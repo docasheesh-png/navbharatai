@@ -61,6 +61,9 @@ steps:
       - 'gen2'
       - '--quiet'
 
+options:
+  logging: CLOUD_LOGGING_ONLY
+
 images:
   - 'gcr.io/$PROJECT_ID/navbharat-cloud-run:$COMMIT_SHA'
   - 'gcr.io/$PROJECT_ID/navbharat-cloud-run:latest'

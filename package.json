@@ -10,7 +10,7 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "gcloud:build": "gcloud builds submit --config=cloudbuild.yaml .",
-    "gcloud:deploy": "gcloud run deploy navbharat-cloud-run --image=gcr.io/gcp-navbharat-core/navbharat-cloud-run:latest --platform=managed --port=3000 --allow-unauthenticated"
+    "gcloud:deploy": "gcloud run deploy navbharat-cloud-run --image=gcr.io/gcp-navbharat-core/navbharat-cloud-run:latest --platform=managed --region=asia-southeast1 --port=8080 --set-env-vars=NODE_ENV=production --allow-unauthenticated"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",

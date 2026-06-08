@@ -354,7 +354,7 @@ function estimateTokens(text: string): number {
     next();
   });
 
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT || 8080);
   const aiRouter = new UniversalAIRouter();
 
   // Trust proxy for correct req.protocol and req.get('host') behind reverse proxies
@@ -482,7 +482,7 @@ function estimateTokens(text: string): number {
 
   // Health check endpoint
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok' });
+    res.json({ status: 'ok', uptime: process.uptime(), port: PORT });
   });
 
   // AppMaker Execution Telemetry Endpoints

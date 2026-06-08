@@ -1,0 +1,55 @@
+# .gcloudignore
+# Prevent heavy files and workspace leftovers from bloating Google Cloud Run build contexts.
+
+# Ignore Git internals
+.git/
+.gitignore
+
+# Ignore node modules (always installed freshly during build)
+node_modules/
+
+# Ignore local builds and coverage metrics
+dist/
+build/
+coverage/
+
+# Ignore package and library caches
+.cache/
+cache/
+.npm/
+.yarn/
+.pnpm-store/
+
+# Ignore temporary runtime files and logging directories
+temp/
+tmp/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Ignore generated AI workspace snapshot folders and dynamic projects
+.ai/
+ai/
+snapshots/
+generated/
+generated-projects/
+generated_projects/
+app_snapshots/
+uploaded-assets/
+uploads/
+
+# Ignore environment credentials and local configurations
+.env
+.env.*
+!.env.example
+.gcloud/
+.firebase/
+.firebaserc
+firebase-applet-config.json
+firebase-blueprint.json
+DRAFT_firestore.rules
+
+# Ignore system registry artifacts
+.DS_Store
+Thumbs.db

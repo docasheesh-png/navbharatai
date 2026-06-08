@@ -1,0 +1,12 @@
+{
+  "status": "building",
+  "steps": [
+    { "id": "1", "label": "Analyzing Requirements", "status": "completed" },
+    { "id": "2", "label": "Creating Architecture", "status": "completed" },
+    { "id": "3", "label": "Generating Database", "status": "in-progress" },
+    { "id": "4", "label": "Creating Backend", "status": "pending" },
+    { "id": "5", "label": "Creating Frontend", "status": "pending" },
+    { "id": "6", "label": "Running Tests", "status": "pending" },
+    { "id": "7", "label": "Deploying Preview", "status": "pending" }
+  ]
+}

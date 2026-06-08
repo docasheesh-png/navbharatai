@@ -1,0 +1,138 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // --- Primitives (Phase 3) ---
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    
+    // --- Validation Blueprints (Pillar 2) ---
+    
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'username']) &&
+             data.keys().size() <= 10 && // Allow for optional fields like avatarUrl, bio
+             data.uid == request.auth.uid &&
+             data.username is string && data.username.size() >= 3 && data.username.size() <= 32;
+    }
+    
+    function isValidPost(data) {
+      return data.keys().hasAll(['userId', 'type', 'content', 'timestamp']) &&
+             data.keys().size() <= 6 && // content, userId, type, content, timestamp, imageUrl
+             data.userId == request.auth.uid &&
+             data.type in ['text', 'image', 'reel'] &&
+             data.content is string && data.content.size() <= 2000 &&
+             data.timestamp is string; // Simplified for this implementation
+    }
+
+    function isValidReport(data) {
+      return data.keys().hasAll(['userId', 'title', 'description', 'timestamp', 'status']) &&
+             data.keys().size() == 6 && // + screenshotUrl
+             data.userId == request.auth.uid &&
+             data.title is string && data.title.size() <= 100 &&
+             data.description is string && data.description.size() <= 1000 &&
+             data.status in ['open', 'investigating', 'resolved'];
+    }
+
+    // --- Global Safety Net (Pillar 1) ---
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Rules (Pillar 4) ---
+
+    // Users
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isValidId(userId) && isOwner(userId) && isValidUser(incoming());
+      allow update: if isVerified() && isValidId(userId) && isOwner(userId) && isValidUser(incoming()) && 
+                       incoming().uid == existing().uid;
+    }
+
+    // Posts
+    match /posts/{postId} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isValidId(postId) && isValidPost(incoming());
+      allow update: if isVerified() && isValidId(postId) && existing().userId == request.auth.uid && 
+                       isValidPost(incoming()) && incoming().userId == existing().userId;
+      allow delete: if isVerified() && isValidId(postId) && existing().userId == request.auth.uid;
+
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if isVerified() && isValidId(commentId) && incoming().userId == request.auth.uid;
+        allow delete: if isVerified() && isValidId(commentId) && (existing().userId == request.auth.uid || get(/databases/$(database)/documents/posts/$(postId)).data.userId == request.auth.uid);
+      }
+    }
+
+    // Groups
+    match /groups/{groupId} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isValidId(groupId) && incoming().adminId == request.auth.uid;
+      allow update: if isVerified() && isValidId(groupId) && existing().adminId == request.auth.uid && 
+                       incoming().adminId == existing().adminId;
+        
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isVerified() && isValidId(messageId) && incoming().userId == request.auth.uid;
+      }
+    }
+
+    // Reports
+    match /reports/{reportId} {
+      allow read: if isVerified() && (isValidId(reportId) && resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && isValidId(reportId) && isValidReport(incoming());
+    }
+
+    match /build_jobs/{jobId} {
+      allow read, write: if true;
+    }
+
+    match /{document=**} {
+      allow read, write: if true;
+    }
+
+    // Billing, Wallets and SRE Logs
+    match /user_token_wallets/{userId} {
+      allow read, write: if true;
+    }
+
+    match /ai_usage_logs/{logId} {
+      allow read, write: if true;
+    }
+
+    match /payment_transactions/{txId} {
+      allow read, write: if true;
+    }
+
+    match /promo_redemptions/{redemptionId} {
+      allow read, write: if true;
+    }
+
+    match /user_secrets/{document=**} {
+      allow read, write: if true;
+    }
+
+    // UCI Universal Chat Continuation System Rules
+    match /chat_sessions/{sessionId} {
+      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /chat_messages/{messageId} {
+      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /chat_agent_history/{transitionId} {
+      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+  }
+}

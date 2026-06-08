@@ -1,0 +1,691 @@
+{
+  "_timestamp": "2026-06-08T19:48:30.093Z",
+  "_all_keys": [
+    "ALLUSERSPROFILE",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    "APPDATA",
+    "asl.log",
+    "CASHFREE_APP_ID",
+    "CASHFREE_SECRET_KEY",
+    "CHROME_CRASHPAD_PIPE_NAME",
+    "CLAUDE_CODE_SSE_PORT",
+    "COLOR",
+    "COLORTERM",
+    "CommonProgramFiles",
+    "CommonProgramFiles(x86)",
+    "CommonProgramW6432",
+    "COMPUTERNAME",
+    "ComSpec",
+    "DokanLibrary1",
+    "DokanLibrary1_LibraryPath_x64",
+    "DokanLibrary1_LibraryPath_x86",
+    "DokanLibrary2",
+    "DokanLibrary2_LibraryPath_x64",
+    "DokanLibrary2_LibraryPath_x86",
+    "DriverData",
+    "EDITOR",
+    "EFC_25772_1592913036",
+    "EFC_25772_4126798990",
+    "GEMINI_API_KEY",
+    "GITHUB_CLIENT_ID",
+    "GITHUB_CLIENT_SECRET",
+    "GITHUB_REDIRECT_URI",
+    "GIT_ASKPASS",
+    "HOME",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "IGCCSVC_DB",
+    "INIT_CWD",
+    "LANG",
+    "LOCALAPPDATA",
+    "LOGONSERVER",
+    "NODE",
+    "npm_command",
+    "npm_config_cache",
+    "npm_config_globalconfig",
+    "npm_config_global_prefix",
+    "npm_config_init_module",
+    "npm_config_local_prefix",
+    "npm_config_node_gyp",
+    "npm_config_noproxy",
+    "npm_config_npm_version",
+    "npm_config_prefix",
+    "npm_config_userconfig",
+    "npm_config_user_agent",
+    "npm_execpath",
+    "npm_lifecycle_event",
+    "npm_lifecycle_script",
+    "npm_node_execpath",
+    "npm_package_json",
+    "npm_package_name",
+    "npm_package_version",
+    "NUMBER_OF_PROCESSORS",
+    "OneDrive",
+    "OneDriveConsumer",
+    "OS",
+    "Path",
+    "PATHEXT",
+    "PROCESSOR_ARCHITECTURE",
+    "PROCESSOR_IDENTIFIER",
+    "PROCESSOR_LEVEL",
+    "PROCESSOR_REVISION",
+    "ProgramData",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "ProgramW6432",
+    "PROMPT",
+    "PSModulePath",
+    "PUBLIC",
+    "SESSIONNAME",
+    "SystemDrive",
+    "SystemRoot",
+    "TEMP",
+    "TERM_PROGRAM",
+    "TERM_PROGRAM_VERSION",
+    "TMP",
+    "USERDOMAIN",
+    "USERDOMAIN_ROAMINGPROFILE",
+    "USERNAME",
+    "USERPROFILE",
+    "VSCODE_A11Y_MODE",
+    "VSCODE_GIT_ASKPASS_EXTRA_ARGS",
+    "VSCODE_GIT_ASKPASS_MAIN",
+    "VSCODE_GIT_ASKPASS_NODE",
+    "VSCODE_GIT_IPC_HANDLE",
+    "VSCODE_INJECTION",
+    "VSCODE_NONCE",
+    "VSCODE_STABLE",
+    "windir",
+    "ZES_ENABLE_SYSMAN",
+    "__PSLockDownPolicy"
+  ],
+  "ALLUSERSPROFILE": {
+    "exists": true,
+    "length": 14,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "ANTHROPIC_API_KEY": {
+    "exists": true,
+    "length": 72,
+    "isPlaceholder": false,
+    "prefix": "sk-liv"
+  },
+  "ANTHROPIC_BASE_URL": {
+    "exists": true,
+    "length": 27,
+    "isPlaceholder": false,
+    "prefix": "https:"
+  },
+  "APPDATA": {
+    "exists": true,
+    "length": 39,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "asl.log": {
+    "exists": true,
+    "length": 16,
+    "isPlaceholder": false,
+    "prefix": "Destin"
+  },
+  "CASHFREE_APP_ID": {
+    "exists": true,
+    "length": 34,
+    "isPlaceholder": false,
+    "prefix": "121605"
+  },
+  "CASHFREE_SECRET_KEY": {
+    "exists": true,
+    "length": 54,
+    "isPlaceholder": false,
+    "prefix": "cfsk_m"
+  },
+  "CHROME_CRASHPAD_PIPE_NAME": {
+    "exists": true,
+    "length": 40,
+    "isPlaceholder": false,
+    "prefix": "\\\\.\\pi"
+  },
+  "CLAUDE_CODE_SSE_PORT": {
+    "exists": true,
+    "length": 5,
+    "isPlaceholder": false,
+    "prefix": "32359"
+  },
+  "COLOR": {
+    "exists": true,
+    "length": 1,
+    "isPlaceholder": false,
+    "prefix": "1"
+  },
+  "COLORTERM": {
+    "exists": true,
+    "length": 9,
+    "isPlaceholder": false,
+    "prefix": "trueco"
+  },
+  "CommonProgramFiles": {
+    "exists": true,
+    "length": 29,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "CommonProgramFiles(x86)": {
+    "exists": true,
+    "length": 35,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "CommonProgramW6432": {
+    "exists": true,
+    "length": 29,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "COMPUTERNAME": {
+    "exists": true,
+    "length": 13,
+    "isPlaceholder": false,
+    "prefix": "ASHISH"
+  },
+  "ComSpec": {
+    "exists": true,
+    "length": 27,
+    "isPlaceholder": false,
+    "prefix": "C:\\WIN"
+  },
+  "DokanLibrary1": {
+    "exists": true,
+    "length": 43,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "DokanLibrary1_LibraryPath_x64": {
+    "exists": true,
+    "length": 47,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "DokanLibrary1_LibraryPath_x86": {
+    "exists": true,
+    "length": 51,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "DokanLibrary2": {
+    "exists": true,
+    "length": 43,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "DokanLibrary2_LibraryPath_x64": {
+    "exists": true,
+    "length": 47,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "DokanLibrary2_LibraryPath_x86": {
+    "exists": true,
+    "length": 51,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "DriverData": {
+    "exists": true,
+    "length": 38,
+    "isPlaceholder": false,
+    "prefix": "C:\\Win"
+  },
+  "EDITOR": {
+    "exists": true,
+    "length": 22,
+    "isPlaceholder": false,
+    "prefix": "C:\\WIN"
+  },
+  "EFC_25772_1592913036": {
+    "exists": true,
+    "length": 1,
+    "isPlaceholder": false,
+    "prefix": "1"
+  },
+  "EFC_25772_4126798990": {
+    "exists": true,
+    "length": 1,
+    "isPlaceholder": false,
+    "prefix": "1"
+  },
+  "GEMINI_API_KEY": {
+    "exists": true,
+    "length": 39,
+    "isPlaceholder": true,
+    "prefix": "AIzaSy"
+  },
+  "GITHUB_CLIENT_ID": {
+    "exists": true,
+    "length": 20,
+    "isPlaceholder": false,
+    "prefix": "Ov23li"
+  },
+  "GITHUB_CLIENT_SECRET": {
+    "exists": true,
+    "length": 40,
+    "isPlaceholder": false,
+    "prefix": "57d10d"
+  },
+  "GITHUB_REDIRECT_URI": {
+    "exists": true,
+    "length": 100,
+    "isPlaceholder": false,
+    "prefix": "https:"
+  },
+  "GIT_ASKPASS": {
+    "exists": true,
+    "length": 110,
+    "isPlaceholder": false,
+    "prefix": "c:\\Use"
+  },
+  "HOME": {
+    "exists": true,
+    "length": 23,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "HOMEDRIVE": {
+    "exists": true,
+    "length": 2,
+    "isPlaceholder": false,
+    "prefix": "C:"
+  },
+  "HOMEPATH": {
+    "exists": true,
+    "length": 21,
+    "isPlaceholder": false,
+    "prefix": "\\Users"
+  },
+  "IGCCSVC_DB": {
+    "exists": true,
+    "length": 416,
+    "isPlaceholder": false,
+    "prefix": "AQAAAN"
+  },
+  "INIT_CWD": {
+    "exists": true,
+    "length": 63,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "LANG": {
+    "exists": true,
+    "length": 11,
+    "isPlaceholder": false,
+    "prefix": "en_US."
+  },
+  "LOCALAPPDATA": {
+    "exists": true,
+    "length": 37,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "LOGONSERVER": {
+    "exists": true,
+    "length": 15,
+    "isPlaceholder": false,
+    "prefix": "\\\\ASHI"
+  },
+  "NODE": {
+    "exists": true,
+    "length": 32,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "npm_command": {
+    "exists": true,
+    "length": 3,
+    "isPlaceholder": false,
+    "prefix": "run"
+  },
+  "npm_config_cache": {
+    "exists": true,
+    "length": 47,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "npm_config_globalconfig": {
+    "exists": true,
+    "length": 53,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "npm_config_global_prefix": {
+    "exists": true,
+    "length": 43,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "npm_config_init_module": {
+    "exists": true,
+    "length": 36,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "npm_config_local_prefix": {
+    "exists": true,
+    "length": 63,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "npm_config_node_gyp": {
+    "exists": true,
+    "length": 78,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "npm_config_noproxy": {
+    "exists": false,
+    "length": 0,
+    "isPlaceholder": false,
+    "prefix": ""
+  },
+  "npm_config_npm_version": {
+    "exists": true,
+    "length": 7,
+    "isPlaceholder": false,
+    "prefix": "11.13."
+  },
+  "npm_config_prefix": {
+    "exists": true,
+    "length": 43,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "npm_config_userconfig": {
+    "exists": true,
+    "length": 30,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "npm_config_user_agent": {
+    "exists": true,
+    "length": 52,
+    "isPlaceholder": false,
+    "prefix": "npm/11"
+  },
+  "npm_execpath": {
+    "exists": true,
+    "length": 55,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "npm_lifecycle_event": {
+    "exists": true,
+    "length": 3,
+    "isPlaceholder": false,
+    "prefix": "dev"
+  },
+  "npm_lifecycle_script": {
+    "exists": true,
+    "length": 13,
+    "isPlaceholder": false,
+    "prefix": "tsx se"
+  },
+  "npm_node_execpath": {
+    "exists": true,
+    "length": 32,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "npm_package_json": {
+    "exists": true,
+    "length": 76,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "npm_package_name": {
+    "exists": true,
+    "length": 13,
+    "isPlaceholder": false,
+    "prefix": "react-"
+  },
+  "npm_package_version": {
+    "exists": true,
+    "length": 5,
+    "isPlaceholder": false,
+    "prefix": "0.0.0"
+  },
+  "NUMBER_OF_PROCESSORS": {
+    "exists": true,
+    "length": 2,
+    "isPlaceholder": false,
+    "prefix": "12"
+  },
+  "OneDrive": {
+    "exists": true,
+    "length": 32,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "OneDriveConsumer": {
+    "exists": true,
+    "length": 32,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "OS": {
+    "exists": true,
+    "length": 10,
+    "isPlaceholder": false,
+    "prefix": "Window"
+  },
+  "Path": {
+    "exists": true,
+    "length": 797,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "PATHEXT": {
+    "exists": true,
+    "length": 58,
+    "isPlaceholder": false,
+    "prefix": ".COM;."
+  },
+  "PROCESSOR_ARCHITECTURE": {
+    "exists": true,
+    "length": 5,
+    "isPlaceholder": false,
+    "prefix": "AMD64"
+  },
+  "PROCESSOR_IDENTIFIER": {
+    "exists": true,
+    "length": 51,
+    "isPlaceholder": false,
+    "prefix": "Intel6"
+  },
+  "PROCESSOR_LEVEL": {
+    "exists": true,
+    "length": 1,
+    "isPlaceholder": false,
+    "prefix": "6"
+  },
+  "PROCESSOR_REVISION": {
+    "exists": true,
+    "length": 4,
+    "isPlaceholder": false,
+    "prefix": "9a04"
+  },
+  "ProgramData": {
+    "exists": true,
+    "length": 14,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "ProgramFiles": {
+    "exists": true,
+    "length": 16,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "ProgramFiles(x86)": {
+    "exists": true,
+    "length": 22,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "ProgramW6432": {
+    "exists": true,
+    "length": 16,
+    "isPlaceholder": false,
+    "prefix": "C:\\Pro"
+  },
+  "PROMPT": {
+    "exists": true,
+    "length": 4,
+    "isPlaceholder": false,
+    "prefix": "$P$G"
+  },
+  "PSModulePath": {
+    "exists": true,
+    "length": 155,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "PUBLIC": {
+    "exists": true,
+    "length": 15,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "SESSIONNAME": {
+    "exists": true,
+    "length": 7,
+    "isPlaceholder": false,
+    "prefix": "Consol"
+  },
+  "SystemDrive": {
+    "exists": true,
+    "length": 2,
+    "isPlaceholder": false,
+    "prefix": "C:"
+  },
+  "SystemRoot": {
+    "exists": true,
+    "length": 10,
+    "isPlaceholder": false,
+    "prefix": "C:\\WIN"
+  },
+  "TEMP": {
+    "exists": true,
+    "length": 36,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "TERM_PROGRAM": {
+    "exists": true,
+    "length": 6,
+    "isPlaceholder": false,
+    "prefix": "vscode"
+  },
+  "TERM_PROGRAM_VERSION": {
+    "exists": true,
+    "length": 7,
+    "isPlaceholder": false,
+    "prefix": "1.123."
+  },
+  "TMP": {
+    "exists": true,
+    "length": 36,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "USERDOMAIN": {
+    "exists": true,
+    "length": 13,
+    "isPlaceholder": false,
+    "prefix": "Ashish"
+  },
+  "USERDOMAIN_ROAMINGPROFILE": {
+    "exists": true,
+    "length": 13,
+    "isPlaceholder": false,
+    "prefix": "Ashish"
+  },
+  "USERNAME": {
+    "exists": true,
+    "length": 14,
+    "isPlaceholder": false,
+    "prefix": "Ashish"
+  },
+  "USERPROFILE": {
+    "exists": true,
+    "length": 23,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "VSCODE_A11Y_MODE": {
+    "exists": true,
+    "length": 1,
+    "isPlaceholder": false,
+    "prefix": "0"
+  },
+  "VSCODE_GIT_ASKPASS_EXTRA_ARGS": {
+    "exists": false,
+    "length": 0,
+    "isPlaceholder": false,
+    "prefix": ""
+  },
+  "VSCODE_GIT_ASKPASS_MAIN": {
+    "exists": true,
+    "length": 115,
+    "isPlaceholder": false,
+    "prefix": "c:\\Use"
+  },
+  "VSCODE_GIT_ASKPASS_NODE": {
+    "exists": true,
+    "length": 73,
+    "isPlaceholder": false,
+    "prefix": "C:\\Use"
+  },
+  "VSCODE_GIT_IPC_HANDLE": {
+    "exists": true,
+    "length": 35,
+    "isPlaceholder": false,
+    "prefix": "\\\\.\\pi"
+  },
+  "VSCODE_INJECTION": {
+    "exists": true,
+    "length": 1,
+    "isPlaceholder": false,
+    "prefix": "1"
+  },
+  "VSCODE_NONCE": {
+    "exists": true,
+    "length": 36,
+    "isPlaceholder": false,
+    "prefix": "f71361"
+  },
+  "VSCODE_STABLE": {
+    "exists": true,
+    "length": 1,
+    "isPlaceholder": false,
+    "prefix": "1"
+  },
+  "windir": {
+    "exists": true,
+    "length": 10,
+    "isPlaceholder": false,
+    "prefix": "C:\\WIN"
+  },
+  "ZES_ENABLE_SYSMAN": {
+    "exists": true,
+    "length": 1,
+    "isPlaceholder": false,
+    "prefix": "1"
+  },
+  "__PSLockDownPolicy": {
+    "exists": true,
+    "length": 1,
+    "isPlaceholder": false,
+    "prefix": "0"
+  }
+}

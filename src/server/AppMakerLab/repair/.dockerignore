@@ -1,0 +1,51 @@
+# .dockerignore
+# Exclude heavy folders to keep Docker build context extremely small and speed up Cloud Run.
+
+# Git and settings
+.git/
+.gitignore
+
+# Dependencies
+node_modules/
+
+# Local builds
+dist/
+build/
+coverage/
+
+# Caches
+.cache/
+cache/
+.npm/
+
+# Logs and temp files
+temp/
+tmp/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# AI snapshots / workspaces / generated files
+.ai/
+ai/
+snapshots/
+generated/
+generated_projects/
+generated-projects/
+uploaded-assets/
+uploads/
+
+# Environments and credentials
+.env
+.env.*
+!.env.example
+.firebase/
+.firebaserc
+firebase-applet-config.json
+firebase-blueprint.json
+DRAFT_firestore.rules
+
+# OS files
+.DS_Store
+Thumbs.db

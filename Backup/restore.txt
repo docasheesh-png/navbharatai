@@ -1,0 +1,10 @@
+RESTORATION INSTRUCTIONS
+
+This backup serves as a structural baseline of the project at the time of the verified production state.
+
+To restore:
+1. Platform Version History: In the AI Studio platform interface, select the appropriate historical revision corresponding to this timestamp. This is the most efficient and reliable restoration method for all source code.
+2. Manual Restoration: If necessary, manually recreate the environment by using the manifest.txt to ensure all required configuration files and directory structures match the verified PRODUCTION_WORKING_BASELINE.
+3. Redeployment: After restoration, verify configurations and trigger a new build according to the established CI/CD pipeline (Cloud Build).
+
+Note: The platform-managed revision history is the canonical source of truth for all source files.

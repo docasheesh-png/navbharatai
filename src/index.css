@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --theme-bg: #0d1117;
+    --theme-text: #c9d1d9;
+    --theme-border: rgba(255, 255, 255, 0.1);
+    --theme-card: #161b22;
+  }
+
+  body, #root {
+    height: 100vh;
+    height: 100dvh;
+    @apply w-screen overflow-hidden m-0 p-0;
+    box-sizing: border-box;
+  }
+  
+  .markdown-body {
+    @apply text-inherit break-words;
+  }
+  .markdown-body p {
+    @apply mb-3 last:mb-0 break-words;
+  }
+  .markdown-body ul, .markdown-body ol {
+    @apply mb-3 ml-4 list-outside;
+  }
+  .markdown-body ul {
+    @apply list-disc;
+  }
+  .markdown-body ol {
+    @apply list-decimal;
+  }
+  .markdown-body a {
+    @apply text-indigo-400 hover:underline transition-all;
+  }
+  .markdown-body code {
+    @apply bg-white/10 px-1 rounded font-mono text-[10px];
+  }
+  .markdown-body pre {
+    @apply bg-black/40 p-3 rounded-xl border border-white/5 overflow-x-auto mb-3;
+  }
+  .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+    @apply font-black uppercase tracking-widest mt-4 mb-2 first:mt-0;
+  }
+  .markdown-body h1 { @apply text-xs; }
+  .markdown-body h2 { @apply text-[11px]; }
+  .markdown-body h3 { @apply text-[10px]; }
+
+  /* Chat Input Auto-resize Simulation */
+  textarea {
+    scrollbar-width: none;
+  }
+  textarea::-webkit-scrollbar {
+    display: none;
+  }
+
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(79, 70, 229, 0.4) transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(79, 70, 229, 0.4);
+    border-radius: 20px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(79, 70, 229, 0.6);
+  }
+
+  @media screen and (max-width: 768px) {
+    input, textarea {
+      font-size: 16px !important;
+    }
+  }
+}
+
+
+/* NavBharatAI Pro — Build Progress Animations */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.6; transform: scale(0.88); }
+}
+
+@keyframes nb-fadein {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.nb-fadein { animation: nb-fadein 0.3s ease forwards; }
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}

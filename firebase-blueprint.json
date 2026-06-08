@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "username": { "type": "string" },
+        "displayName": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "bio": { "type": "string" }
+      },
+      "required": ["uid", "username"]
+    },
+    "Post": {
+      "title": "Post",
+      "description": "Feed post",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["text", "image", "reel"] },
+        "content": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "type", "content", "timestamp"]
+    },
+    "Comment": {
+        "title": "Comment",
+        "description": "Comment on a post",
+        "type": "object",
+        "properties": {
+            "postId": { "type": "string" },
+            "userId": { "type": "string" },
+            "content": { "type": "string" },
+            "timestamp": { "type": "string" }
+        }
+    },
+    "Group": {
+        "title": "Group",
+        "description": "Social group",
+        "type": "object",
+        "properties": {
+            "name": { "type": "string" },
+            "adminId": { "type": "string" }
+        }
+    },
+    "Message": {
+        "title": "Message",
+        "description": "Group chat message",
+        "type": "object",
+        "properties": {
+            "groupId": { "type": "string" },
+            "userId": { "type": "string" },
+            "content": { "type": "string" },
+            "timestamp": { "type": "string" }
+        }
+    },
+    "Report": {
+      "title": "Report",
+      "description": "User reported problem",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "screenshotUrl": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["open", "investigating", "resolved"] }
+      },
+      "required": ["userId", "title", "description", "timestamp", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/posts/{postId}": {
+      "schema": "Post",
+      "description": "Social posts"
+    },
+    "/posts/{postId}/comments/{commentId}": {
+        "schema": "Comment",
+        "description": "Comments on post"
+    },
+    "/groups/{groupId}": {
+        "schema": "Group",
+        "description": "User groups"
+    },
+    "/groups/{groupId}/messages/{messageId}": {
+        "schema": "Message",
+        "description": "Group chat messages"
+    },
+    "/reports/{reportId}": {
+        "schema": "Report",
+        "description": "User reported problems"
+    }
+  }
+}
+

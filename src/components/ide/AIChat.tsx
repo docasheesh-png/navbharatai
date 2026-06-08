@@ -1,0 +1,931 @@
+import React, { useRef, useEffect, useState } from 'react';
+import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2 } from 'lucide-react';
+import { cn } from '../../lib/utils';
+import { motion, AnimatePresence } from 'motion/react';
+import ReactMarkdown from 'react-markdown';
+import axios from 'axios';
+import { AgentProgress, BuildStep } from './AgentProgress';
+
+import { ThemeMode } from '../../lib/theme';
+import { useBuild } from './BuildContext';
+
+interface Message {
+  id: string;
+  text: string;
+  sender: 'user' | 'ai';
+  timestamp: Date | string;
+}
+
+interface SecretQuickFillProps {
+  providerId: string | null;
+  userId?: string;
+  isLoggedIn: boolean;
+  onShowLogin?: () => void;
+}
+
+export const SecretQuickFill: React.FC<SecretQuickFillProps> = ({ providerId, userId, isLoggedIn, onShowLogin }) => {
+  const [provider, setProvider] = useState(providerId || 'gemini');
+  const [secretName, setSecretName] = useState('');
+  const [secretValue, setSecretValue] = useState('');
+  const [showValue, setShowValue] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const providerMap: Record<string, { label: string; key: string; link: string; site: string }> = {
+    gemini: { label: 'Gemini (navBharatAI Engine)', key: 'GEMINI_API_KEY', link: 'https://aistudio.google.com/app/apikey', site: 'navBharatAI Console' },
+    claude: { label: 'Claude (Anthropic)', key: 'CLAUDE_API_KEY', link: 'https://console.anthropic.com/settings/keys', site: 'Anthropic Console' },
+    openai: { label: 'OpenAI (GPT-4)', key: 'OPENAI_API_KEY', link: 'https://platform.openai.com/api-keys', site: 'OpenAI Platform' },
+    groq: { label: 'Groq Cloud', key: 'GROQ_API_KEY', link: 'https://console.groq.com/keys', site: 'Groq Console' },
+    deepseek: { label: 'DeepSeek', key: 'DEEPSEEK_API_KEY', link: 'https://platform.deepseek.com/api_keys', site: 'DeepSeek Platform' },
+    openrouter: { label: 'OpenRouter', key: 'OPENROUTER_API_KEY', link: 'https://openrouter.ai/keys', site: 'OpenRouter' },
+    stripe: { label: 'Stripe Payment', key: 'STRIPE_SECRET_KEY', link: 'https://dashboard.stripe.com/apikeys', site: 'Stripe Dashboard' },
+    firebase: { label: 'Firebase Key', key: 'FIREBASE_API_KEY', link: 'https://console.firebase.google.com/', site: 'Firebase Console' },
+    custom: { label: 'Custom Secret', key: 'CUSTOM_KEY', link: '', site: '' }
+  };
+
+  useEffect(() => {
+    const activeProv = providerId || 'gemini';
+    setProvider(activeProv);
+    if (providerMap[activeProv]) {
+      setSecretName(providerMap[activeProv].key);
+    } else {
+      setSecretName(activeProv.toUpperCase() + '_API_KEY');
+    }
+  }, [providerId]);
+
+  const handleProviderChange = (prov: string) => {
+    setProvider(prov);
+    if (providerMap[prov]) {
+      setSecretName(providerMap[prov].key);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!isLoggedIn) {
+      onShowLogin?.();
+      return;
+    }
+    if (!userId) {
+      setStatus('error');
+      setErrorMessage('User session missing. Please login again.');
+      return;
+    }
+    if (!secretName.trim() || !secretValue.trim()) {
+      setStatus('error');
+      setErrorMessage('Please fill both name and key value.');
+      return;
+    }
+
+    setStatus('saving');
+    try {
+      await axios.post(`/api/secrets/${userId}`, {
+        secret_name: secretName,
+        secret_value: secretValue
+      });
+      setStatus('success');
+      setSecretValue('');
+    } catch (err: any) {
+      console.error('Failed to save API Key:', err);
+      setStatus('error');
+      setErrorMessage(err.response?.data?.error || 'Failed to save secret key. Please try again.');
+    }
+  };
+
+  const currentProvData = providerMap[provider] || providerMap['custom'];
+
+  return (
+    <div className="mt-3 p-4 bg-[#1c2a38]/80 border border-indigo-500/20 rounded-2xl space-y-3.5 shadow-xl backdrop-blur-md">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 bg-indigo-500/20 rounded-lg text-indigo-400">
+            <Lock className="w-3.5 h-3.5 animate-pulse" />
+          </div>
+          <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Vishwakarma Key Assistant</span>
+        </div>
+        {currentProvData.link && (
+          <a
+            href={currentProvData.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[9px] font-black uppercase tracking-wider text-indigo-400 hover:text-indigo-300 flex items-center gap-1 bg-indigo-500/10 px-2 py-1 rounded-lg border border-indigo-500/20"
+          >
+            Generate Key <ExternalLink className="w-2.5 h-2.5" />
+          </a>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <label className="text-[8px] font-black uppercase tracking-widest text-[#484f58] block mb-1">Select Provider</label>
+          <select
+            value={provider}
+            onChange={(e) => handleProviderChange(e.target.value)}
+            className="w-full bg-[#0d1117] border border-white/5 rounded-xl p-2.5 text-[10px] font-black uppercase tracking-wider text-white focus:border-indigo-500 outline-none"
+          >
+            {Object.entries(providerMap).map(([id, p]) => (
+              <option key={id} value={id} className="bg-[#0d1117] text-white">
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="text-[8px] font-black uppercase tracking-widest text-[#484f58] block mb-1">Secret/Key Name</label>
+          <input
+            type="text"
+            value={secretName}
+            onChange={(e) => setSecretName(e.target.value)}
+            placeholder="e.g. GEMINI_API_KEY"
+            className="w-full bg-[#0d1117] border border-white/5 rounded-xl p-2.5 text-[10px] font-mono text-white placeholder:text-[#484f58] focus:border-indigo-500 outline-none"
+          />
+        </div>
+
+        <div>
+          <label className="text-[8px] font-black uppercase tracking-widest text-[#484f58] block mb-1">Key Value</label>
+          <div className="relative">
+            <input
+              type={showValue ? 'text' : 'password'}
+              value={secretValue}
+              onChange={(e) => setSecretValue(e.target.value)}
+              placeholder={`Enter your ${providerMap[provider]?.label || 'Secret'} here`}
+              className="w-full bg-[#0d1117] border border-white/5 rounded-xl p-2.5 pr-10 text-[10px] font-mono text-white placeholder:text-[#484f58] focus:border-indigo-500 outline-none"
+            />
+            <button
+              onClick={() => setShowValue(!showValue)}
+              className="absolute right-3 top-2.5 text-[#484f58] hover:text-white"
+            >
+              {showValue ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+
+        {status === 'success' && (
+          <div className="flex items-center gap-2 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 p-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest animate-in zoom-in-95">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>Success: Key saved safely to user_secrets!</span>
+          </div>
+        )}
+
+        {status === 'error' && (
+          <div className="flex items-center gap-2 text-red-400 bg-red-500/10 border border-red-500/20 p-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest animate-in zoom-in-95">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        <button
+          onClick={handleSave}
+          disabled={status === 'saving'}
+          className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[9px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 shadow-lg disabled:opacity-50"
+        >
+          {status === 'saving' ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Saving to secure panel...
+            </>
+          ) : (
+            <>
+              <Save className="w-3.5 h-3.5" />
+              Save Secret Key
+            </>
+          )}
+        </button>
+
+        {!isLoggedIn && (
+          <div className="text-center">
+            <p className="text-[8px] text-amber-500 font-bold mb-1">
+              ⚠️ Setup requires active account.
+            </p>
+            <button
+              onClick={onShowLogin}
+              className="px-3 py-1 bg-amber-500 text-black text-[8px] font-black uppercase tracking-widest rounded hover:bg-amber-400 transition-all"
+            >
+              Log In Now
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+import { AgentMode, ModeSelector } from './ModeSelector';
+
+interface AIChatProps {
+  messages: Message[];
+  input: string;
+  onInputChange: (val: string) => void;
+  onSend: (files: File[]) => void;
+  isLoading: boolean;
+  activeIntent?: string;
+  mode?: AgentMode;
+  onModeChange?: (mode: AgentMode) => void;
+  pendingGHEdit?: any;
+  onConfirmPush?: () => void;
+  isPushing?: boolean;
+  isPinned?: boolean;
+  onTogglePin?: () => void;
+  isLoggedIn?: boolean;
+  onShowLogin?: () => void;
+  activeAgent?: string;
+  isAppBuilt?: boolean;
+  onPreviewClick?: () => void;
+  theme?: ThemeMode;
+  userId?: string;
+  // UCI System extensions
+  activeUci?: string;
+  onRestoreUci?: (uci: string) => Promise<boolean>;
+  restoredMessages?: Message[];
+  memorySummary?: string;
+  wallet?: any;
+  onGoToMain?: () => void;
+  onUnlockVishwakarma?: () => void;
+  onAttachmentsChange?: (files: File[]) => void;
+}
+
+export const AIChat: React.FC<AIChatProps> = ({
+  messages,
+  input,
+  onInputChange,
+  onSend,
+  isLoading,
+  activeIntent = 'social',
+  mode = 'planning',
+  onModeChange,
+  pendingGHEdit,
+  onConfirmPush,
+  isPushing,
+  isPinned = false,
+  onTogglePin,
+  isLoggedIn = false,
+  onShowLogin,
+  activeAgent = 'navbharatai',
+  isAppBuilt = false,
+  onPreviewClick,
+  theme = 'dark',
+  userId,
+  activeUci = '',
+  onRestoreUci,
+  restoredMessages = [],
+  memorySummary = '',
+  wallet = null,
+  onGoToMain,
+  onUnlockVishwakarma,
+  onAttachmentsChange
+}) => {
+  const { buildSteps } = useBuild();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  
+  useEffect(() => {
+    onAttachmentsChange?.(attachments);
+  }, [attachments, onAttachmentsChange]);
+  
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setAttachments(prev => [...prev, ...Array.from(e.target.files!)]);
+    }
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index));
+  };
+  
+  useEffect(() => {
+    console.log('[AIChat] Received buildSteps:', buildSteps.length, buildSteps);
+  }, [buildSteps]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    console.log(`[AIChat] isLoading changed to: ${isLoading}`);
+  }, [isLoading]);
+
+  const [showModeDropdown, setShowModeDropdown] = useState(false);
+  const [showStruggleFormForMsg, setShowStruggleFormForMsg] = useState<Record<string, boolean>>({});
+  const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
+  const [liked, setLiked] = useState<Record<string, boolean>>({});
+  const [disliked, setDisliked] = useState<Record<string, boolean>>({});
+  const [showReport, setShowReport] = useState<Record<string, boolean>>({});
+  const [reportText, setReportText] = useState<Record<string, string>>({});
+
+  const [codeStudioUci] = useState<string>(() => {
+    let uci = localStorage.getItem('code_studio_chat_uci');
+    if (!uci) {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      let res = 'CS-';
+      for (let i = 0; i < 8; i++) {
+        res += chars[Math.floor(Math.random() * chars.length)];
+      }
+      uci = res;
+      localStorage.setItem('code_studio_chat_uci', uci);
+    }
+    return uci;
+  });
+
+  // UCI Local UI states
+  const [copied, setCopied] = useState(false);
+  const [shared, setShared] = useState(false);
+  const [resumeUciInput, setResumeUciInput] = useState('');
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState('');
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
+  const [showContinueModal, setShowContinueModal] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Dynamic continuation suggestions
+  const [continuePromptPhrase, setContinuePromptPhrase] = useState('Want to continue previous work? Enter your Universal Chat ID (UCI).');
+
+  useEffect(() => {
+    const prompts = [
+      "Want to continue previous work? Enter your Universal Chat ID (UCI).",
+      "Have an existing workspace? Paste your UCI below to restore memory.",
+      "Resume an older session using your Chat ID.",
+      "Want to transition agents? Enter your Chat ID."
+    ];
+    setContinuePromptPhrase(prompts[Math.floor(Math.random() * prompts.length)]);
+  }, [messages.length]);
+
+  const copyUci = () => {
+    if (!activeUci) return;
+    navigator.clipboard.writeText(activeUci);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const shareChat = () => {
+    if (!activeUci) return;
+    const shareUrl = `${window.location.origin}${window.location.pathname}?uci=${encodeURIComponent(activeUci)}`;
+    navigator.clipboard.writeText(shareUrl);
+    setShared(true);
+    setTimeout(() => setShared(false), 2000);
+  };
+
+  const handleRestoreByUci = async () => {
+    if (!resumeUciInput.trim() || !onRestoreUci) return;
+    setIsRestoring(true);
+    setRestoreError('');
+    try {
+      const success = await onRestoreUci(resumeUciInput.trim());
+      if (success) {
+        setResumeUciInput('');
+        setShowContinueModal(false);
+      } else {
+        setRestoreError('Universal Chat ID not found or unauthorized access.');
+      }
+    } catch (err: any) {
+      setRestoreError(err.message || 'Error restoring chat.');
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
+  const parseMessageAndTriggers = (msg: Message) => {
+    const text = String(msg.text || '');
+    const match = text.match(/\[ACTION_SECRET_HELPER:([^\]]+)\]/i);
+    if (match) {
+      const providerId = match[1].toLowerCase().trim();
+      const cleanedText = text.replace(/\[ACTION_SECRET_HELPER:[^\]]+\]/gi, '').trim();
+      return { providerId, cleanedText, deservesManual: false };
+    }
+
+    const deservesManual = msg.sender === 'ai' && /api key|secret key|stripe_secret_key|gemini_api_key|claude_api_key|openai_api_key|groq_api_key|deepseek_api_key/i.test(text);
+    return { providerId: null, cleanedText: text, deservesManual };
+  };
+
+    const getDisplayIntent = (intent: string) => {
+      // Removed Vishwakarma agent specialized intent labels.
+
+      switch(intent) {
+         case 'greeting': return { label: 'Social Assistant', icon: Heart, color: 'text-rose-400 bg-rose-500/10' };
+         case 'build': return { label: 'Architect Mode', icon: Zap, color: 'text-indigo-400 bg-indigo-500/10' };
+         case 'technical': return { label: 'Technical Guru', icon: ShieldCheck, color: 'text-emerald-400 bg-emerald-500/10' };
+         case 'emotional': return { label: 'Empathetic Companion', icon: Languages, color: 'text-amber-400 bg-amber-500/10' };
+         case 'security': return { label: 'Security Auditor', icon: ShieldAlert, color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20' };
+         case 'github': return { label: 'GitHub Cloud Architect', icon: Github, color: 'text-white bg-black/50' };
+         default: return { label: 'Navbharat AI', icon: Sparkles, color: 'text-indigo-400 bg-white/5' };
+      }
+    };
+
+  const intentUI = getDisplayIntent(activeIntent);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, isLoading]);
+
+    const renderMessageContent = (msg: Message) => {
+    if (!msg || (typeof msg.text !== 'string' && !(msg as any).content)) {
+        return null;
+    }
+    
+    // Fallback to content if text is missing
+    const msgText = typeof msg.text === 'string' ? msg.text : (msg as any).content || "";
+    
+    const isAI = msg.sender === 'ai';
+    const text = msgText;
+    const hasSources = text.includes('Sources:') || text.includes('References:');
+    let displayContent = text;
+    
+    // Pro Mode: Hide raw code, show action status
+// (Removed message hiding)
+
+    const isQuestion = isAI && (text.includes('?') || text.includes('what kind of') || text.includes('would you like'));
+
+    // ── Special markers ─────────────────────────────────────────────────────
+    const hasSwitchToBuild = isAI && text.includes('__SWITCH_TO_BUILD__');
+    const hasViewPreview   = isAI && text.includes('__VIEW_PREVIEW__');
+    const cleanText = text
+      .replace('__SWITCH_TO_BUILD__', '')
+      .replace('__VIEW_PREVIEW__', '')
+      .trim();
+
+    return (
+      <div className="space-y-3">
+        {isAI && hasSources && (
+          <div className="flex items-center gap-1.5 mb-1 opacity-80">
+            <CheckCircle2 className="w-3 h-3 text-indigo-400" />
+            <span className="text-[8px] font-black uppercase tracking-widest text-[#8b949e]">Based on verified sources</span>
+          </div>
+        )}
+        <div className={cn("markdown-body prose prose-invert prose-xs max-w-none prose-p:leading-relaxed prose-a:text-indigo-400 prose-a:no-underline hover:prose-a:underline", !isAI && "prose-p:text-white")}>
+          <ReactMarkdown
+            components={{
+              a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5" />,
+            }}
+          >
+            {cleanText || ""}
+          </ReactMarkdown>
+        </div>
+
+        {/* ── Switch to Build Mode button ── */}
+        {hasSwitchToBuild && onModeChange && (
+          <div className="mt-3 pt-3 border-t border-white/10">
+            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 mb-2">
+              <span className="text-amber-400 text-xs">⚡</span>
+              <span className="text-xs text-amber-300/90 font-medium">Planning complete! App banane ke liye Build Mode switch karo.</span>
+            </div>
+            <button
+              onClick={() => onModeChange('build')}
+              className="w-full flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-xl font-bold text-sm transition-all active:scale-95"
+              style={{
+                background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                color: 'white',
+                boxShadow: '0 4px 15px rgba(245,158,11,0.35)',
+              }}
+            >
+              <span>🔨</span>
+              Switch to Build Mode — App Generate Karo
+              <span style={{ fontSize: 16 }}>→</span>
+            </button>
+          </div>
+        )}
+
+        {/* ── View Preview button (after build) ── */}
+        {hasViewPreview && onPreviewClick && (
+          <div className="mt-3 pt-3 border-t border-white/10">
+            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 mb-2">
+              <span className="text-emerald-400 text-xs">✅</span>
+              <span className="text-xs text-emerald-300/90 font-medium">App ban gayi! Preview mein live dekho.</span>
+            </div>
+            <button
+              onClick={onPreviewClick}
+              className="w-full flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-xl font-bold text-sm transition-all active:scale-95"
+              style={{
+                background: 'linear-gradient(135deg, #10b981, #059669)',
+                color: 'white',
+                boxShadow: '0 4px 15px rgba(16,185,129,0.35)',
+              }}
+            >
+              <span>👁️</span>
+              Live Preview Dekho
+              <span style={{ fontSize: 16 }}>→</span>
+            </button>
+          </div>
+        )}
+            
+        {/* Interaction Controls */}
+        <div className="flex gap-2 mt-3 pt-2 border-t border-white/5 items-center">
+            <button onClick={() => { navigator.clipboard.writeText(cleanText); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-1 hover:bg-white/10 rounded text-gray-500 hover:text-white">
+                {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+            </button>
+            {isAI && (
+                <>
+                    <button onClick={() => setLiked({...liked, [msg.id]: !liked[msg.id]})} className={cn("p-1 hover:bg-white/10 rounded", liked[msg.id] ? "text-emerald-400" : "text-gray-500 hover:text-white")}>
+                        <ThumbsUp className="w-3 h-3" />
+                    </button>
+                    <button onClick={() => { setDisliked({...disliked, [msg.id]: !disliked[msg.id]}); setShowReport({...showReport, [msg.id]: !showReport[msg.id]})}} className={cn("p-1 hover:bg-white/10 rounded", disliked[msg.id] ? "text-rose-400" : "text-gray-500 hover:text-white")}>
+                        <ThumbsDown className="w-3 h-3" />
+                    </button>
+                </>
+            )}
+            {showReport[msg.id] && (
+                <div className="mt-1 flex flex-col gap-1 w-full p-2 bg-black/50 border border-white/5 rounded-xl animate-in fade-in duration-200">
+                    <input value={reportText[msg.id] || ''} onChange={(e) => setReportText({...reportText, [msg.id]: e.target.value})} className="bg-transparent border border-white/10 p-1.5 rounded text-[10px] text-white outline-none w-full" placeholder="What was wrong?" />
+                    <button onClick={() => { setShowReport({...showReport, [msg.id]: false}); alert('Thank you for your feedback!'); }} className="text-[9px] text-rose-400 font-bold uppercase tracking-widest pt-1 border-t border-white/5 mt-1 hover:text-rose-300">Submit Report</button>
+                </div>
+            )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex flex-col h-full min-h-0 max-h-full bg-[var(--theme-bg)] transition-colors duration-500 overflow-hidden relative">
+      {isExpanded && (
+        <div className="fixed inset-0 z-[100] bg-[var(--theme-bg)] flex flex-col p-4 md:p-6 animate-in fade-in zoom-in-95 duration-200">
+          <div className="flex justify-between items-center mb-4">
+            <span className="text-[12px] font-black uppercase tracking-widest text-white">Full Screen Composer</span>
+            <button
+              onClick={() => setIsExpanded(false)}
+              className="px-4 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-white text-[10px] font-black uppercase tracking-widest"
+            >
+              <div className="flex items-center gap-1.5">
+                <Minimize2 className="w-3.5 h-3.5" />
+                Collapse
+              </div>
+            </button>
+          </div>
+          <textarea
+            value={input}
+            onChange={(e) => onInputChange(e.target.value)}
+            className="flex-1 w-full bg-[#0d1117] border border-white/10 rounded-2xl p-4 text-[14px] text-white outline-none focus:border-indigo-500 resize-none font-mono"
+            placeholder="Ask navBharatAI..."
+          />
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              onClick={() => { onSend(); setIsExpanded(false); }}
+              disabled={!input.trim() || isLoading}
+              className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[11px] font-black uppercase tracking-widest disabled:opacity-35 transition-all shadow-lg active:scale-95"
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      )}
+      
+      {/* Premium AIChat Header */}
+      {/* Header removed */}
+
+      {/* Play Button Header Popup */}
+      <AnimatePresence>
+        {isAppBuilt && (
+          <motion.div 
+            drag
+            dragMomentum={false}
+            dragConstraints={{ left: -300, right: 300, top: -400, bottom: 400 }}
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="absolute top-16 right-4 z-50 cursor-move"
+          >
+            <button 
+              onClick={onPreviewClick}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full shadow-2xl shadow-emerald-500/20 transition-all border border-emerald-400/30 group active:scale-95"
+            >
+              <Zap className="w-3 h-3 fill-current animate-pulse" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-black uppercase tracking-widest">Live Preview</span>
+              </div>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className={cn("flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar overflow-x-hidden")} ref={scrollRef}>
+        {/* AgentProgress removed here to only be rendered dynamically in messages if needed */}
+        {restoredMessages && restoredMessages.length > 0 && (
+          <div className="mb-6 bg-indigo-950/10 border border-indigo-500/10 rounded-2xl overflow-hidden shadow-2xl transition-all">
+            <button 
+              onClick={() => setIsHistoryExpanded(!isHistoryExpanded)}
+              className="w-full flex items-center justify-between p-4 bg-indigo-500/5 hover:bg-indigo-500/10 transition-all border-b border-indigo-500/5 text-left group"
+            >
+              <div className="flex items-center gap-3">
+                <Clock className="w-4 h-4 text-indigo-400" />
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Previous Conversation ({activeUci})</span>
+                  <p className="text-[8px] text-indigo-400/80 font-mono mt-0.5 font-bold uppercase tracking-wide">
+                    Click to {isHistoryExpanded ? 'collapse' : 'expand'} • {restoredMessages.length} messages preserved
+                  </p>
+                </div>
+              </div>
+              {isHistoryExpanded ? <ChevronUp className="w-4 h-4 text-indigo-400" /> : <ChevronDown className="w-4 h-4 text-indigo-400" />}
+            </button>
+            
+            <AnimatePresence>
+              {isHistoryExpanded && (
+                <motion.div 
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="p-4 space-y-6 max-h-[350px] overflow-y-auto border-t border-white/5 divide-y divide-white/5">
+                    {restoredMessages.map((msg, i) => (
+                      <div key={msg.id || i} className={cn("pt-4 flex flex-col space-y-1.5", msg.sender === 'user' ? "items-end" : "items-start")}>
+                        <div className={cn(
+                          "max-w-[90%] p-3 rounded-xl text-[10.5px] font-medium leading-relaxed shadow-sm break-words bg-[#0d1117] text-[#8b949e] border border-white/5"
+                        )}>
+                          {renderMessageContent(msg)}
+                        </div>
+                        <div className="flex items-center gap-1.5 px-1 opacity-70">
+                          <span className="text-[7px] font-black text-[#8b949e] uppercase tracking-widest">
+                            {msg.sender === 'user' ? 'YOU' : 'PREVIOUS AI'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+        
+        {restoredMessages && restoredMessages.length > 0 && (
+          <div className="relative flex items-center justify-center my-8 select-none">
+            <div className="absolute inset-0 flex items-center" aria-hidden="true">
+              <div className="w-full border-t border-dashed border-indigo-500/25"></div>
+            </div>
+            <div className="relative flex justify-center text-[8px] font-black uppercase tracking-[0.2em] px-4 bg-[var(--theme-bg)] text-indigo-450 border border-indigo-500/20 py-1.5 rounded-full shadow-lg backdrop-blur-md">
+              Continuation Workspace
+            </div>
+          </div>
+        )}
+
+        {/* Compact UCI continuation card */}
+        {messages.length <= 1 && (
+            <div className="flex justify-center my-4">
+                <button 
+                  onClick={() => setShowContinueModal(!showContinueModal)}
+                  className="px-4 py-2 bg-indigo-950/40 hover:bg-indigo-950/60 border border-indigo-500/20 text-indigo-300 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95 flex items-center gap-2"
+                >
+                  <Clock className="w-3 h-3" />
+                  {showContinueModal ? 'Hide Restore Options' : 'Resume Previous Session'}
+                </button>
+            </div>
+        )}
+        
+        {showContinueModal && messages.length <= 1 && (
+          <div className="p-4 bg-indigo-950/20 border border-indigo-500/10 rounded-2xl space-y-3 shadow-xl backdrop-blur-md max-w-xl mx-auto select-none animate-in fade-in zoom-in-95">
+            <p className="text-[9px] text-[#8b949e] font-medium">{continuePromptPhrase}</p>
+            <div className="flex gap-2">
+              <input 
+                type="text"
+                placeholder="Enter Universal Chat ID ..."
+                value={resumeUciInput}
+                onChange={(e) => setResumeUciInput(e.target.value)}
+                className="flex-1 bg-[#0d1117]/80 border border-white/5 rounded-xl p-2.5 text-[10px] font-mono text-white placeholder:text-[#484f58] focus:border-indigo-500 outline-none transition-all shadow-inner"
+              />
+              <button 
+                onClick={handleRestoreByUci}
+                disabled={isRestoring || !resumeUciInput.trim()}
+                className="px-3 bg-indigo-600 hover:bg-indigo-505 text-white rounded-xl text-[8px] font-black uppercase tracking-widest transition-all disabled:opacity-35"
+              >
+                Restore
+              </button>
+            </div>
+            {restoreError && (
+              <p className="text-[8px] text-red-400 font-bold animate-pulse">⚠️ {restoreError}</p>
+            )}
+          </div>
+        )}
+
+        {messages.length === 0 && (
+          <>
+              <div className="flex flex-col items-center justify-center p-6 space-y-2 opacity-50">
+              <div className="w-10 h-10 bg-indigo-600/10 rounded-2xl flex items-center justify-center mb-2">
+                <Sparkles className="w-5 h-5 text-indigo-400" />
+              </div>
+              <p className={cn("text-[10px] font-black uppercase tracking-widest text-[#8b949e]")}>Ready to architect and build.</p>
+            </div>
+            <div className="flex items-center justify-center py-4 border-t border-white/5 mt-4">
+               <button 
+                 onClick={() => document.querySelector<HTMLButtonElement>('[title="Security Scan"]')?.click()}
+                 className="p-2 px-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl flex items-center gap-2 transition-all shadow-lg"
+                 title="Open Security Scan Hub"
+               >
+                 <ShieldAlert className="w-4 h-4" />
+                 <span className="text-[10px] font-black uppercase tracking-widest">Start Security Scan</span>
+               </button>
+            </div>
+          </>
+        )}
+
+        <AnimatePresence>
+          {messages.map((msg, index) => {
+            if (!msg) return null;
+            const { providerId, deservesManual } = parseMessageAndTriggers(msg);
+            const cleanedText = msg.text || (msg as any).content || "No Text";
+            const lineCount = ((cleanedText || '').match(/\n/g) || []).length + 1;
+            const isLongMessage = cleanedText.length > 220 || lineCount > 4;
+
+            return (
+              <motion.div
+                layout
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                key={msg.id}
+                className={cn(
+                  "flex flex-col space-y-2",
+                  msg.sender === 'user' ? "items-end" : "items-start"
+                )}
+              >
+                <div className={cn(
+                  "max-w-[90%] p-3.5 rounded-2xl text-[11px] font-medium leading-relaxed shadow-sm break-words select-text",
+                  msg.sender === 'user' 
+                    ? "bg-indigo-600 text-white rounded-tr-none" 
+                    : "bg-[#161b22] text-[#c9d1d9] border border-white/5 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                )}>
+                  {isLongMessage ? (
+                    <div className="relative">
+                      <div className={cn("transition-all duration-300", !expandedMessages[msg.id] ? "max-h-[120px] overflow-hidden" : "max-h-[5000px]")}>
+                        {renderMessageContent(msg)}
+                      </div>
+                      <button
+                        onClick={() => setExpandedMessages(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
+                        className={cn(
+                          "mt-2 text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center gap-1 cursor-pointer",
+                          msg.sender === 'user' 
+                            ? "text-indigo-200 hover:text-white" 
+                            : "text-blue-500 hover:text-blue-400 font-extrabold"
+                        )}
+                      >
+                        {expandedMessages[msg.id] ? "See Less ▲" : "See More ▼"}
+                      </button>
+                    </div>
+                  ) : (
+                    renderMessageContent(msg)
+                  )}
+                  
+                  {providerId && (
+                    <SecretQuickFill 
+                      providerId={providerId} 
+                      userId={userId} 
+                      isLoggedIn={isLoggedIn} 
+                      onShowLogin={onShowLogin} 
+                    />
+                  )}
+
+                  {deservesManual && (
+                    <div className="mt-2.5 pt-2 border-t border-white/5 space-y-2">
+                      <button
+                        onClick={() => setShowStruggleFormForMsg(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all border border-indigo-500/20 active:scale-95"
+                      >
+                        <Lock className="w-3 h-3 animate-pulse" />
+                        {showStruggleFormForMsg[msg.id] ? 'Hide Setup Form' : 'Struggling with keys? Click for Quick-Fill Form'}
+                      </button>
+
+                      {showStruggleFormForMsg[msg.id] && (
+                        <SecretQuickFill 
+                          providerId="gemini" 
+                          userId={userId} 
+                          isLoggedIn={isLoggedIn} 
+                          onShowLogin={onShowLogin} 
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+                
+
+
+                <div className="flex items-center gap-2 px-1">
+                  {msg.sender === 'ai' && <Bot className="w-2.5 h-2.5 text-indigo-400" />}
+                  <span className="text-[7px] font-black text-[#484f58] uppercase tracking-widest">
+                    {msg.sender === 'user' ? 'YOU' : activeAgent.toUpperCase().replace('_', ' ')}
+                  </span>
+                  {msg.sender === 'user' && <User className="w-2.5 h-2.5 text-indigo-400" />}
+                </div>
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
+
+        {isLoading && (
+          <div className="flex items-center gap-3 text-[#484f58] px-2 animate-in fade-in slide-in-from-left-2 duration-300">
+            <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+            <span className="text-[9px] font-black uppercase tracking-widest animate-pulse">The Architect is analyzing...</span>
+          </div>
+        )}
+
+        {buildSteps && buildSteps.length > 0 && buildSteps.some(step => step.status === 'running') && activeAgent === 'navbharatai-pro' && (
+          <div className="mt-4 p-4 bg-[#161b22] border border-white/5 rounded-2xl animate-in fade-in slide-in-from-bottom-4 duration-300">
+             <span className="text-[9px] font-black uppercase tracking-widest text-[#8b949e] mb-3 block">Live Execution Progress</span>
+             <AgentProgress steps={buildSteps} />
+          </div>
+        )}
+
+        {pendingGHEdit && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-4 bg-indigo-600/10 border border-indigo-500/20 rounded-2xl space-y-3"
+          >
+            <div className="flex items-center gap-2">
+              <Github className="w-4 h-4 text-indigo-400" />
+              <span className="text-[10px] font-black uppercase text-indigo-400">GitHub Push Ready</span>
+            </div>
+            <p className="text-[10px] text-[#c9d1d9] font-medium leading-relaxed">
+              I have prepared changes for <span className="text-white font-bold">{pendingGHEdit.path}</span>. Are you ready to push?
+            </p>
+            <button 
+              onClick={onConfirmPush}
+              disabled={isPushing}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {isPushing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+              {isPushing ? 'Pushing...' : 'Confirm & Push to GitHub'}
+            </button>
+          </motion.div>
+        )}
+      </div>
+
+      <div className="p-4 border-t border-white/5 bg-[var(--theme-card)] backdrop-blur-xl select-none shadow-[0_-12px_40px_rgba(0,0,0,0.5)] pb-6 md:pb-4">
+        <div className="max-w-4xl mx-auto space-y-3">
+            <div className="relative flex items-center bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl shadow-inner focus-within:border-indigo-500 transition-all">
+                  {(() => {
+                    const DEBUG_MODE = false;
+                    console.log('DEBUG AIChat:', {isLoggedIn, onModeChange: !!onModeChange, activeAgent});
+                    return DEBUG_MODE && (
+                      <div className="absolute -top-6 left-0 text-[8px] text-red-400 font-mono">
+                        DBUG: LoggedIn={isLoggedIn?'T':'F'} ModeChg={onModeChange?'T':'F'} Agent='{activeAgent}' Cond={onModeChange && activeAgent === 'navbharatai-pro' ? 'TRUE' : 'FALSE'}
+                      </div>
+                    );
+                  })()}
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileSelect}
+                    className="hidden"
+                    multiple
+                  />
+                  {attachments.length > 0 && (
+                    <div className="px-5 pt-2 flex flex-wrap gap-2">
+                        {attachments.map((file, index) => (
+                            <div key={index} className="flex items-center gap-1 bg-[#161b22] border border-white/10 px-2 py-1 rounded-md text-[9px] text-[#8b949e]">
+                                <span>{file.name}</span>
+                                <button onClick={() => removeAttachment(index)} className="hover:text-white">x</button>
+                            </div>
+                        ))}
+                    </div>
+                   )}
+                  <textarea
+                    value={input}
+                    onChange={(e) => onInputChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      // Enter just adds a newline now
+                    }}
+                    placeholder="Ask navBharatAI..."
+                    rows={1}
+                    className={cn(
+                      "w-full bg-transparent text-[var(--theme-text)] pr-24 py-3.5 text-xs outline-none transition-all resize-none min-h-[48px] max-h-[150px] leading-relaxed text-[16px]",
+                      onModeChange && activeAgent === 'navbharatai-pro' ? "pl-32" : "pl-5"
+                    )}
+                  />
+                  {( (input || '').length > 300 || (((input || '').match(/\n/g) || []).length > 4)) && (
+                    <button
+                      type="button"
+                      onClick={() => setIsExpanded(true)}
+                      className="absolute right-20 bottom-2 p-2 text-gray-500 hover:text-white transition-colors"
+                    >
+                      <Maximize2 size={16} />
+                    </button>
+                  )}
+                  {onModeChange && activeAgent === 'navbharatai-pro' && (
+                    <div className="absolute left-2 top-3 z-50 pointer-events-auto">
+                      <ModeSelector mode={mode || 'chat'} setMode={onModeChange} />
+                    </div>
+                  )}
+                  <div className="absolute right-2 bottom-2 flex gap-1 items-center">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="p-2 text-gray-500 hover:text-indigo-400 transition-colors"
+                    >
+                      <LinkIcon className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => { onSend(attachments); setAttachments([]); }}
+                      disabled={(!input.trim() && attachments.length === 0) || isLoading}
+                      className="p-2.5 bg-indigo-600 text-white rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+            </div>
+
+{isPinned && (
+            <div className="mt-2 flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">
+              <Zap className="w-2 h-2 fill-current" />
+              Pinned
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+

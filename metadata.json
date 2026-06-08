@@ -1,0 +1,6 @@
+{
+  "name": "NavBharatAI-Pro",
+  "description": "An advanced, production-grade AI App Maker and Code Studio that intelligently orchestrates multi-model backend services to plan, blueprint, and build production-ready applications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

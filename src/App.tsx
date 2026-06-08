@@ -2251,7 +2251,7 @@ You still maintain your Indian personality and friendly tone.`;
 
   const menuItems = [
     { id: 'home', label: 'Home', icon: Bot },
-    { id: 'nbi_chat', label: 'navBharatAI (free)', icon: MessageSquare },
+    { id: 'nbi_chat', label: 'asheesh chat', icon: MessageSquare },
     { id: 'nbi_pro_chat', label: 'navBharatAI-Pro', icon: Bot },
     { id: 'billing', label: 'Wallet & Billing', icon: Wallet, status: 'Active' },
     { id: 'history', label: 'history', icon: History },

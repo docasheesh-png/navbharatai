@@ -158,7 +158,7 @@ export const HomeView = ({ onStartChat, onStartProChat, isAdmin, data, onUpdate,
           <div className="flex flex-col sm:flex-row gap-4 pt-2">
             <button 
               onClick={onStartChat}
-              className="bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-black uppercase tracking-widest transition-all px-8 py-4 rounded-[2rem] text-xs flex items-center gap-2"
+              className="bg-gradient-to-r from-orange-500 to-amber-400 hover:from-orange-400 hover:to-amber-300 text-white font-black uppercase tracking-widest transition-all px-8 py-4 rounded-[2rem] text-xs flex items-center gap-2"
             >
               <MessageSquare className="w-4 h-4" />
               navBharatAI

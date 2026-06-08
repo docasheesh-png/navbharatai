@@ -6,6 +6,8 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
+      - '-f'
+      - 'Dockerfile'
       - '--tag'
       - 'gcr.io/$PROJECT_ID/navbharat-cloud-run:$COMMIT_SHA'
       - '-t'

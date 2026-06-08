@@ -32,7 +32,7 @@ steps:
     args:
       - 'run'
       - 'deploy'
-      - 'navbharat-ai'
+      - 'navbharat-ai-prod'
       - '--image'
       - 'gcr.io/$PROJECT_ID/navbharat-cloud-run:$COMMIT_SHA'
       - '--region'

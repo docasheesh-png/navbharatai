@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+.firebase
+firebase-debug.log
+npm-debug.log
+*.local
+*.log
+Backup

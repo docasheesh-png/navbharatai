@@ -2038,8 +2038,6 @@ You still maintain your Indian personality and friendly tone.`;
                addLog('Workspace synced with AI generated code.', 'success');
                setHasGeneratedCode(true);
                setIsDeployed(true);
-               setShowFloatingPreview(true);
-               
                if (currentAgent.startsWith('vishwakarma')) {
                  setIsAppBuilt(true);
                }
@@ -2171,6 +2169,7 @@ You still maintain your Indian personality and friendly tone.`;
                   updatePreview(evt.files);
                   setIsAppBuilt(true);
                   setHasGeneratedCode(true);
+                  setShowFloatingPreview(true);
 
                   const fileList = Object.keys(evt.files);
                   const processLog = [
@@ -2265,6 +2264,7 @@ You still maintain your Indian personality and friendly tone.`;
     { id: 'nbi_pro_chat', label: 'navBharatAI-Pro', icon: Bot },
     { id: 'billing', label: 'Wallet & Billing', icon: Wallet, status: 'Active' },
     { id: 'history', label: 'history', icon: History },
+    { id: 'files', label: 'Files', icon: FolderOpen },
     { id: 'preview', label: 'preview', icon: Monitor },
     { id: 'git', label: 'GIT', icon: GitBranch, status: 'Beta' },
     { id: 'studio', label: 'Code Studio', icon: Smartphone },
@@ -3274,14 +3274,15 @@ ${pending.map(p => `  - ${p}`).join('\n')}
               </div>
               {menuItems.filter(item => enabledModules[item.id] !== false).map((item) => {
                 const isPreview = item.id === 'preview';
-                const isDisabled = isPreview && !hasGeneratedCode;
+                const isFiles = item.id === 'files';
+                const isDisabled = (isPreview || isFiles) && !hasGeneratedCode;
                 const isActive = activeView === item.id;
-                
+
                 return (
                   <button
                     key={item.id}
                     disabled={isDisabled}
-                    title={isDisabled ? "Generate an app to enable preview" : ""}
+                    title={isDisabled ? "Generate an app to enable this" : ""}
                     onClick={() => {
                       if (isPreview) {
                           setShowFloatingPreview(true);
@@ -3381,32 +3382,17 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     <div className="w-1 h-3 bg-indigo-500 rounded-full"></div>
                     Core Navigation
                   </div>
-                  {/* Live Preview CTA — shown prominently when app is built */}
-                  {isAppBuilt && (
-                    <button
-                      onClick={() => {
-                        toggleTab('preview');
-                        setIsMenuOpen(false);
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all mb-1 shadow-lg active:scale-95"
-                      style={{ background: 'linear-gradient(135deg,#059669,#10b981)', boxShadow: '0 4px 20px rgba(16,185,129,0.35)' }}
-                    >
-                      <Monitor className="w-4 h-4 text-white" />
-                      <span className="text-sm font-black text-white tracking-tight uppercase">Live Preview</span>
-                      <div className="ml-auto w-2 h-2 rounded-full bg-white animate-ping" />
-                    </button>
-                  )}
-
                   {menuItems.filter(item => enabledModules[item.id] !== false).map((item) => {
                     const isPreview = item.id === 'preview';
-                    const isDisabled = isPreview && !hasGeneratedCode;
+                    const isFiles = item.id === 'files';
+                    const isDisabled = (isPreview || isFiles) && !hasGeneratedCode;
                     const isActive = activeView === item.id;
 
                     return (
                       <button
                         key={item.id}
                         disabled={isDisabled}
-                        title={isDisabled ? "Generate an app to enable preview" : ""}
+                        title={isDisabled ? "Generate an app to enable this" : ""}
                         onClick={() => {
                           if (isPreview) {
                              setShowFloatingPreview(true);
@@ -4424,93 +4410,6 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {(activeView === 'nbi_pro_chat') && (
             <div className={cn("flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-white/10", themeClasses.bg)}>
 
-              {/* BUILD PROCESS — World-class live build UI with expandable code */}
-              {proBuildProgress.active && (
-                <div style={{
-                  position: 'absolute', inset: 0, zIndex: 50,
-                  background: '#0d1117',
-                  display: 'flex', flexDirection: 'column',
-                  fontFamily: 'monospace',
-                  overflow: 'hidden',
-                }}>
-                  {/* Top bar */}
-                  <div style={{ padding: '0.6rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.07)', display: 'flex', alignItems: 'center', gap: '0.6rem', flexShrink: 0, background: '#161b22' }}>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b', boxShadow: '0 0 10px rgba(245,158,11,0.9)', animation: 'pulse 1s ease-in-out infinite' }} />
-                    <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#f59e0b', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'inherit' }}>NavBharatAI Pro — Building Your App</span>
-                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <div style={{ height: 4, width: 80, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden' }}>
-                        <div style={{ height: '100%', background: 'linear-gradient(90deg,#f59e0b,#fbbf24)', width: proBuildProgress.percent + '%', transition: 'width 0.5s ease' }} />
-                      </div>
-                      <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', fontFamily: 'inherit' }}>{proBuildProgress.percent}%</span>
-                    </div>
-                  </div>
-
-                  {/* Streaming log + files */}
-                  <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    {/* Stage log */}
-                    {proBuildProgress.stage && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0', borderBottom: '1px solid rgba(255,255,255,0.04)', marginBottom: '0.25rem' }}>
-                        <div style={{ width: 12, height: 12, border: '1.5px solid rgba(245,158,11,0.3)', borderTopColor: '#f59e0b', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
-                        <span style={{ fontSize: '0.8rem', color: '#f59e0b', fontFamily: 'inherit' }}>{proBuildProgress.stage}</span>
-                      </div>
-                    )}
-
-                    {/* Steps */}
-                    {proBuildProgress.steps.map((step: {label:string;sub:string;status:string;code?:string;expanded?:boolean}, i: number) => (
-                      <div key={i} style={{ borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.05)', marginBottom: '0.15rem' }}>
-                        {/* Step header */}
-                        <div
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: '0.5rem',
-                            padding: '0.45rem 0.6rem',
-                            background: step.code ? (step.expanded ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.03)') : 'transparent',
-                            cursor: step.code ? 'pointer' : 'default',
-                          }}
-                          onClick={() => {
-                            if (!step.code) return;
-                            setProBuildProgress(prev => ({
-                              ...prev,
-                              steps: prev.steps.map((s, idx) => idx === i ? { ...s, expanded: !s.expanded } : s),
-                            }));
-                          }}
-                        >
-                          <span style={{ flexShrink: 0, width: 14, textAlign: 'center', fontSize: 12 }}>
-                            {step.status === 'done' ? '✓' : step.status === 'error' ? '✕' : step.status === 'running' ? '⟳' : '○'}
-                          </span>
-                          <span style={{ fontSize: '0.8rem', color: step.status === 'done' ? 'rgba(255,255,255,0.8)' : step.status === 'running' ? '#fff' : step.status === 'error' ? '#f87171' : '#555', fontFamily: 'inherit', flex: 1 }}>
-                            {step.label}
-                          </span>
-                          {step.sub && <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)', fontFamily: 'inherit' }}>{step.sub}</span>}
-                          {step.code && (
-                            <span style={{ fontSize: '0.65rem', color: '#6366f1', fontFamily: 'inherit', marginLeft: 4 }}>
-                              {step.expanded ? '▲ hide' : '▼ view code'}
-                            </span>
-                          )}
-                        </div>
-                        {/* Expandable code block */}
-                        {step.code && step.expanded && (
-                          <div style={{ background: '#0a0e14', borderTop: '1px solid rgba(99,102,241,0.2)', padding: '0.6rem 0.75rem', maxHeight: 260, overflowY: 'auto' }}>
-                            <pre style={{ margin: 0, fontSize: '0.72rem', color: '#a5f3fc', fontFamily: 'monospace', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                              {step.code.slice(0, 4000)}{step.code.length > 4000 ? '\n... (truncated)' : ''}
-                            </pre>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Bottom */}
-                  <div style={{ padding: '0.5rem 1rem', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0, background: '#0d1117' }}>
-                    <span style={{ fontSize: '0.75rem', color: proBuildProgress.stage.includes('✅') ? '#4ade80' : proBuildProgress.stage.includes('❌') ? '#f87171' : 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>
-                      {Object.keys(proBuildProgress.generatedFiles).length > 0
-                        ? `${Object.keys(proBuildProgress.generatedFiles).length} file(s) generated`
-                        : 'Working...'}
-                    </span>
-                    <span style={{ marginLeft: 'auto', fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)', fontFamily: 'monospace' }}>navBharatAI Pro Builder</span>
-                  </div>
-                </div>
-              )}
-
               <div className="flex-1 flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0">
                   <div className="flex items-center justify-between px-3 py-1 bg-indigo-950/20 border-b border-indigo-500/20 text-[9px] font-black uppercase tracking-widest text-[#8b949e]">
                      <div className="flex items-center gap-2">
@@ -4548,6 +4447,11 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     restoredMessages={[]}
                     memorySummary={''}
                     wallet={wallet}
+                    buildProgress={proBuildProgress}
+                    onBuildStepToggle={(i) => setProBuildProgress(prev => ({
+                      ...prev,
+                      steps: prev.steps.map((s, idx) => idx === i ? { ...s, expanded: !s.expanded } : s),
+                    }))}
                   />
                 </div>
             </div>
@@ -6241,11 +6145,59 @@ ${pending.map(p => `  - ${p}`).join('\n')}
 
           {activeView === 'preview' && (
             <div className="flex-1 h-full overflow-hidden">
-              <PreviewPanel 
-                files={files} 
-                onRun={() => updatePreview(files)} 
-                generatedCode={generatedCode} 
+              <PreviewPanel
+                files={files}
+                onRun={() => updatePreview(files)}
+                generatedCode={generatedCode}
               />
+            </div>
+          )}
+
+          {activeView === 'files' && (
+            <div className="flex-1 h-full overflow-hidden bg-[#0d1117] flex flex-col">
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5 bg-[#161b22]">
+                <FolderOpen className="w-4 h-4 text-indigo-400" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Project Files</span>
+                {hasGeneratedCode && (
+                  <span className="ml-auto text-[8px] text-emerald-400 font-black uppercase tracking-widest">
+                    {Object.keys(files).length} files
+                  </span>
+                )}
+              </div>
+              {!hasGeneratedCode ? (
+                <div className="flex-1 flex items-center justify-center flex-col gap-3 text-center p-8">
+                  <FolderOpen className="w-12 h-12 text-white/10" />
+                  <p className="text-[11px] text-[#484f58] font-medium">Koi app generate nahi hui abhi tak.</p>
+                  <p className="text-[9px] text-[#484f58]">NavBharatAI Pro mein app banao — yahan files dikhenge.</p>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
+                  <div className="space-y-1">
+                    {Object.entries(files).map(([path, content]) => {
+                      const ext = path.split('.').pop() || '';
+                      const extColor: Record<string, string> = {
+                        html: 'text-orange-400', css: 'text-blue-400', js: 'text-yellow-400',
+                        ts: 'text-cyan-400', tsx: 'text-cyan-400', json: 'text-green-400',
+                        md: 'text-purple-400', py: 'text-emerald-400',
+                      };
+                      const color = extColor[ext] || 'text-white/50';
+                      const lines = (content as string).split('\n').length;
+                      return (
+                        <button
+                          key={path}
+                          onClick={() => { setActiveFile(path); toggleTab('studio'); }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors group text-left"
+                        >
+                          <FileCode className={`w-4 h-4 flex-shrink-0 ${color}`} />
+                          <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{path}</span>
+                          <span className="text-[8px] text-[#484f58] font-mono">{lines}L</span>
+                          <ChevronRight className="w-3 h-3 text-white/20 group-hover:text-white/50 transition-colors" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

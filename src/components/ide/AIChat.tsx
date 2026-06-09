@@ -212,6 +212,14 @@ export const SecretQuickFill: React.FC<SecretQuickFillProps> = ({ providerId, us
 
 import { AgentMode, ModeSelector } from './ModeSelector';
 
+interface BuildProgressState {
+  active: boolean;
+  stage: string;
+  steps: { label: string; sub: string; status: 'pending' | 'running' | 'done' | 'error'; code?: string; expanded?: boolean }[];
+  percent: number;
+  generatedFiles: Record<string, { content: string; expanded: boolean }>;
+}
+
 interface AIChatProps {
   messages: Message[];
   input: string;
@@ -242,6 +250,8 @@ interface AIChatProps {
   onGoToMain?: () => void;
   onUnlockVishwakarma?: () => void;
   onAttachmentsChange?: (files: File[]) => void;
+  buildProgress?: BuildProgressState | null;
+  onBuildStepToggle?: (index: number) => void;
 }
 
 export const AIChat: React.FC<AIChatProps> = ({
@@ -272,7 +282,9 @@ export const AIChat: React.FC<AIChatProps> = ({
   wallet = null,
   onGoToMain,
   onUnlockVishwakarma,
-  onAttachmentsChange
+  onAttachmentsChange,
+  buildProgress = null,
+  onBuildStepToggle,
 }) => {
   const { buildSteps } = useBuild();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -481,28 +493,6 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
           </div>
         )}
 
-        {/* ── View Preview button (after build) ── */}
-        {hasViewPreview && onPreviewClick && (
-          <div className="mt-3 pt-3 border-t border-white/10">
-            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 mb-2">
-              <span className="text-emerald-400 text-xs">✅</span>
-              <span className="text-xs text-emerald-300/90 font-medium">App ban gayi! Preview mein live dekho.</span>
-            </div>
-            <button
-              onClick={onPreviewClick}
-              className="w-full flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-xl font-bold text-sm transition-all active:scale-95"
-              style={{
-                background: 'linear-gradient(135deg, #10b981, #059669)',
-                color: 'white',
-                boxShadow: '0 4px 15px rgba(16,185,129,0.35)',
-              }}
-            >
-              <span>👁️</span>
-              Live Preview Dekho
-              <span style={{ fontSize: 16 }}>→</span>
-            </button>
-          </div>
-        )}
             
         {/* Interaction Controls */}
         <div className="flex gap-2 mt-3 pt-2 border-t border-white/5 items-center">
@@ -788,7 +778,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
         )}
 
         {pendingGHEdit && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className="p-4 bg-indigo-600/10 border border-indigo-500/20 rounded-2xl space-y-3"
@@ -800,7 +790,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
             <p className="text-[10px] text-[#c9d1d9] font-medium leading-relaxed">
               I have prepared changes for <span className="text-white font-bold">{pendingGHEdit.path}</span>. Are you ready to push?
             </p>
-            <button 
+            <button
               onClick={onConfirmPush}
               disabled={isPushing}
               className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
@@ -808,6 +798,75 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
               {isPushing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
               {isPushing ? 'Pushing...' : 'Confirm & Push to GitHub'}
             </button>
+          </motion.div>
+        )}
+
+        {/* ── Inline Build Progress Widget ── */}
+        {buildProgress?.active && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-[#161b22] border border-amber-500/20 rounded-2xl overflow-hidden shadow-xl"
+          >
+            {/* Header */}
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-[#0d1117] border-b border-white/5">
+              <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">NavBharatAI Pro — Building</span>
+              <div className="ml-auto flex items-center gap-2">
+                <div className="h-1.5 w-20 bg-white/5 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${buildProgress.percent}%`, background: 'linear-gradient(90deg,#f59e0b,#fbbf24)' }}
+                  />
+                </div>
+                <span className="text-[8px] text-white/30 font-mono">{buildProgress.percent}%</span>
+              </div>
+            </div>
+            {/* Stage */}
+            {buildProgress.stage && (
+              <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5">
+                <div className="w-3 h-3 rounded-full border border-amber-400/40 border-t-amber-400 animate-spin flex-shrink-0" />
+                <span className="text-[11px] text-amber-300 font-medium">{buildProgress.stage}</span>
+              </div>
+            )}
+            {/* Steps */}
+            <div className="px-4 py-2 space-y-1 max-h-56 overflow-y-auto">
+              {buildProgress.steps.map((step, i) => (
+                <div key={i} className="rounded-lg overflow-hidden border border-white/4">
+                  <div
+                    className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/3 transition-colors"
+                    onClick={() => step.code && onBuildStepToggle?.(i)}
+                  >
+                    <span className="text-[10px] w-3 text-center flex-shrink-0">
+                      {step.status === 'done' ? '✓' : step.status === 'error' ? '✕' : step.status === 'running' ? '⟳' : '○'}
+                    </span>
+                    <span className={`text-[10px] flex-1 font-medium ${
+                      step.status === 'done' ? 'text-white/70' : step.status === 'running' ? 'text-white' : step.status === 'error' ? 'text-red-400' : 'text-white/30'
+                    }`}>{step.label}</span>
+                    {step.sub && <span className="text-[8px] text-white/25">{step.sub}</span>}
+                    {step.code && (
+                      <span className="text-[8px] text-indigo-400">{step.expanded ? '▲' : '▼'}</span>
+                    )}
+                  </div>
+                  {step.code && step.expanded && (
+                    <div className="bg-[#0a0e14] border-t border-indigo-500/20 px-3 py-2 max-h-40 overflow-y-auto">
+                      <pre className="text-[9px] text-cyan-300 font-mono leading-relaxed whitespace-pre-wrap break-all">
+                        {step.code.slice(0, 3000)}{step.code.length > 3000 ? '\n...' : ''}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            {/* Footer */}
+            <div className="px-4 py-2 border-t border-white/5 flex items-center justify-between">
+              <span className="text-[8px] text-white/25 font-mono">
+                {Object.keys(buildProgress.generatedFiles).length > 0
+                  ? `${Object.keys(buildProgress.generatedFiles).length} file(s) generated`
+                  : 'Working...'}
+              </span>
+              <span className="text-[8px] text-white/15 font-mono">navBharatAI Pro Builder</span>
+            </div>
           </motion.div>
         )}
       </div>

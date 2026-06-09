@@ -26,29 +26,26 @@ export class AIRouterManager {
 
     private static createRouterInstance(namespace: 'free' | 'pro'): AIRouter {
         const router = new AIRouter();
-        console.log(`[DEBUG] Creating router for ${namespace}. GOOGLE_CLOUD_PROJECT: ${process.env.GOOGLE_CLOUD_PROJECT}, GOOGLE_CLOUD_PROJECT_ID: ${process.env.GOOGLE_CLOUD_PROJECT_ID}`);
-        console.log(`[DEBUG] Router providers count before registration: ${(router as any).providers?.length || 0}`);
-        
+        console.log(`[DEBUG] Creating router for ${namespace}`);
+
         try {
-            console.log(`[DEBUG] Instantiating VertexProvider for ${namespace}...`);
             const vertexProvider = new VertexProvider();
-            console.log(`[DEBUG] VertexProvider instantiated for ${namespace}`);
-            
-            console.log(`[DEBUG] Registering VertexProvider for ${namespace}...`);
             router.registerProvider(vertexProvider);
             console.log(`[DEBUG] VertexProvider registered for ${namespace}`);
-            console.log(`[DEBUG] Router providers count after Vertex registration: ${(router as any).providers?.length || 0}`);
         } catch (e) {
             console.error(`[ERROR] Failed to register VertexProvider for ${namespace}:`, e);
         }
 
+        // Both free and pro get Gemini as Vertex fallback
         router.registerProvider(new GeminiProvider());
         console.log(`[DEBUG] GeminiProvider registered for ${namespace}`);
-        console.log(`[DEBUG] Router providers count after Gemini registration: ${(router as any).providers?.length || 0}`);
-        
-        router.registerProvider(new AnthropicProvider());
-        console.log(`[DEBUG] AnthropicProvider registered for ${namespace}`);
-        
+
+        // Anthropic only for Pro — Free stays lightweight (Vertex+Gemini only)
+        if (namespace === 'pro') {
+            router.registerProvider(new AnthropicProvider());
+            console.log(`[DEBUG] AnthropicProvider registered for pro`);
+        }
+
         return router;
     }
 }

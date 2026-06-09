@@ -224,10 +224,12 @@ export default function App() {
   const [proBuildProgress, setProBuildProgress] = useState<{
     active: boolean;
     stage: string;
-    steps: { label: string; sub: string; status: 'pending' | 'running' | 'done' | 'error' }[];
+    steps: { label: string; sub: string; status: 'pending' | 'running' | 'done' | 'error'; code?: string; expanded?: boolean }[];
     percent: number;
-  }>({ active: false, stage: '', steps: [], percent: 0 });
+    generatedFiles: Record<string, { content: string; expanded: boolean }>;
+  }>({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isProLoading, setIsProLoading] = useState<boolean>(false);
   const [activeIntent, setActiveIntent] = useState<string>('social');
   const [activeAgent, _setActiveAgent] = useState<string>('navbharatai');
   console.log('[DEBUG APP] Rendering App.tsx. activeAgent=', activeAgent);
@@ -2080,7 +2082,7 @@ You still maintain your Indian personality and friendly tone.`;
 
   const handleSendForPro = async (input?: string | File[]) => {
     const messageToSend = typeof input === 'string' ? input : proInput.trim();
-    if (!messageToSend || isLoading) return;
+    if (!messageToSend || isProLoading) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -2091,135 +2093,146 @@ You still maintain your Indian personality and friendly tone.`;
 
     setProMessages(prev => [...prev, userMessage]);
     setProInput('');
-    setIsLoading(true);
+    setIsProLoading(true);
 
-    // ── Detect build mode: either mode selector is 'build' OR message clearly asks for an app ──
+    // ── Detect build mode ──
     const buildKeywords = /\b(bana[ov]?|banado|build|create|make|generate|app|website|clock|watch|timer|todo|calculator|game|form|dashboard|landing page|portfolio)\b/i;
     const isBuildMode = mode === 'build' || buildKeywords.test(messageToSend);
 
-    const buildStepsDef = [
-      { label: 'Analyzing requirements', sub: 'Understanding what you want to build...' },
-      { label: 'Designing architecture', sub: 'Planning components, layout & data flow...' },
-      { label: 'Writing HTML structure', sub: 'Building the skeleton of your app...' },
-      { label: 'Styling with CSS', sub: 'Adding colors, animations & responsive design...' },
-      { label: 'Adding JavaScript logic', sub: 'Making everything interactive & functional...' },
-      { label: 'Optimizing & polishing', sub: 'Final touches, performance & mobile fixes...' },
-      { label: 'Preparing preview', sub: 'Compiling your live app...' },
-    ];
-
     if (isBuildMode) {
-      // Show progress overlay with initial state
+      // ── SSE Streaming Build via /api/pro-build ──
       setProBuildProgress({
         active: true,
-        stage: 'Building your app...',
-        steps: buildStepsDef.map((s, i) => ({ ...s, status: i === 0 ? 'running' : 'pending' })),
+        stage: '🔍 Analyzing requirements...',
+        steps: [],
         percent: 5,
+        generatedFiles: {},
       });
 
-      // Animate steps while API call is in flight
-      let stepIndex = 0;
-      const totalSteps = buildStepsDef.length;
-      const stepInterval = setInterval(() => {
-        stepIndex++;
-        if (stepIndex >= totalSteps - 1) { clearInterval(stepInterval); return; }
-        const pct = Math.round(5 + (stepIndex / totalSteps) * 80);
-        setProBuildProgress(prev => ({
-          ...prev,
-          percent: pct,
-          stage: buildStepsDef[stepIndex].label + '...',
-          steps: buildStepsDef.map((s, i) => ({
-            ...s,
-            status: i < stepIndex ? 'done' : i === stepIndex ? 'running' : 'pending',
-          })),
-        }));
-      }, 1400);
-
       try {
-        const response = await fetch('/api/pro-chat', {
+        const response = await fetch('/api/pro-build', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: messageToSend, history: proMessages, mode: 'building' }),
+          body: JSON.stringify({ message: messageToSend }),
         });
 
-        clearInterval(stepInterval);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`API Error: ${response.status} - ${errorText}`);
+        if (!response.ok || !response.body) {
+          throw new Error(`API Error: ${response.status}`);
         }
 
-        const data = await response.json();
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-        if (data.files && typeof data.files === 'object' && Object.keys(data.files).length > 0) {
-          // Mark all steps done, 100%
-          setProBuildProgress(prev => ({
-            ...prev,
-            percent: 100,
-            stage: '✅ App ready!',
-            steps: buildStepsDef.map(s => ({ ...s, status: 'done' })),
-          }));
+        const processEvent = (line: string) => {
+          if (!line.startsWith('data: ')) return;
+          try {
+            const evt = JSON.parse(line.slice(6));
 
-          // Small pause to show 100% then switch to preview
-          await new Promise(r => setTimeout(r, 900));
+            if (evt.type === 'progress') {
+              const pct = Math.round((evt.step / evt.total) * 90);
+              setProBuildProgress(prev => ({
+                ...prev,
+                percent: pct,
+                stage: `${evt.stage}: ${evt.detail}`,
+                steps: [
+                  ...prev.steps.filter(s => s.label !== evt.stage),
+                  { label: evt.stage, sub: evt.detail, status: 'running' as const },
+                ],
+              }));
+            } else if (evt.type === 'file') {
+              const fileName: string = evt.fileName;
+              const content: string = evt.content || '';
+              setProBuildProgress(prev => ({
+                ...prev,
+                steps: [
+                  ...prev.steps.map(s => s.status === 'running' ? { ...s, status: 'done' as const } : s),
+                  { label: `📄 ${fileName}`, sub: `${content.split('\n').length} lignes`, status: 'done' as const, code: content, expanded: false },
+                ],
+                generatedFiles: {
+                  ...prev.generatedFiles,
+                  [fileName]: { content, expanded: false },
+                },
+              }));
+            } else if (evt.type === 'complete') {
+              if (evt.success && evt.files && Object.keys(evt.files).length > 0) {
+                setProBuildProgress(prev => ({
+                  ...prev,
+                  percent: 100,
+                  stage: '✅ App ready!',
+                  steps: prev.steps.map(s => ({ ...s, status: 'done' as const })),
+                  generatedFiles: Object.fromEntries(
+                    Object.entries(evt.files as Record<string, string>).map(([k, v]) => [k, { content: v as string, expanded: false }])
+                  ),
+                }));
 
-          setFiles(data.files);
-          updatePreview(data.files);
-          setIsAppBuilt(true);
+                setTimeout(() => {
+                  setFiles(evt.files);
+                  updatePreview(evt.files);
+                  setIsAppBuilt(true);
+                  setHasGeneratedCode(true);
 
-          // Claude-style process log — NO file names, NO code shown
-          const fileList = Object.keys(data.files);
-          const processLog = [
-            `✅ ${data.reply || 'App successfully generated!'}`,
-            ``,
-            `**Build Summary**`,
-            fileList.map(f => `> \`${f}\` — created`).join('\n'),
-            ``,
-            `**App is live in Preview** →`,
-          ].join('\n');
+                  const fileList = Object.keys(evt.files);
+                  const processLog = [
+                    `✅ ${evt.reply || 'App successfully generated!'}`,
+                    ``,
+                    `**Build Summary**`,
+                    fileList.map((f: string) => `> \`${f}\` — created`).join('\n'),
+                    ``,
+                    `**App is live in Preview** →`,
+                  ].join('\n');
 
-          const aiMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            text: processLog + '\n\n__VIEW_PREVIEW__',
-            sender: 'ai',
-            timestamp: new Date(),
-          };
-          setProMessages(prev => [...prev, aiMessage]);
+                  setProMessages(prev => [...prev, {
+                    id: (Date.now() + 1).toString(),
+                    text: processLog + '\n\n__VIEW_PREVIEW__',
+                    sender: 'ai',
+                    timestamp: new Date(),
+                  }]);
 
-          setProBuildProgress({ active: false, stage: '', steps: [], percent: 0 });
-          setActiveView('preview');
-        } else {
-          // Planning reply
-          clearInterval(stepInterval);
-          setProBuildProgress({ active: false, stage: '', steps: [], percent: 0 });
-          const aiMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            text: data.reply || 'No response',
-            sender: 'ai',
-            timestamp: new Date(),
-          };
-          setProMessages(prev => [...prev, aiMessage]);
+                  setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+                  setIsProLoading(false);
+                }, 1200);
+              } else {
+                throw new Error(evt.error || 'Build failed — no files generated');
+              }
+            } else if (evt.type === 'error') {
+              throw new Error(evt.message || 'Build error');
+            }
+          } catch (parseErr: any) {
+            if (parseErr.message && !parseErr.message.includes('JSON')) throw parseErr;
+          }
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (line.trim()) processEvent(line);
+          }
         }
+
       } catch (e: any) {
-        clearInterval(stepInterval);
         setProBuildProgress(prev => ({
           ...prev,
           active: true,
-          stage: '❌ Build failed',
-          steps: prev.steps.map(s => s.status === 'running' ? { ...s, status: 'error' } : s),
-          percent: prev.percent,
+          stage: `❌ ${e.message || 'Build failed'}`,
+          steps: prev.steps.map(s => s.status === 'running' ? { ...s, status: 'error' as const } : s),
         }));
-        await new Promise(r => setTimeout(r, 1500));
-        setProBuildProgress({ active: false, stage: '', steps: [], percent: 0 });
-        const errorMessage: Message = {
+        await new Promise(r => setTimeout(r, 2000));
+        setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+        setProMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
-          text: `⚠️ Error: ${e.message || 'Kuch gadbad ho gayi. Dobara try karo.'}`,
+          text: `⚠️ Build Error: ${e.message || 'Kuch gadbad ho gayi. Dobara try karo.'}`,
           sender: 'ai',
           timestamp: new Date(),
-        };
-        setProMessages(prev => [...prev, errorMessage]);
+        }]);
+        setIsProLoading(false);
       }
     } else {
-      // Planning mode — simple fetch, no progress overlay
+      // ── Planning mode — simple fetch ──
       try {
         const response = await fetch('/api/pro-chat', {
           method: 'POST',
@@ -2228,30 +2241,27 @@ You still maintain your Indian personality and friendly tone.`;
         });
         if (!response.ok) throw new Error(`API Error: ${response.status}`);
         const data = await response.json();
-        const aiMessage: Message = {
+        setProMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
           text: (data.reply || 'No response') + '\n\n__SWITCH_TO_BUILD__',
           sender: 'ai',
           timestamp: new Date(),
-        };
-        setProMessages(prev => [...prev, aiMessage]);
+        }]);
       } catch (e: any) {
-        const errorMessage: Message = {
+        setProMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
           text: `⚠️ Error: ${e.message}`,
           sender: 'ai',
           timestamp: new Date(),
-        };
-        setProMessages(prev => [...prev, errorMessage]);
+        }]);
       }
+      setIsProLoading(false);
     }
-
-    setIsLoading(false);
   };
 
   const menuItems = [
     { id: 'home', label: 'Home', icon: Bot },
-    { id: 'nbi_chat', label: 'asheesh chat', icon: MessageSquare },
+    { id: 'nbi_chat', label: 'NavBharatAi FREE', icon: MessageSquare },
     { id: 'nbi_pro_chat', label: 'navBharatAI-Pro', icon: Bot },
     { id: 'billing', label: 'Wallet & Billing', icon: Wallet, status: 'Active' },
     { id: 'history', label: 'history', icon: History },
@@ -3371,11 +3381,27 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     <div className="w-1 h-3 bg-indigo-500 rounded-full"></div>
                     Core Navigation
                   </div>
+                  {/* Live Preview CTA — shown prominently when app is built */}
+                  {isAppBuilt && (
+                    <button
+                      onClick={() => {
+                        toggleTab('preview');
+                        setIsMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all mb-1 shadow-lg active:scale-95"
+                      style={{ background: 'linear-gradient(135deg,#059669,#10b981)', boxShadow: '0 4px 20px rgba(16,185,129,0.35)' }}
+                    >
+                      <Monitor className="w-4 h-4 text-white" />
+                      <span className="text-sm font-black text-white tracking-tight uppercase">Live Preview</span>
+                      <div className="ml-auto w-2 h-2 rounded-full bg-white animate-ping" />
+                    </button>
+                  )}
+
                   {menuItems.filter(item => enabledModules[item.id] !== false).map((item) => {
                     const isPreview = item.id === 'preview';
                     const isDisabled = isPreview && !hasGeneratedCode;
                     const isActive = activeView === item.id;
-                    
+
                     return (
                       <button
                         key={item.id}
@@ -4398,60 +4424,89 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {(activeView === 'nbi_pro_chat') && (
             <div className={cn("flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-white/10", themeClasses.bg)}>
 
-              {/* BUILD PROCESS — Claude-style streaming log */}
+              {/* BUILD PROCESS — World-class live build UI with expandable code */}
               {proBuildProgress.active && (
                 <div style={{
                   position: 'absolute', inset: 0, zIndex: 50,
                   background: '#0d1117',
                   display: 'flex', flexDirection: 'column',
-                  fontFamily: 'inherit',
+                  fontFamily: 'monospace',
                   overflow: 'hidden',
                 }}>
                   {/* Top bar */}
-                  <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.07)', display: 'flex', alignItems: 'center', gap: '0.6rem', flexShrink: 0 }}>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b', boxShadow: '0 0 8px rgba(245,158,11,0.8)', animation: 'pulse 1s ease-in-out infinite' }} />
-                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#f59e0b', letterSpacing: '0.08em', textTransform: 'uppercase' }}>NavBharatAI Pro — Building</span>
-                    <span style={{ marginLeft: 'auto', fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)' }}>{proBuildProgress.percent}%</span>
+                  <div style={{ padding: '0.6rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.07)', display: 'flex', alignItems: 'center', gap: '0.6rem', flexShrink: 0, background: '#161b22' }}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b', boxShadow: '0 0 10px rgba(245,158,11,0.9)', animation: 'pulse 1s ease-in-out infinite' }} />
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#f59e0b', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'inherit' }}>NavBharatAI Pro — Building Your App</span>
+                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <div style={{ height: 4, width: 80, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', background: 'linear-gradient(90deg,#f59e0b,#fbbf24)', width: proBuildProgress.percent + '%', transition: 'width 0.5s ease' }} />
+                      </div>
+                      <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', fontFamily: 'inherit' }}>{proBuildProgress.percent}%</span>
+                    </div>
                   </div>
 
-                  {/* Progress bar — thin, at top */}
-                  <div style={{ height: 2, background: 'rgba(255,255,255,0.06)', flexShrink: 0 }}>
-                    <div style={{ height: '100%', background: 'linear-gradient(90deg,#f59e0b,#fbbf24)', width: proBuildProgress.percent + '%', transition: 'width 0.7s ease', boxShadow: '0 0 8px rgba(245,158,11,0.7)' }} />
-                  </div>
+                  {/* Streaming log + files */}
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    {/* Stage log */}
+                    {proBuildProgress.stage && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0', borderBottom: '1px solid rgba(255,255,255,0.04)', marginBottom: '0.25rem' }}>
+                        <div style={{ width: 12, height: 12, border: '1.5px solid rgba(245,158,11,0.3)', borderTopColor: '#f59e0b', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
+                        <span style={{ fontSize: '0.8rem', color: '#f59e0b', fontFamily: 'inherit' }}>{proBuildProgress.stage}</span>
+                      </div>
+                    )}
 
-                  {/* Streaming process log */}
-                  <div style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
-                    {proBuildProgress.steps.map((step: {label:string;sub:string;status:string}, i: number) => (
-                      step.status === 'pending' ? null : (
-                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', paddingBottom: '0.6rem', animation: 'nb-fadein 0.25s ease forwards' }}>
-                          {/* Icon */}
-                          <div style={{ paddingTop: 2, flexShrink: 0, width: 16 }}>
-                            {step.status === 'done' && <span style={{ color: '#4ade80', fontSize: 13 }}>✓</span>}
-                            {step.status === 'error' && <span style={{ color: '#f87171', fontSize: 13 }}>✕</span>}
-                            {step.status === 'running' && (
-                              <div style={{ width: 12, height: 12, border: '1.5px solid rgba(245,158,11,0.3)', borderTopColor: '#f59e0b', borderRadius: '50%', animation: 'spin 0.7s linear infinite', marginTop: 2 }} />
-                            )}
-                          </div>
-                          {/* Text */}
-                          <div>
-                            <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: step.status === 'running' ? 500 : 400, color: step.status === 'done' ? 'rgba(255,255,255,0.75)' : step.status === 'running' ? '#fff' : '#f87171', lineHeight: 1.5 }}>
-                              {step.label}
-                            </p>
-                            {step.status === 'running' && step.sub && (
-                              <p style={{ margin: '2px 0 0', fontSize: '0.78rem', color: 'rgba(245,158,11,0.7)', lineHeight: 1.4 }}>
-                                {step.sub}
-                                <span style={{ display: 'inline-block', width: '0.5em', height: '0.85em', background: '#f59e0b', marginLeft: 2, verticalAlign: 'text-bottom', animation: 'blink 1s steps(1) infinite', borderRadius: 1 }} />
-                              </p>
-                            )}
-                          </div>
+                    {/* Steps */}
+                    {proBuildProgress.steps.map((step: {label:string;sub:string;status:string;code?:string;expanded?:boolean}, i: number) => (
+                      <div key={i} style={{ borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.05)', marginBottom: '0.15rem' }}>
+                        {/* Step header */}
+                        <div
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: '0.5rem',
+                            padding: '0.45rem 0.6rem',
+                            background: step.code ? (step.expanded ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.03)') : 'transparent',
+                            cursor: step.code ? 'pointer' : 'default',
+                          }}
+                          onClick={() => {
+                            if (!step.code) return;
+                            setProBuildProgress(prev => ({
+                              ...prev,
+                              steps: prev.steps.map((s, idx) => idx === i ? { ...s, expanded: !s.expanded } : s),
+                            }));
+                          }}
+                        >
+                          <span style={{ flexShrink: 0, width: 14, textAlign: 'center', fontSize: 12 }}>
+                            {step.status === 'done' ? '✓' : step.status === 'error' ? '✕' : step.status === 'running' ? '⟳' : '○'}
+                          </span>
+                          <span style={{ fontSize: '0.8rem', color: step.status === 'done' ? 'rgba(255,255,255,0.8)' : step.status === 'running' ? '#fff' : step.status === 'error' ? '#f87171' : '#555', fontFamily: 'inherit', flex: 1 }}>
+                            {step.label}
+                          </span>
+                          {step.sub && <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)', fontFamily: 'inherit' }}>{step.sub}</span>}
+                          {step.code && (
+                            <span style={{ fontSize: '0.65rem', color: '#6366f1', fontFamily: 'inherit', marginLeft: 4 }}>
+                              {step.expanded ? '▲ hide' : '▼ view code'}
+                            </span>
+                          )}
                         </div>
-                      )
+                        {/* Expandable code block */}
+                        {step.code && step.expanded && (
+                          <div style={{ background: '#0a0e14', borderTop: '1px solid rgba(99,102,241,0.2)', padding: '0.6rem 0.75rem', maxHeight: 260, overflowY: 'auto' }}>
+                            <pre style={{ margin: 0, fontSize: '0.72rem', color: '#a5f3fc', fontFamily: 'monospace', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                              {step.code.slice(0, 4000)}{step.code.length > 4000 ? '\n... (truncated)' : ''}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
                     ))}
                   </div>
 
-                  {/* Bottom stage */}
-                  <div style={{ padding: '0.75rem 1.25rem', borderTop: '1px solid rgba(255,255,255,0.07)', display: 'flex', alignItems: 'center', gap: '0.6rem', flexShrink: 0 }}>
-                    <span style={{ fontSize: '0.8rem', color: proBuildProgress.stage.includes('✅') ? '#4ade80' : proBuildProgress.stage.includes('❌') ? '#f87171' : '#f59e0b', fontWeight: 500 }}>{proBuildProgress.stage}</span>
+                  {/* Bottom */}
+                  <div style={{ padding: '0.5rem 1rem', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0, background: '#0d1117' }}>
+                    <span style={{ fontSize: '0.75rem', color: proBuildProgress.stage.includes('✅') ? '#4ade80' : proBuildProgress.stage.includes('❌') ? '#f87171' : 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>
+                      {Object.keys(proBuildProgress.generatedFiles).length > 0
+                        ? `${Object.keys(proBuildProgress.generatedFiles).length} file(s) generated`
+                        : 'Working...'}
+                    </span>
+                    <span style={{ marginLeft: 'auto', fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)', fontFamily: 'monospace' }}>navBharatAI Pro Builder</span>
                   </div>
                 </div>
               )}
@@ -4464,12 +4519,12 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                      </div>
                      <span className="font-mono text-indigo-400">{sessions.find(s => s.id === currentSessionId)?.uci || ''}</span>
                   </div>
-                  <AIChat 
+                  <AIChat
                     messages={proMessages}
                     input={proInput}
                     onInputChange={setProInput}
                     onSend={(files) => { handleSendForPro(files); }}
-                    isLoading={isLoading}
+                    isLoading={isProLoading}
                     activeIntent={activeIntent}
                     isPinned={false}
                     onTogglePin={() => {}}

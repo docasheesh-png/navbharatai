@@ -42,6 +42,7 @@ import { AIRuntimeManager } from './src/server/AI/AIRuntimeManager';
 import { UniversalAIRouter } from './src/server/AI/UniversalAIRouter';
 import { auditEnv } from './src/server/audit_env';
 import { BuildJobManager } from './src/server/AppMakerLab/jobs/BuildJobManager';
+import { buildApp as buildAppEngine } from './src/server/AppMakerLab/AppEngine';
 
 auditEnv();
 import { initializeApp } from 'firebase/app';
@@ -3781,8 +3782,7 @@ app.post('/api/chat', async (req, res) => {
       // ══ BUILDING MODE — Use AppEngine to generate real app ══
       if (mode === 'building') {
         console.log('[PRO] Building mode — AppEngine starting');
-        const { buildApp } = await import('./AppMakerLab/AppEngine.js');
-        const result = await buildApp(message);
+        const result = await buildAppEngine(message);
 
         if (result.success && Object.keys(result.files).length > 0) {
           console.log('[PRO] Build success:', Object.keys(result.files));
@@ -3883,7 +3883,33 @@ Hinglish mein baat karo — friendly aur professional.`;
     }
   });
 
+  // ══ SSE STREAMING BUILD ENDPOINT — Live progress to frontend ══
+  app.post('/api/pro-build', async (req: any, res: any) => {
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: 'Message required' });
 
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.flushHeaders();
+
+    const send = (data: object) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+      const result = await buildAppEngine(
+        message,
+        (p) => send({ type: 'progress', stage: p.stage, step: p.step, total: p.total, detail: p.detail }),
+        (fileName, content) => send({ type: 'file', fileName, content })
+      );
+      send({ type: 'complete', files: result.files, reply: result.reply, appName: result.appName, previewHtml: result.previewHtml, success: result.success, error: result.error });
+    } catch (err: any) {
+      send({ type: 'error', message: err.message });
+    }
+    res.end();
+  });
 
   /*
   if (walletSnap.exists()) {

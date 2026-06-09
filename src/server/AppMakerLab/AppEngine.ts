@@ -42,6 +42,7 @@ export interface BuildProgress {
 }
 
 type ProgressCallback = (p: BuildProgress) => void;
+type FileGeneratedCallback = (fileName: string, content: string) => void;
 
 // ─── AI Caller — Claude first, Gemini fallback ───────────────────────────────
 
@@ -201,7 +202,8 @@ function buildPreviewHtml(files: Record<string, string>, appName: string): strin
 
 export async function buildApp(
   userPrompt: string,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  onFileGenerated?: FileGeneratedCallback
 ): Promise<BuildResult> {
   const report = (stage: string, step: number, total: number, detail: string) => {
     console.log(`[AppEngine] [${step}/${total}] ${stage}: ${detail}`);
@@ -209,16 +211,16 @@ export async function buildApp(
   };
 
   try {
-    report('Analyzing', 1, 5, 'Understanding your requirements...');
+    report('Analyzing', 1, 6, 'Understanding your requirements...');
     const analysis = await analyzeRequirements(userPrompt);
     console.log('[AppEngine] Analysis:', analysis);
 
-    report('Planning', 2, 5, `Building ${analysis.appName} — ${analysis.appType}`);
+    report('Planning', 2, 6, `Building ${analysis.appName} — ${analysis.appType}`);
 
     const generatedFiles: Record<string, string> = {};
 
     // Generate CSS first (no dependencies)
-    report('Generating', 3, 5, 'Writing style.css — design & animations...');
+    report('Generating', 3, 6, 'Writing style.css — design & animations...');
     generatedFiles['style.css'] = await generateFile(
       'style.css',
       'All visual styling: layout, colors, animations, responsive design. Dark theme. Professional look.',
@@ -226,9 +228,10 @@ export async function buildApp(
       analysis.description,
       analysis.features
     );
+    onFileGenerated?.('style.css', generatedFiles['style.css']);
 
     // Generate JS (no HTML dependency needed)
-    report('Generating', 3, 5, 'Writing script.js — application logic...');
+    report('Generating', 4, 6, 'Writing script.js — application logic...');
     generatedFiles['script.js'] = await generateFile(
       'script.js',
       'Complete application logic. All functionality implemented and working.',
@@ -237,9 +240,10 @@ export async function buildApp(
       analysis.features,
       { 'style.css': generatedFiles['style.css'] }
     );
+    onFileGenerated?.('script.js', generatedFiles['script.js']);
 
     // Generate HTML last (references CSS and JS)
-    report('Generating', 3, 5, 'Writing index.html — structure & markup...');
+    report('Generating', 5, 6, 'Writing index.html — structure & markup...');
     generatedFiles['index.html'] = await generateFile(
       'index.html',
       'Complete HTML5 document. Links to style.css and script.js. All DOM elements needed by JS.',
@@ -248,11 +252,12 @@ export async function buildApp(
       analysis.features,
       { 'style.css': generatedFiles['style.css'], 'script.js': generatedFiles['script.js'] }
     );
+    onFileGenerated?.('index.html', generatedFiles['index.html']);
 
-    report('Assembling', 4, 5, 'Building live preview...');
+    report('Assembling', 6, 6, 'Building live preview...');
     const previewHtml = buildPreviewHtml(generatedFiles, analysis.appName);
 
-    report('Complete', 5, 5, `${analysis.appName} is ready!`);
+    report('Complete', 6, 6, `${analysis.appName} is ready!`);
 
     const fileList: AppFile[] = Object.entries(generatedFiles).map(([path, content]) => ({
       path,

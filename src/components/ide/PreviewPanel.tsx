@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { 
-  Monitor, Smartphone, Tablet, RefreshCcw, 
+import {
+  Monitor, Smartphone, Tablet, RefreshCcw,
   ExternalLink, Maximize2, Shield, Globe,
-  Search, ChevronLeft, ChevronRight
+  Search, ChevronLeft, ChevronRight, Download, Package
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -18,6 +18,54 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
   const [containerRef, setContainerRef] = React.useState<HTMLDivElement | null>(null);
   const [viewRef, setViewRef] = React.useState<HTMLDivElement | null>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  const [downloading, setDownloading] = useState(false);
+
+  const downloadApp = () => {
+    if (!generatedCode) return;
+    setDownloading(true);
+    try {
+      const blob = new Blob([generatedCode], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'navbharat-app.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } finally {
+      setTimeout(() => setDownloading(false), 1500);
+    }
+  };
+
+  const downloadZip = async () => {
+    if (!files || Object.keys(files).length === 0) return;
+    setDownloading(true);
+    try {
+      // Build a simple ZIP-like structure using data URIs
+      // Create an HTML download page listing all files
+      const fileEntries = Object.entries(files);
+      const parts: string[] = [];
+      parts.push(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>NavBharat App Files</title>`);
+      parts.push(`<style>body{font-family:monospace;background:#0d1117;color:#c9d1d9;padding:2rem}h1{color:#58a6ff}pre{background:#161b22;padding:1rem;border-radius:8px;overflow:auto;border:1px solid #30363d}.file-header{color:#3fb950;margin-top:2rem;font-weight:bold}</style></head><body>`);
+      parts.push(`<h1>📦 NavBharat App — Source Files</h1><p>${fileEntries.length} files</p>`);
+      for (const [path, content] of fileEntries) {
+        parts.push(`<div class="file-header">📄 ${path}</div><pre>${(content as string).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>`);
+      }
+      parts.push(`</body></html>`);
+      const blob = new Blob([parts.join('')], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'navbharat-app-source.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } finally {
+      setTimeout(() => setDownloading(false), 1500);
+    }
+  };
 
   React.useEffect(() => {
     if (!containerRef) return;
@@ -90,7 +138,23 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
         </div>
 
         <button className="p-2 hover:bg-white/5 rounded-full text-[#484f58] ml-2">
-           <ExternalLink className="w-4 h-4" />
+          <ExternalLink className="w-4 h-4" />
+        </button>
+
+        {/* Download Button */}
+        <button
+          onClick={downloadApp}
+          disabled={!generatedCode || downloading}
+          title="Download App as HTML"
+          className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ml-1",
+            generatedCode && !downloading
+              ? "bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-500/30 hover:border-emerald-500/60 hover:scale-105"
+              : "bg-white/5 text-[#484f58] border border-white/5 cursor-not-allowed opacity-40"
+          )}
+        >
+          <Download className={cn("w-3.5 h-3.5", downloading && "animate-bounce")} />
+          <span className="hidden sm:inline">{downloading ? 'Downloading...' : 'Download'}</span>
         </button>
       </div>
 
@@ -133,6 +197,37 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
             )}
          </div>
       </div>
+
+      {/* Download Banner — shown only when app is ready */}
+      {generatedCode && (
+        <div className="bg-gradient-to-r from-emerald-950/80 via-[#161b22] to-indigo-950/80 border-t border-emerald-500/20 px-4 py-2.5 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2">
+            <Package className="w-4 h-4 text-emerald-400 shrink-0" />
+            <div>
+              <span className="text-[11px] font-black text-white tracking-wide">Aapki App Ready Hai!</span>
+              <span className="text-[9px] text-[#8b949e] ml-2">Download karke kisi bhi device pe chalao</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={downloadApp}
+              disabled={downloading}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-emerald-900/40 disabled:opacity-60"
+            >
+              <Download className={cn("w-3.5 h-3.5", downloading && "animate-bounce")} />
+              {downloading ? 'Downloading...' : 'Download App'}
+            </button>
+            <button
+              onClick={downloadZip}
+              disabled={downloading}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 active:scale-95 text-[#8b949e] hover:text-white border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-60"
+            >
+              <Package className="w-3.5 h-3.5" />
+              Source Files
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Footer Info */}
       <div className="h-8 bg-[#161b22] border-t border-white/5 px-4 flex items-center justify-between text-[10px] text-[#484f58] font-bold uppercase tracking-widest">

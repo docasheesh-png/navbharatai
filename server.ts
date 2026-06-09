@@ -3828,22 +3828,55 @@ Write complete working code. Beautiful dark UI. No placeholders. Output ONLY the
       }
 
       // ══ PLANNING MODE — No code, architecture discussion only ══
-      const PLAN_PROMPT = `Tu NavBharatAI Pro ka Planning Expert hai.
 
-STRICT RULES:
-- KABHI CODE MAT LIKHNA — na Python, na JavaScript, na HTML, bilkul kuch bhi nahi
-- Sirf features, architecture, UI/UX, tech stack discuss karo (sirf naam, code nahi)
-- Agar user code maange: politely bolo "Build Mode mein switch karo"
-- Hamesha response ke end mein likho: "🔨 Taiyar? **Build Mode** mein switch karo — main poori app generate kar dunga!"
+      // Hard block: detect build/code requests in planning mode
+      const BUILD_INTENT_PATTERN = /\b(bana[odo]*|banado|likhna|likho|likh do|create|make|build|generate|code karo|code kar|code do|implement|develop|app bana)\b/i;
+      if (BUILD_INTENT_PATTERN.test(message)) {
+        return res.json({
+          reply: `⚠️ **Yeh Planning Mode hai!**\n\nYahan sirf app ka design, features aur architecture discuss hota hai — koi code nahi likha jaata.\n\n**Actual app banana ke liye:**\n👆 Upar "Build Mode" switch karo — wahan main poori app generate kar dunga!\n\n🔨 **Build Mode** = Real code + Working app`,
+          files: {}
+        });
+      }
 
-Response structure:
-1. App ka naam aur concept
-2. Key features (bullet points)
-3. Tech stack recommendation
-4. UI/UX design notes
-5. Switch to Build prompt
+      const PLAN_PROMPT = `Tu NavBharatAI Pro ka PLANNING EXPERT hai. Tera kaam sirf app ka blueprint banana hai — code likhna TERA KAAM NAHI HAI.
 
-Hinglish mein baat karo — friendly aur professional.`;
+═══════════════════════════════════════════════
+IRON RULES — YEH RULES KABHI BREAK NAHI HONGE:
+═══════════════════════════════════════════════
+1. ABSOLUTELY NO CODE — na ek bhi line — na HTML, CSS, JavaScript, Python, TypeScript, kuch bhi. ZERO.
+2. Code blocks (\`\`\`...\`\`\`) KABHI MAT LIKHO. Agar koi function/component mention karna ho, sirf naam likho text mein.
+3. Agar user "banao", "code karo", "create karo" bole — IMMEDIATELY bolo: "Yeh Planning Mode hai. Build Mode mein switch karo! 🔨"
+4. Sirf yeh discuss karo: features list, user stories, UI sections, tech stack recommendations (sirf naam), architecture diagram (text-only boxes/arrows).
+═══════════════════════════════════════════════
+
+Response Format (ALWAYS follow this):
+## 📱 App Concept
+(1-2 line summary)
+
+## ✨ Key Features
+(bullet points — no code, just feature names)
+
+## 🎨 UI/UX Design
+(screens aur layout text mein describe karo)
+
+## ⚙️ Tech Stack
+(sirf technology names, no code)
+
+## 🗺️ Architecture Overview
+(text-based boxes/arrows only)
+
+---
+🔨 Taiyar? **Build Mode** mein switch karo — main poori working app generate kar dunga!
+
+Hinglish mein baat karo — friendly, clear, professional.`;
+
+      // Strip any code blocks that slip through AI response
+      const sanitizePlanningReply = (text: string): string => {
+        return text
+          .replace(/```[\s\S]*?```/g, '\n> ⚠️ *[Code removed — Build Mode mein switch karo actual code ke liye]*\n')
+          .replace(/^\s{4,}.+$/gm, '') // strip indented code blocks
+          .trim();
+      };
 
       try {
         const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
@@ -3861,8 +3894,8 @@ Hinglish mein baat karo — friendly aur professional.`;
             model: 'claude-3-5-sonnet-20241022', max_tokens: 1500,
             system: PLAN_PROMPT, messages: msgs,
           });
-          const reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
-          return res.json({ reply, files: {} });
+          const rawReply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
+          return res.json({ reply: sanitizePlanningReply(rawReply), files: {} });
         }
       } catch (e: any) { console.warn('[PRO PLAN] Claude err:', e.message); }
 
@@ -3879,7 +3912,7 @@ Hinglish mein baat karo — friendly aur professional.`;
           model: 'gemini-2.5-flash',
           contents: [...historyContents, { role: 'user', parts: [{ text: PLAN_PROMPT + '\n\nUser: ' + message }] }],
         });
-        return res.json({ reply: r.text || '', files: {} });
+        return res.json({ reply: sanitizePlanningReply(r.text || ''), files: {} });
       } catch (e: any) {
         return res.status(500).json({ error: 'Service unavailable. Check API keys.' });
       }

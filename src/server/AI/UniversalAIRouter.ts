@@ -5,7 +5,7 @@ import { AppMakerOrchestrator } from '../AppMakerLab/AppMakerOrchestrator';
 import { VertexProvider } from './Router/providers/VertexProvider';
 import { GeminiProvider } from './Router/providers/GeminiProvider';
 import { AnthropicProvider } from './Router/providers/AnthropicProvider';
-import { TraceContext } from '../../server';
+import type { TraceContext } from '../../../server';
 
 export class UniversalAIRouter {
   private registryFree: ModelHealthRegistry;

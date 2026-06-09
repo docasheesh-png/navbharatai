@@ -3837,14 +3837,9 @@ Write complete working code. Beautiful dark UI. No placeholders. Output ONLY the
 
       // ══ PLANNING MODE — No code, architecture discussion only ══
 
-      // Hard block: detect build/code requests in planning mode
+      // Detect build intent to flag frontend (no hard-block — AI still responds with plan)
       const BUILD_INTENT_PATTERN = /\b(bana[odo]*|banado|likhna|likho|likh do|create|make|build|generate|code karo|code kar|code do|implement|develop|app bana)\b/i;
-      if (BUILD_INTENT_PATTERN.test(message)) {
-        return res.json({
-          reply: `⚠️ **Yeh Planning Mode hai!**\n\nYahan sirf app ka design, features aur architecture discuss hota hai — koi code nahi likha jaata.\n\n**Actual app banana ke liye:**\n👆 Upar "Build Mode" switch karo — wahan main poori app generate kar dunga!\n\n🔨 **Build Mode** = Real code + Working app`,
-          files: {}
-        });
-      }
+      const suggestBuild = BUILD_INTENT_PATTERN.test(message);
 
       const PLAN_PROMPT = `Tu NavBharatAI Pro ka PLANNING EXPERT hai. Tera kaam sirf app ka blueprint banana hai — code likhna TERA KAAM NAHI HAI.
 
@@ -3903,7 +3898,7 @@ Hinglish mein baat karo — friendly, clear, professional.`;
             system: PLAN_PROMPT, messages: msgs,
           });
           const rawReply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
-          return res.json({ reply: sanitizePlanningReply(rawReply), files: {} });
+          return res.json({ reply: sanitizePlanningReply(rawReply), files: {}, suggestBuild });
         }
       } catch (e: any) { console.warn('[PRO PLAN] Claude err:', e.message); }
 
@@ -3920,7 +3915,7 @@ Hinglish mein baat karo — friendly, clear, professional.`;
           model: 'gemini-2.5-flash',
           contents: [...historyContents, { role: 'user', parts: [{ text: PLAN_PROMPT + '\n\nUser: ' + message }] }],
         });
-        return res.json({ reply: sanitizePlanningReply(r.text || ''), files: {} });
+        return res.json({ reply: sanitizePlanningReply(r.text || ''), files: {}, suggestBuild });
       } catch (e: any) {
         return res.status(500).json({ error: 'Service unavailable. Check API keys.' });
       }

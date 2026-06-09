@@ -2240,9 +2240,11 @@ You still maintain your Indian personality and friendly tone.`;
         });
         if (!response.ok) throw new Error(`API Error: ${response.status}`);
         const data = await response.json();
+        // suggestBuild=true means user asked to build → show urgent CTA
+        const buildMarker = data.suggestBuild ? '__URGENT_BUILD__' : '__SWITCH_TO_BUILD__';
         setProMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
-          text: (data.reply || 'No response') + '\n\n__SWITCH_TO_BUILD__',
+          text: (data.reply || 'No response') + '\n\n' + buildMarker,
           sender: 'ai',
           timestamp: new Date(),
         }]);

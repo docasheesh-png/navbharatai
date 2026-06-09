@@ -446,9 +446,11 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
 
     // ── Special markers ─────────────────────────────────────────────────────
     const hasSwitchToBuild = isAI && text.includes('__SWITCH_TO_BUILD__');
+    const hasUrgentBuild   = isAI && text.includes('__URGENT_BUILD__');
     const hasViewPreview   = isAI && text.includes('__VIEW_PREVIEW__');
     const cleanText = text
       .replace('__SWITCH_TO_BUILD__', '')
+      .replace('__URGENT_BUILD__', '')
       .replace('__VIEW_PREVIEW__', '')
       .trim();
 
@@ -470,25 +472,50 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
           </ReactMarkdown>
         </div>
 
-        {/* ── Switch to Build Mode button ── */}
-        {hasSwitchToBuild && onModeChange && (
+        {/* ── Urgent Build CTA — user explicitly asked to build ── */}
+        {hasUrgentBuild && onModeChange && (
           <div className="mt-3 pt-3 border-t border-white/10">
-            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 mb-2">
-              <span className="text-amber-400 text-xs">⚡</span>
-              <span className="text-xs text-amber-300/90 font-medium">Planning complete! App banane ke liye Build Mode switch karo.</span>
+            <div className="rounded-2xl overflow-hidden border border-orange-500/40 shadow-lg shadow-orange-900/20">
+              <div className="bg-gradient-to-r from-orange-950/80 to-amber-950/80 px-4 py-3 flex items-start gap-3">
+                <span className="text-2xl shrink-0 mt-0.5">🔨</span>
+                <div>
+                  <p className="text-[12px] font-black text-orange-300 uppercase tracking-wider">Build Mode Chahiye?</p>
+                  <p className="text-[11px] text-orange-200/80 mt-0.5 leading-snug">
+                    Planning Mode mein sirf blueprint banta hai — actual app ke liye Build Mode switch karo. Ek click mein poori working app generate ho jayegi!
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => onModeChange('build')}
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 font-black text-[13px] uppercase tracking-widest transition-all active:scale-[0.98] hover:brightness-110"
+                style={{
+                  background: 'linear-gradient(135deg, #ea580c, #d97706)',
+                  color: 'white',
+                  animation: 'pulse 2s ease-in-out infinite',
+                }}
+              >
+                <span style={{ fontSize: 16 }}>⚡</span>
+                Switch to Build Mode — App Banao Abhi
+                <span style={{ fontSize: 16 }}>→</span>
+              </button>
             </div>
+          </div>
+        )}
+
+        {/* ── Regular Switch to Build button — end of every planning response ── */}
+        {hasSwitchToBuild && !hasUrgentBuild && onModeChange && (
+          <div className="mt-3 pt-3 border-t border-white/10">
             <button
               onClick={() => onModeChange('build')}
-              className="w-full flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-xl font-bold text-sm transition-all active:scale-95"
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-bold text-[12px] uppercase tracking-wider transition-all active:scale-95 hover:brightness-110 border border-amber-500/30"
               style={{
-                background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                color: 'white',
-                boxShadow: '0 4px 15px rgba(245,158,11,0.35)',
+                background: 'linear-gradient(135deg, rgba(245,158,11,0.15), rgba(217,119,6,0.15))',
+                color: '#fbbf24',
               }}
             >
               <span>🔨</span>
-              Switch to Build Mode — App Generate Karo
-              <span style={{ fontSize: 16 }}>→</span>
+              Build Mode mein Switch Karo
+              <span style={{ fontSize: 14 }}>→</span>
             </button>
           </div>
         )}

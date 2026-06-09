@@ -302,8 +302,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   }, [isLoading]);
 
   const [showModeDropdown, setShowModeDropdown] = useState(false);
-  const [showStruggleFormForMsg, setShowStruggleFormForMsg] = useState<Record<string, boolean>>({});
-  const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
+const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
   const [liked, setLiked] = useState<Record<string, boolean>>({});
   const [disliked, setDisliked] = useState<Record<string, boolean>>({});
   const [showReport, setShowReport] = useState<Record<string, boolean>>({});
@@ -555,7 +554,7 @@ export const AIChat: React.FC<AIChatProps> = ({
           />
           <div className="mt-4 flex justify-end gap-2">
             <button
-              onClick={() => { onSend(); setIsExpanded(false); }}
+              onClick={() => { onSend([]); setIsExpanded(false); }}
               disabled={!input.trim() || isLoading}
               className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[11px] font-black uppercase tracking-widest disabled:opacity-35 transition-all shadow-lg active:scale-95"
             >
@@ -716,7 +715,6 @@ export const AIChat: React.FC<AIChatProps> = ({
         <AnimatePresence>
           {messages.map((msg, index) => {
             if (!msg) return null;
-            const { providerId, deservesManual } = parseMessageAndTriggers(msg);
             const cleanedText = msg.text || (msg as any).content || "No Text";
             const lineCount = ((cleanedText || '').match(/\n/g) || []).length + 1;
             const isLongMessage = cleanedText.length > 220 || lineCount > 4;
@@ -759,35 +757,6 @@ export const AIChat: React.FC<AIChatProps> = ({
                     renderMessageContent(msg)
                   )}
                   
-                  {providerId && (
-                    <SecretQuickFill 
-                      providerId={providerId} 
-                      userId={userId} 
-                      isLoggedIn={isLoggedIn} 
-                      onShowLogin={onShowLogin} 
-                    />
-                  )}
-
-                  {deservesManual && (
-                    <div className="mt-2.5 pt-2 border-t border-white/5 space-y-2">
-                      <button
-                        onClick={() => setShowStruggleFormForMsg(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all border border-indigo-500/20 active:scale-95"
-                      >
-                        <Lock className="w-3 h-3 animate-pulse" />
-                        {showStruggleFormForMsg[msg.id] ? 'Hide Setup Form' : 'Struggling with keys? Click for Quick-Fill Form'}
-                      </button>
-
-                      {showStruggleFormForMsg[msg.id] && (
-                        <SecretQuickFill 
-                          providerId="gemini" 
-                          userId={userId} 
-                          isLoggedIn={isLoggedIn} 
-                          onShowLogin={onShowLogin} 
-                        />
-                      )}
-                    </div>
-                  )}
                 </div>
                 
 

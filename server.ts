@@ -3812,8 +3812,9 @@ Write complete working code. Beautiful dark UI. No placeholders. Output ONLY the
             const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
             if (key) {
               const A = (await import('@anthropic-ai/sdk')).default;
-              const r = await new A({ apiKey: key }).messages.create({
-                model: 'claude-sonnet-4-20250514', max_tokens: 8000,
+              const baseURL = process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
+              const r = await new A({ apiKey: key, ...(baseURL ? { baseURL } : {}) }).messages.create({
+                model: 'claude-3-5-sonnet-20241022', max_tokens: 8000,
                 system: BUILD_PROMPT, messages: [{ role: 'user', content: message }],
               });
               const raw = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';

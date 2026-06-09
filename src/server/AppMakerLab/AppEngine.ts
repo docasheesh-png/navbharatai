@@ -47,18 +47,19 @@ type FileGeneratedCallback = (fileName: string, content: string) => void;
 // ─── AI Caller — Claude first, Gemini fallback ───────────────────────────────
 
 async function callAI(prompt: string, systemPrompt: string, maxTokens = 4000): Promise<string> {
-  // 1. Try Claude
+  // 1. Try Claude (via aicredits.in proxy)
   const claudeKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
   if (claudeKey) {
     try {
-      const client = new Anthropic({ apiKey: claudeKey });
+      const baseURL = process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
+      const client = new Anthropic({ apiKey: claudeKey, ...(baseURL ? { baseURL } : {}) });
       const r = await client.messages.create({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-3-5-sonnet-20241022',
         max_tokens: maxTokens,
         system: systemPrompt,
         messages: [{ role: 'user', content: prompt }],
       });
-      const text = r.content.find(c => c.type === 'text')?.text || '';
+      const text = (r.content.find(c => c.type === 'text') as any)?.text || '';
       if (text.trim()) return text;
     } catch (e: any) {
       console.warn('[AppEngine] Claude failed:', e.message);
@@ -71,9 +72,8 @@ async function callAI(prompt: string, systemPrompt: string, maxTokens = 4000): P
     try {
       const ai = new GoogleGenAI({ apiKey: geminiKey });
       const r = await ai.models.generateContent({
-        model: 'gemini-1.5-pro',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config: { systemInstruction: systemPrompt, maxOutputTokens: maxTokens },
+        model: 'gemini-2.5-flash',
+        contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + prompt }] }],
       });
       if (r.text?.trim()) return r.text;
     } catch (e: any) {
@@ -81,7 +81,7 @@ async function callAI(prompt: string, systemPrompt: string, maxTokens = 4000): P
     }
   }
 
-  throw new Error('All AI providers failed. Check ANTHROPIC_API_KEY and GEMINI_API_KEY.');
+  throw new Error('Build service temporarily unavailable. Please try again.');
 }
 
 // ─── Step 1: Analyze what app to build ───────────────────────────────────────

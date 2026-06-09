@@ -3816,7 +3816,7 @@ Write complete working code. Beautiful dark UI. No placeholders. Output ONLY the
                 model: 'claude-sonnet-4-20250514', max_tokens: 8000,
                 system: BUILD_PROMPT, messages: [{ role: 'user', content: message }],
               });
-              const raw = r.content.find((c: any) => c.type === 'text')?.text || '';
+              const raw = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
               const parsed = extractJSON(raw);
               if (parsed) return res.json({ reply: parsed.reply || 'App ready!', files: parsed.files });
             }
@@ -3848,6 +3848,7 @@ Hinglish mein baat karo — friendly aur professional.`;
         const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
         if (key) {
           const A = (await import('@anthropic-ai/sdk')).default;
+          const baseURL = process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
           const msgs = [
             ...(history || []).map((m: any) => ({
               role: (m.sender === 'user' ? 'user' : 'assistant') as 'user'|'assistant',
@@ -3855,11 +3856,11 @@ Hinglish mein baat karo — friendly aur professional.`;
             })),
             { role: 'user' as const, content: message }
           ];
-          const r = await new A({ apiKey: key }).messages.create({
-            model: 'claude-sonnet-4-20250514', max_tokens: 1500,
+          const r = await new A({ apiKey: key, ...(baseURL ? { baseURL } : {}) }).messages.create({
+            model: 'claude-3-5-sonnet-20241022', max_tokens: 1500,
             system: PLAN_PROMPT, messages: msgs,
           });
-          const reply = r.content.find((c: any) => c.type === 'text')?.text || '';
+          const reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
           return res.json({ reply, files: {} });
         }
       } catch (e: any) { console.warn('[PRO PLAN] Claude err:', e.message); }
@@ -3867,10 +3868,15 @@ Hinglish mein baat karo — friendly aur professional.`;
       // Gemini planning fallback
       try {
         const { GoogleGenAI } = await import('@google/genai');
-        const r = await new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' }).models.generateContent({
-          model: 'gemini-1.5-flash',
-          contents: [{ role: 'user', parts: [{ text: message }] }],
-          config: { systemInstruction: PLAN_PROMPT, maxOutputTokens: 1500 },
+        const geminiKey = process.env.GEMINI_API_KEY || '';
+        if (!geminiKey) throw new Error('No Gemini key');
+        const historyContents = (history || []).map((m: any) => ({
+          role: m.sender === 'user' ? 'user' : 'model',
+          parts: [{ text: String(m.text || m.content || '') }]
+        }));
+        const r = await new GoogleGenAI({ apiKey: geminiKey }).models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [...historyContents, { role: 'user', parts: [{ text: PLAN_PROMPT + '\n\nUser: ' + message }] }],
         });
         return res.json({ reply: r.text || '', files: {} });
       } catch (e: any) {

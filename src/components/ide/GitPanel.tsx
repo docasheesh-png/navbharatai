@@ -2309,7 +2309,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     className="w-full p-3.5 rounded-2xl bg-neutral-900 border border-white/5 hover:border-indigo-500/30 text-left space-y-1 group transition-all"
                   >
                     <div className="flex justify-between items-center">
-                      <span className="text-xs font-black text-white uppercase tracking-wide group-hover:text-indigo-400">asheesh chat</span>
+                      <span className="text-xs font-black text-white uppercase tracking-wide group-hover:text-indigo-400">NavBharatAi FREE</span>
                       <span className="text-[8px] font-black bg-neutral-950 px-1.5 py-0.5 rounded text-neutral-400 text-right">Standard Speed</span>
                     </div>
                     <p className="text-[#8b949e] text-[9.5px] font-semibold">

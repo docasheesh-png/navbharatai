@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import {
   Monitor, Smartphone, Tablet, RefreshCcw,
   ExternalLink, Maximize2, Shield, Globe,
-  Search, ChevronLeft, ChevronRight, Download, Package
+  Search, ChevronLeft, ChevronRight, Download, Package,
+  Share2, Copy, Check, X, Wifi
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -19,6 +20,34 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
   const [viewRef, setViewRef] = React.useState<HTMLDivElement | null>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [downloading, setDownloading] = useState(false);
+  const [pwaLoading, setPwaLoading] = useState(false);
+  const [showPwaModal, setShowPwaModal] = useState(false);
+  const [pwaUrl, setPwaUrl] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const openAsPwa = async () => {
+    if (!generatedCode || pwaLoading) return;
+    setPwaLoading(true);
+    try {
+      const titleMatch = generatedCode.match(/<title[^>]*>([^<]+)<\/title>/i);
+      const name = titleMatch ? titleMatch[1].trim() : 'My NavBharat App';
+      const res = await fetch('/api/pwa/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html: generatedCode, name })
+      });
+      const data = await res.json();
+      if (data.url) { setPwaUrl(data.url); setShowPwaModal(true); }
+    } catch (e) { console.error('PWA save failed', e); }
+    finally { setPwaLoading(false); }
+  };
+
+  const copyUrl = async () => {
+    try { await navigator.clipboard.writeText(pwaUrl); }
+    catch { const i = document.createElement('input'); i.value = pwaUrl; document.body.appendChild(i); i.select(); document.execCommand('copy'); document.body.removeChild(i); }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
 
   const downloadApp = () => {
     if (!generatedCode) return;
@@ -141,6 +170,22 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           <ExternalLink className="w-4 h-4" />
         </button>
 
+        {/* PWA Install Button */}
+        <button
+          onClick={openAsPwa}
+          disabled={!generatedCode || pwaLoading}
+          title="Install on Android as PWA"
+          className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ml-1",
+            generatedCode && !pwaLoading
+              ? "bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 hover:border-indigo-500/60 hover:scale-105"
+              : "bg-white/5 text-[#484f58] border border-white/5 cursor-not-allowed opacity-40"
+          )}
+        >
+          <Smartphone className={cn("w-3.5 h-3.5", pwaLoading && "animate-pulse")} />
+          <span className="hidden sm:inline">{pwaLoading ? 'Generating...' : 'Install'}</span>
+        </button>
+
         {/* Download Button */}
         <button
           onClick={downloadApp}
@@ -154,7 +199,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           )}
         >
           <Download className={cn("w-3.5 h-3.5", downloading && "animate-bounce")} />
-          <span className="hidden sm:inline">{downloading ? 'Downloading...' : 'Download'}</span>
+          <span className="hidden sm:inline">{downloading ? 'Saving...' : 'Download'}</span>
         </button>
       </div>
 
@@ -198,33 +243,100 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
          </div>
       </div>
 
-      {/* Download Banner — shown only when app is ready */}
+      {/* App Ready Banner */}
       {generatedCode && (
-        <div className="bg-gradient-to-r from-emerald-950/80 via-[#161b22] to-indigo-950/80 border-t border-emerald-500/20 px-4 py-2.5 flex items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-2">
-            <Package className="w-4 h-4 text-emerald-400 shrink-0" />
-            <div>
+        <div className="bg-gradient-to-r from-indigo-950/80 via-[#161b22] to-emerald-950/80 border-t border-indigo-500/20 px-4 py-2.5 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
+              <Smartphone className="w-4 h-4 text-indigo-400" />
+            </div>
+            <div className="min-w-0">
               <span className="text-[11px] font-black text-white tracking-wide">Aapki App Ready Hai!</span>
-              <span className="text-[9px] text-[#8b949e] ml-2">Download karke kisi bhi device pe chalao</span>
+              <p className="text-[9px] text-[#8b949e]">Android pe install karo ya download karo</p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={downloadApp}
-              disabled={downloading}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-emerald-900/40 disabled:opacity-60"
+              onClick={openAsPwa}
+              disabled={pwaLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-900/40 disabled:opacity-60"
             >
-              <Download className={cn("w-3.5 h-3.5", downloading && "animate-bounce")} />
-              {downloading ? 'Downloading...' : 'Download App'}
+              <Share2 className={cn("w-3.5 h-3.5", pwaLoading && "animate-spin")} />
+              {pwaLoading ? 'Wait...' : 'Install on Android'}
             </button>
             <button
-              onClick={downloadZip}
+              onClick={downloadApp}
               disabled={downloading}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 active:scale-95 text-[#8b949e] hover:text-white border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-60"
             >
-              <Package className="w-3.5 h-3.5" />
-              Source Files
+              <Download className={cn("w-3.5 h-3.5", downloading && "animate-bounce")} />
+              Download
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* PWA Install Modal */}
+      {showPwaModal && (
+        <div className="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-[#161b22] border border-indigo-500/40 rounded-2xl w-full max-w-sm shadow-2xl shadow-indigo-900/30">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center">
+                  <Smartphone className="w-4 h-4 text-indigo-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-black text-white">Android pe Install Karo</p>
+                  <p className="text-[9px] text-indigo-400">PWA — Bilkul native app jaisi!</p>
+                </div>
+              </div>
+              <button onClick={() => setShowPwaModal(false)} className="p-1.5 hover:bg-white/10 rounded-lg text-[#484f58] hover:text-white transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* URL Box */}
+            <div className="px-5 pt-4 pb-3">
+              <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest mb-2">Aapki App Ka Link</p>
+              <div className="flex items-center gap-2 bg-black/50 border border-white/10 rounded-xl px-3 py-2.5">
+                <code className="text-[10px] text-indigo-300 flex-1 break-all leading-relaxed">{pwaUrl}</code>
+                <button
+                  onClick={copyUrl}
+                  className={cn(
+                    "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all shrink-0",
+                    copied ? "bg-emerald-600 text-white" : "bg-white/10 hover:bg-white/20 text-[#8b949e]"
+                  )}
+                >
+                  {copied ? <><Check className="w-3 h-3" /> Copied!</> : <><Copy className="w-3 h-3" /> Copy</>}
+                </button>
+              </div>
+              <p className="text-[9px] text-[#484f58] mt-1.5 flex items-center gap-1">
+                <Wifi className="w-3 h-3" /> Link 24 ghante valid hai · Offline bhi kaam karega
+              </p>
+            </div>
+
+            {/* Steps */}
+            <div className="px-5 pb-5">
+              <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest mb-3">Android pe Install Kaise Karein:</p>
+              <div className="space-y-2.5">
+                {[
+                  { n: '1', text: 'Yeh link copy karo (upar button se)', sub: 'Ya seedha scan karo agar QR ho' },
+                  { n: '2', text: 'Android phone mein Chrome browser kholo' },
+                  { n: '3', text: 'Link paste karo aur page load hone do' },
+                  { n: '4', text: 'Top-right 3 dots (⋮) tap karo', sub: 'Menu open hoga' },
+                  { n: '5', text: '"Add to Home Screen" select karo', sub: 'App icon home screen pe aa jayegi!' },
+                ].map(({ n, text, sub }) => (
+                  <div key={n} className="flex items-start gap-3">
+                    <span className="w-5 h-5 rounded-full bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-[9px] font-black flex items-center justify-center shrink-0 mt-0.5">{n}</span>
+                    <div>
+                      <p className="text-[11px] text-[#c9d1d9] font-medium leading-tight">{text}</p>
+                      {sub && <p className="text-[9px] text-[#484f58] mt-0.5">{sub}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}

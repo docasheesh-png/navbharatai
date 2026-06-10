@@ -11,6 +11,7 @@ import {
   ArrowRight, Gift, Columns, Palette
 } from 'lucide-react';
 import { cn } from './lib/utils';
+import { SDAChat } from './components/sda/SDAChat';
 import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
@@ -95,7 +96,7 @@ interface BrainConfig {
   keys: ApiKeys;
 }
 
-type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets';
+type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets';
 
 type SettingsScreen = 'root' | 'general' | 'modules' | 'secrets' | 'connections' | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell' | 'git' | 'logs' | 'report';
 
@@ -2264,6 +2265,7 @@ You still maintain your Indian personality and friendly tone.`;
     { id: 'home', label: 'Home', icon: Bot },
     { id: 'nbi_chat', label: 'NavBharatAi FREE', icon: MessageSquare },
     { id: 'nbi_pro_chat', label: 'navBharatAI-Pro', icon: Bot },
+    { id: 'sda_chat', label: 'Senior Doctor Assistant', icon: Activity, status: 'New' },
     { id: 'billing', label: 'Wallet & Billing', icon: Wallet, status: 'Active' },
     { id: 'history', label: 'history', icon: History },
     { id: 'files', label: 'Files', icon: FolderOpen },
@@ -4459,7 +4461,13 @@ ${pending.map(p => `  - ${p}`).join('\n')}
             </div>
           )}
 
-          
+          {/* ── Senior Doctor Assistant ── */}
+          {activeView === 'sda_chat' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <SDAChat userId={user?.uid} />
+            </div>
+          )}
+
                     {activeView === 'about' && (
             <div className="flex-1 bg-[#0d1117] overflow-y-auto custom-scrollbar p-6 sm:p-12 relative">
                {isAdmin && (

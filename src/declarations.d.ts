@@ -411,6 +411,10 @@ declare module 'firebase/firestore' {
   export function increment(n: number): any;
   export function writeBatch(db: any): any;
   export function runTransaction<T = any>(db: any, cb: (tx: any) => Promise<T>): Promise<T>;
+  export function startAfter(...fieldValues: any[]): any;
+  export function startAt(...fieldValues: any[]): any;
+  export function endBefore(...fieldValues: any[]): any;
+  export function endAt(...fieldValues: any[]): any;
   export type DocumentData = any;
   export type QuerySnapshot<T = any> = any;
   export type DocumentSnapshot<T = any> = any;
@@ -419,6 +423,7 @@ declare module 'firebase/firestore' {
   export type DocumentReference<T = any> = any;
   export type Query<T = any> = any;
   export type FieldValue = any;
+  export type QueryDocumentSnapshot<T = any> = any;
 }
 declare module 'firebase/storage';
 declare module 'firebase/functions';

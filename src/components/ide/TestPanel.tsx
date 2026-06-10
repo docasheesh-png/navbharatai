@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  CheckCircle2, XCircle, Clock, Play, Plus, AlertCircle,
+  CheckCircle2, Clock, Play, Plus, AlertCircle,
   RefreshCcw, Loader2, ChevronDown, ChevronRight, Trash2, X
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -106,7 +106,7 @@ function buildIframeSrc(appHtml: string, tests: TestCase[]): string {
 
 const StatusIcon: React.FC<{ status: TestCase['status'] }> = ({ status }) => {
   if (status === 'pass') return <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />;
-  if (status === 'fail') return <XCircle className="w-4 h-4 text-red-400 shrink-0" />;
+  if (status === 'fail') return <X className="w-4 h-4 text-red-400 shrink-0" />;
   if (status === 'running') return <Loader2 className="w-4 h-4 text-yellow-400 shrink-0 animate-spin" />;
   if (status === 'skip') return <AlertCircle className="w-4 h-4 text-gray-500 shrink-0" />;
   return <Clock className="w-4 h-4 text-gray-500 shrink-0" />;

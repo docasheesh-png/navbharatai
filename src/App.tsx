@@ -8,7 +8,7 @@ import {
   Link as LinkIcon, List, GitCommit, Share2, Box, Folder, UploadCloud, ChevronLeft,
   Edit2, Camera, Upload, Image as ImageIcon, Info, LogIn,
   GitFork, GitMerge, History as HistoryIcon, UserPlus, LogOut, CheckCircle2, AlertCircle, RotateCcw,
-  ArrowRight, Gift, Columns, Palette
+  ArrowRight, Gift, Columns, Palette, TestTube
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { SDAChat } from './components/sda/SDAChat';
@@ -35,6 +35,10 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 import { CodeStudio } from './components/ide/CodeStudio';
 import { GitPanel } from './components/ide/GitPanel';
 import { SecurityScan } from './components/ide/SecurityScan';
+import { TestPanel } from './components/ide/TestPanel';
+import APITester from './components/ide/APITester';
+import { DiffViewer } from './components/ide/DiffViewer';
+import { DatabaseUI } from './components/ide/DatabaseUI';
 import { SecretManager } from './components/SecretManager';
 import { AIChat } from './components/ide/AIChat';
 import { PreviewPanel } from './components/ide/PreviewPanel';
@@ -96,7 +100,7 @@ interface BrainConfig {
   keys: ApiKeys;
 }
 
-type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets';
+type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database';
 
 type SettingsScreen = 'root' | 'general' | 'modules' | 'secrets' | 'connections' | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell' | 'git' | 'logs' | 'report';
 
@@ -2308,6 +2312,10 @@ You still maintain your Indian personality and friendly tone.`;
     { id: 'report', label: 'report a problem', icon: AlertCircle, status: 'Beta' },
     { id: 'entertainment', label: 'other', icon: Gamepad2, status: 'Beta' },
     { id: 'donation', label: 'Donate', icon: CreditCard },
+    { id: 'testing', label: 'Test Runner', icon: TestTube, status: 'New' },
+    { id: 'api', label: 'API Tester', icon: Globe, status: 'New' },
+    { id: 'diff', label: 'Diff Viewer', icon: GitMerge, status: 'New' },
+    { id: 'database', label: 'Database', icon: Database, status: 'New' },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'admin', label: 'Admin Login', icon: Lock },
   ];
@@ -3693,6 +3701,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                           { id: 'shell', label: 'Terminal', sub: 'Advanced debug tools', icon: Terminal, color: 'text-indigo-500', status: 'Beta' },
                           { id: 'git', label: 'Git', sub: 'Version control', icon: GitBranch, color: 'text-emerald-500', status: 'Beta' },
                           { id: 'logs', label: 'Logs', sub: 'System activity', icon: Activity, color: 'text-rose-500', status: 'Beta' },
+                          { id: 'testing', label: 'Test Runner', sub: 'Run tests on generated apps', icon: TestTube, color: 'text-amber-400', status: 'New' },
+                          { id: 'api', label: 'API Tester', sub: 'Test HTTP endpoints', icon: Globe, color: 'text-cyan-400', status: 'New' },
+                          { id: 'diff', label: 'Diff Viewer', sub: 'Side-by-side code diff', icon: GitMerge, color: 'text-violet-400', status: 'New' },
+                          { id: 'database', label: 'Database', sub: 'Browse Firestore data', icon: Database, color: 'text-indigo-400', status: 'New' },
                           { id: 'access', label: 'Permissions', sub: 'Team Access & Security', icon: ShieldCheck, color: 'text-purple-400', status: 'Coming Soon' },
                         ].map(item => (
                           <button
@@ -3702,6 +3714,14 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                     toggleTab('git');
                                 } else if (item.id === 'shell') {
                                     toggleTab('shell');
+                                } else if (item.id === 'testing') {
+                                    toggleTab('testing');
+                                } else if (item.id === 'api') {
+                                    toggleTab('api');
+                                } else if (item.id === 'diff') {
+                                    toggleTab('diff');
+                                } else if (item.id === 'database') {
+                                    toggleTab('database');
                                 } else {
                                     setSettingsScreen(item.id as any);
                                 }
@@ -6263,6 +6283,35 @@ ${pending.map(p => `  - ${p}`).join('\n')}
               )}
             </div>
           )}
+
+          {/* Phase 3 — Testing System */}
+          {activeView === 'testing' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <TestPanel generatedCode={generatedCode} files={files} />
+            </div>
+          )}
+
+          {/* Phase 3 — API Tester */}
+          {activeView === 'api' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <APITester />
+            </div>
+          )}
+
+          {/* Phase 3 — Diff Viewer */}
+          {activeView === 'diff' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <DiffViewer files={files} />
+            </div>
+          )}
+
+          {/* Phase 3 — Database UI */}
+          {activeView === 'database' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <DatabaseUI userId={user?.uid} userTier={activeAgent} />
+            </div>
+          )}
+
         </div>
       </main>
 

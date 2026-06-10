@@ -10,7 +10,8 @@ import {
   GitFork, GitMerge, History as HistoryIcon, UserPlus, LogOut, CheckCircle2, AlertCircle, RotateCcw,
   ArrowRight, Gift, Columns, Palette, TestTube,
   Mic, BarChart2, Languages, Layout, TrendingUp,
-  Bug, Gauge, Puzzle, Search as SearchIcon
+  Bug, Gauge, Puzzle, Search as SearchIcon,
+  Globe as GlobeIcon, Users2, Figma
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { SDAChat } from './components/sda/SDAChat';
@@ -51,6 +52,10 @@ import { AIDebugger } from './components/ide/AIDebugger';
 import { PerformanceAnalyzer } from './components/ide/PerformanceAnalyzer';
 import { ComponentLibrary } from './components/ide/ComponentLibrary';
 import { SEOOptimizer } from './components/ide/SEOOptimizer';
+import { APKBuilder } from './components/ide/APKBuilder';
+import { FigmaImporter } from './components/ide/FigmaImporter';
+import { CustomDomain } from './components/ide/CustomDomain';
+import { TeamCollaboration } from './components/ide/TeamCollaboration';
 import { SecretManager } from './components/SecretManager';
 import { AIChat } from './components/ide/AIChat';
 import { PreviewPanel } from './components/ide/PreviewPanel';
@@ -112,7 +117,7 @@ interface BrainConfig {
   keys: ApiKeys;
 }
 
-type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components' | 'seo';
+type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components' | 'seo' | 'apk' | 'figma' | 'domain' | 'team';
 
 type SettingsScreen = 'root' | 'general' | 'modules' | 'secrets' | 'connections' | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell' | 'git' | 'logs' | 'report';
 
@@ -2349,6 +2354,10 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     { id: 'performance', label: 'Performance', icon: Gauge, status: 'New' },
     { id: 'components', label: 'Components', icon: Puzzle, status: 'New' },
     { id: 'seo', label: 'SEO Optimizer', icon: SearchIcon, status: 'New' },
+    { id: 'apk', label: 'APK Builder', icon: Smartphone, status: 'New' },
+    { id: 'figma', label: 'Figma Import', icon: Figma, status: 'New' },
+    { id: 'domain', label: 'Custom Domain', icon: GlobeIcon, status: 'New' },
+    { id: 'team', label: 'Team', icon: Users2, status: 'New' },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'admin', label: 'Admin Login', icon: Lock },
   ];
@@ -3748,6 +3757,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                           { id: 'performance', label: 'Performance', sub: 'Lighthouse-style app scoring', icon: Gauge, color: 'text-blue-400', status: 'New' },
                           { id: 'components', label: 'Component Library', sub: 'Ready-made UI blocks', icon: Puzzle, color: 'text-violet-400', status: 'New' },
                           { id: 'seo', label: 'SEO Optimizer', sub: 'Meta tags, sitemap, OG tags', icon: SearchIcon, color: 'text-teal-400', status: 'New' },
+                          { id: 'apk', label: 'APK Builder', sub: 'Android app banao', icon: Smartphone, color: 'text-green-400', status: 'New' },
+                          { id: 'figma', label: 'Figma Import', sub: 'Design se code banao', icon: Figma, color: 'text-pink-400', status: 'New' },
+                          { id: 'domain', label: 'Custom Domain', sub: 'Apna domain connect karo', icon: GlobeIcon, color: 'text-blue-400', status: 'New' },
+                          { id: 'team', label: 'Team Collaboration', sub: 'Members invite karo', icon: Users2, color: 'text-amber-400', status: 'New' },
                           { id: 'access', label: 'Permissions', sub: 'Team Access & Security', icon: ShieldCheck, color: 'text-purple-400', status: 'Coming Soon' },
                         ].map(item => (
                           <button
@@ -3785,6 +3798,14 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                     toggleTab('components');
                                 } else if (item.id === 'seo') {
                                     toggleTab('seo');
+                                } else if (item.id === 'apk') {
+                                    toggleTab('apk');
+                                } else if (item.id === 'figma') {
+                                    toggleTab('figma');
+                                } else if (item.id === 'domain') {
+                                    toggleTab('domain');
+                                } else if (item.id === 'team') {
+                                    toggleTab('team');
                                 } else {
                                     setSettingsScreen(item.id as any);
                                 }
@@ -3815,7 +3836,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                           <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-4">
                             <span className="text-white font-black text-xs">NB</span>
                           </div>
-                          <p className="text-[10px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v3.0.0</p>
+                          <p className="text-[10px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v3.5.0</p>
                         </div>
                       </motion.div>
                     )}
@@ -6478,6 +6499,37 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {activeView === 'seo' && (
             <div className="flex-1 h-full overflow-hidden">
               <SEOOptimizer generatedCode={generatedCode} appName="NavBharatAI App" />
+            </div>
+          )}
+
+          {/* Phase 7 — APK Builder */}
+          {activeView === 'apk' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <APKBuilder generatedCode={generatedCode} appName="NavBharatAI App" />
+            </div>
+          )}
+
+          {/* Phase 7 — Figma Importer */}
+          {activeView === 'figma' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <FigmaImporter onCodeGenerated={(code) => {
+                setGeneratedCode(code);
+                toggleTab('preview');
+              }} />
+            </div>
+          )}
+
+          {/* Phase 7 — Custom Domain */}
+          {activeView === 'domain' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <CustomDomain />
+            </div>
+          )}
+
+          {/* Phase 7 — Team Collaboration */}
+          {activeView === 'team' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <TeamCollaboration userId={user?.uid} projectName="NavBharatAI Project" />
             </div>
           )}
 

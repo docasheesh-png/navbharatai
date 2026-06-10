@@ -401,6 +401,23 @@ declare module 'lucide-react' {
   export const Crosshair: Icon;
   export const Sliders: Icon;
   export const SlidersHorizontal: Icon;
+  export const Figma: Icon;
+  export const Users2: Icon;
+  export const UserCheck: Icon;
+  export const UserX: Icon;
+  export const Crown: Icon;
+  export const Link2: Icon;
+  export const Signal: Icon;
+  export const Globe2: Icon;
+  export const PackageOpen: Icon;
+  export const FolderDown: Icon;
+  export const ArrowUpRight: Icon;
+  export const Edit3: Icon;
+  export const UserMinus: Icon;
+  export const Video: Icon;
+  export const Users: Icon;
+  export const Wifi: Icon;
+  export const MoreVertical: Icon;
 }
 
 declare module 'firebase/app' {

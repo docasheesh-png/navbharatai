@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Send, Loader2, AlertTriangle, BookOpen, FileText, User,
-  Activity, Thermometer, Heart, Wind, Eye, ChevronDown,
-  ChevronRight, Stethoscope, ClipboardList, X, Plus, RefreshCw
+  Activity, Stethoscope, ClipboardList, X, RefreshCw,
+  Paperclip, Image as ImageIcon, FileSearch
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import ReactMarkdown from 'react-markdown';
@@ -13,6 +13,7 @@ interface SDAMessage {
   sender: 'doctor' | 'sda';
   timestamp: Date;
   isRedFlag?: boolean;
+  attachedFile?: { name: string; type: string };
 }
 
 interface PatientSnapshot {
@@ -22,6 +23,13 @@ interface PatientSnapshot {
   chiefComplaint?: string;
   vitals?: { label: string; value: string; alert?: boolean }[];
   redFlags?: string[];
+}
+
+interface AttachedFile {
+  name: string;
+  type: string;
+  base64: string;
+  preview?: string;
 }
 
 interface SDAChatProps {
@@ -39,7 +47,7 @@ I work like an experienced senior consultant sitting beside you, guiding you thr
 **How this works:**
 - I will ask you questions one at a time
 - Each of your answers shapes my next question
-- I adapt my questioning based on the evolving clinical picture
+- You can upload lab reports, X-rays, ECGs, or any medical document — I will analyze them
 - Final diagnosis and treatment decisions remain entirely yours
 
 ---
@@ -51,6 +59,9 @@ To begin, please tell me — **what is the patient's age and sex?**
   timestamp: new Date(),
 };
 
+const ACCEPTED_TYPES = 'image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp';
+const MAX_FILE_MB = 10;
+
 export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const [messages, setMessages] = useState<SDAMessage[]>([WELCOME]);
   const [input, setInput] = useState('');
@@ -59,24 +70,48 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const [showPatientPanel, setShowPatientPanel] = useState(true);
   const [patient, setPatient] = useState<PatientSnapshot>({});
   const [activeRedFlags, setActiveRedFlags] = useState<string[]>([]);
-  const [showSummaryLoading, setShowSummaryLoading] = useState(false);
+  const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > MAX_FILE_MB * 1024 * 1024) {
+      alert(`File too large. Max ${MAX_FILE_MB}MB allowed.`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.split(',')[1];
+      const preview = file.type.startsWith('image/') ? result : undefined;
+      setAttachedFile({ name: file.name, type: file.type, base64, preview });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   const handleSend = async (overrideText?: string) => {
     const text = (overrideText ?? input).trim();
-    if (!text || loading) return;
+    if ((!text && !attachedFile) || loading) return;
     setInput('');
 
+    const fileForMsg = attachedFile;
+    setAttachedFile(null);
+
+    const displayText = text || (fileForMsg ? `📎 ${fileForMsg.name}` : '');
     const userMsg: SDAMessage = {
       id: Date.now().toString(),
-      text,
+      text: displayText,
       sender: 'doctor',
       timestamp: new Date(),
+      attachedFile: fileForMsg ? { name: fileForMsg.name, type: fileForMsg.type } : undefined,
     };
     setMessages(prev => [...prev, userMsg]);
     setLoading(true);
@@ -91,10 +126,13 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: text,
+          message: text || 'Please analyze this medical document and extract all relevant clinical findings.',
           history,
           teachingMode,
           userId,
+          fileData: fileForMsg?.base64 || null,
+          fileType: fileForMsg?.type || null,
+          fileName: fileForMsg?.name || null,
         }),
       });
 
@@ -129,26 +167,15 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
     }
   };
 
-  const requestSummary = () => {
-    handleSend('Please generate a complete structured case summary based on all information collected so far.');
-  };
-
-  const requestMissingCheck = () => {
-    handleSend('What am I missing? Review the case and identify any missing history, examination findings, investigations, or alternative diagnoses I should consider.');
-  };
+  const requestSummary = () => handleSend('Please generate a complete structured case summary based on all information collected so far.');
+  const requestMissingCheck = () => handleSend('What am I missing? Review the case and identify any missing history, examination findings, investigations, or alternative diagnoses I should consider.');
 
   const startNewCase = () => {
     setMessages([WELCOME]);
     setPatient({});
     setActiveRedFlags([]);
     setInput('');
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    setAttachedFile(null);
   };
 
   return (
@@ -156,7 +183,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
       {/* ── Patient Info Panel ── */}
       {showPatientPanel && (
-        <div className="w-64 shrink-0 bg-[#0d1520] border-r border-emerald-900/30 flex flex-col overflow-hidden hidden md:flex">
+        <div className="w-64 shrink-0 bg-[#0d1520] border-r border-emerald-900/30 flex-col overflow-hidden hidden md:flex">
           <div className="px-4 py-3 border-b border-emerald-900/30 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <User className="w-3.5 h-3.5 text-emerald-400" />
@@ -168,7 +195,6 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
-            {/* Demographics */}
             <div className="bg-[#111827] rounded-xl p-3 border border-white/5">
               <p className="text-[9px] text-[#484f58] font-black uppercase tracking-widest mb-2">Demographics</p>
               <div className="space-y-1.5">
@@ -179,15 +205,12 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                 ].map(({ label, value }) => (
                   <div key={label} className="flex justify-between items-center">
                     <span className="text-[10px] text-[#484f58]">{label}</span>
-                    <span className={cn("text-[10px] font-medium", value ? 'text-white' : 'text-[#2d3748]')}>
-                      {value || '—'}
-                    </span>
+                    <span className={cn("text-[10px] font-medium", value ? 'text-white' : 'text-[#2d3748]')}>{value || '—'}</span>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Chief Complaint */}
             <div className="bg-[#111827] rounded-xl p-3 border border-white/5">
               <p className="text-[9px] text-[#484f58] font-black uppercase tracking-widest mb-1.5">Chief Complaint</p>
               <p className={cn("text-[11px]", patient.chiefComplaint ? 'text-emerald-300 font-medium' : 'text-[#2d3748]')}>
@@ -195,7 +218,6 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               </p>
             </div>
 
-            {/* Vitals */}
             {patient.vitals && patient.vitals.length > 0 && (
               <div className="bg-[#111827] rounded-xl p-3 border border-white/5">
                 <p className="text-[9px] text-[#484f58] font-black uppercase tracking-widest mb-2">Vitals</p>
@@ -203,16 +225,13 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                   {patient.vitals.map(v => (
                     <div key={v.label} className="flex justify-between items-center">
                       <span className="text-[10px] text-[#484f58]">{v.label}</span>
-                      <span className={cn("text-[10px] font-mono font-bold", v.alert ? 'text-red-400' : 'text-white')}>
-                        {v.value}
-                      </span>
+                      <span className={cn("text-[10px] font-mono font-bold", v.alert ? 'text-red-400' : 'text-white')}>{v.value}</span>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Red Flags */}
             {activeRedFlags.length > 0 && (
               <div className="bg-red-950/40 rounded-xl p-3 border border-red-500/30">
                 <p className="text-[9px] text-red-400 font-black uppercase tracking-widest mb-2 flex items-center gap-1">
@@ -227,23 +246,14 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
             )}
           </div>
 
-          {/* Quick Actions */}
           <div className="p-3 border-t border-emerald-900/30 space-y-2">
-            <button
-              onClick={requestSummary}
-              disabled={loading || messages.length < 3}
-              className="w-full flex items-center gap-2 px-3 py-2 bg-emerald-900/30 hover:bg-emerald-900/50 border border-emerald-700/30 rounded-lg text-[10px] font-black text-emerald-300 uppercase tracking-widest transition-all disabled:opacity-40"
-            >
-              <FileText className="w-3.5 h-3.5" />
-              Case Summary
+            <button onClick={requestSummary} disabled={loading || messages.length < 3}
+              className="w-full flex items-center gap-2 px-3 py-2 bg-emerald-900/30 hover:bg-emerald-900/50 border border-emerald-700/30 rounded-lg text-[10px] font-black text-emerald-300 uppercase tracking-widest transition-all disabled:opacity-40">
+              <FileText className="w-3.5 h-3.5" /> Case Summary
             </button>
-            <button
-              onClick={requestMissingCheck}
-              disabled={loading || messages.length < 3}
-              className="w-full flex items-center gap-2 px-3 py-2 bg-indigo-900/20 hover:bg-indigo-900/40 border border-indigo-700/20 rounded-lg text-[10px] font-black text-indigo-300 uppercase tracking-widest transition-all disabled:opacity-40"
-            >
-              <ClipboardList className="w-3.5 h-3.5" />
-              What Am I Missing?
+            <button onClick={requestMissingCheck} disabled={loading || messages.length < 3}
+              className="w-full flex items-center gap-2 px-3 py-2 bg-indigo-900/20 hover:bg-indigo-900/40 border border-indigo-700/20 rounded-lg text-[10px] font-black text-indigo-300 uppercase tracking-widest transition-all disabled:opacity-40">
+              <ClipboardList className="w-3.5 h-3.5" /> What Am I Missing?
             </button>
           </div>
         </div>
@@ -268,34 +278,22 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               <p className="text-[9px] text-emerald-600 font-medium">Clinical Decision Support · Doctor Use Only</p>
             </div>
           </div>
-
           <div className="flex items-center gap-2">
-            {/* Teaching Mode Toggle */}
-            <button
-              onClick={() => setTeachingMode(p => !p)}
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all border",
-                teachingMode
-                  ? "bg-amber-900/30 border-amber-600/40 text-amber-300"
-                  : "bg-white/5 border-white/10 text-[#484f58] hover:text-white"
-              )}
-            >
+            <button onClick={() => setTeachingMode(p => !p)}
+              className={cn("flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all border",
+                teachingMode ? "bg-amber-900/30 border-amber-600/40 text-amber-300" : "bg-white/5 border-white/10 text-[#484f58] hover:text-white")}>
               <BookOpen className="w-3 h-3" />
               <span className="hidden sm:inline">Teaching {teachingMode ? 'ON' : 'OFF'}</span>
             </button>
-
-            {/* New Case */}
-            <button
-              onClick={startNewCase}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white/5 border border-white/10 text-[#484f58] hover:text-white hover:bg-white/10 transition-all"
-            >
+            <button onClick={startNewCase}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white/5 border border-white/10 text-[#484f58] hover:text-white hover:bg-white/10 transition-all">
               <RefreshCw className="w-3 h-3" />
               <span className="hidden sm:inline">New Case</span>
             </button>
           </div>
         </div>
 
-        {/* Red Flag Alert Banner */}
+        {/* Red Flag Alert */}
         {activeRedFlags.length > 0 && (
           <div className="shrink-0 bg-red-950/60 border-b border-red-500/40 px-4 py-2 flex items-center gap-3">
             <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 animate-pulse" />
@@ -312,10 +310,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
           {messages.map(msg => (
-            <div
-              key={msg.id}
-              className={cn("flex", msg.sender === 'doctor' ? "justify-end" : "justify-start")}
-            >
+            <div key={msg.id} className={cn("flex", msg.sender === 'doctor' ? "justify-end" : "justify-start")}>
               {msg.sender === 'sda' && (
                 <div className="w-7 h-7 rounded-full bg-emerald-900/40 border border-emerald-700/40 flex items-center justify-center shrink-0 mr-2.5 mt-0.5">
                   <Stethoscope className="w-3.5 h-3.5 text-emerald-400" />
@@ -335,13 +330,22 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                     <span className="text-[9px] font-black uppercase tracking-widest text-red-400">Red Flag Detected</span>
                   </div>
                 )}
+                {/* File attachment preview */}
+                {msg.attachedFile && (
+                  <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/10">
+                    {msg.attachedFile.type.startsWith('image/') ? (
+                      <ImageIcon className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                    ) : (
+                      <FileSearch className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                    )}
+                    <span className="text-[10px] text-[#8b949e] truncate">{msg.attachedFile.name}</span>
+                  </div>
+                )}
                 <div className="prose prose-invert prose-xs max-w-none prose-p:leading-relaxed prose-p:my-1 prose-headings:text-emerald-300 prose-strong:text-white prose-li:my-0.5">
                   <ReactMarkdown>{msg.text}</ReactMarkdown>
                 </div>
                 <p className="text-[8px] text-[#484f58] mt-2 text-right">
-                  {msg.timestamp instanceof Date
-                    ? msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    : ''}
+                  {msg.timestamp instanceof Date ? msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                 </p>
               </div>
               {msg.sender === 'doctor' && (
@@ -379,29 +383,69 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
         {/* Input Area */}
         <div className="shrink-0 bg-[#0d1520] border-t border-emerald-900/30 px-4 py-3">
-          <div className="flex items-end gap-3">
-            <div className="flex-1 bg-[#111827] border border-emerald-900/40 focus-within:border-emerald-600/60 rounded-xl px-4 py-2.5 transition-all">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Type your answer or clinical finding..."
-                rows={1}
-                className="w-full bg-transparent resize-none outline-none text-[12px] text-white placeholder-[#484f58] leading-relaxed max-h-32 overflow-y-auto custom-scrollbar"
-                style={{ minHeight: '1.5rem' }}
-                disabled={loading}
-              />
+
+          {/* Attached file preview */}
+          {attachedFile && (
+            <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-[#111827] border border-emerald-900/40 rounded-xl">
+              {attachedFile.preview ? (
+                <img src={attachedFile.preview} alt="preview" className="w-8 h-8 rounded object-cover border border-white/10 shrink-0" />
+              ) : (
+                <div className="w-8 h-8 rounded bg-orange-900/30 border border-orange-700/30 flex items-center justify-center shrink-0">
+                  <FileSearch className="w-4 h-4 text-orange-400" />
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] text-white font-medium truncate">{attachedFile.name}</p>
+                <p className="text-[9px] text-[#484f58]">{attachedFile.type.startsWith('image/') ? 'Image' : 'PDF'} · Ready to analyze</p>
+              </div>
+              <button onClick={() => setAttachedFile(null)} className="text-[#484f58] hover:text-red-400 p-1 transition-colors">
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
+          )}
+
+          <div className="flex items-end gap-2">
+            {/* Input box with attach button inside */}
+            <div className="flex-1 bg-[#111827] border border-emerald-900/40 focus-within:border-emerald-600/60 rounded-xl transition-all">
+              <div className="flex items-end px-3 py-2.5 gap-2">
+                {/* Attach button */}
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading}
+                  title="Upload lab report, X-ray, ECG, or any medical document"
+                  className="text-[#484f58] hover:text-emerald-400 transition-colors pb-0.5 shrink-0 disabled:opacity-40"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </button>
+                <input ref={fileInputRef} type="file" accept={ACCEPTED_TYPES} onChange={handleFileSelect} className="hidden" />
+
+                {/* Text input */}
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  placeholder={attachedFile ? "Add a note about this document (optional)..." : "Type your answer or clinical finding..."}
+                  rows={1}
+                  className="flex-1 bg-transparent resize-none outline-none text-[12px] text-white placeholder-[#484f58] leading-relaxed max-h-32 overflow-y-auto custom-scrollbar"
+                  style={{ minHeight: '1.5rem' }}
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            {/* Send button */}
             <button
               onClick={() => handleSend()}
-              disabled={!input.trim() || loading}
+              disabled={(!input.trim() && !attachedFile) || loading}
               className="w-10 h-10 flex items-center justify-center bg-emerald-700 hover:bg-emerald-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-all shrink-0 shadow-lg shadow-emerald-900/40"
             >
               {loading ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Send className="w-4 h-4 text-white" />}
             </button>
           </div>
-          <p className="text-[9px] text-[#2d3748] mt-1.5 text-center">Enter to send · Shift+Enter for new line</p>
+
+          <p className="text-[9px] text-[#2d3748] mt-1.5 text-center">
+            📎 Lab reports · X-rays · ECGs · PDFs supported · Send button se bhejo
+          </p>
         </div>
       </div>
     </div>

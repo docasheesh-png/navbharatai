@@ -4651,8 +4651,12 @@ Hinglish mein baat karo — friendly, clear, professional.`;
   // ══ SENIOR DOCTOR ASSISTANT (SDA) ══
   app.post('/api/sda-chat', async (req: any, res: any) => {
     try {
-      const { message, history = [], teachingMode = false, userId } = req.body;
+      const { message, history = [], teachingMode = false, userId, fileData, fileType, fileName } = req.body;
       if (!message) return res.status(400).json({ error: 'Message required' });
+
+      const hasFile = !!(fileData && fileType);
+      const isImage = hasFile && fileType.startsWith('image/');
+      const isPDF = hasFile && fileType === 'application/pdf';
 
       const SDA_SYSTEM = `You are the Senior Doctor Assistant (SDA) — a Clinical Decision Support AI inside NavBharatAI, designed exclusively for qualified doctors (MBBS, residents, consultants, specialists).
 
@@ -4755,31 +4759,61 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
 
       let reply = '';
 
-      // Try Claude first (best for clinical reasoning)
+      // Try Claude first (best for clinical reasoning + vision)
       const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
       if (anthropicKey) {
         try {
           const A = (await import('@anthropic-ai/sdk')).default;
           const baseURL = process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
+
+          // Build the user message content (with optional file attachment)
+          let userContent: any;
+          if (isImage) {
+            userContent = [
+              { type: 'image', source: { type: 'base64', media_type: fileType, data: fileData } },
+              { type: 'text', text: `[Document: ${fileName}]\n${message}` },
+            ];
+          } else if (isPDF) {
+            userContent = [
+              { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileData } },
+              { type: 'text', text: `[PDF Report: ${fileName}]\n${message}` },
+            ];
+          } else {
+            userContent = message;
+          }
+
           const r = await new A({ apiKey: anthropicKey, ...(baseURL ? { baseURL } : {}) }).messages.create({
             model: 'claude-3-5-sonnet-20241022',
-            max_tokens: 1200,
+            max_tokens: 1500,
             system: SDA_SYSTEM,
-            messages: [...historyForAI, { role: 'user', content: message }],
+            messages: [
+              ...historyForAI,
+              { role: 'user', content: userContent },
+            ],
           });
           reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
         } catch (e: any) { console.warn('[SDA] Claude err:', e.message); }
       }
 
-      // Gemini fallback
+      // Gemini fallback (also supports vision)
       if (!reply) {
         try {
           const { GoogleGenAI } = await import('@google/genai');
           const geminiKey = process.env.GEMINI_API_KEY || '';
           if (!geminiKey) throw new Error('No Gemini key');
+
+          // Build the current user parts with optional file
+          const currentParts: any[] = [];
+          if (isImage || isPDF) {
+            currentParts.push({ inline_data: { mime_type: fileType, data: fileData } });
+            currentParts.push({ text: `[${isPDF ? 'PDF Report' : 'Document'}: ${fileName}]\n${message}` });
+          } else {
+            currentParts.push({ text: message });
+          }
+
           const contents = [
             ...historyForAI.map((m: any) => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] })),
-            { role: 'user', parts: [{ text: message }] },
+            { role: 'user', parts: currentParts },
           ];
           const r = await new GoogleGenAI({ apiKey: geminiKey }).models.generateContent({
             model: 'gemini-2.5-flash',
@@ -4796,7 +4830,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       const patientUpdate = extractPatientUpdate(reply, message);
       const redFlagDetected = redFlags.length > 0 || /\bRED FLAG\b|\bEMERGENCY\b|\bURGENT\b/i.test(reply);
 
-      return res.json({ reply, redFlagDetected, redFlags, patientUpdate });
+      return res.json({ reply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null });
 
     } catch (err: any) {
       console.error('[SDA] Error:', err);

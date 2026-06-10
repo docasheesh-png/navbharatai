@@ -48,7 +48,7 @@ declare namespace React {
   type Ref<T = any> = RefObject<T> | ((val: T | null) => void) | null;
   type RefObject<T = any> = { readonly current: T | null };
   type MutableRefObject<T = any> = { current: T };
-  type CSSProperties = Partial<CSSStyleDeclaration> & { [key: string]: any };
+  type CSSProperties = { [key: string]: string | number | undefined | null };
   type Dispatch<A = any> = (a: A) => void;
   type SetStateAction<S = any> = S | ((prev: S) => S);
   type ChangeEvent<T = any> = any;
@@ -349,6 +349,16 @@ declare module 'lucide-react' {
   export const Workflow: Icon;
   export const Calculator: Icon;
   export const Webhook: Icon;
+  export const Clipboard: Icon;
+  export const GripVertical: Icon;
+  export const Pencil: Icon;
+  export const Lightbulb: Icon;
+  export const BarChart: Icon;
+  export const PieChart: Icon;
+  export const TrendingUp: Icon;
+  export const FileCode2: Icon;
+  export const Maximize: Icon;
+  export const Minimize: Icon;
   export const StopCircle: Icon;
   export const ToggleLeft: Icon;
   export const ToggleRight: Icon;
@@ -359,7 +369,6 @@ declare module 'lucide-react' {
   export const Users: Icon;
   export const HardDriveDownload: Icon;
   export const Cpu2: Icon;
-  export const TrendingUp: Icon;
   export const Wand2: Icon;
   export const MessageCircle: Icon;
   export const Network: Icon;

@@ -9,7 +9,7 @@ import {
   Edit2, Camera, Upload, Image as ImageIcon, Info, LogIn,
   GitFork, GitMerge, History as HistoryIcon, UserPlus, LogOut, CheckCircle2, AlertCircle, RotateCcw,
   ArrowRight, Gift, Columns, Palette, TestTube,
-  Mic, BarChart2, Languages
+  Mic, BarChart2, Languages, Layout, TrendingUp
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { SDAChat } from './components/sda/SDAChat';
@@ -43,6 +43,9 @@ import { DatabaseUI } from './components/ide/DatabaseUI';
 import { VoiceToApp } from './components/ide/VoiceToApp';
 import { BotBuilder } from './components/ide/BotBuilder';
 import { CostEstimator } from './components/ide/CostEstimator';
+import { ScreenshotToCode } from './components/ide/ScreenshotToCode';
+import { MultiPageBuilder } from './components/ide/MultiPageBuilder';
+import { AppAnalytics } from './components/ide/AppAnalytics';
 import { SecretManager } from './components/SecretManager';
 import { AIChat } from './components/ide/AIChat';
 import { PreviewPanel } from './components/ide/PreviewPanel';
@@ -104,7 +107,7 @@ interface BrainConfig {
   keys: ApiKeys;
 }
 
-type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost';
+type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics';
 
 type SettingsScreen = 'root' | 'general' | 'modules' | 'secrets' | 'connections' | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell' | 'git' | 'logs' | 'report';
 
@@ -2334,6 +2337,9 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     { id: 'voice', label: 'Voice to App', icon: Mic, status: 'New' },
     { id: 'botbuilder', label: 'Bot Builder', icon: MessageSquare, status: 'New' },
     { id: 'cost', label: 'Cost Estimator', icon: BarChart2, status: 'New' },
+    { id: 'screenshot', label: 'Screenshot to Code', icon: Camera, status: 'New' },
+    { id: 'multipages', label: 'Multi-Page Builder', icon: Layout, status: 'New' },
+    { id: 'analytics', label: 'Analytics', icon: TrendingUp, status: 'New' },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'admin', label: 'Admin Login', icon: Lock },
   ];
@@ -3726,6 +3732,9 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                           { id: 'voice', label: 'Voice to App', sub: 'Speak your app into existence', icon: Mic, color: 'text-rose-400', status: 'New' },
                           { id: 'botbuilder', label: 'Bot Builder', sub: 'WhatsApp / Telegram flows', icon: MessageSquare, color: 'text-green-400', status: 'New' },
                           { id: 'cost', label: 'Cost Estimator', sub: 'Compare cloud hosting costs', icon: BarChart2, color: 'text-amber-400', status: 'New' },
+                          { id: 'screenshot', label: 'Screenshot to Code', sub: 'Screenshot se app banao', icon: Camera, color: 'text-pink-400', status: 'New' },
+                          { id: 'multipages', label: 'Multi-Page Builder', sub: 'Full website with navigation', icon: Layout, color: 'text-cyan-400', status: 'New' },
+                          { id: 'analytics', label: 'Analytics', sub: 'Workspace usage insights', icon: TrendingUp, color: 'text-emerald-400', status: 'New' },
                           { id: 'access', label: 'Permissions', sub: 'Team Access & Security', icon: ShieldCheck, color: 'text-purple-400', status: 'Coming Soon' },
                         ].map(item => (
                           <button
@@ -3749,6 +3758,12 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                     toggleTab('botbuilder');
                                 } else if (item.id === 'cost') {
                                     toggleTab('cost');
+                                } else if (item.id === 'screenshot') {
+                                    toggleTab('screenshot');
+                                } else if (item.id === 'multipages') {
+                                    toggleTab('multipages');
+                                } else if (item.id === 'analytics') {
+                                    toggleTab('analytics');
                                 } else {
                                     setSettingsScreen(item.id as any);
                                 }
@@ -3779,7 +3794,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                           <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-4">
                             <span className="text-white font-black text-xs">NB</span>
                           </div>
-                          <p className="text-[10px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v2.5.0</p>
+                          <p className="text-[10px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v3.0.0</p>
                         </div>
                       </motion.div>
                     )}
@@ -6381,6 +6396,36 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {activeView === 'cost' && (
             <div className="flex-1 h-full overflow-hidden">
               <CostEstimator />
+            </div>
+          )}
+
+          {/* Phase 5 — Screenshot to Code */}
+          {activeView === 'screenshot' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <ScreenshotToCode onCodeGenerated={(code) => {
+                setGeneratedCode(code);
+                toggleTab('preview');
+              }} />
+            </div>
+          )}
+
+          {/* Phase 5 — Multi-Page Builder */}
+          {activeView === 'multipages' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <MultiPageBuilder
+                initialCode={generatedCode}
+                onExport={(pages) => {
+                  const firstPage = Object.values(pages)[0];
+                  if (firstPage) { setGeneratedCode(firstPage); toggleTab('preview'); }
+                }}
+              />
+            </div>
+          )}
+
+          {/* Phase 5 — Analytics */}
+          {activeView === 'analytics' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <AppAnalytics userId={user?.uid} />
             </div>
           )}
 

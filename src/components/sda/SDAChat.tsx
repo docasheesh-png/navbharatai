@@ -75,6 +75,14 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const BASE_HEIGHT = 44;
+  const MAX_HEIGHT = BASE_HEIGHT * 2; // 100% max increase
+
+  const autoResize = (el: HTMLTextAreaElement) => {
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
+  };
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -101,6 +109,9 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
     const text = (overrideText ?? input).trim();
     if ((!text && !attachedFile) || loading) return;
     setInput('');
+    if (inputRef.current) {
+      inputRef.current.style.height = `${BASE_HEIGHT}px`;
+    }
 
     const fileForMsg = attachedFile;
     setAttachedFile(null);
@@ -423,11 +434,11 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                 <textarea
                   ref={inputRef}
                   value={input}
-                  onChange={e => setInput(e.target.value)}
+                  onChange={e => { setInput(e.target.value); autoResize(e.target); }}
                   placeholder={attachedFile ? "Add a note about this document (optional)..." : "Type your answer or clinical finding..."}
                   rows={1}
-                  className="flex-1 bg-transparent resize-none outline-none text-[12px] text-white placeholder-[#484f58] leading-relaxed max-h-32 overflow-y-auto custom-scrollbar"
-                  style={{ minHeight: '1.5rem' }}
+                  className="flex-1 bg-transparent resize-none outline-none text-[12px] text-white placeholder-[#484f58] leading-relaxed overflow-y-auto custom-scrollbar"
+                  style={{ minHeight: `${BASE_HEIGHT}px`, maxHeight: `${MAX_HEIGHT}px` }}
                   disabled={loading}
                 />
               </div>

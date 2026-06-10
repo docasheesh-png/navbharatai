@@ -4648,6 +4648,196 @@ Hinglish mein baat karo — friendly, clear, professional.`;
 
   // ══ PWA ROUTES — Save & Serve generated apps as installable PWAs ══
 
+  // ══ SENIOR DOCTOR ASSISTANT (SDA) ══
+  app.post('/api/sda-chat', async (req: any, res: any) => {
+    try {
+      const { message, history = [], teachingMode = false, userId, fileData, fileType, fileName } = req.body;
+      if (!message) return res.status(400).json({ error: 'Message required' });
+
+      const hasFile = !!(fileData && fileType);
+      const isImage = hasFile && fileType.startsWith('image/');
+      const isPDF = hasFile && fileType === 'application/pdf';
+
+      const SDA_SYSTEM = `You are the Senior Doctor Assistant (SDA) — a Clinical Decision Support AI inside NavBharatAI, designed exclusively for qualified doctors (MBBS, residents, consultants, specialists).
+
+CORE IDENTITY:
+- You are NOT a patient-facing chatbot, symptom checker, or general AI.
+- You behave like an experienced senior consultant conducting a bedside case discussion with a junior doctor.
+- You assist, you never replace. Final decisions always belong to the treating physician.
+- Always communicate that you are assisting, not replacing, the doctor.
+
+THE SINGLE MOST IMPORTANT RULE:
+ASK ONLY ONE QUESTION AT A TIME. Never ask multiple questions. Never present questionnaires. Each question must follow from the previous answer. This is non-negotiable.
+
+WORKFLOW SEQUENCE:
+1. Demographics first: Age, Sex, Weight, Pregnancy status (if female, reproductive age), Current medications, Allergies, Chronic illnesses
+2. Chief Complaint — ask for the single most important complaint
+3. History of Present Illness — complaint-specific, dynamic questioning:
+   - Fever pathway: duration, pattern, max temp, chills/rigors, rash, travel, mosquito exposure, sick contacts
+   - Chest pain pathway: onset, location, radiation, severity, sweating, breathlessness, palpitations, syncope, cardiac risk factors
+   - Abdominal pain pathway: location (use anatomical regions), character, radiation, bowel symptoms, food relation
+   - Neuro pathway: consciousness, focal deficits, seizures, weakness, speech, headache features
+   - Adapt pathway to whatever complaint is presented
+4. Past Medical/Surgical/Medication/Allergy/Family/Social History
+5. General Physical Examination: Temp, Pulse, BP, RR, SpO2, Pallor, Icterus, Cyanosis, Clubbing, Edema, Lymphadenopathy
+6. Systemic Examination: relevant systems only based on complaint
+7. Investigation review if provided
+
+QUESTIONING RULES:
+- Always provide structured answer options when clinically useful (e.g., pain location as anatomical regions, severity as 0-10 scale)
+- Reject vague answers: if doctor says "SpO2 normal" respond "Please provide exact SpO2 value (e.g., 94%, 98%)"
+- Validate every response before proceeding
+- Adapt next question entirely based on previous answer
+
+RED FLAG DETECTION (always active):
+Screen continuously for: Shock, Sepsis, Respiratory failure, ACS, Stroke, Meningitis, Severe dehydration, Status epilepticus, GI bleed, Severe anemia, DKA, Obstetric emergencies, Pediatric emergencies.
+If detected: IMMEDIATELY alert the doctor prominently before continuing.
+
+DIFFERENTIAL DIAGNOSIS:
+- Never anchor on one diagnosis. Always maintain ranked differentials.
+- For each differential: supporting evidence, contradicting evidence, confirming investigations
+- State uncertainty clearly when evidence is insufficient
+
+MEDICATION SAFETY:
+- Always check: age, weight, pregnancy, breastfeeding, renal/hepatic disease, allergies, drug interactions
+- Never suggest a medication without evaluating available safety data
+
+${teachingMode ? `TEACHING MODE ACTIVE: After each question, briefly explain WHY you are asking it and what clinical reasoning it serves. Help the doctor learn to think like a senior clinician.` : ''}
+
+SPECIAL POPULATIONS:
+- Pediatric: collect birth history, gestational age, immunization, development, feeding, growth
+- Geriatric: focus on polypharmacy, frailty, fall risk, cognitive impairment
+- Pregnant: trimester, fetal risk, medication safety
+
+RESPONSE FORMAT:
+- Be concise and clinical. No unnecessary padding.
+- Use markdown for structure when generating summaries or differentials.
+- For case summaries: include Demographics, CC, HPI, PMH, Examination, Investigations, Impression, Differentials, Red Flags, Safety notes, Next steps.
+- For "What am I missing?": review entire case for missing history, examination gaps, investigation gaps, alternative diagnoses, cognitive biases.
+
+LANGUAGE: Primarily English medical terminology. Can use Hinglish for brief clarifications if needed.
+
+IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, evidence-based, and respectful of physician authority.`;
+
+      // Extract structured data from response (simple heuristic)
+      const extractPatientUpdate = (text: string, msg: string): Record<string, any> => {
+        const update: Record<string, any> = {};
+        const ageSexMatch = msg.match(/(\d+)\s*[-–]?\s*year[- ]?old\s*(male|female|m|f)/i);
+        if (ageSexMatch) {
+          update.age = ageSexMatch[1] + ' years';
+          update.sex = ageSexMatch[2].toLowerCase().startsWith('m') ? 'Male' : 'Female';
+        }
+        const weightMatch = msg.match(/(\d+)\s*kg/i);
+        if (weightMatch) update.weight = weightMatch[1] + ' kg';
+        return update;
+      };
+
+      const detectRedFlags = (text: string): string[] => {
+        const flags: string[] = [];
+        const patterns: [RegExp, string][] = [
+          [/\bshock\b/i, 'Shock'],
+          [/\bsepsis\b/i, 'Sepsis'],
+          [/spo2.{0,10}[0-8]\d%?|oxygen.{0,10}[0-8]\d/i, 'Low SpO2'],
+          [/\brespiratory failure\b/i, 'Respiratory Failure'],
+          [/\bchest pain\b.{0,30}\bsweating\b|\bdiaphoresis\b/i, 'Possible ACS'],
+          [/\bstroke\b|\bfacial droop\b|\barm weakness\b/i, 'Stroke Signs'],
+          [/\bmeningitis\b|\bneck stiffness\b.*fever/i, 'Meningitis Signs'],
+          [/\bgi bleed\b|\bmelena\b|\bhematemesis\b/i, 'GI Bleeding'],
+          [/\bdka\b|\bdiabetic ketoacidosis\b/i, 'DKA'],
+          [/bp.{0,10}[0-7]\d\/|hypotension/i, 'Hypotension'],
+        ];
+        for (const [pattern, label] of patterns) {
+          if (pattern.test(text) || pattern.test(message)) flags.push(label);
+        }
+        return flags;
+      };
+
+      const historyForAI = history.slice(-20).map((m: any) => ({
+        role: m.role as 'user' | 'assistant',
+        content: String(m.content || ''),
+      }));
+
+      let reply = '';
+
+      // Try Claude first (best for clinical reasoning + vision)
+      const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+      if (anthropicKey) {
+        try {
+          const A = (await import('@anthropic-ai/sdk')).default;
+          const baseURL = process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
+
+          // Build the user message content (with optional file attachment)
+          let userContent: any;
+          if (isImage) {
+            userContent = [
+              { type: 'image', source: { type: 'base64', media_type: fileType, data: fileData } },
+              { type: 'text', text: `[Document: ${fileName}]\n${message}` },
+            ];
+          } else if (isPDF) {
+            userContent = [
+              { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileData } },
+              { type: 'text', text: `[PDF Report: ${fileName}]\n${message}` },
+            ];
+          } else {
+            userContent = message;
+          }
+
+          const r = await new A({ apiKey: anthropicKey, ...(baseURL ? { baseURL } : {}) }).messages.create({
+            model: 'claude-3-5-sonnet-20241022',
+            max_tokens: 1500,
+            system: SDA_SYSTEM,
+            messages: [
+              ...historyForAI,
+              { role: 'user', content: userContent },
+            ],
+          });
+          reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
+        } catch (e: any) { console.warn('[SDA] Claude err:', e.message); }
+      }
+
+      // Gemini fallback (also supports vision)
+      if (!reply) {
+        try {
+          const { GoogleGenAI } = await import('@google/genai');
+          const geminiKey = process.env.GEMINI_API_KEY || '';
+          if (!geminiKey) throw new Error('No Gemini key');
+
+          // Build the current user parts with optional file
+          const currentParts: any[] = [];
+          if (isImage || isPDF) {
+            currentParts.push({ inline_data: { mime_type: fileType, data: fileData } });
+            currentParts.push({ text: `[${isPDF ? 'PDF Report' : 'Document'}: ${fileName}]\n${message}` });
+          } else {
+            currentParts.push({ text: message });
+          }
+
+          const contents = [
+            ...historyForAI.map((m: any) => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] })),
+            { role: 'user', parts: currentParts },
+          ];
+          const r = await new GoogleGenAI({ apiKey: geminiKey }).models.generateContent({
+            model: 'gemini-2.5-flash',
+            systemInstruction: SDA_SYSTEM,
+            contents,
+          });
+          reply = r.text || '';
+        } catch (e: any) { console.warn('[SDA] Gemini err:', e.message); }
+      }
+
+      if (!reply) return res.status(503).json({ error: 'AI service unavailable. Please check API keys.' });
+
+      const redFlags = detectRedFlags(reply);
+      const patientUpdate = extractPatientUpdate(reply, message);
+      const redFlagDetected = redFlags.length > 0 || /\bRED FLAG\b|\bEMERGENCY\b|\bURGENT\b/i.test(reply);
+
+      return res.json({ reply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null });
+
+    } catch (err: any) {
+      console.error('[SDA] Error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post('/api/pwa/save', (req: any, res: any) => {
     const { html, name } = req.body;
     if (!html) return res.status(400).json({ error: 'HTML required' });

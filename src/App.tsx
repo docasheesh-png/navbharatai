@@ -11,7 +11,8 @@ import {
   ArrowRight, Gift, Columns, Palette, TestTube,
   Mic, BarChart2, Languages, Layout, TrendingUp,
   Bug, Gauge, Puzzle, Search as SearchIcon,
-  Globe as GlobeIcon, Users2, Figma
+  Globe as GlobeIcon, Users2, Figma,
+  Bell, Minimize2, Moon, IndianRupee as RupeeIcon
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { SDAChat } from './components/sda/SDAChat';
@@ -56,6 +57,10 @@ import { APKBuilder } from './components/ide/APKBuilder';
 import { FigmaImporter } from './components/ide/FigmaImporter';
 import { CustomDomain } from './components/ide/CustomDomain';
 import { TeamCollaboration } from './components/ide/TeamCollaboration';
+import { PWANotifications } from './components/ide/PWANotifications';
+import { CodeMinifier } from './components/ide/CodeMinifier';
+import { DarkModeGenerator } from './components/ide/DarkModeGenerator';
+import { MonetizationWizard } from './components/ide/MonetizationWizard';
 import { SecretManager } from './components/SecretManager';
 import { AIChat } from './components/ide/AIChat';
 import { PreviewPanel } from './components/ide/PreviewPanel';
@@ -117,7 +122,7 @@ interface BrainConfig {
   keys: ApiKeys;
 }
 
-type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components' | 'seo' | 'apk' | 'figma' | 'domain' | 'team';
+type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components' | 'seo' | 'apk' | 'figma' | 'domain' | 'team' | 'pwa' | 'minifier' | 'darkmode' | 'monetize';
 
 type SettingsScreen = 'root' | 'general' | 'modules' | 'secrets' | 'connections' | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell' | 'git' | 'logs' | 'report';
 
@@ -2358,6 +2363,10 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     { id: 'figma', label: 'Figma Import', icon: Figma, status: 'New' },
     { id: 'domain', label: 'Custom Domain', icon: GlobeIcon, status: 'New' },
     { id: 'team', label: 'Team', icon: Users2, status: 'New' },
+    { id: 'pwa', label: 'PWA Notifications', icon: Bell, status: 'New' },
+    { id: 'minifier', label: 'Code Minifier', icon: Minimize2, status: 'New' },
+    { id: 'darkmode', label: 'Dark Mode Gen', icon: Moon, status: 'New' },
+    { id: 'monetize', label: 'Monetize', icon: RupeeIcon, status: 'New' },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'admin', label: 'Admin Login', icon: Lock },
   ];
@@ -3761,6 +3770,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                           { id: 'figma', label: 'Figma Import', sub: 'Design se code banao', icon: Figma, color: 'text-pink-400', status: 'New' },
                           { id: 'domain', label: 'Custom Domain', sub: 'Apna domain connect karo', icon: GlobeIcon, color: 'text-blue-400', status: 'New' },
                           { id: 'team', label: 'Team Collaboration', sub: 'Members invite karo', icon: Users2, color: 'text-amber-400', status: 'New' },
+                          { id: 'pwa', label: 'PWA Notifications', sub: 'Push alerts add karo', icon: Bell, color: 'text-rose-400', status: 'New' },
+                          { id: 'minifier', label: 'Code Minifier', sub: 'Code size kam karo', icon: Minimize2, color: 'text-cyan-400', status: 'New' },
+                          { id: 'darkmode', label: 'Dark Mode Generator', sub: 'Auto dark theme banao', icon: Moon, color: 'text-indigo-400', status: 'New' },
+                          { id: 'monetize', label: 'Monetization', sub: 'Razorpay, UPI, AdSense', icon: RupeeIcon, color: 'text-emerald-400', status: 'New' },
                           { id: 'access', label: 'Permissions', sub: 'Team Access & Security', icon: ShieldCheck, color: 'text-purple-400', status: 'Coming Soon' },
                         ].map(item => (
                           <button
@@ -3806,6 +3819,14 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                     toggleTab('domain');
                                 } else if (item.id === 'team') {
                                     toggleTab('team');
+                                } else if (item.id === 'pwa') {
+                                    toggleTab('pwa');
+                                } else if (item.id === 'minifier') {
+                                    toggleTab('minifier');
+                                } else if (item.id === 'darkmode') {
+                                    toggleTab('darkmode');
+                                } else if (item.id === 'monetize') {
+                                    toggleTab('monetize');
                                 } else {
                                     setSettingsScreen(item.id as any);
                                 }
@@ -3836,7 +3857,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                           <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-4">
                             <span className="text-white font-black text-xs">NB</span>
                           </div>
-                          <p className="text-[10px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v3.5.0</p>
+                          <p className="text-[10px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v4.0.0</p>
                         </div>
                       </motion.div>
                     )}
@@ -6530,6 +6551,34 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {activeView === 'team' && (
             <div className="flex-1 h-full overflow-hidden">
               <TeamCollaboration userId={user?.uid} projectName="NavBharatAI Project" />
+            </div>
+          )}
+
+          {/* Phase 8 — PWA Notifications */}
+          {activeView === 'pwa' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <PWANotifications generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
+            </div>
+          )}
+
+          {/* Phase 8 — Code Minifier */}
+          {activeView === 'minifier' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <CodeMinifier generatedCode={generatedCode} onOptimized={(c) => { setGeneratedCode(c); toggleTab('preview'); }} />
+            </div>
+          )}
+
+          {/* Phase 8 — Dark Mode Generator */}
+          {activeView === 'darkmode' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <DarkModeGenerator generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
+            </div>
+          )}
+
+          {/* Phase 8 — Monetization Wizard */}
+          {activeView === 'monetize' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <MonetizationWizard generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
             </div>
           )}
 

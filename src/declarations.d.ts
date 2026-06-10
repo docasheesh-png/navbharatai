@@ -403,6 +403,18 @@ declare module 'lucide-react' {
   export const SlidersHorizontal: Icon;
   export const Figma: Icon;
   export const Users2: Icon;
+  export const Sun: Icon;
+  export const Megaphone: Icon;
+  export const BadgeIndianRupee: Icon;
+  export const Banknote: Icon;
+  export const Repeat: Icon;
+  export const Moon: Icon;
+  export const PaintBucket: Icon;
+  export const Minimize2: Icon;
+  export const Maximize2: Icon;
+  export const SunMoon: Icon;
+  export const Contrast: Icon;
+  export const Palette2: Icon;
   export const UserCheck: Icon;
   export const UserX: Icon;
   export const Crown: Icon;

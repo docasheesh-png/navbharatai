@@ -346,6 +346,37 @@ declare module 'lucide-react' {
   export const UploadCloud: Icon;
   export const UserPlus: Icon;
   export const Wallet: Icon;
+  export const Workflow: Icon;
+  export const Calculator: Icon;
+  export const Webhook: Icon;
+  export const StopCircle: Icon;
+  export const ToggleLeft: Icon;
+  export const ToggleRight: Icon;
+  export const Flame: Icon;
+  export const Server2: Icon;
+  export const CloudLightning: Icon;
+  export const TrendingDown: Icon;
+  export const Users: Icon;
+  export const HardDriveDownload: Icon;
+  export const Cpu2: Icon;
+  export const TrendingUp: Icon;
+  export const Wand2: Icon;
+  export const MessageCircle: Icon;
+  export const Network: Icon;
+  export const DollarSign: Icon;
+  export const Radio: Icon;
+  export const Zap2: Icon;
+  export const Languages2: Icon;
+  export const Blocks: Icon;
+  export const CircleDot: Icon;
+  export const ArrowDownRight: Icon;
+  export const MoveRight: Icon;
+  export const Route: Icon;
+  export const BotMessageSquare: Icon;
+  export const MousePointer: Icon;
+  export const Crosshair: Icon;
+  export const Sliders: Icon;
+  export const SlidersHorizontal: Icon;
 }
 
 declare module 'firebase/app' {

@@ -8,7 +8,8 @@ import {
   Link as LinkIcon, List, GitCommit, Share2, Box, Folder, UploadCloud, ChevronLeft,
   Edit2, Camera, Upload, Image as ImageIcon, Info, LogIn,
   GitFork, GitMerge, History as HistoryIcon, UserPlus, LogOut, CheckCircle2, AlertCircle, RotateCcw,
-  ArrowRight, Gift, Columns, Palette, TestTube
+  ArrowRight, Gift, Columns, Palette, TestTube,
+  Mic, BarChart2, Languages
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { SDAChat } from './components/sda/SDAChat';
@@ -39,6 +40,9 @@ import { TestPanel } from './components/ide/TestPanel';
 import APITester from './components/ide/APITester';
 import { DiffViewer } from './components/ide/DiffViewer';
 import { DatabaseUI } from './components/ide/DatabaseUI';
+import { VoiceToApp } from './components/ide/VoiceToApp';
+import { BotBuilder } from './components/ide/BotBuilder';
+import { CostEstimator } from './components/ide/CostEstimator';
 import { SecretManager } from './components/SecretManager';
 import { AIChat } from './components/ide/AIChat';
 import { PreviewPanel } from './components/ide/PreviewPanel';
@@ -100,7 +104,7 @@ interface BrainConfig {
   keys: ApiKeys;
 }
 
-type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database';
+type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost';
 
 type SettingsScreen = 'root' | 'general' | 'modules' | 'secrets' | 'connections' | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell' | 'git' | 'logs' | 'report';
 
@@ -187,6 +191,13 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('navbharat_admin_v1', isAdmin.toString());
   }, [isAdmin]);
+
+  const [hinglishMode, setHinglishMode] = useState(() => {
+    return localStorage.getItem('navbharat_hinglish') === 'true';
+  });
+  useEffect(() => {
+    localStorage.setItem('navbharat_hinglish', hinglishMode.toString());
+  }, [hinglishMode]);
   const [loadingUser, setLoadingUser] = useState(true);
   const [activeView, setActiveView] = useState<ViewType>('home');
   const [settingsScreen, setSettingsScreen] = useState<SettingsScreen>('root');
@@ -1221,7 +1232,7 @@ export default function App() {
     addLog('Navigation history mapping enabled for all routes.', 'info');
   }, []);
 
-  const getBharatContext = (appMode: 'chat' | 'build', intent: string = 'general', target?: string, currentFiles?: FileSystem) => {
+  const getBharatContext = (appMode: 'chat' | 'build', intent: string = 'general', target?: string, currentFiles?: FileSystem, forceHinglish?: boolean) => {
     const now = new Date();
     const today = now.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     
@@ -1410,6 +1421,10 @@ Your goal is to be a helpful companion. If the user expresses interest in an app
 YOU MUST NOT GENERATE FULL APP CODE OR START DEVELOPMENT IN THIS MODE unless the user explicitly switches context.`;
     }
     
+    const hinglishSuffix = (forceHinglish || hinglishMode) ? `
+
+⚡ HINGLISH MODE ACTIVE: Saare responses Hinglish mein dena — Hindi words (Roman script) + English technical terms ka natural mix. Example style: "Tumhara app ready hai! Main isko deploy karne ke liye yeh steps follow karunga." Devanagari script mat use karna unless user specifically Hindi mein likhe.` : '';
+
     return `${baseAI}
 
 CURRENT MODE: ENTERPRISE ARCHITECT & BUILD ENGINE.
@@ -1421,7 +1436,7 @@ You are in FULL BUILD MODE. When asked to build, you MUST:
 3. Ensure absolute code modularity and production readiness.
 4. Set IS_APP_BUILT = TRUE in the system state when successful.
 
-You still maintain your Indian personality and friendly tone.`;
+You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
   };
 
   const classifyError = (error: any): ErrorType => {
@@ -2316,6 +2331,9 @@ You still maintain your Indian personality and friendly tone.`;
     { id: 'api', label: 'API Tester', icon: Globe, status: 'New' },
     { id: 'diff', label: 'Diff Viewer', icon: GitMerge, status: 'New' },
     { id: 'database', label: 'Database', icon: Database, status: 'New' },
+    { id: 'voice', label: 'Voice to App', icon: Mic, status: 'New' },
+    { id: 'botbuilder', label: 'Bot Builder', icon: MessageSquare, status: 'New' },
+    { id: 'cost', label: 'Cost Estimator', icon: BarChart2, status: 'New' },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'admin', label: 'Admin Login', icon: Lock },
   ];
@@ -3705,6 +3723,9 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                           { id: 'api', label: 'API Tester', sub: 'Test HTTP endpoints', icon: Globe, color: 'text-cyan-400', status: 'New' },
                           { id: 'diff', label: 'Diff Viewer', sub: 'Side-by-side code diff', icon: GitMerge, color: 'text-violet-400', status: 'New' },
                           { id: 'database', label: 'Database', sub: 'Browse Firestore data', icon: Database, color: 'text-indigo-400', status: 'New' },
+                          { id: 'voice', label: 'Voice to App', sub: 'Speak your app into existence', icon: Mic, color: 'text-rose-400', status: 'New' },
+                          { id: 'botbuilder', label: 'Bot Builder', sub: 'WhatsApp / Telegram flows', icon: MessageSquare, color: 'text-green-400', status: 'New' },
+                          { id: 'cost', label: 'Cost Estimator', sub: 'Compare cloud hosting costs', icon: BarChart2, color: 'text-amber-400', status: 'New' },
                           { id: 'access', label: 'Permissions', sub: 'Team Access & Security', icon: ShieldCheck, color: 'text-purple-400', status: 'Coming Soon' },
                         ].map(item => (
                           <button
@@ -3722,6 +3743,12 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                     toggleTab('diff');
                                 } else if (item.id === 'database') {
                                     toggleTab('database');
+                                } else if (item.id === 'voice') {
+                                    toggleTab('voice');
+                                } else if (item.id === 'botbuilder') {
+                                    toggleTab('botbuilder');
+                                } else if (item.id === 'cost') {
+                                    toggleTab('cost');
                                 } else {
                                     setSettingsScreen(item.id as any);
                                 }
@@ -3752,7 +3779,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                           <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-4">
                             <span className="text-white font-black text-xs">NB</span>
                           </div>
-                          <p className="text-[10px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v2.4.0</p>
+                          <p className="text-[10px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v2.5.0</p>
                         </div>
                       </motion.div>
                     )}
@@ -3831,6 +3858,27 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                  </div>
                                </div>
                                <button className="w-12 h-6 bg-indigo-600 rounded-full p-1 flex items-center justify-end transition-all">
+                                 <div className="w-4 h-4 bg-white rounded-full shadow-lg"></div>
+                               </button>
+                             </div>
+
+                             <div
+                               onClick={() => setHinglishMode(h => !h)}
+                               className="flex items-center justify-between p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner cursor-pointer group hover:border-indigo-500/30 transition-all"
+                             >
+                               <div className="flex items-center gap-4">
+                                 <div className="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
+                                   <Languages className="w-5 h-5 text-amber-400" />
+                                 </div>
+                                 <div>
+                                   <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Hinglish Mode</h4>
+                                   <p className="text-[9px] text-[#484f58] font-bold uppercase">AI replies in Hindi + English mix</p>
+                                 </div>
+                               </div>
+                               <button
+                                 className={`w-12 h-6 rounded-full p-1 flex items-center transition-all ${hinglishMode ? 'bg-amber-500 justify-end' : 'bg-white/10 justify-start'}`}
+                                 onClick={e => { e.stopPropagation(); setHinglishMode(h => !h); }}
+                               >
                                  <div className="w-4 h-4 bg-white rounded-full shadow-lg"></div>
                                </button>
                              </div>
@@ -6309,6 +6357,30 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {activeView === 'database' && (
             <div className="flex-1 h-full overflow-hidden">
               <DatabaseUI userId={user?.uid} userTier={activeAgent} />
+            </div>
+          )}
+
+          {/* Phase 4 — Voice to App */}
+          {activeView === 'voice' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <VoiceToApp onAppGenerated={(code, _prompt) => {
+                setGeneratedCode(code);
+                toggleTab('preview');
+              }} />
+            </div>
+          )}
+
+          {/* Phase 4 — Bot Builder */}
+          {activeView === 'botbuilder' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <BotBuilder />
+            </div>
+          )}
+
+          {/* Phase 4 — Cost Estimator */}
+          {activeView === 'cost' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <CostEstimator />
             </div>
           )}
 

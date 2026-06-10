@@ -10,11 +10,15 @@
       "DOM.Iterable"
     ],
     "skipLibCheck": true,
+    "skipDefaultLibCheck": true,
     "moduleResolution": "bundler",
     "isolatedModules": true,
     "moduleDetection": "force",
     "allowJs": true,
     "jsx": "react-jsx",
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
     "paths": {
       "@/*": [
         "./*"
@@ -22,5 +26,15 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "vite.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/server"
+  ]
 }

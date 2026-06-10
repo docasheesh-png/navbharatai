@@ -297,7 +297,7 @@ export const AIChat: React.FC<AIChatProps> = ({
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      setAttachments(prev => [...prev, ...Array.from(e.target.files!)]);
+      setAttachments(prev => [...prev, ...Array.from(e.target.files!)] as File[]);
     }
     e.target.value = '';
   };

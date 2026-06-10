@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, ClipboardList, Code2, Hammer, Bug, ChevronDown } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
-export type AgentMode = 'planning' | 'build';
+export type AgentMode = 'planning' | 'build' | 'chat';
 
 interface ModeSelectorProps {
   mode: AgentMode;

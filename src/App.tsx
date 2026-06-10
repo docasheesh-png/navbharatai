@@ -6211,6 +6211,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 generatedCode={generatedCode}
                 previewHistory={previewHistory}
                 onRestoreHistory={(html) => setGeneratedCode(html)}
+                onHtmlChange={(html) => setGeneratedCode(html)}
               />
             </div>
           )}

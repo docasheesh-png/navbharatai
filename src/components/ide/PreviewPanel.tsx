@@ -11,10 +11,13 @@ interface PreviewPanelProps {
   files: Record<string, string>;
   onRun: () => void;
   generatedCode?: string;
+  previewHistory?: { id: string; label: string; ts: Date; html: string }[];
+  onRestoreHistory?: (html: string) => void;
 }
 
-export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, generatedCode }) => {
+export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, generatedCode, previewHistory = [], onRestoreHistory }) => {
   const [device, setDevice] = useState<'laptop' | 'mobile' | 'full'>('laptop');
+  const [showHistory, setShowHistory] = useState(false);
   const [url, setUrl] = useState('http://localhost:3000');
   const [containerRef, setContainerRef] = React.useState<HTMLDivElement | null>(null);
   const [viewRef, setViewRef] = React.useState<HTMLDivElement | null>(null);
@@ -169,6 +172,40 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
         <button className="p-2 hover:bg-white/5 rounded-full text-[#484f58] ml-2">
           <ExternalLink className="w-4 h-4" />
         </button>
+
+        {/* Preview History */}
+        {previewHistory.length > 0 && (
+          <div className="relative ml-1">
+            <button
+              onClick={() => setShowHistory(p => !p)}
+              title="Preview history"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest bg-white/5 hover:bg-white/10 border border-white/10 text-[#484f58] hover:text-white transition-all"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">History ({previewHistory.length})</span>
+            </button>
+            {showHistory && (
+              <div className="absolute right-0 top-full mt-1 w-64 bg-[#161b22] border border-white/10 rounded-xl shadow-2xl shadow-black/50 z-50 overflow-hidden">
+                <p className="text-[9px] font-black uppercase tracking-widest text-[#484f58] px-3 py-2 border-b border-white/5">Preview History</p>
+                {previewHistory.map((h) => (
+                  <button
+                    key={h.id}
+                    onClick={() => { onRestoreHistory?.(h.html); setShowHistory(false); }}
+                    className="w-full flex items-start gap-2 px-3 py-2 hover:bg-white/5 transition-colors text-left border-b border-white/5 last:border-0"
+                  >
+                    <div className="w-8 h-6 rounded bg-[#0d1117] border border-white/10 shrink-0 overflow-hidden mt-0.5">
+                      <div className="w-full h-full bg-gradient-to-br from-indigo-900/40 to-purple-900/40" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[11px] text-white font-medium truncate">{h.label}</p>
+                      <p className="text-[9px] text-[#484f58]">{h.ts instanceof Date ? h.ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* PWA Install Button */}
         <button

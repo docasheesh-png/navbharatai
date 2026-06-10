@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2 } from 'lucide-react';
+import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -288,20 +288,53 @@ export const AIChat: React.FC<AIChatProps> = ({
 }) => {
   const { buildSteps } = useBuild();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
-  
+
   useEffect(() => {
     onAttachmentsChange?.(attachments);
   }, [attachments, onAttachmentsChange]);
-  
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       setAttachments(prev => [...prev, ...Array.from(e.target.files!)]);
     }
+    e.target.value = '';
   };
 
   const removeAttachment = (index: number) => {
     setAttachments(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // ── Voice Input ──────────────────────────────────────────────────────────
+  const recognitionRef = useRef<any>(null);
+  const [isListening, setIsListening] = useState(false);
+
+  const startVoice = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) { alert('Voice input works on Chrome only. Please use Chrome browser.'); return; }
+    const rec = new SR();
+    rec.lang = 'en-IN';
+    rec.interimResults = true;
+    rec.continuous = true;
+    rec.onresult = (e: any) => {
+      const transcript = Array.from(e.results as any[]).map((r: any) => r[0].transcript).join('');
+      onInputChange(transcript);
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 240)}px`;
+      }
+    };
+    rec.onerror = () => setIsListening(false);
+    rec.onend = () => setIsListening(false);
+    rec.start();
+    recognitionRef.current = rec;
+    setIsListening(true);
+  };
+
+  const stopVoice = () => {
+    recognitionRef.current?.stop();
+    setIsListening(false);
   };
   
   useEffect(() => {
@@ -916,6 +949,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                     onChange={handleFileSelect}
                     className="hidden"
                     multiple
+                    accept="image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp"
                   />
                   {attachments.length > 0 && (
                     <div className="px-5 pt-2 flex flex-wrap gap-2">
@@ -928,17 +962,20 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                     </div>
                    )}
                   <textarea
+                    ref={textareaRef}
                     value={input}
-                    onChange={(e) => onInputChange(e.target.value)}
-                    onKeyDown={(e) => {
-                      // Enter just adds a newline now
+                    onChange={(e) => {
+                      onInputChange(e.target.value);
+                      e.target.style.height = 'auto';
+                      e.target.style.height = `${Math.min(e.target.scrollHeight, 240)}px`;
                     }}
                     placeholder="Ask navBharatAI..."
                     rows={1}
                     className={cn(
-                      "w-full bg-transparent text-[var(--theme-text)] pr-24 py-3.5 text-xs outline-none transition-all resize-none min-h-[48px] max-h-[150px] leading-relaxed text-[16px]",
+                      "w-full bg-transparent text-[var(--theme-text)] pr-24 py-3.5 text-xs outline-none transition-all resize-none min-h-[48px] leading-relaxed text-[16px]",
                       onModeChange && activeAgent === 'navbharatai-pro' ? "pl-32" : "pl-5"
                     )}
+                    style={{ maxHeight: '240px', overflowY: 'auto' }}
                   />
                   {( (input || '').length > 300 || (((input || '').match(/\n/g) || []).length > 4)) && (
                     <button
@@ -958,9 +995,18 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
+                      title="Attach image or PDF"
                       className="p-2 text-gray-500 hover:text-indigo-400 transition-colors"
                     >
                       <LinkIcon className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={isListening ? stopVoice : startVoice}
+                      title={isListening ? 'Stop voice input' : 'Voice input (Chrome only)'}
+                      className={`p-2 transition-colors ${isListening ? 'text-red-400 animate-pulse' : 'text-gray-500 hover:text-blue-400'}`}
+                    >
+                      {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                     </button>
                     <button
                       onClick={() => { onSend(attachments); setAttachments([]); }}

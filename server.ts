@@ -3784,8 +3784,11 @@ app.post('/api/chat', async (req, res) => {
   app.post('/api/pro-chat', async (req, res) => {
     console.log("=== HIT /api/pro-chat ===");
     try {
-      const { message, history, mode } = req.body;
+      const { message, history, mode, fileData, fileType, fileName } = req.body;
       if (!message) return res.status(400).json({ error: 'Message required' });
+      const hasFile = !!(fileData && fileType);
+      const isImageFile = hasFile && (fileType as string).startsWith('image/');
+      const isPDFFile = hasFile && fileType === 'application/pdf';
 
       // ══ BUILDING MODE — Use AppEngine to generate real app ══
       if (mode === 'building') {
@@ -3886,12 +3889,25 @@ Hinglish mein baat karo — friendly, clear, professional.`;
         if (key) {
           const A = (await import('@anthropic-ai/sdk')).default;
           const baseURL = process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
+          // Build user content — with optional vision attachment
+          let userContent: any = message;
+          if (isImageFile) {
+            userContent = [
+              { type: 'image', source: { type: 'base64', media_type: fileType, data: fileData } },
+              { type: 'text', text: `[Image attached: ${fileName}]\n${message}` },
+            ];
+          } else if (isPDFFile) {
+            userContent = [
+              { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileData } },
+              { type: 'text', text: `[PDF attached: ${fileName}]\n${message}` },
+            ];
+          }
           const msgs = [
             ...(history || []).map((m: any) => ({
               role: (m.sender === 'user' ? 'user' : 'assistant') as 'user'|'assistant',
               content: String(m.text || m.content || '')
             })),
-            { role: 'user' as const, content: message }
+            { role: 'user' as const, content: userContent }
           ];
           const r = await new A({ apiKey: key, ...(baseURL ? { baseURL } : {}) }).messages.create({
             model: 'claude-3-5-sonnet-20241022', max_tokens: 1500,

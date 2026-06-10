@@ -9,7 +9,8 @@ import {
   Edit2, Camera, Upload, Image as ImageIcon, Info, LogIn,
   GitFork, GitMerge, History as HistoryIcon, UserPlus, LogOut, CheckCircle2, AlertCircle, RotateCcw,
   ArrowRight, Gift, Columns, Palette, TestTube,
-  Mic, BarChart2, Languages, Layout, TrendingUp
+  Mic, BarChart2, Languages, Layout, TrendingUp,
+  Bug, Gauge, Puzzle, Search as SearchIcon
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { SDAChat } from './components/sda/SDAChat';
@@ -46,6 +47,10 @@ import { CostEstimator } from './components/ide/CostEstimator';
 import { ScreenshotToCode } from './components/ide/ScreenshotToCode';
 import { MultiPageBuilder } from './components/ide/MultiPageBuilder';
 import { AppAnalytics } from './components/ide/AppAnalytics';
+import { AIDebugger } from './components/ide/AIDebugger';
+import { PerformanceAnalyzer } from './components/ide/PerformanceAnalyzer';
+import { ComponentLibrary } from './components/ide/ComponentLibrary';
+import { SEOOptimizer } from './components/ide/SEOOptimizer';
 import { SecretManager } from './components/SecretManager';
 import { AIChat } from './components/ide/AIChat';
 import { PreviewPanel } from './components/ide/PreviewPanel';
@@ -107,7 +112,7 @@ interface BrainConfig {
   keys: ApiKeys;
 }
 
-type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics';
+type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components' | 'seo';
 
 type SettingsScreen = 'root' | 'general' | 'modules' | 'secrets' | 'connections' | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell' | 'git' | 'logs' | 'report';
 
@@ -2340,6 +2345,10 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     { id: 'screenshot', label: 'Screenshot to Code', icon: Camera, status: 'New' },
     { id: 'multipages', label: 'Multi-Page Builder', icon: Layout, status: 'New' },
     { id: 'analytics', label: 'Analytics', icon: TrendingUp, status: 'New' },
+    { id: 'debugger', label: 'AI Debugger', icon: Bug, status: 'New' },
+    { id: 'performance', label: 'Performance', icon: Gauge, status: 'New' },
+    { id: 'components', label: 'Components', icon: Puzzle, status: 'New' },
+    { id: 'seo', label: 'SEO Optimizer', icon: SearchIcon, status: 'New' },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'admin', label: 'Admin Login', icon: Lock },
   ];
@@ -3735,6 +3744,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                           { id: 'screenshot', label: 'Screenshot to Code', sub: 'Screenshot se app banao', icon: Camera, color: 'text-pink-400', status: 'New' },
                           { id: 'multipages', label: 'Multi-Page Builder', sub: 'Full website with navigation', icon: Layout, color: 'text-cyan-400', status: 'New' },
                           { id: 'analytics', label: 'Analytics', sub: 'Workspace usage insights', icon: TrendingUp, color: 'text-emerald-400', status: 'New' },
+                          { id: 'debugger', label: 'AI Debugger', sub: 'Error paste karo, fix pao', icon: Bug, color: 'text-red-400', status: 'New' },
+                          { id: 'performance', label: 'Performance', sub: 'Lighthouse-style app scoring', icon: Gauge, color: 'text-blue-400', status: 'New' },
+                          { id: 'components', label: 'Component Library', sub: 'Ready-made UI blocks', icon: Puzzle, color: 'text-violet-400', status: 'New' },
+                          { id: 'seo', label: 'SEO Optimizer', sub: 'Meta tags, sitemap, OG tags', icon: SearchIcon, color: 'text-teal-400', status: 'New' },
                           { id: 'access', label: 'Permissions', sub: 'Team Access & Security', icon: ShieldCheck, color: 'text-purple-400', status: 'Coming Soon' },
                         ].map(item => (
                           <button
@@ -3764,6 +3777,14 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                     toggleTab('multipages');
                                 } else if (item.id === 'analytics') {
                                     toggleTab('analytics');
+                                } else if (item.id === 'debugger') {
+                                    toggleTab('debugger');
+                                } else if (item.id === 'performance') {
+                                    toggleTab('performance');
+                                } else if (item.id === 'components') {
+                                    toggleTab('components');
+                                } else if (item.id === 'seo') {
+                                    toggleTab('seo');
                                 } else {
                                     setSettingsScreen(item.id as any);
                                 }
@@ -6426,6 +6447,37 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {activeView === 'analytics' && (
             <div className="flex-1 h-full overflow-hidden">
               <AppAnalytics userId={user?.uid} />
+            </div>
+          )}
+
+          {/* Phase 6 — AI Debugger */}
+          {activeView === 'debugger' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <AIDebugger files={files} />
+            </div>
+          )}
+
+          {/* Phase 6 — Performance Analyzer */}
+          {activeView === 'performance' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <PerformanceAnalyzer generatedCode={generatedCode} />
+            </div>
+          )}
+
+          {/* Phase 6 — Component Library */}
+          {activeView === 'components' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <ComponentLibrary onInsert={(html) => {
+                setGeneratedCode(prev => prev ? prev.replace('</body>', html + '\n</body>') : html);
+                toggleTab('preview');
+              }} />
+            </div>
+          )}
+
+          {/* Phase 6 — SEO Optimizer */}
+          {activeView === 'seo' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <SEOOptimizer generatedCode={generatedCode} appName="NavBharatAI App" />
             </div>
           )}
 

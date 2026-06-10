@@ -1,11 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Send, Loader2, AlertTriangle, BookOpen, FileText, User,
-  Activity, Stethoscope, ClipboardList, X, RefreshCw,
-  Paperclip, Image as ImageIcon, FileSearch
+  Stethoscope, ClipboardList, X, RefreshCw,
+  Paperclip, Image as ImageIcon, FileSearch,
+  Mic, MicOff, Download, BarChart2, Pill, TestTube,
+  Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import ReactMarkdown from 'react-markdown';
+
+// ── Types ──────────────────────────────────────────────────────────────────
 
 interface SDAMessage {
   id: string;
@@ -36,6 +40,13 @@ interface SDAChatProps {
   userId?: string;
 }
 
+// ── Constants ──────────────────────────────────────────────────────────────
+
+const ACCEPTED_TYPES = 'image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp';
+const MAX_FILE_MB = 10;
+const BASE_HEIGHT = 44;
+const MAX_HEIGHT = BASE_HEIGHT * 5; // 5x max grow
+
 const WELCOME: SDAMessage = {
   id: 'welcome',
   text: `**Namaste, Doctor.**
@@ -48,6 +59,7 @@ I work like an experienced senior consultant sitting beside you, guiding you thr
 - I will ask you questions one at a time
 - Each of your answers shapes my next question
 - You can upload lab reports, X-rays, ECGs, or any medical document — I will analyze them
+- Use Quick Tools below for scores, drug checks, dosing, protocols, and more
 - Final diagnosis and treatment decisions remain entirely yours
 
 ---
@@ -59,8 +71,165 @@ To begin, please tell me — **what is the patient's age and sex?**
   timestamp: new Date(),
 };
 
-const ACCEPTED_TYPES = 'image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp';
-const MAX_FILE_MB = 10;
+const QUICK_TOOLS = [
+  {
+    label: 'Clinical Scores',
+    icon: BarChart2,
+    color: 'text-blue-400 border-blue-800/40 hover:bg-blue-950/50',
+    prompt: 'Using all clinical data collected so far, calculate every applicable severity score: SOFA (if sepsis/ICU), qSOFA (sepsis screening), GCS (if neuro), CURB-65 (if pneumonia), Wells score (if PE/DVT suspected), NIHSS (if stroke), Killip class (if cardiac). Show step-by-step calculation, score value, and clinical interpretation with recommended action for each.',
+  },
+  {
+    label: 'Drug Interactions',
+    icon: Pill,
+    color: 'text-red-400 border-red-800/40 hover:bg-red-950/50',
+    prompt: 'List all medications mentioned in this case (current meds + those being prescribed). Check every combination for drug-drug interactions. For each interaction found: severity (mild/moderate/severe/contraindicated), mechanism, clinical consequence, and management (avoid/monitor/dose adjust). Also check for drug-disease contraindications given this patient\'s comorbidities.',
+  },
+  {
+    label: 'Lab Values',
+    icon: TestTube,
+    color: 'text-purple-400 border-purple-800/40 hover:bg-purple-950/50',
+    prompt: 'Interpret all laboratory and investigation values mentioned in this case. For each value: normal range, patient\'s value, whether abnormal (and critically so), clinical significance in this patient\'s context, and what diagnosis or condition it supports. Highlight any critically abnormal values requiring immediate action.',
+  },
+  {
+    label: 'Peds Dosing',
+    icon: Baby,
+    color: 'text-emerald-400 border-emerald-800/40 hover:bg-emerald-950/50',
+    prompt: 'For this pediatric patient, calculate weight-based doses for all medications being considered. Provide: dose in mg/kg, total dose for this patient\'s weight, frequency, route, maximum dose limit, any renal/hepatic dose adjustments. Use standard pediatric dosing references (BNF for Children / Harriet Lane).',
+  },
+  {
+    label: 'Emergency Protocol',
+    icon: Zap,
+    color: 'text-orange-400 border-orange-800/40 hover:bg-orange-950/50',
+    prompt: 'Based on this clinical picture, provide the immediate emergency management protocol. Include: triage priority, ABCDE approach, immediate stabilization steps, monitoring parameters, emergency medications with doses/timing, which emergency bundles to activate (sepsis 3-hour bundle, STEMI protocol, stroke pathway, anaphylaxis etc.), and ICU escalation criteria.',
+  },
+  {
+    label: 'Antibiotic Guide',
+    icon: Shield,
+    color: 'text-teal-400 border-teal-800/40 hover:bg-teal-950/50',
+    prompt: 'Provide evidence-based antibiotic recommendations for this infection. Include: suspected organism(s), first-line antibiotic (drug, dose, frequency, route, duration), second-line alternative, allergy substitution, empirical vs targeted therapy, culture-sensitivity adjustment strategy, de-escalation criteria, and antibiotic stewardship points to minimize resistance.',
+  },
+  {
+    label: 'Pregnancy Safety',
+    icon: Heart,
+    color: 'text-pink-400 border-pink-800/40 hover:bg-pink-950/50',
+    prompt: 'For all medications being considered in this case, provide complete pregnancy safety information: FDA pregnancy category (A/B/C/D/X), specific teratogenic risks by trimester, breast milk transfer and infant risk, safer alternatives if category C/D/X, and dose adjustments in pregnancy. Note any pregnancy-specific management changes for this condition.',
+  },
+  {
+    label: 'Refer?',
+    icon: Navigation,
+    color: 'text-indigo-400 border-indigo-800/40 hover:bg-indigo-950/50',
+    prompt: 'Based on the complete clinical picture, make a referral decision: Should this patient be referred or managed here? If referral: which specialty, urgency (emergency/urgent within 24h/routine/elective), reason for referral, pre-referral workup to complete, and full content for the referral letter. If managing locally: define clear escalation criteria that would trigger referral.',
+  },
+];
+
+// ── PDF Generator ──────────────────────────────────────────────────────────
+
+const mdToHtml = (text: string) =>
+  text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/^### (.+)$/gm, '<h3 style="font-size:13px;color:#065f46;margin:10px 0 4px">$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2 style="font-size:15px;color:#065f46;margin:12px 0 6px">$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1 style="font-size:17px;color:#064e3b;margin:14px 0 8px">$1</h1>')
+    .replace(/^- (.+)$/gm, '<li style="margin:3px 0">$1</li>')
+    .replace(/^(\d+)\. (.+)$/gm, '<li style="margin:3px 0"><strong>$1.</strong> $2</li>')
+    .replace(/---/g, '<hr style="border:0;border-top:1px solid #e5e7eb;margin:12px 0">')
+    .replace(/\n\n/g, '</p><p style="margin:8px 0">')
+    .replace(/\n/g, '<br>');
+
+const buildCasePDF = (
+  messages: SDAMessage[],
+  patient: PatientSnapshot,
+  redFlags: string[]
+): string => {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
+  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  const conversationHTML = messages
+    .filter(m => m.id !== 'welcome')
+    .map(m => {
+      const isDoc = m.sender === 'doctor';
+      const role = isDoc ? 'Doctor' : 'Senior Doctor Assistant (SDA)';
+      const bg = isDoc ? '#f0f7ff' : '#f0fdf4';
+      const border = isDoc ? '#93c5fd' : '#6ee7b7';
+      const fileTag = m.attachedFile
+        ? `<div style="font-size:11px;color:#6b7280;margin-bottom:6px;padding:4px 8px;background:#f9fafb;border-radius:4px;border:1px solid #e5e7eb">📎 ${m.attachedFile.name}</div>`
+        : '';
+      return `
+        <div style="margin-bottom:14px;padding:12px 14px;background:${bg};border-left:3px solid ${border};border-radius:6px;page-break-inside:avoid">
+          <p style="font-size:9px;font-weight:700;color:#6b7280;margin:0 0 6px;text-transform:uppercase;letter-spacing:1px">${role} · ${m.timestamp instanceof Date ? m.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</p>
+          ${fileTag}
+          <div style="font-size:12px;color:#1f2937;line-height:1.65"><p style="margin:0">${mdToHtml(m.text)}</p></div>
+        </div>`;
+    }).join('');
+
+  const patientHTML = (patient.age || patient.sex || patient.chiefComplaint) ? `
+    <div style="margin-bottom:20px">
+      <h2 style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#065f46;border-bottom:2px solid #065f46;padding-bottom:4px;margin-bottom:10px">Patient Summary</h2>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        ${patient.age ? `<tr><td style="padding:4px 8px;color:#6b7280;font-weight:600;width:120px">Age</td><td style="padding:4px 8px">${patient.age}</td></tr>` : ''}
+        ${patient.sex ? `<tr><td style="padding:4px 8px;color:#6b7280;font-weight:600">Sex</td><td style="padding:4px 8px">${patient.sex}</td></tr>` : ''}
+        ${patient.weight ? `<tr><td style="padding:4px 8px;color:#6b7280;font-weight:600">Weight</td><td style="padding:4px 8px">${patient.weight}</td></tr>` : ''}
+        ${patient.chiefComplaint ? `<tr><td style="padding:4px 8px;color:#6b7280;font-weight:600">Chief Complaint</td><td style="padding:4px 8px;color:#065f46;font-weight:600">${patient.chiefComplaint}</td></tr>` : ''}
+      </table>
+      ${redFlags.length > 0 ? `<div style="margin-top:8px;padding:8px 12px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;font-size:11px"><strong style="color:#dc2626">⚠ Red Flags Identified:</strong> ${redFlags.join(' · ')}</div>` : ''}
+    </div>` : '';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Clinical Case Report — ${dateStr}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Times New Roman', Georgia, serif; margin: 0; padding: 0; color: #1f2937; background: #fff; }
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="background:#1a1a1a;padding:12px 24px;display:flex;justify-content:space-between;align-items:center">
+    <span style="color:#fff;font-size:14px;font-family:sans-serif">Clinical Case Report — Preview</span>
+    <button onclick="window.print()" style="background:#065f46;color:#fff;border:0;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;font-family:sans-serif">🖨️ Print / Save as PDF</button>
+  </div>
+  <div style="max-width:800px;margin:0 auto;padding:32px">
+    <!-- Header -->
+    <div style="background:linear-gradient(135deg,#064e3b,#065f46);color:#fff;padding:24px 32px;border-radius:10px 10px 0 0;margin-bottom:0">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h1 style="margin:0;font-size:22px;font-weight:700;letter-spacing:.5px">Clinical Case Report</h1>
+          <p style="margin:4px 0 0;font-size:11px;opacity:.8">Senior Doctor Assistant (SDA) · NavBharatAI Clinical Decision Support</p>
+        </div>
+        <div style="text-align:right;font-size:11px;opacity:.8">
+          <p style="margin:0">${dateStr}</p>
+          <p style="margin:2px 0 0">${timeStr}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div style="border:1px solid #e5e7eb;border-top:0;border-radius:0 0 10px 10px;padding:28px 32px">
+      ${patientHTML}
+
+      <div>
+        <h2 style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#065f46;border-bottom:2px solid #065f46;padding-bottom:4px;margin-bottom:16px">Clinical Case Transcript</h2>
+        ${conversationHTML || '<p style="color:#9ca3af;font-style:italic;font-size:12px">No clinical data recorded.</p>'}
+      </div>
+
+      <div style="margin-top:28px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:10px;color:#9ca3af;line-height:1.6">
+        <strong style="color:#6b7280">DISCLAIMER:</strong> This report was generated by NavBharatAI Senior Doctor Assistant (SDA), an AI-powered clinical decision support tool. This document is intended exclusively for qualified medical professionals. All clinical decisions, diagnoses, and treatment plans remain the sole responsibility of the treating physician. This report does not constitute a legal or binding medical document.
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+};
+
+// ── Component ──────────────────────────────────────────────────────────────
 
 export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const [messages, setMessages] = useState<SDAMessage[]>([WELCOME]);
@@ -68,24 +237,71 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const [loading, setLoading] = useState(false);
   const [teachingMode, setTeachingMode] = useState(false);
   const [showPatientPanel, setShowPatientPanel] = useState(true);
+  const [showTools, setShowTools] = useState(true);
   const [patient, setPatient] = useState<PatientSnapshot>({});
   const [activeRedFlags, setActiveRedFlags] = useState<string[]>([]);
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
+  const [isListening, setIsListening] = useState(false);
+  const [suggestPDF, setSuggestPDF] = useState(false);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
 
-  const BASE_HEIGHT = 44;
-  const MAX_HEIGHT = BASE_HEIGHT * 2; // 100% max increase
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const autoResize = (el: HTMLTextAreaElement) => {
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
   };
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  // ── Voice Input ──────────────────────────────────────────────────────────
+
+  const startVoice = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      alert('Voice input is not supported in this browser. Please use Chrome.');
+      return;
+    }
+    const rec = new SR();
+    rec.lang = 'en-IN';
+    rec.interimResults = true;
+    rec.continuous = true;
+    rec.onresult = (e: any) => {
+      const transcript = Array.from(e.results as any[])
+        .map((r: any) => r[0].transcript)
+        .join('');
+      setInput(transcript);
+      if (inputRef.current) autoResize(inputRef.current);
+    };
+    rec.onerror = () => setIsListening(false);
+    rec.onend = () => setIsListening(false);
+    rec.start();
+    recognitionRef.current = rec;
+    setIsListening(true);
+  };
+
+  const stopVoice = () => {
+    recognitionRef.current?.stop();
+    setIsListening(false);
+  };
+
+  // ── PDF ──────────────────────────────────────────────────────────────────
+
+  const generatePDF = () => {
+    const html = buildCasePDF(messages, patient, activeRedFlags);
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+      setTimeout(() => win.print(), 600);
+    }
+  };
+
+  // ── File Select ──────────────────────────────────────────────────────────
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -105,13 +321,15 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
     e.target.value = '';
   };
 
+  // ── Send ─────────────────────────────────────────────────────────────────
+
   const handleSend = async (overrideText?: string) => {
     const text = (overrideText ?? input).trim();
     if ((!text && !attachedFile) || loading) return;
+
     setInput('');
-    if (inputRef.current) {
-      inputRef.current.style.height = `${BASE_HEIGHT}px`;
-    }
+    if (inputRef.current) inputRef.current.style.height = `${BASE_HEIGHT}px`;
+    setSuggestPDF(false);
 
     const fileForMsg = attachedFile;
     setAttachedFile(null);
@@ -165,7 +383,10 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
       if (data.patientUpdate) {
         setPatient(prev => ({ ...prev, ...data.patientUpdate }));
       }
-    } catch (e) {
+      if (data.suggestPDF) {
+        setSuggestPDF(true);
+      }
+    } catch {
       setMessages(prev => [...prev, {
         id: (Date.now() + 2).toString(),
         text: '⚠️ Service temporarily unavailable. Please try again.',
@@ -180,19 +401,21 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
   const requestSummary = () => handleSend('Please generate a complete structured case summary based on all information collected so far.');
   const requestMissingCheck = () => handleSend('What am I missing? Review the case and identify any missing history, examination findings, investigations, or alternative diagnoses I should consider.');
-
   const startNewCase = () => {
     setMessages([WELCOME]);
     setPatient({});
     setActiveRedFlags([]);
     setInput('');
     setAttachedFile(null);
+    setSuggestPDF(false);
   };
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex h-full bg-[#0a0f1a] overflow-hidden">
 
-      {/* ── Patient Info Panel ── */}
+      {/* ── Left Panel ──────────────────────────────────────────────────── */}
       {showPatientPanel && (
         <div className="w-64 shrink-0 bg-[#0d1520] border-r border-emerald-900/30 flex-col overflow-hidden hidden md:flex">
           <div className="px-4 py-3 border-b border-emerald-900/30 flex items-center justify-between">
@@ -206,6 +429,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+            {/* Demographics */}
             <div className="bg-[#111827] rounded-xl p-3 border border-white/5">
               <p className="text-[9px] text-[#484f58] font-black uppercase tracking-widest mb-2">Demographics</p>
               <div className="space-y-1.5">
@@ -222,6 +446,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               </div>
             </div>
 
+            {/* Chief Complaint */}
             <div className="bg-[#111827] rounded-xl p-3 border border-white/5">
               <p className="text-[9px] text-[#484f58] font-black uppercase tracking-widest mb-1.5">Chief Complaint</p>
               <p className={cn("text-[11px]", patient.chiefComplaint ? 'text-emerald-300 font-medium' : 'text-[#2d3748]')}>
@@ -229,6 +454,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               </p>
             </div>
 
+            {/* Vitals */}
             {patient.vitals && patient.vitals.length > 0 && (
               <div className="bg-[#111827] rounded-xl p-3 border border-white/5">
                 <p className="text-[9px] text-[#484f58] font-black uppercase tracking-widest mb-2">Vitals</p>
@@ -243,6 +469,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               </div>
             )}
 
+            {/* Red Flags */}
             {activeRedFlags.length > 0 && (
               <div className="bg-red-950/40 rounded-xl p-3 border border-red-500/30">
                 <p className="text-[9px] text-red-400 font-black uppercase tracking-widest mb-2 flex items-center gap-1">
@@ -257,6 +484,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
             )}
           </div>
 
+          {/* Panel Actions */}
           <div className="p-3 border-t border-emerald-900/30 space-y-2">
             <button onClick={requestSummary} disabled={loading || messages.length < 3}
               className="w-full flex items-center gap-2 px-3 py-2 bg-emerald-900/30 hover:bg-emerald-900/50 border border-emerald-700/30 rounded-lg text-[10px] font-black text-emerald-300 uppercase tracking-widest transition-all disabled:opacity-40">
@@ -266,11 +494,15 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               className="w-full flex items-center gap-2 px-3 py-2 bg-indigo-900/20 hover:bg-indigo-900/40 border border-indigo-700/20 rounded-lg text-[10px] font-black text-indigo-300 uppercase tracking-widest transition-all disabled:opacity-40">
               <ClipboardList className="w-3.5 h-3.5" /> What Am I Missing?
             </button>
+            <button onClick={generatePDF} disabled={messages.length < 2}
+              className="w-full flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-black text-[#8b949e] hover:text-white uppercase tracking-widest transition-all disabled:opacity-40">
+              <Download className="w-3.5 h-3.5" /> Download PDF
+            </button>
           </div>
         </div>
       )}
 
-      {/* ── Main Chat Area ── */}
+      {/* ── Main Chat Area ─────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
         {/* Header */}
@@ -290,6 +522,12 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button onClick={generatePDF} disabled={messages.length < 2}
+              title="Download case as PDF"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white/5 border border-white/10 text-[#484f58] hover:text-white hover:bg-white/10 transition-all disabled:opacity-40">
+              <Download className="w-3 h-3" />
+              <span className="hidden sm:inline">PDF</span>
+            </button>
             <button onClick={() => setTeachingMode(p => !p)}
               className={cn("flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all border",
                 teachingMode ? "bg-amber-900/30 border-amber-600/40 text-amber-300" : "bg-white/5 border-white/10 text-[#484f58] hover:text-white")}>
@@ -341,7 +579,6 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                     <span className="text-[9px] font-black uppercase tracking-widest text-red-400">Red Flag Detected</span>
                   </div>
                 )}
-                {/* File attachment preview */}
                 {msg.attachedFile && (
                   <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/10">
                     {msg.attachedFile.type.startsWith('image/') ? (
@@ -382,6 +619,27 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               </div>
             </div>
           )}
+
+          {/* PDF Suggest Card */}
+          {suggestPDF && (
+            <div className="flex justify-center">
+              <div className="bg-emerald-950/60 border border-emerald-600/40 rounded-2xl px-5 py-3 flex items-center gap-4 max-w-sm">
+                <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
+                <p className="text-[11px] text-emerald-200 flex-1">Case assessment ready. PDF report banana chahiye?</p>
+                <div className="flex gap-2">
+                  <button onClick={generatePDF}
+                    className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded-lg text-[10px] font-black text-white transition-all">
+                    Haan, Banao
+                  </button>
+                  <button onClick={() => setSuggestPDF(false)}
+                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[10px] font-black text-[#8b949e] transition-all">
+                    Baad mein
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div ref={bottomRef} />
         </div>
 
@@ -392,8 +650,42 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           </p>
         </div>
 
+        {/* Quick Tools Row */}
+        <div className="shrink-0 bg-[#0d1520] border-t border-emerald-900/20 px-4 py-2">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <button
+              onClick={() => setShowTools(p => !p)}
+              className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-emerald-400 transition-colors"
+            >
+              {showTools ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+              Quick Tools
+            </button>
+          </div>
+          {showTools && (
+            <div className="flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+              {QUICK_TOOLS.map(tool => {
+                const Icon = tool.icon;
+                return (
+                  <button
+                    key={tool.label}
+                    onClick={() => handleSend(tool.prompt)}
+                    disabled={loading || messages.length < 2}
+                    className={cn(
+                      "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[9px] font-black uppercase tracking-widest whitespace-nowrap transition-all shrink-0 disabled:opacity-40",
+                      tool.color
+                    )}
+                  >
+                    <Icon className="w-3 h-3" />
+                    {tool.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
         {/* Input Area */}
-        <div className="shrink-0 bg-[#0d1520] border-t border-emerald-900/30 px-4 py-3">
+        <div className="shrink-0 bg-[#0d1520] border-t border-emerald-900/30 px-4 pb-3 pt-2">
 
           {/* Attached file preview */}
           {attachedFile && (
@@ -416,7 +708,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           )}
 
           <div className="flex items-end gap-2">
-            {/* Input box with attach button inside */}
+            {/* Input box */}
             <div className="flex-1 bg-[#111827] border border-emerald-900/40 focus-within:border-emerald-600/60 rounded-xl transition-all">
               <div className="flex items-end px-3 py-2.5 gap-2">
                 {/* Attach button */}
@@ -429,6 +721,19 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                   <Paperclip className="w-4 h-4" />
                 </button>
                 <input ref={fileInputRef} type="file" accept={ACCEPTED_TYPES} onChange={handleFileSelect} className="hidden" />
+
+                {/* Mic button */}
+                <button
+                  onClick={isListening ? stopVoice : startVoice}
+                  disabled={loading}
+                  title={isListening ? 'Stop voice input' : 'Start voice input'}
+                  className={cn(
+                    "transition-colors pb-0.5 shrink-0 disabled:opacity-40",
+                    isListening ? "text-red-400 animate-pulse" : "text-[#484f58] hover:text-blue-400"
+                  )}
+                >
+                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </button>
 
                 {/* Text input */}
                 <textarea
@@ -455,7 +760,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           </div>
 
           <p className="text-[9px] text-[#2d3748] mt-1.5 text-center">
-            📎 Lab reports · X-rays · ECGs · PDFs supported · Send button se bhejo
+            📎 Docs · 🎙️ Voice · 🧮 Clinical Tools — Send button se bhejo
           </p>
         </div>
       </div>

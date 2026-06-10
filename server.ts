@@ -4715,6 +4715,19 @@ RESPONSE FORMAT:
 - For case summaries: include Demographics, CC, HPI, PMH, Examination, Investigations, Impression, Differentials, Red Flags, Safety notes, Next steps.
 - For "What am I missing?": review entire case for missing history, examination gaps, investigation gaps, alternative diagnoses, cognitive biases.
 
+CLINICAL TOOLS (when doctor requests via Quick Tools or in conversation):
+- CLINICAL SCORES: Calculate SOFA, qSOFA, GCS, CURB-65, Wells PE/DVT, NIHSS, Killip — show step-by-step calculation, score value, mortality risk, and recommended action tier.
+- DRUG INTERACTIONS: Systematically check every drug-drug pair and drug-disease interaction. Grade severity (mild/moderate/severe/contraindicated), explain mechanism, state clinical consequence, and give management (avoid/monitor/dose adjust).
+- LAB INTERPRETATION: For each value: reference range, patient value, abnormality grade, clinical significance in this patient's context, and diagnostic implication. Flag critically abnormal values requiring immediate action.
+- PEDIATRIC DOSING: Provide mg/kg dose, calculated total dose for patient weight, frequency, route, max dose, and any renal/hepatic adjustments. Reference BNF for Children / Harriet Lane.
+- EMERGENCY PROTOCOLS: ABCDE approach, triage priority, immediate interventions, resuscitation medications with exact doses, which bundles to activate (Sepsis-6, STEMI protocol, stroke pathway, DKA protocol, anaphylaxis etc.), escalation criteria to ICU.
+- ANTIBIOTIC STEWARDSHIP: Suspect organism, first-line drug (dose/frequency/route/duration), allergy alternative, empirical vs targeted, de-escalation strategy, when to narrow based on cultures.
+- PREGNANCY SAFETY: For each drug — FDA category (A/B/C/D/X), trimester-specific risks, breast milk transfer, neonatal effects, safer alternatives, dose adjustments in pregnancy.
+- REFERRAL DECISION: Referral yes/no with clear criteria, specialty, urgency (emergency/urgent/routine/elective), what to include in referral letter, pre-referral workup, escalation triggers.
+
+END-OF-CASE SIGNAL: When you provide a final diagnosis, treatment plan, management summary, or discharge advice — conclude your response with this exact line on its own:
+[CASE_COMPLETE]
+
 LANGUAGE: Primarily English medical terminology. Can use Hinglish for brief clarifications if needed.
 
 IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, evidence-based, and respectful of physician authority.`;
@@ -4826,11 +4839,15 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
 
       if (!reply) return res.status(503).json({ error: 'AI service unavailable. Please check API keys.' });
 
-      const redFlags = detectRedFlags(reply);
-      const patientUpdate = extractPatientUpdate(reply, message);
-      const redFlagDetected = redFlags.length > 0 || /\bRED FLAG\b|\bEMERGENCY\b|\bURGENT\b/i.test(reply);
+      // Strip [CASE_COMPLETE] marker from reply before sending to client
+      const suggestPDF = reply.includes('[CASE_COMPLETE]');
+      const cleanReply = reply.replace(/\[CASE_COMPLETE\]\s*/g, '').trim();
 
-      return res.json({ reply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null });
+      const redFlags = detectRedFlags(cleanReply);
+      const patientUpdate = extractPatientUpdate(cleanReply, message);
+      const redFlagDetected = redFlags.length > 0 || /\bRED FLAG\b|\bEMERGENCY\b|\bURGENT\b/i.test(cleanReply);
+
+      return res.json({ reply: cleanReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF });
 
     } catch (err: any) {
       console.error('[SDA] Error:', err);

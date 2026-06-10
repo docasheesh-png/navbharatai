@@ -11,6 +11,7 @@ import {
   ArrowRight, Gift, Columns, Palette
 } from 'lucide-react';
 import { cn } from './lib/utils';
+import { SDAChat } from './components/sda/SDAChat';
 import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
@@ -95,7 +96,7 @@ interface BrainConfig {
   keys: ApiKeys;
 }
 
-type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets';
+type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets';
 
 type SettingsScreen = 'root' | 'general' | 'modules' | 'secrets' | 'connections' | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell' | 'git' | 'logs' | 'report';
 
@@ -852,6 +853,7 @@ export default function App() {
     'style.css': 'body { margin: 0; font-family: system-ui; }'
   });
   const [activeFile, setActiveFile] = useState<string>('index.html');
+  const [previewHistory, setPreviewHistory] = useState<{ id: string; label: string; ts: Date; html: string }[]>([]);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isDeployed, setIsDeployed] = useState(false);
   const [deployUrl, setDeployUrl] = useState('');
@@ -1637,6 +1639,13 @@ You still maintain your Indian personality and friendly tone.`;
     }
 
     setGeneratedCode(finalHtml);
+
+    // Save to preview history (max 5)
+    setPreviewHistory(prev => {
+      const title = (finalHtml.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || 'App Preview').trim();
+      const entry = { id: Date.now().toString(), label: title, ts: new Date(), html: finalHtml };
+      return [entry, ...prev.filter(h => h.id !== entry.id)].slice(0, 5);
+    });
   };
 
   const handleFileChange = (path: string, content: string) => {
@@ -2078,13 +2087,28 @@ You still maintain your Indian personality and friendly tone.`;
     await handleSendForTab(tabId, overrideMessage);
   };
 
+  const filesToBase64 = (files: File[]): Promise<{ name: string; type: string; base64: string }[]> =>
+    Promise.all(files.map(file => new Promise<{ name: string; type: string; base64: string }>(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve({ name: file.name, type: file.type, base64: result.split(',')[1] });
+      };
+      reader.readAsDataURL(file);
+    })));
+
   const handleSendForPro = async (input?: string | File[]) => {
+    const fileList = Array.isArray(input) ? input : [];
     const messageToSend = typeof input === 'string' ? input : proInput.trim();
-    if (!messageToSend || isProLoading) return;
+    if (!messageToSend && fileList.length === 0 || isProLoading) return;
+
+    // Convert any attached files to base64 for AI vision
+    const fileAttachments = fileList.length > 0 ? await filesToBase64(fileList) : [];
+    const fileLabel = fileAttachments.length > 0 ? ` [📎 ${fileAttachments.map(f => f.name).join(', ')}]` : '';
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: messageToSend,
+      text: messageToSend + fileLabel,
       sender: 'user',
       timestamp: new Date(),
     };
@@ -2236,7 +2260,16 @@ You still maintain your Indian personality and friendly tone.`;
         const response = await fetch('/api/pro-chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: messageToSend, history: proMessages, mode: 'planning' }),
+          body: JSON.stringify({
+            message: messageToSend,
+            history: proMessages,
+            mode: 'planning',
+            ...(fileAttachments.length > 0 ? {
+              fileData: fileAttachments[0].base64,
+              fileType: fileAttachments[0].type,
+              fileName: fileAttachments[0].name,
+            } : {}),
+          }),
         });
         if (!response.ok) throw new Error(`API Error: ${response.status}`);
         const data = await response.json();
@@ -2264,6 +2297,7 @@ You still maintain your Indian personality and friendly tone.`;
     { id: 'home', label: 'Home', icon: Bot },
     { id: 'nbi_chat', label: 'NavBharatAi FREE', icon: MessageSquare },
     { id: 'nbi_pro_chat', label: 'navBharatAI-Pro', icon: Bot },
+    { id: 'sda_chat', label: 'Senior Doctor Assistant', icon: Activity, status: 'New' },
     { id: 'billing', label: 'Wallet & Billing', icon: Wallet, status: 'Active' },
     { id: 'history', label: 'history', icon: History },
     { id: 'files', label: 'Files', icon: FolderOpen },
@@ -4417,8 +4451,26 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                      <div className="flex items-center gap-2">
                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping shrink-0" />
                        <span>NAVBHARATAI-PRO</span>
+                       {mode === 'planning' && <span className="px-1.5 py-0.5 bg-amber-900/30 border border-amber-600/30 text-amber-400 rounded text-[8px]">PLANNING</span>}
+                       {mode === 'build' && <span className="px-1.5 py-0.5 bg-orange-900/30 border border-orange-600/30 text-orange-400 rounded text-[8px]">BUILD</span>}
                      </div>
-                     <span className="font-mono text-indigo-400">{sessions.find(s => s.id === currentSessionId)?.uci || ''}</span>
+                     <div className="flex items-center gap-2">
+                       {mode === 'planning' && proMessages.length > 2 && (
+                         <button
+                           onClick={() => {
+                             const content = proMessages.map(m => `${m.sender === 'user' ? '👤 Doctor' : '🤖 NavBharatAI'}: ${m.text.replace(/__SWITCH_TO_BUILD__|__URGENT_BUILD__/g, '').trim()}`).join('\n\n---\n\n');
+                             const blob = new Blob([`# NavBharatAI — Product Requirements Document\nGenerated: ${new Date().toLocaleString('en-IN')}\n\n${content}`], { type: 'text/plain' });
+                             const url = URL.createObjectURL(blob);
+                             const a = document.createElement('a'); a.href = url; a.download = 'navbharat-prd.txt';
+                             document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                           }}
+                           className="flex items-center gap-1 px-2 py-0.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded text-[8px] text-[#8b949e] hover:text-white transition-all"
+                         >
+                           ⬇ Export PRD
+                         </button>
+                       )}
+                       <span className="font-mono text-indigo-400">{sessions.find(s => s.id === currentSessionId)?.uci || ''}</span>
+                     </div>
                   </div>
                   <AIChat
                     messages={proMessages}
@@ -4459,7 +4511,13 @@ ${pending.map(p => `  - ${p}`).join('\n')}
             </div>
           )}
 
-          
+          {/* ── Senior Doctor Assistant ── */}
+          {activeView === 'sda_chat' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <SDAChat userId={user?.uid} />
+            </div>
+          )}
+
                     {activeView === 'about' && (
             <div className="flex-1 bg-[#0d1117] overflow-y-auto custom-scrollbar p-6 sm:p-12 relative">
                {isAdmin && (
@@ -6151,6 +6209,9 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 files={files}
                 onRun={() => updatePreview(files)}
                 generatedCode={generatedCode}
+                previewHistory={previewHistory}
+                onRestoreHistory={(html) => setGeneratedCode(html)}
+                onHtmlChange={(html) => setGeneratedCode(html)}
               />
             </div>
           )}

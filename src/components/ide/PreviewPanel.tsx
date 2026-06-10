@@ -3,18 +3,24 @@ import {
   Monitor, Smartphone, Tablet, RefreshCcw,
   ExternalLink, Maximize2, Shield, Globe,
   Search, ChevronLeft, ChevronRight, Download, Package,
-  Share2, Copy, Check, X, Wifi
+  Share2, Copy, Check, X, Wifi, Pen, Eye
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { VisualEditor } from './VisualEditor';
 
 interface PreviewPanelProps {
   files: Record<string, string>;
   onRun: () => void;
   generatedCode?: string;
+  previewHistory?: { id: string; label: string; ts: Date; html: string }[];
+  onRestoreHistory?: (html: string) => void;
+  onHtmlChange?: (html: string) => void;
 }
 
-export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, generatedCode }) => {
+export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, generatedCode, previewHistory = [], onRestoreHistory, onHtmlChange }) => {
   const [device, setDevice] = useState<'laptop' | 'mobile' | 'full'>('laptop');
+  const [visualMode, setVisualMode] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [url, setUrl] = useState('http://localhost:3000');
   const [containerRef, setContainerRef] = React.useState<HTMLDivElement | null>(null);
   const [viewRef, setViewRef] = React.useState<HTMLDivElement | null>(null);
@@ -170,6 +176,57 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           <ExternalLink className="w-4 h-4" />
         </button>
 
+        {/* Preview History */}
+        {previewHistory.length > 0 && (
+          <div className="relative ml-1">
+            <button
+              onClick={() => setShowHistory(p => !p)}
+              title="Preview history"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest bg-white/5 hover:bg-white/10 border border-white/10 text-[#484f58] hover:text-white transition-all"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">History ({previewHistory.length})</span>
+            </button>
+            {showHistory && (
+              <div className="absolute right-0 top-full mt-1 w-64 bg-[#161b22] border border-white/10 rounded-xl shadow-2xl shadow-black/50 z-50 overflow-hidden">
+                <p className="text-[9px] font-black uppercase tracking-widest text-[#484f58] px-3 py-2 border-b border-white/5">Preview History</p>
+                {previewHistory.map((h) => (
+                  <button
+                    key={h.id}
+                    onClick={() => { onRestoreHistory?.(h.html); setShowHistory(false); }}
+                    className="w-full flex items-start gap-2 px-3 py-2 hover:bg-white/5 transition-colors text-left border-b border-white/5 last:border-0"
+                  >
+                    <div className="w-8 h-6 rounded bg-[#0d1117] border border-white/10 shrink-0 overflow-hidden mt-0.5">
+                      <div className="w-full h-full bg-gradient-to-br from-indigo-900/40 to-purple-900/40" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[11px] text-white font-medium truncate">{h.label}</p>
+                      <p className="text-[9px] text-[#484f58]">{h.ts instanceof Date ? h.ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Visual Editor Toggle */}
+        {generatedCode && onHtmlChange && (
+          <button
+            onClick={() => setVisualMode(v => !v)}
+            title={visualMode ? 'Switch to Preview mode' : 'Switch to Visual Edit mode'}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border',
+              visualMode
+                ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-900/40'
+                : 'bg-indigo-600/10 text-indigo-400 border-indigo-500/20 hover:bg-indigo-600/30'
+            )}
+          >
+            {visualMode ? <Eye className="w-3.5 h-3.5" /> : <Pen className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">{visualMode ? 'Preview' : 'Edit'}</span>
+          </button>
+        )}
+
         {/* PWA Install Button */}
         <button
           onClick={openAsPwa}
@@ -203,45 +260,51 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
         </button>
       </div>
 
-      {/* Preview Viewport */}
-      <div 
-        ref={setContainerRef}
-        className="flex-1 bg-[#1e1e1e] p-4 flex justify-center items-center overflow-hidden relative"
-      >
-          <div 
-            style={{
-              width: device === 'full' ? `${targetWidth}px` : undefined,
-              height: device === 'full' ? `${targetHeight}px` : undefined,
-              transform: `scale(${displayScale})`,
-              transformOrigin: 'center center',
-              flexShrink: 0
-            }}
-            className={cn(
-            "h-full bg-white shadow-2xl transition-all duration-300 rounded-lg overflow-hidden border-8 border-black/20",
-            device === 'laptop' ? 'w-full max-w-[1280px]' : 
-            device === 'mobile' ? 'w-[375px]' : ''
-         )}>
-            {generatedCode ? (
-              <iframe
-                title="App Preview"
-                srcDoc={generatedCode}
-                className="w-full h-full bg-white border-none"
-                sandbox="allow-scripts allow-modals allow-same-origin"
-              />
-            ) : (
-              <div className="w-full h-full bg-[#fafafa] flex flex-col items-center justify-center p-8 text-center space-y-4 animate-pulse">
-                <Globe className="w-8.5 h-8.5 text-indigo-500 animate-spin" />
-                <p className="text-xs text-gray-500 font-mono tracking-wider">Syncing workspace code...</p>
-                <button 
-                  onClick={onRun}
-                  className="px-6 py-2 bg-indigo-600 text-white rounded-full text-xs font-black uppercase tracking-widest hover:bg-indigo-700 active:scale-95 transition-all shadow-xl shadow-indigo-600/20"
-                >
-                  Sync Changes
-                </button>
-              </div>
-            )}
-         </div>
-      </div>
+      {/* Preview Viewport or Visual Editor */}
+      {visualMode && generatedCode && onHtmlChange ? (
+        <div className="flex-1 overflow-hidden">
+          <VisualEditor html={generatedCode} onHtmlChange={onHtmlChange} />
+        </div>
+      ) : (
+        <div
+          ref={setContainerRef}
+          className="flex-1 bg-[#1e1e1e] p-4 flex justify-center items-center overflow-hidden relative"
+        >
+            <div
+              style={{
+                width: device === 'full' ? `${targetWidth}px` : undefined,
+                height: device === 'full' ? `${targetHeight}px` : undefined,
+                transform: `scale(${displayScale})`,
+                transformOrigin: 'center center',
+                flexShrink: 0
+              }}
+              className={cn(
+              "h-full bg-white shadow-2xl transition-all duration-300 rounded-lg overflow-hidden border-8 border-black/20",
+              device === 'laptop' ? 'w-full max-w-[1280px]' :
+              device === 'mobile' ? 'w-[375px]' : ''
+           )}>
+              {generatedCode ? (
+                <iframe
+                  title="App Preview"
+                  srcDoc={generatedCode}
+                  className="w-full h-full bg-white border-none"
+                  sandbox="allow-scripts allow-modals allow-same-origin"
+                />
+              ) : (
+                <div className="w-full h-full bg-[#fafafa] flex flex-col items-center justify-center p-8 text-center space-y-4 animate-pulse">
+                  <Globe className="w-8.5 h-8.5 text-indigo-500 animate-spin" />
+                  <p className="text-xs text-gray-500 font-mono tracking-wider">Syncing workspace code...</p>
+                  <button
+                    onClick={onRun}
+                    className="px-6 py-2 bg-indigo-600 text-white rounded-full text-xs font-black uppercase tracking-widest hover:bg-indigo-700 active:scale-95 transition-all shadow-xl shadow-indigo-600/20"
+                  >
+                    Sync Changes
+                  </button>
+                </div>
+              )}
+           </div>
+        </div>
+      )}
 
       {/* App Ready Banner */}
       {generatedCode && (

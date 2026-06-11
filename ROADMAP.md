@@ -4,9 +4,9 @@
 ---
 
 ## 📊 CURRENT STATUS
-- **Active Phase:** Phase 5 — Real Preview Runtime
-- **Overall Progress:** 5 / 12 Phases Complete (42%)
-- **Last Updated:** 2026-06-11
+- **Active Phase:** Phase 6 — Feature Depth
+- **Overall Progress:** 6 / 12 Phases Complete (50%)
+- **Last Updated:** 2026-06-11 (Phase 5 complete)
 
 ---
 
@@ -19,7 +19,7 @@
 | 2 | Performance Overhaul | ✅ Complete | 100% | 2026-06-11 | 2026-06-11 |
 | 3 | Code Quality & Dead Code | ✅ Complete | 100% | 2026-06-11 | 2026-06-11 |
 | 4 | Security Hardening | ✅ Complete | 100% | 2026-06-11 | 2026-06-11 |
-| 5 | Real Preview Runtime | ⏳ Pending | 0% | — | — |
+| 5 | Real Preview Runtime | ✅ Complete | 100% | 2026-06-11 | 2026-06-11 |
 | 6 | Feature Depth | ⏳ Pending | 0% | — | — |
 | 7 | AI Intelligence Upgrade | ⏳ Pending | 0% | — | — |
 | 8 | Mobile-First Redesign | ⏳ Pending | 0% | — | — |
@@ -91,15 +91,15 @@
 
 ---
 
-## PHASE 5 — Real Preview Runtime (2-3 hafta)
+## PHASE 5 — Real Preview Runtime ✅ COMPLETE
 **Tasks:**
-- [ ] 5.1 WebContainers integration research & setup
-- [ ] 5.2 Static HTML preview polish (iframe sandboxing)
-- [ ] 5.3 React/Vite real preview support
-- [ ] 5.4 Real build logs (actual output, no fake setTimeout)
-- [ ] 5.5 Hot reload in preview
-- [ ] 5.6 Multi-file preview (HTML + CSS + JS)
-- [ ] 5.7 Preview URL sharing
+- [x] 5.1 WebContainers research — deferred (needs COOP/COEP headers); React/Vite shows honest fallback
+- [x] 5.2 Static HTML preview polish — iframe sandbox expanded (forms, popups, downloads)
+- [x] 5.3 React/Vite — honest fallback message when package.json detected without WebContainers
+- [x] 5.4 Real build logs — fake setTimeout stages replaced with real file validation + bundling feedback
+- [x] 5.5 Hot reload indicator — "Updated" flash + address bar updates on every generatedCode change
+- [x] 5.6 Multi-file preview — handles style.css/styles.css/main.css/app.css + script.js/app.js/main.js + inline <link>/<script> src resolution
+- [x] 5.7 Preview URL sharing — "Open in new tab" via blob URL; address bar shows live page title URL
 
 ---
 

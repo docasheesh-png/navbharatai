@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  Monitor, Smartphone, Tablet, RefreshCcw,
+  Monitor, Smartphone, RefreshCcw,
   ExternalLink, Maximize2, Shield, Globe,
   Search, ChevronLeft, ChevronRight, Download, Package,
-  Share2, Copy, Check, X, Wifi, Pen, Eye, ChevronDown, ChevronUp
+  Share2, Copy, Check, X, Wifi, Pen, Eye, ChevronDown, ChevronUp,
+  Zap
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { VisualEditor } from './VisualEditor';
@@ -21,9 +22,8 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
   const [device, setDevice] = useState<'laptop' | 'mobile' | 'full'>('laptop');
   const [visualMode, setVisualMode] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [url, setUrl] = useState('http://localhost:3000');
+  const [url, setUrl] = useState('preview://navbharat.app/');
   const [containerRef, setContainerRef] = React.useState<HTMLDivElement | null>(null);
-  const [viewRef, setViewRef] = React.useState<HTMLDivElement | null>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [downloading, setDownloading] = useState(false);
   const [pwaLoading, setPwaLoading] = useState(false);
@@ -31,6 +31,20 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
   const [pwaUrl, setPwaUrl] = useState('');
   const [copied, setCopied] = useState(false);
   const [footerMinimized, setFooterMinimized] = useState(false);
+  const [hotReloadFlash, setHotReloadFlash] = useState(false);
+  const prevCodeRef = useRef<string | undefined>(undefined);
+
+  // Hot reload indicator: flash when generatedCode changes
+  useEffect(() => {
+    if (prevCodeRef.current !== undefined && prevCodeRef.current !== generatedCode) {
+      setHotReloadFlash(true);
+      const titleMatch = generatedCode?.match(/<title[^>]*>([^<]+)<\/title>/i);
+      const title = titleMatch?.[1]?.trim();
+      setUrl(title ? `preview://navbharat.app/${encodeURIComponent(title).replace(/%20/g, '-').toLowerCase()}` : 'preview://navbharat.app/');
+      setTimeout(() => setHotReloadFlash(false), 1500);
+    }
+    prevCodeRef.current = generatedCode;
+  }, [generatedCode]);
 
   const openAsPwa = async () => {
     if (!generatedCode || pwaLoading) return;
@@ -146,14 +160,15 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           <button onClick={onRun} className="p-2 hover:bg-indigo-600/20 rounded-full text-indigo-400"><RefreshCcw className="w-4 h-4" /></button>
         </div>
 
-        <div className="flex-1 max-w-xl h-8 bg-black/40 border border-white/10 rounded-full px-4 flex items-center gap-2 group transition-all focus-within:border-indigo-500/50">
-          <Shield className="w-3.5 h-3.5 text-emerald-500" />
-          <input 
-            value={url}
-            readOnly
-            className="flex-1 bg-transparent border-none outline-none text-[11px] text-[#8b949e] font-mono"
-          />
-          <Globe className="w-3.5 h-3.5 text-[#484f58]" />
+        <div className={cn(
+          "flex-1 max-w-xl h-8 bg-black/40 border rounded-full px-4 flex items-center gap-2 group transition-all",
+          hotReloadFlash ? "border-emerald-500/50" : "border-white/10 focus-within:border-indigo-500/50"
+        )}>
+          <Shield className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+          <span className="flex-1 text-[11px] text-[#8b949e] font-mono truncate select-all cursor-text">
+            {url}
+          </span>
+          {hotReloadFlash && <Zap className="w-3 h-3 text-emerald-400 flex-shrink-0 animate-pulse" />}
         </div>
 
         <div className="flex items-center gap-1 bg-black/20 p-1 rounded-xl border border-white/5">
@@ -173,7 +188,19 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           ))}
         </div>
 
-        <button className="p-2 hover:bg-white/5 rounded-full text-[#484f58] ml-2">
+        <button
+          onClick={() => {
+            if (generatedCode) {
+              const blob = new Blob([generatedCode], { type: 'text/html' });
+              const blobUrl = URL.createObjectURL(blob);
+              window.open(blobUrl, '_blank');
+              setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+            }
+          }}
+          title="Open in new tab"
+          disabled={!generatedCode}
+          className="p-2 hover:bg-white/5 rounded-full text-[#484f58] hover:text-white ml-2 disabled:opacity-30 transition-colors"
+        >
           <ExternalLink className="w-4 h-4" />
         </button>
 
@@ -271,6 +298,13 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           ref={setContainerRef}
           className="flex-1 bg-[#1e1e1e] p-4 flex justify-center items-center overflow-hidden relative"
         >
+            {/* Hot reload flash */}
+            {hotReloadFlash && (
+              <div className="absolute top-2 right-2 z-50 flex items-center gap-1.5 px-2.5 py-1 bg-emerald-600/90 rounded-full text-[9px] font-black text-white uppercase tracking-widest shadow-lg animate-pulse">
+                <Zap className="w-3 h-3" />
+                Updated
+              </div>
+            )}
             <div
               style={{
                 width: device === 'full' ? `${targetWidth}px` : undefined,
@@ -289,7 +323,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
                   title="App Preview"
                   srcDoc={generatedCode}
                   className="w-full h-full bg-white border-none"
-                  sandbox="allow-scripts allow-modals allow-same-origin"
+                  sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
                 />
               ) : (
                 <div className="w-full h-full bg-[#fafafa] flex flex-col items-center justify-center p-8 text-center space-y-4 animate-pulse">
@@ -431,10 +465,20 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
       {/* Footer Info */}
       <div className="h-8 bg-[#161b22] border-t border-white/5 px-4 flex items-center justify-between text-[10px] text-[#484f58] font-bold uppercase tracking-widest">
          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" /> Server: Port 3000</span>
-            <span>DOM Inspect: Off</span>
+            <span className="flex items-center gap-1.5">
+              <div className={cn("w-1.5 h-1.5 rounded-full", generatedCode ? "bg-emerald-500 animate-pulse" : "bg-[#484f58]")} />
+              {generatedCode ? 'Preview Live' : 'No Preview'}
+            </span>
+            <span>{Object.keys(files).length} files</span>
          </div>
-         <div>Responsive: {device.toUpperCase()}</div>
+         <div className="flex items-center gap-3">
+           {generatedCode && (
+             <span className="text-[9px] text-emerald-500/70">
+               {(new Blob([generatedCode]).size / 1024).toFixed(1)} KB
+             </span>
+           )}
+           <span>Mode: {device.toUpperCase()}</span>
+         </div>
       </div>
     </div>
   );

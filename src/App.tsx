@@ -278,69 +278,68 @@ export default function App() {
     setIsPreviewBuilding(true);
     setPreviewBuildError(null);
     setPreviewBuildStage('preparing');
-    
+
     const framework = detectFrameworkFromFiles(files);
     setDetectedFramework(framework);
-    
-    addLog(`Initiating real Preview runtime preparation for [${framework}]...`, 'info');
-    
+
+    addLog(`Building preview for [${framework}]...`, 'info');
+
     try {
-      // STEP 1: Preparing Preview Runtime
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      
-      // Validate project integrity
-      if (!files || Object.keys(files).length === 0) {
-        throw new Error("No source files found in the active workspace context to prepare runtime.");
+      // STAGE 1: Validate workspace (real, instant)
+      const fileCount = Object.keys(files).length;
+      if (fileCount === 0) {
+        throw new Error('No source files found. Ask NavBharat AI to build something first.');
       }
-      if (!files['package.json'] && framework !== 'Vanilla JS / Static HTML' && framework !== 'Static HTML Site') {
-         throw new Error("package.json missing. Cannot boot application runtime.");
+
+      const hasHtml = !!files['index.html'];
+      const hasPkg = !!files['package.json'];
+
+      if (!hasHtml && !hasPkg) {
+        throw new Error('No index.html or package.json found. Cannot build preview.');
       }
-      
-      // STEP 2: Installing Dependencies
+
+      addLog(`Found ${fileCount} source file(s): ${Object.keys(files).slice(0, 5).join(', ')}${fileCount > 5 ? '...' : ''}`, 'info');
+
+      // STAGE 2: Validate files (real, instant)
       setPreviewBuildStage('installing');
-      await new Promise((resolve, reject) => {
-        setTimeout(() => {
-          if (files['package.json']) {
-            try {
-              JSON.parse(files['package.json']);
-            } catch (err) {
-              reject(new Error("npm install failed. package.json contains invalid syntax or JSON parsing errors."));
-              return;
-            }
-          }
-          resolve(true);
-        }, 2000);
-      });
-      
-      // STEP 3: Building Application
+      if (hasPkg) {
+        try {
+          JSON.parse(files['package.json']);
+          addLog('package.json: valid JSON ✓', 'info');
+        } catch {
+          throw new Error('package.json has invalid JSON syntax. Fix it and try again.');
+        }
+      }
+
+      // For React/Vite: show honest note (WebContainers not yet available)
+      const isReactApp = hasPkg && (
+        files['package.json'].includes('"react"') ||
+        files['package.json'].includes('"vite"')
+      );
+      if (isReactApp && !hasHtml) {
+        addLog('React/Vite app detected — showing static HTML preview (full runtime coming in Phase 5.1)', 'info');
+      }
+
+      // STAGE 3: Bundle files (real work — CSS + JS injection)
       setPreviewBuildStage('building');
-      await new Promise((resolve, reject) => {
-        setTimeout(() => {
-          if (files['package.json'] && files['package.json'].includes('"build": "exit 1"')) {
-            reject(new Error("dependency error. 'npm run build' returned non-zero status exit code 1."));
-            return;
-          }
-          resolve(true);
-        }, 2000);
-      });
-      
-      // STEP 4: Starting Preview Server
+      updatePreview(files);
+      const bundledFiles = Object.keys(files).filter(f =>
+        f.endsWith('.css') || f.endsWith('.js') || f.endsWith('.html')
+      );
+      addLog(`Bundled ${bundledFiles.length} asset(s) into preview ✓`, 'info');
+
+      // STAGE 4: Ready
       setPreviewBuildStage('starting');
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      
-      // STEP 5: Ready
       setPreviewBuildStage('ready');
-      updatePreview(files); // update current preview static bundle code to display properly
-      
-      addLog(`Application successfully built and served at Virtual Port 3000!`, 'success');
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      
-      // Switch view to preview
+      addLog('Preview ready!', 'success');
+
+      // Short visual pause so user sees "ready" state
+      await new Promise((resolve) => setTimeout(resolve, 500));
       toggleTab('preview');
-      
+
     } catch (err: any) {
-      setPreviewBuildError(err.message || "runtime crashed during compilation");
-      addLog(`❌ Preview Build Failed: ${err.message}`, 'error');
+      setPreviewBuildError(err.message || 'Build failed.');
+      addLog(`Preview build failed: ${err.message}`, 'error');
     } finally {
       setIsPreviewBuilding(false);
     }
@@ -1594,12 +1593,10 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
 
   const updatePreview = (currentFiles: FileSystem) => {
     let html = currentFiles['index.html'] || '';
-    
+
     if (!html) {
-      // Fallback if no index.html
       html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body><div id="root"></div></body></html>';
     } else if (!html.toLowerCase().includes('viewport')) {
-      // Inject viewport for mobile friendliness
       if (html.includes('</head>')) {
         html = html.replace('</head>', '<meta name="viewport" content="width=device-width, initial-scale=1.0"></head>');
       } else if (html.includes('<head>')) {
@@ -1609,15 +1606,43 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
       }
     }
 
-    const css = currentFiles['style.css'] || '';
-    const js = currentFiles['script.js'] || '';
+    // Collect all CSS files (style.css, styles.css, main.css, app.css, index.css, etc.)
+    const CSS_NAMES = ['style.css', 'styles.css', 'main.css', 'app.css', 'index.css'];
+    const allCss = [
+      ...CSS_NAMES.map(n => currentFiles[n] || ''),
+      ...Object.entries(currentFiles)
+        .filter(([k]) => k.endsWith('.css') && !CSS_NAMES.includes(k))
+        .map(([, v]) => v as string),
+    ].filter(Boolean).join('\n');
 
-    // Robust Injection
+    // Collect all JS files (script.js, app.js, main.js, index.js, etc.)
+    const JS_NAMES = ['script.js', 'app.js', 'main.js', 'index.js'];
+    const allJs = [
+      ...JS_NAMES.map(n => currentFiles[n] || ''),
+      ...Object.entries(currentFiles)
+        .filter(([k]) => k.endsWith('.js') && !JS_NAMES.includes(k) && !k.includes('node_modules') && !k.includes('.min.js'))
+        .map(([, v]) => v as string),
+    ].filter(Boolean).join('\n');
+
     let finalHtml = html;
 
-    // Inject CSS
-    if (css) {
-      const styleTag = `<style id="nb-injected-css">${css}</style>`;
+    // Inline external CSS links that reference local files
+    finalHtml = finalHtml.replace(/<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["'][^>]*\/?>/gi, (match, href) => {
+      const filename = href.replace(/^\.\//, '').replace(/^\//, '');
+      const content = currentFiles[filename];
+      return content ? `<style data-src="${filename}">${content}</style>` : match;
+    });
+
+    // Inline external script src that reference local files
+    finalHtml = finalHtml.replace(/<script[^>]+src=["']([^"']+)["'][^>]*><\/script>/gi, (match, src) => {
+      const filename = src.replace(/^\.\//, '').replace(/^\//, '');
+      const content = currentFiles[filename];
+      return content ? `<script data-src="${filename}">${content}<\/script>` : match;
+    });
+
+    // Inject any remaining CSS not already inlined
+    if (allCss) {
+      const styleTag = `<style id="nb-injected-css">${allCss}</style>`;
       if (finalHtml.includes('</head>')) {
         finalHtml = finalHtml.replace('</head>', `${styleTag}</head>`);
       } else if (finalHtml.includes('<body>')) {
@@ -1627,9 +1652,9 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
       }
     }
 
-    // Inject JS
-    if (js) {
-      const scriptTag = `<script id="nb-injected-js">${js}<\/script>`;
+    // Inject any remaining JS not already inlined
+    if (allJs) {
+      const scriptTag = `<script id="nb-injected-js">${allJs}<\/script>`;
       if (finalHtml.includes('</body>')) {
         finalHtml = finalHtml.replace('</body>', `${scriptTag}</body>`);
       } else {
@@ -2303,62 +2328,18 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
 
   // Task 2.7 — memoized: static array, rebuilt only once
   const menuItems = useMemo(() => [
-    { id: 'home', label: 'Home', icon: Bot },
-    { id: 'nbi_chat', label: 'NavBharatAi FREE', icon: MessageSquare },
-    { id: 'nbi_pro_chat', label: 'navBharatAI-Pro', icon: Bot },
-    { id: 'sda_chat', label: 'Senior Doctor Assistant', icon: Activity, status: 'New' },
-    { id: 'billing', label: 'Wallet & Billing', icon: Wallet, status: 'Active' },
-    { id: 'history', label: 'history', icon: History },
-    { id: 'files', label: 'Files', icon: FolderOpen },
-    { id: 'preview', label: 'preview', icon: Monitor },
-    { id: 'git', label: 'GIT', icon: GitBranch, status: 'Beta' },
-    { id: 'studio', label: 'Code Studio', icon: Smartphone },
-    { id: 'templates', label: 'templates', icon: LayoutDashboard },
-    { id: 'report', label: 'report a problem', icon: AlertCircle, status: 'Beta' },
-    { id: 'entertainment', label: 'other', icon: Gamepad2, status: 'Beta' },
-    { id: 'donation', label: 'Donate', icon: CreditCard },
-    { id: 'testing', label: 'Test Runner', icon: TestTube, status: 'New' },
-    { id: 'api', label: 'API Tester', icon: Globe, status: 'New' },
-    { id: 'diff', label: 'Diff Viewer', icon: GitMerge, status: 'New' },
-    { id: 'database', label: 'Database', icon: Database, status: 'New' },
-    { id: 'voice', label: 'Voice to App', icon: Mic, status: 'New' },
-    { id: 'botbuilder', label: 'Bot Builder', icon: MessageSquare, status: 'New' },
-    { id: 'cost', label: 'Cost Estimator', icon: BarChart2, status: 'New' },
-    { id: 'screenshot', label: 'Screenshot to Code', icon: Camera, status: 'New' },
-    { id: 'multipages', label: 'Multi-Page Builder', icon: Layout, status: 'New' },
-    { id: 'analytics', label: 'Analytics', icon: TrendingUp, status: 'New' },
-    { id: 'debugger', label: 'AI Debugger', icon: Bug, status: 'New' },
-    { id: 'performance', label: 'Performance', icon: Gauge, status: 'New' },
-    { id: 'components', label: 'Components', icon: Puzzle, status: 'New' },
-    { id: 'seo', label: 'SEO Optimizer', icon: SearchIcon, status: 'New' },
-    { id: 'apk', label: 'APK Builder', icon: Smartphone, status: 'New' },
-    { id: 'figma', label: 'Figma Import', icon: Figma, status: 'New' },
-    { id: 'domain', label: 'Custom Domain', icon: GlobeIcon, status: 'New' },
-    { id: 'team', label: 'Team', icon: Users2, status: 'New' },
-    { id: 'pwa', label: 'PWA Notifications', icon: Bell, status: 'New' },
-    { id: 'minifier', label: 'Code Minifier', icon: Minimize2, status: 'New' },
-    { id: 'darkmode', label: 'Dark Mode Gen', icon: Moon, status: 'New' },
-    { id: 'monetize', label: 'Monetize', icon: RupeeIcon, status: 'New' },
-    { id: 'imagegen', label: 'AI Image Gen', icon: Wand2, status: 'New' },
-    { id: 'versioning', label: 'Code Versioning', icon: GitBranch, status: 'New' },
-    { id: 'apimarket', label: 'API Marketplace', icon: Package, status: 'New' },
-    { id: 'appstore', label: 'App Store', icon: Rocket, status: 'New' },
-    { id: 'collab', label: 'Live Collab', icon: Users2, status: 'New' },
-    { id: 'aitesting', label: 'AI Testing', icon: TestTube, status: 'New' },
-    { id: 'localization', label: 'Localization', icon: Languages, status: 'New' },
-    { id: 'codereview', label: 'AI Code Review', icon: Code, status: 'New' },
-    { id: 'dbstudio', label: 'DB Studio', icon: Database, status: 'New' },
-    { id: 'cicd', label: 'CI/CD Pipeline', icon: Rocket, status: 'New' },
-    { id: 'plugins', label: 'Plugin System', icon: Puzzle, status: 'New' },
-    { id: 'whitelabel', label: 'Whitelabel', icon: Palette, status: 'New' },
-    { id: 'projectmgr', label: 'Project Manager', icon: Kanban, status: 'New' },
-    { id: 'cloudeploy', label: 'Multi-Cloud Deploy', icon: CloudUpload, status: 'New' },
-    { id: 'designsys', label: 'Design System', icon: LayoutTemplate, status: 'New' },
-    { id: 'healthmon', label: 'Health Monitor', icon: HeartPulse, status: 'New' },
-    { id: 'settings', label: 'Settings', icon: Settings },
-    { id: 'admin', label: 'Admin Login', icon: Lock },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], []); // static list — no deps
+    { id: 'home',         label: 'Home',              icon: Bot },
+    { id: 'nbi_chat',     label: 'NavBharatAI FREE',  icon: MessageSquare },
+    { id: 'nbi_pro_chat', label: 'NavBharatAI Pro',   icon: Bot },
+    { id: 'preview',      label: 'Preview',           icon: Monitor },
+    { id: 'files',        label: 'Files',             icon: FolderOpen },
+    { id: 'history',      label: 'History',           icon: History },
+    { id: 'studio',       label: 'Code Studio',       icon: Smartphone },
+    { id: 'billing',      label: 'Wallet & Billing',  icon: Wallet },
+    { id: 'sda_chat',     label: 'Doctor AI',         icon: Activity, status: 'New' },
+    { id: 'donation',     label: 'Donate',            icon: Heart },
+    { id: 'settings',     label: 'Settings',          icon: Settings },
+  ], []);
 
   // --- UNIVERSAL CHAT CONTINUATION SYSTEM (UCI) HELPERS & IMPLEMENTATION ---
   
@@ -3725,193 +3706,143 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 <div className="max-w-xl mx-auto p-4 sm:p-6 pb-20">
                   <AnimatePresence mode="wait">
                     {settingsScreen === 'root' && (
-                      <motion.div 
+                      <motion.div
                         key="root"
                         initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.95 }}
-                        className="space-y-3"
+                        className="space-y-4"
                       >
-                      <div className="bg-[#161b22] border border-white/5 rounded-2xl p-6">
-                        <div className="flex items-center gap-3 mb-4">
-                            <Monitor className="w-5 h-5 text-indigo-400" />
-                            <h4 className="text-sm font-bold text-white">View Mode</h4>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                            {['auto', 'mobile', 'desktop'].map(mode => (
-                                <button 
-                                    key={mode}
-                                    onClick={() => setDeviceMode(mode as any)}
-                                    className={`py-2 rounded-xl text-xs font-bold transition-all border ${deviceMode === mode ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20'}`}
-                                >
-                                    {mode.charAt(0).toUpperCase() + mode.slice(1)}
-                                </button>
+                        {/* View Mode */}
+                        <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
+                          <div className="flex items-center gap-3 mb-3">
+                            <Monitor className="w-4 h-4 text-indigo-400" />
+                            <h4 className="text-xs font-bold text-white uppercase tracking-widest">View Mode</h4>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {['auto', 'mobile', 'desktop'].map(m => (
+                              <button key={m} onClick={() => setDeviceMode(m as any)}
+                                className={`py-2 rounded-xl text-xs font-bold transition-all border ${deviceMode === m ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20'}`}>
+                                {m.charAt(0).toUpperCase() + m.slice(1)}
+                              </button>
                             ))}
+                          </div>
                         </div>
-                      </div>
+                        {/* 6 grouped sections */}
                         {[
-                          { id: 'general', label: 'General', sub: 'Profile, Identity, Theme', icon: LayoutDashboard, color: 'text-blue-400' },
-                          { id: 'secrets', label: 'Secrets & API Keys', sub: 'Secrets for your Baby Apps', icon: Lock, color: 'text-emerald-400' },
-                          { id: 'connections', label: 'Connections', sub: 'GitHub, Firebase, Socials', icon: GitFork, color: 'text-pink-400' },
-                          { id: 'sharing', label: 'Share & Publish', sub: 'Collaborate with the world', icon: Globe, color: 'text-indigo-400', status: 'Coming Soon' },
-                          { id: 'deploy', label: 'Donate Now', sub: 'Support the Navbharat Project', icon: Heart, color: 'text-rose-400' },
-                          { id: 'shell', label: 'Terminal', sub: 'Advanced debug tools', icon: Terminal, color: 'text-indigo-500', status: 'Beta' },
-                          { id: 'git', label: 'Git', sub: 'Version control', icon: GitBranch, color: 'text-emerald-500', status: 'Beta' },
-                          { id: 'logs', label: 'Logs', sub: 'System activity', icon: Activity, color: 'text-rose-500', status: 'Beta' },
-                          { id: 'testing', label: 'Test Runner', sub: 'Run tests on generated apps', icon: TestTube, color: 'text-amber-400', status: 'New' },
-                          { id: 'api', label: 'API Tester', sub: 'Test HTTP endpoints', icon: Globe, color: 'text-cyan-400', status: 'New' },
-                          { id: 'diff', label: 'Diff Viewer', sub: 'Side-by-side code diff', icon: GitMerge, color: 'text-violet-400', status: 'New' },
-                          { id: 'database', label: 'Database', sub: 'Browse Firestore data', icon: Database, color: 'text-indigo-400', status: 'New' },
-                          { id: 'voice', label: 'Voice to App', sub: 'Speak your app into existence', icon: Mic, color: 'text-rose-400', status: 'New' },
-                          { id: 'botbuilder', label: 'Bot Builder', sub: 'WhatsApp / Telegram flows', icon: MessageSquare, color: 'text-green-400', status: 'New' },
-                          { id: 'cost', label: 'Cost Estimator', sub: 'Compare cloud hosting costs', icon: BarChart2, color: 'text-amber-400', status: 'New' },
-                          { id: 'screenshot', label: 'Screenshot to Code', sub: 'Screenshot se app banao', icon: Camera, color: 'text-pink-400', status: 'New' },
-                          { id: 'multipages', label: 'Multi-Page Builder', sub: 'Full website with navigation', icon: Layout, color: 'text-cyan-400', status: 'New' },
-                          { id: 'analytics', label: 'Analytics', sub: 'Workspace usage insights', icon: TrendingUp, color: 'text-emerald-400', status: 'New' },
-                          { id: 'debugger', label: 'AI Debugger', sub: 'Error paste karo, fix pao', icon: Bug, color: 'text-red-400', status: 'New' },
-                          { id: 'performance', label: 'Performance', sub: 'Lighthouse-style app scoring', icon: Gauge, color: 'text-blue-400', status: 'New' },
-                          { id: 'components', label: 'Component Library', sub: 'Ready-made UI blocks', icon: Puzzle, color: 'text-violet-400', status: 'New' },
-                          { id: 'seo', label: 'SEO Optimizer', sub: 'Meta tags, sitemap, OG tags', icon: SearchIcon, color: 'text-teal-400', status: 'New' },
-                          { id: 'apk', label: 'APK Builder', sub: 'Android app banao', icon: Smartphone, color: 'text-green-400', status: 'New' },
-                          { id: 'figma', label: 'Figma Import', sub: 'Design se code banao', icon: Figma, color: 'text-pink-400', status: 'New' },
-                          { id: 'domain', label: 'Custom Domain', sub: 'Apna domain connect karo', icon: GlobeIcon, color: 'text-blue-400', status: 'New' },
-                          { id: 'team', label: 'Team Collaboration', sub: 'Members invite karo', icon: Users2, color: 'text-amber-400', status: 'New' },
-                          { id: 'pwa', label: 'PWA Notifications', sub: 'Push alerts add karo', icon: Bell, color: 'text-rose-400', status: 'New' },
-                          { id: 'minifier', label: 'Code Minifier', sub: 'Code size kam karo', icon: Minimize2, color: 'text-cyan-400', status: 'New' },
-                          { id: 'darkmode', label: 'Dark Mode Generator', sub: 'Auto dark theme banao', icon: Moon, color: 'text-indigo-400', status: 'New' },
-                          { id: 'monetize', label: 'Monetization', sub: 'Razorpay, UPI, AdSense', icon: RupeeIcon, color: 'text-emerald-400', status: 'New' },
-                          { id: 'imagegen', label: 'AI Image Generator', sub: 'Logos, banners, icons banao', icon: Wand2, color: 'text-violet-400', status: 'New' },
-                          { id: 'versioning', label: 'Code Versioning', sub: 'Snapshot & restore history', icon: GitBranch, color: 'text-emerald-400', status: 'New' },
-                          { id: 'apimarket', label: 'API Marketplace', sub: 'One-click API integrations', icon: Package, color: 'text-blue-400', status: 'New' },
-                          { id: 'appstore', label: 'App Store Publisher', sub: 'Google Play & App Store ASO', icon: Rocket, color: 'text-rose-400', status: 'New' },
-                          { id: 'collab', label: 'Live Collaboration', sub: 'Real-time team co-editing', icon: Users2, color: 'text-blue-400', status: 'New' },
-                          { id: 'aitesting', label: 'AI Testing Suite', sub: 'Auto-generate test cases', icon: TestTube, color: 'text-emerald-400', status: 'New' },
-                          { id: 'localization', label: 'Localization', sub: '18 languages — auto translate', icon: Languages, color: 'text-amber-400', status: 'New' },
-                          { id: 'codereview', label: 'AI Code Review', sub: 'Bugs, security, performance', icon: Code, color: 'text-red-400', status: 'New' },
-                          { id: 'dbstudio', label: 'DB Studio', sub: 'Visual Firestore manager', icon: Database, color: 'text-cyan-400', status: 'New' },
-                          { id: 'cicd', label: 'CI/CD Pipeline', sub: 'Auto deploy pipelines', icon: Rocket, color: 'text-orange-400', status: 'New' },
-                          { id: 'plugins', label: 'Plugin System', sub: '16 one-click integrations', icon: Puzzle, color: 'text-violet-400', status: 'New' },
-                          { id: 'whitelabel', label: 'Whitelabel Branding', sub: 'Custom brand & white-label', icon: Palette, color: 'text-pink-400', status: 'New' },
-                          { id: 'projectmgr', label: 'AI Project Manager', sub: 'Kanban + AI-generated plans', icon: Kanban, color: 'text-indigo-400', status: 'New' },
-                          { id: 'cloudeploy', label: 'Multi-Cloud Deploy', sub: 'Vercel, Netlify, GCP & more', icon: CloudUpload, color: 'text-blue-400', status: 'New' },
-                          { id: 'designsys', label: 'Design System', sub: 'Tokens, components, style guide', icon: LayoutTemplate, color: 'text-purple-400', status: 'New' },
-                          { id: 'healthmon', label: 'Health Monitor', sub: 'Real-time app monitoring', icon: HeartPulse, color: 'text-red-400', status: 'New' },
-                          { id: 'access', label: 'Permissions', sub: 'Team Access & Security', icon: ShieldCheck, color: 'text-purple-400', status: 'Coming Soon' },
-                        ].map(item => (
-                          <button
-                            key={item.id}
-                            onClick={() => {
-                                if (item.id === 'git') {
-                                    toggleTab('git');
-                                } else if (item.id === 'shell') {
-                                    toggleTab('shell');
-                                } else if (item.id === 'testing') {
-                                    toggleTab('testing');
-                                } else if (item.id === 'api') {
-                                    toggleTab('api');
-                                } else if (item.id === 'diff') {
-                                    toggleTab('diff');
-                                } else if (item.id === 'database') {
-                                    toggleTab('database');
-                                } else if (item.id === 'voice') {
-                                    toggleTab('voice');
-                                } else if (item.id === 'botbuilder') {
-                                    toggleTab('botbuilder');
-                                } else if (item.id === 'cost') {
-                                    toggleTab('cost');
-                                } else if (item.id === 'screenshot') {
-                                    toggleTab('screenshot');
-                                } else if (item.id === 'multipages') {
-                                    toggleTab('multipages');
-                                } else if (item.id === 'analytics') {
-                                    toggleTab('analytics');
-                                } else if (item.id === 'debugger') {
-                                    toggleTab('debugger');
-                                } else if (item.id === 'performance') {
-                                    toggleTab('performance');
-                                } else if (item.id === 'components') {
-                                    toggleTab('components');
-                                } else if (item.id === 'seo') {
-                                    toggleTab('seo');
-                                } else if (item.id === 'apk') {
-                                    toggleTab('apk');
-                                } else if (item.id === 'figma') {
-                                    toggleTab('figma');
-                                } else if (item.id === 'domain') {
-                                    toggleTab('domain');
-                                } else if (item.id === 'team') {
-                                    toggleTab('team');
-                                } else if (item.id === 'pwa') {
-                                    toggleTab('pwa');
-                                } else if (item.id === 'minifier') {
-                                    toggleTab('minifier');
-                                } else if (item.id === 'darkmode') {
-                                    toggleTab('darkmode');
-                                } else if (item.id === 'monetize') {
-                                    toggleTab('monetize');
-                                } else if (item.id === 'imagegen') {
-                                    toggleTab('imagegen');
-                                } else if (item.id === 'versioning') {
-                                    toggleTab('versioning');
-                                } else if (item.id === 'apimarket') {
-                                    toggleTab('apimarket');
-                                } else if (item.id === 'appstore') {
-                                    toggleTab('appstore');
-                                } else if (item.id === 'collab') {
-                                    toggleTab('collab');
-                                } else if (item.id === 'aitesting') {
-                                    toggleTab('aitesting');
-                                } else if (item.id === 'localization') {
-                                    toggleTab('localization');
-                                } else if (item.id === 'codereview') {
-                                    toggleTab('codereview');
-                                } else if (item.id === 'dbstudio') {
-                                    toggleTab('dbstudio');
-                                } else if (item.id === 'cicd') {
-                                    toggleTab('cicd');
-                                } else if (item.id === 'plugins') {
-                                    toggleTab('plugins');
-                                } else if (item.id === 'whitelabel') {
-                                    toggleTab('whitelabel');
-                                } else if (item.id === 'projectmgr') {
-                                    toggleTab('projectmgr');
-                                } else if (item.id === 'cloudeploy') {
-                                    toggleTab('cloudeploy');
-                                } else if (item.id === 'designsys') {
-                                    toggleTab('designsys');
-                                } else if (item.id === 'healthmon') {
-                                    toggleTab('healthmon');
-                                } else {
-                                    setSettingsScreen(item.id as any);
-                                }
-                            }}
-                            className="w-full flex items-center gap-4 p-5 bg-[#161b22] border border-white/5 rounded-[2rem] hover:border-indigo-500/30 transition-all group active:scale-[0.98]"
-                          >
-                            <div className={`w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center ${item.color} group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-inner`}>
-                              <item.icon className="w-5.5 h-5.5" />
+                          {
+                            title: 'App Settings',
+                            color: 'text-blue-400',
+                            icon: Settings,
+                            items: [
+                              { id: 'general', label: 'General', icon: LayoutDashboard },
+                              { id: 'secrets', label: 'Secrets & Keys', icon: Lock },
+                              { id: 'connections', label: 'Connections', icon: GitFork },
+                              { id: 'shell', label: 'Terminal', icon: Terminal },
+                              { id: 'logs', label: 'Logs', icon: Activity },
+                              { id: 'git', label: 'Git', icon: GitBranch },
+                            ],
+                          },
+                          {
+                            title: 'AI Tools',
+                            color: 'text-violet-400',
+                            icon: Bot,
+                            items: [
+                              { id: 'sda_chat', label: 'Doctor AI', icon: Activity, tab: true },
+                              { id: 'voice', label: 'Voice to App', icon: Mic, tab: true },
+                              { id: 'botbuilder', label: 'Bot Builder', icon: MessageSquare, tab: true },
+                              { id: 'imagegen', label: 'AI Image Gen', icon: Wand2, tab: true },
+                              { id: 'debugger', label: 'AI Debugger', icon: Bug, tab: true },
+                              { id: 'codereview', label: 'Code Review', icon: Code, tab: true },
+                            ],
+                          },
+                          {
+                            title: 'Developer Tools',
+                            color: 'text-emerald-400',
+                            icon: Code,
+                            items: [
+                              { id: 'testing', label: 'Test Runner', icon: TestTube, tab: true },
+                              { id: 'api', label: 'API Tester', icon: Globe, tab: true },
+                              { id: 'diff', label: 'Diff Viewer', icon: GitMerge, tab: true },
+                              { id: 'versioning', label: 'Versioning', icon: GitBranch, tab: true },
+                              { id: 'performance', label: 'Performance', icon: Gauge, tab: true },
+                              { id: 'minifier', label: 'Minifier', icon: Minimize2, tab: true },
+                            ],
+                          },
+                          {
+                            title: 'Design & Build',
+                            color: 'text-pink-400',
+                            icon: Palette,
+                            items: [
+                              { id: 'screenshot', label: 'Screenshot→Code', icon: Camera, tab: true },
+                              { id: 'multipages', label: 'Multi-Page', icon: Layout, tab: true },
+                              { id: 'components', label: 'Components', icon: Puzzle, tab: true },
+                              { id: 'designsys', label: 'Design System', icon: LayoutTemplate, tab: true },
+                              { id: 'darkmode', label: 'Dark Mode Gen', icon: Moon, tab: true },
+                              { id: 'figma', label: 'Figma Import', icon: Figma, tab: true },
+                            ],
+                          },
+                          {
+                            title: 'Publish & Deploy',
+                            color: 'text-cyan-400',
+                            icon: Rocket,
+                            items: [
+                              { id: 'apk', label: 'APK Builder', icon: Smartphone, tab: true },
+                              { id: 'cicd', label: 'CI/CD Pipeline', icon: Rocket, tab: true },
+                              { id: 'cloudeploy', label: 'Multi-Cloud', icon: CloudUpload, tab: true },
+                              { id: 'domain', label: 'Custom Domain', icon: GlobeIcon, tab: true },
+                              { id: 'seo', label: 'SEO Optimizer', icon: SearchIcon, tab: true },
+                              { id: 'appstore', label: 'App Store', icon: Package, tab: true },
+                            ],
+                          },
+                          {
+                            title: 'Monetization & Team',
+                            color: 'text-amber-400',
+                            icon: IndianRupee,
+                            items: [
+                              { id: 'monetize', label: 'Monetize', icon: IndianRupee, tab: true },
+                              { id: 'team', label: 'Team', icon: Users2, tab: true },
+                              { id: 'collab', label: 'Live Collab', icon: Users2, tab: true },
+                              { id: 'whitelabel', label: 'Whitelabel', icon: Palette, tab: true },
+                              { id: 'analytics', label: 'Analytics', icon: TrendingUp, tab: true },
+                              { id: 'database', label: 'Database', icon: Database, tab: true },
+                            ],
+                          },
+                        ].map(group => (
+                          <div key={group.title} className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
+                            <div className="flex items-center gap-2 mb-3">
+                              <group.icon className={`w-3.5 h-3.5 ${group.color}`} />
+                              <span className={`text-[10px] font-black uppercase tracking-widest ${group.color}`}>{group.title}</span>
                             </div>
-                            <div className="flex-1 text-left">
-                              <div className="flex items-center gap-2">
-                                <div className="text-[13px] font-black text-white tracking-tight uppercase">{item.label}</div>
-                                {(item as any).status && (
-                                  <span className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest border ${(item as any).status === 'Beta' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
-                                    {(item as any).status}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[10px] text-[#484f58] font-black uppercase tracking-widest mt-0.5">{item.sub}</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {group.items.map(item => (
+                                <button
+                                  key={item.id}
+                                  onClick={() => (item as any).tab ? toggleTab(item.id as any) : setSettingsScreen(item.id as any)}
+                                  className="flex items-center gap-2 p-2.5 bg-[#0d1117] border border-white/5 rounded-xl hover:border-indigo-500/30 hover:bg-indigo-600/10 transition-all group text-left"
+                                >
+                                  <item.icon className="w-3.5 h-3.5 text-[#484f58] group-hover:text-indigo-400 transition-colors flex-shrink-0" />
+                                  <span className="text-[10px] font-bold text-[#8b949e] group-hover:text-white transition-colors truncate">{item.label}</span>
+                                </button>
+                              ))}
                             </div>
-                            <div className="w-8 h-8 bg-white/5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
-                              <ChevronRight className="w-4 h-4 text-white" />
-                            </div>
-                          </button>
+                          </div>
                         ))}
-                        
-                        <div className="mt-10 pt-10 border-t border-white/5 flex flex-col items-center">
-                          <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-4">
+
+                        {/* Admin + Footer */}
+                        <button
+                          onClick={() => setSettingsScreen('admin' as any)}
+                          className="w-full flex items-center gap-3 p-3 bg-[#161b22] border border-white/5 rounded-xl hover:border-red-500/20 transition-all group"
+                        >
+                          <Lock className="w-4 h-4 text-[#484f58] group-hover:text-red-400 transition-colors" />
+                          <span className="text-xs font-bold text-[#8b949e] group-hover:text-white transition-colors">Admin Login</span>
+                        </button>
+
+                        <div className="pt-4 border-t border-white/5 flex flex-col items-center">
+                          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-3">
                             <span className="text-white font-black text-xs">NB</span>
                           </div>
-                          <p className="text-[10px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v4.0.0</p>
+                          <p className="text-[9px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v5.0.0</p>
                         </div>
                       </motion.div>
                     )}
@@ -7438,8 +7369,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <h4 className="text-white text-sm font-black uppercase tracking-wider font-sans">👁️ Compiling Live Preview</h4>
-                    <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30">Simulated</span>
+                    <h4 className="text-white text-sm font-black uppercase tracking-wider font-sans">Building Preview</h4>
                   </div>
                   <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest font-mono font-black">
                     Runtime: <span className="text-slate-200 font-extrabold">{detectedFramework}</span>
@@ -7449,10 +7379,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
 
               <div className="space-y-2.5">
                 {[
-                  { key: 'preparing', label: 'Preparing native preview runtime environment' },
-                  { key: 'installing', label: 'Installing packages / resolving dependencies' },
-                  { key: 'building', label: 'Bundling development scripts & module assets' },
-                  { key: 'starting', label: 'Launching hot virtual container ingress on Port 3000' },
+                  { key: 'preparing', label: 'Validating workspace files' },
+                  { key: 'installing', label: 'Checking dependencies & file structure' },
+                  { key: 'building', label: 'Bundling HTML + CSS + JS assets' },
+                  { key: 'starting', label: 'Launching preview' },
                 ].map((step, idx) => {
                   const stages = ['preparing', 'installing', 'building', 'starting', 'ready'];
                   const stageIdx = stages.indexOf(previewBuildStage);
@@ -7492,7 +7422,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
               </div>
 
               <div className="text-center font-mono text-[9px] text-[#484f58] uppercase font-bold tracking-widest leading-none pt-1">
-                Virtualizing Sandbox Container logs • Powered by SRE Orchestration
+                NavBharat Preview Runtime • Static HTML + CSS + JS
               </div>
             </motion.div>
           </div>

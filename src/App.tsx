@@ -6459,7 +6459,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {/* Phase 6 — SEO Optimizer */}
           {activeView === 'seo' && (
             <div className="flex-1 h-full overflow-hidden">
-              <SEOOptimizer generatedCode={generatedCode} appName="NavBharatAI App" />
+              <SEOOptimizer generatedCode={generatedCode} appName="NavBharatAI App" onCodeUpdate={(c) => setGeneratedCode(c)} />
             </div>
           )}
 
@@ -6617,13 +6617,13 @@ ${pending.map(p => `  - ${p}`).join('\n')}
 
           {activeView === 'cloudeploy' && (
             <div className="flex-1 h-full overflow-hidden">
-              <MultiCloudDeploy />
+              <MultiCloudDeploy generatedCode={generatedCode} />
             </div>
           )}
 
           {activeView === 'designsys' && (
             <div className="flex-1 h-full overflow-hidden">
-              <DesignSystem />
+              <DesignSystem generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
             </div>
           )}
 

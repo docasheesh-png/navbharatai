@@ -20,6 +20,7 @@ import {
 export interface SEOOptimizerProps {
   generatedCode?: string;
   appName?: string;
+  onCodeUpdate?: (html: string) => void;
 }
 
 interface MetaFormData {
@@ -715,7 +716,7 @@ const ScoreSidebar: React.FC<{ meta: MetaFormData; og: OGFormData; pages: Sitema
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, appName }) => {
+export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, appName, onCodeUpdate }) => {
   const [tab, setTab] = useState(0);
   const { copied, copy } = useCopy();
 
@@ -797,6 +798,55 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, appNa
             ))}
           </div>
         </div>
+
+        {/* Apply to App button */}
+        {onCodeUpdate && generatedCode && (
+          <div className="flex-shrink-0 px-5 py-2 border-b border-white/10 bg-blue-500/5">
+            <button
+              onClick={() => {
+                // Build the full head injection string
+                const titleFull = meta.siteName
+                  ? `${meta.siteName}${meta.pageTitle ? ` | ${meta.pageTitle}` : ''}`
+                  : meta.pageTitle;
+                const headTags = [
+                  titleFull ? `<title>${titleFull}</title>` : '',
+                  meta.pageTitle ? `<meta name="title" content="${meta.pageTitle}" />` : '',
+                  meta.description ? `<meta name="description" content="${meta.description}" />` : '',
+                  meta.keywords ? `<meta name="keywords" content="${meta.keywords}" />` : '',
+                  `<meta name="robots" content="${meta.robots}" />`,
+                  meta.author ? `<meta name="author" content="${meta.author}" />` : '',
+                  meta.canonicalUrl ? `<link rel="canonical" href="${meta.canonicalUrl}" />` : '',
+                  og.ogTitle || meta.pageTitle ? `<meta property="og:title" content="${og.ogTitle || meta.pageTitle}" />` : '',
+                  og.ogDescription || meta.description ? `<meta property="og:description" content="${og.ogDescription || meta.description}" />` : '',
+                  og.ogImage ? `<meta property="og:image" content="${og.ogImage}" />` : '',
+                  og.ogType ? `<meta property="og:type" content="${og.ogType}" />` : '',
+                  og.ogSiteName ? `<meta property="og:site_name" content="${og.ogSiteName}" />` : '',
+                  og.twitterCard ? `<meta property="twitter:card" content="${og.twitterCard}" />` : '',
+                  og.twitterHandle ? `<meta property="twitter:site" content="${og.twitterHandle}" />` : '',
+                ].filter(Boolean).join('\n');
+
+                // Inject into generatedCode — replace existing tags or add before </head>
+                let newHtml = generatedCode;
+                // Remove existing title + seo meta tags
+                newHtml = newHtml.replace(/<title[^>]*>.*?<\/title>/gi, '');
+                newHtml = newHtml.replace(/<meta\s+name=["'](title|description|keywords|robots|author)["'][^>]*>/gi, '');
+                newHtml = newHtml.replace(/<meta\s+property=["']og:[^"']*["'][^>]*>/gi, '');
+                newHtml = newHtml.replace(/<meta\s+property=["']twitter:[^"']*["'][^>]*>/gi, '');
+                newHtml = newHtml.replace(/<link\s+rel=["']canonical["'][^>]*>/gi, '');
+                // Inject before </head>
+                if (newHtml.includes('</head>')) {
+                  newHtml = newHtml.replace('</head>', `${headTags}\n</head>`);
+                } else {
+                  newHtml = headTags + '\n' + newHtml;
+                }
+                onCodeUpdate(newHtml);
+              }}
+              className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors"
+            >
+              <Check size={12} /> Apply to App
+            </button>
+          </div>
+        )}
 
         {/* Tab content */}
         <div className="flex-1 overflow-hidden p-4">

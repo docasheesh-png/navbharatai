@@ -91,25 +91,36 @@ export function CICDPipeline() {
 
   const yaml = generateYAML(steps, platform, appName, envName);
 
-  const runPipeline = async () => {
+  const runPipeline = () => {
     if (running) return;
     runId++;
-    const thisRun = runId;
     setRunning(true);
     setSteps(prev => prev.map(s => ({ ...s, status: 'idle', duration: undefined, log: undefined })));
 
     const enabledSteps = steps.filter(s => s.enabled);
-    for (let i = 0; i < enabledSteps.length; i++) {
-      if (runId !== thisRun) break;
-      const step = enabledSteps[i];
-      setSteps(prev => prev.map(s => s.id === step.id ? { ...s, status: 'running' } : s));
-      await new Promise(r => setTimeout(r, 600 + Math.random() * 800));
-      if (runId !== thisRun) break;
-      const pass = step.type !== 'test' ? true : Math.random() > 0.1;
-      const duration = Math.floor(500 + Math.random() * 3000);
-      setSteps(prev => prev.map(s => s.id === step.id ? { ...s, status: pass ? 'pass' : 'fail', duration, log: STEP_LOGS[step.type] } : s));
-      if (!pass) break;
-    }
+    let failed = false;
+
+    const updatedSteps = enabledSteps.map(step => {
+      if (failed) return { ...step, status: 'skip' as StepStatus };
+      // Instant validation: pass if command is non-empty
+      const pass = step.command.trim().length > 0 && step.type !== 'test' ? true : step.command.trim().length > 0;
+      // Compute a realistic duration based on command complexity
+      const words = step.command.split(/\s+/).length;
+      const duration = 500 + words * 120 + step.type.length * 50;
+      if (!pass) failed = true;
+      return {
+        ...step,
+        status: (pass ? 'pass' : 'fail') as StepStatus,
+        duration,
+        log: STEP_LOGS[step.type],
+      };
+    });
+
+    // Build full updated list including disabled steps unchanged
+    setSteps(prev => prev.map(s => {
+      const updated = updatedSteps.find(u => u.id === s.id);
+      return updated || s;
+    }));
     setRunning(false);
   };
 

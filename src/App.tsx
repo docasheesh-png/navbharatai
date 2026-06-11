@@ -153,6 +153,9 @@ export default function App() {
     return localStorage.getItem('navbharat_sidebar_collapsed') === 'true';
   });
 
+  // Pre-warm server on app load so chat is instant when user opens it
+  useEffect(() => { fetch('/api/health', { method: 'GET' }).catch(() => {}); }, []);
+
   useEffect(() => {
     localStorage.setItem('navbharat_sidebar_collapsed', isSidebarCollapsed.toString());
   }, [isSidebarCollapsed]);
@@ -942,6 +945,11 @@ export default function App() {
   };
 
   const toggleTab = useCallback((view: ViewType, pushToHistory = true) => {
+    // Pre-warm server when user opens chat tabs (fire-and-forget)
+    if (view === 'nbi_chat' || view === 'nbi_pro_chat') {
+      fetch('/api/health', { method: 'GET' }).catch(() => {});
+    }
+
     if (view === 'security' && !user) {
       setShowAuth(true);
       addLog('Security Audit requires an active session. Please login.', 'warn');

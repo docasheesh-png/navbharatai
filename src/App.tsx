@@ -1,14 +1,14 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 import { 
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
   Terminal, Activity, Cpu, Settings, X, Shield, ShieldCheck, Eye, EyeOff, Lock, Wallet, CreditCard,
-  Globe, FileCode, GitBranch, Play, Monitor, Search, ChevronRight, Gamepad2, Tv, Music, Sparkles, Trophy,
+  Globe, FileCode, GitBranch, Play, Monitor, Search, ChevronRight, Gamepad2, Sparkles,
   FolderOpen, Trash2, Plus, FilePlus, FolderPlus, Save, MoreHorizontal, Rocket, LayoutDashboard, Database, 
   Github, HardDrive, RefreshCw, Menu, History, Clock, Smartphone, ThumbsUp, ThumbsDown, Copy, Check,
   Link as LinkIcon, List, GitCommit, Share2, Box, Folder, UploadCloud, ChevronLeft,
   Edit2, Camera, Upload, Image as ImageIcon, Info, LogIn,
   GitFork, GitMerge, History as HistoryIcon, UserPlus, LogOut, CheckCircle2, AlertCircle, RotateCcw,
-  ArrowRight, Gift, Columns, Palette, TestTube,
+  Gift, Palette, TestTube,
   Mic, BarChart2, Languages, Layout, TrendingUp,
   Bug, Gauge, Puzzle, Search as SearchIcon,
   Globe as GlobeIcon, Users2, Figma,
@@ -17,170 +17,104 @@ import {
   Kanban, CloudUpload, LayoutTemplate, HeartPulse
 } from 'lucide-react';
 import { cn } from './lib/utils';
+// SDAChat kept eager — used immediately on tab open
 import { SDAChat } from './components/sda/SDAChat';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
-const firebaseConfig = {
-  "projectId": "gen-lang-client-0866594388",
-  "appId": "1:950841184325:web:5f54018ec63af0376d132c",
-  "apiKey": "AIzaSyAGIUMRMGgD4MTUxflH4pVbVhVleM0LdwE",
-  "authDomain": "gen-lang-client-0866594388.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-cc9cd998-d842-4462-9833-b44f49825878",
-  "storageBucket": "gen-lang-client-0866594388.firebasestorage.app",
-  "messagingSenderId": "950841184325",
-  "measurementId": ""
-};
+import { firebaseConfig } from './config/firebase';
 
-const app = initializeApp(firebaseConfig);
+const app = initializeApp({ ...firebaseConfig, firestoreDatabaseId: firebaseConfig.firestoreDbId });
 export const auth = getAuth();
 setPersistence(auth, browserLocalPersistence);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = getFirestore(app, firebaseConfig.firestoreDbId);
 
-import { CodeStudio } from './components/ide/CodeStudio';
-import { GitPanel } from './components/ide/GitPanel';
-import { SecurityScan } from './components/ide/SecurityScan';
-import { TestPanel } from './components/ide/TestPanel';
-import APITester from './components/ide/APITester';
-import { DiffViewer } from './components/ide/DiffViewer';
-import { DatabaseUI } from './components/ide/DatabaseUI';
-import { VoiceToApp } from './components/ide/VoiceToApp';
-import { BotBuilder } from './components/ide/BotBuilder';
-import { CostEstimator } from './components/ide/CostEstimator';
-import { ScreenshotToCode } from './components/ide/ScreenshotToCode';
-import { MultiPageBuilder } from './components/ide/MultiPageBuilder';
-import { AppAnalytics } from './components/ide/AppAnalytics';
-import { AIDebugger } from './components/ide/AIDebugger';
-import { PerformanceAnalyzer } from './components/ide/PerformanceAnalyzer';
-import { ComponentLibrary } from './components/ide/ComponentLibrary';
-import { SEOOptimizer } from './components/ide/SEOOptimizer';
-import { APKBuilder } from './components/ide/APKBuilder';
-import { FigmaImporter } from './components/ide/FigmaImporter';
-import { CustomDomain } from './components/ide/CustomDomain';
-import { TeamCollaboration } from './components/ide/TeamCollaboration';
-import { PWANotifications } from './components/ide/PWANotifications';
-import { CodeMinifier } from './components/ide/CodeMinifier';
-import { DarkModeGenerator } from './components/ide/DarkModeGenerator';
-import { MonetizationWizard } from './components/ide/MonetizationWizard';
-import { AIImageGenerator } from './components/ide/AIImageGenerator';
-import { CodeVersioning } from './components/ide/CodeVersioning';
-import { APIMarketplace } from './components/ide/APIMarketplace';
-import { AppStorePublisher } from './components/ide/AppStorePublisher';
-import { LiveCollaboration } from './components/ide/LiveCollaboration';
-import { AITestingSuite } from './components/ide/AITestingSuite';
-import { LocalizationManager } from './components/ide/LocalizationManager';
-import { AICodeReview } from './components/ide/AICodeReview';
-import { DatabaseStudio } from './components/ide/DatabaseStudio';
-import { CICDPipeline } from './components/ide/CICDPipeline';
-import { PluginSystem } from './components/ide/PluginSystem';
-import { WhitelabelBranding } from './components/ide/WhitelabelBranding';
-import { AIProjectManager } from './components/ide/AIProjectManager';
-import { MultiCloudDeploy } from './components/ide/MultiCloudDeploy';
-import { DesignSystem } from './components/ide/DesignSystem';
-import { AppHealthMonitor } from './components/ide/AppHealthMonitor';
-import { SecretManager } from './components/SecretManager';
+// ── Eager imports — always needed on first render ───────────────────────────
 import { AIChat } from './components/ide/AIChat';
 import { PreviewPanel } from './components/ide/PreviewPanel';
-import { SocialHub } from './components/social/SocialHub';
-import { ReportsListView } from './components/ReportsListView';
-import { HistoryView } from './components/HistoryView';
+
+// ── Task 2.2: React.lazy code-splitting — 44 view-only components ────────────
+// Helper: wraps a named export into the {default} shape lazy() requires
+const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
+  lazy(() => fn().then(m => ({ default: m[k] as React.ComponentType<any> })));
+
+const CodeStudio       = _lz(() => import('./components/ide/CodeStudio'),       'CodeStudio');
+const GitPanel         = _lz(() => import('./components/ide/GitPanel'),         'GitPanel');
+const SecurityScan     = _lz(() => import('./components/ide/SecurityScan'),     'SecurityScan');
+const TestPanel        = _lz(() => import('./components/ide/TestPanel'),        'TestPanel');
+const DiffViewer       = _lz(() => import('./components/ide/DiffViewer'),       'DiffViewer');
+const DatabaseUI       = _lz(() => import('./components/ide/DatabaseUI'),       'DatabaseUI');
+const VoiceToApp       = _lz(() => import('./components/ide/VoiceToApp'),       'VoiceToApp');
+const BotBuilder       = _lz(() => import('./components/ide/BotBuilder'),       'BotBuilder');
+const CostEstimator    = _lz(() => import('./components/ide/CostEstimator'),    'CostEstimator');
+const ScreenshotToCode = _lz(() => import('./components/ide/ScreenshotToCode'),'ScreenshotToCode');
+const MultiPageBuilder = _lz(() => import('./components/ide/MultiPageBuilder'), 'MultiPageBuilder');
+const AppAnalytics     = _lz(() => import('./components/ide/AppAnalytics'),     'AppAnalytics');
+const AIDebugger       = _lz(() => import('./components/ide/AIDebugger'),       'AIDebugger');
+const PerformanceAnalyzer = _lz(() => import('./components/ide/PerformanceAnalyzer'), 'PerformanceAnalyzer');
+const ComponentLibrary = _lz(() => import('./components/ide/ComponentLibrary'), 'ComponentLibrary');
+const SEOOptimizer     = _lz(() => import('./components/ide/SEOOptimizer'),     'SEOOptimizer');
+const APKBuilder       = _lz(() => import('./components/ide/APKBuilder'),       'APKBuilder');
+const FigmaImporter    = _lz(() => import('./components/ide/FigmaImporter'),    'FigmaImporter');
+const CustomDomain     = _lz(() => import('./components/ide/CustomDomain'),     'CustomDomain');
+const TeamCollaboration= _lz(() => import('./components/ide/TeamCollaboration'),'TeamCollaboration');
+const PWANotifications = _lz(() => import('./components/ide/PWANotifications'), 'PWANotifications');
+const CodeMinifier     = _lz(() => import('./components/ide/CodeMinifier'),     'CodeMinifier');
+const DarkModeGenerator= _lz(() => import('./components/ide/DarkModeGenerator'),'DarkModeGenerator');
+const MonetizationWizard= _lz(() => import('./components/ide/MonetizationWizard'),'MonetizationWizard');
+const AIImageGenerator = _lz(() => import('./components/ide/AIImageGenerator'), 'AIImageGenerator');
+const CodeVersioning   = _lz(() => import('./components/ide/CodeVersioning'),   'CodeVersioning');
+const APIMarketplace   = _lz(() => import('./components/ide/APIMarketplace'),   'APIMarketplace');
+const AppStorePublisher= _lz(() => import('./components/ide/AppStorePublisher'),'AppStorePublisher');
+const LiveCollaboration= _lz(() => import('./components/ide/LiveCollaboration'),'LiveCollaboration');
+const AITestingSuite   = _lz(() => import('./components/ide/AITestingSuite'),   'AITestingSuite');
+const LocalizationManager = _lz(() => import('./components/ide/LocalizationManager'), 'LocalizationManager');
+const AICodeReview     = _lz(() => import('./components/ide/AICodeReview'),     'AICodeReview');
+const DatabaseStudio   = _lz(() => import('./components/ide/DatabaseStudio'),   'DatabaseStudio');
+const CICDPipeline     = _lz(() => import('./components/ide/CICDPipeline'),     'CICDPipeline');
+const PluginSystem     = _lz(() => import('./components/ide/PluginSystem'),     'PluginSystem');
+const WhitelabelBranding= _lz(() => import('./components/ide/WhitelabelBranding'),'WhitelabelBranding');
+const AIProjectManager = _lz(() => import('./components/ide/AIProjectManager'), 'AIProjectManager');
+const MultiCloudDeploy = _lz(() => import('./components/ide/MultiCloudDeploy'), 'MultiCloudDeploy');
+const DesignSystem     = _lz(() => import('./components/ide/DesignSystem'),     'DesignSystem');
+const AppHealthMonitor = _lz(() => import('./components/ide/AppHealthMonitor'), 'AppHealthMonitor');
+const SecretManager    = _lz(() => import('./components/SecretManager'),        'SecretManager');
+const SocialHub        = _lz(() => import('./components/social/SocialHub'),     'SocialHub');
+const ReportsListView  = _lz(() => import('./components/ReportsListView'),      'ReportsListView');
+const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
+const ReportProblemComponent = _lz(() => import('./components/ReportProblemComponent'), 'ReportProblemComponent');
+
+// APITester has a default export
+const APITester = lazy(() => import('./components/ide/APITester'));
 import { motion, AnimatePresence } from 'motion/react';
 import axios from 'axios';
 
 import { AgentProgress, BuildStep } from './components/ide/AgentProgress';
 import { useBuild } from './components/ide/BuildContext';
 import { ThemeMode, THEME_MODES, getThemeClasses } from './lib/theme';
-
-interface Message {
-  id: string;
-  text: string;
-  sender: 'user' | 'ai';
-  timestamp: Date | string; // Handle serialized dates
-  modelUsed?: string;
-}
-
-interface ChatSession {
-  id: string;
-  title: string;
-  messages: Message[];
-  files: FileSystem;
-  lastUpdated: Date | string;
-  isPinned?: boolean;
-  mode?: AgentMode;
-  agent?: string;
-  uci?: string;
-  originalAgent?: string;
-  currentAgent?: string;
-  memorySummary?: string;
-  continuationChain?: string[];
-  restoredMessages?: Message[];
-}
-
-interface ApiKeys {
-  gemini: string;
-  groq: string;
-  deepseek: string;
-  openai: string;
-  openrouter: string;
-  claude: string;
-}
-
-interface AppSecret {
-  id: string;
-  label: string;
-  value: string;
-  provider: string;
-  masked: boolean;
-}
-
-interface BrainConfig {
-  engine: string;
-  model: string;
-  keys: ApiKeys;
-}
-
-type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components' | 'seo' | 'apk' | 'figma' | 'domain' | 'team' | 'pwa' | 'minifier' | 'darkmode' | 'monetize' | 'imagegen' | 'versioning' | 'apimarket' | 'appstore' | 'collab' | 'aitesting' | 'localization' | 'codereview' | 'dbstudio' | 'cicd' | 'plugins' | 'whitelabel' | 'projectmgr' | 'cloudeploy' | 'designsys' | 'healthmon';
-
-type SettingsScreen = 'root' | 'general' | 'modules' | 'secrets' | 'connections' | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell' | 'git' | 'logs' | 'report';
-
-interface FileSystem {
-  [path: string]: string;
-}
-
-type ErrorType = 'AUTH' | 'QUOTA' | 'NETWORK' | 'CONFIG' | 'UNKNOWN';
-
-interface ErrorContext {
-  type: ErrorType;
-  message: string;
-  provider?: string;
-  lastInput?: string;
-}
-
-const PROVIDER_CONFIG: Record<string, { label: string; link: string; icon: string }> = {
-  gemini: { label: 'Sovereign Cognitive Engine', link: 'https://aistudio.google.com/app/apikey', icon: 'Google' },
-  openai: { label: 'Semantic Orchestration Core', link: 'https://platform.openai.com/api-keys', icon: 'OpenAI' },
-  groq: { label: 'Ultra-Low-Latency Stream Core', link: 'https://console.groq.com/keys', icon: 'Groq' },
-  deepseek: { label: 'Hyper-Inference Matrix Core', link: 'https://platform.deepseek.com/api_keys', icon: 'DeepSeek' },
-  openrouter: { label: 'Sovereign Logic Router', link: 'https://openrouter.ai/keys', icon: 'OpenRouter' },
-  claude: { label: 'Deep Reasoning Logic Core', link: 'https://console.anthropic.com/settings/keys', icon: 'Anthropic' },
-};
-
-interface Log {
-  id: string;
-  text: string;
-  type: 'info' | 'error' | 'success' | 'warn';
-  timestamp: Date;
-}
+import { useDevLogs } from './hooks/useDevLogs';
+import { useSettings } from './hooks/useSettings';
+import { Agent, isVishwakarmaAgent } from './types/agents';
+import {
+  Message, ChatSession, ApiKeys, AppSecret, BrainConfig,
+  ViewType, SettingsScreen, FileSystem, ErrorType, ErrorContext, Log, PROVIDER_CONFIG,
+} from './types';
 
 import { AuthComponent } from './components/AuthComponent';
-import { ReportProblemComponent } from './components/ReportProblemComponent';
+// ReportProblemComponent → lazy above
 import { MessageContent } from './components/MessageContent';
 import { HomeView } from './components/home/HomeView';
 import { GitHubService } from './lib/githubService';
-import { AgentMode } from './components/ide/ModeSelector';
+// AgentMode → re-exported from ./types
 
 export default function App() {
+  // ── Phase 1 hooks ──────────────────────────────────────────────────────
+  const { logs, setLogs, addLog } = useDevLogs();
+  const { theme, setTheme, hinglishMode, setHinglishMode, mode, setMode, enabledModules, setEnabledModules, isThemePickerOpen, setIsThemePickerOpen } = useSettings();
+  // ───────────────────────────────────────────────────────────────────────
+
   const [deviceMode, setDeviceMode] = useState<'auto' | 'mobile' | 'tablet' | 'desktop'>('auto');
   const [effectiveDeviceMode, setEffectiveDeviceMode] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
 
@@ -211,7 +145,6 @@ export default function App() {
   }, [deviceMode]);
 
   const [tabHistories, setTabHistories] = useState<Record<string, ViewType[]>>({});
-  const [showFloatingPreview, setShowFloatingPreview] = useState(false);
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [isAdmin, setIsAdmin] = useState(() => {
     return localStorage.getItem('navbharat_admin_v1') === 'true';
@@ -219,6 +152,9 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     return localStorage.getItem('navbharat_sidebar_collapsed') === 'true';
   });
+
+  // Pre-warm server on app load so chat is instant when user opens it
+  useEffect(() => { fetch('/api/health', { method: 'GET' }).catch(() => {}); }, []);
 
   useEffect(() => {
     localStorage.setItem('navbharat_sidebar_collapsed', isSidebarCollapsed.toString());
@@ -228,12 +164,7 @@ export default function App() {
     localStorage.setItem('navbharat_admin_v1', isAdmin.toString());
   }, [isAdmin]);
 
-  const [hinglishMode, setHinglishMode] = useState(() => {
-    return localStorage.getItem('navbharat_hinglish') === 'true';
-  });
-  useEffect(() => {
-    localStorage.setItem('navbharat_hinglish', hinglishMode.toString());
-  }, [hinglishMode]);
+  // hinglishMode → from useSettings() hook
   const [loadingUser, setLoadingUser] = useState(true);
   const [activeView, setActiveView] = useState<ViewType>('home');
   const [settingsScreen, setSettingsScreen] = useState<SettingsScreen>('root');
@@ -245,32 +176,20 @@ export default function App() {
     callbackUrl?: string;
   } | null>(null);
   const [showAuth, setShowAuth] = useState(false);
-  const [enabledModules, setEnabledModules] = useState<Record<string, boolean>>(() => {
-      const saved = localStorage.getItem('navbharat_modules');
-      const defaultModules = {
-          chat: true,
-          history: true,
-          files: true,
-          preview: true,
-          shell: true,
-          git: true,
-          logs: true,
-          templates: true,
-          donation: true,
-          entertainment: true,
-          studio: true,
-          security: true,
-      };
-      return saved ? { ...defaultModules, ...JSON.parse(saved) } : defaultModules;
+  // enabledModules → from useSettings() hook
+  // Task 1.4 — messagesMap: single source of truth per tab
+  const WELCOME_MSG: Message = { id: 'welcome', text: 'Namaskar! Main navBharatAI hoon. Aap mujhse kisi bhi language me chat kar sakte hain!', sender: 'ai', timestamp: new Date(), modelUsed: 'General Assistant' };
+  const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>({
+    nbi_chat: [WELCOME_MSG],
+    nbi_pro_chat: [],
   });
-  const [messages, setMessages] = useState<Message[]>(() => {
-    const savedAgent = localStorage.getItem('activeAgent') || 'navbharatai';
-    console.log('[DEBUG] Initializing messages with savedAgent:', savedAgent);
-    const text = 'Namaskar! Main navBharatAI hoon. Aap mujhse kisi bhi language me chat kar sakte hain!';
-      
-    return [{ id: 'welcome', text, sender: 'ai', timestamp: new Date(), modelUsed: 'General Assistant' }];
-  });
-  const [proMessages, setProMessages] = useState<Message[]>([]);
+  // Backward-compatible derived accessors — all existing code using messages/proMessages still works
+  const messages: Message[] = messagesMap['nbi_chat'] || [];
+  const proMessages: Message[] = messagesMap['nbi_pro_chat'] || [];
+  const setMessages = (v: Message[] | ((p: Message[]) => Message[])) =>
+    setMessagesMap(prev => ({ ...prev, nbi_chat: typeof v === 'function' ? v(prev['nbi_chat'] || []) : v }));
+  const setProMessages = (v: Message[] | ((p: Message[]) => Message[])) =>
+    setMessagesMap(prev => ({ ...prev, nbi_pro_chat: typeof v === 'function' ? v(prev['nbi_pro_chat'] || []) : v }));
   const [input, setInput] = useState<string>('');
   const [proInput, setProInput] = useState<string>('');
   const [proBuildProgress, setProBuildProgress] = useState<{
@@ -284,11 +203,9 @@ export default function App() {
   const [isProLoading, setIsProLoading] = useState<boolean>(false);
   const [activeIntent, setActiveIntent] = useState<string>('social');
   const [activeAgent, _setActiveAgent] = useState<string>('navbharatai');
-  console.log('[DEBUG APP] Rendering App.tsx. activeAgent=', activeAgent);
   
   useEffect(() => {
     if (activeView === 'nbi_chat' && activeAgent !== 'navbharatai') {
-      console.log('[SYNC] Synchronizing agent to navbharatai');
       setActiveAgent('navbharatai');
     }
   }, [activeView]);
@@ -297,18 +214,17 @@ export default function App() {
     addLog(`STATE_TRACE: activeAgent=${activeAgent}, activeView=${activeView}`, 'info');
   }, [activeAgent, activeView]);
   
-  const setActiveAgent = (newAgent: string) => {
+  const setActiveAgent = useCallback((newAgent: string) => {
     addLog(`setActiveAgent called: ${newAgent}`, 'info');
     _setActiveAgent(newAgent);
     localStorage.setItem('activeAgent', newAgent);
-  };
+  }, [addLog]);
 
-  const handleAgentChange = (newAgent: string) => {
+  const handleAgentChange = useCallback((newAgent: string) => {
     addLog(`handleAgentChange entry: current=${activeAgent}, new=${newAgent}, view=${activeView}`, 'info');
-    console.log('[DEBUG CODE] handleAgentChange: newAgent=', newAgent, 'activeView=', activeView);
     setActiveAgent(newAgent);
     addLog(`AI Agent switched to: ${newAgent}`, 'info');
-  };
+  }, [addLog, activeAgent, activeView, setActiveAgent]);
 
   const handleActivateWorkspace = (agent: string) => {
     setActiveAgent('navbharatai');
@@ -320,7 +236,7 @@ export default function App() {
   // ==================================================
   const [isWorkspacePreparing, setIsWorkspacePreparing] = useState(false);
   const [workspacePrepError, setWorkspacePrepError] = useState<string | null>(null);
-  const [workspacePrepAgent, setWorkspacePrepAgent] = useState<string>('navbharatai');
+
 
   const [isPreviewBuilding, setIsPreviewBuilding] = useState(false);
   const [previewBuildError, setPreviewBuildError] = useState<string | null>(null);
@@ -462,14 +378,14 @@ export default function App() {
     message: string;
     suggestions: string;
   } | null>(null);
-  const [shellInput, setShellInput] = useState('');
+
   const [selectedModel, setSelectedModel] = useState('auto');
   const [invalidKeys, setInvalidKeys] = useState<Set<string>>(new Set());
   const [pendingProvider, setPendingProvider] = useState<string | null>(null);
   const [pendingKey, setPendingKey] = useState('');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [openTabs, setOpenTabs] = useState<ViewType[]>([]);
-  const [sandboxError, setSandboxError] = useState<string | null>(null);
+
   const [errorContext, setErrorContext] = useState<ErrorContext | null>(null);
   const [githubToken, setGithubToken] = useState<string | null>(() => localStorage.getItem('gh_token'));
   const [firebaseToken, setFirebaseToken] = useState<string | null>(() => localStorage.getItem('fb_token'));
@@ -489,29 +405,32 @@ export default function App() {
   const [isPushing, setIsPushing] = useState(false);
   const [pendingGHEdit, setPendingGHEdit] = useState<{ path: string, content: string, message: string, sha?: string } | null>(null);
   const [pushStatus, setPushStatus] = useState<{ status: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ status: 'idle' });
-  const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('theme') as ThemeMode) || 'dark');
-  const [isThemePickerOpen, setIsThemePickerOpen] = useState(false);
+  // theme, isThemePickerOpen → from useSettings() hook
   const { buildSteps, setBuildSteps } = useBuild();
   const [isAppBuilt, setIsAppBuilt] = useState(false);
 
   useEffect(() => {
+    let active = true;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
     const pollBuildStatus = async () => {
+      if (!active) return;
       try {
-        console.log('[POLLING] BuildContext.buildSteps before:', buildSteps);
         const res = await fetch('/build_status.json?t=' + Date.now());
         const data = await res.json();
-        console.log('[POLLING] Received status:', data.status);
         if (data.status === 'building' && data.steps) {
-          setBuildSteps(data.steps.filter(s => s.status !== 'pending'));
+          setBuildSteps(data.steps.filter((s: any) => s.status !== 'pending'));
+          timeoutId = setTimeout(pollBuildStatus, 2000);
         } else {
           setBuildSteps([]);
         }
-      } catch (err) {
-        console.error('Failed to poll build status', err);
+      } catch {
+        // /build_status.json not found — not in a build, stop polling
       }
     };
-    const interval = setInterval(pollBuildStatus, 2000);
-    return () => clearInterval(interval);
+
+    pollBuildStatus();
+    return () => { active = false; clearTimeout(timeoutId); };
   }, [setBuildSteps]);
   const [isDonationEditing, setIsDonationEditing] = useState(false);
   const [donationData, setDonationData] = useState(() => {
@@ -834,9 +753,7 @@ export default function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
-  useEffect(() => {
-    localStorage.setItem('theme', theme);
-  }, [theme]);
+  // theme persistence → handled inside useSettings() hook
 
   const togglePin = (sessionId: string) => {
     if (!user) return;
@@ -908,14 +825,10 @@ export default function App() {
   const [isBuilding, setIsBuilding] = useState(false);
   const [isDeployed, setIsDeployed] = useState(false);
   const [deployUrl, setDeployUrl] = useState('');
-  const [logs, setLogs] = useState<Log[]>([
-    { id: '1', text: 'Navbharat Kernel initialized.', type: 'info', timestamp: new Date() },
-    { id: '2', text: 'Virtual File System mounted.', type: 'success', timestamp: new Date() },
-    { id: '3', text: 'AI Engines ready for deployment.', type: 'info', timestamp: new Date() }
-  ]);
+  // logs, setLogs → from useDevLogs() hook
   const [generatedCode, setGeneratedCode] = useState<string>('<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>');
   const [hasGeneratedCode, setHasGeneratedCode] = useState(false);
-  const [currentPreviewUrl, setCurrentPreviewUrl] = useState('navbharat://sandbox');
+
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const saved = localStorage.getItem('navbharat_keys');
       const defaults = { gemini: '', groq: '', deepseek: '', openai: '', openrouter: '', claude: '' };
@@ -932,22 +845,32 @@ export default function App() {
   const [showKeyStates, setShowKeyStates] = useState<Record<string, boolean>>({
       gemini: false, groq: false, deepseek: false, openai: false, openrouter: false, claude: false
   });
-  const [mode, setMode] = useState<AgentMode>('planning');
+  // mode, setMode → from useSettings() hook
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [adminError, setAdminError] = useState('');
 
-  const handleAdminLogin = (e: React.FormEvent) => {
+  const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (adminEmail === 'aashishcpmt09' && adminPassword === 'Navbharat@8949199709') {
-      setIsAdmin(true);
-      setAdminError('');
-      toggleTab('home'); 
-      addLog('Admin: Access Granted. Welcome Aashish.', 'success');
-      alert("🔑 Admin Login Successful\nAb aap pura app edit mode mein dekh sakte hain. Har section ke saath ✏️ Edit button dikhega.");
-    } else {
-      setAdminError('Invalid credentials. Please try again.');
-      addLog('Admin: Access Denied.', 'error');
+    setAdminError('');
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: adminEmail, password: adminPassword }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        sessionStorage.setItem('admin_token', data.token);
+        setIsAdmin(true);
+        toggleTab('home');
+        addLog('Admin: Access Granted.', 'success');
+      } else {
+        setAdminError(data.error || 'Invalid credentials.');
+        addLog('Admin: Access Denied.', 'error');
+      }
+    } catch {
+      setAdminError('Server error. Please try again.');
     }
   };
 
@@ -1014,11 +937,29 @@ export default function App() {
     return unsubscribe;
   }, []);
 
+  const MAX_UPLOAD_BYTES = 2 * 1024 * 1024; // 2 MB
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logoUrl' | 'qrUrl') => {
-    console.log('File upload triggered for', type);
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      addLog(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max 2 MB allowed.`, 'error');
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      setDonationData(prev => ({ ...prev, [type]: dataUrl }));
+    };
+    reader.readAsDataURL(file);
   };
 
-  const toggleTab = (view: ViewType, pushToHistory = true) => {
+  const toggleTab = useCallback((view: ViewType, pushToHistory = true) => {
+    // Pre-warm server when user opens chat tabs (fire-and-forget)
+    if (view === 'nbi_chat' || view === 'nbi_pro_chat') {
+      fetch('/api/health', { method: 'GET' }).catch(() => {});
+    }
+
     if (view === 'security' && !user) {
       setShowAuth(true);
       addLog('Security Audit requires an active session. Please login.', 'warn');
@@ -1043,7 +984,7 @@ export default function App() {
     }
     
     setActiveView(view);
-  };
+  }, [user, openTabs, activeView, addLog, setShowAuth]);
 
 
   const handleGHConfirmPush = async () => {
@@ -1081,10 +1022,9 @@ export default function App() {
       setIsPushing(false);
     }
   };
-  const closeTab = (e: React.MouseEvent, view: ViewType) => {
+  const closeTab = useCallback((e: React.MouseEvent, view: ViewType) => {
     e.stopPropagation();
-    console.log('Close tab clicked for:', view);
-    
+
     // If user closes home tab, just go to it but don't close
     if (view === 'home') {
       toggleTab('home', false);
@@ -1092,14 +1032,22 @@ export default function App() {
     }
 
     setOpenTabs(prev => {
-      const nextTabs = prev.filter(t => t !== view);
-      
-      // If we are closing the active view, switch to another one
-      if (activeView === view) {
+      let nextTabs = prev.filter(t => t !== view);
+
+      // When closing pro chat, also remove the preview tab
+      if (view === 'nbi_pro_chat') {
+        nextTabs = nextTabs.filter(t => t !== 'preview');
+        // If active view is preview or pro-chat, redirect away
+        if (activeView === 'preview' || activeView === 'nbi_pro_chat') {
+          const nextActiveView = nextTabs.length > 0 ? nextTabs[nextTabs.length - 1] : 'home';
+          setActiveView(nextActiveView);
+        }
+      } else if (activeView === view) {
+        // If we are closing the active view, switch to another one
         const nextActiveView = nextTabs.length > 0 ? nextTabs[nextTabs.length - 1] : 'home';
         setActiveView(nextActiveView);
       }
-      
+
       return nextTabs;
     });
 
@@ -1113,7 +1061,14 @@ export default function App() {
     if (view === 'chat' || view === 'nbi_chat' || view === 'nbi_pro_chat' || view === 'asc_chat') {
         setMessages([]);
     }
-  };
+
+    // When pro chat is closed, wipe preview state so old app doesn't bleed into next session
+    if (view === 'nbi_pro_chat') {
+      setGeneratedCode('<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>');
+      setHasGeneratedCode(false);
+      setIsAppBuilt(false);
+    }
+  }, [activeView, toggleTab, setMessages, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt]);
    const scrollRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
 
@@ -1121,9 +1076,7 @@ export default function App() {
     localStorage.setItem('navbharat_keys', JSON.stringify(keys));
   }, [keys]);
 
-  useEffect(() => {
-    localStorage.setItem('navbharat_modules', JSON.stringify(enabledModules));
-  }, [enabledModules]);
+  // enabledModules persistence → handled inside useSettings() hook
 
   // Synchronized Auto-Save for All AI Agents (NBI Chat & AS Chat)
   useEffect(() => {
@@ -1249,9 +1202,7 @@ export default function App() {
     }
   }, [logs, activeView]);
 
-  const addLog = (text: string, type: Log['type'] = 'info') => {
-    setLogs(prev => [...prev.slice(-49), { id: Math.random().toString(), text, type, timestamp: new Date() }]);
-  };
+  // addLog → from useDevLogs() hook
 
   useEffect(() => {
     if (activeView === 'studio') {
@@ -1539,9 +1490,6 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     agent: string = 'navbharatai',
     mode: string = 'chat'
   ): Promise<string> => {
-    console.log("AI REQUEST START");
-    console.log("Agent:", agent);
-
     let endpoint = '/api/chat/navbharatai';
 
     const controller = new AbortController();
@@ -1575,7 +1523,6 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
       });
       
       clearTimeout(timeoutId);
-      console.log("AI REQUEST SUCCESS");
       return response.data.reply;
     } catch (error: any) {
       clearTimeout(timeoutId);
@@ -1586,9 +1533,6 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
       }
       
       let errMsg = "AI request failed.";
-      console.log("DEBUG: error.code =", error.code);
-      console.log("DEBUG: error.message =", error.message);
-      console.log("DEBUG: error.response =", error.response);
 
       if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') errMsg = "Network connection failed. Please check your internet or the backend availability.";
       else if (error.response?.status === 500) errMsg = "Backend runtime failure detected.";
@@ -1717,7 +1661,7 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     
     if (['html', 'js', 'css'].includes(ext || '')) {
         updatePreview(currentFiles);
-        setActiveView('preview');
+        toggleTab('preview');
         addLog(`Application launched in Sandbox mode.`, 'success');
     } else {
         addLog(`Runtime for .${ext} is currently in limited availability. Executing in dry-run mode...`, 'warn');
@@ -1830,7 +1774,6 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
   };
 
   const handleSendForTab = async (tabId: ViewType, overrideMessage?: string, files: File[] = []) => {
-      console.log('Sending message to', tabId, 'files:', files);
       // ... (existing logic, maybe add files to messages)
     const isNbi = tabId === 'nbi_chat';
     const currentInput = input;
@@ -1962,7 +1905,6 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
       setIntentForTab(detectedIntent);
 
       const performBackendCall = async () => {
-        console.log("AI REQUEST START");
         addLog('Falling back to background AI processing...', 'info');
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (keys.gemini && !invalidKeys.has(keys.gemini)) headers['x-gemini-key'] = keys.gemini;
@@ -2006,13 +1948,20 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
           
           if (!response.ok) {
              const errData = await response.json().catch(() => ({}));
+             if (response.status === 401) {
+               setUser(null);
+               setShowAuth(true);
+               throw new Error('Session expired. Please login again.');
+             }
+             if (response.status === 429) {
+               throw new Error('Too many requests. Please wait a moment before sending again.');
+             }
              if (response.status === 402 || errData.requirePass) {
                setShowVishwakarmaUnlockModal(true);
              }
              throw new Error(errData.error || `HTTP Error ${response.status}`);
           }
           
-          console.log("AI REQUEST SUCCESS");
           return await response.json();
         } catch (error: any) {
           console.error("AI REQUEST FAILURE", error);
@@ -2059,10 +2008,8 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
         modelUsed: data.model
       };
 
-      console.log('[DEBUG] Setting messages:', aiMessage);
       setMessagesForTab((prev) => {
         const next = [...prev, aiMessage];
-        console.log('[DEBUG] New messages length:', next.length);
         return next;
       });
       addLog(`AI Response received via ${data.model || 'unknown'}`, 'success');
@@ -2157,6 +2104,13 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     const messageToSend = typeof input === 'string' ? input : proInput.trim();
     if (!messageToSend && fileList.length === 0 || isProLoading) return;
 
+    const oversized = fileList.filter(f => f.size > MAX_UPLOAD_BYTES);
+    if (oversized.length > 0) {
+      const names = oversized.map(f => `${f.name} (${(f.size/1024/1024).toFixed(1)}MB)`).join(', ');
+      addLog(`File too large: ${names}. Max 2 MB per file.`, 'error');
+      return;
+    }
+
     // Convert any attached files to base64 for AI vision
     const fileAttachments = fileList.length > 0 ? await filesToBase64(fileList) : [];
     const fileLabel = fileAttachments.length > 0 ? ` [📎 ${fileAttachments.map(f => f.name).join(', ')}]` : '';
@@ -2248,7 +2202,6 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
                   updatePreview(evt.files);
                   setIsAppBuilt(true);
                   setHasGeneratedCode(true);
-                  setShowFloatingPreview(true);
 
                   const fileList = Object.keys(evt.files);
                   const processLog = [
@@ -2348,19 +2301,64 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     }
   };
 
+  // Task 2.7 — memoized: static array, rebuilt only once
   const menuItems = useMemo(() => [
-    { id: 'home',         label: 'Home',              icon: Bot },
-    { id: 'nbi_chat',     label: 'NavBharatAI FREE',  icon: MessageSquare },
-    { id: 'nbi_pro_chat', label: 'NavBharatAI Pro',   icon: Bot },
-    { id: 'preview',      label: 'Preview',           icon: Monitor },
-    { id: 'files',        label: 'Files',             icon: FolderOpen },
-    { id: 'history',      label: 'History',           icon: History },
-    { id: 'studio',       label: 'Code Studio',       icon: Smartphone },
-    { id: 'billing',      label: 'Wallet & Billing',  icon: Wallet },
-    { id: 'sda_chat',     label: 'Doctor AI',         icon: Activity, status: 'New' },
-    { id: 'donation',     label: 'Donate',            icon: Heart },
-    { id: 'settings',     label: 'Settings',          icon: Settings },
-  ], []);
+    { id: 'home', label: 'Home', icon: Bot },
+    { id: 'nbi_chat', label: 'NavBharatAi FREE', icon: MessageSquare },
+    { id: 'nbi_pro_chat', label: 'navBharatAI-Pro', icon: Bot },
+    { id: 'sda_chat', label: 'Senior Doctor Assistant', icon: Activity, status: 'New' },
+    { id: 'billing', label: 'Wallet & Billing', icon: Wallet, status: 'Active' },
+    { id: 'history', label: 'history', icon: History },
+    { id: 'files', label: 'Files', icon: FolderOpen },
+    { id: 'preview', label: 'preview', icon: Monitor },
+    { id: 'git', label: 'GIT', icon: GitBranch, status: 'Beta' },
+    { id: 'studio', label: 'Code Studio', icon: Smartphone },
+    { id: 'templates', label: 'templates', icon: LayoutDashboard },
+    { id: 'report', label: 'report a problem', icon: AlertCircle, status: 'Beta' },
+    { id: 'entertainment', label: 'other', icon: Gamepad2, status: 'Beta' },
+    { id: 'donation', label: 'Donate', icon: CreditCard },
+    { id: 'testing', label: 'Test Runner', icon: TestTube, status: 'New' },
+    { id: 'api', label: 'API Tester', icon: Globe, status: 'New' },
+    { id: 'diff', label: 'Diff Viewer', icon: GitMerge, status: 'New' },
+    { id: 'database', label: 'Database', icon: Database, status: 'New' },
+    { id: 'voice', label: 'Voice to App', icon: Mic, status: 'New' },
+    { id: 'botbuilder', label: 'Bot Builder', icon: MessageSquare, status: 'New' },
+    { id: 'cost', label: 'Cost Estimator', icon: BarChart2, status: 'New' },
+    { id: 'screenshot', label: 'Screenshot to Code', icon: Camera, status: 'New' },
+    { id: 'multipages', label: 'Multi-Page Builder', icon: Layout, status: 'New' },
+    { id: 'analytics', label: 'Analytics', icon: TrendingUp, status: 'New' },
+    { id: 'debugger', label: 'AI Debugger', icon: Bug, status: 'New' },
+    { id: 'performance', label: 'Performance', icon: Gauge, status: 'New' },
+    { id: 'components', label: 'Components', icon: Puzzle, status: 'New' },
+    { id: 'seo', label: 'SEO Optimizer', icon: SearchIcon, status: 'New' },
+    { id: 'apk', label: 'APK Builder', icon: Smartphone, status: 'New' },
+    { id: 'figma', label: 'Figma Import', icon: Figma, status: 'New' },
+    { id: 'domain', label: 'Custom Domain', icon: GlobeIcon, status: 'New' },
+    { id: 'team', label: 'Team', icon: Users2, status: 'New' },
+    { id: 'pwa', label: 'PWA Notifications', icon: Bell, status: 'New' },
+    { id: 'minifier', label: 'Code Minifier', icon: Minimize2, status: 'New' },
+    { id: 'darkmode', label: 'Dark Mode Gen', icon: Moon, status: 'New' },
+    { id: 'monetize', label: 'Monetize', icon: RupeeIcon, status: 'New' },
+    { id: 'imagegen', label: 'AI Image Gen', icon: Wand2, status: 'New' },
+    { id: 'versioning', label: 'Code Versioning', icon: GitBranch, status: 'New' },
+    { id: 'apimarket', label: 'API Marketplace', icon: Package, status: 'New' },
+    { id: 'appstore', label: 'App Store', icon: Rocket, status: 'New' },
+    { id: 'collab', label: 'Live Collab', icon: Users2, status: 'New' },
+    { id: 'aitesting', label: 'AI Testing', icon: TestTube, status: 'New' },
+    { id: 'localization', label: 'Localization', icon: Languages, status: 'New' },
+    { id: 'codereview', label: 'AI Code Review', icon: Code, status: 'New' },
+    { id: 'dbstudio', label: 'DB Studio', icon: Database, status: 'New' },
+    { id: 'cicd', label: 'CI/CD Pipeline', icon: Rocket, status: 'New' },
+    { id: 'plugins', label: 'Plugin System', icon: Puzzle, status: 'New' },
+    { id: 'whitelabel', label: 'Whitelabel', icon: Palette, status: 'New' },
+    { id: 'projectmgr', label: 'Project Manager', icon: Kanban, status: 'New' },
+    { id: 'cloudeploy', label: 'Multi-Cloud Deploy', icon: CloudUpload, status: 'New' },
+    { id: 'designsys', label: 'Design System', icon: LayoutTemplate, status: 'New' },
+    { id: 'healthmon', label: 'Health Monitor', icon: HeartPulse, status: 'New' },
+    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'admin', label: 'Admin Login', icon: Lock },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], []); // static list — no deps
 
   // --- UNIVERSAL CHAT CONTINUATION SYSTEM (UCI) HELPERS & IMPLEMENTATION ---
   
@@ -2581,8 +2579,33 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     
     setCurrentSessionId(targetSession.id);
     setMessages([continuationGreeting]);
-    toggleTab('nbi_chat');
-    
+
+    // Detect if this was a pro session
+    const isProSession = targetAgent === 'navbharatai-pro';
+
+    // Restore generated code from session files if available
+    if (targetSession.files && Object.keys(targetSession.files).length > 0) {
+      const htmlFile = Object.entries(targetSession.files as Record<string, string>)
+        .find(([name]) => name.endsWith('.html'));
+      if (htmlFile) {
+        setGeneratedCode(htmlFile[1]);
+        setHasGeneratedCode(true);
+        // Open preview tab alongside the chat tab so history preview shows
+        if (isProSession) {
+          toggleTab('nbi_pro_chat');
+          toggleTab('preview');
+        } else {
+          toggleTab('nbi_chat');
+          toggleTab('preview');
+        }
+        addLog(`UCI resumed with preview: ${uciToFind}`, 'info');
+        return true;
+      }
+    }
+
+    // No code to restore — just open the right chat tab
+    toggleTab(isProSession ? 'nbi_pro_chat' : 'nbi_chat');
+
     addLog(`UCI resumed: ${uciToFind}`, 'info');
     return true;
   };
@@ -2793,7 +2816,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
 
     const handleMessage = (e: MessageEvent) => {
       if (e.data.type === 'SANDBOX_ERROR') {
-        setSandboxError(e.data.message);
+        addLog(`Sandbox error: ${e.data.message}`, 'error');
       } else if (e.data.type === 'GITHUB_AUTH_SUCCESS') {
         const token = e.data.token;
         setGithubToken(token);
@@ -2931,13 +2954,6 @@ ${pending.map(p => `  - ${p}`).join('\n')}
 
       const finalOAuthUrl = githubUrl.toString();
 
-      // REQUIRED DESIGN & TROUBLESHOOTING CONSOLE LOGGING
-      console.log('✅=== [GITHUB OAUTH REDIRECT DEBUG] ===');
-      console.log('✅ Final constructed OAuth URL:', finalOAuthUrl);
-      console.log('✅ redirect_uri parameter:', redirectUri);
-      console.log('✅ Current page origin:', window.location.origin);
-      console.log('======================================');
-
       // Populate diagnosis details for in-app floating overlay popup debug representation
       setGithubDebugData({
         oauthUrl: finalOAuthUrl,
@@ -2996,14 +3012,6 @@ ${pending.map(p => `  - ${p}`).join('\n')}
       const consentUrl = new URL(`${window.location.origin}/api/auth/firebase/consent`);
       consentUrl.searchParams.set('redirect_uri', redirectUri);
       consentUrl.searchParams.set('state', state);
-
-      // REQUIRED LOGGING
-      console.log('✅=== [FIREBASE OAUTH REDIRECT DEBUG] ===');
-      console.log('✅ Generated OAuth URL:', consentUrl.toString());
-      console.log('✅ Redirect URI:', redirectUri);
-      console.log('✅ Current Page Origin:', window.location.origin);
-      console.log('✅ Auth State Payload:', returnPath);
-      console.log('=========================================');
 
       addLog('Redirecting to Firebase/GCP authorization consent...', 'info');
       setTimeout(() => {
@@ -3311,7 +3319,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     try {
                       await signOut(auth);
                       window.location.reload();
-                      console.log('Logged out successfully');
+;
                     } catch (error) {
                       console.error('Logout failed:', error);
                     }
@@ -3371,8 +3379,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     title={isDisabled ? "Generate an app to enable this" : ""}
                     onClick={() => {
                       if (isPreview) {
-                          setShowFloatingPreview(true);
-                          addLog('Preview control activated.', 'success');
+                          toggleTab('preview');
                           return;
                       }
                       if (item.id === 'asc_chat') {
@@ -3481,9 +3488,8 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                         title={isDisabled ? "Generate an app to enable this" : ""}
                         onClick={() => {
                           if (isPreview) {
-                             setShowFloatingPreview(true);
+                             toggleTab('preview');
                              setIsMenuOpen(false);
-                             addLog('Preview control activated.', 'success');
                              return;
                           }
                           if (item.id === 'asc_chat') {
@@ -3655,8 +3661,17 @@ ${pending.map(p => `  - ${p}`).join('\n')}
       {/* Workspace */}
       <main className="flex flex-1 relative min-h-0 min-w-0">
 
-        {/* View Switcher Output */}
-        <div className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all", 
+        {/* View Switcher Output — wrapped in ErrorBoundary + Suspense for lazy-loaded components */}
+        <ErrorBoundary>
+        <Suspense fallback={
+          <div className="flex-1 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-8 h-8 border-2 border-indigo-500/40 border-t-indigo-500 rounded-full animate-spin" />
+              <span className="text-xs text-[#8b949e] font-mono uppercase tracking-widest">Loading module…</span>
+            </div>
+          </div>
+        }>
+        <div className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
           ['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem)] supports-[height:100dvh]:h-[calc(100dvh-3.5rem)] max-h-[calc(100vh-3.5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem)]" : "overflow-y-auto overflow-x-hidden custom-scrollbar"
         )}>
           {activeView === 'home' && (
@@ -3710,204 +3725,193 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 <div className="max-w-xl mx-auto p-4 sm:p-6 pb-20">
                   <AnimatePresence mode="wait">
                     {settingsScreen === 'root' && (
-                      <motion.div
+                      <motion.div 
                         key="root"
                         initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.95 }}
-                        className="space-y-4"
+                        className="space-y-3"
                       >
-                        {/* View Mode */}
-                        <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
-                          <div className="flex items-center gap-3 mb-3">
-                            <Monitor className="w-4 h-4 text-indigo-400" />
-                            <h4 className="text-xs font-bold text-white uppercase tracking-widest">View Mode</h4>
-                          </div>
-                          <div className="grid grid-cols-3 gap-2">
-                            {['auto', 'mobile', 'desktop'].map(m => (
-                              <button key={m} onClick={() => setDeviceMode(m as any)}
-                                className={`py-2 rounded-xl text-xs font-bold transition-all border ${deviceMode === m ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20'}`}>
-                                {m.charAt(0).toUpperCase() + m.slice(1)}
-                              </button>
-                            ))}
-                          </div>
+                      <div className="bg-[#161b22] border border-white/5 rounded-2xl p-6">
+                        <div className="flex items-center gap-3 mb-4">
+                            <Monitor className="w-5 h-5 text-indigo-400" />
+                            <h4 className="text-sm font-bold text-white">View Mode</h4>
                         </div>
-
-                        {/* App Settings */}
-                        <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4 space-y-1">
-                          <p className="text-[9px] font-black text-[#484f58] uppercase tracking-[0.25em] mb-2">App Settings</p>
-                          {[
-                            { id: 'general',     label: 'General',          sub: 'Profile, Theme, Identity',    icon: LayoutDashboard, color: 'text-blue-400' },
-                            { id: 'secrets',     label: 'Secrets & API Keys', sub: 'Keys for your apps',        icon: Lock,            color: 'text-emerald-400' },
-                            { id: 'connections', label: 'Connections',       sub: 'GitHub, Firebase, Socials',  icon: GitFork,         color: 'text-pink-400' },
-                            { id: 'shell',       label: 'Terminal',          sub: 'Advanced debug tools',       icon: Terminal,        color: 'text-indigo-400', status: 'Beta' },
-                            { id: 'logs',        label: 'Logs',              sub: 'System activity',            icon: Activity,        color: 'text-rose-400',  status: 'Beta' },
-                          ].map(item => (
-                            <button key={item.id} onClick={() => item.id === 'shell' ? toggleTab('shell') : setSettingsScreen(item.id as any)}
-                              className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition-all group">
-                              <div className={`w-8 h-8 bg-white/5 rounded-lg flex items-center justify-center ${item.color} group-hover:bg-indigo-600 group-hover:text-white transition-all`}>
-                                <item.icon className="w-4 h-4" />
+                        <div className="grid grid-cols-3 gap-2">
+                            {['auto', 'mobile', 'desktop'].map(mode => (
+                                <button 
+                                    key={mode}
+                                    onClick={() => setDeviceMode(mode as any)}
+                                    className={`py-2 rounded-xl text-xs font-bold transition-all border ${deviceMode === mode ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20'}`}
+                                >
+                                    {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                                </button>
+                            ))}
+                        </div>
+                      </div>
+                        {[
+                          { id: 'general', label: 'General', sub: 'Profile, Identity, Theme', icon: LayoutDashboard, color: 'text-blue-400' },
+                          { id: 'secrets', label: 'Secrets & API Keys', sub: 'Secrets for your Baby Apps', icon: Lock, color: 'text-emerald-400' },
+                          { id: 'connections', label: 'Connections', sub: 'GitHub, Firebase, Socials', icon: GitFork, color: 'text-pink-400' },
+                          { id: 'sharing', label: 'Share & Publish', sub: 'Collaborate with the world', icon: Globe, color: 'text-indigo-400', status: 'Coming Soon' },
+                          { id: 'deploy', label: 'Donate Now', sub: 'Support the Navbharat Project', icon: Heart, color: 'text-rose-400' },
+                          { id: 'shell', label: 'Terminal', sub: 'Advanced debug tools', icon: Terminal, color: 'text-indigo-500', status: 'Beta' },
+                          { id: 'git', label: 'Git', sub: 'Version control', icon: GitBranch, color: 'text-emerald-500', status: 'Beta' },
+                          { id: 'logs', label: 'Logs', sub: 'System activity', icon: Activity, color: 'text-rose-500', status: 'Beta' },
+                          { id: 'testing', label: 'Test Runner', sub: 'Run tests on generated apps', icon: TestTube, color: 'text-amber-400', status: 'New' },
+                          { id: 'api', label: 'API Tester', sub: 'Test HTTP endpoints', icon: Globe, color: 'text-cyan-400', status: 'New' },
+                          { id: 'diff', label: 'Diff Viewer', sub: 'Side-by-side code diff', icon: GitMerge, color: 'text-violet-400', status: 'New' },
+                          { id: 'database', label: 'Database', sub: 'Browse Firestore data', icon: Database, color: 'text-indigo-400', status: 'New' },
+                          { id: 'voice', label: 'Voice to App', sub: 'Speak your app into existence', icon: Mic, color: 'text-rose-400', status: 'New' },
+                          { id: 'botbuilder', label: 'Bot Builder', sub: 'WhatsApp / Telegram flows', icon: MessageSquare, color: 'text-green-400', status: 'New' },
+                          { id: 'cost', label: 'Cost Estimator', sub: 'Compare cloud hosting costs', icon: BarChart2, color: 'text-amber-400', status: 'New' },
+                          { id: 'screenshot', label: 'Screenshot to Code', sub: 'Screenshot se app banao', icon: Camera, color: 'text-pink-400', status: 'New' },
+                          { id: 'multipages', label: 'Multi-Page Builder', sub: 'Full website with navigation', icon: Layout, color: 'text-cyan-400', status: 'New' },
+                          { id: 'analytics', label: 'Analytics', sub: 'Workspace usage insights', icon: TrendingUp, color: 'text-emerald-400', status: 'New' },
+                          { id: 'debugger', label: 'AI Debugger', sub: 'Error paste karo, fix pao', icon: Bug, color: 'text-red-400', status: 'New' },
+                          { id: 'performance', label: 'Performance', sub: 'Lighthouse-style app scoring', icon: Gauge, color: 'text-blue-400', status: 'New' },
+                          { id: 'components', label: 'Component Library', sub: 'Ready-made UI blocks', icon: Puzzle, color: 'text-violet-400', status: 'New' },
+                          { id: 'seo', label: 'SEO Optimizer', sub: 'Meta tags, sitemap, OG tags', icon: SearchIcon, color: 'text-teal-400', status: 'New' },
+                          { id: 'apk', label: 'APK Builder', sub: 'Android app banao', icon: Smartphone, color: 'text-green-400', status: 'New' },
+                          { id: 'figma', label: 'Figma Import', sub: 'Design se code banao', icon: Figma, color: 'text-pink-400', status: 'New' },
+                          { id: 'domain', label: 'Custom Domain', sub: 'Apna domain connect karo', icon: GlobeIcon, color: 'text-blue-400', status: 'New' },
+                          { id: 'team', label: 'Team Collaboration', sub: 'Members invite karo', icon: Users2, color: 'text-amber-400', status: 'New' },
+                          { id: 'pwa', label: 'PWA Notifications', sub: 'Push alerts add karo', icon: Bell, color: 'text-rose-400', status: 'New' },
+                          { id: 'minifier', label: 'Code Minifier', sub: 'Code size kam karo', icon: Minimize2, color: 'text-cyan-400', status: 'New' },
+                          { id: 'darkmode', label: 'Dark Mode Generator', sub: 'Auto dark theme banao', icon: Moon, color: 'text-indigo-400', status: 'New' },
+                          { id: 'monetize', label: 'Monetization', sub: 'Razorpay, UPI, AdSense', icon: RupeeIcon, color: 'text-emerald-400', status: 'New' },
+                          { id: 'imagegen', label: 'AI Image Generator', sub: 'Logos, banners, icons banao', icon: Wand2, color: 'text-violet-400', status: 'New' },
+                          { id: 'versioning', label: 'Code Versioning', sub: 'Snapshot & restore history', icon: GitBranch, color: 'text-emerald-400', status: 'New' },
+                          { id: 'apimarket', label: 'API Marketplace', sub: 'One-click API integrations', icon: Package, color: 'text-blue-400', status: 'New' },
+                          { id: 'appstore', label: 'App Store Publisher', sub: 'Google Play & App Store ASO', icon: Rocket, color: 'text-rose-400', status: 'New' },
+                          { id: 'collab', label: 'Live Collaboration', sub: 'Real-time team co-editing', icon: Users2, color: 'text-blue-400', status: 'New' },
+                          { id: 'aitesting', label: 'AI Testing Suite', sub: 'Auto-generate test cases', icon: TestTube, color: 'text-emerald-400', status: 'New' },
+                          { id: 'localization', label: 'Localization', sub: '18 languages — auto translate', icon: Languages, color: 'text-amber-400', status: 'New' },
+                          { id: 'codereview', label: 'AI Code Review', sub: 'Bugs, security, performance', icon: Code, color: 'text-red-400', status: 'New' },
+                          { id: 'dbstudio', label: 'DB Studio', sub: 'Visual Firestore manager', icon: Database, color: 'text-cyan-400', status: 'New' },
+                          { id: 'cicd', label: 'CI/CD Pipeline', sub: 'Auto deploy pipelines', icon: Rocket, color: 'text-orange-400', status: 'New' },
+                          { id: 'plugins', label: 'Plugin System', sub: '16 one-click integrations', icon: Puzzle, color: 'text-violet-400', status: 'New' },
+                          { id: 'whitelabel', label: 'Whitelabel Branding', sub: 'Custom brand & white-label', icon: Palette, color: 'text-pink-400', status: 'New' },
+                          { id: 'projectmgr', label: 'AI Project Manager', sub: 'Kanban + AI-generated plans', icon: Kanban, color: 'text-indigo-400', status: 'New' },
+                          { id: 'cloudeploy', label: 'Multi-Cloud Deploy', sub: 'Vercel, Netlify, GCP & more', icon: CloudUpload, color: 'text-blue-400', status: 'New' },
+                          { id: 'designsys', label: 'Design System', sub: 'Tokens, components, style guide', icon: LayoutTemplate, color: 'text-purple-400', status: 'New' },
+                          { id: 'healthmon', label: 'Health Monitor', sub: 'Real-time app monitoring', icon: HeartPulse, color: 'text-red-400', status: 'New' },
+                          { id: 'access', label: 'Permissions', sub: 'Team Access & Security', icon: ShieldCheck, color: 'text-purple-400', status: 'Coming Soon' },
+                        ].map(item => (
+                          <button
+                            key={item.id}
+                            onClick={() => {
+                                if (item.id === 'git') {
+                                    toggleTab('git');
+                                } else if (item.id === 'shell') {
+                                    toggleTab('shell');
+                                } else if (item.id === 'testing') {
+                                    toggleTab('testing');
+                                } else if (item.id === 'api') {
+                                    toggleTab('api');
+                                } else if (item.id === 'diff') {
+                                    toggleTab('diff');
+                                } else if (item.id === 'database') {
+                                    toggleTab('database');
+                                } else if (item.id === 'voice') {
+                                    toggleTab('voice');
+                                } else if (item.id === 'botbuilder') {
+                                    toggleTab('botbuilder');
+                                } else if (item.id === 'cost') {
+                                    toggleTab('cost');
+                                } else if (item.id === 'screenshot') {
+                                    toggleTab('screenshot');
+                                } else if (item.id === 'multipages') {
+                                    toggleTab('multipages');
+                                } else if (item.id === 'analytics') {
+                                    toggleTab('analytics');
+                                } else if (item.id === 'debugger') {
+                                    toggleTab('debugger');
+                                } else if (item.id === 'performance') {
+                                    toggleTab('performance');
+                                } else if (item.id === 'components') {
+                                    toggleTab('components');
+                                } else if (item.id === 'seo') {
+                                    toggleTab('seo');
+                                } else if (item.id === 'apk') {
+                                    toggleTab('apk');
+                                } else if (item.id === 'figma') {
+                                    toggleTab('figma');
+                                } else if (item.id === 'domain') {
+                                    toggleTab('domain');
+                                } else if (item.id === 'team') {
+                                    toggleTab('team');
+                                } else if (item.id === 'pwa') {
+                                    toggleTab('pwa');
+                                } else if (item.id === 'minifier') {
+                                    toggleTab('minifier');
+                                } else if (item.id === 'darkmode') {
+                                    toggleTab('darkmode');
+                                } else if (item.id === 'monetize') {
+                                    toggleTab('monetize');
+                                } else if (item.id === 'imagegen') {
+                                    toggleTab('imagegen');
+                                } else if (item.id === 'versioning') {
+                                    toggleTab('versioning');
+                                } else if (item.id === 'apimarket') {
+                                    toggleTab('apimarket');
+                                } else if (item.id === 'appstore') {
+                                    toggleTab('appstore');
+                                } else if (item.id === 'collab') {
+                                    toggleTab('collab');
+                                } else if (item.id === 'aitesting') {
+                                    toggleTab('aitesting');
+                                } else if (item.id === 'localization') {
+                                    toggleTab('localization');
+                                } else if (item.id === 'codereview') {
+                                    toggleTab('codereview');
+                                } else if (item.id === 'dbstudio') {
+                                    toggleTab('dbstudio');
+                                } else if (item.id === 'cicd') {
+                                    toggleTab('cicd');
+                                } else if (item.id === 'plugins') {
+                                    toggleTab('plugins');
+                                } else if (item.id === 'whitelabel') {
+                                    toggleTab('whitelabel');
+                                } else if (item.id === 'projectmgr') {
+                                    toggleTab('projectmgr');
+                                } else if (item.id === 'cloudeploy') {
+                                    toggleTab('cloudeploy');
+                                } else if (item.id === 'designsys') {
+                                    toggleTab('designsys');
+                                } else if (item.id === 'healthmon') {
+                                    toggleTab('healthmon');
+                                } else {
+                                    setSettingsScreen(item.id as any);
+                                }
+                            }}
+                            className="w-full flex items-center gap-4 p-5 bg-[#161b22] border border-white/5 rounded-[2rem] hover:border-indigo-500/30 transition-all group active:scale-[0.98]"
+                          >
+                            <div className={`w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center ${item.color} group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-inner`}>
+                              <item.icon className="w-5.5 h-5.5" />
+                            </div>
+                            <div className="flex-1 text-left">
+                              <div className="flex items-center gap-2">
+                                <div className="text-[13px] font-black text-white tracking-tight uppercase">{item.label}</div>
+                                {(item as any).status && (
+                                  <span className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest border ${(item as any).status === 'Beta' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
+                                    {(item as any).status}
+                                  </span>
+                                )}
                               </div>
-                              <div className="flex-1 text-left">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-bold text-white">{item.label}</span>
-                                  {(item as any).status && <span className="px-1.5 py-0.5 rounded-full text-[7px] font-black uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">{(item as any).status}</span>}
-                                </div>
-                                <span className="text-[9px] text-[#484f58] font-bold uppercase tracking-wider">{item.sub}</span>
-                              </div>
-                              <ChevronRight className="w-3.5 h-3.5 text-[#484f58] group-hover:text-white transition-all" />
-                            </button>
-                          ))}
-                        </div>
-
-                        {/* AI Tools */}
-                        <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
-                          <p className="text-[9px] font-black text-[#484f58] uppercase tracking-[0.25em] mb-3">AI Tools</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { id: 'imagegen',   label: 'Image Gen',     icon: Wand2,        color: 'text-violet-400' },
-                              { id: 'voice',      label: 'Voice to App',  icon: Mic,          color: 'text-rose-400' },
-                              { id: 'screenshot', label: 'Screenshot→Code', icon: Camera,     color: 'text-pink-400' },
-                              { id: 'botbuilder', label: 'Bot Builder',   icon: MessageSquare, color: 'text-green-400' },
-                              { id: 'codereview', label: 'Code Review',   icon: Code,         color: 'text-red-400' },
-                              { id: 'aitesting',  label: 'AI Testing',    icon: TestTube,     color: 'text-emerald-400' },
-                              { id: 'localization', label: 'Localization', icon: Languages,   color: 'text-amber-400' },
-                              { id: 'debugger',   label: 'AI Debugger',   icon: Bug,          color: 'text-red-400' },
-                            ].map(item => (
-                              <button key={item.id} onClick={() => toggleTab(item.id as any)}
-                                className="flex items-center gap-2 p-3 bg-[#0d1117] rounded-xl border border-white/5 hover:border-indigo-500/30 transition-all group">
-                                <div className={`w-7 h-7 bg-white/5 rounded-lg flex items-center justify-center ${item.color} group-hover:bg-indigo-600 group-hover:text-white transition-all`}>
-                                  <item.icon className="w-3.5 h-3.5" />
-                                </div>
-                                <span className="text-[10px] font-bold text-[#8b949e] group-hover:text-white transition-all leading-tight">{item.label}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Developer Tools */}
-                        <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
-                          <p className="text-[9px] font-black text-[#484f58] uppercase tracking-[0.25em] mb-3">Developer Tools</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { id: 'git',         label: 'Git',           icon: GitBranch,  color: 'text-emerald-400' },
-                              { id: 'testing',     label: 'Test Runner',   icon: TestTube,   color: 'text-amber-400' },
-                              { id: 'api',         label: 'API Tester',    icon: Globe,      color: 'text-cyan-400' },
-                              { id: 'diff',        label: 'Diff Viewer',   icon: GitMerge,   color: 'text-violet-400' },
-                              { id: 'database',    label: 'Database',      icon: Database,   color: 'text-indigo-400' },
-                              { id: 'dbstudio',    label: 'DB Studio',     icon: Database,   color: 'text-cyan-400' },
-                              { id: 'performance', label: 'Performance',   icon: Gauge,      color: 'text-blue-400' },
-                              { id: 'versioning',  label: 'Versioning',    icon: GitBranch,  color: 'text-emerald-400' },
-                              { id: 'cicd',        label: 'CI/CD',         icon: Rocket,     color: 'text-orange-400' },
-                              { id: 'minifier',    label: 'Minifier',      icon: Minimize2,  color: 'text-cyan-400' },
-                            ].map(item => (
-                              <button key={item.id} onClick={() => toggleTab(item.id as any)}
-                                className="flex items-center gap-2 p-3 bg-[#0d1117] rounded-xl border border-white/5 hover:border-indigo-500/30 transition-all group">
-                                <div className={`w-7 h-7 bg-white/5 rounded-lg flex items-center justify-center ${item.color} group-hover:bg-indigo-600 group-hover:text-white transition-all`}>
-                                  <item.icon className="w-3.5 h-3.5" />
-                                </div>
-                                <span className="text-[10px] font-bold text-[#8b949e] group-hover:text-white transition-all leading-tight">{item.label}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Design & Build */}
-                        <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
-                          <p className="text-[9px] font-black text-[#484f58] uppercase tracking-[0.25em] mb-3">Design &amp; Build</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { id: 'components', label: 'Components',    icon: Puzzle,         color: 'text-violet-400' },
-                              { id: 'designsys',  label: 'Design System', icon: LayoutTemplate, color: 'text-purple-400' },
-                              { id: 'figma',      label: 'Figma Import',  icon: Figma,          color: 'text-pink-400' },
-                              { id: 'darkmode',   label: 'Dark Mode Gen', icon: Moon,           color: 'text-indigo-400' },
-                              { id: 'multipages', label: 'Multi-Page',    icon: Layout,         color: 'text-cyan-400' },
-                              { id: 'analytics',  label: 'Analytics',     icon: TrendingUp,     color: 'text-emerald-400' },
-                            ].map(item => (
-                              <button key={item.id} onClick={() => toggleTab(item.id as any)}
-                                className="flex items-center gap-2 p-3 bg-[#0d1117] rounded-xl border border-white/5 hover:border-indigo-500/30 transition-all group">
-                                <div className={`w-7 h-7 bg-white/5 rounded-lg flex items-center justify-center ${item.color} group-hover:bg-indigo-600 group-hover:text-white transition-all`}>
-                                  <item.icon className="w-3.5 h-3.5" />
-                                </div>
-                                <span className="text-[10px] font-bold text-[#8b949e] group-hover:text-white transition-all leading-tight">{item.label}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Publish & Deploy */}
-                        <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
-                          <p className="text-[9px] font-black text-[#484f58] uppercase tracking-[0.25em] mb-3">Publish &amp; Deploy</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { id: 'seo',        label: 'SEO',            icon: SearchIcon,   color: 'text-teal-400' },
-                              { id: 'apk',        label: 'APK Builder',    icon: Smartphone,   color: 'text-green-400' },
-                              { id: 'domain',     label: 'Custom Domain',  icon: GlobeIcon,    color: 'text-blue-400' },
-                              { id: 'pwa',        label: 'PWA Notify',     icon: Bell,         color: 'text-rose-400' },
-                              { id: 'appstore',   label: 'App Store',      icon: Rocket,       color: 'text-rose-400' },
-                              { id: 'cloudeploy', label: 'Multi-Cloud',    icon: CloudUpload,  color: 'text-blue-400' },
-                              { id: 'whitelabel', label: 'Whitelabel',     icon: Palette,      color: 'text-pink-400' },
-                              { id: 'healthmon',  label: 'Health Monitor', icon: HeartPulse,   color: 'text-red-400' },
-                            ].map(item => (
-                              <button key={item.id} onClick={() => toggleTab(item.id as any)}
-                                className="flex items-center gap-2 p-3 bg-[#0d1117] rounded-xl border border-white/5 hover:border-indigo-500/30 transition-all group">
-                                <div className={`w-7 h-7 bg-white/5 rounded-lg flex items-center justify-center ${item.color} group-hover:bg-indigo-600 group-hover:text-white transition-all`}>
-                                  <item.icon className="w-3.5 h-3.5" />
-                                </div>
-                                <span className="text-[10px] font-bold text-[#8b949e] group-hover:text-white transition-all leading-tight">{item.label}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Monetization & Team */}
-                        <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
-                          <p className="text-[9px] font-black text-[#484f58] uppercase tracking-[0.25em] mb-3">Monetization &amp; Team</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { id: 'monetize',   label: 'Monetize',    icon: RupeeIcon,  color: 'text-emerald-400' },
-                              { id: 'apimarket',  label: 'API Market',  icon: Package,    color: 'text-blue-400' },
-                              { id: 'cost',       label: 'Cost Calc',   icon: BarChart2,  color: 'text-amber-400' },
-                              { id: 'team',       label: 'Team',        icon: Users2,     color: 'text-amber-400' },
-                              { id: 'collab',     label: 'Live Collab', icon: Users2,     color: 'text-blue-400' },
-                              { id: 'projectmgr', label: 'Project Mgr', icon: Kanban,     color: 'text-indigo-400' },
-                              { id: 'plugins',    label: 'Plugins',     icon: Puzzle,     color: 'text-violet-400' },
-                            ].map(item => (
-                              <button key={item.id} onClick={() => toggleTab(item.id as any)}
-                                className="flex items-center gap-2 p-3 bg-[#0d1117] rounded-xl border border-white/5 hover:border-indigo-500/30 transition-all group">
-                                <div className={`w-7 h-7 bg-white/5 rounded-lg flex items-center justify-center ${item.color} group-hover:bg-indigo-600 group-hover:text-white transition-all`}>
-                                  <item.icon className="w-3.5 h-3.5" />
-                                </div>
-                                <span className="text-[10px] font-bold text-[#8b949e] group-hover:text-white transition-all leading-tight">{item.label}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Support */}
-                        <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
-                          <p className="text-[9px] font-black text-[#484f58] uppercase tracking-[0.25em] mb-3">Support</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { id: 'report', label: 'Report Bug',   icon: AlertCircle, color: 'text-rose-400', isTab: false },
-                              { id: 'admin',  label: 'Admin Login',  icon: Lock,        color: 'text-purple-400', isTab: false },
-                            ].map(item => (
-                              <button key={item.id} onClick={() => setSettingsScreen(item.id as any)}
-                                className="flex items-center gap-2 p-3 bg-[#0d1117] rounded-xl border border-white/5 hover:border-indigo-500/30 transition-all group">
-                                <div className={`w-7 h-7 bg-white/5 rounded-lg flex items-center justify-center ${item.color} group-hover:bg-indigo-600 group-hover:text-white transition-all`}>
-                                  <item.icon className="w-3.5 h-3.5" />
-                                </div>
-                                <span className="text-[10px] font-bold text-[#8b949e] group-hover:text-white transition-all leading-tight">{item.label}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="pt-4 pb-2 flex flex-col items-center">
-                          <div className="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-2">
+                              <div className="text-[10px] text-[#484f58] font-black uppercase tracking-widest mt-0.5">{item.sub}</div>
+                            </div>
+                            <div className="w-8 h-8 bg-white/5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
+                              <ChevronRight className="w-4 h-4 text-white" />
+                            </div>
+                          </button>
+                        ))}
+                        
+                        <div className="mt-10 pt-10 border-t border-white/5 flex flex-col items-center">
+                          <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-4">
                             <span className="text-white font-black text-xs">NB</span>
                           </div>
-                          <p className="text-[9px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v4.0.0</p>
+                          <p className="text-[10px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v4.0.0</p>
                         </div>
                       </motion.div>
                     )}
@@ -3991,7 +3995,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                              </div>
 
                              <div
-                               onClick={() => setHinglishMode(h => !h)}
+                               onClick={() => setHinglishMode(!hinglishMode)}
                                className="flex items-center justify-between p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner cursor-pointer group hover:border-indigo-500/30 transition-all"
                              >
                                <div className="flex items-center gap-4">
@@ -4005,7 +4009,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                </div>
                                <button
                                  className={`w-12 h-6 rounded-full p-1 flex items-center transition-all ${hinglishMode ? 'bg-amber-500 justify-end' : 'bg-white/10 justify-start'}`}
-                                 onClick={e => { e.stopPropagation(); setHinglishMode(h => !h); }}
+                                 onClick={e => { e.stopPropagation(); setHinglishMode(!hinglishMode); }}
                                >
                                  <div className="w-4 h-4 bg-white rounded-full shadow-lg"></div>
                                </button>
@@ -4577,7 +4581,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     isAppBuilt={isAppBuilt}
                     theme={theme}
                     onPreviewClick={() => {
-                       setActiveView('preview');
+                       toggleTab('preview');
                        setIsMenuOpen(false);
                     }}
                     userId={user?.uid}
@@ -4590,51 +4594,6 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 </div>
               )}
 
-              {/* ASC Column */}
-              {false && (
-                <div className="flex-1 flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0">
-                  <div className="p-3 bg-amber-900/10 border-b border-amber-500/20 text-center text-[10px] font-black uppercase tracking-widest text-[#8b949e] flex items-center gap-3 shrink-0">
-                     <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse shrink-0" />
-{/* Vishwakarma UI Removed */}
-                     {renderUciControls('amber')}
-                     
-                     <span className="ml-auto text-amber-400 font-mono text-[9px] font-black bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20 flex items-center gap-1">
-{/* Reserved for space */}
-                     </span>
-                  </div>
-                  <AIChat 
-                    messages={messages}
-                    input={input}
-                    onInputChange={setInput}
-                    onSend={() => { handleSendForTab('nbi_chat'); }}
-                    isLoading={isLoading}
-                    activeIntent={activeIntent}
-                    isPinned={sessions.find(s => s.id === currentSessionId)?.isPinned || false}
-                    onTogglePin={() => togglePin(currentSessionId)}
-                    isLoggedIn={!!user}
-                    onShowLogin={() => setShowAuth(true)}
-                    mode={mode}
-                    onModeChange={setMode}
-                    activeAgent={activeAgent}
-                    pendingGHEdit={pendingGHEdit}
-                    onConfirmPush={handleGHConfirmPush}
-                    isPushing={isPushing}
-                    isAppBuilt={isAppBuilt}
-                    theme={theme}
-                    onPreviewClick={() => {
-                       setActiveView('preview');
-                       setIsMenuOpen(false);
-                    }}
-                    userId={user?.uid}
-                    activeUci={user ? (sessions.find(s => s.id === currentSessionId)?.uci || '') : ''}
-                    onRestoreUci={user ? handleRestoreUci : undefined}
-                    restoredMessages={sessions.find(s => s.id === currentSessionId)?.restoredMessages || []}
-                    memorySummary={sessions.find(s => s.id === currentSessionId)?.memorySummary || ''}
-                    wallet={wallet}
-                    onUnlockVishwakarma={() => setShowVishwakarmaUnlockModal(true)}
-                  />
-                </div>
-              )}
 
             </div>
           )}
@@ -4688,7 +4647,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     isAppBuilt={isAppBuilt}
                     theme={theme}
                     onPreviewClick={() => {
-                        setActiveView('preview');
+                        toggleTab('preview');
                         setIsMenuOpen(false);
                     }}
                     userId={user?.uid}
@@ -6341,7 +6300,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4">
-                  <button onClick={() => setActiveView('preview')} className="py-3 px-4 bg-white/5 hover:bg-white/10 text-white rounded-xl text-xs font-bold transition-all">Preview App</button>
+                  <button onClick={() => toggleTab('preview')} className="py-3 px-4 bg-white/5 hover:bg-white/10 text-white rounded-xl text-xs font-bold transition-all">Preview App</button>
                   <button onClick={() => setIsDeployed(false)} className="py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/20">Back to Code</button>
                 </div>
               </motion.div>
@@ -6381,7 +6340,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 mode={mode}
                 onModeChange={setMode}
                 isAppBuilt={isAppBuilt}
-                onPreviewClick={() => setActiveView('preview')}
+                onPreviewClick={() => toggleTab('preview')}
                 theme={theme}
                 onThemeChange={setTheme}
                 pendingGHEdit={pendingGHEdit}
@@ -6529,7 +6488,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 initialCode={generatedCode}
                 onExport={(pages) => {
                   const firstPage = Object.values(pages)[0];
-                  if (firstPage) { setGeneratedCode(firstPage); toggleTab('preview'); }
+                  if (firstPage) { setGeneratedCode(firstPage as string); toggleTab('preview'); }
                 }}
               />
             </div>
@@ -6744,6 +6703,8 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           )}
 
         </div>
+        </Suspense>
+        </ErrorBoundary>
       </main>
 
 {/* Vishwakarma Mode Chooser Modal Removed */}
@@ -7476,7 +7437,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                   <Globe className="w-6 h-6 animate-spin" style={{ animationDuration: '6s' }} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h4 className="text-white text-sm font-black uppercase tracking-wider font-sans">👁️ Compiling Live Preview</h4>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-white text-sm font-black uppercase tracking-wider font-sans">👁️ Compiling Live Preview</h4>
+                    <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30">Simulated</span>
+                  </div>
                   <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest font-mono font-black">
                     Runtime: <span className="text-slate-200 font-extrabold">{detectedFramework}</span>
                   </p>

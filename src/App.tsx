@@ -82,96 +82,27 @@ import axios from 'axios';
 import { AgentProgress, BuildStep } from './components/ide/AgentProgress';
 import { useBuild } from './components/ide/BuildContext';
 import { ThemeMode, THEME_MODES, getThemeClasses } from './lib/theme';
-
-interface Message {
-  id: string;
-  text: string;
-  sender: 'user' | 'ai';
-  timestamp: Date | string; // Handle serialized dates
-  modelUsed?: string;
-}
-
-interface ChatSession {
-  id: string;
-  title: string;
-  messages: Message[];
-  files: FileSystem;
-  lastUpdated: Date | string;
-  isPinned?: boolean;
-  mode?: AgentMode;
-  agent?: string;
-  uci?: string;
-  originalAgent?: string;
-  currentAgent?: string;
-  memorySummary?: string;
-  continuationChain?: string[];
-  restoredMessages?: Message[];
-}
-
-interface ApiKeys {
-  gemini: string;
-  groq: string;
-  deepseek: string;
-  openai: string;
-  openrouter: string;
-  claude: string;
-}
-
-interface AppSecret {
-  id: string;
-  label: string;
-  value: string;
-  provider: string;
-  masked: boolean;
-}
-
-interface BrainConfig {
-  engine: string;
-  model: string;
-  keys: ApiKeys;
-}
-
-type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components' | 'seo' | 'apk' | 'figma' | 'domain' | 'team' | 'pwa' | 'minifier' | 'darkmode' | 'monetize' | 'imagegen' | 'versioning' | 'apimarket' | 'appstore' | 'collab' | 'aitesting' | 'localization' | 'codereview' | 'dbstudio' | 'cicd' | 'plugins' | 'whitelabel' | 'projectmgr' | 'cloudeploy' | 'designsys' | 'healthmon';
-
-type SettingsScreen = 'root' | 'general' | 'modules' | 'secrets' | 'connections' | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell' | 'git' | 'logs' | 'report';
-
-interface FileSystem {
-  [path: string]: string;
-}
-
-type ErrorType = 'AUTH' | 'QUOTA' | 'NETWORK' | 'CONFIG' | 'UNKNOWN';
-
-interface ErrorContext {
-  type: ErrorType;
-  message: string;
-  provider?: string;
-  lastInput?: string;
-}
-
-const PROVIDER_CONFIG: Record<string, { label: string; link: string; icon: string }> = {
-  gemini: { label: 'Sovereign Cognitive Engine', link: 'https://aistudio.google.com/app/apikey', icon: 'Google' },
-  openai: { label: 'Semantic Orchestration Core', link: 'https://platform.openai.com/api-keys', icon: 'OpenAI' },
-  groq: { label: 'Ultra-Low-Latency Stream Core', link: 'https://console.groq.com/keys', icon: 'Groq' },
-  deepseek: { label: 'Hyper-Inference Matrix Core', link: 'https://platform.deepseek.com/api_keys', icon: 'DeepSeek' },
-  openrouter: { label: 'Sovereign Logic Router', link: 'https://openrouter.ai/keys', icon: 'OpenRouter' },
-  claude: { label: 'Deep Reasoning Logic Core', link: 'https://console.anthropic.com/settings/keys', icon: 'Anthropic' },
-};
-
-interface Log {
-  id: string;
-  text: string;
-  type: 'info' | 'error' | 'success' | 'warn';
-  timestamp: Date;
-}
+import { useDevLogs } from './hooks/useDevLogs';
+import { useSettings } from './hooks/useSettings';
+import { Agent, isVishwakarmaAgent } from './types/agents';
+import {
+  Message, ChatSession, ApiKeys, AppSecret, BrainConfig,
+  ViewType, SettingsScreen, FileSystem, ErrorType, ErrorContext, Log, PROVIDER_CONFIG,
+} from './types';
 
 import { AuthComponent } from './components/AuthComponent';
 import { ReportProblemComponent } from './components/ReportProblemComponent';
 import { MessageContent } from './components/MessageContent';
 import { HomeView } from './components/home/HomeView';
 import { GitHubService } from './lib/githubService';
-import { AgentMode } from './components/ide/ModeSelector';
+// AgentMode → re-exported from ./types
 
 export default function App() {
+  // ── Phase 1 hooks ──────────────────────────────────────────────────────
+  const { logs, setLogs, addLog } = useDevLogs();
+  const { theme, setTheme, hinglishMode, setHinglishMode, mode, setMode, enabledModules, setEnabledModules, isThemePickerOpen, setIsThemePickerOpen } = useSettings();
+  // ───────────────────────────────────────────────────────────────────────
+
   const [deviceMode, setDeviceMode] = useState<'auto' | 'mobile' | 'tablet' | 'desktop'>('auto');
   const [effectiveDeviceMode, setEffectiveDeviceMode] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
 
@@ -219,12 +150,7 @@ export default function App() {
     localStorage.setItem('navbharat_admin_v1', isAdmin.toString());
   }, [isAdmin]);
 
-  const [hinglishMode, setHinglishMode] = useState(() => {
-    return localStorage.getItem('navbharat_hinglish') === 'true';
-  });
-  useEffect(() => {
-    localStorage.setItem('navbharat_hinglish', hinglishMode.toString());
-  }, [hinglishMode]);
+  // hinglishMode → from useSettings() hook
   const [loadingUser, setLoadingUser] = useState(true);
   const [activeView, setActiveView] = useState<ViewType>('home');
   const [settingsScreen, setSettingsScreen] = useState<SettingsScreen>('root');
@@ -236,32 +162,20 @@ export default function App() {
     callbackUrl?: string;
   } | null>(null);
   const [showAuth, setShowAuth] = useState(false);
-  const [enabledModules, setEnabledModules] = useState<Record<string, boolean>>(() => {
-      const saved = localStorage.getItem('navbharat_modules');
-      const defaultModules = {
-          chat: true,
-          history: true,
-          files: true,
-          preview: true,
-          shell: true,
-          git: true,
-          logs: true,
-          templates: true,
-          donation: true,
-          entertainment: true,
-          studio: true,
-          security: true,
-      };
-      return saved ? { ...defaultModules, ...JSON.parse(saved) } : defaultModules;
+  // enabledModules → from useSettings() hook
+  // Task 1.4 — messagesMap: single source of truth per tab
+  const WELCOME_MSG: Message = { id: 'welcome', text: 'Namaskar! Main navBharatAI hoon. Aap mujhse kisi bhi language me chat kar sakte hain!', sender: 'ai', timestamp: new Date(), modelUsed: 'General Assistant' };
+  const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>({
+    nbi_chat: [WELCOME_MSG],
+    nbi_pro_chat: [],
   });
-  const [messages, setMessages] = useState<Message[]>(() => {
-    const savedAgent = localStorage.getItem('activeAgent') || 'navbharatai';
-    console.log('[DEBUG] Initializing messages with savedAgent:', savedAgent);
-    const text = 'Namaskar! Main navBharatAI hoon. Aap mujhse kisi bhi language me chat kar sakte hain!';
-      
-    return [{ id: 'welcome', text, sender: 'ai', timestamp: new Date(), modelUsed: 'General Assistant' }];
-  });
-  const [proMessages, setProMessages] = useState<Message[]>([]);
+  // Backward-compatible derived accessors — all existing code using messages/proMessages still works
+  const messages: Message[] = messagesMap['nbi_chat'] || [];
+  const proMessages: Message[] = messagesMap['nbi_pro_chat'] || [];
+  const setMessages = (v: Message[] | ((p: Message[]) => Message[])) =>
+    setMessagesMap(prev => ({ ...prev, nbi_chat: typeof v === 'function' ? v(prev['nbi_chat'] || []) : v }));
+  const setProMessages = (v: Message[] | ((p: Message[]) => Message[])) =>
+    setMessagesMap(prev => ({ ...prev, nbi_pro_chat: typeof v === 'function' ? v(prev['nbi_pro_chat'] || []) : v }));
   const [input, setInput] = useState<string>('');
   const [proInput, setProInput] = useState<string>('');
   const [proBuildProgress, setProBuildProgress] = useState<{
@@ -275,7 +189,6 @@ export default function App() {
   const [isProLoading, setIsProLoading] = useState<boolean>(false);
   const [activeIntent, setActiveIntent] = useState<string>('social');
   const [activeAgent, _setActiveAgent] = useState<string>('navbharatai');
-  console.log('[DEBUG APP] Rendering App.tsx. activeAgent=', activeAgent);
   
   useEffect(() => {
     if (activeView === 'nbi_chat' && activeAgent !== 'navbharatai') {
@@ -480,8 +393,7 @@ export default function App() {
   const [isPushing, setIsPushing] = useState(false);
   const [pendingGHEdit, setPendingGHEdit] = useState<{ path: string, content: string, message: string, sha?: string } | null>(null);
   const [pushStatus, setPushStatus] = useState<{ status: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ status: 'idle' });
-  const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('theme') as ThemeMode) || 'dark');
-  const [isThemePickerOpen, setIsThemePickerOpen] = useState(false);
+  // theme, isThemePickerOpen → from useSettings() hook
   const { buildSteps, setBuildSteps } = useBuild();
   const [isAppBuilt, setIsAppBuilt] = useState(false);
 
@@ -829,9 +741,7 @@ export default function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
-  useEffect(() => {
-    localStorage.setItem('theme', theme);
-  }, [theme]);
+  // theme persistence → handled inside useSettings() hook
 
   const togglePin = (sessionId: string) => {
     if (!user) return;
@@ -903,11 +813,7 @@ export default function App() {
   const [isBuilding, setIsBuilding] = useState(false);
   const [isDeployed, setIsDeployed] = useState(false);
   const [deployUrl, setDeployUrl] = useState('');
-  const [logs, setLogs] = useState<Log[]>([
-    { id: '1', text: 'Navbharat Kernel initialized.', type: 'info', timestamp: new Date() },
-    { id: '2', text: 'Virtual File System mounted.', type: 'success', timestamp: new Date() },
-    { id: '3', text: 'AI Engines ready for deployment.', type: 'info', timestamp: new Date() }
-  ]);
+  // logs, setLogs → from useDevLogs() hook
   const [generatedCode, setGeneratedCode] = useState<string>('<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>');
   const [hasGeneratedCode, setHasGeneratedCode] = useState(false);
   const [currentPreviewUrl, setCurrentPreviewUrl] = useState('navbharat://sandbox');
@@ -927,7 +833,7 @@ export default function App() {
   const [showKeyStates, setShowKeyStates] = useState<Record<string, boolean>>({
       gemini: false, groq: false, deepseek: false, openai: false, openrouter: false, claude: false
   });
-  const [mode, setMode] = useState<AgentMode>('planning');
+  // mode, setMode → from useSettings() hook
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [adminError, setAdminError] = useState('');
@@ -1131,9 +1037,7 @@ export default function App() {
     localStorage.setItem('navbharat_keys', JSON.stringify(keys));
   }, [keys]);
 
-  useEffect(() => {
-    localStorage.setItem('navbharat_modules', JSON.stringify(enabledModules));
-  }, [enabledModules]);
+  // enabledModules persistence → handled inside useSettings() hook
 
   // Synchronized Auto-Save for All AI Agents (NBI Chat & AS Chat)
   useEffect(() => {
@@ -1259,9 +1163,7 @@ export default function App() {
     }
   }, [logs, activeView]);
 
-  const addLog = (text: string, type: Log['type'] = 'info') => {
-    setLogs(prev => [...prev.slice(-49), { id: Math.random().toString(), text, type, timestamp: new Date() }]);
-  };
+  // addLog → from useDevLogs() hook
 
   useEffect(() => {
     if (activeView === 'studio') {
@@ -4056,7 +3958,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                              </div>
 
                              <div
-                               onClick={() => setHinglishMode(h => !h)}
+                               onClick={() => setHinglishMode(!hinglishMode)}
                                className="flex items-center justify-between p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner cursor-pointer group hover:border-indigo-500/30 transition-all"
                              >
                                <div className="flex items-center gap-4">
@@ -4070,7 +3972,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                </div>
                                <button
                                  className={`w-12 h-6 rounded-full p-1 flex items-center transition-all ${hinglishMode ? 'bg-amber-500 justify-end' : 'bg-white/10 justify-start'}`}
-                                 onClick={e => { e.stopPropagation(); setHinglishMode(h => !h); }}
+                                 onClick={e => { e.stopPropagation(); setHinglishMode(!hinglishMode); }}
                                >
                                  <div className="w-4 h-4 bg-white rounded-full shadow-lg"></div>
                                </button>

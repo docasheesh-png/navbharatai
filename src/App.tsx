@@ -13,7 +13,8 @@ import {
   Bug, Gauge, Puzzle, Search as SearchIcon,
   Globe as GlobeIcon, Users2, Figma,
   Bell, Minimize2, Moon, IndianRupee as RupeeIcon,
-  Wand2, Package
+  Wand2, Package,
+  Kanban, CloudUpload, LayoutTemplate, HeartPulse
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { SDAChat } from './components/sda/SDAChat';
@@ -70,6 +71,14 @@ import { LiveCollaboration } from './components/ide/LiveCollaboration';
 import { AITestingSuite } from './components/ide/AITestingSuite';
 import { LocalizationManager } from './components/ide/LocalizationManager';
 import { AICodeReview } from './components/ide/AICodeReview';
+import { DatabaseStudio } from './components/ide/DatabaseStudio';
+import { CICDPipeline } from './components/ide/CICDPipeline';
+import { PluginSystem } from './components/ide/PluginSystem';
+import { WhitelabelBranding } from './components/ide/WhitelabelBranding';
+import { AIProjectManager } from './components/ide/AIProjectManager';
+import { MultiCloudDeploy } from './components/ide/MultiCloudDeploy';
+import { DesignSystem } from './components/ide/DesignSystem';
+import { AppHealthMonitor } from './components/ide/AppHealthMonitor';
 import { SecretManager } from './components/SecretManager';
 import { AIChat } from './components/ide/AIChat';
 import { PreviewPanel } from './components/ide/PreviewPanel';
@@ -131,7 +140,7 @@ interface BrainConfig {
   keys: ApiKeys;
 }
 
-type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components' | 'seo' | 'apk' | 'figma' | 'domain' | 'team' | 'pwa' | 'minifier' | 'darkmode' | 'monetize' | 'imagegen' | 'versioning' | 'apimarket' | 'appstore' | 'collab' | 'aitesting' | 'localization' | 'codereview';
+type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components' | 'seo' | 'apk' | 'figma' | 'domain' | 'team' | 'pwa' | 'minifier' | 'darkmode' | 'monetize' | 'imagegen' | 'versioning' | 'apimarket' | 'appstore' | 'collab' | 'aitesting' | 'localization' | 'codereview' | 'dbstudio' | 'cicd' | 'plugins' | 'whitelabel' | 'projectmgr' | 'cloudeploy' | 'designsys' | 'healthmon';
 
 type SettingsScreen = 'root' | 'general' | 'modules' | 'secrets' | 'connections' | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell' | 'git' | 'logs' | 'report';
 
@@ -2384,6 +2393,14 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     { id: 'aitesting', label: 'AI Testing', icon: TestTube, status: 'New' },
     { id: 'localization', label: 'Localization', icon: Languages, status: 'New' },
     { id: 'codereview', label: 'AI Code Review', icon: Code, status: 'New' },
+    { id: 'dbstudio', label: 'DB Studio', icon: Database, status: 'New' },
+    { id: 'cicd', label: 'CI/CD Pipeline', icon: Rocket, status: 'New' },
+    { id: 'plugins', label: 'Plugin System', icon: Puzzle, status: 'New' },
+    { id: 'whitelabel', label: 'Whitelabel', icon: Palette, status: 'New' },
+    { id: 'projectmgr', label: 'Project Manager', icon: Kanban, status: 'New' },
+    { id: 'cloudeploy', label: 'Multi-Cloud Deploy', icon: CloudUpload, status: 'New' },
+    { id: 'designsys', label: 'Design System', icon: LayoutTemplate, status: 'New' },
+    { id: 'healthmon', label: 'Health Monitor', icon: HeartPulse, status: 'New' },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'admin', label: 'Admin Login', icon: Lock },
   ];
@@ -3799,6 +3816,14 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                           { id: 'aitesting', label: 'AI Testing Suite', sub: 'Auto-generate test cases', icon: TestTube, color: 'text-emerald-400', status: 'New' },
                           { id: 'localization', label: 'Localization', sub: '18 languages — auto translate', icon: Languages, color: 'text-amber-400', status: 'New' },
                           { id: 'codereview', label: 'AI Code Review', sub: 'Bugs, security, performance', icon: Code, color: 'text-red-400', status: 'New' },
+                          { id: 'dbstudio', label: 'DB Studio', sub: 'Visual Firestore manager', icon: Database, color: 'text-cyan-400', status: 'New' },
+                          { id: 'cicd', label: 'CI/CD Pipeline', sub: 'Auto deploy pipelines', icon: Rocket, color: 'text-orange-400', status: 'New' },
+                          { id: 'plugins', label: 'Plugin System', sub: '16 one-click integrations', icon: Puzzle, color: 'text-violet-400', status: 'New' },
+                          { id: 'whitelabel', label: 'Whitelabel Branding', sub: 'Custom brand & white-label', icon: Palette, color: 'text-pink-400', status: 'New' },
+                          { id: 'projectmgr', label: 'AI Project Manager', sub: 'Kanban + AI-generated plans', icon: Kanban, color: 'text-indigo-400', status: 'New' },
+                          { id: 'cloudeploy', label: 'Multi-Cloud Deploy', sub: 'Vercel, Netlify, GCP & more', icon: CloudUpload, color: 'text-blue-400', status: 'New' },
+                          { id: 'designsys', label: 'Design System', sub: 'Tokens, components, style guide', icon: LayoutTemplate, color: 'text-purple-400', status: 'New' },
+                          { id: 'healthmon', label: 'Health Monitor', sub: 'Real-time app monitoring', icon: HeartPulse, color: 'text-red-400', status: 'New' },
                           { id: 'access', label: 'Permissions', sub: 'Team Access & Security', icon: ShieldCheck, color: 'text-purple-400', status: 'Coming Soon' },
                         ].map(item => (
                           <button
@@ -3868,6 +3893,22 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                     toggleTab('localization');
                                 } else if (item.id === 'codereview') {
                                     toggleTab('codereview');
+                                } else if (item.id === 'dbstudio') {
+                                    toggleTab('dbstudio');
+                                } else if (item.id === 'cicd') {
+                                    toggleTab('cicd');
+                                } else if (item.id === 'plugins') {
+                                    toggleTab('plugins');
+                                } else if (item.id === 'whitelabel') {
+                                    toggleTab('whitelabel');
+                                } else if (item.id === 'projectmgr') {
+                                    toggleTab('projectmgr');
+                                } else if (item.id === 'cloudeploy') {
+                                    toggleTab('cloudeploy');
+                                } else if (item.id === 'designsys') {
+                                    toggleTab('designsys');
+                                } else if (item.id === 'healthmon') {
+                                    toggleTab('healthmon');
                                 } else {
                                     setSettingsScreen(item.id as any);
                                 }
@@ -6683,6 +6724,54 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {activeView === 'codereview' && (
             <div className="flex-1 h-full overflow-hidden">
               <AICodeReview generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
+            </div>
+          )}
+
+          {activeView === 'dbstudio' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <DatabaseStudio />
+            </div>
+          )}
+
+          {activeView === 'cicd' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <CICDPipeline />
+            </div>
+          )}
+
+          {activeView === 'plugins' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <PluginSystem />
+            </div>
+          )}
+
+          {activeView === 'whitelabel' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <WhitelabelBranding />
+            </div>
+          )}
+
+          {activeView === 'projectmgr' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <AIProjectManager />
+            </div>
+          )}
+
+          {activeView === 'cloudeploy' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <MultiCloudDeploy />
+            </div>
+          )}
+
+          {activeView === 'designsys' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <DesignSystem />
+            </div>
+          )}
+
+          {activeView === 'healthmon' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <AppHealthMonitor />
             </div>
           )}
 

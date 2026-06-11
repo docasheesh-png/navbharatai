@@ -66,6 +66,10 @@ import { AIImageGenerator } from './components/ide/AIImageGenerator';
 import { CodeVersioning } from './components/ide/CodeVersioning';
 import { APIMarketplace } from './components/ide/APIMarketplace';
 import { AppStorePublisher } from './components/ide/AppStorePublisher';
+import { LiveCollaboration } from './components/ide/LiveCollaboration';
+import { AITestingSuite } from './components/ide/AITestingSuite';
+import { LocalizationManager } from './components/ide/LocalizationManager';
+import { AICodeReview } from './components/ide/AICodeReview';
 import { SecretManager } from './components/SecretManager';
 import { AIChat } from './components/ide/AIChat';
 import { PreviewPanel } from './components/ide/PreviewPanel';
@@ -127,7 +131,7 @@ interface BrainConfig {
   keys: ApiKeys;
 }
 
-type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components' | 'seo' | 'apk' | 'figma' | 'domain' | 'team' | 'pwa' | 'minifier' | 'darkmode' | 'monetize' | 'imagegen' | 'versioning' | 'apimarket' | 'appstore';
+type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components' | 'seo' | 'apk' | 'figma' | 'domain' | 'team' | 'pwa' | 'minifier' | 'darkmode' | 'monetize' | 'imagegen' | 'versioning' | 'apimarket' | 'appstore' | 'collab' | 'aitesting' | 'localization' | 'codereview';
 
 type SettingsScreen = 'root' | 'general' | 'modules' | 'secrets' | 'connections' | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell' | 'git' | 'logs' | 'report';
 
@@ -2376,6 +2380,10 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     { id: 'versioning', label: 'Code Versioning', icon: GitBranch, status: 'New' },
     { id: 'apimarket', label: 'API Marketplace', icon: Package, status: 'New' },
     { id: 'appstore', label: 'App Store', icon: Rocket, status: 'New' },
+    { id: 'collab', label: 'Live Collab', icon: Users2, status: 'New' },
+    { id: 'aitesting', label: 'AI Testing', icon: TestTube, status: 'New' },
+    { id: 'localization', label: 'Localization', icon: Languages, status: 'New' },
+    { id: 'codereview', label: 'AI Code Review', icon: Code, status: 'New' },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'admin', label: 'Admin Login', icon: Lock },
   ];
@@ -3787,6 +3795,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                           { id: 'versioning', label: 'Code Versioning', sub: 'Snapshot & restore history', icon: GitBranch, color: 'text-emerald-400', status: 'New' },
                           { id: 'apimarket', label: 'API Marketplace', sub: 'One-click API integrations', icon: Package, color: 'text-blue-400', status: 'New' },
                           { id: 'appstore', label: 'App Store Publisher', sub: 'Google Play & App Store ASO', icon: Rocket, color: 'text-rose-400', status: 'New' },
+                          { id: 'collab', label: 'Live Collaboration', sub: 'Real-time team co-editing', icon: Users2, color: 'text-blue-400', status: 'New' },
+                          { id: 'aitesting', label: 'AI Testing Suite', sub: 'Auto-generate test cases', icon: TestTube, color: 'text-emerald-400', status: 'New' },
+                          { id: 'localization', label: 'Localization', sub: '18 languages — auto translate', icon: Languages, color: 'text-amber-400', status: 'New' },
+                          { id: 'codereview', label: 'AI Code Review', sub: 'Bugs, security, performance', icon: Code, color: 'text-red-400', status: 'New' },
                           { id: 'access', label: 'Permissions', sub: 'Team Access & Security', icon: ShieldCheck, color: 'text-purple-400', status: 'Coming Soon' },
                         ].map(item => (
                           <button
@@ -3848,6 +3860,14 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                     toggleTab('apimarket');
                                 } else if (item.id === 'appstore') {
                                     toggleTab('appstore');
+                                } else if (item.id === 'collab') {
+                                    toggleTab('collab');
+                                } else if (item.id === 'aitesting') {
+                                    toggleTab('aitesting');
+                                } else if (item.id === 'localization') {
+                                    toggleTab('localization');
+                                } else if (item.id === 'codereview') {
+                                    toggleTab('codereview');
                                 } else {
                                     setSettingsScreen(item.id as any);
                                 }
@@ -6630,6 +6650,39 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {activeView === 'appstore' && (
             <div className="flex-1 h-full overflow-hidden">
               <AppStorePublisher generatedCode={generatedCode} />
+            </div>
+          )}
+
+          {/* Phase 10 — Live Collaboration */}
+          {activeView === 'collab' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <LiveCollaboration
+                generatedCode={generatedCode}
+                onCodeUpdate={(c) => setGeneratedCode(c)}
+                userId={user?.uid}
+                userName={user?.displayName || user?.email?.split('@')[0]}
+              />
+            </div>
+          )}
+
+          {/* Phase 10 — AI Testing Suite */}
+          {activeView === 'aitesting' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <AITestingSuite generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
+            </div>
+          )}
+
+          {/* Phase 10 — Localization Manager */}
+          {activeView === 'localization' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <LocalizationManager />
+            </div>
+          )}
+
+          {/* Phase 10 — AI Code Review */}
+          {activeView === 'codereview' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <AICodeReview generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
             </div>
           )}
 

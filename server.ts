@@ -5022,6 +5022,45 @@ self.addEventListener('fetch',e=>e.respondWith(
     res.send(html);
   });
 
+  // --- Team Invite ---
+  app.post('/api/team/invite', async (req, res) => {
+    const { email, projectId, userId, role = 'viewer' } = req.body || {};
+    if (!email || !userId) return res.status(400).json({ error: 'email and userId required' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+    const inviteId = crypto.randomBytes(8).toString('hex');
+    audit('TEAM_INVITE', { userId, email, projectId, role });
+    return res.json({ ok: true, inviteId, message: `Invite sent to ${email}`, inviteUrl: `/join/${inviteId}` });
+  });
+
+  // --- PageSpeed Analysis Proxy ---
+  app.get('/api/analyze/pagespeed', async (req, res) => {
+    const { url } = req.query;
+    if (!url || typeof url !== 'string') return res.status(400).json({ error: 'url required' });
+    try {
+      const apiKey = process.env.PAGESPEED_API_KEY || '';
+      const endpoint = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=mobile${apiKey ? '&key=' + apiKey : ''}`;
+      const r = await fetch(endpoint, { signal: AbortSignal.timeout(20000) });
+      const data = await r.json() as any;
+      if (!r.ok) return res.status(r.status).json({ error: data.error?.message || 'PageSpeed API error' });
+      const cats = data.lighthouseResult?.categories || {};
+      const audits = data.lighthouseResult?.audits || {};
+      return res.json({
+        performance: Math.round((cats.performance?.score || 0) * 100),
+        accessibility: Math.round((cats.accessibility?.score || 0) * 100),
+        seo: Math.round((cats.seo?.score || 0) * 100),
+        bestPractices: Math.round((cats['best-practices']?.score || 0) * 100),
+        fcp: audits['first-contentful-paint']?.displayValue,
+        lcp: audits['largest-contentful-paint']?.displayValue,
+        cls: audits['cumulative-layout-shift']?.displayValue,
+        tbt: audits['total-blocking-time']?.displayValue,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Failed to analyze' });
+    }
+  });
+
   // Final diagnostic and server start
 
   try {

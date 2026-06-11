@@ -114,7 +114,12 @@ const COMPONENT_PREVIEWS = [
   },
 ];
 
-export function DesignSystem() {
+interface DesignSystemProps {
+  onCodeUpdate?: (html: string) => void;
+  generatedCode?: string;
+}
+
+export function DesignSystem({ onCodeUpdate, generatedCode }: DesignSystemProps = {}) {
   const [tokens, setTokens] = useState<DesignTokens>(() => {
     try { return JSON.parse(localStorage.getItem('navbharat_design_tokens') || JSON.stringify(DEFAULT_TOKENS)); } catch { return DEFAULT_TOKENS; }
   });
@@ -292,9 +297,31 @@ export function DesignSystem() {
               <pre style={{ ...monoStyle, background: '#0f172a', borderRadius: 6, padding: '12px', color: '#a5f3fc', overflow: 'auto', maxHeight: 300, margin: 0 }}>
                 {generateCSS()}
               </pre>
-              <button onClick={() => copyText(generateCSS(), 'css')} style={{ marginTop: 10, padding: '8px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#a855f7', color: '#fff', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                {copied === 'css' ? <><Check size={12} />Copied!</> : <><Copy size={12} />Copy CSS</>}
-              </button>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                <button onClick={() => copyText(generateCSS(), 'css')} style={{ padding: '8px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#a855f7', color: '#fff', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {copied === 'css' ? <><Check size={12} />Copied!</> : <><Copy size={12} />Copy CSS</>}
+                </button>
+                {onCodeUpdate && (
+                  <button
+                    onClick={() => {
+                      const css = generateCSS();
+                      const styleTag = `<style id="nb-design-tokens">\n${css}\n</style>`;
+                      let newHtml = generatedCode || '';
+                      if (newHtml.includes('<style id="nb-design-tokens">')) {
+                        newHtml = newHtml.replace(/<style id="nb-design-tokens">[\s\S]*?<\/style>/, styleTag);
+                      } else if (newHtml.includes('</head>')) {
+                        newHtml = newHtml.replace('</head>', `${styleTag}\n</head>`);
+                      } else {
+                        newHtml = styleTag + '\n' + newHtml;
+                      }
+                      onCodeUpdate!(newHtml);
+                    }}
+                    style={{ padding: '8px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#7c3aed', color: '#fff', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <Download size={12} /> Inject CSS Tokens into App
+                  </button>
+                )}
+              </div>
             </div>
             <div style={{ ...cardStyle }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Tailwind Config</div>

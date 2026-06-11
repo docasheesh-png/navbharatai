@@ -68,17 +68,25 @@ type TimeRange = '7days' | '30days' | 'alltime';
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const generateActivityData = (days: number): ActivityDay[] => {
-  // Use a stable seed-like approach based on day index so re-renders are consistent
+  // Build a day-keyed map from real localStorage history
+  const countsByDay: Record<string, number> = {};
+  try {
+    const historyRaw = localStorage.getItem('navbharatai_history');
+    const history: { ts?: string; timestamp?: string }[] = historyRaw ? JSON.parse(historyRaw) : [];
+    history.forEach((entry) => {
+      const ts = entry.ts || entry.timestamp;
+      if (ts) {
+        const key = new Date(ts).toDateString();
+        countsByDay[key] = (countsByDay[key] || 0) + 1;
+      }
+    });
+  } catch { /* ignore */ }
+
   return Array.from({ length: days }, (_, i) => {
-    const dayOfWeek = (new Date().getDay() - (days - i)) % 7;
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-    const base = isWeekend ? 6 : 2;
-    // deterministic-ish variation using index
-    const variation = ((i * 7 + 13) % 7);
-    return {
-      date: new Date(Date.now() - (days - i) * 86_400_000),
-      builds: base + variation,
-    };
+    const date = new Date(Date.now() - (days - 1 - i) * 86_400_000);
+    date.setHours(0, 0, 0, 0);
+    const key = date.toDateString();
+    return { date, builds: countsByDay[key] || 0 };
   });
 };
 
@@ -97,43 +105,7 @@ const formatTimestamp = (ts: Date | string): string => {
   });
 };
 
-const SIMULATED_SESSIONS: ChatSession[] = [
-  {
-    id: 'sim-1',
-    title: 'E-commerce Platform Build',
-    messages: [{ id: 'm1', text: 'Build me an e-commerce app', sender: 'user', timestamp: new Date(Date.now() - 3_600_000), modelUsed: 'Gemini Pro' }],
-    lastUpdated: new Date(Date.now() - 3_600_000),
-    agent: 'navBharatAI',
-  },
-  {
-    id: 'sim-2',
-    title: 'Weather App with Forecast',
-    messages: Array(4).fill(null).map((_, i) => ({ id: `m${i}`, text: '', sender: 'user' as const, timestamp: new Date(), modelUsed: 'Claude' })),
-    lastUpdated: new Date(Date.now() - 7_200_000),
-    agent: 'navBharatAI',
-  },
-  {
-    id: 'sim-3',
-    title: 'Portfolio Website UI',
-    messages: Array(6).fill(null).map((_, i) => ({ id: `m${i}`, text: '', sender: 'user' as const, timestamp: new Date(), modelUsed: 'Groq Llama' })),
-    lastUpdated: new Date(Date.now() - 86_400_000),
-    agent: 'Vishwakarma',
-  },
-  {
-    id: 'sim-4',
-    title: 'Restaurant Booking System',
-    messages: Array(3).fill(null).map((_, i) => ({ id: `m${i}`, text: '', sender: 'user' as const, timestamp: new Date(), modelUsed: 'Gemini Pro' })),
-    lastUpdated: new Date(Date.now() - 2 * 86_400_000),
-    agent: 'navBharatAI',
-  },
-  {
-    id: 'sim-5',
-    title: 'Task Manager Dashboard',
-    messages: Array(8).fill(null).map((_, i) => ({ id: `m${i}`, text: '', sender: 'user' as const, timestamp: new Date(), modelUsed: 'Gemini Pro' })),
-    lastUpdated: new Date(Date.now() - 3 * 86_400_000),
-    agent: 'navBharatAI',
-  },
-];
+const SIMULATED_SESSIONS: ChatSession[] = [];
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -348,7 +320,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
 
   // ── Read localStorage ──
   const readLocalData = useCallback(() => {
-    // Sessions
+    // Sessions from dedicated key
     let sessions: ChatSession[] = [];
     try {
       const raw = localStorage.getItem('navbharat_sessions');
@@ -357,7 +329,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       sessions = [];
     }
 
-    // History / app builds (fallback to sessions length)
+    // History / app builds
     let historyCount = 0;
     try {
       const raw = localStorage.getItem('navbharatai_history');
@@ -369,7 +341,18 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       historyCount = 0;
     }
 
-    return { sessions, historyCount };
+    // Count total messages across all localStorage keys matching navbharat patterns
+    let totalMsgCount = 0;
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i) || '';
+        if (key.startsWith('navbharat') || key.startsWith('nb_')) {
+          totalMsgCount++;
+        }
+      }
+    } catch { /* ignore */ }
+
+    return { sessions, historyCount: Math.max(historyCount, Math.floor(totalMsgCount / 3)) };
   }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { sessions, historyCount } = readLocalData();

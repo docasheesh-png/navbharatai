@@ -478,31 +478,28 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
   const runAnalysis = useCallback(
     (html: string) => {
       setIsAnalyzing(true);
-      // Fake minimal async tick to show loading state
-      setTimeout(() => {
-        const res = analyzeHTML(html);
-        setResult(res);
+      const res = analyzeHTML(html);
+      setResult(res);
 
-        const entry: HistoryEntry = {
-          performance: res.performance.score,
-          accessibility: res.accessibility.score,
-          seo: res.seo.score,
-          bestPractices: res.bestPractices.score,
-          analyzedAt: res.analyzedAt,
-        };
+      const entry: HistoryEntry = {
+        performance: res.performance.score,
+        accessibility: res.accessibility.score,
+        seo: res.seo.score,
+        bestPractices: res.bestPractices.score,
+        analyzedAt: res.analyzedAt,
+      };
 
-        setHistory((prev) => {
-          const updated = [entry, ...prev].slice(0, MAX_HISTORY);
-          try {
-            localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
-          } catch {
-            // ignore
-          }
-          return updated;
-        });
+      setHistory((prev) => {
+        const updated = [entry, ...prev].slice(0, MAX_HISTORY);
+        try {
+          localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+        } catch {
+          // ignore
+        }
+        return updated;
+      });
 
-        setIsAnalyzing(false);
-      }, 600);
+      setIsAnalyzing(false);
     },
     []
   );
@@ -544,6 +541,15 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
               {new Date(result.analyzedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </span>
           )}
+          <a
+            href="https://pagespeed.web.dev/analysis?url="
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#30363d] text-[#58a6ff] hover:bg-[#21262d] transition-colors"
+          >
+            <BarChart2 size={13} />
+            Run PageSpeed Test
+          </a>
           {!generatedCode && (
             <button
               onClick={() => setPasteModal(true)}

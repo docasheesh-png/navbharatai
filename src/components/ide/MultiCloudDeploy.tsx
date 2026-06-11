@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CloudUpload, ServerCog, CloudCheck, CloudCog, Globe, Rocket, Check, X, Loader2, ChevronRight, RefreshCw, ExternalLink, Terminal, Shield, Zap, Clock, AlertCircle, CheckCircle2, Copy } from 'lucide-react';
 
-type Platform = 'vercel' | 'netlify' | 'firebase' | 'cloudrun' | 'railway' | 'render';
+type Platform = 'vercel' | 'netlify' | 'firebase' | 'cloudrun' | 'railway' | 'render' | 'navbharat';
 type DeployStatus = 'idle' | 'building' | 'deploying' | 'success' | 'failed';
 
 interface Deployment {
@@ -26,6 +26,17 @@ interface PlatformConfig {
 }
 
 const PLATFORMS: Record<Platform, PlatformConfig> = {
+  navbharat: {
+    name: 'NavBharat Hosting',
+    color: '#6366f1',
+    icon: '🇮🇳',
+    description: 'Instant hosting via NavBharatAI — get a live URL in seconds',
+    buildCmd: 'navbharat deploy',
+    outputDir: 'dist',
+    envVars: [],
+    features: ['Instant Deploy', 'Live URL', 'PWA Ready', 'Free Tier'],
+    free: true,
+  },
   vercel: {
     name: 'Vercel',
     color: '#000000',
@@ -118,7 +129,11 @@ const LOG_MESSAGES: Record<DeployStatus, string[]> = {
   failed: ['> ❌ Deployment failed', '> Check environment variables and try again'],
 };
 
-export function MultiCloudDeploy() {
+interface MultiCloudDeployProps {
+  generatedCode?: string;
+}
+
+export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) {
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>('vercel');
   const [deployStatus, setDeployStatus] = useState<DeployStatus>('idle');
   const [logs, setLogs] = useState<string[]>([]);
@@ -140,6 +155,44 @@ export function MultiCloudDeploy() {
     setLogs([]);
     setLiveUrl('');
 
+    // NavBharat Hosting: real deploy via /api/pwa/save
+    if (selectedPlatform === 'navbharat') {
+      if (!generatedCode) {
+        setDeployStatus('failed');
+        setLogs(['> ❌ No app code found. Build something with NavBharat AI first.']);
+        return;
+      }
+      setLogs(['> Preparing NavBharat Hosting upload...']);
+      setDeployStatus('deploying');
+      setLogs(prev => [...prev, '> Uploading app bundle...']);
+      try {
+        const titleMatch = generatedCode.match(/<title[^>]*>([^<]+)<\/title>/i);
+        const name = titleMatch?.[1]?.trim() || 'NavBharat App';
+        const res = await fetch('/api/pwa/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ html: generatedCode, name }),
+        });
+        const data = await res.json();
+        if (data.url) {
+          setDeployStatus('success');
+          setLiveUrl(data.url);
+          setLogs(prev => [...prev, '> ✅ Deployed successfully!', `> 🌍 Live URL: ${data.url}`]);
+          setDeployments(prev => [{
+            id: Date.now().toString(), platform: 'navbharat', url: data.url,
+            status: 'live', timestamp: Date.now(), duration: 2,
+          }, ...prev.slice(0, 9)]);
+        } else {
+          throw new Error(data.error || 'Deploy failed');
+        }
+      } catch (err: any) {
+        setDeployStatus('failed');
+        setLogs(prev => [...prev, `> ❌ ${err.message || 'Deploy failed'}`]);
+      }
+      return;
+    }
+
+    // Other platforms: show config + fake simulation (real deploy needs API tokens)
     const buildLogs = LOG_MESSAGES.building;
     for (let i = 0; i < buildLogs.length; i++) {
       await new Promise(r => setTimeout(r, 300 + Math.random() * 200));

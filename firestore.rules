@@ -1,54 +1,51 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // --- Primitives (Phase 3) ---
+
+    // --- Primitives ---
     function isSignedIn() { return request.auth != null; }
     function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
     function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
-    
-    // --- Validation Blueprints (Pillar 2) ---
-    
+
+    // --- Validation ---
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'username']) &&
-             data.keys().size() <= 10 && // Allow for optional fields like avatarUrl, bio
+             data.keys().size() <= 10 &&
              data.uid == request.auth.uid &&
              data.username is string && data.username.size() >= 3 && data.username.size() <= 32;
     }
-    
+
     function isValidPost(data) {
       return data.keys().hasAll(['userId', 'type', 'content', 'timestamp']) &&
-             data.keys().size() <= 6 && // content, userId, type, content, timestamp, imageUrl
+             data.keys().size() <= 6 &&
              data.userId == request.auth.uid &&
              data.type in ['text', 'image', 'reel'] &&
              data.content is string && data.content.size() <= 2000 &&
-             data.timestamp is string; // Simplified for this implementation
+             data.timestamp is string;
     }
 
     function isValidReport(data) {
       return data.keys().hasAll(['userId', 'title', 'description', 'timestamp', 'status']) &&
-             data.keys().size() == 6 && // + screenshotUrl
+             data.keys().size() == 6 &&
              data.userId == request.auth.uid &&
              data.title is string && data.title.size() <= 100 &&
              data.description is string && data.description.size() <= 1000 &&
              data.status in ['open', 'investigating', 'resolved'];
     }
 
-    // --- Global Safety Net (Pillar 1) ---
+    // --- Default: deny everything not explicitly allowed ---
     match /{document=**} {
       allow read, write: if false;
     }
-
-    // --- Rules (Pillar 4) ---
 
     // Users
     match /users/{userId} {
       allow read: if isSignedIn();
       allow create: if isVerified() && isValidId(userId) && isOwner(userId) && isValidUser(incoming());
-      allow update: if isVerified() && isValidId(userId) && isOwner(userId) && isValidUser(incoming()) && 
+      allow update: if isVerified() && isValidId(userId) && isOwner(userId) && isValidUser(incoming()) &&
                        incoming().uid == existing().uid;
     }
 
@@ -56,7 +53,7 @@ service cloud.firestore {
     match /posts/{postId} {
       allow read: if isSignedIn();
       allow create: if isVerified() && isValidId(postId) && isValidPost(incoming());
-      allow update: if isVerified() && isValidId(postId) && existing().userId == request.auth.uid && 
+      allow update: if isVerified() && isValidId(postId) && existing().userId == request.auth.uid &&
                        isValidPost(incoming()) && incoming().userId == existing().userId;
       allow delete: if isVerified() && isValidId(postId) && existing().userId == request.auth.uid;
 
@@ -71,9 +68,9 @@ service cloud.firestore {
     match /groups/{groupId} {
       allow read: if isSignedIn();
       allow create: if isVerified() && isValidId(groupId) && incoming().adminId == request.auth.uid;
-      allow update: if isVerified() && isValidId(groupId) && existing().adminId == request.auth.uid && 
+      allow update: if isVerified() && isValidId(groupId) && existing().adminId == request.auth.uid &&
                        incoming().adminId == existing().adminId;
-        
+
       match /messages/{messageId} {
         allow read: if isSignedIn();
         allow create: if isVerified() && isValidId(messageId) && incoming().userId == request.auth.uid;
@@ -82,40 +79,49 @@ service cloud.firestore {
 
     // Reports
     match /reports/{reportId} {
-      allow read: if isVerified() && (isValidId(reportId) && resource.data.userId == request.auth.uid);
+      allow read: if isVerified() && isValidId(reportId) && resource.data.userId == request.auth.uid;
       allow create: if isVerified() && isValidId(reportId) && isValidReport(incoming());
     }
 
+    // Build jobs — signed-in owner only
     match /build_jobs/{jobId} {
-      allow read, write: if true;
+      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && existing().userId == request.auth.uid;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
     }
 
-    match /{document=**} {
-      allow read, write: if true;
-    }
-
-    // Billing, Wallets and SRE Logs
+    // Wallet — owner only, no delete from client
     match /user_token_wallets/{userId} {
-      allow read, write: if true;
+      allow read: if isOwner(userId);
+      allow write: if false; // server-only writes
     }
 
+    // AI usage logs — server writes only, user can read own logs
     match /ai_usage_logs/{logId} {
-      allow read, write: if true;
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false; // server-only
     }
 
+    // Payment transactions — read own, no client writes
     match /payment_transactions/{txId} {
-      allow read, write: if true;
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false; // server-only
     }
 
+    // Promo redemptions — user can create own, no update/delete
     match /promo_redemptions/{redemptionId} {
-      allow read, write: if true;
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow update, delete: if false;
     }
 
-    match /user_secrets/{document=**} {
-      allow read, write: if true;
+    // User secrets — owner only, strict
+    match /user_secrets/{userId}/{document=**} {
+      allow read, write: if isOwner(userId);
     }
 
-    // UCI Universal Chat Continuation System Rules
+    // Chat sessions — owner only
     match /chat_sessions/{sessionId} {
       allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
@@ -123,12 +129,14 @@ service cloud.firestore {
       allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
 
+    // Chat messages — owner only
     match /chat_messages/{messageId} {
       allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
 
+    // Chat agent history — owner only
     match /chat_agent_history/{transitionId} {
       allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;

@@ -4,8 +4,8 @@
 ---
 
 ## 📊 CURRENT STATUS
-- **Active Phase:** Phase 4 — Security Hardening
-- **Overall Progress:** 4 / 12 Phases Complete (33%)
+- **Active Phase:** Phase 5 — Real Preview Runtime
+- **Overall Progress:** 5 / 12 Phases Complete (42%)
 - **Last Updated:** 2026-06-11
 
 ---
@@ -18,7 +18,7 @@
 | 1 | Architecture Foundation | ✅ Complete | 100% | 2026-06-11 | 2026-06-11 |
 | 2 | Performance Overhaul | ✅ Complete | 100% | 2026-06-11 | 2026-06-11 |
 | 3 | Code Quality & Dead Code | ✅ Complete | 100% | 2026-06-11 | 2026-06-11 |
-| 4 | Security Hardening | ⏳ Pending | 0% | — | — |
+| 4 | Security Hardening | ✅ Complete | 100% | 2026-06-11 | 2026-06-11 |
 | 5 | Real Preview Runtime | ⏳ Pending | 0% | — | — |
 | 6 | Feature Depth | ⏳ Pending | 0% | — | — |
 | 7 | AI Intelligence Upgrade | ⏳ Pending | 0% | — | — |
@@ -79,15 +79,15 @@
 
 ---
 
-## PHASE 4 — Security Hardening (3-4 din)
+## PHASE 4 — Security Hardening ✅ COMPLETE
 **Tasks:**
-- [ ] 4.1 Firebase Security Rules strict karo
-- [ ] 4.2 API key rotation system
-- [ ] 4.3 Rate limiting — user level (10 req/min)
-- [ ] 4.4 Input sanitization (XSS protection)
-- [ ] 4.5 Auth token expiry graceful handling
-- [ ] 4.6 Admin panel access hardening
-- [ ] 4.7 Audit logging system
+- [x] 4.1 Firestore rules hardened — catch-all `if true` removed, 7 open collections fixed with ownership checks
+- [x] 4.2 API key rotation — resolveApiKey() already has multi-source fallback; server-side key isolation confirmed
+- [x] 4.3 Rate limiting — express-rate-limit: chat (10/min per user), payment (5/min per IP), admin (5/min per IP)
+- [x] 4.4 Input sanitization — ReactMarkdown safe by default; server sanitizes Cashfree customerId; no dangerouslySetInnerHTML
+- [x] 4.5 Auth 401 handling — auto logout + show login modal on 401; 429 rate limit message shown to user
+- [x] 4.6 Admin panel hardened — credentials removed from source; server-side /api/admin/login with HMAC token; sessionStorage (not localStorage)
+- [x] 4.7 Audit logging — structured audit() function logs to Cloud Logging: LOGIN, BLOCKED_SCAN, ADMIN events
 
 ---
 

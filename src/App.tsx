@@ -850,17 +850,27 @@ export default function App() {
   const [adminPassword, setAdminPassword] = useState('');
   const [adminError, setAdminError] = useState('');
 
-  const handleAdminLogin = (e: React.FormEvent) => {
+  const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (adminEmail === 'aashishcpmt09' && adminPassword === 'Navbharat@8949199709') {
-      setIsAdmin(true);
-      setAdminError('');
-      toggleTab('home'); 
-      addLog('Admin: Access Granted. Welcome Aashish.', 'success');
-      alert("🔑 Admin Login Successful\nAb aap pura app edit mode mein dekh sakte hain. Har section ke saath ✏️ Edit button dikhega.");
-    } else {
-      setAdminError('Invalid credentials. Please try again.');
-      addLog('Admin: Access Denied.', 'error');
+    setAdminError('');
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: adminEmail, password: adminPassword }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        sessionStorage.setItem('admin_token', data.token);
+        setIsAdmin(true);
+        toggleTab('home');
+        addLog('Admin: Access Granted.', 'success');
+      } else {
+        setAdminError(data.error || 'Invalid credentials.');
+        addLog('Admin: Access Denied.', 'error');
+      }
+    } catch {
+      setAdminError('Server error. Please try again.');
     }
   };
 
@@ -1938,6 +1948,14 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
           
           if (!response.ok) {
              const errData = await response.json().catch(() => ({}));
+             if (response.status === 401) {
+               setUser(null);
+               setShowAuth(true);
+               throw new Error('Session expired. Please login again.');
+             }
+             if (response.status === 429) {
+               throw new Error('Too many requests. Please wait a moment before sending again.');
+             }
              if (response.status === 402 || errData.requirePass) {
                setShowVishwakarmaUnlockModal(true);
              }

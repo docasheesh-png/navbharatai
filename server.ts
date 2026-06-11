@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import crypto from 'crypto';
+import rateLimit from 'express-rate-limit';
 
 // Traceability Infrastructure
 export interface TraceContext {
@@ -361,10 +362,45 @@ setInterval(() => {
   const app = express();
   app.use(traceMiddleware);
 
-  // Security Middleware: Block mal-ware scanner paths
+  // ── Rate Limiters (4.3) ──────────────────────────────────────────────────
+  const chatLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    keyGenerator: (req) => (req.headers['x-user-id'] as string) || req.ip || 'anon',
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests. Please wait a moment before sending again.' },
+  });
+
+  const paymentLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 5,
+    keyGenerator: (req) => req.ip || 'anon',
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many payment requests. Please slow down.' },
+  });
+
+  const adminLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 5,
+    keyGenerator: (req) => req.ip || 'anon',
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many admin requests.' },
+  });
+
+  // ── Structured Audit Logger (4.7) ────────────────────────────────────────
+  const audit = (event: string, meta: Record<string, any> = {}) => {
+    const entry = { ts: new Date().toISOString(), event, ...meta };
+    console.log(`[AUDIT] ${JSON.stringify(entry)}`);
+  };
+
+  // ── Security Middleware: Block malware scanner paths ─────────────────────
   app.use((req, res, next) => {
     const maliciousPaths = ['/wp-admin', '/wp-content', '/wp-includes', '/.env', '/config.php'];
     if (maliciousPaths.some(path => req.path.startsWith(path))) {
+      audit('BLOCKED_SCAN', { ip: req.ip, path: req.path });
       return res.status(403).send('Forbidden');
     }
     next();
@@ -3773,11 +3809,11 @@ Analyze the target for any vulnerabilities, configuration issues, or exposed sec
     }
   };
 
-  app.post('/api/chat/navbharat', (req, res) => chatHandler(req, res, 'navbharat'));
-  app.post('/api/chat/navbharatai', (req, res) => chatHandler(req, res, 'navbharat'));
-  app.post('/api/chat/vishwakarma-basic', (req, res) => chatHandler(req, res, 'vishwakarma-basic'));
-  app.post('/api/chat/vishwakarma-pro', (req, res) => chatHandler(req, res, 'vishwakarma-pro'));
-  app.post('/api/chat/vip', (req, res) => chatHandler(req, res, 'vip'));
+  app.post('/api/chat/navbharat',       chatLimiter, (req, res) => chatHandler(req, res, 'navbharat'));
+  app.post('/api/chat/navbharatai',     chatLimiter, (req, res) => chatHandler(req, res, 'navbharat'));
+  app.post('/api/chat/vishwakarma-basic', chatLimiter, (req, res) => chatHandler(req, res, 'vishwakarma-basic'));
+  app.post('/api/chat/vishwakarma-pro', chatLimiter, (req, res) => chatHandler(req, res, 'vishwakarma-pro'));
+  app.post('/api/chat/vip',             chatLimiter, (req, res) => chatHandler(req, res, 'vip'));
 
   // Legacy /api/chat route has been deprecated. Users should use /api/chat/:tier endpoints.
 /*
@@ -4170,7 +4206,7 @@ Hinglish mein baat karo — friendly, clear, professional.`;
     }
   });
 
-  app.post('/api/payment/create-order', async (req, res) => {
+  app.post('/api/payment/create-order', paymentLimiter, async (req, res) => {
     const { amount, userId, userEmail, userName, userPhone, isVishwakarmaOrder, buyPass, tokenAmount } = req.body;
     if (!userId) return res.status(400).json({ error: 'User is not authenticated' });
     const orderAmount = parseFloat(amount);
@@ -4338,7 +4374,7 @@ Hinglish mein baat karo — friendly, clear, professional.`;
     }
   });
 
-  app.post('/api/payment/verify-payment', async (req, res) => {
+  app.post('/api/payment/verify-payment', paymentLimiter, async (req, res) => {
     const { orderId } = req.body;
     if (!orderId) return res.status(400).json({ error: 'Order ID is required' });
 
@@ -4500,7 +4536,48 @@ Hinglish mein baat karo — friendly, clear, professional.`;
     }
   });
 
-  app.get('/api/admin/analytics', async (req, res) => {
+  // ── Admin server-side auth (4.6) ─────────────────────────────────────────
+  app.post('/api/admin/login', adminLimiter, (req, res) => {
+    const { username, password } = req.body || {};
+    const validUser = process.env.ADMIN_USERNAME || 'aashishcpmt09';
+    const validPass = process.env.ADMIN_PASSWORD;
+
+    if (!validPass) {
+      audit('ADMIN_LOGIN_BLOCKED', { reason: 'ADMIN_PASSWORD not set', ip: req.ip });
+      return res.status(503).json({ error: 'Admin access not configured on server.' });
+    }
+
+    const passHash = crypto.createHash('sha256').update(password || '').digest('hex');
+    const expectedHash = crypto.createHash('sha256').update(validPass).digest('hex');
+
+    if (username === validUser && passHash === expectedHash) {
+      const token = crypto.createHmac('sha256', validPass)
+        .update(`admin:${Math.floor(Date.now() / 86400000)}:${username}`)
+        .digest('hex');
+      audit('ADMIN_LOGIN_SUCCESS', { username, ip: req.ip });
+      return res.json({ ok: true, token });
+    }
+
+    audit('ADMIN_LOGIN_FAILED', { username, ip: req.ip });
+    return res.status(401).json({ error: 'Invalid credentials.' });
+  });
+
+  // Admin token verification middleware
+  const verifyAdminToken = (req: any, res: any, next: any) => {
+    const token = req.headers['x-admin-token'] as string;
+    const validPass = process.env.ADMIN_PASSWORD;
+    if (!validPass || !token) return res.status(401).json({ error: 'Admin token required.' });
+    const expected = crypto.createHmac('sha256', validPass)
+      .update(`admin:${Math.floor(Date.now() / 86400000)}:${process.env.ADMIN_USERNAME || 'aashishcpmt09'}`)
+      .digest('hex');
+    if (token !== expected) {
+      audit('ADMIN_ACCESS_DENIED', { ip: req.ip, path: req.path });
+      return res.status(403).json({ error: 'Forbidden.' });
+    }
+    next();
+  };
+
+  app.get('/api/admin/analytics', verifyAdminToken, async (req, res) => {
     try {
       const walletsRef = collection(db, 'user_token_wallets');
       const walletSnap = await getDocs(walletsRef);

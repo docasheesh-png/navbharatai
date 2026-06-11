@@ -7,37 +7,42 @@ interface Props {
 
 interface State {
   hasError: boolean;
+  errorMessage: string;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
-  public state: State = {
-    hasError: false
-  };
+  public state: State = { hasError: false, errorMessage: '' };
 
-  public static getDerivedStateFromError(_: Error): State {
-    return { hasError: true };
+  public static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, errorMessage: error.message };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("Uncaught error in component tree:", error);
-    console.error("Component stack:", errorInfo.componentStack);
+    console.error("ErrorBoundary caught:", error.message, errorInfo.componentStack);
   }
 
   public render() {
     if (this.state.hasError) {
       return this.props.fallback || (
-        <div className="p-4 bg-red-50 text-red-900 rounded-md">
-          <h2 className="text-lg font-semibold">Something went wrong.</h2>
-          <button
-            className="mt-2 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-            onClick={() => this.setState({ hasError: false })}
-          >
-            Try again
-          </button>
+        <div className="flex-1 flex items-center justify-center bg-[#0d1117] p-8">
+          <div className="max-w-sm w-full bg-[#161b22] border border-red-500/20 rounded-2xl p-6 text-center space-y-4">
+            <div className="w-12 h-12 bg-red-500/10 rounded-2xl flex items-center justify-center mx-auto">
+              <span className="text-red-400 text-2xl">⚠</span>
+            </div>
+            <div>
+              <h2 className="text-sm font-black text-white uppercase tracking-widest">Something went wrong</h2>
+              <p className="text-[10px] text-[#484f58] font-bold uppercase tracking-wider mt-1">{this.state.errorMessage || 'An unexpected error occurred'}</p>
+            </div>
+            <button
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all"
+              onClick={() => this.setState({ hasError: false, errorMessage: '' })}
+            >
+              Try Again
+            </button>
+          </div>
         </div>
       );
     }
-
     return this.props.children;
   }
 }

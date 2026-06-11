@@ -2,13 +2,13 @@ import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallbac
 import { 
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
   Terminal, Activity, Cpu, Settings, X, Shield, ShieldCheck, Eye, EyeOff, Lock, Wallet, CreditCard,
-  Globe, FileCode, GitBranch, Play, Monitor, Search, ChevronRight, Gamepad2, Tv, Music, Sparkles, Trophy,
+  Globe, FileCode, GitBranch, Play, Monitor, Search, ChevronRight, Gamepad2, Sparkles,
   FolderOpen, Trash2, Plus, FilePlus, FolderPlus, Save, MoreHorizontal, Rocket, LayoutDashboard, Database, 
   Github, HardDrive, RefreshCw, Menu, History, Clock, Smartphone, ThumbsUp, ThumbsDown, Copy, Check,
   Link as LinkIcon, List, GitCommit, Share2, Box, Folder, UploadCloud, ChevronLeft,
   Edit2, Camera, Upload, Image as ImageIcon, Info, LogIn,
   GitFork, GitMerge, History as HistoryIcon, UserPlus, LogOut, CheckCircle2, AlertCircle, RotateCcw,
-  ArrowRight, Gift, Columns, Palette, TestTube,
+  Gift, Palette, TestTube,
   Mic, BarChart2, Languages, Layout, TrendingUp,
   Bug, Gauge, Puzzle, Search as SearchIcon,
   Globe as GlobeIcon, Users2, Figma,
@@ -19,6 +19,7 @@ import {
 import { cn } from './lib/utils';
 // SDAChat kept eager — used immediately on tab open
 import { SDAChat } from './components/sda/SDAChat';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
@@ -144,7 +145,6 @@ export default function App() {
   }, [deviceMode]);
 
   const [tabHistories, setTabHistories] = useState<Record<string, ViewType[]>>({});
-  const [showFloatingPreview, setShowFloatingPreview] = useState(false);
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [isAdmin, setIsAdmin] = useState(() => {
     return localStorage.getItem('navbharat_admin_v1') === 'true';
@@ -233,7 +233,7 @@ export default function App() {
   // ==================================================
   const [isWorkspacePreparing, setIsWorkspacePreparing] = useState(false);
   const [workspacePrepError, setWorkspacePrepError] = useState<string | null>(null);
-  const [workspacePrepAgent, setWorkspacePrepAgent] = useState<string>('navbharatai');
+
 
   const [isPreviewBuilding, setIsPreviewBuilding] = useState(false);
   const [previewBuildError, setPreviewBuildError] = useState<string | null>(null);
@@ -375,14 +375,14 @@ export default function App() {
     message: string;
     suggestions: string;
   } | null>(null);
-  const [shellInput, setShellInput] = useState('');
+
   const [selectedModel, setSelectedModel] = useState('auto');
   const [invalidKeys, setInvalidKeys] = useState<Set<string>>(new Set());
   const [pendingProvider, setPendingProvider] = useState<string | null>(null);
   const [pendingKey, setPendingKey] = useState('');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [openTabs, setOpenTabs] = useState<ViewType[]>([]);
-  const [sandboxError, setSandboxError] = useState<string | null>(null);
+
   const [errorContext, setErrorContext] = useState<ErrorContext | null>(null);
   const [githubToken, setGithubToken] = useState<string | null>(() => localStorage.getItem('gh_token'));
   const [firebaseToken, setFirebaseToken] = useState<string | null>(() => localStorage.getItem('fb_token'));
@@ -825,7 +825,7 @@ export default function App() {
   // logs, setLogs → from useDevLogs() hook
   const [generatedCode, setGeneratedCode] = useState<string>('<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>');
   const [hasGeneratedCode, setHasGeneratedCode] = useState(false);
-  const [currentPreviewUrl, setCurrentPreviewUrl] = useState('navbharat://sandbox');
+
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const saved = localStorage.getItem('navbharat_keys');
       const defaults = { gemini: '', groq: '', deepseek: '', openai: '', openrouter: '', claude: '' };
@@ -924,8 +924,21 @@ export default function App() {
     return unsubscribe;
   }, []);
 
+  const MAX_UPLOAD_BYTES = 2 * 1024 * 1024; // 2 MB
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logoUrl' | 'qrUrl') => {
-    console.log('File upload triggered for', type);
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      addLog(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max 2 MB allowed.`, 'error');
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      setDonationData(prev => ({ ...prev, [type]: dataUrl }));
+    };
+    reader.readAsDataURL(file);
   };
 
   const toggleTab = useCallback((view: ViewType, pushToHistory = true) => {
@@ -993,7 +1006,6 @@ export default function App() {
   };
   const closeTab = useCallback((e: React.MouseEvent, view: ViewType) => {
     e.stopPropagation();
-    console.log('Close tab clicked for:', view);
 
     // If user closes home tab, just go to it but don't close
     if (view === 'home') {
@@ -1460,9 +1472,6 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     agent: string = 'navbharatai',
     mode: string = 'chat'
   ): Promise<string> => {
-    console.log("AI REQUEST START");
-    console.log("Agent:", agent);
-
     let endpoint = '/api/chat/navbharatai';
 
     const controller = new AbortController();
@@ -1496,7 +1505,6 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
       });
       
       clearTimeout(timeoutId);
-      console.log("AI REQUEST SUCCESS");
       return response.data.reply;
     } catch (error: any) {
       clearTimeout(timeoutId);
@@ -1748,7 +1756,6 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
   };
 
   const handleSendForTab = async (tabId: ViewType, overrideMessage?: string, files: File[] = []) => {
-      console.log('Sending message to', tabId, 'files:', files);
       // ... (existing logic, maybe add files to messages)
     const isNbi = tabId === 'nbi_chat';
     const currentInput = input;
@@ -1880,7 +1887,6 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
       setIntentForTab(detectedIntent);
 
       const performBackendCall = async () => {
-        console.log("AI REQUEST START");
         addLog('Falling back to background AI processing...', 'info');
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (keys.gemini && !invalidKeys.has(keys.gemini)) headers['x-gemini-key'] = keys.gemini;
@@ -1930,7 +1936,6 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
              throw new Error(errData.error || `HTTP Error ${response.status}`);
           }
           
-          console.log("AI REQUEST SUCCESS");
           return await response.json();
         } catch (error: any) {
           console.error("AI REQUEST FAILURE", error);
@@ -2073,6 +2078,13 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     const messageToSend = typeof input === 'string' ? input : proInput.trim();
     if (!messageToSend && fileList.length === 0 || isProLoading) return;
 
+    const oversized = fileList.filter(f => f.size > MAX_UPLOAD_BYTES);
+    if (oversized.length > 0) {
+      const names = oversized.map(f => `${f.name} (${(f.size/1024/1024).toFixed(1)}MB)`).join(', ');
+      addLog(`File too large: ${names}. Max 2 MB per file.`, 'error');
+      return;
+    }
+
     // Convert any attached files to base64 for AI vision
     const fileAttachments = fileList.length > 0 ? await filesToBase64(fileList) : [];
     const fileLabel = fileAttachments.length > 0 ? ` [📎 ${fileAttachments.map(f => f.name).join(', ')}]` : '';
@@ -2164,7 +2176,6 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
                   updatePreview(evt.files);
                   setIsAppBuilt(true);
                   setHasGeneratedCode(true);
-                  setShowFloatingPreview(true);
 
                   const fileList = Object.keys(evt.files);
                   const processLog = [
@@ -2779,7 +2790,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
 
     const handleMessage = (e: MessageEvent) => {
       if (e.data.type === 'SANDBOX_ERROR') {
-        setSandboxError(e.data.message);
+        addLog(`Sandbox error: ${e.data.message}`, 'error');
       } else if (e.data.type === 'GITHUB_AUTH_SUCCESS') {
         const token = e.data.token;
         setGithubToken(token);
@@ -2917,13 +2928,6 @@ ${pending.map(p => `  - ${p}`).join('\n')}
 
       const finalOAuthUrl = githubUrl.toString();
 
-      // REQUIRED DESIGN & TROUBLESHOOTING CONSOLE LOGGING
-      console.log('✅=== [GITHUB OAUTH REDIRECT DEBUG] ===');
-      console.log('✅ Final constructed OAuth URL:', finalOAuthUrl);
-      console.log('✅ redirect_uri parameter:', redirectUri);
-      console.log('✅ Current page origin:', window.location.origin);
-      console.log('======================================');
-
       // Populate diagnosis details for in-app floating overlay popup debug representation
       setGithubDebugData({
         oauthUrl: finalOAuthUrl,
@@ -2982,14 +2986,6 @@ ${pending.map(p => `  - ${p}`).join('\n')}
       const consentUrl = new URL(`${window.location.origin}/api/auth/firebase/consent`);
       consentUrl.searchParams.set('redirect_uri', redirectUri);
       consentUrl.searchParams.set('state', state);
-
-      // REQUIRED LOGGING
-      console.log('✅=== [FIREBASE OAUTH REDIRECT DEBUG] ===');
-      console.log('✅ Generated OAuth URL:', consentUrl.toString());
-      console.log('✅ Redirect URI:', redirectUri);
-      console.log('✅ Current Page Origin:', window.location.origin);
-      console.log('✅ Auth State Payload:', returnPath);
-      console.log('=========================================');
 
       addLog('Redirecting to Firebase/GCP authorization consent...', 'info');
       setTimeout(() => {
@@ -3297,7 +3293,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     try {
                       await signOut(auth);
                       window.location.reload();
-                      console.log('Logged out successfully');
+;
                     } catch (error) {
                       console.error('Logout failed:', error);
                     }
@@ -3639,7 +3635,8 @@ ${pending.map(p => `  - ${p}`).join('\n')}
       {/* Workspace */}
       <main className="flex flex-1 relative min-h-0 min-w-0">
 
-        {/* View Switcher Output — wrapped in Suspense for lazy-loaded components */}
+        {/* View Switcher Output — wrapped in ErrorBoundary + Suspense for lazy-loaded components */}
+        <ErrorBoundary>
         <Suspense fallback={
           <div className="flex-1 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3">
@@ -6681,6 +6678,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
 
         </div>
         </Suspense>
+        </ErrorBoundary>
       </main>
 
 {/* Vishwakarma Mode Chooser Modal Removed */}

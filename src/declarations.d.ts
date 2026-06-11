@@ -430,6 +430,20 @@ declare module 'lucide-react' {
   export const Users: Icon;
   export const Wifi: Icon;
   export const MoreVertical: Icon;
+  export const Store: Icon;
+  export const AppWindow: Icon;
+  export const ImagePlus: Icon;
+  export const Sparkle: Icon;
+  export const Timer: Icon;
+  export const FileDiff: Icon;
+  export const GitGraph: Icon;
+  export const Milestone: Icon;
+  export const ListChecks: Icon;
+  export const BadgeCheck: Icon;
+  export const BarChart: Icon;
+  export const LineChart: Icon;
+  export const Apple: Icon;
+  export const PlayCircle: Icon;
 }
 
 declare module 'firebase/app' {

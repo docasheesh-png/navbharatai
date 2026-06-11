@@ -12,7 +12,8 @@ import {
   Mic, BarChart2, Languages, Layout, TrendingUp,
   Bug, Gauge, Puzzle, Search as SearchIcon,
   Globe as GlobeIcon, Users2, Figma,
-  Bell, Minimize2, Moon, IndianRupee as RupeeIcon
+  Bell, Minimize2, Moon, IndianRupee as RupeeIcon,
+  Wand2, Package
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { SDAChat } from './components/sda/SDAChat';
@@ -61,6 +62,10 @@ import { PWANotifications } from './components/ide/PWANotifications';
 import { CodeMinifier } from './components/ide/CodeMinifier';
 import { DarkModeGenerator } from './components/ide/DarkModeGenerator';
 import { MonetizationWizard } from './components/ide/MonetizationWizard';
+import { AIImageGenerator } from './components/ide/AIImageGenerator';
+import { CodeVersioning } from './components/ide/CodeVersioning';
+import { APIMarketplace } from './components/ide/APIMarketplace';
+import { AppStorePublisher } from './components/ide/AppStorePublisher';
 import { SecretManager } from './components/SecretManager';
 import { AIChat } from './components/ide/AIChat';
 import { PreviewPanel } from './components/ide/PreviewPanel';
@@ -122,7 +127,7 @@ interface BrainConfig {
   keys: ApiKeys;
 }
 
-type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components' | 'seo' | 'apk' | 'figma' | 'domain' | 'team' | 'pwa' | 'minifier' | 'darkmode' | 'monetize';
+type ViewType = 'home' | 'chat' | 'nbi_chat' | 'nbi_pro_chat' | 'asc_chat' | 'sda_chat' | 'files' | 'history' | 'preview' | 'shell' | 'git' | 'logs' | 'settings' | 'deploy' | 'templates' | 'entertainment' | 'donation' | 'studio' | 'report' | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api' | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot' | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components' | 'seo' | 'apk' | 'figma' | 'domain' | 'team' | 'pwa' | 'minifier' | 'darkmode' | 'monetize' | 'imagegen' | 'versioning' | 'apimarket' | 'appstore';
 
 type SettingsScreen = 'root' | 'general' | 'modules' | 'secrets' | 'connections' | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell' | 'git' | 'logs' | 'report';
 
@@ -2367,6 +2372,10 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     { id: 'minifier', label: 'Code Minifier', icon: Minimize2, status: 'New' },
     { id: 'darkmode', label: 'Dark Mode Gen', icon: Moon, status: 'New' },
     { id: 'monetize', label: 'Monetize', icon: RupeeIcon, status: 'New' },
+    { id: 'imagegen', label: 'AI Image Gen', icon: Wand2, status: 'New' },
+    { id: 'versioning', label: 'Code Versioning', icon: GitBranch, status: 'New' },
+    { id: 'apimarket', label: 'API Marketplace', icon: Package, status: 'New' },
+    { id: 'appstore', label: 'App Store', icon: Rocket, status: 'New' },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'admin', label: 'Admin Login', icon: Lock },
   ];
@@ -3774,6 +3783,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                           { id: 'minifier', label: 'Code Minifier', sub: 'Code size kam karo', icon: Minimize2, color: 'text-cyan-400', status: 'New' },
                           { id: 'darkmode', label: 'Dark Mode Generator', sub: 'Auto dark theme banao', icon: Moon, color: 'text-indigo-400', status: 'New' },
                           { id: 'monetize', label: 'Monetization', sub: 'Razorpay, UPI, AdSense', icon: RupeeIcon, color: 'text-emerald-400', status: 'New' },
+                          { id: 'imagegen', label: 'AI Image Generator', sub: 'Logos, banners, icons banao', icon: Wand2, color: 'text-violet-400', status: 'New' },
+                          { id: 'versioning', label: 'Code Versioning', sub: 'Snapshot & restore history', icon: GitBranch, color: 'text-emerald-400', status: 'New' },
+                          { id: 'apimarket', label: 'API Marketplace', sub: 'One-click API integrations', icon: Package, color: 'text-blue-400', status: 'New' },
+                          { id: 'appstore', label: 'App Store Publisher', sub: 'Google Play & App Store ASO', icon: Rocket, color: 'text-rose-400', status: 'New' },
                           { id: 'access', label: 'Permissions', sub: 'Team Access & Security', icon: ShieldCheck, color: 'text-purple-400', status: 'Coming Soon' },
                         ].map(item => (
                           <button
@@ -3827,6 +3840,14 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                     toggleTab('darkmode');
                                 } else if (item.id === 'monetize') {
                                     toggleTab('monetize');
+                                } else if (item.id === 'imagegen') {
+                                    toggleTab('imagegen');
+                                } else if (item.id === 'versioning') {
+                                    toggleTab('versioning');
+                                } else if (item.id === 'apimarket') {
+                                    toggleTab('apimarket');
+                                } else if (item.id === 'appstore') {
+                                    toggleTab('appstore');
                                 } else {
                                     setSettingsScreen(item.id as any);
                                 }
@@ -6579,6 +6600,36 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {activeView === 'monetize' && (
             <div className="flex-1 h-full overflow-hidden">
               <MonetizationWizard generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
+            </div>
+          )}
+
+          {/* Phase 9 — AI Image Generator */}
+          {activeView === 'imagegen' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <AIImageGenerator onImageGenerated={(url, prompt) => {
+                setGeneratedCode(prev => prev + `\n<!-- Generated Image: ${prompt} -->\n<img src="${url}" alt="${prompt}" style="max-width:100%;border-radius:12px;" />`);
+              }} />
+            </div>
+          )}
+
+          {/* Phase 9 — Code Versioning */}
+          {activeView === 'versioning' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <CodeVersioning generatedCode={generatedCode} onRestore={(c) => setGeneratedCode(c)} />
+            </div>
+          )}
+
+          {/* Phase 9 — API Marketplace */}
+          {activeView === 'apimarket' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <APIMarketplace onCodeInsert={(code) => setGeneratedCode(prev => prev + '\n\n' + code)} />
+            </div>
+          )}
+
+          {/* Phase 9 — App Store Publisher */}
+          {activeView === 'appstore' && (
+            <div className="flex-1 h-full overflow-hidden">
+              <AppStorePublisher generatedCode={generatedCode} />
             </div>
           )}
 

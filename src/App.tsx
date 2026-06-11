@@ -1084,7 +1084,7 @@ export default function App() {
   const closeTab = (e: React.MouseEvent, view: ViewType) => {
     e.stopPropagation();
     console.log('Close tab clicked for:', view);
-    
+
     // If user closes home tab, just go to it but don't close
     if (view === 'home') {
       toggleTab('home', false);
@@ -1092,14 +1092,22 @@ export default function App() {
     }
 
     setOpenTabs(prev => {
-      const nextTabs = prev.filter(t => t !== view);
-      
-      // If we are closing the active view, switch to another one
-      if (activeView === view) {
+      let nextTabs = prev.filter(t => t !== view);
+
+      // When closing pro chat, also remove the preview tab
+      if (view === 'nbi_pro_chat') {
+        nextTabs = nextTabs.filter(t => t !== 'preview');
+        // If active view is preview or pro-chat, redirect away
+        if (activeView === 'preview' || activeView === 'nbi_pro_chat') {
+          const nextActiveView = nextTabs.length > 0 ? nextTabs[nextTabs.length - 1] : 'home';
+          setActiveView(nextActiveView);
+        }
+      } else if (activeView === view) {
+        // If we are closing the active view, switch to another one
         const nextActiveView = nextTabs.length > 0 ? nextTabs[nextTabs.length - 1] : 'home';
         setActiveView(nextActiveView);
       }
-      
+
       return nextTabs;
     });
 
@@ -1112,6 +1120,13 @@ export default function App() {
     // Reset messages only if explicitly closed chat
     if (view === 'chat' || view === 'nbi_chat' || view === 'nbi_pro_chat' || view === 'asc_chat') {
         setMessages([]);
+    }
+
+    // When pro chat is closed, wipe preview state so old app doesn't bleed into next session
+    if (view === 'nbi_pro_chat') {
+      setGeneratedCode('<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>');
+      setHasGeneratedCode(false);
+      setIsAppBuilt(false);
     }
   };
    const scrollRef = useRef<HTMLDivElement>(null);
@@ -1717,7 +1732,7 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     
     if (['html', 'js', 'css'].includes(ext || '')) {
         updatePreview(currentFiles);
-        setActiveView('preview');
+        toggleTab('preview');
         addLog(`Application launched in Sandbox mode.`, 'success');
     } else {
         addLog(`Runtime for .${ext} is currently in limited availability. Executing in dry-run mode...`, 'warn');
@@ -2624,8 +2639,33 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     
     setCurrentSessionId(targetSession.id);
     setMessages([continuationGreeting]);
-    toggleTab('nbi_chat');
-    
+
+    // Detect if this was a pro session
+    const isProSession = targetAgent === 'navbharatai-pro';
+
+    // Restore generated code from session files if available
+    if (targetSession.files && Object.keys(targetSession.files).length > 0) {
+      const htmlFile = Object.entries(targetSession.files as Record<string, string>)
+        .find(([name]) => name.endsWith('.html'));
+      if (htmlFile) {
+        setGeneratedCode(htmlFile[1]);
+        setHasGeneratedCode(true);
+        // Open preview tab alongside the chat tab so history preview shows
+        if (isProSession) {
+          toggleTab('nbi_pro_chat');
+          toggleTab('preview');
+        } else {
+          toggleTab('nbi_chat');
+          toggleTab('preview');
+        }
+        addLog(`UCI resumed with preview: ${uciToFind}`, 'info');
+        return true;
+      }
+    }
+
+    // No code to restore — just open the right chat tab
+    toggleTab(isProSession ? 'nbi_pro_chat' : 'nbi_chat');
+
     addLog(`UCI resumed: ${uciToFind}`, 'info');
     return true;
   };
@@ -3414,8 +3454,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     title={isDisabled ? "Generate an app to enable this" : ""}
                     onClick={() => {
                       if (isPreview) {
-                          setShowFloatingPreview(true);
-                          addLog('Preview control activated.', 'success');
+                          toggleTab('preview');
                           return;
                       }
                       if (item.id === 'asc_chat') {
@@ -3524,9 +3563,8 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                         title={isDisabled ? "Generate an app to enable this" : ""}
                         onClick={() => {
                           if (isPreview) {
-                             setShowFloatingPreview(true);
+                             toggleTab('preview');
                              setIsMenuOpen(false);
-                             addLog('Preview control activated.', 'success');
                              return;
                           }
                           if (item.id === 'asc_chat') {
@@ -4609,7 +4647,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     isAppBuilt={isAppBuilt}
                     theme={theme}
                     onPreviewClick={() => {
-                       setActiveView('preview');
+                       toggleTab('preview');
                        setIsMenuOpen(false);
                     }}
                     userId={user?.uid}
@@ -4654,7 +4692,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     isAppBuilt={isAppBuilt}
                     theme={theme}
                     onPreviewClick={() => {
-                       setActiveView('preview');
+                       toggleTab('preview');
                        setIsMenuOpen(false);
                     }}
                     userId={user?.uid}
@@ -4720,7 +4758,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     isAppBuilt={isAppBuilt}
                     theme={theme}
                     onPreviewClick={() => {
-                        setActiveView('preview');
+                        toggleTab('preview');
                         setIsMenuOpen(false);
                     }}
                     userId={user?.uid}
@@ -6373,7 +6411,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4">
-                  <button onClick={() => setActiveView('preview')} className="py-3 px-4 bg-white/5 hover:bg-white/10 text-white rounded-xl text-xs font-bold transition-all">Preview App</button>
+                  <button onClick={() => toggleTab('preview')} className="py-3 px-4 bg-white/5 hover:bg-white/10 text-white rounded-xl text-xs font-bold transition-all">Preview App</button>
                   <button onClick={() => setIsDeployed(false)} className="py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/20">Back to Code</button>
                 </div>
               </motion.div>
@@ -6413,7 +6451,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 mode={mode}
                 onModeChange={setMode}
                 isAppBuilt={isAppBuilt}
-                onPreviewClick={() => setActiveView('preview')}
+                onPreviewClick={() => toggleTab('preview')}
                 theme={theme}
                 onThemeChange={setTheme}
                 pendingGHEdit={pendingGHEdit}

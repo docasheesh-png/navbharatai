@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../App';
-import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import { MessageSquare, Clock, ShieldCheck, LogIn, MoreVertical, Trash2, X } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -23,15 +23,24 @@ export const HistoryView = ({
     if (!user) return;
     const q = query(
       collection(db, 'chat_sessions'),
-      where('userId', '==', user.uid),
-      orderBy('lastUpdated', 'desc')
+      where('userId', '==', user.uid)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      const data = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .sort((a: any, b: any) => {
+          const ta = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
+          const tb = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
+          return tb - ta;
+        });
       setSessions(data);
+      setLoading(false);
+    }, () => {
+      // Fallback: load from localStorage if Firestore fails
+      try {
+        const local = JSON.parse(localStorage.getItem('navbharat_sessions') || '[]');
+        setSessions(local.sort((a: any, b: any) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime()));
+      } catch { /* empty */ }
       setLoading(false);
     });
     return () => unsubscribe();

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 import { 
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
   Terminal, Activity, Cpu, Settings, X, Shield, ShieldCheck, Eye, EyeOff, Lock, Wallet, CreditCard,
@@ -17,6 +17,7 @@ import {
   Kanban, CloudUpload, LayoutTemplate, HeartPulse
 } from 'lucide-react';
 import { cn } from './lib/utils';
+// SDAChat kept eager — used immediately on tab open
 import { SDAChat } from './components/sda/SDAChat';
 import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
@@ -29,53 +30,63 @@ export const auth = getAuth();
 setPersistence(auth, browserLocalPersistence);
 export const db = getFirestore(app, firebaseConfig.firestoreDbId);
 
-import { CodeStudio } from './components/ide/CodeStudio';
-import { GitPanel } from './components/ide/GitPanel';
-import { SecurityScan } from './components/ide/SecurityScan';
-import { TestPanel } from './components/ide/TestPanel';
-import APITester from './components/ide/APITester';
-import { DiffViewer } from './components/ide/DiffViewer';
-import { DatabaseUI } from './components/ide/DatabaseUI';
-import { VoiceToApp } from './components/ide/VoiceToApp';
-import { BotBuilder } from './components/ide/BotBuilder';
-import { CostEstimator } from './components/ide/CostEstimator';
-import { ScreenshotToCode } from './components/ide/ScreenshotToCode';
-import { MultiPageBuilder } from './components/ide/MultiPageBuilder';
-import { AppAnalytics } from './components/ide/AppAnalytics';
-import { AIDebugger } from './components/ide/AIDebugger';
-import { PerformanceAnalyzer } from './components/ide/PerformanceAnalyzer';
-import { ComponentLibrary } from './components/ide/ComponentLibrary';
-import { SEOOptimizer } from './components/ide/SEOOptimizer';
-import { APKBuilder } from './components/ide/APKBuilder';
-import { FigmaImporter } from './components/ide/FigmaImporter';
-import { CustomDomain } from './components/ide/CustomDomain';
-import { TeamCollaboration } from './components/ide/TeamCollaboration';
-import { PWANotifications } from './components/ide/PWANotifications';
-import { CodeMinifier } from './components/ide/CodeMinifier';
-import { DarkModeGenerator } from './components/ide/DarkModeGenerator';
-import { MonetizationWizard } from './components/ide/MonetizationWizard';
-import { AIImageGenerator } from './components/ide/AIImageGenerator';
-import { CodeVersioning } from './components/ide/CodeVersioning';
-import { APIMarketplace } from './components/ide/APIMarketplace';
-import { AppStorePublisher } from './components/ide/AppStorePublisher';
-import { LiveCollaboration } from './components/ide/LiveCollaboration';
-import { AITestingSuite } from './components/ide/AITestingSuite';
-import { LocalizationManager } from './components/ide/LocalizationManager';
-import { AICodeReview } from './components/ide/AICodeReview';
-import { DatabaseStudio } from './components/ide/DatabaseStudio';
-import { CICDPipeline } from './components/ide/CICDPipeline';
-import { PluginSystem } from './components/ide/PluginSystem';
-import { WhitelabelBranding } from './components/ide/WhitelabelBranding';
-import { AIProjectManager } from './components/ide/AIProjectManager';
-import { MultiCloudDeploy } from './components/ide/MultiCloudDeploy';
-import { DesignSystem } from './components/ide/DesignSystem';
-import { AppHealthMonitor } from './components/ide/AppHealthMonitor';
-import { SecretManager } from './components/SecretManager';
+// ── Eager imports — always needed on first render ───────────────────────────
 import { AIChat } from './components/ide/AIChat';
 import { PreviewPanel } from './components/ide/PreviewPanel';
-import { SocialHub } from './components/social/SocialHub';
-import { ReportsListView } from './components/ReportsListView';
-import { HistoryView } from './components/HistoryView';
+
+// ── Task 2.2: React.lazy code-splitting — 44 view-only components ────────────
+// Helper: wraps a named export into the {default} shape lazy() requires
+const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
+  lazy(() => fn().then(m => ({ default: m[k] as React.ComponentType<any> })));
+
+const CodeStudio       = _lz(() => import('./components/ide/CodeStudio'),       'CodeStudio');
+const GitPanel         = _lz(() => import('./components/ide/GitPanel'),         'GitPanel');
+const SecurityScan     = _lz(() => import('./components/ide/SecurityScan'),     'SecurityScan');
+const TestPanel        = _lz(() => import('./components/ide/TestPanel'),        'TestPanel');
+const DiffViewer       = _lz(() => import('./components/ide/DiffViewer'),       'DiffViewer');
+const DatabaseUI       = _lz(() => import('./components/ide/DatabaseUI'),       'DatabaseUI');
+const VoiceToApp       = _lz(() => import('./components/ide/VoiceToApp'),       'VoiceToApp');
+const BotBuilder       = _lz(() => import('./components/ide/BotBuilder'),       'BotBuilder');
+const CostEstimator    = _lz(() => import('./components/ide/CostEstimator'),    'CostEstimator');
+const ScreenshotToCode = _lz(() => import('./components/ide/ScreenshotToCode'),'ScreenshotToCode');
+const MultiPageBuilder = _lz(() => import('./components/ide/MultiPageBuilder'), 'MultiPageBuilder');
+const AppAnalytics     = _lz(() => import('./components/ide/AppAnalytics'),     'AppAnalytics');
+const AIDebugger       = _lz(() => import('./components/ide/AIDebugger'),       'AIDebugger');
+const PerformanceAnalyzer = _lz(() => import('./components/ide/PerformanceAnalyzer'), 'PerformanceAnalyzer');
+const ComponentLibrary = _lz(() => import('./components/ide/ComponentLibrary'), 'ComponentLibrary');
+const SEOOptimizer     = _lz(() => import('./components/ide/SEOOptimizer'),     'SEOOptimizer');
+const APKBuilder       = _lz(() => import('./components/ide/APKBuilder'),       'APKBuilder');
+const FigmaImporter    = _lz(() => import('./components/ide/FigmaImporter'),    'FigmaImporter');
+const CustomDomain     = _lz(() => import('./components/ide/CustomDomain'),     'CustomDomain');
+const TeamCollaboration= _lz(() => import('./components/ide/TeamCollaboration'),'TeamCollaboration');
+const PWANotifications = _lz(() => import('./components/ide/PWANotifications'), 'PWANotifications');
+const CodeMinifier     = _lz(() => import('./components/ide/CodeMinifier'),     'CodeMinifier');
+const DarkModeGenerator= _lz(() => import('./components/ide/DarkModeGenerator'),'DarkModeGenerator');
+const MonetizationWizard= _lz(() => import('./components/ide/MonetizationWizard'),'MonetizationWizard');
+const AIImageGenerator = _lz(() => import('./components/ide/AIImageGenerator'), 'AIImageGenerator');
+const CodeVersioning   = _lz(() => import('./components/ide/CodeVersioning'),   'CodeVersioning');
+const APIMarketplace   = _lz(() => import('./components/ide/APIMarketplace'),   'APIMarketplace');
+const AppStorePublisher= _lz(() => import('./components/ide/AppStorePublisher'),'AppStorePublisher');
+const LiveCollaboration= _lz(() => import('./components/ide/LiveCollaboration'),'LiveCollaboration');
+const AITestingSuite   = _lz(() => import('./components/ide/AITestingSuite'),   'AITestingSuite');
+const LocalizationManager = _lz(() => import('./components/ide/LocalizationManager'), 'LocalizationManager');
+const AICodeReview     = _lz(() => import('./components/ide/AICodeReview'),     'AICodeReview');
+const DatabaseStudio   = _lz(() => import('./components/ide/DatabaseStudio'),   'DatabaseStudio');
+const CICDPipeline     = _lz(() => import('./components/ide/CICDPipeline'),     'CICDPipeline');
+const PluginSystem     = _lz(() => import('./components/ide/PluginSystem'),     'PluginSystem');
+const WhitelabelBranding= _lz(() => import('./components/ide/WhitelabelBranding'),'WhitelabelBranding');
+const AIProjectManager = _lz(() => import('./components/ide/AIProjectManager'), 'AIProjectManager');
+const MultiCloudDeploy = _lz(() => import('./components/ide/MultiCloudDeploy'), 'MultiCloudDeploy');
+const DesignSystem     = _lz(() => import('./components/ide/DesignSystem'),     'DesignSystem');
+const AppHealthMonitor = _lz(() => import('./components/ide/AppHealthMonitor'), 'AppHealthMonitor');
+const SecretManager    = _lz(() => import('./components/SecretManager'),        'SecretManager');
+const SocialHub        = _lz(() => import('./components/social/SocialHub'),     'SocialHub');
+const ReportsListView  = _lz(() => import('./components/ReportsListView'),      'ReportsListView');
+const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
+const ReportProblemComponent = _lz(() => import('./components/ReportProblemComponent'), 'ReportProblemComponent');
+
+// APITester has a default export
+const APITester = lazy(() => import('./components/ide/APITester'));
 import { motion, AnimatePresence } from 'motion/react';
 import axios from 'axios';
 
@@ -91,7 +102,7 @@ import {
 } from './types';
 
 import { AuthComponent } from './components/AuthComponent';
-import { ReportProblemComponent } from './components/ReportProblemComponent';
+// ReportProblemComponent → lazy above
 import { MessageContent } from './components/MessageContent';
 import { HomeView } from './components/home/HomeView';
 import { GitHubService } from './lib/githubService';
@@ -192,7 +203,6 @@ export default function App() {
   
   useEffect(() => {
     if (activeView === 'nbi_chat' && activeAgent !== 'navbharatai') {
-      console.log('[SYNC] Synchronizing agent to navbharatai');
       setActiveAgent('navbharatai');
     }
   }, [activeView]);
@@ -201,18 +211,17 @@ export default function App() {
     addLog(`STATE_TRACE: activeAgent=${activeAgent}, activeView=${activeView}`, 'info');
   }, [activeAgent, activeView]);
   
-  const setActiveAgent = (newAgent: string) => {
+  const setActiveAgent = useCallback((newAgent: string) => {
     addLog(`setActiveAgent called: ${newAgent}`, 'info');
     _setActiveAgent(newAgent);
     localStorage.setItem('activeAgent', newAgent);
-  };
+  }, [addLog]);
 
-  const handleAgentChange = (newAgent: string) => {
+  const handleAgentChange = useCallback((newAgent: string) => {
     addLog(`handleAgentChange entry: current=${activeAgent}, new=${newAgent}, view=${activeView}`, 'info');
-    console.log('[DEBUG CODE] handleAgentChange: newAgent=', newAgent, 'activeView=', activeView);
     setActiveAgent(newAgent);
     addLog(`AI Agent switched to: ${newAgent}`, 'info');
-  };
+  }, [addLog, activeAgent, activeView, setActiveAgent]);
 
   const handleActivateWorkspace = (agent: string) => {
     setActiveAgent('navbharatai');
@@ -919,7 +928,7 @@ export default function App() {
     console.log('File upload triggered for', type);
   };
 
-  const toggleTab = (view: ViewType, pushToHistory = true) => {
+  const toggleTab = useCallback((view: ViewType, pushToHistory = true) => {
     if (view === 'security' && !user) {
       setShowAuth(true);
       addLog('Security Audit requires an active session. Please login.', 'warn');
@@ -944,7 +953,7 @@ export default function App() {
     }
     
     setActiveView(view);
-  };
+  }, [user, openTabs, activeView, addLog, setShowAuth]);
 
 
   const handleGHConfirmPush = async () => {
@@ -982,7 +991,7 @@ export default function App() {
       setIsPushing(false);
     }
   };
-  const closeTab = (e: React.MouseEvent, view: ViewType) => {
+  const closeTab = useCallback((e: React.MouseEvent, view: ViewType) => {
     e.stopPropagation();
     console.log('Close tab clicked for:', view);
 
@@ -1029,7 +1038,7 @@ export default function App() {
       setHasGeneratedCode(false);
       setIsAppBuilt(false);
     }
-  };
+  }, [activeView, toggleTab, setMessages, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt]);
    const scrollRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
 
@@ -1498,9 +1507,6 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
       }
       
       let errMsg = "AI request failed.";
-      console.log("DEBUG: error.code =", error.code);
-      console.log("DEBUG: error.message =", error.message);
-      console.log("DEBUG: error.response =", error.response);
 
       if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') errMsg = "Network connection failed. Please check your internet or the backend availability.";
       else if (error.response?.status === 500) errMsg = "Backend runtime failure detected.";
@@ -1971,10 +1977,8 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
         modelUsed: data.model
       };
 
-      console.log('[DEBUG] Setting messages:', aiMessage);
       setMessagesForTab((prev) => {
         const next = [...prev, aiMessage];
-        console.log('[DEBUG] New messages length:', next.length);
         return next;
       });
       addLog(`AI Response received via ${data.model || 'unknown'}`, 'success');
@@ -2260,7 +2264,8 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     }
   };
 
-  const menuItems = [
+  // Task 2.7 — memoized: static array, rebuilt only once
+  const menuItems = useMemo(() => [
     { id: 'home', label: 'Home', icon: Bot },
     { id: 'nbi_chat', label: 'NavBharatAi FREE', icon: MessageSquare },
     { id: 'nbi_pro_chat', label: 'navBharatAI-Pro', icon: Bot },
@@ -2315,7 +2320,8 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
     { id: 'healthmon', label: 'Health Monitor', icon: HeartPulse, status: 'New' },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'admin', label: 'Admin Login', icon: Lock },
-  ];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], []); // static list — no deps
 
   // --- UNIVERSAL CHAT CONTINUATION SYSTEM (UCI) HELPERS & IMPLEMENTATION ---
   
@@ -3633,8 +3639,16 @@ ${pending.map(p => `  - ${p}`).join('\n')}
       {/* Workspace */}
       <main className="flex flex-1 relative min-h-0 min-w-0">
 
-        {/* View Switcher Output */}
-        <div className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all", 
+        {/* View Switcher Output — wrapped in Suspense for lazy-loaded components */}
+        <Suspense fallback={
+          <div className="flex-1 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-8 h-8 border-2 border-indigo-500/40 border-t-indigo-500 rounded-full animate-spin" />
+              <span className="text-xs text-[#8b949e] font-mono uppercase tracking-widest">Loading module…</span>
+            </div>
+          </div>
+        }>
+        <div className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
           ['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem)] supports-[height:100dvh]:h-[calc(100dvh-3.5rem)] max-h-[calc(100vh-3.5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem)]" : "overflow-y-auto overflow-x-hidden custom-scrollbar"
         )}>
           {activeView === 'home' && (
@@ -6451,7 +6465,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 initialCode={generatedCode}
                 onExport={(pages) => {
                   const firstPage = Object.values(pages)[0];
-                  if (firstPage) { setGeneratedCode(firstPage); toggleTab('preview'); }
+                  if (firstPage) { setGeneratedCode(firstPage as string); toggleTab('preview'); }
                 }}
               />
             </div>
@@ -6666,6 +6680,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           )}
 
         </div>
+        </Suspense>
       </main>
 
 {/* Vishwakarma Mode Chooser Modal Removed */}

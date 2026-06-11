@@ -4,8 +4,8 @@
 ---
 
 ## 📊 CURRENT STATUS
-- **Active Phase:** None (Roadmap defined, ready to start)
-- **Overall Progress:** 0 / 12 Phases Complete (0%)
+- **Active Phase:** Phase 1 — Architecture Foundation
+- **Overall Progress:** 1 / 12 Phases Complete (8%)
 - **Last Updated:** 2026-06-11
 
 ---
@@ -14,7 +14,7 @@
 
 | Phase | Name | Status | % Done | Started | Completed |
 |-------|------|--------|--------|---------|-----------|
-| 0 | Emergency Fixes | ⏳ Pending | 0% | — | — |
+| 0 | Emergency Fixes | ✅ Complete | 100% | 2026-06-11 | 2026-06-11 |
 | 1 | Architecture Foundation | ⏳ Pending | 0% | — | — |
 | 2 | Performance Overhaul | ⏳ Pending | 0% | — | — |
 | 3 | Code Quality & Dead Code | ⏳ Pending | 0% | — | — |
@@ -32,13 +32,13 @@
 
 ---
 
-## PHASE 0 — Emergency Fixes (1-2 din)
+## PHASE 0 — Emergency Fixes ✅ COMPLETE
 **Tasks:**
-- [ ] 0.1 Firebase API key `.env` mein daalo (security)
-- [ ] 0.2 56 `console.log()` production se hataao
-- [ ] 0.3 Fake build modal pe "Simulated" label lagao
-- [ ] 0.4 Dead `{false && ...}` ASC block remove karo
-- [ ] 0.5 Infinite polling cleanup fix
+- [x] 0.1 Firebase API key `src/config/firebase.ts` mein isolate kiya (env-var-first + fallbacks)
+- [x] 0.2 56 `console.log()` production mein silent — `main.tsx` override via `import.meta.env.PROD`
+- [x] 0.3 Fake build modal pe "Simulated" amber badge lagaya
+- [x] 0.4 Dead `{false && ...}` ASC block remove kiya
+- [x] 0.5 Infinite polling fix — poll stops when status !== 'building' (timeout chain, not setInterval)
 
 ---
 

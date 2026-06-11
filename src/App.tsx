@@ -22,21 +22,12 @@ import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
-const firebaseConfig = {
-  "projectId": "gen-lang-client-0866594388",
-  "appId": "1:950841184325:web:5f54018ec63af0376d132c",
-  "apiKey": "AIzaSyAGIUMRMGgD4MTUxflH4pVbVhVleM0LdwE",
-  "authDomain": "gen-lang-client-0866594388.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-cc9cd998-d842-4462-9833-b44f49825878",
-  "storageBucket": "gen-lang-client-0866594388.firebasestorage.app",
-  "messagingSenderId": "950841184325",
-  "measurementId": ""
-};
+import { firebaseConfig } from './config/firebase';
 
-const app = initializeApp(firebaseConfig);
+const app = initializeApp({ ...firebaseConfig, firestoreDatabaseId: firebaseConfig.firestoreDbId });
 export const auth = getAuth();
 setPersistence(auth, browserLocalPersistence);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = getFirestore(app, firebaseConfig.firestoreDbId);
 
 import { CodeStudio } from './components/ide/CodeStudio';
 import { GitPanel } from './components/ide/GitPanel';
@@ -495,23 +486,27 @@ export default function App() {
   const [isAppBuilt, setIsAppBuilt] = useState(false);
 
   useEffect(() => {
+    let active = true;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
     const pollBuildStatus = async () => {
+      if (!active) return;
       try {
-        console.log('[POLLING] BuildContext.buildSteps before:', buildSteps);
         const res = await fetch('/build_status.json?t=' + Date.now());
         const data = await res.json();
-        console.log('[POLLING] Received status:', data.status);
         if (data.status === 'building' && data.steps) {
-          setBuildSteps(data.steps.filter(s => s.status !== 'pending'));
+          setBuildSteps(data.steps.filter((s: any) => s.status !== 'pending'));
+          timeoutId = setTimeout(pollBuildStatus, 2000);
         } else {
           setBuildSteps([]);
         }
-      } catch (err) {
-        console.error('Failed to poll build status', err);
+      } catch {
+        // /build_status.json not found — not in a build, stop polling
       }
     };
-    const interval = setInterval(pollBuildStatus, 2000);
-    return () => clearInterval(interval);
+
+    pollBuildStatus();
+    return () => { active = false; clearTimeout(timeoutId); };
   }, [setBuildSteps]);
   const [isDonationEditing, setIsDonationEditing] = useState(false);
   const [donationData, setDonationData] = useState(() => {
@@ -4660,51 +4655,6 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 </div>
               )}
 
-              {/* ASC Column */}
-              {false && (
-                <div className="flex-1 flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0">
-                  <div className="p-3 bg-amber-900/10 border-b border-amber-500/20 text-center text-[10px] font-black uppercase tracking-widest text-[#8b949e] flex items-center gap-3 shrink-0">
-                     <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse shrink-0" />
-{/* Vishwakarma UI Removed */}
-                     {renderUciControls('amber')}
-                     
-                     <span className="ml-auto text-amber-400 font-mono text-[9px] font-black bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20 flex items-center gap-1">
-{/* Reserved for space */}
-                     </span>
-                  </div>
-                  <AIChat 
-                    messages={messages}
-                    input={input}
-                    onInputChange={setInput}
-                    onSend={() => { handleSendForTab('nbi_chat'); }}
-                    isLoading={isLoading}
-                    activeIntent={activeIntent}
-                    isPinned={sessions.find(s => s.id === currentSessionId)?.isPinned || false}
-                    onTogglePin={() => togglePin(currentSessionId)}
-                    isLoggedIn={!!user}
-                    onShowLogin={() => setShowAuth(true)}
-                    mode={mode}
-                    onModeChange={setMode}
-                    activeAgent={activeAgent}
-                    pendingGHEdit={pendingGHEdit}
-                    onConfirmPush={handleGHConfirmPush}
-                    isPushing={isPushing}
-                    isAppBuilt={isAppBuilt}
-                    theme={theme}
-                    onPreviewClick={() => {
-                       toggleTab('preview');
-                       setIsMenuOpen(false);
-                    }}
-                    userId={user?.uid}
-                    activeUci={user ? (sessions.find(s => s.id === currentSessionId)?.uci || '') : ''}
-                    onRestoreUci={user ? handleRestoreUci : undefined}
-                    restoredMessages={sessions.find(s => s.id === currentSessionId)?.restoredMessages || []}
-                    memorySummary={sessions.find(s => s.id === currentSessionId)?.memorySummary || ''}
-                    wallet={wallet}
-                    onUnlockVishwakarma={() => setShowVishwakarmaUnlockModal(true)}
-                  />
-                </div>
-              )}
 
             </div>
           )}
@@ -7546,7 +7496,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                   <Globe className="w-6 h-6 animate-spin" style={{ animationDuration: '6s' }} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h4 className="text-white text-sm font-black uppercase tracking-wider font-sans">👁️ Compiling Live Preview</h4>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-white text-sm font-black uppercase tracking-wider font-sans">👁️ Compiling Live Preview</h4>
+                    <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30">Simulated</span>
+                  </div>
                   <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest font-mono font-black">
                     Runtime: <span className="text-slate-200 font-extrabold">{detectedFramework}</span>
                   </p>

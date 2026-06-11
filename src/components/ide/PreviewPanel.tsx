@@ -3,7 +3,7 @@ import {
   Monitor, Smartphone, Tablet, RefreshCcw,
   ExternalLink, Maximize2, Shield, Globe,
   Search, ChevronLeft, ChevronRight, Download, Package,
-  Share2, Copy, Check, X, Wifi, Pen, Eye
+  Share2, Copy, Check, X, Wifi, Pen, Eye, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { VisualEditor } from './VisualEditor';
@@ -30,6 +30,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
   const [showPwaModal, setShowPwaModal] = useState(false);
   const [pwaUrl, setPwaUrl] = useState('');
   const [copied, setCopied] = useState(false);
+  const [footerMinimized, setFooterMinimized] = useState(false);
 
   const openAsPwa = async () => {
     if (!generatedCode || pwaLoading) return;
@@ -308,34 +309,57 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
 
       {/* App Ready Banner */}
       {generatedCode && (
-        <div className="bg-gradient-to-r from-indigo-950/80 via-[#161b22] to-emerald-950/80 border-t border-indigo-500/20 px-4 py-2.5 flex items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
-              <Smartphone className="w-4 h-4 text-indigo-400" />
+        <div className="shrink-0 border-t border-indigo-500/20">
+          {/* Minimized bar — always visible, shows toggle */}
+          <div className="bg-gradient-to-r from-indigo-950/80 via-[#161b22] to-emerald-950/80 px-3 py-1.5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[10px] font-black text-white tracking-wide">App Ready</span>
+              {footerMinimized && (
+                <span className="text-[9px] text-[#8b949e] hidden sm:inline">· Install on Android ya Download karo</span>
+              )}
             </div>
-            <div className="min-w-0">
-              <span className="text-[11px] font-black text-white tracking-wide">Aapki App Ready Hai!</span>
-              <p className="text-[9px] text-[#8b949e]">Android pe install karo ya download karo</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={openAsPwa}
-              disabled={pwaLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-900/40 disabled:opacity-60"
+              onClick={() => setFooterMinimized(p => !p)}
+              title={footerMinimized ? 'Expand footer' : 'Minimise footer'}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 text-[#8b949e] hover:text-white transition-all text-[9px] font-black uppercase tracking-wider"
             >
-              <Share2 className={cn("w-3.5 h-3.5", pwaLoading && "animate-spin")} />
-              {pwaLoading ? 'Wait...' : 'Install on Android'}
-            </button>
-            <button
-              onClick={downloadApp}
-              disabled={downloading}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 active:scale-95 text-[#8b949e] hover:text-white border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-60"
-            >
-              <Download className={cn("w-3.5 h-3.5", downloading && "animate-bounce")} />
-              Download
+              {footerMinimized ? <><ChevronUp className="w-3 h-3" /> Expand</> : <><ChevronDown className="w-3 h-3" /> Minimise</>}
             </button>
           </div>
+
+          {/* Expandable action row */}
+          {!footerMinimized && (
+            <div className="bg-gradient-to-r from-indigo-950/60 via-[#161b22] to-emerald-950/60 px-4 py-2.5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-7 h-7 rounded-lg bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
+                  <Smartphone className="w-4 h-4 text-indigo-400" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[11px] font-black text-white tracking-wide">Aapki App Ready Hai!</span>
+                  <p className="text-[9px] text-[#8b949e]">Android pe install karo ya download karo</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={openAsPwa}
+                  disabled={pwaLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-900/40 disabled:opacity-60"
+                >
+                  <Share2 className={cn("w-3.5 h-3.5", pwaLoading && "animate-spin")} />
+                  {pwaLoading ? 'Wait...' : 'Install on Android'}
+                </button>
+                <button
+                  onClick={downloadApp}
+                  disabled={downloading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 active:scale-95 text-[#8b949e] hover:text-white border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-60"
+                >
+                  <Download className={cn("w-3.5 h-3.5", downloading && "animate-bounce")} />
+                  Download
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

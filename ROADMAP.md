@@ -1,0 +1,217 @@
+# NavBharatAI — Chief Engineer's Master Roadmap
+## Goal: World No. 1 AI App Maker
+
+---
+
+## 📊 CURRENT STATUS
+- **Active Phase:** None (Roadmap defined, ready to start)
+- **Overall Progress:** 0 / 12 Phases Complete (0%)
+- **Last Updated:** 2026-06-11
+
+---
+
+## PHASE TRACKER
+
+| Phase | Name | Status | % Done | Started | Completed |
+|-------|------|--------|--------|---------|-----------|
+| 0 | Emergency Fixes | ⏳ Pending | 0% | — | — |
+| 1 | Architecture Foundation | ⏳ Pending | 0% | — | — |
+| 2 | Performance Overhaul | ⏳ Pending | 0% | — | — |
+| 3 | Code Quality & Dead Code | ⏳ Pending | 0% | — | — |
+| 4 | Security Hardening | ⏳ Pending | 0% | — | — |
+| 5 | Real Preview Runtime | ⏳ Pending | 0% | — | — |
+| 6 | Feature Depth | ⏳ Pending | 0% | — | — |
+| 7 | AI Intelligence Upgrade | ⏳ Pending | 0% | — | — |
+| 8 | Mobile-First Redesign | ⏳ Pending | 0% | — | — |
+| 9 | Missing Critical Features | ⏳ Pending | 0% | — | — |
+| 10 | World-Class UX Polish | ⏳ Pending | 0% | — | — |
+| 11 | Monetization & Business | ⏳ Pending | 0% | — | — |
+| 12 | Analytics, Monitoring & Scaling | ⏳ Pending | 0% | — | — |
+
+**Status Legend:** ⏳ Pending | 🔄 In Progress | ✅ Complete | ⏸️ Paused
+
+---
+
+## PHASE 0 — Emergency Fixes (1-2 din)
+**Tasks:**
+- [ ] 0.1 Firebase API key `.env` mein daalo (security)
+- [ ] 0.2 56 `console.log()` production se hataao
+- [ ] 0.3 Fake build modal pe "Simulated" label lagao
+- [ ] 0.4 Dead `{false && ...}` ASC block remove karo
+- [ ] 0.5 Infinite polling cleanup fix
+
+---
+
+## PHASE 1 — Architecture Foundation (1-2 hafta)
+**Tasks:**
+- [ ] 1.1 App.tsx ko 10 modules mein todo
+- [ ] 1.2 React Context API setup
+- [ ] 1.3 Centralized state management (WorkspaceContext)
+- [ ] 1.4 Single source of truth for messages (messagesMap[tabId])
+- [ ] 1.5 Agent system TypeScript enum banao
+- [ ] 1.6 Environment config system (dev/staging/prod)
+
+---
+
+## PHASE 2 — Performance Overhaul (1 hafta)
+**Tasks:**
+- [ ] 2.1 React.memo + useMemo + useCallback add karo
+- [ ] 2.2 Code splitting — React.lazy() for all 58 components
+- [ ] 2.3 Virtual scrolling for chat messages
+- [ ] 2.4 localStorage → IndexedDB async
+- [ ] 2.5 57 useEffect dependency arrays audit & fix
+- [ ] 2.6 Request debouncing + AbortController
+- [ ] 2.7 Memoize menuItems, tabs rendering
+
+---
+
+## PHASE 3 — Code Quality & Dead Code (3-4 din)
+**Tasks:**
+- [ ] 3.1 20+ unused state variables delete karo
+- [ ] 3.2 Dead imports cleanup
+- [ ] 3.3 Placeholder integrations fix ya remove
+- [ ] 3.4 Error boundaries add karo (per major module)
+- [ ] 3.5 All async functions mein try-catch
+- [ ] 3.6 File size validation add karo (attachments)
+- [ ] 3.7 Ghost Vishwakarma code cleanup
+
+---
+
+## PHASE 4 — Security Hardening (3-4 din)
+**Tasks:**
+- [ ] 4.1 Firebase Security Rules strict karo
+- [ ] 4.2 API key rotation system
+- [ ] 4.3 Rate limiting — user level (10 req/min)
+- [ ] 4.4 Input sanitization (XSS protection)
+- [ ] 4.5 Auth token expiry graceful handling
+- [ ] 4.6 Admin panel access hardening
+- [ ] 4.7 Audit logging system
+
+---
+
+## PHASE 5 — Real Preview Runtime (2-3 hafta)
+**Tasks:**
+- [ ] 5.1 WebContainers integration research & setup
+- [ ] 5.2 Static HTML preview polish (iframe sandboxing)
+- [ ] 5.3 React/Vite real preview support
+- [ ] 5.4 Real build logs (actual output, no fake setTimeout)
+- [ ] 5.5 Hot reload in preview
+- [ ] 5.6 Multi-file preview (HTML + CSS + JS)
+- [ ] 5.7 Preview URL sharing
+
+---
+
+## PHASE 6 — Feature Depth (2-3 hafta)
+**Tasks:**
+- [ ] 6.1 CI/CD Pipeline — real GitHub Actions API trigger
+- [ ] 6.2 Team Collaboration — real invite + RBAC + Firestore
+- [ ] 6.3 Database Studio — real user Firestore CRUD
+- [ ] 6.4 Performance Analyzer — real Lighthouse API
+- [ ] 6.5 App Analytics — real Firebase Analytics data
+- [ ] 6.6 APK Builder — real PWA-to-APK (Bubblewrap/TWA)
+- [ ] 6.7 SEO Optimizer — real meta injection + sitemap
+- [ ] 6.8 Monetization Wizard — real Razorpay + AdSense
+- [ ] 6.9 Multi-Cloud Deploy — real Vercel/Netlify API calls
+- [ ] 6.10 Design System — token export injects into generated code
+
+---
+
+## PHASE 7 — AI Intelligence Upgrade (2-3 hafta)
+**Tasks:**
+- [ ] 7.1 Project Memory System (file context always inject)
+- [ ] 7.2 Smart Code Continuation (no overwrite, continue existing)
+- [ ] 7.3 Intent Detection improve (targeted edits)
+- [ ] 7.4 Multi-file awareness (5 files in context)
+- [ ] 7.5 Error-aware AI (console error → auto fix)
+- [ ] 7.6 Component-level editing (targeted, not full regenerate)
+- [ ] 7.7 AI Suggestions sidebar (Copilot-style real-time)
+
+---
+
+## PHASE 8 — Mobile-First Redesign (1-2 hafta)
+**Tasks:**
+- [ ] 8.1 Sidebar mobile properly collapsible
+- [ ] 8.2 Code editor mobile-friendly (lightweight fallback)
+- [ ] 8.3 Preview full-screen on mobile
+- [ ] 8.4 Chat input mobile keyboard aware
+- [ ] 8.5 Touch gestures for tab switch
+- [ ] 8.6 PWA — app install on phone
+- [ ] 8.7 Offline mode — basic (last state preserved)
+
+---
+
+## PHASE 9 — Missing Critical Features (3-4 hafta)
+**Tasks:**
+- [ ] 9.1 Workspace Undo/Redo system
+- [ ] 9.2 Real Git Integration (commit history, branch, merge)
+- [ ] 9.3 User-specific Deployment (each user gets live URL)
+- [ ] 9.4 Template Marketplace (community upload + download)
+- [ ] 9.5 AI Teaching Mode (explain code for beginners)
+- [ ] 9.6 React Native / Mobile App Generation
+- [ ] 9.7 Figma → Real Code (Figma API token extract)
+- [ ] 9.8 Real-time Collaboration (Google Docs-style)
+- [ ] 9.9 API Testing — Postman level
+- [ ] 9.10 Custom AI Model Support (user's own API key)
+
+---
+
+## PHASE 10 — World-Class UX Polish (1-2 hafta)
+**Tasks:**
+- [ ] 10.1 Onboarding flow (guided tour + template chooser)
+- [ ] 10.2 Empty states everywhere (helpful messages + CTA)
+- [ ] 10.3 Loading skeletons (no blank screens)
+- [ ] 10.4 Keyboard shortcuts system
+- [ ] 10.5 Command Palette (Ctrl+K — Linear/VSCode style)
+- [ ] 10.6 Notification/Toast system
+- [ ] 10.7 Dark/Light theme (system theme follow)
+- [ ] 10.8 Accessibility (a11y — screen reader, keyboard nav)
+- [ ] 10.9 Reduce excessive animations (battery + focus)
+- [ ] 10.10 Responsive typography scale
+
+---
+
+## PHASE 11 — Monetization & Business (1 hafta)
+**Tasks:**
+- [ ] 11.1 Free vs Pro limits enforce in code (not just UI)
+- [ ] 11.2 Real Razorpay subscription (monthly/annual, auto-renewal)
+- [ ] 11.3 Usage tracking per user (builds, API calls dashboard)
+- [ ] 11.4 Referral system
+- [ ] 11.5 Enterprise plan infrastructure (team billing, GST)
+- [ ] 11.6 In-app purchase for premium templates
+
+---
+
+## PHASE 12 — Analytics, Monitoring & Scaling (1 hafta)
+**Tasks:**
+- [ ] 12.1 Real error tracking (Sentry / LogRocket)
+- [ ] 12.2 Real user analytics (Mixpanel / PostHog)
+- [ ] 12.3 Performance monitoring (real Core Web Vitals)
+- [ ] 12.4 A/B testing infrastructure
+- [ ] 12.5 Backend auto-scaling config (Cloud Run)
+- [ ] 12.6 Database indexing audit (Firestore queries)
+- [ ] 12.7 CDN for static assets
+
+---
+
+## TIMELINE
+```
+WEEK 1-2:   Phase 0 + Phase 1 (Emergency + Architecture)
+WEEK 3:     Phase 2 + Phase 3 (Performance + Code Cleanup)
+WEEK 4:     Phase 4 (Security)
+WEEK 5-7:   Phase 5 (Real Preview Runtime)
+WEEK 8-10:  Phase 6 (Feature Depth)
+WEEK 11-13: Phase 7 (AI Intelligence)
+WEEK 14-15: Phase 8 (Mobile-First)
+WEEK 16-19: Phase 9 (Missing Critical Features)
+WEEK 20-21: Phase 10 (UX Polish)
+WEEK 22:    Phase 11 (Monetization)
+WEEK 23-24: Phase 12 (Analytics + Scaling)
+```
+**Total estimated: ~6 months | Goal: World No. 1 AI App Maker**
+
+---
+
+## NOTES / DECISIONS LOG
+- 2026-06-11: Roadmap created after full codebase audit
+- Previous work: 12 feature phases (Phase 1-12 of feature builds) already complete — 60+ features added
+- This new roadmap focuses on QUALITY, DEPTH, PERFORMANCE, and ARCHITECTURE

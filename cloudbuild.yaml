@@ -41,7 +41,7 @@ steps:
       - 'managed'
       - '--port'
       - '8080'
-      - '--set-env-vars'
+      - '--update-env-vars'
       - 'NODE_ENV=production'
       - '--allow-unauthenticated'
       - '--cpu'

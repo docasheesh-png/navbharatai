@@ -47,26 +47,33 @@ import { buildApp as buildAppEngine } from './src/server/AppMakerLab/AppEngine';
 auditEnv();
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
-// Fallback: Populate process.env from .env.example any missing vars to prevent crashes
-try { // start
-  const examplePath = path.join(process.cwd(), '.env.example');
-  if (fs.existsSync(examplePath)) {
-    const exampleContent = fs.readFileSync(examplePath, 'utf8');
-    exampleContent.split('\n').forEach(line => {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-        const eqIndex = trimmed.indexOf('=');
-        const key = trimmed.slice(0, eqIndex).trim();
-        const val = trimmed.slice(eqIndex + 1).trim();
-        if (key && val && !process.env[key]) {
-          process.env[key] = val;
+// Fallback: load .env file first, then .env.example (skip placeholder values)
+const isPlaceholder = (v: string) =>
+  v.startsWith('your_') || v.endsWith('_here') || v === '' || v === 'undefined';
+
+const loadEnvFile = (filePath: string) => {
+  try {
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, 'utf8');
+      content.split('\n').forEach(line => {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+          const eqIdx = trimmed.indexOf('=');
+          const key = trimmed.slice(0, eqIdx).trim();
+          const val = trimmed.slice(eqIdx + 1).trim();
+          if (key && val && !process.env[key] && !isPlaceholder(val)) {
+            process.env[key] = val;
+          }
         }
-      }
-    });
+      });
+    }
+  } catch (e) {
+    console.error(`Error loading env file ${filePath}:`, e);
   }
-} catch (e) {
-  console.error('Error loading .env.example fallback:', e);
-}
+};
+
+loadEnvFile(path.join(process.cwd(), '.env'));
+loadEnvFile(path.join(process.cwd(), '.env.example'));
 
 // Generate the debug dump
 try {
@@ -3767,6 +3774,7 @@ Analyze the target for any vulnerabilities, configuration issues, or exposed sec
   };
 
   app.post('/api/chat/navbharat', (req, res) => chatHandler(req, res, 'navbharat'));
+  app.post('/api/chat/navbharatai', (req, res) => chatHandler(req, res, 'navbharat'));
   app.post('/api/chat/vishwakarma-basic', (req, res) => chatHandler(req, res, 'vishwakarma-basic'));
   app.post('/api/chat/vishwakarma-pro', (req, res) => chatHandler(req, res, 'vishwakarma-pro'));
   app.post('/api/chat/vip', (req, res) => chatHandler(req, res, 'vip'));

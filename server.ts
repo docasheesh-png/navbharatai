@@ -433,8 +433,25 @@ setInterval(() => {
       // Robust production path resolution
       const distPath = path.join(process.cwd(), 'dist');
       console.log(`[PRODUCTION] Serving static files from: ${distPath}`);
-      app.use(express.static(distPath));
+      // 12.7 — CDN-friendly Cache-Control headers for static assets
+      app.use(express.static(distPath, {
+        maxAge: '1y',          // JS/CSS hashed by Vite → safe to cache 1 year
+        immutable: true,
+        setHeaders: (res, filePath) => {
+          // HTML must always revalidate (never cache)
+          if (filePath.endsWith('.html')) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+          } else if (/\.(js|css|woff2|woff|ttf|otf)$/.test(filePath)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          } else if (/\.(png|jpg|jpeg|svg|ico|webp)$/.test(filePath)) {
+            res.setHeader('Cache-Control', 'public, max-age=604800'); // 1 week for images
+          }
+        }
+      }));
       app.get('*', (req, res) => {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.sendFile(path.join(distPath, 'index.html'));
       });
     }
@@ -5058,6 +5075,30 @@ self.addEventListener('fetch',e=>e.respondWith(
       });
     } catch (err: any) {
       return res.status(500).json({ error: err.message || 'Failed to analyze' });
+    }
+  });
+
+  // 12.1 — Frontend error ingestion endpoint
+  app.post('/api/logs/error', (req, res) => {
+    try {
+      const { message, source, line, col, stack, url, ts, type } = req.body || {};
+      const ip = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || '').split(',')[0].trim();
+      console.error('[CLIENT_ERROR]', JSON.stringify({ message, source, line, col, stack, url, ts, type, ip }));
+      res.status(204).end();
+    } catch {
+      res.status(204).end();
+    }
+  });
+
+  // 12.2 — User analytics event ingestion endpoint
+  app.post('/api/analytics/event', (req, res) => {
+    try {
+      const { event, props, userId, sessionId, ts } = req.body || {};
+      if (!event) return res.status(400).json({ error: 'event required' });
+      console.log('[ANALYTICS]', JSON.stringify({ event, props, userId: userId || 'anon', sessionId, ts: ts || Date.now() }));
+      res.status(204).end();
+    } catch {
+      res.status(204).end();
     }
   });
 

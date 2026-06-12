@@ -393,6 +393,47 @@ Return ONLY the JSON:`;
   }
 }
 
+// ─── Phase 3: Structural Summary Extractor ───────────────────────────────────
+
+/**
+ * Extracts a compact structural summary from raw HTML.
+ * Replaces passing 8000 chars of raw HTML to CSS/secondary prompts.
+ * Result: ~300 chars with all the IDs, classes, and page structure JS/CSS need.
+ */
+function extractStructuralSummary(html: string): string {
+  const pages:   string[] = [];
+  const buttons: string[] = [];
+  const inputs:  string[] = [];
+  const displays:string[] = [];
+  const classes: Set<string> = new Set();
+
+  // Extract page IDs
+  for (const m of html.matchAll(/id="(page-[^"]+)"/g))  pages.push(m[1]);
+  // Extract button IDs + labels
+  for (const m of html.matchAll(/<button[^>]*id="([^"]+)"[^>]*>([^<]{0,30})/gi)) {
+    buttons.push(`#${m[1]}[${m[2].trim()}]`);
+  }
+  // Extract input/select IDs
+  for (const m of html.matchAll(/<(?:input|select|textarea)[^>]*id="([^"]+)"/gi)) inputs.push(`#${m[1]}`);
+  // Extract display/output IDs (non-button, non-input)
+  for (const m of html.matchAll(/id="(?!page-|btn-)([^"]+)"/g)) {
+    if (!buttons.find(b => b.startsWith(`#${m[1]}`))) displays.push(`#${m[1]}`);
+  }
+  // Extract unique class names (skip single-letter / utility names)
+  for (const m of html.matchAll(/class="([^"]+)"/g)) {
+    m[1].split(/\s+/).filter(c => c.length > 3).forEach(c => classes.add(c));
+  }
+
+  const lines: string[] = [];
+  if (pages.length)    lines.push(`PAGES: ${pages.join(', ')}`);
+  if (buttons.length)  lines.push(`BUTTONS: ${buttons.slice(0, 15).join(', ')}`);
+  if (inputs.length)   lines.push(`INPUTS: ${inputs.join(', ')}`);
+  if (displays.length) lines.push(`DISPLAYS: ${displays.slice(0, 15).join(', ')}`);
+  if (classes.size)    lines.push(`CLASSES: ${[...classes].slice(0, 30).join(', ')}`);
+
+  return lines.join('\n');
+}
+
 // ─── Step 2: Generate HTML (template-aware) ───────────────────────────────────
 
 async function generateHTML(bp: AppBlueprint): Promise<string> {
@@ -487,7 +528,15 @@ Output ONLY the raw JavaScript:`;
 // ─── Step 4: Generate CSS (template-aware, knows HTML + dynamic elements) ────
 
 async function generateCSS(bp: AppBlueprint, htmlContent: string): Promise<string> {
-  const hints = TEMPLATE_HINTS[bp.template];
+  const hints   = TEMPLATE_HINTS[bp.template];
+  // Use compact structural summary — saves tokens, easier for AI to parse
+  const summary = extractStructuralSummary(htmlContent);
+
+  // Standard dynamic elements + blueprint-specified ones
+  const dynElements = [...new Set([
+    ...bp.dynamicElements,
+    'toast-notification', 'modal-overlay', 'loading-spinner',
+  ])];
 
   const sys = `You are a world-class CSS designer. Output ONLY raw CSS — no markdown fences, no <style> tags.`;
 
@@ -495,32 +544,33 @@ async function generateCSS(bp: AppBlueprint, htmlContent: string): Promise<strin
 
 App: ${bp.appName} [${bp.appType}, Template: ${bp.template}]
 
-HTML STRUCTURE TO STYLE (use exact class names):
-\`\`\`html
-${htmlContent.slice(0, 6000)}
-\`\`\`
+APP STRUCTURE (style these exact IDs and classes):
+${summary}
 
-JS WILL CREATE THESE DYNAMIC ELEMENTS AT RUNTIME (style them too):
-${bp.dynamicElements.length > 0
-  ? bp.dynamicElements.map(e => `- .${e}`).join('\n')
-  : '- .toast-notification, .modal-overlay (standard dynamic elements)'}
+JS WILL CREATE THESE DYNAMIC ELEMENTS AT RUNTIME — STYLE THEM TOO:
+${dynElements.map(e => `- .${e}`).join('\n')}
+
+Example dynamic element styles needed:
+.toast-notification { position: fixed; bottom: 24px; right: 24px; padding: 14px 20px; border-radius: 10px; background: var(--surface); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(10px); animation: slide-in 0.3s ease; z-index: 9999; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.loading-spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.1); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 
 TEMPLATE-SPECIFIC CSS REQUIREMENTS:
 ${hints.css}
 
 UNIVERSAL RULES:
-1. CSS custom properties at :root — define --bg, --surface, --accent, --accent-rgb, --text, --text-muted
-2. Base: * { box-sizing: border-box; margin: 0; padding: 0; }
-3. Dark theme: --bg: #0a0a0f; --surface: rgba(255,255,255,0.05); --accent: #6366f1; --accent-rgb: 99,102,241
-4. [id^="page-"] { display: none; } — JS controls visibility
-5. Beautiful buttons: gradient bg, transform on hover, active press scale
-6. Fully responsive: works on mobile (min-width: 320px) through desktop (max-width: 1400px)
-7. Smooth transitions on ALL interactive elements (0.2s ease)
-8. Style every class in the HTML above — nothing left unstyled
+1. :root { --bg: #0a0a0f; --surface: rgba(255,255,255,0.05); --accent: #6366f1; --accent-rgb: 99,102,241; --text: #f1f5f9; --text-muted: #64748b; }
+2. * { box-sizing: border-box; margin: 0; padding: 0; }
+3. body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+4. [id^="page-"] { display: none; }  ← JS controls page visibility
+5. @keyframes spin { to { transform: rotate(360deg); } }
+6. @keyframes slide-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+7. Fully responsive: mobile (320px) → desktop (1400px+)
+8. ALL classes from the structure above must be styled — nothing left as browser default
 
 Output ONLY the raw CSS:`;
 
-  return callAI(prompt, sys, 6000);
+  return callAI(prompt, sys, 7000);
 }
 
 // ─── Step 5: Assemble preview ─────────────────────────────────────────────────

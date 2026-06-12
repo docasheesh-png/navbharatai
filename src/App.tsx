@@ -291,6 +291,7 @@ export default function App() {
   };
 
   const handleTriggerPreviewBuild = async () => {
+    incrementDailyUsage('build');
     setIsPreviewBuilding(true);
     setPreviewBuildError(null);
     setPreviewBuildStage('preparing');
@@ -522,6 +523,39 @@ export default function App() {
 
   // navBharat Core Token Wallet & Billing States
   const [wallet, setWallet] = useState<any>(null);
+
+  // 11.1 + 11.3 — Daily usage tracking (free tier enforcement)
+  const FREE_DAILY_MESSAGES = 10;
+  const [dailyUsage, setDailyUsage] = useState<{ date: string; count: number; builds: number }>(() => {
+    try {
+      const saved = localStorage.getItem('navbharat_daily_usage');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.date === new Date().toDateString()) return parsed;
+      }
+    } catch {}
+    return { date: new Date().toDateString(), count: 0, builds: 0 };
+  });
+  useEffect(() => {
+    try { localStorage.setItem('navbharat_daily_usage', JSON.stringify(dailyUsage)); } catch {}
+  }, [dailyUsage]);
+  const incrementDailyUsage = useCallback((type: 'message' | 'build') => {
+    setDailyUsage(prev => {
+      const today = new Date().toDateString();
+      if (prev.date !== today) return { date: today, count: type === 'message' ? 1 : 0, builds: type === 'build' ? 1 : 0 };
+      return { ...prev, count: prev.count + (type === 'message' ? 1 : 0), builds: prev.builds + (type === 'build' ? 1 : 0) };
+    });
+  }, []);
+  const isFreeLimitReached = !user && dailyUsage.date === new Date().toDateString() && dailyUsage.count >= FREE_DAILY_MESSAGES;
+
+  // 11.4 — Referral code (generated per user, stored in localStorage)
+  const [myReferralCode] = useState<string>(() => {
+    const saved = localStorage.getItem('navbharat_my_referral');
+    if (saved) return saved;
+    const code = 'NB-' + Math.random().toString(36).slice(2, 8).toUpperCase();
+    localStorage.setItem('navbharat_my_referral', code);
+    return code;
+  });
   const [showVishwakarmaChooser, setShowVishwakarmaChooser] = useState(false);
   const [showVishwakarmaUnlockModal, setShowVishwakarmaUnlockModal] = useState(false);
   const [vkTokenInput, setVkTokenInput] = useState<string>('50');
@@ -1988,9 +2022,17 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
 
     const msgInput = typeof overrideMessage === 'string' ? overrideMessage : '';
     if (!msgInput && !input.trim() && !errorContext?.lastInput || isLoading) return;
-    
+
     const messageToSend = msgInput || currentInput.trim() || errorContext?.lastInput || '';
     if (!messageToSend) return;
+
+    // 11.1 — Free tier daily limit enforcement (guests only)
+    if (isFreeLimitReached) {
+      addToast(`Free limit reached (${FREE_DAILY_MESSAGES} messages/day). Please sign in for unlimited access!`, 'warning');
+      setShowAuth(true);
+      return;
+    }
+    incrementDailyUsage('message');
 
     // Handle GitHub Push Confirmation
     if (pendingGHEdit && /push|confirm|yes|ha|kardo/i.test(messageToSend)) {
@@ -3380,10 +3422,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     { id: 'calc', name: 'Simple Calculator', icon: Cpu, prompt: 'I want you to act as a World-Class Software Architect. Build a Professional High-Precision Scientific Calculator. \n\n### MANDATORY FUNCTIONAL REQUIREMENTS:\n1. **Core Logic**: You MUST implement a robust JavaScript evaluation engine in `script.js`. It should handle click events for all buttons, manage a screen buffer, and accurately calculate results for basic (+, -, *, /) and scientific (sqrt, sin, cos, tan, log) operations. Ensure the calculator works perfectly upon loading.\n2. **UI Architecture**: In `style.css`, create a premium "Space-Age Glass" design with deep shadows and tactile hover animations. Use a responsive grid layout.\n3. **History System**: Implement a history list that records the last 5 operations.\n4. **Checklist**: All button IDs in `index.html` must match the selectors used in `script.js`. Ensure NO empty functions.' },
     { id: 'clock', name: 'Simple Clock', icon: Clock, prompt: 'Create a fully functional, production-grade analog clock/watch application for Android + Web (responsive mobile-first UI).\n\n### PRIMARY GOAL\nBuild an ultra-realistic, smooth, accurate analog watch application with professional mechanics, synchronized with the device time down to the millisecond. It must look and behave like a real luxury wristwatch.\n\n### CRITICAL FUNCTIONAL REQUIREMENTS\n1. **REAL TIME SYNC**: Automatically sync with device local time, hours, minutes, and seconds. The clock MUST NOT freeze or use hardcoded angles. Use `requestAnimationFrame` for continuous updates.\n2. **SMOOTH MOVEMENT**: Second hand must move smoothly every frame (not teleport). Minute and Hour hands must move proportionally as seconds progress.\n3. **HAND ALIGNMENT**: All hands MUST originate from EXACTLY the same center pivot point (0,0 center). No misaligned axes.\n4. **DESIGN**: Premium luxury watch face with metallic frame, realistic dial texture, and inner shadows. Include 12 hour markers and minute ticks.\n5. **GEOMETRY**: Perfectly circular (1:1 aspect ratio) and centered on all screens (Android/Desktop).\n6. **FORMULAS**:\n   - Seconds: `seconds * 6` degrees\n   - Minutes: `(minutes * 6) + (seconds * 0.1)` degrees\n   - Hours: `(hours % 12 * 30) + (minutes * 0.5)` degrees\n7. **TECHNICAL**: Use HTML/CSS/JS with SVG or Canvas for real-time rendering. Provide separate code for index.html, style.css, and script.js with NO placeholders.' },
     // 9.6 — React Native / Mobile App generation template
-    { id: 'rn_app', name: 'React Native App', icon: Smartphone, prompt: 'Build a React Native (Expo) mobile app. Generate the complete project structure with:\n1. App.js entry point with React Navigation\n2. HomeScreen, DetailScreen components\n3. Bottom tab navigation\n4. StyleSheet with platform-specific styling (ios/android)\n5. Async storage for state persistence\n\nProvide separate files: App.js, screens/HomeScreen.js, screens/DetailScreen.js, package.json (Expo), README with run commands.\nApp theme: dark mode with indigo accent. Include sample data and list rendering.' },
-    { id: 'portfolio', name: 'Portfolio Site', icon: Globe, prompt: 'Build a stunning personal portfolio website with: hero section with animated gradient, about me, skills grid, projects showcase (3 cards), contact form with validation. Dark theme with glassmorphism cards, smooth scroll animations, mobile-first responsive. HTML/CSS/JS only.' },
-    { id: 'ecommerce', name: 'E-Commerce UI', icon: ShieldCheck, prompt: 'Build a modern e-commerce product listing page: navbar with cart counter, hero banner, product grid (8 items with images, prices, add-to-cart), cart sidebar with total calculation. Tailwind CSS style with indigo/white palette. Full JavaScript interactions.' },
-    { id: 'dashboard', name: 'Admin Dashboard', icon: LayoutDashboard, prompt: 'Build a professional admin dashboard: sidebar navigation, header with user info, metric cards (4 KPIs), recent activity table (10 rows), line chart using Chart.js CDN. Dark theme, responsive. All data should be realistic sample data.' },
+    { id: 'rn_app', name: 'React Native App', icon: Smartphone, isPro: true, prompt: 'Build a React Native (Expo) mobile app. Generate the complete project structure with:\n1. App.js entry point with React Navigation\n2. HomeScreen, DetailScreen components\n3. Bottom tab navigation\n4. StyleSheet with platform-specific styling (ios/android)\n5. Async storage for state persistence\n\nProvide separate files: App.js, screens/HomeScreen.js, screens/DetailScreen.js, package.json (Expo), README with run commands.\nApp theme: dark mode with indigo accent. Include sample data and list rendering.' },
+    { id: 'portfolio', name: 'Portfolio Site', icon: Globe, isPro: false, prompt: 'Build a stunning personal portfolio website with: hero section with animated gradient, about me, skills grid, projects showcase (3 cards), contact form with validation. Dark theme with glassmorphism cards, smooth scroll animations, mobile-first responsive. HTML/CSS/JS only.' },
+    { id: 'ecommerce', name: 'E-Commerce UI', icon: ShieldCheck, isPro: true, prompt: 'Build a modern e-commerce product listing page: navbar with cart counter, hero banner, product grid (8 items with images, prices, add-to-cart), cart sidebar with total calculation. Tailwind CSS style with indigo/white palette. Full JavaScript interactions.' },
+    { id: 'dashboard', name: 'Admin Dashboard', icon: LayoutDashboard, isPro: true, prompt: 'Build a professional admin dashboard: sidebar navigation, header with user info, metric cards (4 KPIs), recent activity table (10 rows), line chart using Chart.js CDN. Dark theme, responsive. All data should be realistic sample data.' },
   ];
 
   const themeClasses = getThemeClasses(theme);
@@ -5301,6 +5343,33 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                        </div>
                     </div>
 
+                    {/* 11.3 — Daily Usage Stats + 11.4 Referral Code */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-[#161b22] border border-white/5 rounded-2xl p-5 space-y-2">
+                        <p className="text-[9px] font-black text-[#484f58] uppercase tracking-widest">Today's Messages</p>
+                        <p className="text-3xl font-black text-white">{dailyUsage.date === new Date().toDateString() ? dailyUsage.count : 0}</p>
+                        <p className="text-[10px] text-emerald-400">Unlimited for registered users ✓</p>
+                      </div>
+                      <div className="bg-[#161b22] border border-white/5 rounded-2xl p-5 space-y-2">
+                        <p className="text-[9px] font-black text-[#484f58] uppercase tracking-widest">Today's Builds</p>
+                        <p className="text-3xl font-black text-white">{dailyUsage.date === new Date().toDateString() ? dailyUsage.builds : 0}</p>
+                        <p className="text-[10px] text-indigo-400">Preview builds today</p>
+                      </div>
+                      <div className="bg-[#161b22] border border-white/5 rounded-2xl p-5 space-y-2">
+                        <p className="text-[9px] font-black text-[#484f58] uppercase tracking-widest">My Referral Code</p>
+                        <p className="text-xl font-black text-indigo-400 font-mono">{myReferralCode}</p>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard?.writeText(`Join NavBharatAI — भारत का अपना AI App Maker! Use my code ${myReferralCode} for bonus credits: https://navbharatai.com`);
+                            addToast('Referral link copied! ✓', 'success');
+                          }}
+                          className="text-[9px] font-black text-indigo-400 hover:text-white uppercase tracking-widest transition-colors"
+                        >
+                          Copy & Share →
+                        </button>
+                      </div>
+                    </div>
+
                     {/* Autonomous Warning Alert Popup (Reminder Limit Trigger) */}
                     {wallet && wallet.remaining_balance <= reminderLimit && !dismissedReminderWarning && (
                        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 animate-fade-in backdrop-blur-sm">
@@ -6112,26 +6181,39 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                   <p className="text-sm text-[#8b949e]">Accelerate your development with AI-optimized templates</p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {templates.map(t => (
+                  {templates.map(t => {
+                    const isLocked = (t as any).isPro && !user;
+                    return (
                     <motion.button
                       whileHover={{ y: -5 }}
                       key={t.id}
                       onClick={() => {
+                        if (isLocked) { setShowAuth(true); addToast('Sign in to use Pro templates', 'warning'); return; }
                         setInput(t.prompt);
                         toggleTab('nbi_chat');
                       }}
-                      className="flex flex-col items-start p-6 bg-[#161b22] border border-white/5 rounded-2xl hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all text-left group shadow-xl"
+                      className={`flex flex-col items-start p-6 bg-[#161b22] border rounded-2xl transition-all text-left group shadow-xl relative overflow-hidden ${
+                        isLocked ? 'border-amber-500/20 hover:border-amber-500/40' : 'border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/5'
+                      }`}
                     >
-                      <div className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center mb-6 group-hover:bg-indigo-600 transition-colors">
-                        <t.icon className="w-6 h-6 text-indigo-400 group-hover:text-white" />
+                      {(t as any).isPro && (
+                        <span className="absolute top-3 right-3 text-[8px] font-black px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-amber-400 uppercase tracking-widest">
+                          {isLocked ? '🔒 Pro' : '⭐ Pro'}
+                        </span>
+                      )}
+                      <div className={`w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center mb-6 transition-colors ${isLocked ? 'group-hover:bg-amber-600' : 'group-hover:bg-indigo-600'}`}>
+                        <t.icon className={`w-6 h-6 ${isLocked ? 'text-amber-400 group-hover:text-white' : 'text-indigo-400 group-hover:text-white'}`} />
                       </div>
                       <h4 className="font-bold text-white mb-2">{t.name}</h4>
                       <p className="text-[11px] text-[#8b949e] leading-relaxed mb-6 opacity-70">Pre-configured scaffolding for modern responsive web applications.</p>
                       <div className="mt-auto w-full flex items-center justify-between">
-                         <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest bg-indigo-500/10 px-2 py-0.5 rounded">Fast Build</span>
+                         <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${isLocked ? 'text-amber-400 bg-amber-500/10' : 'text-indigo-400 bg-indigo-500/10'}`}>
+                           {isLocked ? 'Sign In to Use' : 'Fast Build'}
+                         </span>
                       </div>
                     </motion.button>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* 9.4 — My Saved Templates (local marketplace) */}

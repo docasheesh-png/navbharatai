@@ -33,11 +33,12 @@ export class UniversalAIRouter {
     tier: string,
     systemPrompt: string | undefined,
     onChunk: (text: string) => void,
+    signal?: AbortSignal,
   ): Promise<void> {
     const ns = (tier === 'vishwakarma-pro' || tier === 'vip') ? 'pro' : 'free';
     const router = AIRouterManager.getRouter(ns);
     const fullPrompt = this.buildPrompt(message, history);
-    await router.routeStream(fullPrompt, systemPrompt, onChunk);
+    await router.routeStream(fullPrompt, systemPrompt, onChunk, signal);
   }
 
   // Context compression: keep last 12 turns, summarise older ones

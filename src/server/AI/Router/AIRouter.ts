@@ -2,6 +2,9 @@ import { AIProvider, AIProviderResponse, ProviderTelemetry } from './ProviderTyp
 
 // Per-provider cooldown tracker (module-level singleton — shared across all requests)
 const cooldownUntil = new Map<string, number>();
+// Per-provider in-flight request counter (concurrency limiter)
+const inFlight = new Map<string, number>();
+const MAX_IN_FLIGHT = 8;
 
 function isOnCooldown(name: string): boolean {
   return Date.now() < (cooldownUntil.get(name) || 0);
@@ -13,12 +16,26 @@ function setCooldown(name: string, seconds: number) {
   console.log(`[CIRCUIT] ${name} on cooldown for ${seconds}s (until ${new Date(until).toISOString()})`);
 }
 
+function acquireSlot(name: string): boolean {
+  const count = inFlight.get(name) || 0;
+  if (count >= MAX_IN_FLIGHT) return false;
+  inFlight.set(name, count + 1);
+  return true;
+}
+
+function releaseSlot(name: string) {
+  inFlight.set(name, Math.max(0, (inFlight.get(name) || 1) - 1));
+}
+
 function cooldownSeconds(error: any): number {
   const msg = String(error?.message || error?.status || '');
-  if (msg.includes('429') || msg.toLowerCase().includes('rate') || msg.toLowerCase().includes('quota')) return 90;
-  if (msg.includes('503') || msg.includes('overloaded')) return 45;
-  if (msg.toLowerCase().includes('timeout')) return 15;
-  return 10;
+  let base: number;
+  if (msg.includes('429') || msg.toLowerCase().includes('rate') || msg.toLowerCase().includes('quota')) base = 90;
+  else if (msg.includes('503') || msg.includes('overloaded')) base = 45;
+  else if (msg.toLowerCase().includes('timeout')) base = 15;
+  else base = 10;
+  // ±20% jitter — prevents thundering herd when many users retry simultaneously
+  return Math.round(base * (0.8 + Math.random() * 0.4));
 }
 
 export class AIRouter {
@@ -38,28 +55,44 @@ export class AIRouter {
     return JSON.parse(response.content);
   }
 
-  async routeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void): Promise<void> {
+  async routeStream(
+    prompt: string,
+    systemPrompt: string | undefined,
+    onChunk: (text: string) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
     for (const pass of [1, 2]) {
       for (const provider of this.providers) {
+        if (signal?.aborted) return;
         if (pass === 1 && isOnCooldown(provider.name)) continue;
+        const concurrent = inFlight.get(provider.name) || 0;
+        if (concurrent >= MAX_IN_FLIGHT) {
+          console.log(`[CAPACITY] ${provider.name} at max ${MAX_IN_FLIGHT} concurrent, skipping`);
+          continue;
+        }
         const healthy = await provider.healthCheck().catch(() => false);
         if (!healthy) continue;
+        if (!acquireSlot(provider.name)) continue;
         try {
           if (provider.executeStream) {
             await provider.executeStream(prompt, systemPrompt, onChunk);
           } else {
             const resp = await provider.execute(prompt, undefined, undefined, systemPrompt);
-            onChunk(resp.content);
+            if (!signal?.aborted) onChunk(resp.content);
           }
           return;
         } catch (err: any) {
           const secs = cooldownSeconds(err);
           setCooldown(provider.name, secs);
           console.error(`[ROUTER_STREAM] ${provider.name} failed, cooldown ${secs}s:`, err?.message?.slice(0, 80));
+        } finally {
+          releaseSlot(provider.name);
         }
       }
     }
-    onChunk('Abhi AI service thodi der ke liye busy hai. Kripya 1-2 minute mein dobara try karein. 🙏');
+    if (!signal?.aborted) {
+      onChunk('Abhi AI service thodi der ke liye busy hai. Kripya 1-2 minute mein dobara try karein. 🙏');
+    }
   }
 
   private async execute(prompt: string, schema?: any, systemPrompt?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
@@ -82,9 +115,15 @@ export class AIRouter {
           continue;
         }
 
+        const concurrent = inFlight.get(provider.name) || 0;
+        if (concurrent >= MAX_IN_FLIGHT) {
+          console.log(`[CAPACITY] ${provider.name} at max ${MAX_IN_FLIGHT} concurrent, skipping`);
+          continue;
+        }
+        if (!acquireSlot(provider.name)) continue;
         try {
           const startTime = Date.now();
-          console.log(`[ROUTER] Trying ${provider.name} (pass ${pass})...`);
+          console.log(`[ROUTER] Trying ${provider.name} (pass ${pass}, in-flight ${concurrent + 1})...`);
           const response = await provider.execute(prompt, targetSchema, undefined, systemPrompt);
           const latency = Date.now() - startTime;
           console.log(`[ROUTER] ${provider.name} SUCCESS in ${latency}ms`);
@@ -98,6 +137,8 @@ export class AIRouter {
           console.error(`[ROUTER] ${provider.name} FAILED (${error?.message?.slice(0, 80)}), cooldown ${secs}s`);
           setCooldown(provider.name, secs);
           errors.push(`${provider.name}: ${error?.message?.slice(0, 60)}`);
+        } finally {
+          releaseSlot(provider.name);
         }
       }
     }

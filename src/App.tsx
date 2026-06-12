@@ -2211,8 +2211,10 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
         }
 
         const contentType = response.headers.get('Content-Type') || '';
-        if (contentType.includes('text/plain') && response.body) {
-          // True streaming path
+        const isSSE = contentType.includes('text/event-stream');
+        const isPlain = contentType.includes('text/plain');
+        if ((isSSE || isPlain) && response.body) {
+          // Streaming path — SSE (text/event-stream) or legacy plain text
           streamingMsgId = (Date.now() + 1).toString();
           setMessagesForTab(prev => [...prev, {
             id: streamingMsgId!,
@@ -2225,17 +2227,43 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
           const decoder = new TextDecoder();
           let accumulated = '';
           let lastUpdate = 0;
+          let sseBuffer = '';
 
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            accumulated += decoder.decode(value, { stream: true });
-            const now = Date.now();
-            if (now - lastUpdate > 40) {
-              const snap = accumulated;
-              setMessagesForTab(prev => prev.map(m => m.id === streamingMsgId ? { ...m, text: snap + '▋' } : m));
-              lastUpdate = now;
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              const raw = decoder.decode(value, { stream: true });
+
+              if (isSSE) {
+                // Parse SSE: lines like "data: {...}\n\n" and ": ping\n\n" (heartbeat, ignored)
+                sseBuffer += raw;
+                const events = sseBuffer.split('\n\n');
+                sseBuffer = events.pop() ?? '';
+                for (const event of events) {
+                  for (const line of event.split('\n')) {
+                    if (!line.startsWith('data: ')) continue;
+                    const payload = line.slice(6).trim();
+                    if (payload === '[DONE]') break;
+                    try {
+                      const parsed = JSON.parse(payload);
+                      if (parsed.c) accumulated += parsed.c;
+                    } catch { /* malformed chunk, skip */ }
+                  }
+                }
+              } else {
+                accumulated += raw;
+              }
+
+              const now = Date.now();
+              if (now - lastUpdate > 40) {
+                const snap = accumulated;
+                setMessagesForTab(prev => prev.map(m => m.id === streamingMsgId ? { ...m, text: snap + '▋' } : m));
+                lastUpdate = now;
+              }
             }
+          } finally {
+            reader.releaseLock();
           }
           // Final update — remove cursor
           setMessagesForTab(prev => prev.map(m => m.id === streamingMsgId ? { ...m, text: accumulated } : m));
@@ -2244,6 +2272,24 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
 
         // Fallback: JSON response
         return await response.json();
+      };
+
+      // Retry helper: up to 3 attempts with backoff, only before streaming starts
+      const callWithRetry = async (): Promise<{ reply: string; model?: string }> => {
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            return await performStreamingBackendCall();
+          } catch (err: any) {
+            const isHardError = err.message?.includes('Session expired')
+              || err.message?.includes('Too many requests')
+              || streamingMsgId !== null; // streaming already started — don't retry mid-stream
+            if (isHardError || attempt >= 3) throw err;
+            const delay = attempt * 1500; // 1.5s, then 3s
+            console.warn(`[RETRY] Backend attempt ${attempt} failed (${err.message}), retrying in ${delay}ms`);
+            await new Promise(r => setTimeout(r, delay));
+          }
+        }
+        throw new Error('Unreachable');
       };
 
       // Call Gemini locally if we are on NBI or preferred model is gemini, etc.
@@ -2256,15 +2302,15 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
             const urlMatch = messageToSend.match(/https?:\/\/[^\s]+/);
             potentialTarget = urlMatch ? urlMatch[0] : '';
           }
-          
+
           data = await runFrontendPipeline(messageToSend, isRealTime || detectedIntent === 'security', historyForAPI, detectedIntent, potentialTarget, currentAgent, currentMode);
         } catch (frontendErr: any) {
           console.warn('Frontend Gemini failed, trying backend fallback...', frontendErr.message);
-          data = await performStreamingBackendCall();
+          data = await callWithRetry();
           usedBackend = true;
         }
       } else {
-        data = await performStreamingBackendCall();
+        data = await callWithRetry();
         usedBackend = true;
       }
       

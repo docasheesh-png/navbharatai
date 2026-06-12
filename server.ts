@@ -365,7 +365,7 @@ setInterval(() => {
   // ── Rate Limiters (4.3) ──────────────────────────────────────────────────
   const chatLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 10,
+    max: 20,   // 20 req/min per user — generous for normal chat, tight for abuse
     keyGenerator: (req) => (req.headers['x-user-id'] as string) || req.ip || 'anon',
     standardHeaders: true,
     legacyHeaders: false,
@@ -3870,14 +3870,44 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
 
     try {
       if (req.body.stream === true) {
-        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-        res.setHeader('Transfer-Encoding', 'chunked');
+        // SSE stream — proper format so proxies/load balancers don't drop idle connections
+        res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Accel-Buffering', 'no');
-        await aiRouter.routeStream(contextualMessage, history, tier, systemPrompt, (chunk: string) => {
-          res.write(chunk);
+        res.flushHeaders(); // send headers immediately, don't buffer
+
+        const controller = new AbortController();
+
+        // Keepalive ping every 20s — prevents proxy/LB from closing idle connection
+        const heartbeat = setInterval(() => {
+          if (!res.writableEnded) res.write(': ping\n\n');
+        }, 20000);
+
+        // Cancel upstream AI call when client disconnects (saves quota)
+        req.on('close', () => {
+          controller.abort();
+          clearInterval(heartbeat);
         });
-        res.end();
+
+        try {
+          await aiRouter.routeStream(
+            contextualMessage, history, tier, systemPrompt,
+            (chunk: string) => {
+              if (!res.writableEnded) {
+                // JSON-encode each chunk so newlines/special chars are safe in SSE
+                res.write(`data: ${JSON.stringify({ c: chunk })}\n\n`);
+              }
+            },
+            controller.signal,
+          );
+        } finally {
+          clearInterval(heartbeat);
+        }
+        if (!res.writableEnded) {
+          res.write('data: [DONE]\n\n');
+          res.end();
+        }
       } else {
         const aiResponse = await aiRouter.route(contextualMessage, history, tier, undefined, systemPrompt);
         res.json({ reply: aiResponse });

@@ -73,6 +73,7 @@ export class AIRouter {
         const healthy = await provider.healthCheck().catch(() => false);
         if (!healthy) continue;
         if (!acquireSlot(provider.name)) continue;
+        const startTime = Date.now();
         try {
           if (provider.executeStream) {
             await provider.executeStream(prompt, systemPrompt, onChunk);
@@ -80,10 +81,12 @@ export class AIRouter {
             const resp = await provider.execute(prompt, undefined, undefined, systemPrompt);
             if (!signal?.aborted) onChunk(resp.content);
           }
+          recordProviderLatency(provider.name, Date.now() - startTime, false);
           return;
         } catch (err: any) {
           const secs = cooldownSeconds(err);
           setCooldown(provider.name, secs);
+          recordProviderLatency(provider.name, 0, true);
           console.error(`[ROUTER_STREAM] ${provider.name} failed, cooldown ${secs}s:`, err?.message?.slice(0, 80));
         } finally {
           releaseSlot(provider.name);
@@ -127,6 +130,7 @@ export class AIRouter {
           const response = await provider.execute(prompt, targetSchema, undefined, systemPrompt);
           const latency = Date.now() - startTime;
           console.log(`[ROUTER] ${provider.name} SUCCESS in ${latency}ms`);
+          recordProviderLatency(provider.name, latency, false);
 
           return {
             response,
@@ -136,6 +140,7 @@ export class AIRouter {
           const secs = cooldownSeconds(error);
           console.error(`[ROUTER] ${provider.name} FAILED (${error?.message?.slice(0, 80)}), cooldown ${secs}s`);
           setCooldown(provider.name, secs);
+          recordProviderLatency(provider.name, 0, true);
           errors.push(`${provider.name}: ${error?.message?.slice(0, 60)}`);
         } finally {
           releaseSlot(provider.name);
@@ -155,4 +160,32 @@ export class AIRouter {
       telemetry: { provider: 'NONE', retries: errors.length, latency: 0, success: false },
     };
   }
+}
+
+// Per-provider latency accumulator for stats
+const latencyAccum = new Map<string, { total: number; count: number; errors: number }>();
+
+export function recordProviderLatency(name: string, latencyMs: number, failed: boolean) {
+  const cur = latencyAccum.get(name) || { total: 0, count: 0, errors: 0 };
+  latencyAccum.set(name, {
+    total: cur.total + (failed ? 0 : latencyMs),
+    count: cur.count + 1,
+    errors: cur.errors + (failed ? 1 : 0),
+  });
+}
+
+export function getProviderStats(): Record<string, { cooldownUntil: number; inFlight: number; avgLatencyMs: number; errorCount: number; requestCount: number }> {
+  const result: Record<string, any> = {};
+  const allNames = new Set([...cooldownUntil.keys(), ...inFlight.keys(), ...latencyAccum.keys()]);
+  for (const name of allNames) {
+    const acc = latencyAccum.get(name) || { total: 0, count: 0, errors: 0 };
+    result[name] = {
+      cooldownUntil: cooldownUntil.get(name) || 0,
+      inFlight: inFlight.get(name) || 0,
+      avgLatencyMs: acc.count > 0 ? Math.round(acc.total / Math.max(1, acc.count - acc.errors)) : 0,
+      errorCount: acc.errors,
+      requestCount: acc.count,
+    };
+  }
+  return result;
 }

@@ -41,11 +41,26 @@ import * as cheerio from 'cheerio';
 import fs from 'fs';
 import { AIRuntimeManager } from './src/server/AI/AIRuntimeManager';
 import { UniversalAIRouter } from './src/server/AI/UniversalAIRouter';
+import { getProviderStats, recordProviderLatency } from './src/server/AI/Router/AIRouter';
 import { auditEnv } from './src/server/audit_env';
 import { BuildJobManager } from './src/server/AppMakerLab/jobs/BuildJobManager';
 import { buildApp as buildAppEngine } from './src/server/AppMakerLab/AppEngine';
 
 auditEnv();
+
+// ── In-memory server stats ─────────────────────────────────────────────────
+const serverStats = {
+  totalHits: 0,
+  dailyHits: new Map<string, number>(),
+  failedLogins: 0,
+  failedLoginIPs: [] as { ip: string; time: number; username?: string }[],
+  maintenanceMode: false,
+  featureFlags: { doctorAI: true, navBharatPro: true, appBuilder: true },
+  pricingConfig: { coinsPerRupee: 100, referralBonusPct: 10 },
+  providerEnabled: { gemini: true, anthropic: true, grok: true, vertex: true },
+  announcements: [] as { id: string; message: string; createdAt: string; target: 'all' | string }[],
+};
+
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
 // Fallback: load .env file first, then .env.example (skip placeholder values)
@@ -414,6 +429,13 @@ setInterval(() => {
 
     app.use(express.json());
 
+  // Hit counter middleware
+  app.use((req: any, _res: any, next: any) => {
+    serverStats.totalHits++;
+    const today = new Date().toISOString().slice(0, 10);
+    serverStats.dailyHits.set(today, (serverStats.dailyHits.get(today) || 0) + 1);
+    next();
+  });
 
   // Cashfree Configuration
   if (process.env.CASHFREE_APP_ID) (Cashfree as any).XClientId = process.env.CASHFREE_APP_ID;
@@ -3997,6 +4019,13 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         }
       } else {
         const aiResponse = await aiRouter.route(contextualMessage, history, tier, undefined, systemPrompt);
+        // Fire-and-forget usage logging
+        const userId2 = req.body?.userId || req.body?.uid || 'anonymous';
+        addDoc(collection(db, 'ai_usage_logs'), {
+          userId: userId2, tier, latencyMs: 0, outputTokens: Math.round((aiResponse.length || 0) / 4),
+          modelName: 'auto', providerName: 'auto', estimated_provider_cost: 0,
+          createdAt: new Date().toISOString(),
+        }).catch(() => {});
         res.json({ reply: aiResponse });
       }
     } catch(e: any) {
@@ -4781,6 +4810,9 @@ Response Format:
     }
 
     audit('ADMIN_LOGIN_FAILED', { username, ip: req.ip });
+    serverStats.failedLogins++;
+    serverStats.failedLoginIPs.push({ ip: String(req.ip), time: Date.now(), username });
+    if (serverStats.failedLoginIPs.length > 100) serverStats.failedLoginIPs.shift();
     return res.status(401).json({ error: 'Invalid credentials.' });
   });
 
@@ -4864,24 +4896,220 @@ Response Format:
           money_spent: w.total_money_spent || 0
         }));
 
+      // New stats additions
+      const today2 = new Date().toISOString().slice(0, 10);
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const todayHits = serverStats.dailyHits.get(today2) || 0;
+      const yesterdayHits = serverStats.dailyHits.get(yesterday) || 0;
+
+      // New users today (wallets created today)
+      const newUsersToday = wallets.filter((w: any) => {
+        const created = w.updatedAt || w.createdAt || '';
+        return created.startsWith(today2);
+      }).length;
+
+      // Active users last 24h (from usage logs)
+      const cutoff24h = new Date(Date.now() - 86400000).toISOString();
+      const activeUserIds = new Set(logs.filter((l: any) => (l.createdAt || '') > cutoff24h).map((l: any) => l.userId));
+      const activeUsers24h = activeUserIds.size;
+
+      // Provider ranking by request count
+      const providerRequestCount: any = {};
+      const providerLatencySum: any = {};
+      const providerLatencyCount: any = {};
+      logs.forEach((log: any) => {
+        const p = log.providerName || 'unknown';
+        providerRequestCount[p] = (providerRequestCount[p] || 0) + 1;
+        if (log.latencyMs) {
+          providerLatencySum[p] = (providerLatencySum[p] || 0) + log.latencyMs;
+          providerLatencyCount[p] = (providerLatencyCount[p] || 0) + 1;
+        }
+      });
+      const providerRanking = Object.entries(providerRequestCount)
+        .map(([name, count]: any) => ({
+          name,
+          requests: count,
+          avgLatencyMs: providerLatencyCount[name] ? Math.round(providerLatencySum[name] / providerLatencyCount[name]) : 0,
+          tokensUsed: providerWise[name.toLowerCase()] || 0,
+        }))
+        .sort((a: any, b: any) => b.requests - a.requests);
+
+      // Token purchases
+      const successfulPurchases = transactions.filter((tx: any) => tx.paymentStatus === 'SUCCESS' && tx.paymentProvider !== 'WELCOME_BONUS');
+      const tokenPurchaseCount = successfulPurchases.length;
+      const recentPurchases = [...successfulPurchases]
+        .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 10)
+        .map((tx: any) => ({ userId: tx.userId, amount: tx.amountPaid, tokens: tx.tokenAmount || 0, date: tx.createdAt }));
+
+      // Live provider stats from AIRouter
+      const liveProviderStats = getProviderStats();
+
       return res.json({
-        totalUsers,
-        totalRevenue,
-        totalTokensUsed,
-        totalProviderCost,
+        totalUsers, totalRevenue, totalTokensUsed, totalProviderCost,
         estimatedProfit: totalRevenue - totalProviderCost,
-        failedRequests,
-        expensiveUsers,
-        modelWise,
-        providerWise,
-        cashfreeStatus,
-        burnRate: totalProviderCost / Math.max(1, logs.length)
+        failedRequests: serverStats.failedLogins,
+        expensiveUsers, modelWise, providerWise, cashfreeStatus, burnRate: totalProviderCost / Math.max(1, logs.length),
+        // New fields
+        websiteHitsToday: todayHits, websiteHitsYesterday: yesterdayHits,
+        websiteHitsTotal: serverStats.totalHits,
+        newUsersToday, activeUsers24h,
+        providerRanking, tokenPurchaseCount, recentPurchases,
+        liveProviderStats,
+        maintenanceMode: serverStats.maintenanceMode,
+        featureFlags: serverStats.featureFlags,
+        pricingConfig: serverStats.pricingConfig,
+        providerEnabled: serverStats.providerEnabled,
+        failedLoginAttempts: serverStats.failedLoginIPs.slice(-20),
       });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
   });
 
+  // ── Provider live status ──────────────────────────────────────────────────
+  app.get('/api/admin/provider-status', verifyAdminToken, (_req, res) => {
+    res.json(getProviderStats());
+  });
+
+  // ── Full user list with sort ──────────────────────────────────────────────
+  app.get('/api/admin/users', verifyAdminToken, async (req, res) => {
+    try {
+      const sort = (req.query.sort as string) || 'tokens';
+      const search = ((req.query.search as string) || '').toLowerCase();
+      const walletsRef = collection(db, 'user_token_wallets');
+      const snap = await getDocs(walletsRef);
+      let users = snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+
+      if (search) {
+        users = users.filter((u: any) =>
+          (u.userEmail || '').toLowerCase().includes(search) ||
+          (u.userName || '').toLowerCase().includes(search)
+        );
+      }
+
+      if (sort === 'alpha') users.sort((a: any, b: any) => (a.userEmail || '').localeCompare(b.userEmail || ''));
+      else if (sort === 'tokens') users.sort((a: any, b: any) => (b.tokenBalance || 0) - (a.tokenBalance || 0));
+      else if (sort === 'ai_per_day') users.sort((a: any, b: any) => (b.total_output_tokens_used || 0) - (a.total_output_tokens_used || 0));
+      else if (sort === 'recent') users.sort((a: any, b: any) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+
+      res.json(users.map((u: any) => ({
+        userId: u.userId || u.id,
+        email: u.userEmail || '–',
+        name: u.userName || 'NavBharat User',
+        tokenBalance: u.tokenBalance || 0,
+        totalTokensUsed: u.total_output_tokens_used || 0,
+        remainingBalance: u.remaining_balance || 0,
+        moneySpent: u.total_money_spent || 0,
+        hasPro: u.hasVishwakarmaPass || false,
+        banned: u.banned || false,
+        createdAt: u.updatedAt || u.createdAt || '',
+      })));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── User token adjustment ─────────────────────────────────────────────────
+  app.post('/api/admin/users/:userId/tokens', verifyAdminToken, async (req, res) => {
+    const { userId } = req.params;
+    const { delta, reason } = req.body;
+    if (!delta || typeof delta !== 'number') return res.status(400).json({ error: 'delta (number) required' });
+    try {
+      const walletRef = doc(db, 'user_token_wallets', userId);
+      const snap = await getDoc(walletRef);
+      if (!snap.exists()) return res.status(404).json({ error: 'User not found' });
+      const data = snap.data();
+      const newBalance = Math.max(0, (data.tokenBalance || 0) + delta);
+      await updateDoc(walletRef, {
+        tokenBalance: newBalance,
+        walletLedger: [...(data.walletLedger || []), { type: 'admin_adjustment', amountCoinsOrTokens: delta, reason: reason || 'Admin adjustment', timestamp: new Date().toISOString() }],
+        updatedAt: new Date().toISOString(),
+      });
+      audit('ADMIN_TOKEN_ADJUST', { userId, delta, reason, ip: req.ip });
+      res.json({ ok: true, newBalance });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Ban / unban user ──────────────────────────────────────────────────────
+  app.post('/api/admin/users/:userId/ban', verifyAdminToken, async (req, res) => {
+    const { userId } = req.params;
+    const { banned, reason } = req.body;
+    try {
+      const walletRef = doc(db, 'user_token_wallets', userId);
+      await setDoc(walletRef, { banned: !!banned, banReason: reason || '', bannedAt: new Date().toISOString() }, { merge: true });
+      audit(banned ? 'ADMIN_USER_BANNED' : 'ADMIN_USER_UNBANNED', { userId, reason, ip: req.ip });
+      res.json({ ok: true, banned: !!banned });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Grant / revoke Pro access ─────────────────────────────────────────────
+  app.post('/api/admin/users/:userId/pro', verifyAdminToken, async (req, res) => {
+    const { userId } = req.params;
+    const { grant } = req.body;
+    try {
+      const walletRef = doc(db, 'user_token_wallets', userId);
+      await setDoc(walletRef, { hasVishwakarmaPass: !!grant, vishwakarmaPassActivatedAt: grant ? new Date().toISOString() : null }, { merge: true });
+      audit(grant ? 'ADMIN_PRO_GRANTED' : 'ADMIN_PRO_REVOKED', { userId, ip: req.ip });
+      res.json({ ok: true, hasPro: !!grant });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Settings (pricing, feature flags, maintenance) ────────────────────────
+  app.get('/api/admin/settings', verifyAdminToken, (_req, res) => {
+    res.json({
+      maintenanceMode: serverStats.maintenanceMode,
+      featureFlags: serverStats.featureFlags,
+      pricingConfig: serverStats.pricingConfig,
+      providerEnabled: serverStats.providerEnabled,
+    });
+  });
+
+  app.post('/api/admin/settings', verifyAdminToken, (req, res) => {
+    const { maintenanceMode, featureFlags, pricingConfig, providerEnabled } = req.body;
+    if (maintenanceMode !== undefined) serverStats.maintenanceMode = !!maintenanceMode;
+    if (featureFlags) Object.assign(serverStats.featureFlags, featureFlags);
+    if (pricingConfig) Object.assign(serverStats.pricingConfig, pricingConfig);
+    if (providerEnabled) Object.assign(serverStats.providerEnabled, providerEnabled);
+    audit('ADMIN_SETTINGS_CHANGED', { changes: req.body, ip: req.ip });
+    res.json({ ok: true, settings: { maintenanceMode: serverStats.maintenanceMode, featureFlags: serverStats.featureFlags, pricingConfig: serverStats.pricingConfig, providerEnabled: serverStats.providerEnabled } });
+  });
+
+  // ── Announcement broadcast ────────────────────────────────────────────────
+  app.post('/api/admin/announcement', verifyAdminToken, (req, res) => {
+    const { message, target } = req.body;
+    if (!message) return res.status(400).json({ error: 'message required' });
+    const ann = { id: Date.now().toString(), message, createdAt: new Date().toISOString(), target: target || 'all' };
+    serverStats.announcements.push(ann);
+    if (serverStats.announcements.length > 50) serverStats.announcements.shift();
+    audit('ADMIN_ANNOUNCEMENT', { message, target, ip: req.ip });
+    res.json({ ok: true, announcement: ann });
+  });
+
+  app.get('/api/admin/announcements', verifyAdminToken, (_req, res) => {
+    res.json(serverStats.announcements);
+  });
+
+  // ── Promo code management ─────────────────────────────────────────────────
+  app.post('/api/admin/promo', verifyAdminToken, async (req, res) => {
+    const { code, discountPct, freeTokens, maxUses, expiresAt } = req.body;
+    if (!code) return res.status(400).json({ error: 'code required' });
+    try {
+      const promoRef = doc(db, 'promo_codes', code.toUpperCase());
+      await setDoc(promoRef, {
+        code: code.toUpperCase(), discountPct: discountPct || 0, freeTokens: freeTokens || 0,
+        maxUses: maxUses || 1, usedCount: 0, expiresAt: expiresAt || null,
+        active: true, createdAt: new Date().toISOString(),
+      });
+      audit('ADMIN_PROMO_CREATED', { code, ip: req.ip });
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/admin/promo', verifyAdminToken, async (_req, res) => {
+    try {
+      const snap = await getDocs(collection(db, 'promo_codes'));
+      res.json(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
 
 
   // SECRETS

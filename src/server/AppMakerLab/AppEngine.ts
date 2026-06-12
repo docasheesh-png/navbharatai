@@ -434,6 +434,116 @@ function extractStructuralSummary(html: string): string {
   return lines.join('\n');
 }
 
+// ─── Phase 4: Split JS Generation for Complex Apps ───────────────────────────
+
+/**
+ * For complex apps (500+ lines of JS needed), splits generation into 3 focused modules:
+ * - state:  data model, game/app state, storage
+ * - ui:     DOM updates, page transitions, rendering, animations
+ * - logic:  core rules, calculations, event handlers, game mechanics
+ *
+ * Each module is generated with the full HTML context + other modules as stubs,
+ * then merged into one script.js.
+ */
+async function generateJSSplit(bp: AppBlueprint, htmlContent: string): Promise<string> {
+  const hints    = TEMPLATE_HINTS[bp.template];
+  const cdnHints = buildCdnJsHints(bp.cdnNeeded);
+  const summary  = extractStructuralSummary(htmlContent);
+  const baseCtx  = `App: ${bp.appName} [${bp.template}, ${bp.complexity}]\nDescription: ${bp.description}`;
+
+  const showPageFn = `function showPage(id) {
+  document.querySelectorAll('[id^="page-"]').forEach(p => p.style.display = 'none');
+  const el = document.getElementById(id); if (el) el.style.display = 'block';
+}`;
+
+  const sys = `You are a world-class JavaScript developer. Output ONLY raw JavaScript — no markdown, no <script> tags.`;
+
+  // Module 1: State — data model, constants, storage
+  const statePrompt = `${baseCtx}
+
+Generate ONLY the STATE MODULE for script.js.
+This module covers: all data models, constants, initial state, localStorage load/save.
+
+APP STRUCTURE:
+${summary}
+
+DATA MODEL: ${JSON.stringify(bp.dataModel, null, 2)}
+
+Rules:
+- Define all state variables at module top
+- Include loadState() and saveState() using localStorage
+- Define all constants (speeds, sizes, rules)
+- NO event listeners, NO DOM manipulation — that's in other modules
+- Export nothing — all vars are module-global (no ES modules)
+
+Output ONLY the state module JavaScript:`;
+
+  // Module 2: Logic — core rules, calculations, game mechanics
+  const logicPrompt = `${baseCtx}
+
+Generate ONLY the LOGIC MODULE for script.js.
+This module covers: core game/app logic, calculations, win/lose checks, AI, data processing.
+
+APP STRUCTURE:
+${summary}
+
+USER INTERACTIONS: ${bp.interactions.join(' | ')}
+
+TEMPLATE RULES:
+${hints.js}
+
+Rules:
+- Pure logic functions (no DOM) where possible
+- Game rules, scoring, win conditions, calculations
+- AI opponent logic if needed
+- Call saveState() after state changes
+- No event listeners — logic module, called BY event handlers
+
+Output ONLY the logic module JavaScript:`;
+
+  // Module 3: UI — DOM, events, rendering, transitions
+  const uiPrompt = `${baseCtx}
+
+Generate ONLY the UI MODULE for script.js — this is the main entry point.
+This module covers: all event listeners, DOM updates, page transitions, rendering, DOMContentLoaded.
+
+EXACT HTML:
+\`\`\`html
+${htmlContent.slice(0, 8000)}
+\`\`\`
+
+${cdnHints ? `CDN LIBRARIES:\n${cdnHints}\n` : ''}
+
+Rules:
+- DOMContentLoaded wraps EVERYTHING
+- Wire EVERY button using addEventListener
+- Render functions update DOM from state variables
+- Include:
+${showPageFn}
+- showPage('${bp.screens[0]?.id || 'page-home'}') on load
+- Dynamic elements to create: ${bp.dynamicElements.join(', ') || 'toast-notification, modal-overlay'}
+- Call logic functions, update DOM, show results
+
+Output ONLY the UI module JavaScript:`;
+
+  console.log('[AppEngine] Split generation: 3 modules in parallel...');
+  const [stateJs, logicJs, uiJs] = await Promise.all([
+    callAI(statePrompt, sys, 4000),
+    callAI(logicPrompt, sys, 5000),
+    callAI(uiPrompt,    sys, 6000),
+  ]);
+
+  // Merge: state → logic → ui (dependency order)
+  return `// ── STATE ──────────────────────────────────────────
+${stateJs}
+
+// ── LOGIC ──────────────────────────────────────────
+${logicJs}
+
+// ── UI / EVENT HANDLERS ────────────────────────────
+${uiJs}`;
+}
+
 // ─── Step 2: Generate HTML (template-aware) ───────────────────────────────────
 
 async function generateHTML(bp: AppBlueprint): Promise<string> {
@@ -625,15 +735,30 @@ export async function buildApp(
     const generatedFiles: Record<string, string> = { 'index.html': htmlContent };
     onFileGenerated?.('index.html', htmlContent);
 
-    report('Generating', 4, 6, 'Writing JavaScript — wiring all buttons & game logic...');
-    const jsContent = await generateJS(bp, htmlContent);
-    generatedFiles['script.js'] = jsContent;
-    onFileGenerated?.('script.js', jsContent);
+    if (bp.complexity === 'complex') {
+      // Phase 4: Split JS generation — 3 parallel modules for complex apps
+      report('Generating', 4, 6, `Writing JavaScript (split mode — state + logic + ui in parallel)...`);
+      const jsContent = await generateJSSplit(bp, htmlContent);
+      generatedFiles['script.js'] = jsContent;
+      onFileGenerated?.('script.js', jsContent);
 
-    report('Generating', 5, 6, 'Writing CSS — styling & animations...');
-    const cssContent = await generateCSS(bp, htmlContent);
-    generatedFiles['style.css'] = cssContent;
-    onFileGenerated?.('style.css', cssContent);
+      report('Generating', 5, 6, 'Writing CSS — styling & animations...');
+      const cssContent = await generateCSS(bp, htmlContent);
+      generatedFiles['style.css'] = cssContent;
+      onFileGenerated?.('style.css', cssContent);
+    } else {
+      // Phase 6: JS + CSS in parallel for simple/medium apps
+      report('Generating', 4, 6, 'Writing JavaScript + CSS in parallel...');
+      const [jsContent, cssContent] = await Promise.all([
+        generateJS(bp, htmlContent),
+        generateCSS(bp, htmlContent),
+      ]);
+      generatedFiles['script.js']  = jsContent;
+      generatedFiles['style.css']  = cssContent;
+      onFileGenerated?.('script.js',  jsContent);
+      onFileGenerated?.('style.css',  cssContent);
+      report('Generating', 5, 6, 'JS + CSS complete.');
+    }
 
     report('Assembling', 6, 6, 'Building live preview...');
     const previewHtml = buildPreviewHtml(generatedFiles, bp);

@@ -6611,7 +6611,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 messages={messages}
                 chatInput={input}
                 onChatInputChange={setInput}
-                onChatSend={() => handleSendForTab(activeAgent.startsWith('vishwakarma') ? 'asc_chat' : 'nbi_chat')}
+                onChatSend={() => handleSendForTab(activeAgent.startsWith('vishwakarma') ? 'asc_chat' : 'nbi_pro_chat')}
                 isChatLoading={isLoading}
                 activeIntent={activeIntent}
                 githubToken={githubToken}
@@ -6639,11 +6639,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 onConfirmPush={handleGHConfirmPush}
                 isGHPushing={isPushing}
                 onGoToMain={() => {
-                  const isVishwakarma = activeAgent.startsWith('vishwakarma');
-                  const targetView = 'nbi_chat';
-                  toggleTab(targetView);
+                  toggleTab('nbi_pro_chat');
                   addLog('Cognitive memory layer successfully merged and redirected to main cockpit.', 'info');
                 }}
+                onOpenProChat={() => toggleTab('nbi_pro_chat')}
                 wallet={wallet}
                 onUnlockVishwakarma={() => setShowVishwakarmaUnlockModal(true)}
               />

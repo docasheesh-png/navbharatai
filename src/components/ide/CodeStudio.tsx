@@ -64,6 +64,7 @@ interface CodeStudioProps {
   onThemeChange?: (theme: ThemeMode) => void;
   onAgentChange?: (agent: string) => void;
   onGoToMain?: () => void;
+  onOpenProChat?: () => void;
   wallet?: any;
   onUnlockVishwakarma: () => void;
 }
@@ -107,6 +108,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   onThemeChange,
   onAgentChange,
   onGoToMain,
+  onOpenProChat,
   wallet,
   onUnlockVishwakarma,
 }) => {
@@ -534,16 +536,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
          </div>
 
          <div className="flex items-center gap-2">
-            <button 
+            <button
               id="ide-social-chat-trigger"
-              onClick={() => {
-                console.log("Opening AI Chat...");
-                console.log("Selected Agent:", activeAgent);
-                handleScreenChange('ai');
-                setIsSidebarOpen(true);
-              }}
+              onClick={() => onOpenProChat ? onOpenProChat() : (handleScreenChange('ai'), setIsSidebarOpen(true))}
               className="w-16 h-7 bg-indigo-600 hover:bg-indigo-700 rounded-l-lg flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-l border-indigo-400/20"
-              title="Chat with NavBharat AI"
+              title="Open NavBharatAI Pro"
             >
               <Bot className="w-4 h-4 mr-1" />
               <span className="text-[10px] font-bold">AI</span>

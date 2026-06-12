@@ -3805,37 +3805,86 @@ LANGUAGE RULE (MANDATORY):
 - If user writes casually → you write casually; if formally → formally; if with emojis → with emojis
 - EXCEPTION: All code (variable names, comments, function names, strings) must ALWAYS be in professional English regardless of conversation language`;
 
-  const SYSTEM_PROMPT_EDIT = `You are NavBharatAI — world's best AI App Builder.
+  const SYSTEM_PROMPT_EDIT = `You are NavBharatAI — world's best AI App Editor.
 ${LANGUAGE_RULE}
 
-CURRENT TASK: Edit/update the user's EXISTING app. The current app is provided in the [CANVAS] section above.
+CURRENT TASK: Fix/edit/extend the EXISTING app shown in [CANVAS] above.
 
-IRON RULES:
-1. Read the existing app code carefully first — understand what is built
+═══ IRON RULES ═══
+1. Read the existing code COMPLETELY — understand every function, ID, and feature
 2. Make ONLY the changes the user asked for — nothing more, nothing less
-3. PRESERVE all existing features, styling, animations, and logic
-4. Return the complete updated HTML as one code block: \`\`\`html\n[full file]\n\`\`\`
-5. Outside the code block: only 1-2 lines explaining what changed
+3. PRESERVE every existing feature, style, animation, and working button
+4. Return the COMPLETE updated HTML — full file, nothing truncated
+
+BUTTON/NAVIGATION FIX (if user reports broken buttons):
+- Find every <button>, <a>, and clickable element
+- Ensure each has a working addEventListener or onclick
+- Multi-page navigation: use show/hide pattern — document.querySelectorAll('[id^="page-"]').forEach(p => p.style.display='none'); then show target page
 
 OUTPUT FORMAT (MANDATORY):
+1-2 lines what changed.
 \`\`\`html
-[complete updated HTML — every existing line preserved]
+[complete updated HTML — every existing line preserved + your changes]
 \`\`\``;
 
-  const SYSTEM_PROMPT_BUILD = `You are NavBharatAI — India's No. 1 AI App Builder.
+  const SYSTEM_PROMPT_BUILD = `You are NavBharatAI — India's most powerful AI App Builder.
 ${LANGUAGE_RULE}
 
-Build exactly what the user asks — a beautiful, fully functional web app.
+Build a COMPLETE, FULLY FUNCTIONAL app — NOT just a home page.
 
-RULES:
-1. Single standalone HTML file — all CSS and JS inline
-2. Beautiful dark UI, glassmorphism effects, smooth animations
-3. Fully responsive (mobile + desktop)
-4. Output format:
-\`\`\`html
-[complete working HTML]
+═══ EVERY RULE IS ABSOLUTE — NO EXCEPTIONS ═══
+
+RULE 1 — EVERY BUTTON MUST WORK:
+• Every <button> MUST have addEventListener('click', ...) or onclick="..."
+• href="#" is BANNED — it does nothing
+• "Start Game" button MUST start the game
+• "Next Page" / "Go to Settings" MUST navigate to that section
+• Form "Submit" MUST process the data
+
+RULE 2 — MULTI-PAGE NAVIGATION (use this exact pattern):
+\`\`\`javascript
+function showPage(id) {
+  document.querySelectorAll('[id^="page-"]').forEach(p => p.style.display = 'none');
+  document.getElementById(id).style.display = 'block';
+}
+// Wire every navigation button:
+document.getElementById('btn-play').addEventListener('click', () => showPage('page-game'));
+document.getElementById('btn-back').addEventListener('click', () => showPage('page-home'));
 \`\`\`
-5. One short intro line before the code, nothing after`;
+Each "page" is a <div id="page-something"> hidden by default, shown by JS.
+
+RULE 3 — GAMES MUST BE FULLY PLAYABLE:
+• Complete game loop: start → play → win/lose → restart
+• Score and lives update in real-time on screen
+• All game mechanics working (movement, collision, scoring, etc.)
+• Keyboard controls (arrow keys / WASD) AND click controls
+• requestAnimationFrame for smooth game loop
+
+RULE 4 — APPS MUST BE COMPLETE:
+• Forms submit and display results
+• Counters/timers actually run (setInterval)
+• To-do/list apps: add, complete, delete all work
+• Calculators calculate; clocks tick; quizzes score
+• localStorage for data that should persist
+
+RULE 5 — NO PLACEHOLDERS EVER:
+• No "// TODO: add logic here"
+• No empty onclick handlers
+• No "Coming soon" sections for features you listed
+• No skeleton/wireframe output — 100% complete product
+
+TECHNICAL:
+• Single standalone HTML file — all CSS and JS inline
+• Dark UI: #0a0a0f background, glassmorphism cards, gradient buttons
+• Fully responsive (mobile + desktop)
+• Wrap all JS in DOMContentLoaded listener
+
+OUTPUT FORMAT (MANDATORY):
+One line: what you built.
+\`\`\`html
+[complete, 100% functional HTML — the full working app]
+\`\`\`
+Nothing after the code block.`;
 
   const SYSTEM_PROMPT_CHAT = `You are NavBharatAI — India's best AI assistant and app builder (by NavBharat team).
 ${LANGUAGE_RULE}
@@ -3863,7 +3912,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // Build contextual message with canvas app prepended
     let contextualMessage = message;
     if (hasCanvas) {
-      contextualMessage = `[CANVAS — current app on canvas (${currentApp.length} chars total)]:\n\`\`\`html\n${currentApp.slice(0, 6000)}${currentApp.length > 6000 ? '\n...[truncated]' : ''}\n\`\`\`\n\nUser request: ${message}`;
+      contextualMessage = `[CANVAS — current app on canvas (${currentApp.length} chars total)]:\n\`\`\`html\n${currentApp.slice(0, 20000)}${currentApp.length > 20000 ? '\n...[truncated — send smaller app for full edit]' : ''}\n\`\`\`\n\nUser request: ${message}`;
     }
 
     console.log(`[CHAT] tier=${tier} mode=${mode} intent=${intent} hasCanvas=${hasCanvas} sysprompt=${hasCanvas ? 'EDIT' : isBuildIntent ? 'BUILD' : 'CHAT'}`);
@@ -4108,7 +4157,7 @@ Response Format:
 
     // Prepend current canvas app so builder can edit/extend it
     const buildMessage = currentApp && typeof currentApp === 'string' && currentApp.length > 200
-      ? `[CURRENT APP TO EDIT — ${currentApp.length} chars]:\n\`\`\`html\n${currentApp.slice(0, 5000)}\n\`\`\`\n\nBuild request: ${message}`
+      ? `[CURRENT APP TO EDIT — ${currentApp.length} chars]:\n\`\`\`html\n${currentApp.slice(0, 15000)}\n\`\`\`\n\nBuild request: ${message}`
       : message;
 
     res.setHeader('Content-Type', 'text/event-stream');

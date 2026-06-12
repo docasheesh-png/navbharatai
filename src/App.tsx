@@ -2187,7 +2187,7 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
             files: files,
             // 3 — canvas memory: send current app so AI can edit it
             currentApp: hasGeneratedCode && generatedCode && generatedCode.length > 200
-              ? generatedCode.slice(0, 5000)
+              ? generatedCode.slice(0, 15000)
               : undefined,
             stream: true,
           }),
@@ -2475,7 +2475,7 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
           body: JSON.stringify({
             message: buildMessage,
             currentApp: hasGeneratedCode && generatedCode && generatedCode.length > 200
-              ? generatedCode.slice(0, 5000)
+              ? generatedCode.slice(0, 15000)
               : undefined,
           }),
         });

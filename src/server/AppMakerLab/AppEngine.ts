@@ -1,16 +1,12 @@
 /**
- * NavBharatAI Pro — App Maker Engine v2
- * 
- * Replaces the broken AppMakerOrchestrator flow.
- * 
- * Flow:
- *   user prompt
- *     → analyzeRequirements()   — understand what to build
- *     → planFiles()             — decide which files needed
- *     → generateFiles()         — generate each file via AI (Claude → Vertex → Gemini)
- *     → assemble()              — combine into final output + preview HTML
+ * NavBharatAI Pro — App Maker Engine v3
  *
- * Connected to /api/pro-chat in server.ts via buildApp()
+ * Generation order: HTML → JS → CSS
+ *   HTML defines the DOM (all element IDs, classes, structure)
+ *   JS is written AFTER HTML so it uses the exact same IDs → buttons always work
+ *   CSS is written AFTER HTML so selectors match actual classes
+ *
+ * Connected to /api/pro-build and /api/pro-chat in server.ts via buildApp()
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -27,7 +23,7 @@ export interface AppFile {
 export interface BuildResult {
   success: boolean;
   reply: string;
-  files: Record<string, string>;   // path → content (for existing preview system)
+  files: Record<string, string>;
   fileList: AppFile[];
   previewHtml: string;
   appName: string;
@@ -46,8 +42,7 @@ type FileGeneratedCallback = (fileName: string, content: string) => void;
 
 // ─── AI Caller — Claude first, Gemini fallback ───────────────────────────────
 
-async function callAI(prompt: string, systemPrompt: string, maxTokens = 4000): Promise<string> {
-  // 1. Try Claude (via aicredits.in proxy)
+async function callAI(prompt: string, systemPrompt: string, maxTokens = 6000): Promise<string> {
   const claudeKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
   if (claudeKey) {
     try {
@@ -66,7 +61,6 @@ async function callAI(prompt: string, systemPrompt: string, maxTokens = 4000): P
     }
   }
 
-  // 2. Fallback: Gemini
   const geminiKey = process.env.GEMINI_API_KEY;
   if (geminiKey) {
     try {
@@ -84,27 +78,25 @@ async function callAI(prompt: string, systemPrompt: string, maxTokens = 4000): P
   throw new Error('Build service temporarily unavailable. Please try again.');
 }
 
-// ─── Step 1: Analyze what app to build ───────────────────────────────────────
+// ─── Step 1: Analyze requirements ────────────────────────────────────────────
 
 async function analyzeRequirements(prompt: string): Promise<{
   appName: string;
   appType: string;
   features: string[];
-  techStack: string;
   description: string;
 }> {
   const sys = `You are a software architect. Analyze the user's app request and return JSON only.
 Return this exact JSON structure:
 {
   "appName": "short app name",
-  "appType": "web-app|game|tool|dashboard|landing-page|calculator|clock|etc",
-  "features": ["feature1", "feature2", "feature3"],
-  "techStack": "HTML+CSS+JS (vanilla)",
+  "appType": "web-app|game|tool|dashboard|calculator|etc",
+  "features": ["feature1", "feature2", "feature3", "feature4", "feature5"],
   "description": "one sentence what this app does"
 }
 Return ONLY the JSON, no markdown, no explanation.`;
 
-  const raw = await callAI(prompt, sys, 500);
+  const raw = await callAI(prompt, sys, 600);
   try {
     const clean = raw.replace(/```(?:json)?\s*/g, '').replace(/```/g, '').trim();
     return JSON.parse(clean);
@@ -113,52 +105,145 @@ Return ONLY the JSON, no markdown, no explanation.`;
       appName: 'My App',
       appType: 'web-app',
       features: ['main functionality'],
-      techStack: 'HTML+CSS+JS',
       description: prompt.slice(0, 80),
     };
   }
 }
 
-// ─── Step 2: Generate individual file ────────────────────────────────────────
+// ─── Step 2: Generate HTML first (defines the DOM) ───────────────────────────
 
-async function generateFile(
-  fileName: string,
-  fileRole: string,
+async function generateHTML(
   appName: string,
-  appDescription: string,
+  appType: string,
+  description: string,
   features: string[],
-  existingFiles: Record<string, string> = {}
 ): Promise<string> {
-  const context = Object.keys(existingFiles).length > 0
-    ? `\n\nAlready generated files for reference:\n${Object.entries(existingFiles).map(([f, c]) => `--- ${f} ---\n${c.slice(0, 800)}`).join('\n\n')}`
-    : '';
+  const isGame = appType.toLowerCase().includes('game');
 
-  const sys = `You are a world-class frontend developer. Generate ONLY the raw file content requested.
-No markdown fences, no explanations, just the pure code content.
-Make it beautiful, modern, and fully functional.`;
+  const sys = `You are a world-class frontend developer building a complete, fully functional HTML app.
+Output ONLY raw HTML code — no markdown fences, no explanation, just the pure HTML.`;
 
-  const prompt = `Generate the ${fileName} file for this app:
+  const prompt = `Generate a COMPLETE index.html for this app:
 
 App Name: ${appName}
-Description: ${appDescription}
+Type: ${appType}
+Description: ${description}
 Features: ${features.join(', ')}
-This file's role: ${fileRole}
-${context}
 
-Rules:
-- Write COMPLETE, WORKING code — no placeholders, no TODOs
-- For HTML: full document structure, link style.css and script.js
-- For CSS: beautiful dark theme, smooth animations, responsive design, professional look
-- For JS: complete working logic, real-time if needed (clocks use setInterval), all features implemented
-- For analog clock: use HTML5 Canvas API, draw hour/minute/second hands with proper math
-- Quality must be world-class — something you'd be proud to show
+CRITICAL REQUIREMENTS:
+1. Full HTML5 document with <link rel="stylesheet" href="style.css"> and <script src="script.js" defer></script>
+2. ALL sections/pages must exist as <div> elements — use id="" and class="" to identify each
+3. Navigation/multi-page: use id="page-home", id="page-game", id="page-settings" etc. — JS will show/hide them
+4. Every interactive element MUST have an id="" so JavaScript can attach event listeners
+   Examples: <button id="btn-start-game">, <button id="btn-submit">, <input id="input-name">
+5. ${isGame ? 'Include ALL game UI: score display, lives/health, game board/canvas, start/pause/restart buttons, win/lose overlays' : 'Include ALL UI sections for every feature listed'}
+6. Dark theme classes: use class="card", class="btn", class="nav", etc. — CSS will style these
+7. NO inline styles, NO inline onclick — CSS handles styling, JS handles events
+8. Complete, production-ready HTML — not a placeholder or skeleton
 
-Output ONLY the raw code for ${fileName}:`;
+Output ONLY the raw HTML:`;
 
-  return callAI(prompt, sys, 4000);
+  return callAI(prompt, sys, 6000);
 }
 
-// ─── Step 3: Build preview HTML (self-contained) ─────────────────────────────
+// ─── Step 3: Generate JS (knows the exact HTML structure) ────────────────────
+
+async function generateJS(
+  appName: string,
+  appType: string,
+  description: string,
+  features: string[],
+  htmlContent: string,
+): Promise<string> {
+  const isGame = appType.toLowerCase().includes('game');
+
+  const sys = `You are a world-class JavaScript developer. You write complete, working JavaScript.
+Output ONLY raw JavaScript code — no markdown fences, no <script> tags, no explanation.`;
+
+  const prompt = `Generate COMPLETE script.js for this app.
+
+App Name: ${appName}
+Description: ${description}
+Features: ${features.join(', ')}
+
+THE EXACT HTML YOU MUST WORK WITH:
+\`\`\`html
+${htmlContent.slice(0, 8000)}
+\`\`\`
+
+CRITICAL REQUIREMENTS — EVERY RULE IS MANDATORY:
+
+1. EVERY BUTTON/LINK MUST WORK:
+   - Find every element with an id="" in the HTML above
+   - Add document.getElementById('...').addEventListener('click', ...) for every button
+   - Use DOMContentLoaded: document.addEventListener('DOMContentLoaded', () => { ... all your code here ... })
+
+2. MULTI-PAGE NAVIGATION (use this exact pattern):
+   \`\`\`javascript
+   function showPage(pageId) {
+     document.querySelectorAll('[id^="page-"]').forEach(p => { p.style.display = 'none'; });
+     const page = document.getElementById(pageId);
+     if (page) page.style.display = 'block';
+   }
+   // Example: document.getElementById('btn-go-settings').addEventListener('click', () => showPage('page-settings'));
+   \`\`\`
+
+3. ${isGame ? `GAME MUST BE FULLY PLAYABLE:
+   - Complete game loop with start, play, win/lose, restart states
+   - Score/lives tracking with real-time DOM updates
+   - All game mechanics implemented (not stubs)
+   - Keyboard and/or click controls working
+   - requestAnimationFrame for smooth animations where needed` :
+   `APP MUST BE FULLY FUNCTIONAL:
+   - All form submissions process data
+   - All counters/timers actually run
+   - Data persists in localStorage where relevant
+   - All features listed are implemented and working`}
+
+4. STRICT DOM MATCHING — use the EXACT same IDs as in the HTML above. No new IDs.
+
+5. NO PLACEHOLDERS: No "// TODO", no empty functions, no "implement later" comments.
+
+Output ONLY the raw JavaScript (no <script> tags, no markdown):`;
+
+  return callAI(prompt, sys, 8000);
+}
+
+// ─── Step 4: Generate CSS (knows the exact HTML structure) ───────────────────
+
+async function generateCSS(
+  appName: string,
+  description: string,
+  htmlContent: string,
+): Promise<string> {
+  const sys = `You are a world-class CSS designer. You write beautiful, modern CSS.
+Output ONLY raw CSS — no markdown fences, no <style> tags, no explanation.`;
+
+  const prompt = `Generate beautiful style.css for this app.
+
+App Name: ${appName}
+Description: ${description}
+
+THE EXACT HTML YOU MUST STYLE (use the exact same class names):
+\`\`\`html
+${htmlContent.slice(0, 5000)}
+\`\`\`
+
+REQUIREMENTS:
+1. Dark theme: use #0a0a0f background, deep navy/purple gradients
+2. Glassmorphism cards: background: rgba(255,255,255,0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1)
+3. Beautiful buttons: gradient backgrounds, hover effects with transform/box-shadow, active press effect
+4. Smooth animations: CSS transitions on all interactive elements (0.2-0.3s ease)
+5. Fully responsive: mobile-first, works on all screen sizes
+6. Every class from the HTML above must be styled — no unstyled elements
+7. pages hidden by default: [id^="page-"] { display: none; } — JS shows them
+
+Output ONLY the raw CSS:`;
+
+  return callAI(prompt, sys, 5000);
+}
+
+// ─── Step 5: Assemble preview HTML ───────────────────────────────────────────
 
 function buildPreviewHtml(files: Record<string, string>, appName: string): string {
   let html = files['index.html'] || '';
@@ -169,36 +254,22 @@ function buildPreviewHtml(files: Record<string, string>, appName: string): strin
     html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${appName}</title></head><body></body></html>`;
   }
 
-  // Inject CSS inline
   if (css) {
     const styleTag = `<style>\n${css}\n</style>`;
-    if (html.includes('</head>')) {
-      html = html.replace('</head>', `${styleTag}\n</head>`);
-    } else {
-      html = styleTag + html;
-    }
+    html = html.includes('</head>') ? html.replace('</head>', `${styleTag}\n</head>`) : styleTag + html;
   }
-
-  // Remove external CSS link (since we inlined it)
   html = html.replace(/<link[^>]+style\.css[^>]*>/gi, '');
 
-  // Inject JS inline
   if (js) {
     const scriptTag = `<script>\n${js}\n</script>`;
-    if (html.includes('</body>')) {
-      html = html.replace('</body>', `${scriptTag}\n</body>`);
-    } else {
-      html = html + scriptTag;
-    }
+    html = html.includes('</body>') ? html.replace('</body>', `${scriptTag}\n</body>`) : html + scriptTag;
   }
-
-  // Remove external JS script tag (since we inlined it)
   html = html.replace(/<script[^>]+src=["']script\.js["'][^>]*><\/script>/gi, '');
 
   return html;
 }
 
-// ─── Main: buildApp() — called from server.ts ─────────────────────────────────
+// ─── Main: buildApp() ─────────────────────────────────────────────────────────
 
 export async function buildApp(
   userPrompt: string,
@@ -211,65 +282,41 @@ export async function buildApp(
   };
 
   try {
-    report('Analyzing', 1, 6, 'Understanding your requirements...');
+    report('Analyzing', 1, 5, 'Understanding your requirements...');
     const analysis = await analyzeRequirements(userPrompt);
     console.log('[AppEngine] Analysis:', analysis);
 
-    report('Planning', 2, 6, `Building ${analysis.appName} — ${analysis.appType}`);
+    report('Generating', 2, 5, `Building ${analysis.appName} HTML structure...`);
+    const htmlContent = await generateHTML(analysis.appName, analysis.appType, analysis.description, analysis.features);
+    const generatedFiles: Record<string, string> = { 'index.html': htmlContent };
+    onFileGenerated?.('index.html', htmlContent);
 
-    const generatedFiles: Record<string, string> = {};
+    // JS generated AFTER HTML — knows exact IDs and element structure
+    report('Generating', 3, 5, 'Writing JavaScript — wiring all buttons & logic...');
+    const jsContent = await generateJS(analysis.appName, analysis.appType, analysis.description, analysis.features, htmlContent);
+    generatedFiles['script.js'] = jsContent;
+    onFileGenerated?.('script.js', jsContent);
 
-    // Generate CSS first (no dependencies)
-    report('Generating', 3, 6, 'Writing style.css — design & animations...');
-    generatedFiles['style.css'] = await generateFile(
-      'style.css',
-      'All visual styling: layout, colors, animations, responsive design. Dark theme. Professional look.',
-      analysis.appName,
-      analysis.description,
-      analysis.features
-    );
-    onFileGenerated?.('style.css', generatedFiles['style.css']);
+    // CSS generated AFTER HTML — knows exact class names
+    report('Generating', 4, 5, 'Writing CSS — styling & animations...');
+    const cssContent = await generateCSS(analysis.appName, analysis.description, htmlContent);
+    generatedFiles['style.css'] = cssContent;
+    onFileGenerated?.('style.css', cssContent);
 
-    // Generate JS (no HTML dependency needed)
-    report('Generating', 4, 6, 'Writing script.js — application logic...');
-    generatedFiles['script.js'] = await generateFile(
-      'script.js',
-      'Complete application logic. All functionality implemented and working.',
-      analysis.appName,
-      analysis.description,
-      analysis.features,
-      { 'style.css': generatedFiles['style.css'] }
-    );
-    onFileGenerated?.('script.js', generatedFiles['script.js']);
-
-    // Generate HTML last (references CSS and JS)
-    report('Generating', 5, 6, 'Writing index.html — structure & markup...');
-    generatedFiles['index.html'] = await generateFile(
-      'index.html',
-      'Complete HTML5 document. Links to style.css and script.js. All DOM elements needed by JS.',
-      analysis.appName,
-      analysis.description,
-      analysis.features,
-      { 'style.css': generatedFiles['style.css'], 'script.js': generatedFiles['script.js'] }
-    );
-    onFileGenerated?.('index.html', generatedFiles['index.html']);
-
-    report('Assembling', 6, 6, 'Building live preview...');
+    report('Assembling', 5, 5, 'Building live preview...');
     const previewHtml = buildPreviewHtml(generatedFiles, analysis.appName);
-
-    report('Complete', 6, 6, `${analysis.appName} is ready!`);
 
     const fileList: AppFile[] = Object.entries(generatedFiles).map(([path, content]) => ({
       path,
       content,
-      description: path === 'index.html' ? 'HTML structure'
+      description: path === 'index.html' ? 'HTML structure & layout'
         : path === 'style.css' ? 'Styles & animations'
-        : 'Application logic',
+        : 'Application logic & interactions',
     }));
 
     return {
       success: true,
-      reply: `✅ ${analysis.appName} ban gayi! ${analysis.description}`,
+      reply: `✅ ${analysis.appName} ready! ${analysis.description}`,
       files: generatedFiles,
       fileList,
       previewHtml,

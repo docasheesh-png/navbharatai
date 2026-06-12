@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
+import { useSwipe } from './hooks/useSwipe';
 import { 
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
   Terminal, Activity, Cpu, Settings, X, Shield, ShieldCheck, Eye, EyeOff, Lock, Wallet, CreditCard,
@@ -160,6 +161,7 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('navbharat_sidebar_collapsed', isSidebarCollapsed.toString());
   }, [isSidebarCollapsed]);
+
 
   useEffect(() => {
     localStorage.setItem('navbharat_admin_v1', isAdmin.toString());
@@ -826,8 +828,24 @@ export default function App() {
   const [isDeployed, setIsDeployed] = useState(false);
   const [deployUrl, setDeployUrl] = useState('');
   // logs, setLogs → from useDevLogs() hook
-  const [generatedCode, setGeneratedCode] = useState<string>('<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>');
-  const [hasGeneratedCode, setHasGeneratedCode] = useState(false);
+  const [generatedCode, setGeneratedCode] = useState<string>(() => {
+    // 8.7 — restore last generated app for offline mode
+    try {
+      const saved = localStorage.getItem('navbharat_last_app');
+      if (saved && saved.length > 200) return saved;
+    } catch {}
+    return '<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>';
+  });
+  const [hasGeneratedCode, setHasGeneratedCode] = useState<boolean>(() => {
+    try { return !!localStorage.getItem('navbharat_last_app'); } catch { return false; }
+  });
+
+  // 8.7 — persist last generated app for offline access
+  useEffect(() => {
+    if (hasGeneratedCode && generatedCode && generatedCode.length > 200) {
+      try { localStorage.setItem('navbharat_last_app', generatedCode); } catch {}
+    }
+  }, [generatedCode, hasGeneratedCode]);
 
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const saved = localStorage.getItem('navbharat_keys');
@@ -1069,8 +1087,25 @@ export default function App() {
       setIsAppBuilt(false);
     }
   }, [activeView, toggleTab, setMessages, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt]);
-   const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
+  const mainContentRef = useRef<HTMLDivElement>(null);
+
+  // 8.5 — touch swipe to switch tabs (left = next tab, right = previous tab)
+  useSwipe(mainContentRef, {
+    onSwipeLeft: useCallback(() => {
+      if (effectiveDeviceMode === 'desktop') return;
+      const allTabs: ViewType[] = ['home', ...openTabs.filter(t => t !== 'home')];
+      const idx = allTabs.indexOf(activeView);
+      if (idx < allTabs.length - 1) setActiveView(allTabs[idx + 1]);
+    }, [activeView, openTabs, effectiveDeviceMode]),
+    onSwipeRight: useCallback(() => {
+      if (effectiveDeviceMode === 'desktop') return;
+      const allTabs: ViewType[] = ['home', ...openTabs.filter(t => t !== 'home')];
+      const idx = allTabs.indexOf(activeView);
+      if (idx > 0) setActiveView(allTabs[idx - 1]);
+    }, [activeView, openTabs, effectiveDeviceMode]),
+  });
 
   useEffect(() => {
     localStorage.setItem('navbharat_keys', JSON.stringify(keys));
@@ -3734,8 +3769,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
             </div>
           </div>
         }>
-        <div className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
-          ['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem)] supports-[height:100dvh]:h-[calc(100dvh-3.5rem)] max-h-[calc(100vh-3.5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem)]" : "overflow-y-auto overflow-x-hidden custom-scrollbar"
+        <div ref={mainContentRef} className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
+          ['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem)] supports-[height:100dvh]:h-[calc(100dvh-3.5rem)] max-h-[calc(100vh-3.5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem)]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
+          // 8.1 — space for bottom nav on mobile
+          effectiveDeviceMode !== 'desktop' && !['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "pb-16" : ""
         )}>
           {activeView === 'home' && (
              <HomeView 
@@ -7558,6 +7595,38 @@ ${pending.map(p => `  - ${p}`).join('\n')}
       </AnimatePresence>
 
 
+      {/* 8.1 — Mobile bottom navigation bar (hidden on desktop) */}
+      {effectiveDeviceMode !== 'desktop' && (
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-[150] bg-[#0d1117]/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-around px-2 h-14"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+        >
+          {[
+            { id: 'home' as ViewType,      icon: menuItems.find(m => m.id === 'home')?.icon      ?? Bot,         label: 'Home' },
+            { id: 'nbi_chat' as ViewType,  icon: menuItems.find(m => m.id === 'nbi_chat')?.icon  ?? MessageSquare, label: 'AI' },
+            { id: 'preview' as ViewType,   icon: menuItems.find(m => m.id === 'preview')?.icon   ?? Monitor,     label: 'Preview' },
+            { id: 'files' as ViewType,     icon: menuItems.find(m => m.id === 'files')?.icon     ?? FolderOpen,  label: 'Files' },
+            { id: 'settings' as ViewType,  icon: menuItems.find(m => m.id === 'settings')?.icon  ?? Settings,    label: 'More' },
+          ].map(({ id, icon: Icon, label }) => {
+            const isActive = activeView === id;
+            const isDisabled = (id === 'preview' || id === 'files') && !hasGeneratedCode;
+            return (
+              <button
+                key={id}
+                disabled={isDisabled}
+                onClick={() => { if (!isDisabled) toggleTab(id); }}
+                className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-all active:scale-90 ${
+                  isActive ? 'text-indigo-400' : isDisabled ? 'text-white/20' : 'text-[#484f58]'
+                }`}
+              >
+                <Icon className={`w-5 h-5 ${isActive ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />
+                <span className={`text-[9px] font-black uppercase tracking-widest leading-none ${isActive ? 'text-indigo-400' : ''}`}>{label}</span>
+                {isActive && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}
+              </button>
+            );
+          })}
+        </nav>
+      )}
+
       <style>{`
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
@@ -7570,6 +7639,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           50% { transform: translateY(0); animation-timing-function: cubic-bezier(0, 0, 0.2, 1); }
         }
         .animate-bounce-slow { animation: bounce-slow 2s infinite; }
+        /* 8.1 — bottom nav safe-area padding on mobile */
+        @supports (padding-bottom: env(safe-area-inset-bottom)) {
+          body { padding-bottom: env(safe-area-inset-bottom); }
+        }
       `}</style>
       </div>
   );

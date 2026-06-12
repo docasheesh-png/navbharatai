@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import MonacoEditor, { loader } from '@monaco-editor/react';
 import { cn } from '../../lib/utils';
 import { 
@@ -25,20 +25,22 @@ interface EditorProps {
   onDebug?: () => void;
 }
 
-export const Editor: React.FC<EditorProps> = React.memo(({ 
-  content, 
-  language, 
+export const Editor: React.FC<EditorProps> = React.memo(({
+  content,
+  language,
   fileName,
   openTabs,
   activeTab,
-  onChange, 
+  onChange,
   onTabChange,
   onTabClose,
   onMount,
-  onRun, 
-  onDebug 
+  onRun,
+  onDebug
 }) => {
   const editorRef = useRef<any>(null);
+  // 8.2 — lightweight textarea fallback on mobile to avoid Monaco memory issues
+  const [isMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
 
   useEffect(() => {
     return () => {
@@ -133,8 +135,19 @@ export const Editor: React.FC<EditorProps> = React.memo(({
         </div>
       </div>
 
-      {/* Monaco Editor */}
+      {/* Editor — Monaco on desktop, textarea on mobile */}
       <div className="flex-1 overflow-hidden relative">
+        {isMobile ? (
+          <textarea
+            value={content}
+            onChange={(e) => onChange(e.target.value)}
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="none"
+            className="w-full h-full bg-[#1e1e1e] text-[#d4d4d4] font-mono text-[13px] leading-relaxed p-4 resize-none outline-none border-none"
+            style={{ fontFamily: "'Courier New', monospace", caretColor: '#569cd6' }}
+          />
+        ) : (
         <MonacoEditor
           height="100%"
           path={fileName}
@@ -164,6 +177,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
             smoothScrolling: true,
           }}
         />
+        )}
       </div>
 
       {/* Mobile Input Helper Toolbar - Hidden on desktop */}

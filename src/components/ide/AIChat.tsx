@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import axios from 'axios';
 import { AgentProgress, BuildStep } from './AgentProgress';
+import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 
 import { ThemeMode } from '../../lib/theme';
 import { useBuild } from './BuildContext';
@@ -289,6 +290,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   const { buildSteps } = useBuild();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const kbHeight = useKeyboardHeight();
   const [attachments, setAttachments] = useState<File[]>([]);
 
   useEffect(() => {
@@ -931,7 +933,10 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
         )}
       </div>
 
-      <div className="p-4 border-t border-white/5 bg-[var(--theme-card)] backdrop-blur-xl select-none shadow-[0_-12px_40px_rgba(0,0,0,0.5)] pb-6 md:pb-4">
+      <div
+        className="p-4 border-t border-white/5 bg-[var(--theme-card)] backdrop-blur-xl select-none shadow-[0_-12px_40px_rgba(0,0,0,0.5)] pb-6 md:pb-4"
+        style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : undefined }}
+      >
         <div className="max-w-4xl mx-auto space-y-3">
             <div className="relative flex items-center bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl shadow-inner focus-within:border-indigo-500 transition-all">
                   {(() => {

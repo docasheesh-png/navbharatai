@@ -19,7 +19,8 @@ interface PreviewPanelProps {
 }
 
 export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, generatedCode, previewHistory = [], onRestoreHistory, onHtmlChange }) => {
-  const [device, setDevice] = useState<'laptop' | 'mobile' | 'full'>('laptop');
+  const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
+  const [device, setDevice] = useState<'laptop' | 'mobile' | 'full'>(isMobileScreen ? 'full' : 'laptop');
   const [visualMode, setVisualMode] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [url, setUrl] = useState('preview://navbharat.app/');
@@ -202,6 +203,22 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           className="p-2 hover:bg-white/5 rounded-full text-[#484f58] hover:text-white ml-2 disabled:opacity-30 transition-colors"
         >
           <ExternalLink className="w-4 h-4" />
+        </button>
+
+        {/* 8.3 — Native fullscreen on mobile */}
+        <button
+          onClick={() => {
+            const el = document.documentElement;
+            if (!document.fullscreenElement) {
+              el.requestFullscreen?.().catch(() => {});
+            } else {
+              document.exitFullscreen?.().catch(() => {});
+            }
+          }}
+          title="Toggle fullscreen"
+          className="p-2 hover:bg-white/5 rounded-full text-[#484f58] hover:text-white transition-colors lg:hidden"
+        >
+          <Maximize2 className="w-4 h-4" />
         </button>
 
         {/* Preview History */}

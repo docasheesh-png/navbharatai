@@ -10,6 +10,13 @@ if (import.meta.env.PROD) {
   console.info = () => {};
 }
 
+// 8.6 PWA — register service worker
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BuildProvider>

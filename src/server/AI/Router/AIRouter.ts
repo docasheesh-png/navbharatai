@@ -38,6 +38,30 @@ export class AIRouter {
     return JSON.parse(response.content);
   }
 
+  async routeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void): Promise<void> {
+    for (const pass of [1, 2]) {
+      for (const provider of this.providers) {
+        if (pass === 1 && isOnCooldown(provider.name)) continue;
+        const healthy = await provider.healthCheck().catch(() => false);
+        if (!healthy) continue;
+        try {
+          if (provider.executeStream) {
+            await provider.executeStream(prompt, systemPrompt, onChunk);
+          } else {
+            const resp = await provider.execute(prompt, undefined, undefined, systemPrompt);
+            onChunk(resp.content);
+          }
+          return;
+        } catch (err: any) {
+          const secs = cooldownSeconds(err);
+          setCooldown(provider.name, secs);
+          console.error(`[ROUTER_STREAM] ${provider.name} failed, cooldown ${secs}s:`, err?.message?.slice(0, 80));
+        }
+      }
+    }
+    onChunk('Abhi AI service thodi der ke liye busy hai. Kripya 1-2 minute mein dobara try karein. 🙏');
+  }
+
   private async execute(prompt: string, schema?: any, systemPrompt?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
     const targetSchema = schema?.type === 'OBJECT' ? schema : undefined;
     const errors: string[] = [];

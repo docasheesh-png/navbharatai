@@ -3869,14 +3869,24 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     console.log(`[CHAT] tier=${tier} mode=${mode} intent=${intent} hasCanvas=${hasCanvas} sysprompt=${hasCanvas ? 'EDIT' : isBuildIntent ? 'BUILD' : 'CHAT'}`);
 
     try {
+      if (req.body.stream === true) {
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Transfer-Encoding', 'chunked');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('X-Accel-Buffering', 'no');
+        await aiRouter.routeStream(contextualMessage, history, tier, systemPrompt, (chunk: string) => {
+          res.write(chunk);
+        });
+        res.end();
+      } else {
         const aiResponse = await aiRouter.route(contextualMessage, history, tier, undefined, systemPrompt);
         res.json({ reply: aiResponse });
+      }
     } catch(e: any) {
-        console.error(`Error for tier ${tier}:`, e.message);
-        res.status(500).json({
-          reply: "Backend AI inference failed",
-          error: e.message
-        });
+      console.error(`Error for tier ${tier}:`, e.message);
+      if (!res.headersSent) {
+        res.status(500).json({ reply: 'Backend AI inference failed', error: e.message });
+      }
     }
   };
 

@@ -39,6 +39,24 @@ export class AnthropicProvider implements AIProvider {
     };
   }
 
+  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void): Promise<string> {
+    const params: any = {
+      model: 'claude-3-5-sonnet-20240620',
+      max_tokens: 8000,
+      messages: [{ role: 'user', content: prompt }],
+    };
+    if (systemPrompt) params.system = systemPrompt;
+    const stream = this.client.messages.stream(params);
+    let full = '';
+    for await (const event of stream) {
+      if ((event as any).type === 'content_block_delta' && (event as any).delta?.type === 'text_delta') {
+        const text = (event as any).delta.text || '';
+        if (text) { full += text; onChunk(text); }
+      }
+    }
+    return full;
+  }
+
   async healthCheck(): Promise<boolean> {
     return !!process.env.ANTHROPIC_API_KEY;
   }

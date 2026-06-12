@@ -18,4 +18,5 @@ export interface AIProvider {
   priority: number;
   execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string): Promise<AIProviderResponse>;
   healthCheck(): Promise<boolean>;
+  executeStream?(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void): Promise<string>;
 }

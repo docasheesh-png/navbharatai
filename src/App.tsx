@@ -2146,7 +2146,9 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
       
       setIntentForTab(detectedIntent);
 
-      const performBackendCall = async () => {
+      let streamingMsgId: string | null = null;
+
+      const performStreamingBackendCall = async (): Promise<{ reply: string; model?: string }> => {
         addLog('Falling back to background AI processing...', 'info');
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (keys.gemini && !invalidKeys.has(keys.gemini)) headers['x-gemini-key'] = keys.gemini;
@@ -2172,56 +2174,76 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
           endpoint = '/api/chat/vip';
         }
 
-        try {
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              message: messageToSend,
-              preferredModel: isNbi ? 'gemini' : selectedModel,
-              history: historyForAPI,
-              agent: currentAgent,
-              mode: currentMode,
-              intent: detectedIntent,
-              files: files,
-              // 3 — canvas memory: send current app so AI can edit it
-              currentApp: hasGeneratedCode && generatedCode && generatedCode.length > 200
-                ? generatedCode.slice(0, 5000)
-                : undefined,
-            }),
-            signal: AbortSignal.timeout(60000)
-          });
-          
-          if (!response.ok) {
-             const errData = await response.json().catch(() => ({}));
-             if (response.status === 401) {
-               setUser(null);
-               setShowAuth(true);
-               throw new Error('Session expired. Please login again.');
-             }
-             if (response.status === 429) {
-               throw new Error('Too many requests. Please wait a moment before sending again.');
-             }
-             if (response.status === 402 || errData.requirePass) {
-               setShowVishwakarmaUnlockModal(true);
-             }
-             throw new Error(errData.error || `HTTP Error ${response.status}`);
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            message: messageToSend,
+            preferredModel: isNbi ? 'gemini' : selectedModel,
+            history: historyForAPI,
+            agent: currentAgent,
+            mode: currentMode,
+            intent: detectedIntent,
+            files: files,
+            // 3 — canvas memory: send current app so AI can edit it
+            currentApp: hasGeneratedCode && generatedCode && generatedCode.length > 200
+              ? generatedCode.slice(0, 5000)
+              : undefined,
+            stream: true,
+          }),
+          signal: AbortSignal.timeout(90000),
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          if (response.status === 401) {
+            setUser(null);
+            setShowAuth(true);
+            throw new Error('Session expired. Please login again.');
           }
-          
-          return await response.json();
-        } catch (error: any) {
-          console.error("AI REQUEST FAILURE", error);
-          
-          let errMsg = "AI request failed.";
-          if (error.name === 'TimeoutError') errMsg = "AI response timeout. Server or AI may be overloaded.";
-          else if (error.message.includes('Network') || error.message.includes('fetch')) errMsg = "Network connection failed.";
-          else if (error.message.includes('HTTP Error 500')) errMsg = "Backend runtime failure detected.";
-          else if (error.message.includes('HTTP Error 403')) errMsg = "AI permission/authentication failure detected.";
-          else errMsg = error.message || "Application runtime error detected.";
-          
-          console.error("AI REQUEST MSG", errMsg);
-          throw new Error(errMsg);
+          if (response.status === 429) {
+            throw new Error('Too many requests. Please wait a moment before sending again.');
+          }
+          if (response.status === 402 || (errData as any).requirePass) {
+            setShowVishwakarmaUnlockModal(true);
+          }
+          throw new Error((errData as any).error || `HTTP Error ${response.status}`);
         }
+
+        const contentType = response.headers.get('Content-Type') || '';
+        if (contentType.includes('text/plain') && response.body) {
+          // True streaming path
+          streamingMsgId = (Date.now() + 1).toString();
+          setMessagesForTab(prev => [...prev, {
+            id: streamingMsgId!,
+            text: '▋',
+            sender: 'ai' as const,
+            timestamp: new Date(),
+          }]);
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let accumulated = '';
+          let lastUpdate = 0;
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            accumulated += decoder.decode(value, { stream: true });
+            const now = Date.now();
+            if (now - lastUpdate > 40) {
+              const snap = accumulated;
+              setMessagesForTab(prev => prev.map(m => m.id === streamingMsgId ? { ...m, text: snap + '▋' } : m));
+              lastUpdate = now;
+            }
+          }
+          // Final update — remove cursor
+          setMessagesForTab(prev => prev.map(m => m.id === streamingMsgId ? { ...m, text: accumulated } : m));
+          return { reply: accumulated, model: 'streaming' };
+        }
+
+        // Fallback: JSON response
+        return await response.json();
       };
 
       // Call Gemini locally if we are on NBI or preferred model is gemini, etc.
@@ -2238,27 +2260,35 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
           data = await runFrontendPipeline(messageToSend, isRealTime || detectedIntent === 'security', historyForAPI, detectedIntent, potentialTarget, currentAgent, currentMode);
         } catch (frontendErr: any) {
           console.warn('Frontend Gemini failed, trying backend fallback...', frontendErr.message);
-          data = await performBackendCall();
+          data = await performStreamingBackendCall();
           usedBackend = true;
         }
       } else {
-        data = await performBackendCall();
+        data = await performStreamingBackendCall();
         usedBackend = true;
       }
       
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: data.reply || 'No response received.',
-        sender: 'ai',
-        timestamp: new Date(),
-        modelUsed: data.model
-      };
-
-      setMessagesForTab((prev) => {
-        const next = [...prev, aiMessage];
-        return next;
-      });
-      addLog(`AI Response received via ${data.model || 'unknown'}`, 'success');
+      // Only add aiMessage if streaming didn't already add it
+      if (!streamingMsgId) {
+        const aiMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: data.reply || 'No response received.',
+          sender: 'ai',
+          timestamp: new Date(),
+          modelUsed: data.model
+        };
+        setMessagesForTab((prev) => {
+          const next = [...prev, aiMessage];
+          return next;
+        });
+      } else {
+        // Update modelUsed on the streaming message
+        const sid = streamingMsgId;
+        if (data.model && data.model !== 'streaming' && sid) {
+          setMessagesForTab(prev => prev.map(m => m.id === sid ? { ...m, modelUsed: data.model } : m));
+        }
+      }
+      addLog(`AI Response received via ${data.model || 'streaming'}`, 'success');
 
       // Sync CSS/HTML/JS if build mode
       if (currentMode === 'build' && data.reply) {

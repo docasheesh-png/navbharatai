@@ -11,9 +11,12 @@ const DEFAULT_MODULES: Record<string, boolean> = {
 };
 
 export function useSettings() {
-  const [theme, setThemeState] = useState<ThemeMode>(
-    () => (localStorage.getItem('theme') as ThemeMode) || 'dark'
-  );
+  const [theme, setThemeState] = useState<ThemeMode>(() => {
+    const saved = localStorage.getItem('theme') as ThemeMode | null;
+    if (saved) return saved;
+    // 10.7 — auto-detect system theme on first visit
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
   const [hinglishMode, setHinglishModeState] = useState<boolean>(
     () => localStorage.getItem('navbharat_hinglish') === 'true'
   );
@@ -37,6 +40,19 @@ export function useSettings() {
   useEffect(() => {
     localStorage.setItem('navbharat_modules', JSON.stringify(enabledModules));
   }, [enabledModules]);
+
+  // 10.7 — follow system theme changes (only if user hasn't manually set one)
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!mq) return;
+    const handler = (e: MediaQueryListEvent) => {
+      if (!localStorage.getItem('theme')) {
+        setThemeState(e.matches ? 'dark' : 'light');
+      }
+    };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   return {
     theme, setTheme,

@@ -3827,64 +3827,93 @@ OUTPUT FORMAT (MANDATORY):
 [complete updated HTML — every existing line preserved + your changes]
 \`\`\``;
 
-  const SYSTEM_PROMPT_BUILD = `You are NavBharatAI — India's most powerful AI App Builder.
+  // Dynamic build prompt — injects template hints based on detected app type
+  function buildDynamicPrompt(message: string): string {
+    const m = message.toLowerCase();
+    const isGame      = /\b(game|play|cricket|chess|snake|tetris|puzzle|quiz|arcade|ludo|card game|flappy|pacman|shooter|platformer)\b/.test(m);
+    const isCanvasGame = /\b(snake|tetris|pacman|flappy|shooter|arcade|cricket|football|space|asteroid|runner)\b/.test(m);
+    const isDashboard = /\b(dashboard|analytics|chart|graph|report|admin|stats|metric|monitor)\b/.test(m);
+    const isSocial    = /\b(social|feed|post|like|comment|share|follow|profile|tweet|community)\b/.test(m);
+
+    const cdnTags = [
+      '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">',
+      '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">',
+      ...(isDashboard ? ['<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>'] : []),
+    ].join('\n  ');
+
+    let templateHint = '';
+    if (isCanvasGame) {
+      templateHint = `GAME (Canvas) RULES:
+• <canvas id="game-canvas"> as main surface + HUD strip + overlay divs for start/pause/gameover
+• requestAnimationFrame game loop: function gameLoop(ts) { update(ts); draw(ctx); requestAnimationFrame(gameLoop); }
+• Game state machine: const STATE = {IDLE,PLAYING,PAUSED,GAMEOVER}; let state = STATE.IDLE;
+• Keyboard: document.addEventListener('keydown', handleKey) — arrow keys / WASD / space
+• All game objects: { x, y, w, h, vx, vy } — AABB collision detection`;
+    } else if (isGame) {
+      templateHint = `GAME (Logic/Board) RULES:
+• Board as CSS grid, every cell has data-row + data-col attributes
+• Game state object: let gs = { board:[], currentPlayer:1, scores:{}, moveCount:0 }
+• Win check after every move, AI opponent for single-player
+• Event delegation: board.addEventListener('click', e => e.target.closest('[data-row]'))
+• Animate moves: .animate-move class with CSS @keyframes`;
+    } else if (isDashboard) {
+      templateHint = `DASHBOARD RULES:
+• Sidebar nav + main content area with multiple sections
+• Chart.js loaded via CDN — use: new Chart(ctx, { type:'bar', data:{...}, options:{ responsive:true, plugins:{legend:{labels:{color:'#fff'}}}, scales:{x:{ticks:{color:'#aaa'}},y:{ticks:{color:'#aaa'}}} } })
+• Sample data tables, stat cards, filter controls
+• Section switching via showSection(id) function`;
+    } else if (isSocial) {
+      templateHint = `SOCIAL APP RULES:
+• Feed with post cards (like/comment/share buttons)
+• renderPosts(posts) function — builds cards from data array
+• Event delegation on feed container for like/comment
+• localStorage to persist posts and user data`;
+    } else {
+      templateHint = `APP RULES:
+• Input validation before processing
+• Result display area, copy to clipboard button
+• localStorage for persistence
+• Step-by-step flow if multi-stage`;
+    }
+
+    return `You are NavBharatAI — India's most powerful AI App Builder.
 ${LANGUAGE_RULE}
 
 Build a COMPLETE, FULLY FUNCTIONAL app — NOT just a home page.
 
-═══ EVERY RULE IS ABSOLUTE — NO EXCEPTIONS ═══
+INCLUDE THESE CDN TAGS IN <head> (copy verbatim):
+  ${cdnTags}
 
-RULE 1 — EVERY BUTTON MUST WORK:
-• Every <button> MUST have addEventListener('click', ...) or onclick="..."
-• href="#" is BANNED — it does nothing
-• "Start Game" button MUST start the game
-• "Next Page" / "Go to Settings" MUST navigate to that section
-• Form "Submit" MUST process the data
+${templateHint}
 
-RULE 2 — MULTI-PAGE NAVIGATION (use this exact pattern):
-\`\`\`javascript
-function showPage(id) {
-  document.querySelectorAll('[id^="page-"]').forEach(p => p.style.display = 'none');
-  document.getElementById(id).style.display = 'block';
-}
-// Wire every navigation button:
-document.getElementById('btn-play').addEventListener('click', () => showPage('page-game'));
-document.getElementById('btn-back').addEventListener('click', () => showPage('page-home'));
-\`\`\`
-Each "page" is a <div id="page-something"> hidden by default, shown by JS.
+═══ UNIVERSAL RULES — ALL MANDATORY ═══
 
-RULE 3 — GAMES MUST BE FULLY PLAYABLE:
-• Complete game loop: start → play → win/lose → restart
-• Score and lives update in real-time on screen
-• All game mechanics working (movement, collision, scoring, etc.)
-• Keyboard controls (arrow keys / WASD) AND click controls
-• requestAnimationFrame for smooth game loop
+1. EVERY BUTTON MUST WORK:
+   Every <button> has addEventListener('click',...) — NO exceptions
+   href="#" is BANNED. Every click navigates or triggers real action.
 
-RULE 4 — APPS MUST BE COMPLETE:
-• Forms submit and display results
-• Counters/timers actually run (setInterval)
-• To-do/list apps: add, complete, delete all work
-• Calculators calculate; clocks tick; quizzes score
-• localStorage for data that should persist
+2. MULTI-PAGE NAVIGATION:
+   function showPage(id) {
+     document.querySelectorAll('[id^="page-"]').forEach(p => p.style.display='none');
+     document.getElementById(id).style.display='block';
+   }
+   Every page is <div id="page-*"> — JS shows/hides them.
 
-RULE 5 — NO PLACEHOLDERS EVER:
-• No "// TODO: add logic here"
-• No empty onclick handlers
-• No "Coming soon" sections for features you listed
-• No skeleton/wireframe output — 100% complete product
+3. NO PLACEHOLDERS:
+   No TODO, no empty functions, no "coming soon" — 100% complete.
 
-TECHNICAL:
-• Single standalone HTML file — all CSS and JS inline
-• Dark UI: #0a0a0f background, glassmorphism cards, gradient buttons
-• Fully responsive (mobile + desktop)
-• Wrap all JS in DOMContentLoaded listener
+4. TECHNICAL:
+   Single HTML file — all CSS and JS inline.
+   :root { --bg:#0a0a0f; --accent:#6366f1; --accent-rgb:99,102,241; font-family:'Inter',sans-serif; }
+   DOMContentLoaded wraps all JS. Responsive (mobile + desktop).
+   Use Font Awesome icons: <i class="fa-solid fa-play"></i>
 
-OUTPUT FORMAT (MANDATORY):
+OUTPUT FORMAT:
 One line: what you built.
 \`\`\`html
-[complete, 100% functional HTML — the full working app]
-\`\`\`
-Nothing after the code block.`;
+[complete, 100% working HTML]
+\`\`\``;
+  }
 
   const SYSTEM_PROMPT_CHAT = `You are NavBharatAI — India's best AI assistant and app builder (by NavBharat team).
 ${LANGUAGE_RULE}
@@ -3901,10 +3930,9 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // Pick system prompt based on context
     let systemPrompt: string;
     if (hasCanvas) {
-      // App is on canvas — ALWAYS edit mode, regardless of message wording
       systemPrompt = SYSTEM_PROMPT_EDIT;
     } else if (isBuildIntent) {
-      systemPrompt = SYSTEM_PROMPT_BUILD;
+      systemPrompt = buildDynamicPrompt(message); // Phase 9: template-aware dynamic prompt
     } else {
       systemPrompt = SYSTEM_PROMPT_CHAT;
     }

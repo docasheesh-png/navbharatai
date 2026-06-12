@@ -113,7 +113,6 @@ import { MessageContent } from './components/MessageContent';
 import { HomeView } from './components/home/HomeView';
 import { GitHubService } from './lib/githubService';
 import { trackEvent } from './lib/analytics';
-import { isEnabled } from './lib/featureFlags';
 // AgentMode → re-exported from ./types
 
 export default function App() {

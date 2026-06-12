@@ -10,6 +10,21 @@ if (import.meta.env.PROD) {
   console.info = () => {};
 }
 
+// Chunk load error recovery — new deployment invalidates old Vite chunks.
+// When a lazy import 404s, force a hard reload ONCE to pick up the new bundle.
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = String(e.reason?.message || e.reason || '');
+  if (msg.toLowerCase().includes('importing a module script failed') ||
+      msg.toLowerCase().includes('failed to fetch dynamically imported module') ||
+      msg.toLowerCase().includes('error loading chunk')) {
+    const RELOAD_KEY = 'navbharat_chunk_reload';
+    if (!sessionStorage.getItem(RELOAD_KEY)) {
+      sessionStorage.setItem(RELOAD_KEY, '1');
+      window.location.reload();
+    }
+  }
+});
+
 // 8.6 PWA — register service worker
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {

@@ -1,49 +1,77 @@
 import { AnthropicProvider } from './Router/providers/AnthropicProvider';
 import { GeminiProvider } from './Router/providers/GeminiProvider';
 import { VertexProvider } from './Router/providers/VertexProvider';
+import { GrokProvider } from './Router/providers/GrokProvider';
 import { AIRouter } from './Router/AIRouter';
-import { ModelHealthRegistry } from './HealthRegistry';
+
+// Priority order (lower number = tried first):
+// 1 = Vertex (fastest, cheapest via GCP)
+// 2 = Gemini (direct API, very reliable)
+// 3 = Grok  (xAI, OpenAI-compatible, great fallback)
+// 4 = Claude (Anthropic, highest quality, last resort / fallback)
 
 export class AIRouterManager {
     private static instanceFree: AIRouter | null = null;
     private static instancePro: AIRouter | null = null;
-    private static registryFree = new ModelHealthRegistry('free');
-    private static registryPro = new ModelHealthRegistry('pro');
 
     static getRouter(namespace: 'free' | 'pro'): AIRouter {
         if (namespace === 'pro') {
-            if (!this.instancePro) {
-                this.instancePro = this.createRouterInstance('pro');
-            }
+            if (!this.instancePro) this.instancePro = this.createRouter('pro');
             return this.instancePro;
         } else {
-            if (!this.instanceFree) {
-                this.instanceFree = this.createRouterInstance('free');
-            }
+            if (!this.instanceFree) this.instanceFree = this.createRouter('free');
             return this.instanceFree;
         }
     }
 
-    private static createRouterInstance(namespace: 'free' | 'pro'): AIRouter {
-        const router = new AIRouter();
-        console.log(`[DEBUG] Creating router for ${namespace}`);
+    // Invalidate cached instances (call after env var updates if ever needed)
+    static reset() {
+        this.instanceFree = null;
+        this.instancePro = null;
+    }
 
+    private static createRouter(namespace: 'free' | 'pro'): AIRouter {
+        const router = new AIRouter();
+        console.log(`[ROUTER_MGR] Building ${namespace} router with 4-provider chain`);
+
+        // 1. Vertex AI (priority 1)
         try {
-            const vertexProvider = new VertexProvider();
-            router.registerProvider(vertexProvider);
-            console.log(`[DEBUG] VertexProvider registered for ${namespace}`);
+            const vertex = new VertexProvider();
+            vertex.priority = 1;
+            router.registerProvider(vertex);
+            console.log(`[ROUTER_MGR] ✓ VertexProvider registered`);
         } catch (e) {
-            console.error(`[ERROR] Failed to register VertexProvider for ${namespace}:`, e);
+            console.warn(`[ROUTER_MGR] ✗ VertexProvider failed to init:`, e);
         }
 
-        // Both free and pro get Gemini as Vertex fallback
-        router.registerProvider(new GeminiProvider());
-        console.log(`[DEBUG] GeminiProvider registered for ${namespace}`);
+        // 2. Gemini Direct API (priority 2)
+        try {
+            const gemini = new GeminiProvider();
+            gemini.priority = 2;
+            router.registerProvider(gemini);
+            console.log(`[ROUTER_MGR] ✓ GeminiProvider registered`);
+        } catch (e) {
+            console.warn(`[ROUTER_MGR] ✗ GeminiProvider failed to init:`, e);
+        }
 
-        // Anthropic only for Pro — Free stays lightweight (Vertex+Gemini only)
-        if (namespace === 'pro') {
-            router.registerProvider(new AnthropicProvider());
-            console.log(`[DEBUG] AnthropicProvider registered for pro`);
+        // 3. Grok / xAI (priority 3) — add key GROK_API_KEY in Cloud Run env
+        try {
+            const grok = new GrokProvider();
+            grok.priority = 3;
+            router.registerProvider(grok);
+            console.log(`[ROUTER_MGR] ✓ GrokProvider registered (key present: ${!!(process.env.GROK_API_KEY || process.env.XAI_API_KEY)})`);
+        } catch (e) {
+            console.warn(`[ROUTER_MGR] ✗ GrokProvider failed to init:`, e);
+        }
+
+        // 4. Anthropic / Claude (priority 4) — best quality, used as final fallback
+        try {
+            const claude = new AnthropicProvider();
+            claude.priority = 4;
+            router.registerProvider(claude);
+            console.log(`[ROUTER_MGR] ✓ AnthropicProvider registered`);
+        } catch (e) {
+            console.warn(`[ROUTER_MGR] ✗ AnthropicProvider failed to init:`, e);
         }
 
         return router;

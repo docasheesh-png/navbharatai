@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 
 export class AnthropicProvider implements AIProvider {
   name: 'ANTHROPIC' = 'ANTHROPIC';
-  priority = 3; 
+  priority = 4;
 
   private client: Anthropic;
 

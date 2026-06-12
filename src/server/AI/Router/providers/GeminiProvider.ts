@@ -3,7 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 
 export class GeminiProvider implements AIProvider {
   name: 'GEMINI' = 'GEMINI';
-  priority = 2; // Second priority
+  priority = 2;
 
   async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string): Promise<AIProviderResponse> {
     console.log(`[GeminiProvider] Entry. Key present: ${!!process.env.GEMINI_API_KEY}, Length: ${process.env.GEMINI_API_KEY?.length}`);

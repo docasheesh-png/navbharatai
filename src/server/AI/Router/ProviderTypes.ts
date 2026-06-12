@@ -1,7 +1,7 @@
 export interface AIProviderResponse {
   content: string;
   latencyMs: number;
-  provider: 'VERTEX' | 'GEMINI' | 'ANTHROPIC';
+  provider: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK';
   model: string;
 }
 
@@ -14,7 +14,7 @@ export interface ProviderTelemetry {
 }
 
 export interface AIProvider {
-  name: 'VERTEX' | 'GEMINI' | 'ANTHROPIC';
+  name: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK';
   priority: number;
   execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string): Promise<AIProviderResponse>;
   healthCheck(): Promise<boolean>;

@@ -1080,6 +1080,12 @@ export default function App() {
       return;
     }
 
+    if ((view === 'nbi_pro_chat' || view === 'sda_chat') && !user) {
+      setShowAuth(true);
+      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI Pro' : 'Doctor AI'} is available for logged-in users only. Please sign in.`, 'warn');
+      return;
+    }
+
     if (!openTabs.includes(view)) {
       setOpenTabs(prev => [...prev, view]);
     }
@@ -3813,6 +3819,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
               {menuItems.filter(item => enabledModules[item.id] !== false).map((item) => {
                 const isPreview = item.id === 'preview';
                 const isFiles = item.id === 'files';
+                const isLoginGated = (item.id === 'nbi_pro_chat' || item.id === 'sda_chat') && !user;
                 const isDisabled = (isPreview || isFiles) && !hasGeneratedCode;
                 const isActive = activeView === item.id;
 
@@ -3820,40 +3827,35 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                   <button
                     key={item.id}
                     disabled={isDisabled}
-                    title={isDisabled ? "Generate an app to enable this" : ""}
+                    title={isLoginGated ? 'Sign in to access this feature' : isDisabled ? 'Generate an app to enable this' : ''}
                     onClick={() => {
-                      if (isPreview) {
-                          toggleTab('preview');
-                          return;
-                      }
-                      if (item.id === 'asc_chat') {
-                          toggleTab('asc_chat');
-                          return;
-                      }
+                      if (isPreview) { toggleTab('preview'); return; }
+                      if (item.id === 'asc_chat') { toggleTab('asc_chat'); return; }
                       if (item.id === 'history' && !user) {
-                          setShowAuth(true);
-                          addLog('Chat history requires an active session. Please login.', 'warn');
-                          return;
+                        setShowAuth(true);
+                        addLog('Chat history requires an active session. Please login.', 'warn');
+                        return;
                       }
                       toggleTab(item.id as ViewType);
                     }}
                     className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all group ${
-                      isActive 
-                      ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' 
-                      : isDisabled
-                        ? 'opacity-40 grayscale cursor-not-allowed'
-                        : 'text-[#8b949e] hover:bg-white/5 hover:text-white'
+                      isActive
+                        ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20'
+                        : isDisabled
+                          ? 'opacity-40 grayscale cursor-not-allowed'
+                          : 'text-[#8b949e] hover:bg-white/5 hover:text-white'
                     }`}
                   >
                     <item.icon className={`w-4.5 h-4.5 transition-transform group-hover:scale-110 ${
-                      isActive 
-                        ? 'text-white' 
-                        : isPreview && hasGeneratedCode 
-                          ? 'text-emerald-500' 
-                          : 'text-indigo-400'
+                      isActive ? 'text-white' : isPreview && hasGeneratedCode ? 'text-emerald-500' : 'text-indigo-400'
                     }`} />
                     <span className="text-sm font-bold tracking-tight">{item.label}</span>
-                    {isActive && (
+                    {isLoginGated && (
+                      <span className="ml-auto flex items-center gap-1 text-[9px] font-black uppercase tracking-widest bg-amber-500/15 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                        <Lock className="w-2.5 h-2.5" /> Login
+                      </span>
+                    )}
+                    {isActive && !isLoginGated && (
                       <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>
                     )}
                   </button>
@@ -3922,6 +3924,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                   {menuItems.filter(item => enabledModules[item.id] !== false).map((item) => {
                     const isPreview = item.id === 'preview';
                     const isFiles = item.id === 'files';
+                    const isLoginGated = (item.id === 'nbi_pro_chat' || item.id === 'sda_chat') && !user;
                     const isDisabled = (isPreview || isFiles) && !hasGeneratedCode;
                     const isActive = activeView === item.id;
 
@@ -3929,49 +3932,41 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                       <button
                         key={item.id}
                         disabled={isDisabled}
-                        title={isDisabled ? "Generate an app to enable this" : ""}
+                        title={isLoginGated ? 'Sign in to access this feature' : isDisabled ? 'Generate an app to enable this' : ''}
                         onClick={() => {
-                          if (isPreview) {
-                             toggleTab('preview');
-                             setIsMenuOpen(false);
-                             return;
-                          }
-                          if (item.id === 'asc_chat') {
-                             setShowVishwakarmaChooser(true);
-                             setIsMenuOpen(false);
-                             return;
-                          }
+                          if (isPreview) { toggleTab('preview'); setIsMenuOpen(false); return; }
+                          if (item.id === 'asc_chat') { setShowVishwakarmaChooser(true); setIsMenuOpen(false); return; }
                           if (item.id === 'history' && !user) {
-                             setShowAuth(true);
-                             setIsMenuOpen(false);
-                             addLog('Chat history requires an active session. Please login.', 'warn');
-                             return;
+                            setShowAuth(true); setIsMenuOpen(false);
+                            addLog('Chat history requires an active session. Please login.', 'warn');
+                            return;
                           }
                           toggleTab(item.id as ViewType);
                           setIsMenuOpen(false);
                         }}
                         className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all group ${
-                          isActive 
-                          ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' 
-                          : isDisabled
-                            ? 'opacity-40 grayscale cursor-not-allowed'
-                            : 'text-[#8b949e] hover:bg-white/5 hover:text-white'
+                          isActive
+                            ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20'
+                            : isDisabled
+                              ? 'opacity-40 grayscale cursor-not-allowed'
+                              : 'text-[#8b949e] hover:bg-white/5 hover:text-white'
                         }`}
                       >
                         <item.icon className={`w-4.5 h-4.5 transition-transform group-hover:scale-110 ${
-                          isActive 
-                            ? 'text-white' 
-                            : isPreview && hasGeneratedCode 
-                              ? 'text-emerald-500' 
-                              : 'text-indigo-400'
+                          isActive ? 'text-white' : isPreview && hasGeneratedCode ? 'text-emerald-500' : 'text-indigo-400'
                         }`} />
                         <span className="text-sm font-bold tracking-tight">{item.label}</span>
-                        {(item as any).status && !isActive && (
+                        {isLoginGated && (
+                          <span className="ml-auto flex items-center gap-1 text-[9px] font-black uppercase tracking-widest bg-amber-500/15 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                            <Lock className="w-2.5 h-2.5" /> Login
+                          </span>
+                        )}
+                        {!isLoginGated && (item as any).status && !isActive && (
                           <div className={`ml-auto px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest border ${(item as any).status === 'Beta' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
                             {(item as any).status}
                           </div>
                         )}
-                        {isActive && (
+                        {isActive && !isLoginGated && (
                           <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>
                         )}
                         {isPreview && hasGeneratedCode && !isActive && (

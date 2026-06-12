@@ -2185,14 +2185,18 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
           const response = await fetch(endpoint, {
             method: 'POST',
             headers,
-            body: JSON.stringify({ 
+            body: JSON.stringify({
               message: messageToSend,
               preferredModel: isNbi ? 'gemini' : selectedModel,
               history: historyForAPI,
               agent: currentAgent,
               mode: currentMode,
               intent: detectedIntent,
-              files: files
+              files: files,
+              // 3 — canvas memory: send current app so AI can edit it
+              currentApp: hasGeneratedCode && generatedCode && generatedCode.length > 200
+                ? generatedCode.slice(0, 5000)
+                : undefined,
             }),
             signal: AbortSignal.timeout(60000)
           });
@@ -2377,9 +2381,8 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
     setProInput('');
     setIsProLoading(true);
 
-    // ── Detect build mode ──
-    const buildKeywords = /\b(bana[ov]?|banado|build|create|make|generate|app|website|clock|watch|timer|todo|calculator|game|form|dashboard|landing page|portfolio)\b/i;
-    const isBuildMode = mode === 'build' || buildKeywords.test(messageToSend);
+    // ── Mode is the single source of truth — no keyword override ──
+    const isBuildMode = mode === 'build';
 
     if (isBuildMode) {
       // ── SSE Streaming Build via /api/pro-build ──
@@ -2392,10 +2395,22 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
       });
 
       try {
+        // Include planning history + current app so build has full context
+        const planningContext = proMessages.length > 0
+          ? proMessages.slice(-8).map((m: any) => `${m.sender === 'user' ? 'User' : 'AI'}: ${String(m.text || '').slice(0, 400)}`).join('\n')
+          : '';
+        const buildMessage = planningContext
+          ? `[PLANNING CONVERSATION]\n${planningContext}\n\n[BUILD REQUEST]\n${messageToSend}`
+          : messageToSend;
         const response = await fetch('/api/pro-build', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: messageToSend }),
+          body: JSON.stringify({
+            message: buildMessage,
+            currentApp: hasGeneratedCode && generatedCode && generatedCode.length > 200
+              ? generatedCode.slice(0, 5000)
+              : undefined,
+          }),
         });
 
         if (!response.ok || !response.body) {
@@ -2523,6 +2538,9 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
             message: messageToSend,
             history: proMessages,
             mode: 'planning',
+            currentApp: hasGeneratedCode && generatedCode && generatedCode.length > 200
+              ? generatedCode.slice(0, 3000)
+              : undefined,
             ...(fileAttachments.length > 0 ? {
               fileData: fileAttachments[0].base64,
               fileType: fileAttachments[0].type,

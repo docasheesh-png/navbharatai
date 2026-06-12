@@ -293,6 +293,13 @@ export const AIChat: React.FC<AIChatProps> = ({
   const kbHeight = useKeyboardHeight();
   const [attachments, setAttachments] = useState<File[]>([]);
 
+  // Fix 1: reset textarea height when input is cleared after send
+  useEffect(() => {
+    if (!input && textareaRef.current) {
+      textareaRef.current.style.height = '48px';
+    }
+  }, [input]);
+
   useEffect(() => {
     onAttachmentsChange?.(attachments);
   }, [attachments, onAttachmentsChange]);
@@ -938,7 +945,19 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
         style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : undefined }}
       >
         <div className="max-w-4xl mx-auto space-y-3">
-            <div className="relative flex items-center bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl shadow-inner focus-within:border-indigo-500 transition-all">
+            {/* Fix 2: attachment chips above input, outside the flex row */}
+            <div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl shadow-inner focus-within:border-indigo-500 transition-all">
+                  {attachments.length > 0 && (
+                    <div className="px-3 pt-2 pb-1 flex flex-wrap gap-1.5 border-b border-white/5">
+                      {attachments.map((file, index) => (
+                        <div key={index} className="flex items-center gap-1 bg-[#161b22] border border-white/10 px-2 py-0.5 rounded-md text-[9px] text-[#8b949e] max-w-[160px]">
+                          <span className="truncate">{file.name}</span>
+                          <button onClick={() => removeAttachment(index)} className="hover:text-white ml-1 shrink-0 leading-none">×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="relative flex items-center">
                   {(() => {
                     const DEBUG_MODE = false;
                     console.log('DEBUG AIChat:', {isLoggedIn, onModeChange: !!onModeChange, activeAgent});
@@ -956,16 +975,6 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                     multiple
                     accept="image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp"
                   />
-                  {attachments.length > 0 && (
-                    <div className="px-5 pt-2 flex flex-wrap gap-2">
-                        {attachments.map((file, index) => (
-                            <div key={index} className="flex items-center gap-1 bg-[#161b22] border border-white/10 px-2 py-1 rounded-md text-[9px] text-[#8b949e]">
-                                <span>{file.name}</span>
-                                <button onClick={() => removeAttachment(index)} className="hover:text-white">x</button>
-                            </div>
-                        ))}
-                    </div>
-                   )}
                   <textarea
                     ref={textareaRef}
                     value={input}
@@ -1021,7 +1030,8 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                       <Send className="w-3.5 h-3.5" />
                     </button>
                   </div>
-            </div>
+                  </div>{/* end inner flex row */}
+            </div>{/* end outer rounded container */}
 
 {isPinned && (
             <div className="mt-2 flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">

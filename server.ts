@@ -3799,18 +3799,26 @@ Analyze the target for any vulnerabilities, configuration issues, or exposed sec
 
   // New Isolated Chat Endpoints
   const chatHandler = async (req: any, res: any, tier: 'navbharat' | 'vishwakarma-basic' | 'vishwakarma-pro' | 'vip') => {
-    let { message, history } = req.body;
+    let { message, history, currentApp } = req.body;
     if (!message) return res.status(400).json({ reply: 'Message is required' });
+
+    // 3 — Inject canvas app context so AI can edit the existing app
+    let contextualMessage = message;
+    if (currentApp && typeof currentApp === 'string' && currentApp.length > 200) {
+      contextualMessage = `[CANVAS — currently built app HTML, ${currentApp.length} chars total]:
+\`\`\`html
+${currentApp.slice(0, 5000)}${currentApp.length > 5000 ? '\n...[truncated]' : ''}
+\`\`\`
+
+User request: ${message}`;
+    }
 
     console.log("===== CHAT REQUEST START =====");
     console.log("ROUTE:", req.path);
-    console.log("BODY:", req.body);
 
     try {
-        console.log("INITIALIZING PROVIDER");
-        
         let aiResponse = "";
-        aiResponse = await aiRouter.route(message, history, tier);
+        aiResponse = await aiRouter.route(contextualMessage, history, tier);
         
         console.log("RAW AI RESPONSE:", aiResponse);
         
@@ -3845,11 +3853,15 @@ app.post('/api/chat', async (req, res) => {
   app.post('/api/pro-chat', async (req, res) => {
     console.log("=== HIT /api/pro-chat ===");
     try {
-      const { message, history, mode, fileData, fileType, fileName } = req.body;
+      const { message, history, mode, fileData, fileType, fileName, currentApp } = req.body;
       if (!message) return res.status(400).json({ error: 'Message required' });
       const hasFile = !!(fileData && fileType);
       const isImageFile = hasFile && (fileType as string).startsWith('image/');
       const isPDFFile = hasFile && fileType === 'application/pdf';
+      // currentApp context for planning mode
+      const canvasContext = currentApp && typeof currentApp === 'string' && currentApp.length > 200
+        ? `\n\n### CURRENT APP ON CANVAS (${currentApp.length} chars):\n\`\`\`html\n${currentApp.slice(0, 3000)}\n\`\`\`\nUser is discussing modifications/additions to THIS app.`
+        : '';
 
       // ══ BUILDING MODE — Use AppEngine to generate real app ══
       if (mode === 'building') {
@@ -3905,7 +3917,7 @@ Write complete working code. Beautiful dark UI. No placeholders. Output ONLY the
       const BUILD_INTENT_PATTERN = /\b(bana[odo]*|banado|likhna|likho|likh do|create|make|build|generate|code karo|code kar|code do|implement|develop|app bana)\b/i;
       const suggestBuild = BUILD_INTENT_PATTERN.test(message);
 
-      const PLAN_PROMPT = `Tu NavBharatAI Pro ka PLANNING EXPERT hai. Tera kaam sirf app ka blueprint banana hai — code likhna TERA KAAM NAHI HAI.
+      const PLAN_PROMPT = `Tu NavBharatAI Pro ka PLANNING EXPERT hai. Tera kaam sirf app ka blueprint banana hai — code likhna TERA KAAM NAHI HAI.${canvasContext}
 
 ═══════════════════════════════════════════════
 IRON RULES — YEH RULES KABHI BREAK NAHI HONGE:
@@ -4005,8 +4017,13 @@ Hinglish mein baat karo — friendly, clear, professional.`;
 
   // ══ SSE STREAMING BUILD ENDPOINT — Live progress to frontend ══
   app.post('/api/pro-build', async (req: any, res: any) => {
-    const { message } = req.body;
+    const { message, currentApp } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
+
+    // Prepend current canvas app so builder can edit/extend it
+    const buildMessage = currentApp && typeof currentApp === 'string' && currentApp.length > 200
+      ? `[CURRENT APP TO EDIT — ${currentApp.length} chars]:\n\`\`\`html\n${currentApp.slice(0, 5000)}\n\`\`\`\n\nBuild request: ${message}`
+      : message;
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -4020,7 +4037,7 @@ Hinglish mein baat karo — friendly, clear, professional.`;
 
     try {
       const result = await buildAppEngine(
-        message,
+        buildMessage,
         (p) => send({ type: 'progress', stage: p.stage, step: p.step, total: p.total, detail: p.detail }),
         (fileName, content) => send({ type: 'file', fileName, content })
       );

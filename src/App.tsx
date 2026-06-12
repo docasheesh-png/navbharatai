@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 import { useSwipe } from './hooks/useSwipe';
+import { useUndoRedo } from './hooks/useUndoRedo';
 import { 
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
   Terminal, Activity, Cpu, Settings, X, Shield, ShieldCheck, Eye, EyeOff, Lock, Wallet, CreditCard,
@@ -195,6 +196,9 @@ export default function App() {
     setMessagesMap(prev => ({ ...prev, nbi_pro_chat: typeof v === 'function' ? v(prev['nbi_pro_chat'] || []) : v }));
   const [input, setInput] = useState<string>('');
   const [proInput, setProInput] = useState<string>('');
+  // 9.5 — AI Teaching Mode (beginner-friendly explanations)
+  const [teachMode, setTeachMode] = useState<boolean>(() => localStorage.getItem('navbharat_teach_mode') === 'true');
+  useEffect(() => { localStorage.setItem('navbharat_teach_mode', teachMode.toString()); }, [teachMode]);
   const [proBuildProgress, setProBuildProgress] = useState<{
     active: boolean;
     stage: string;
@@ -828,14 +832,19 @@ export default function App() {
   const [isDeployed, setIsDeployed] = useState(false);
   const [deployUrl, setDeployUrl] = useState('');
   // logs, setLogs → from useDevLogs() hook
-  const [generatedCode, setGeneratedCode] = useState<string>(() => {
+  const _initialCode = (() => {
     // 8.7 — restore last generated app for offline mode
     try {
       const saved = localStorage.getItem('navbharat_last_app');
       if (saved && saved.length > 200) return saved;
     } catch {}
     return '<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>';
-  });
+  })();
+
+  // 9.1 — undo/redo for generated code (Ctrl+Z / Ctrl+Y)
+  const { current: generatedCode, push: _pushCode, undo: undoCode, redo: redoCode, canUndo, canRedo } = useUndoRedo<string>(_initialCode);
+  const setGeneratedCode = useCallback((code: string) => { _pushCode(code); }, [_pushCode]);
+
   const [hasGeneratedCode, setHasGeneratedCode] = useState<boolean>(() => {
     try { return !!localStorage.getItem('navbharat_last_app'); } catch { return false; }
   });
@@ -846,6 +855,26 @@ export default function App() {
       try { localStorage.setItem('navbharat_last_app', generatedCode); } catch {}
     }
   }, [generatedCode, hasGeneratedCode]);
+
+  // 9.1 — Ctrl+Z / Ctrl+Y keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        if (canUndo && document.activeElement?.tagName !== 'TEXTAREA' && document.activeElement?.tagName !== 'INPUT') {
+          e.preventDefault();
+          undoCode();
+        }
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        if (canRedo && document.activeElement?.tagName !== 'TEXTAREA' && document.activeElement?.tagName !== 'INPUT') {
+          e.preventDefault();
+          redoCode();
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [canUndo, canRedo, undoCode, redoCode]);
 
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const saved = localStorage.getItem('navbharat_keys');
@@ -1482,6 +1511,16 @@ YOU MUST NOT GENERATE FULL APP CODE OR START DEVELOPMENT IN THIS MODE unless the
 
 ⚡ HINGLISH MODE ACTIVE: Saare responses Hinglish mein dena — Hindi words (Roman script) + English technical terms ka natural mix. Example style: "Tumhara app ready hai! Main isko deploy karne ke liye yeh steps follow karunga." Devanagari script mat use karna unless user specifically Hindi mein likhe.` : '';
 
+    // 9.5 — Teaching Mode: add beginner-friendly explanation instructions
+    const teachSuffix = teachMode ? `
+
+📚 TEACHING MODE ACTIVE: After completing each task, also provide a beginner-friendly explanation section titled "🧠 How This Works (Seekhne Ke Liye)":
+- Explain in simple Hindi/Hinglish what each key part does
+- Use analogies (ghar, dukaan, mobile phone) to explain technical concepts
+- Point out which lines of code do what, using simple language
+- Add "Pro Tip" for common beginner mistakes to avoid
+- Format: short bullet points, avoid jargon` : '';
+
     return `${baseAI}
 
 CURRENT MODE: ENTERPRISE ARCHITECT & BUILD ENGINE.
@@ -1493,7 +1532,7 @@ You are in FULL BUILD MODE. When asked to build, you MUST:
 3. Ensure absolute code modularity and production readiness.
 4. Set IS_APP_BUILT = TRUE in the system state when successful.
 
-You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
+You still maintain your Indian personality and friendly tone.${hinglishSuffix}${teachSuffix}`;
   };
 
   const classifyError = (error: any): ErrorType => {
@@ -3300,11 +3339,34 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     }
   }, []);
 
+  // 9.4 — Template Marketplace: curated + user-saved templates
+  const [savedTemplates, setSavedTemplates] = useState<{ id: string; name: string; html: string; savedAt: string }[]>(() => {
+    try { return JSON.parse(localStorage.getItem('navbharat_saved_templates') || '[]'); } catch { return []; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('navbharat_saved_templates', JSON.stringify(savedTemplates)); } catch {}
+  }, [savedTemplates]);
+  const saveCurrentAsTemplate = () => {
+    if (!hasGeneratedCode || !generatedCode) return;
+    const name = prompt('Template name (e.g. "My Portfolio App"):');
+    if (!name?.trim()) return;
+    setSavedTemplates(prev => [
+      { id: Date.now().toString(), name: name.trim(), html: generatedCode, savedAt: new Date().toLocaleDateString('en-IN') },
+      ...prev.slice(0, 19)
+    ]);
+    addLog(`Template "${name}" saved to marketplace ✓`, 'success');
+  };
+
   const templates = [
     { id: 'intro', name: 'Introduction', icon: Sparkles, prompt: 'hey 👋 , tell me about yourself!' },
     { id: 'analytics', name: 'Smart Analytics', icon: Activity, prompt: 'Create a high-performance Data Analytics Dashboard for a modern business. I want real-time visualization of key performance indicators (KPIs) including monthly revenue, user growth, and churn rate. Use a sophisticated dark-glassmorphism theme with SVG charts and interactive data tables. Ensure the UI is fully responsive and supports dynamic data filtering.' },
     { id: 'calc', name: 'Simple Calculator', icon: Cpu, prompt: 'I want you to act as a World-Class Software Architect. Build a Professional High-Precision Scientific Calculator. \n\n### MANDATORY FUNCTIONAL REQUIREMENTS:\n1. **Core Logic**: You MUST implement a robust JavaScript evaluation engine in `script.js`. It should handle click events for all buttons, manage a screen buffer, and accurately calculate results for basic (+, -, *, /) and scientific (sqrt, sin, cos, tan, log) operations. Ensure the calculator works perfectly upon loading.\n2. **UI Architecture**: In `style.css`, create a premium "Space-Age Glass" design with deep shadows and tactile hover animations. Use a responsive grid layout.\n3. **History System**: Implement a history list that records the last 5 operations.\n4. **Checklist**: All button IDs in `index.html` must match the selectors used in `script.js`. Ensure NO empty functions.' },
     { id: 'clock', name: 'Simple Clock', icon: Clock, prompt: 'Create a fully functional, production-grade analog clock/watch application for Android + Web (responsive mobile-first UI).\n\n### PRIMARY GOAL\nBuild an ultra-realistic, smooth, accurate analog watch application with professional mechanics, synchronized with the device time down to the millisecond. It must look and behave like a real luxury wristwatch.\n\n### CRITICAL FUNCTIONAL REQUIREMENTS\n1. **REAL TIME SYNC**: Automatically sync with device local time, hours, minutes, and seconds. The clock MUST NOT freeze or use hardcoded angles. Use `requestAnimationFrame` for continuous updates.\n2. **SMOOTH MOVEMENT**: Second hand must move smoothly every frame (not teleport). Minute and Hour hands must move proportionally as seconds progress.\n3. **HAND ALIGNMENT**: All hands MUST originate from EXACTLY the same center pivot point (0,0 center). No misaligned axes.\n4. **DESIGN**: Premium luxury watch face with metallic frame, realistic dial texture, and inner shadows. Include 12 hour markers and minute ticks.\n5. **GEOMETRY**: Perfectly circular (1:1 aspect ratio) and centered on all screens (Android/Desktop).\n6. **FORMULAS**:\n   - Seconds: `seconds * 6` degrees\n   - Minutes: `(minutes * 6) + (seconds * 0.1)` degrees\n   - Hours: `(hours % 12 * 30) + (minutes * 0.5)` degrees\n7. **TECHNICAL**: Use HTML/CSS/JS with SVG or Canvas for real-time rendering. Provide separate code for index.html, style.css, and script.js with NO placeholders.' },
+    // 9.6 — React Native / Mobile App generation template
+    { id: 'rn_app', name: 'React Native App', icon: Smartphone, prompt: 'Build a React Native (Expo) mobile app. Generate the complete project structure with:\n1. App.js entry point with React Navigation\n2. HomeScreen, DetailScreen components\n3. Bottom tab navigation\n4. StyleSheet with platform-specific styling (ios/android)\n5. Async storage for state persistence\n\nProvide separate files: App.js, screens/HomeScreen.js, screens/DetailScreen.js, package.json (Expo), README with run commands.\nApp theme: dark mode with indigo accent. Include sample data and list rendering.' },
+    { id: 'portfolio', name: 'Portfolio Site', icon: Globe, prompt: 'Build a stunning personal portfolio website with: hero section with animated gradient, about me, skills grid, projects showcase (3 cards), contact form with validation. Dark theme with glassmorphism cards, smooth scroll animations, mobile-first responsive. HTML/CSS/JS only.' },
+    { id: 'ecommerce', name: 'E-Commerce UI', icon: ShieldCheck, prompt: 'Build a modern e-commerce product listing page: navbar with cart counter, hero banner, product grid (8 items with images, prices, add-to-cart), cart sidebar with total calculation. Tailwind CSS style with indigo/white palette. Full JavaScript interactions.' },
+    { id: 'dashboard', name: 'Admin Dashboard', icon: LayoutDashboard, prompt: 'Build a professional admin dashboard: sidebar navigation, header with user info, metric cards (4 KPIs), recent activity table (10 rows), line chart using Chart.js CDN. Dark theme, responsive. All data should be realistic sample data.' },
   ];
 
   const themeClasses = getThemeClasses(theme);
@@ -3397,6 +3459,28 @@ ${pending.map(p => `  - ${p}`).join('\n')}
 
         {/* Action Controls */}
         <div className="flex items-center gap-2 shrink-0">
+          {/* 9.1 — Undo/Redo buttons (shown when app is built) */}
+          {hasGeneratedCode && (
+            <div className="hidden sm:flex items-center gap-1 border border-white/5 rounded-xl overflow-hidden">
+              <button
+                onClick={undoCode}
+                disabled={!canUndo}
+                title="Undo (Ctrl+Z)"
+                className="p-2 hover:bg-white/5 text-[#484f58] hover:text-white transition-all disabled:opacity-25 disabled:cursor-not-allowed"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+              <div className="w-px h-5 bg-white/10" />
+              <button
+                onClick={redoCode}
+                disabled={!canRedo}
+                title="Redo (Ctrl+Y)"
+                className="p-2 hover:bg-white/5 text-[#484f58] hover:text-white transition-all disabled:opacity-25 disabled:cursor-not-allowed"
+              >
+                <RotateCcw className="w-3.5 h-3.5 scale-x-[-1]" />
+              </button>
+            </div>
+          )}
           {!user ? (
             <button 
               onClick={() => setShowAuth(true)} 
@@ -4609,9 +4693,36 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping shrink-0" />
                        <span>NAVBHARATAI</span>
                      </div>
-                     <span className="font-mono text-indigo-400">{sessions.find(s => s.id === currentSessionId)?.uci || ''}</span>
+                     <div className="flex items-center gap-2">
+                       {/* 9.10 — Model selector quick-pick */}
+                       <select
+                         value={selectedModel}
+                         onChange={e => handleModelSelect(e.target.value)}
+                         className="bg-[#0d1117] border border-white/10 text-[8px] font-black uppercase tracking-widest text-indigo-400 rounded px-1.5 py-0.5 outline-none cursor-pointer hover:border-indigo-500/50 transition-colors"
+                         title="Select AI Model"
+                       >
+                         <option value="auto">AUTO</option>
+                         <option value="gemini">GEMINI</option>
+                         {keys.openai && <option value="openai">GPT-4</option>}
+                         {keys.claude && <option value="claude">CLAUDE</option>}
+                         {keys.groq && <option value="groq">GROQ</option>}
+                         {keys.deepseek && <option value="deepseek">DEEPSEEK</option>}
+                       </select>
+                       {/* 9.5 — Teaching Mode toggle */}
+                       <button
+                         onClick={() => setTeachMode(p => !p)}
+                         title={teachMode ? 'Teaching Mode ON — click to turn off' : 'Teaching Mode OFF — click to enable beginner explanations'}
+                         className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[8px] font-black uppercase tracking-widest transition-all ${
+                           teachMode ? 'bg-amber-500/20 border-amber-500/40 text-amber-400' : 'bg-white/5 border-white/10 text-[#484f58] hover:text-white'
+                         }`}
+                       >
+                         <span>{teachMode ? '📚' : '🎓'}</span>
+                         <span className="hidden sm:inline">Teach</span>
+                       </button>
+                       <span className="font-mono text-indigo-400 hidden sm:inline">{sessions.find(s => s.id === currentSessionId)?.uci || ''}</span>
+                     </div>
                   </div>
-                  <AIChat 
+                  <AIChat
                     messages={messages}
                     input={input}
                     onInputChange={setInput}
@@ -5974,12 +6085,12 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   {templates.map(t => (
-                    <motion.button 
+                    <motion.button
                       whileHover={{ y: -5 }}
                       key={t.id}
                       onClick={() => {
                         setInput(t.prompt);
-                        setActiveView('chat');
+                        toggleTab('nbi_chat');
                       }}
                       className="flex flex-col items-start p-6 bg-[#161b22] border border-white/5 rounded-2xl hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all text-left group shadow-xl"
                     >
@@ -5993,6 +6104,65 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                       </div>
                     </motion.button>
                   ))}
+                </div>
+
+                {/* 9.4 — My Saved Templates (local marketplace) */}
+                <div className="mt-12">
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h3 className="text-xl font-bold text-white">My Templates</h3>
+                      <p className="text-sm text-[#8b949e]">Your saved apps — reuse, remix, and share</p>
+                    </div>
+                    {hasGeneratedCode && (
+                      <button
+                        onClick={saveCurrentAsTemplate}
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Save Current App
+                      </button>
+                    )}
+                  </div>
+                  {savedTemplates.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 border border-dashed border-white/10 rounded-2xl text-center gap-3">
+                      <Package className="w-10 h-10 text-white/20" />
+                      <p className="text-[#484f58] text-sm font-medium">No saved templates yet</p>
+                      <p className="text-[10px] text-[#484f58]">Build an app and click "Save Current App" to save it here</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {savedTemplates.map(t => (
+                        <div key={t.id} className="flex flex-col bg-[#161b22] border border-white/5 rounded-2xl p-5 gap-3 hover:border-indigo-500/30 transition-all group">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <h4 className="text-white font-bold text-sm">{t.name}</h4>
+                              <p className="text-[9px] text-[#484f58] mt-0.5">Saved {t.savedAt}</p>
+                            </div>
+                            <button
+                              onClick={() => setSavedTemplates(prev => prev.filter(x => x.id !== t.id))}
+                              className="p-1.5 hover:bg-red-500/10 rounded-lg text-[#484f58] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                          <div className="text-[9px] text-[#8b949e] font-mono bg-black/30 rounded-lg p-2 truncate">
+                            {t.html.slice(0, 80)}...
+                          </div>
+                          <button
+                            onClick={() => {
+                              setGeneratedCode(t.html);
+                              setHasGeneratedCode(true);
+                              updatePreview({ 'index.html': t.html });
+                              toggleTab('preview');
+                            }}
+                            className="w-full py-2 bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/20 text-indigo-400 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
+                          >
+                            Load & Preview
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -6574,7 +6744,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {activeView === 'components' && (
             <div className="flex-1 h-full overflow-hidden">
               <ComponentLibrary onInsert={(html) => {
-                setGeneratedCode(prev => prev ? prev.replace('</body>', html + '\n</body>') : html);
+                setGeneratedCode(generatedCode ? generatedCode.replace('</body>', html + '\n</body>') : html);
                 toggleTab('preview');
               }} />
             </div>
@@ -6650,7 +6820,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {activeView === 'imagegen' && (
             <div className="flex-1 h-full overflow-hidden">
               <AIImageGenerator onImageGenerated={(url, prompt) => {
-                setGeneratedCode(prev => prev + `\n<!-- Generated Image: ${prompt} -->\n<img src="${url}" alt="${prompt}" style="max-width:100%;border-radius:12px;" />`);
+                setGeneratedCode(generatedCode + `\n<!-- Generated Image: ${prompt} -->\n<img src="${url}" alt="${prompt}" style="max-width:100%;border-radius:12px;" />`);
               }} />
             </div>
           )}
@@ -6665,7 +6835,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {/* Phase 9 — API Marketplace */}
           {activeView === 'apimarket' && (
             <div className="flex-1 h-full overflow-hidden">
-              <APIMarketplace onCodeInsert={(code) => setGeneratedCode(prev => prev + '\n\n' + code)} />
+              <APIMarketplace onCodeInsert={(code) => setGeneratedCode(generatedCode + '\n\n' + code)} />
             </div>
           )}
 

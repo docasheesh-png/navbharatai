@@ -1239,14 +1239,14 @@ export default function App() {
         files,
         lastUpdated: new Date().toISOString(),
         mode,
-        agent: 'navbharatai',
+        agent: activeAgent,
         isPinned: existingSession?.isPinned || false,
         // UCI details
         uci: sessionUci,
-        originalAgent: existingSession?.originalAgent || 'navbharatai',
-        currentAgent: 'navbharatai',
+        originalAgent: existingSession?.originalAgent || activeAgent,
+        currentAgent: activeAgent,
         memorySummary: existingSession?.memorySummary || '',
-        continuationChain: existingSession?.continuationChain || ['navbharatai'],
+        continuationChain: existingSession?.continuationChain || [activeAgent],
         restoredMessages: existingSession?.restoredMessages || []
       };
 
@@ -1279,6 +1279,7 @@ export default function App() {
           id: currentSessionId || 'unknown',
           uci: sessionUci || '',
           userId: user?.uid || 'anonymous',
+          tab: activeView,
           original_agent: updatedSession.originalAgent || null,
           current_agent: updatedSession.currentAgent || null,
           title: updatedSession.title || 'Untitled',
@@ -2900,8 +2901,9 @@ ${pending.map(p => `  - ${p}`).join('\n')}
             originalAgent: docData.original_agent,
             currentAgent: docData.current_agent,
             memorySummary: docData.memory_summary || '',
-            restoredMessages: docData.restoredMessages || []
-          };
+            restoredMessages: docData.restoredMessages || [],
+            meta: { tab: docData.tab }
+          } as any;
         }
       } catch (err) {
         console.error('Error fetching session from Firestore:', err);
@@ -2974,8 +2976,12 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     setCurrentSessionId(targetSession.id);
     setMessages([continuationGreeting]);
 
-    // Detect if this was a pro session
-    const isProSession = targetAgent === 'navbharatai-pro';
+    // Detect target tab — use saved tab field first, then broad agent/mode detection
+    const savedTab = (targetSession as any).meta?.tab as ViewType | undefined;
+    const isProAgent = targetAgent === 'navbharatai-pro' || targetAgent.includes('pro');
+    const isVishwakarmaAgent = targetAgent.startsWith('vishwakarma');
+    const isProSession = savedTab === 'nbi_pro_chat' || isProAgent;
+    const isAscSession = savedTab === 'asc_chat' || isVishwakarmaAgent;
 
     // Restore generated code from session files if available
     if (targetSession.files && Object.keys(targetSession.files).length > 0) {
@@ -2987,8 +2993,16 @@ ${pending.map(p => `  - ${p}`).join('\n')}
       }
     }
 
-    // Always open the chat tab (not preview) when restoring from history
-    toggleTab(isProSession ? 'nbi_pro_chat' : 'nbi_chat');
+    // Navigate to the correct chat tab — never open preview
+    const targetTab: ViewType = savedTab && ['nbi_chat', 'nbi_pro_chat', 'asc_chat', 'sda_chat'].includes(savedTab)
+      ? savedTab
+      : isAscSession ? 'asc_chat' : isProSession ? 'nbi_pro_chat' : 'nbi_chat';
+    toggleTab(targetTab);
+
+    // Restore activeAgent to match the session
+    if (isVishwakarmaAgent || isAscSession) setActiveAgent(targetAgent);
+    else if (isProSession) setActiveAgent('navbharatai-pro');
+    else setActiveAgent('navbharatai');
 
     addLog(`UCI resumed: ${uciToFind}`, 'info');
     return true;

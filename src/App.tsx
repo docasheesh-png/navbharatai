@@ -187,7 +187,7 @@ export default function App() {
   const [showAuth, setShowAuth] = useState(false);
   // enabledModules → from useSettings() hook
   // Task 1.4 — messagesMap: single source of truth per tab
-  const WELCOME_MSG: Message = { id: 'welcome', text: 'Namaskar! Main navBharatAI hoon. Aap mujhse kisi bhi language me chat kar sakte hain!', sender: 'ai', timestamp: new Date(), modelUsed: 'General Assistant' };
+  const WELCOME_MSG: Message = { id: 'welcome', text: 'Hello! I\'m navBharatAI. You can chat with me in any language!', sender: 'ai', timestamp: new Date(), modelUsed: 'General Assistant' };
   const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>({
     nbi_chat: [WELCOME_MSG],
     nbi_pro_chat: [],
@@ -1453,11 +1453,11 @@ You have advanced GitHub Code Management capabilities built-in. You can help use
 7. Create Pull Requests
 
 ### SMART CODE EDITING (CRITICAL)
-- **Understanding**: Sabse pehle existng code ko double check karo. Flow aur logic ko samjho.
-- **Integrity**: Aapke edits se app ka core flow nahi tutna chahiye. Regression se bacho.
-- **Precision**: Agar user ne ek specific feature manga hai, toh usko existing code mein intelligently integrate karo, replace mat karo agar zarurat nahi hai (unless pure file change is cleaner).
-- **Markers**: Code blocks mein hamesha file path mention karo: \`\`\`tsx:src/App.tsx\`\`\` या \`// path: src/App.tsx\`.
-- **Double Check**: Response dene se pehle verify karo ki sabhi imports sahi hain aur variable names consistent hain.
+- **Understanding**: Always double-check existing code first. Understand the flow and logic.
+- **Integrity**: Your edits must not break the app's core flow. Avoid regressions.
+- **Precision**: If the user requests a specific feature, integrate it intelligently into existing code — don't replace unless a full rewrite is cleaner.
+- **Markers**: Always include the file path in code blocks: \`\`\`tsx:src/App.tsx\`\`\` or \`// path: src/App.tsx\`.
+- **Double Check**: Before responding, verify that all imports are correct and variable names are consistent.
 
 When the user mentions GitHub or repository tasks, follow this STRICT workflow:
 Phase 1: Connection Setup - Ask for GitHub Personal Access Token (PAT) with repo scope and Repository name (username/repo).
@@ -1474,17 +1474,17 @@ Phase 5: Completion - Push changes with a professional message and provide the c
 
 CONVERSATIONAL RULES:
 1. UNDERSTAND INTENT FIRST: Always check if the user is greeting you, making small talk, or expressing emotions before assuming they want to build an app or code.
-2. RESPOND NATURALLY: If someone says "Ram Ram", reply "Ram Ram 🙏 Kaise ho?". If someone says "Kya haal hai", reply like a friend "Sab badhiya 😄 Aap batao?".
+2. RESPOND NATURALLY: Match the user's greeting style and energy. If someone greets casually, reply warmly and casually. If formal, match that tone.
 3. MULTILINGUAL PROTOCOL (STRICT MANDATE): Always respond in the EXACT same language, dialect, and writing style that the user uses in their message. 
    - If user writes in Hindi (हिंदी): AI MUST reply in Hindi.
-   - If user writes in Hinglish (e.g., "navbar red kar do"): AI MUST reply naturally in Hinglish ("Navbar ka color red kar diya gaya hai.").
-   - If user writes in English: AI MUST reply in English.
-   - If user writes in Urdu (اردו): AI MUST reply in Urdu.
-   - If user writes in mixed Hindi-English: AI MUST reply naturally in mixed Hindi-English.
-   - NEVER force replies into English. NEVER enforce English-only conversations. Maintain conversational adaptive linguistic comfort. The user's input language is the absolute gold standard for the response language.
+   - If user writes in Hinglish: reply naturally in Hinglish.
+   - If user writes in English: reply in English.
+   - If user writes in Urdu: reply in Urdu.
+   - If user writes in mixed Hindi-English: reply naturally in mixed Hindi-English.
+   - NEVER force replies into English. The user's input language is the absolute gold standard for the response language.
 4. EMOTIONAL INTELLIGENCE: Detect frustration, excitement, or humor. If the user is frustrated, offer support. If they tell a joke, laugh and join in.
-5. NO REPETITION: Do NOT repeat greetings like "Namaskar" in every message. Only greet when it's natural in a conversation.
-6. INDIAN CONTEXT: Use Indian emojis (🙏, 🇮🇳, 😄, ✨) and cultural references where appropriate.
+5. NO REPETITION: Do NOT repeat greetings in every message. Only greet when it's natural in a conversation.
+6. CULTURAL CONTEXT: Use appropriate emojis (🙏, 🇮🇳, 😄, ✨) and cultural references where suitable.
 7. SOURCE ATTRIBUTION: For factual, news, or informational queries, you MUST cite 1-3 high-quality sources. At the end of your response, add a section "Sources:" with clickable links in the format: Website Name – URL.
 
 RESPONSE MODES:
@@ -1498,45 +1498,45 @@ RESPONSE MODES:
         return `${baseAI}
 
 ### 🔗 navBharatAI Git Integration Activated
-Main aapke GitHub repository ko connect, fetch, edit aur deploy karne mein madad karunga.
+I will help you connect, fetch, edit, and deploy your GitHub repository.
 
 ### GIT MODE – FULL FUNCTIONALITY (Strict Workflow)
-Hamesha is order mein follow karo:
+Always follow in this order:
 
 **Phase 1: Connection**
-- User se GitHub Personal Access Token (PAT) maango (repo scope). Agar token "asheeshgithubkeys" hai toh use save karlo.
-- Repository full name maango (username/repo).
-- Branch name poochho (default: main).
+- Ask the user for a GitHub Personal Access Token (PAT) with repo scope.
+- Ask for the repository full name (username/repo).
+- Ask for the branch name (default: main).
 
 **Phase 2: Repository Fetch**
-- GitHub API se repository tree fetch karne ke liye [GH_LIST_FILES] use karo.
-- Clean aur beautiful folder structure dikhao.
-- Important files highlight karo (package.json, src/, app/, index.js etc.)
+- Use [GH_LIST_FILES] to fetch the repository tree from GitHub API.
+- Display a clean, well-organized folder structure.
+- Highlight important files (package.json, src/, app/, index.js, etc.)
 
 **Phase 3: File Operations**
-- User jo file bole, usko fetch [GH_READ_FILE:path] karke line numbers ke saath dikhao.
-- Code ko syntax highlighted format mein present karo.
+- Fetch the requested file using [GH_READ_FILE:path] and display with line numbers.
+- Present code in syntax-highlighted format.
 
 **Phase 4: Intelligent Code Editing**
-- User ke instruction ke hisaab se code samajh kar changes suggest karo.
-- Old code vs New code (Diff) dikhao.
-- User se confirmation lo: "Kya aap ye changes commit karna chahte hain?"
+- Understand the user's instructions and suggest changes.
+- Show Old code vs New code (Diff).
+- Ask for confirmation before committing: "Would you like to commit these changes?"
 
 **Phase 5: Commit & Push**
-- Professional commit message generate karo.
-- [GH_PROPOSE_EDIT:path|content|message] tag use karo.
-- Success message mein GitHub commit link do.
+- Generate a professional commit message.
+- Use [GH_PROPOSE_EDIT:path|content|message] tag.
+- Include the GitHub commit link in the success message.
 
 **Phase 6: Deployment Guidance**
-- Changes push hone ke baad user ko Railway, Vercel, Render, Netlify pe deploy karne ka step-by-step guide do.
+- After pushing changes, provide a step-by-step guide to deploy on Railway, Vercel, Render, or Netlify.
 
 ### SECURITY & SAFETY
-- Har critical action (edit, commit, push) se pehle double confirmation lo.
-- .env, API keys, passwords wali files edit karne se pehle strong warning do.
-- Sirf user ke bataye files hi edit karo.
+- Ask for double confirmation before every critical action (edit, commit, push).
+- Show a strong warning before editing .env, API keys, or password files.
+- Only edit files explicitly specified by the user.
 
 ### UI INTERACTION
-Jab aap response do, toh hamesha relevant buttons suggest karo agar user ko action lena ho.
+Always suggest relevant action buttons in your response when the user needs to take an action.
 
 ${fileContext}
 
@@ -1559,15 +1559,15 @@ YOU MUST NOT GENERATE FULL APP CODE OR START DEVELOPMENT IN THIS MODE unless the
     
     const hinglishSuffix = (forceHinglish || hinglishMode) ? `
 
-⚡ HINGLISH MODE ACTIVE: Saare responses Hinglish mein dena — Hindi words (Roman script) + English technical terms ka natural mix. Example style: "Tumhara app ready hai! Main isko deploy karne ke liye yeh steps follow karunga." Devanagari script mat use karna unless user specifically Hindi mein likhe.` : '';
+⚡ HINGLISH MODE ACTIVE: Always reply in Hinglish — a natural mix of Hindi words (Roman script) and English technical terms. Do not use Devanagari script unless the user specifically writes in Hindi.` : '';
 
     // 9.5 — Teaching Mode: add beginner-friendly explanation instructions
     const teachSuffix = teachMode ? `
 
-📚 TEACHING MODE ACTIVE: After completing each task, also provide a beginner-friendly explanation section titled "🧠 How This Works (Seekhne Ke Liye)":
-- Explain in simple Hindi/Hinglish what each key part does
-- Use analogies (ghar, dukaan, mobile phone) to explain technical concepts
-- Point out which lines of code do what, using simple language
+📚 TEACHING MODE ACTIVE: After completing each task, also provide a beginner-friendly explanation section titled "🧠 How This Works":
+- Explain what each key part does in simple, clear language
+- Use everyday analogies to explain technical concepts
+- Point out which lines of code do what, in simple language
 - Add "Pro Tip" for common beginner mistakes to avoid
 - Format: short bullet points, avoid jargon` : '';
 
@@ -2561,8 +2561,8 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
                   // Deploy prompt
                   const deployGuide = evt.deploymentGuide as string | undefined;
                   const deploySection = deployGuide
-                    ? `\n\n**Deploy karna chahte ho?** 🚀\nType \`deploy\` ya \`haan deploy karo\` — main step-by-step guide dunga!\n\n<details>\n<summary>📋 Deployment Options (click to expand)</summary>\n\n${deployGuide}\n</details>`
-                    : `\n\n**App ready hai!** Preview mein dekho → "deploy karo" bolkar deploy options le sakte ho.`;
+                    ? `\n\n**Ready to deploy?** 🚀\nType \`deploy\` for step-by-step deployment options!\n\n<details>\n<summary>📋 Deployment Options (click to expand)</summary>\n\n${deployGuide}\n</details>`
+                    : `\n\n**App is ready!** Check the preview → type "deploy" to get deployment options.`;
 
                   const processLog = [
                     `✅ ${evt.reply || 'App successfully generated!'}`,
@@ -2618,7 +2618,7 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
         setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
         setProMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
-          text: `⚠️ Build Error: ${e.message || 'Kuch gadbad ho gayi. Dobara try karo.'}`,
+          text: `⚠️ Build Error: ${e.message || 'Something went wrong. Please try again.'}`,
           sender: 'ai',
           timestamp: new Date(),
         }]);
@@ -2684,16 +2684,16 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
   // --- UNIVERSAL CHAT CONTINUATION SYSTEM (UCI) HELPERS & IMPLEMENTATION ---
   
   const NBI_GREETINGS = [
-    "Swagat hai navBharatAI Workspace me! Aaj hum kaun sa advanced SaaS platform design aur cultivate karenge?",
-    "Pranam! navBharatAI orchestrator is live. General queries ho ya dynamic full-stack builds, let's innovate!",
-    "Namaskar! navBharatAI core cognitive system is active. Your enterprise specifications are welcome here.",
-    "Namaste! navBharatAI online. Let's craft some scalable architectures with deep, robust logic today."
+    "Welcome to navBharatAI Workspace! What advanced platform shall we design today?",
+    "navBharatAI orchestrator is live. General queries or full-stack builds — let's innovate!",
+    "navBharatAI core cognitive system is active. Your enterprise specifications are welcome here.",
+    "navBharatAI online. Let's craft scalable architectures with deep, robust logic today."
   ];
 
   const BASIC_GREETINGS = [
     "Vishwakarma Basic active. Security audit protocols loaded and ready for code analysis.",
     "Vishwakarma Basic online. Let's identify structural vulnerabilities and build secure pages.",
-    "Swagat hai! Vishwakarma Basic analysis engine is fully operational. Aapki coding needs ready hain."
+    "Vishwakarma Basic analysis engine is fully operational. Ready for your coding needs."
   ];
 
   const PRO_GREETINGS = [
@@ -2705,7 +2705,7 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
   const VIP_GREETINGS = [
     "VIP orchestration initialized. Sovereign multi-model cognitive routing is actively online.",
     "Sovereign VIP Agent active. Enterprise platforms, AI scaling, and zero-trust security matrices initialized.",
-    "Swagat hai VIP Workspace me! Highly tuned LLM orchestrators and stateful agents are ready to assist you."
+    "Welcome to VIP Workspace! Highly tuned LLM orchestrators and stateful agents are ready to assist you."
   ];
 
   const generateUCI = (): string => {
@@ -3046,8 +3046,8 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     
     const isVishwakarma = false;
     const welcomeText = isVishwakarma
-       ? 'Namaskar! Main agent Vishwakarma hoon. bataye apko kya help chahiye?'
-       : 'Namaskar! Main navBharatAI hoon. Aap mujhse kisi bhi language me chat kar sakte hain!';
+       ? 'Hello! I\'m Vishwakarma. How can I help you today?'
+       : 'Hello! I\'m navBharatAI. You can chat with me in any language!';
 
     setMessages([
       { id: 'welcome', text: welcomeText, sender: 'ai', timestamp: new Date(), modelUsed: 'General Assistant' }
@@ -3067,8 +3067,8 @@ ${pending.map(p => `  - ${p}`).join('\n')}
       id: newId,
       title: 'New Conversation',
       messages: isVishwakarma 
-        ? [{ id: 'asc-welcome', text: 'Namaskar! Main agent Vishwakarma hoon. bataye apko kya help chahiye?', sender: 'ai', timestamp: new Date(), modelUsed: 'Vishwakarma' }] 
-        : [{ id: 'nbi-welcome', text: 'Namaskar! Main navBharatAI hoon. Aap mujhse kisi bhi language me chat kar sakte hain!', sender: 'ai', timestamp: new Date(), modelUsed: 'navBharatAI Cognitive Layer' }],
+        ? [{ id: 'asc-welcome', text: 'Hello! I\'m Vishwakarma. How can I help you today?', sender: 'ai', timestamp: new Date(), modelUsed: 'Vishwakarma' }]
+        : [{ id: 'nbi-welcome', text: 'Hello! I\'m navBharatAI. You can chat with me in any language!', sender: 'ai', timestamp: new Date(), modelUsed: 'navBharatAI Cognitive Layer' }],
       files: {
         'index.html': `<!DOCTYPE html><html><body><h1>New Sandbox</h1></body></html>`,
         'script.js': 'console.log("Ready");',
@@ -3410,7 +3410,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     // Add activation message as requested
     const activationMsg: Message = {
       id: Date.now().toString(),
-      text: "📂 **GitHub Repository Loaded Successfully**\nFiles ab Code Studio mein real mode mein load ho rahi hain. Aap ab directly edit kar sakte hain. Aap AI se code edit karwa sakte hain aur **Commit & Push** capability use karke changes wapas GitHub pe bhej sakte hain.",
+      text: "📂 **GitHub Repository Loaded Successfully**\nFiles are now loading in Code Studio in real mode. You can edit them directly. Use AI to edit code and push changes back to GitHub using the **Commit & Push** capability.",
       sender: 'ai',
       timestamp: new Date(),
       modelUsed: 'GitHub Core'
@@ -5875,7 +5875,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                          </button>
                                       </div>
                                       <p className="text-xs text-amber-200/70 leading-relaxed font-semibold mt-4">
-                                         🤝 refer karne par <span className="text-white font-black">10% Credit Free</span>, agar jisko refer kiya hai woh jitne ka credit purchase karega uska 10% is user ke account me add honge free me!
+                                         🤝 Earn <span className="text-white font-black">10% Free Credits</span> for every referral — when your referred user purchases credits, 10% gets added to your account for free!
                                       </p>
                                    </div>
 
@@ -5883,7 +5883,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                    <div className="bg-black/20 border border-white/5 rounded-2xl p-6 space-y-4">
                                       <div>
                                          <h4 className="text-xs font-black text-white uppercase tracking-wider">Redeem Reward Coupons</h4>
-                                         <p className="text-[10px] text-[#8b949e] font-bold font-mono">Ek promocode / referral code sirf ek bar hi apply kiya ja sakta hai!</p>
+                                         <p className="text-[10px] text-[#8b949e] font-bold font-mono">Each promo code / referral code can only be applied once!</p>
                                       </div>
                                       <div className="flex gap-3">
                                          <input 
@@ -6846,8 +6846,8 @@ ${pending.map(p => `  - ${p}`).join('\n')}
               {!hasGeneratedCode ? (
                 <div className="flex-1 flex items-center justify-center flex-col gap-3 text-center p-8">
                   <FolderOpen className="w-12 h-12 text-white/10" />
-                  <p className="text-[11px] text-[#484f58] font-medium">Koi app generate nahi hui abhi tak.</p>
-                  <p className="text-[9px] text-[#484f58]">NavBharatAI Pro mein app banao — yahan files dikhenge.</p>
+                  <p className="text-[11px] text-[#484f58] font-medium">No app generated yet.</p>
+                  <p className="text-[9px] text-[#484f58]">Build an app in NavBharatAI Pro — files will appear here.</p>
                 </div>
               ) : (
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
@@ -7305,7 +7305,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                       🔥 Unlock Agent Vishwakarma
                     </h3>
                     <p className="text-[10px] text-[#8b949e] mt-1 leading-normal">
-                      Aapka portal locked hai. Checkout complete karke dynamic modeling access activate karein.
+                      Your portal is locked. Complete checkout to activate dynamic modeling access.
                     </p>
                   </div>
                 </div>

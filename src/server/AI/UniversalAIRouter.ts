@@ -23,7 +23,7 @@ export class UniversalAIRouter {
       return response.content;
     } catch (e: any) {
       console.error('[UNIVERSAL_ROUTER] exhausted:', e.message);
-      return 'Abhi AI service thodi der ke liye busy hai. Kripya 1-2 minute mein dobara try karein. 🙏';
+      return 'The AI service is temporarily busy. Please try again in 1-2 minutes. 🙏';
     }
   }
 

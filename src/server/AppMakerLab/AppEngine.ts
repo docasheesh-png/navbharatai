@@ -744,19 +744,19 @@ function generateDeploymentGuide(appName: string): string {
   return `## ${appName} — Deployment Options
 
 ### Option 1: GitHub Pages (Free, Recommended)
-1. GitHub par naya repo banao: github.com/new
-2. Upload karo: index.html, style.css, script.js
+1. Create a new repo at github.com/new
+2. Upload: index.html, style.css, script.js
 3. Settings → Pages → Source: "main branch"
-4. 2 minute mein live: https://yourusername.github.io/repo-name
+4. Live in ~2 minutes: https://yourusername.github.io/repo-name
 
 ### Option 2: Vercel (Free, Fastest)
-1. vercel.com par signup karo
-2. "New Project" → "Import from GitHub" ya drag-drop files
-3. Deploy click karo → 30 seconds mein live URL mil jayegi
+1. Sign up at vercel.com
+2. "New Project" → "Import from GitHub" or drag-drop files
+3. Click Deploy → live URL ready in 30 seconds
 
 ### Option 3: Netlify (Free)
 1. netlify.com → drag & drop your 3 files
-2. Instant live URL milega (e.g. https://amazing-app-123.netlify.app)
+2. Instant live URL (e.g. https://amazing-app-123.netlify.app)
 
 ### Option 4: Firebase Hosting
 1. npm install -g firebase-tools

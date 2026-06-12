@@ -91,7 +91,7 @@ export class AIRouter {
       }
     }
     if (!signal?.aborted) {
-      onChunk('Abhi AI service thodi der ke liye busy hai. Kripya 1-2 minute mein dobara try karein. 🙏');
+      onChunk('The AI service is temporarily busy. Please try again in 1-2 minutes. 🙏');
     }
   }
 
@@ -147,7 +147,7 @@ export class AIRouter {
     console.error('[ROUTER] ALL PROVIDERS FAILED:', errors);
     return {
       response: {
-        content: 'Abhi AI service thodi der ke liye busy hai. Kripya 1-2 minute mein dobara try karein. 🙏',
+        content: 'The AI service is temporarily busy. Please try again in 1-2 minutes. 🙏',
         latencyMs: 0,
         provider: 'GEMINI',
         model: 'fallback',

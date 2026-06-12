@@ -80,6 +80,7 @@ const AIProjectManager = _lz(() => import('./components/ide/AIProjectManager'), 
 const MultiCloudDeploy = _lz(() => import('./components/ide/MultiCloudDeploy'), 'MultiCloudDeploy');
 const DesignSystem     = _lz(() => import('./components/ide/DesignSystem'),     'DesignSystem');
 const AppHealthMonitor = _lz(() => import('./components/ide/AppHealthMonitor'), 'AppHealthMonitor');
+const AISuggestions    = _lz(() => import('./components/ide/AISuggestions'),    'AISuggestions');
 const SecretManager    = _lz(() => import('./components/SecretManager'),        'SecretManager');
 const SocialHub        = _lz(() => import('./components/social/SocialHub'),     'SocialHub');
 const ReportsListView  = _lz(() => import('./components/ReportsListView'),      'ReportsListView');
@@ -1226,14 +1227,49 @@ export default function App() {
     const ghStatus = githubToken ? `Connected as: ${githubUser?.login || 'Authenticated User'}` : 'Not Connected';
     const ghRepo = githubRepoContext ? `Active Repo: ${githubRepoContext.owner}/${githubRepoContext.repo} (Branch: ${githubRepoContext.branch})` : 'No Repository Connected';
 
-    // File Workspace Context
-    const fileList = currentFiles ? Object.keys(currentFiles).map(p => `- ${p}`).join('\n') : 'No files in workspace';
-    const fileContext = currentFiles ? `
-### CURRENT FILES IN WORKSPACE (VSC)
-These are the files you have access to. If you need to edit or read them, you can ask or just provide the updated code blocks with the file path mentioned in a comment or a code block tag (e.g. \`\`\`tsx:src/App.tsx\`\`\`).
+    // 7.4 + 7.1 — Multi-file awareness: inject actual file CONTENTS (top 5 files, capped per file)
+    const MAX_FILE_CHARS = 2000;
+    const MAX_FILES = 5;
+    const PRIORITY_FILES = ['index.html', 'App.tsx', 'App.jsx', 'main.tsx', 'main.jsx', 'style.css', 'styles.css', 'script.js', 'app.js', 'main.js'];
 
-FILES:
-${fileList}
+    const fileContext = currentFiles && Object.keys(currentFiles).length > 0 ? (() => {
+      const allFiles = Object.entries(currentFiles as FileSystem);
+      // Sort: priority files first, then by size descending
+      const sorted = [
+        ...PRIORITY_FILES.map(p => allFiles.find(([k]) => k === p)).filter(Boolean) as [string, string][],
+        ...allFiles.filter(([k]) => !PRIORITY_FILES.includes(k)).sort((a, b) => b[1].length - a[1].length),
+      ].slice(0, MAX_FILES);
+
+      const filesSummary = allFiles.map(([p, v]) => `  - ${p} (${v.length} chars)`).join('\n');
+      const fileContents = sorted.map(([path, content]) => {
+        const truncated = content.length > MAX_FILE_CHARS
+          ? content.slice(0, MAX_FILE_CHARS) + `\n... [${content.length - MAX_FILE_CHARS} chars truncated]`
+          : content;
+        return `\`\`\`${path.split('.').pop()}:${path}\n${truncated}\n\`\`\``;
+      }).join('\n\n');
+
+      return `
+### PROJECT WORKSPACE — ${allFiles.length} FILE(S) LOADED
+All files:
+${filesSummary}
+
+### FILE CONTENTS (top ${sorted.length}):
+${fileContents}
+`;
+    })() : '';
+
+    // 7.2 — Continuation mode: if files exist, instruct AI to modify not replace
+    const hasMeaningfulFiles = currentFiles && Object.keys(currentFiles).length > 0 &&
+      Object.values(currentFiles).some(v => (v as string).length > 100);
+    const continuationPrefix = hasMeaningfulFiles ? `
+### CONTINUATION MODE ACTIVE
+Existing project files are present above. You MUST:
+- ANALYZE the existing code before responding
+- Make TARGETED, SURGICAL changes only
+- PRESERVE all existing functionality
+- DO NOT rewrite files from scratch unless explicitly asked
+- When modifying HTML: show the full updated file
+- When modifying JS/CSS: show only the changed section with clear markers
 ` : '';
 
     // Check for security intent first
@@ -1415,7 +1451,7 @@ YOU MUST NOT GENERATE FULL APP CODE OR START DEVELOPMENT IN THIS MODE unless the
 
 CURRENT MODE: ENTERPRISE ARCHITECT & BUILD ENGINE.
 ${fileContext}
-
+${continuationPrefix}
 You are in FULL BUILD MODE. When asked to build, you MUST:
 1. Generate COMPLETE, runnable frontend/backend structures immediately.
 2. Create ALL files required (pages, components, utils, config).
@@ -1564,22 +1600,68 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}`;
         addLog(enableSearch ? 'Accessing live knowledge banks...' : 'Generating your solution...', 'info');
     }
     
-    // Optimize: Only greet in the first message. Prevent repeated greetings like "Namaskar".
     const isFollowUp = history.length > 0;
     let promptWithContext = message;
 
+    // 7.5 — Error-aware AI: detect console errors / stack traces in user message
+    const ERROR_PATTERNS = [
+      /uncaught (typeerror|referenceerror|syntaxerror|rangeerror)/i,
+      /cannot read propert/i,
+      /is not a function/i,
+      /is not defined/i,
+      /\bat line \d+/i,
+      /error:/i,
+      /failed to|could not load/i,
+    ];
+    const isErrorMessage = ERROR_PATTERNS.some(p => p.test(message));
+
+    // 7.3 — Intent Detection: classify user request type
+    const detectIntent = (msg: string): 'fix' | 'add' | 'edit' | 'create' | 'general' => {
+      const m = msg.toLowerCase();
+      if (isErrorMessage || /fix|bug|broken|nahi chal|error|crash|issue/.test(m)) return 'fix';
+      if (/add|jod|include|insert|naya feature|new feature/.test(m)) return 'add';
+      if (/change|update|modify|badlo|hatao|remove|replace/.test(m)) return 'edit';
+      if (/build|create|banao|make|generate|design|write/.test(m)) return 'create';
+      return 'general';
+    };
+    const detectedIntent = intent === 'general' ? detectIntent(message) : intent as any;
+
+    // 7.6 — Component-level editing: detect component names (PascalCase words)
+    const componentMatches = message.match(/\b([A-Z][a-zA-Z0-9]+(?:Component|Panel|Card|Modal|Button|Nav|Header|Footer|Sidebar|Form)?)\b/g);
+    const mentionedComponents = componentMatches ? [...new Set(componentMatches)].slice(0, 3) : [];
+
+    // Build intent-aware prefix
+    const intentPrefix: Record<string, string> = {
+      fix: '[FIX MODE] User is reporting a bug or error. Focus ONLY on the specific issue. Show the exact lines to change. Do not rewrite unrelated code.',
+      add: '[ADD MODE] User wants to ADD a new feature to existing code. Integrate it cleanly without touching unrelated parts.',
+      edit: '[EDIT MODE] User wants to MODIFY existing code. Make targeted changes only. Preserve all other functionality.',
+      create: '[CREATE MODE] Build the requested app/component from scratch with clean, complete, production-ready code.',
+      general: isFollowUp ? '[FOLLOW-UP] Respond directly without greeting.' : '',
+    };
+
     if (intent === 'security') {
-        promptWithContext = `[AUDITOR_ACTIVATION] Target: ${target || 'Current System'}\n\n${message}`;
+      promptWithContext = `[AUDITOR_ACTIVATION] Target: ${target || 'Current System'}\n\n${message}`;
     } else if (intent === 'github') {
-        promptWithContext = `[GITHub_ACTIVATION] 🔗 navBharatAI GitHub Integration Activated\nReady to connect, fetch, edit and push code securely.\n\n${message}`;
-    } else if (isFollowUp) {
-        promptWithContext = `[SYSTEM NOTICE: This is a follow-up. Respond directly. DO NOT use greetings like Namaskar/Hello unless the user greets you. Focus on the detected context: ${intent}. Respond in the same language as the user.]\n\n${message}`;
+      promptWithContext = `[GITHub_ACTIVATION] 🔗 navBharatAI GitHub Integration Activated\n\n${message}`;
+    } else {
+      const prefix = intentPrefix[detectedIntent] || '';
+      const componentHint = mentionedComponents.length > 0
+        ? `\n[COMPONENT FOCUS] User mentions: ${mentionedComponents.join(', ')} — target these specifically.`
+        : '';
+      const errorHint = isErrorMessage
+        ? '\n[ERROR DETECTED] User has pasted a runtime error. Diagnose the root cause and provide the exact fix.'
+        : '';
+      if (prefix || componentHint || errorHint) {
+        promptWithContext = `${prefix}${componentHint}${errorHint}\n\n${message}`;
+      } else if (isFollowUp) {
+        promptWithContext = `[Follow-up. No greeting needed. Respond in same language as user.]\n\n${message}`;
+      }
     }
 
-    // Inject active memory summary from App state if present
+    // 7.1 — Project Memory: inject active session memory summary
     const activeSession = sessions.find(s => s.id === currentSessionId);
     if (activeSession?.memorySummary) {
-      promptWithContext = `[ACTIVE SESSION HISTORIC CONTEXT SUMMARY]\n\n${activeSession.memorySummary}\n\n---\n\nUser request:\n${promptWithContext}`;
+      promptWithContext = `[SESSION MEMORY]\n${activeSession.memorySummary}\n\n---\n\n${promptWithContext}`;
     }
 
     // Switch to a single high-speed call for near-instant response
@@ -4525,6 +4607,11 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 </div>
               )}
 
+              {/* 7.7 — AI Copilot Suggestions */}
+              <AISuggestions
+                generatedCode={generatedCode}
+                onSendSuggestion={(prompt) => handleSend(prompt)}
+              />
 
             </div>
           )}

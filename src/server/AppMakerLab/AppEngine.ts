@@ -544,6 +544,85 @@ ${logicJs}
 ${uiJs}`;
 }
 
+// ─── Phase 5: Quality Validation + Auto-Repair ───────────────────────────────
+
+interface ValidationResult {
+  valid: boolean;
+  brokenIds: string[];        // IDs referenced in JS but missing in HTML
+  missingWires: string[];     // button IDs in HTML with no addEventListener in JS
+  syntaxIssues: string[];     // basic syntax problems detected
+}
+
+function validateDOMConsistency(html: string, js: string): ValidationResult {
+  const result: ValidationResult = { valid: true, brokenIds: [], missingWires: [], syntaxIssues: [] };
+
+  // Extract all IDs from HTML
+  const htmlIds = new Set<string>();
+  for (const m of html.matchAll(/id="([^"]+)"/g)) htmlIds.add(m[1]);
+
+  // Find IDs referenced in JS via getElementById / querySelector
+  const jsIdRefs = new Set<string>();
+  for (const m of js.matchAll(/getElementById\(['"`]([^'"`]+)['"`]\)/g))  jsIdRefs.add(m[1]);
+  for (const m of js.matchAll(/querySelector\(['"`]#([^'"`\s]+)['"`]\)/g)) jsIdRefs.add(m[1]);
+
+  // Broken: JS references ID not in HTML
+  for (const id of jsIdRefs) {
+    if (!htmlIds.has(id)) result.brokenIds.push(id);
+  }
+
+  // Missing wires: button IDs in HTML that have no addEventListener in JS
+  const buttonIds: string[] = [];
+  for (const m of html.matchAll(/<button[^>]*id="([^"]+)"/gi)) buttonIds.push(m[1]);
+  for (const id of buttonIds) {
+    if (!js.includes(`'${id}'`) && !js.includes(`"${id}"`)) {
+      result.missingWires.push(id);
+    }
+  }
+
+  // Basic syntax: unclosed braces (rough check, ±3 tolerance)
+  const opens  = (js.match(/\{/g) || []).length;
+  const closes = (js.match(/\}/g) || []).length;
+  if (Math.abs(opens - closes) > 3) result.syntaxIssues.push(`brace mismatch: ${opens} { vs ${closes} }`);
+
+  result.valid = result.brokenIds.length === 0 && result.missingWires.length === 0 && result.syntaxIssues.length === 0;
+  return result;
+}
+
+async function autoRepairJS(
+  js: string,
+  html: string,
+  validation: ValidationResult,
+  appName: string,
+): Promise<string> {
+  const issues: string[] = [];
+  if (validation.brokenIds.length)    issues.push(`Broken getElementById IDs (not in HTML): ${validation.brokenIds.join(', ')}`);
+  if (validation.missingWires.length) issues.push(`Button IDs in HTML with no addEventListener: ${validation.missingWires.join(', ')}`);
+  if (validation.syntaxIssues.length) issues.push(`Syntax issues: ${validation.syntaxIssues.join(', ')}`);
+
+  const htmlIds = [...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]).join(', ');
+
+  const sys = `You are a JavaScript debugger. Fix ONLY the listed issues. Change no other logic. Output ONLY fixed JavaScript.`;
+  const prompt = `Fix these issues in the JavaScript for "${appName}":
+
+ISSUES TO FIX:
+${issues.join('\n')}
+
+ALL VALID HTML IDs (use these exact strings):
+${htmlIds}
+
+JAVASCRIPT TO FIX:
+${js.slice(0, 12000)}
+
+Return ONLY the corrected JavaScript — same logic, only broken references/missing wires fixed:`;
+
+  try {
+    return await callAI(prompt, sys, 10000);
+  } catch {
+    console.warn('[AppEngine] Auto-repair AI call failed, returning original JS');
+    return js;
+  }
+}
+
 // ─── Step 2: Generate HTML (template-aware) ───────────────────────────────────
 
 async function generateHTML(bp: AppBlueprint): Promise<string> {
@@ -735,30 +814,38 @@ export async function buildApp(
     const generatedFiles: Record<string, string> = { 'index.html': htmlContent };
     onFileGenerated?.('index.html', htmlContent);
 
-    if (bp.complexity === 'complex') {
-      // Phase 4: Split JS generation — 3 parallel modules for complex apps
-      report('Generating', 4, 6, `Writing JavaScript (split mode — state + logic + ui in parallel)...`);
-      const jsContent = await generateJSSplit(bp, htmlContent);
-      generatedFiles['script.js'] = jsContent;
-      onFileGenerated?.('script.js', jsContent);
+    let jsContent: string;
+    let cssContent: string;
 
+    if (bp.complexity === 'complex') {
+      report('Generating', 4, 6, 'Writing JavaScript (split: state + logic + ui in parallel)...');
+      jsContent = await generateJSSplit(bp, htmlContent);
       report('Generating', 5, 6, 'Writing CSS — styling & animations...');
-      const cssContent = await generateCSS(bp, htmlContent);
-      generatedFiles['style.css'] = cssContent;
-      onFileGenerated?.('style.css', cssContent);
+      cssContent = await generateCSS(bp, htmlContent);
     } else {
-      // Phase 6: JS + CSS in parallel for simple/medium apps
       report('Generating', 4, 6, 'Writing JavaScript + CSS in parallel...');
-      const [jsContent, cssContent] = await Promise.all([
+      [jsContent, cssContent] = await Promise.all([
         generateJS(bp, htmlContent),
         generateCSS(bp, htmlContent),
       ]);
-      generatedFiles['script.js']  = jsContent;
-      generatedFiles['style.css']  = cssContent;
-      onFileGenerated?.('script.js',  jsContent);
-      onFileGenerated?.('style.css',  cssContent);
       report('Generating', 5, 6, 'JS + CSS complete.');
     }
+
+    // Phase 5: Validate DOM consistency + auto-repair broken wires
+    const validation = validateDOMConsistency(htmlContent, jsContent);
+    if (!validation.valid) {
+      console.log(`[AppEngine] Validation issues — brokenIds: [${validation.brokenIds}] missingWires: [${validation.missingWires}] syntax: [${validation.syntaxIssues}]`);
+      report('Repairing', 5, 6, `Auto-repairing ${validation.brokenIds.length + validation.missingWires.length} issues...`);
+      jsContent = await autoRepairJS(jsContent, htmlContent, validation, bp.appName);
+      console.log('[AppEngine] Auto-repair complete.');
+    } else {
+      console.log('[AppEngine] Validation passed — all DOM references and button wires OK.');
+    }
+
+    generatedFiles['script.js']  = jsContent;
+    generatedFiles['style.css']  = cssContent;
+    onFileGenerated?.('script.js',  jsContent);
+    onFileGenerated?.('style.css',  cssContent);
 
     report('Assembling', 6, 6, 'Building live preview...');
     const previewHtml = buildPreviewHtml(generatedFiles, bp);

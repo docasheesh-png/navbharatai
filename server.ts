@@ -4747,17 +4747,20 @@ Response Format:
 
   // ── Admin server-side auth (4.6) ─────────────────────────────────────────
   app.post('/api/admin/login', adminLimiter, (req, res) => {
-    const { username, password } = req.body || {};
-    const validUser = process.env.ADMIN_USERNAME || 'aashishcpmt09';
-    const validPass = process.env.ADMIN_PASSWORD;
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '').trim();
+    const validUser = (process.env.ADMIN_USERNAME || 'aashishcpmt09').trim();
+    const validPass = (process.env.ADMIN_PASSWORD || '').trim();
 
     if (!validPass) {
       audit('ADMIN_LOGIN_BLOCKED', { reason: 'ADMIN_PASSWORD not set', ip: req.ip });
       return res.status(503).json({ error: 'Admin access not configured on server.' });
     }
 
-    const passHash = crypto.createHash('sha256').update(password || '').digest('hex');
+    const passHash    = crypto.createHash('sha256').update(password).digest('hex');
     const expectedHash = crypto.createHash('sha256').update(validPass).digest('hex');
+
+    console.log(`[ADMIN_LOGIN] user="${username}" validUser="${validUser}" match=${username === validUser} passLen=${password.length} validPassLen=${validPass.length}`);
 
     if (username === validUser && passHash === expectedHash) {
       const token = crypto.createHmac('sha256', validPass)

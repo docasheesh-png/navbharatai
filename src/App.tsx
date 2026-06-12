@@ -112,6 +112,8 @@ import { AuthComponent } from './components/AuthComponent';
 import { MessageContent } from './components/MessageContent';
 import { HomeView } from './components/home/HomeView';
 import { GitHubService } from './lib/githubService';
+import { trackEvent } from './lib/analytics';
+import { isEnabled } from './lib/featureFlags';
 // AgentMode → re-exported from ./types
 
 export default function App() {
@@ -160,6 +162,8 @@ export default function App() {
 
   // Pre-warm server on app load so chat is instant when user opens it
   useEffect(() => { fetch('/api/health', { method: 'GET' }).catch(() => {}); }, []);
+  // 12.2 — Track app load
+  useEffect(() => { trackEvent('app_load', { referrer: document.referrer, ua: navigator.userAgent.slice(0, 100) }); }, []);
 
   useEffect(() => {
     localStorage.setItem('navbharat_sidebar_collapsed', isSidebarCollapsed.toString());
@@ -206,8 +210,14 @@ export default function App() {
   // 10.6 — Toast notifications
   const { toasts, addToast, removeToast } = useToast();
   // 10.1 — Onboarding
+  // 12.4 — A/B flag: new_onboarding_v2 may show extended flow in future
+  const _useNewOnboarding = isEnabled('new_onboarding_v2');
   const [showOnboarding, setShowOnboarding] = useState<boolean>(() => !localStorage.getItem('navbharat_onboarded'));
-  const dismissOnboarding = () => { localStorage.setItem('navbharat_onboarded', '1'); setShowOnboarding(false); };
+  const dismissOnboarding = () => {
+    localStorage.setItem('navbharat_onboarded', '1');
+    setShowOnboarding(false);
+    trackEvent('onboarding_dismissed', { variant: _useNewOnboarding ? 'v2' : 'v1' });
+  };
   const [proBuildProgress, setProBuildProgress] = useState<{
     active: boolean;
     stage: string;
@@ -1868,6 +1878,7 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
     }
 
     setGeneratedCode(finalHtml);
+    trackEvent('app_generated', { agent: activeAgent, htmlBytes: finalHtml.length });
 
     // Save to preview history (max 5)
     setPreviewHistory(prev => {
@@ -2033,6 +2044,7 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
       return;
     }
     incrementDailyUsage('message');
+    trackEvent('message_sent', { tab: tabId, agent: activeAgent, isGuest: !user });
 
     // Handle GitHub Push Confirmation
     if (pendingGHEdit && /push|confirm|yes|ha|kardo/i.test(messageToSend)) {

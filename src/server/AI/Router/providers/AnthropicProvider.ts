@@ -15,16 +15,19 @@ export class AnthropicProvider implements AIProvider {
     });
   }
 
-  async execute(prompt: string, schema?: any): Promise<AIProviderResponse> {
+  async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string): Promise<AIProviderResponse> {
     const startTime = Date.now();
-    
+
     const messages: Anthropic.MessageParam[] = [{ role: "user", content: prompt }];
-    
-    const response = await this.client.messages.create({
-      model: "claude-3-5-sonnet-20240620",
-      max_tokens: 2048,
-      messages: messages,
-    });
+
+    const createParams: any = {
+      model: modelOverride || "claude-3-5-sonnet-20240620",
+      max_tokens: 8000,
+      messages,
+    };
+    if (systemPrompt) createParams.system = systemPrompt;
+
+    const response = await this.client.messages.create(createParams);
 
     const content = (response.content[0] as Anthropic.TextBlock).text;
 

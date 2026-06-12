@@ -8,8 +8,8 @@ export class AIRouter {
     this.providers.sort((a, b) => a.priority - b.priority);
   }
 
-  async route(prompt: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
-    return this.execute(prompt);
+  async route(prompt: string, systemPrompt?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+    return this.execute(prompt, undefined, systemPrompt);
   }
 
   // Support for structured generation
@@ -19,7 +19,7 @@ export class AIRouter {
     return JSON.parse(response.content);
   }
 
-  private async execute(prompt: string, schema?: any): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+  private async execute(prompt: string, schema?: any, systemPrompt?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
     let retries = 0;
     const maxRetries = 3;
     const targetSchema = schema?.type === 'OBJECT' ? schema : undefined;
@@ -32,7 +32,7 @@ export class AIRouter {
 
         const startTime = Date.now();
         console.log(`Executing ${provider.name}...`);
-        const response = await provider.execute(prompt, targetSchema);
+        const response = await provider.execute(prompt, targetSchema, undefined, systemPrompt);
         const latency = Date.now() - startTime;
 
         return {

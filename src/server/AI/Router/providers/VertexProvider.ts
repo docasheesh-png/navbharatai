@@ -30,20 +30,24 @@ export class VertexProvider implements AIProvider {
         }
     }
 
-    async execute(prompt: string, schema?: any, modelOverride?: string): Promise<AIProviderResponse> {
+    async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string): Promise<AIProviderResponse> {
         if (!this.vertexAI) {
             throw new Error("Vertex AI not configured");
         }
         const startTime = Date.now();
         const modelName = modelOverride || this.modelPro;
-        const model = this.vertexAI.getGenerativeModel({ model: modelName });
+        const modelConfig: any = { model: modelName };
+        if (systemPrompt) {
+            modelConfig.systemInstruction = { role: 'system', parts: [{ text: systemPrompt }] };
+        }
+        const model = this.vertexAI.getGenerativeModel(modelConfig);
 
         let retries = 0;
         const maxRetries = 2;
 
         while (true) {
             try {
-                const timeoutPromise = new Promise((_, reject) => 
+                const timeoutPromise = new Promise((_, reject) =>
                     setTimeout(() => reject(new Error('Vertex AI Timeout')), 30000)
                 );
 

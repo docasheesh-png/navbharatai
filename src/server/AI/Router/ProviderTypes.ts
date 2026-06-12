@@ -16,6 +16,6 @@ export interface ProviderTelemetry {
 export interface AIProvider {
   name: 'VERTEX' | 'GEMINI' | 'ANTHROPIC';
   priority: number;
-  execute(prompt: string, schema?: any): Promise<AIProviderResponse>;
+  execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string): Promise<AIProviderResponse>;
   healthCheck(): Promise<boolean>;
 }

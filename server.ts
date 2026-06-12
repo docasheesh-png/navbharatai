@@ -3798,38 +3798,77 @@ Analyze the target for any vulnerabilities, configuration issues, or exposed sec
   });
 
   // New Isolated Chat Endpoints
+  const SYSTEM_PROMPT_EDIT = `Tu NavBharatAI hai — world's best AI App Builder.
+
+CURRENT TASK: User ka EXISTING app edit/update karna hai. [CANVAS] section mein current app diya hua hai.
+
+IRON RULES — yeh kabhi break nahi hone chahiye:
+1. Pehle existing app ka poora code padh — samajh kya bana hua hai
+2. SIRF woh changes kar jo user ne manga — na zyada, na kam
+3. Existing features, styling, animations, aur logic PRESERVE kar — kuch bhi mat todo
+4. Poora updated HTML ek code block mein de — \`\`\`html\n[complete file]\n\`\`\`
+5. Code block ke bahar sirf 1-2 line mein bata kya change kiya — bss
+
+OUTPUT FORMAT (MANDATORY):
+\`\`\`html
+[poora updated HTML — ek bhi existing line skip mat karna]
+\`\`\``;
+
+  const SYSTEM_PROMPT_BUILD = `Tu NavBharatAI hai — India ka No. 1 AI App Builder.
+
+User jo app manga hai, woh ek beautiful, fully functional web app bana.
+
+RULES:
+1. Ek single standalone HTML file — CSS aur JS sab inline
+2. Beautiful dark UI, glassmorphism effects, smooth animations
+3. Fully responsive (mobile + desktop dono)
+4. Output ONLY yeh format:
+\`\`\`html
+[complete working HTML]
+\`\`\`
+5. Code ke baad koi explanation nahi — sirf ek line summary pehle
+
+Hinglish mein chhota intro de, phir seedha code.`;
+
+  const SYSTEM_PROMPT_CHAT = `Tu NavBharatAI hai — India ka best AI assistant aur app builder (NavBharat team ka product).
+Friendly Hinglish mein baat kar. Helpful, concise, aur accurate reh.
+Agar user koi app banana chahe, guide kar. General questions ka seedha jawab de.`;
+
   const chatHandler = async (req: any, res: any, tier: 'navbharat' | 'vishwakarma-basic' | 'vishwakarma-pro' | 'vip') => {
-    let { message, history, currentApp } = req.body;
+    let { message, history, currentApp, mode, intent } = req.body;
     if (!message) return res.status(400).json({ reply: 'Message is required' });
 
-    // 3 — Inject canvas app context so AI can edit the existing app
-    let contextualMessage = message;
-    if (currentApp && typeof currentApp === 'string' && currentApp.length > 200) {
-      contextualMessage = `[CANVAS — currently built app HTML, ${currentApp.length} chars total]:
-\`\`\`html
-${currentApp.slice(0, 5000)}${currentApp.length > 5000 ? '\n...[truncated]' : ''}
-\`\`\`
+    const hasCanvas = !!(currentApp && typeof currentApp === 'string' && currentApp.length > 200);
+    const buildIntents = ['create', 'build', 'generate', 'edit', 'fix', 'add', 'modify', 'update', 'change'];
+    const isBuildIntent = mode === 'build' || (intent && buildIntents.includes(String(intent).toLowerCase()));
 
-User request: ${message}`;
+    // Pick system prompt based on context
+    let systemPrompt: string;
+    if (hasCanvas) {
+      // App is on canvas — ALWAYS edit mode, regardless of message wording
+      systemPrompt = SYSTEM_PROMPT_EDIT;
+    } else if (isBuildIntent) {
+      systemPrompt = SYSTEM_PROMPT_BUILD;
+    } else {
+      systemPrompt = SYSTEM_PROMPT_CHAT;
     }
 
-    console.log("===== CHAT REQUEST START =====");
-    console.log("ROUTE:", req.path);
+    // Build contextual message with canvas app prepended
+    let contextualMessage = message;
+    if (hasCanvas) {
+      contextualMessage = `[CANVAS — current app on canvas (${currentApp.length} chars total)]:\n\`\`\`html\n${currentApp.slice(0, 6000)}${currentApp.length > 6000 ? '\n...[truncated]' : ''}\n\`\`\`\n\nUser request: ${message}`;
+    }
+
+    console.log(`[CHAT] tier=${tier} mode=${mode} intent=${intent} hasCanvas=${hasCanvas} sysprompt=${hasCanvas ? 'EDIT' : isBuildIntent ? 'BUILD' : 'CHAT'}`);
 
     try {
-        let aiResponse = "";
-        aiResponse = await aiRouter.route(contextualMessage, history, tier);
-        
-        console.log("RAW AI RESPONSE:", aiResponse);
-        
-        console.log("SENDING RESPONSE TO FRONTEND");
+        const aiResponse = await aiRouter.route(contextualMessage, history, tier, undefined, systemPrompt);
         res.json({ reply: aiResponse });
-        console.log("===== CHAT REQUEST END =====");
     } catch(e: any) {
         console.error(`Error for tier ${tier}:`, e.message);
-        res.status(500).json({ 
+        res.status(500).json({
           reply: "Backend AI inference failed",
-          error: e.message 
+          error: e.message
         });
     }
   };

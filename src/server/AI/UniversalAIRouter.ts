@@ -19,7 +19,7 @@ export class UniversalAIRouter {
     this.registryPro = new ModelHealthRegistry('pro');
   }
 
-  async route(message: string, history: any[] = [], tier: 'navbharat' | 'vishwakarma-basic' | 'vishwakarma-pro' | 'vip' = 'navbharat', traceContext?: TraceContext): Promise<string> {
+  async route(message: string, history: any[] = [], tier: 'navbharat' | 'vishwakarma-basic' | 'vishwakarma-pro' | 'vip' = 'navbharat', traceContext?: TraceContext, systemPrompt?: string): Promise<string> {
     console.log(`[TRACE][UniversalAIRouter][ROUTE] ${traceContext ? JSON.stringify(traceContext) : 'No TraceContext'} called`);
     const isPro = tier === 'vishwakarma-pro' || tier === 'vip';
     const router = AIRouterManager.getRouter(isPro ? 'pro' : 'free');
@@ -27,11 +27,11 @@ export class UniversalAIRouter {
     console.log(`[${isPro ? 'PRO' : 'FREE'}] Provider Count:`, (router as any).providers.length);
 
     try {
-      const { response, telemetry } = await router.route(message);
+      const { response, telemetry } = await router.route(message, systemPrompt);
       console.log(`[${isPro ? 'PRO' : 'FREE'}] Selected Provider:`, telemetry.provider);
       console.log(`[${isPro ? 'PRO' : 'FREE'}] Selected Model:`, response.model);
       console.log(`[${isPro ? 'PRO' : 'FREE'}] Response Received`);
-      return response.content; // Simplified for now
+      return response.content;
     } catch(e) {
       console.error('[ROUTE] router.route failed:', e);
       return 'Request could not be completed right now. AI service temporarily unavailable.';

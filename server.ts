@@ -4038,6 +4038,8 @@ app.post('/api/chat', async (req, res) => {
             files: result.files,
             previewHtml: result.previewHtml,
             appName: result.appName,
+            validationReport: result.validationReport,
+            deploymentGuide: result.deploymentGuide,
           });
         } else {
           // AppEngine failed — fallback to direct Claude JSON build
@@ -4204,7 +4206,17 @@ Response Format:
         (p) => send({ type: 'progress', stage: p.stage, step: p.step, total: p.total, detail: p.detail }),
         (fileName, content) => send({ type: 'file', fileName, content })
       );
-      send({ type: 'complete', files: result.files, reply: result.reply, appName: result.appName, previewHtml: result.previewHtml, success: result.success, error: result.error });
+      send({
+        type: 'complete',
+        files: result.files,
+        reply: result.reply,
+        appName: result.appName,
+        previewHtml: result.previewHtml,
+        success: result.success,
+        error: result.error,
+        validationReport: result.validationReport,
+        deploymentGuide: result.deploymentGuide,
+      });
     } catch (err: any) {
       send({ type: 'error', message: err.message });
     }

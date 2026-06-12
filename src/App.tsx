@@ -2537,13 +2537,42 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
                   setHasGeneratedCode(true);
 
                   const fileList = Object.keys(evt.files);
+                  const vr = evt.validationReport as any;
+
+                  // Validation report section
+                  let validationSection = '';
+                  if (vr) {
+                    const score = vr.score ?? 100;
+                    const scoreEmoji = score >= 90 ? '🟢' : score >= 70 ? '🟡' : '🔴';
+                    const issues: string[] = [
+                      ...(vr.brokenIds || []).map((id: string) => `⚠️ Broken ID: #${id}`),
+                      ...(vr.missingWires || []).map((id: string) => `⚠️ Unwired button: #${id}`),
+                      ...(vr.syntaxIssues || []).map((s: string) => `⚠️ ${s}`),
+                    ];
+                    validationSection = [
+                      ``,
+                      `**Quality Check** ${scoreEmoji} Score: ${score}/100`,
+                      vr.passed
+                        ? `> ✅ All checks passed${vr.repairsApplied > 0 ? ` (${vr.repairsApplied} auto-repair${vr.repairsApplied > 1 ? 's' : ''} applied)` : ''}`
+                        : issues.map((i: string) => `> ${i}`).join('\n'),
+                    ].join('\n');
+                  }
+
+                  // Deploy prompt
+                  const deployGuide = evt.deploymentGuide as string | undefined;
+                  const deploySection = deployGuide
+                    ? `\n\n**Deploy karna chahte ho?** 🚀\nType \`deploy\` ya \`haan deploy karo\` — main step-by-step guide dunga!\n\n<details>\n<summary>📋 Deployment Options (click to expand)</summary>\n\n${deployGuide}\n</details>`
+                    : `\n\n**App ready hai!** Preview mein dekho → "deploy karo" bolkar deploy options le sakte ho.`;
+
                   const processLog = [
                     `✅ ${evt.reply || 'App successfully generated!'}`,
                     ``,
                     `**Build Summary**`,
                     fileList.map((f: string) => `> \`${f}\` — created`).join('\n'),
+                    validationSection,
                     ``,
                     `**App is live in Preview** →`,
+                    deploySection,
                   ].join('\n');
 
                   setProMessages(prev => [...prev, {

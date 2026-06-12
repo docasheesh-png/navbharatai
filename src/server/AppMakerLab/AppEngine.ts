@@ -217,6 +217,51 @@ const TEMPLATE_HINTS: Record<AppTemplate, { html: string; js: string; css: strin
   },
 };
 
+// ─── Phase 2: CDN Registry ───────────────────────────────────────────────────
+
+const CDN_TAGS: Record<string, string> = {
+  'inter-font':   '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">',
+  'font-awesome': '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">',
+  'chart.js':     '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>',
+  'animate-css':  '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">',
+  'gsap':         '<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>',
+};
+
+// CDN usage hints injected into JS prompts so AI knows how to use them
+const CDN_USAGE_HINTS: Record<string, string> = {
+  'chart.js': `Chart.js is loaded via CDN. Usage:
+  const ctx = document.getElementById('myChart').getContext('2d');
+  const chart = new Chart(ctx, {
+    type: 'bar', // or 'line', 'doughnut', 'pie', 'radar'
+    data: { labels: [...], datasets: [{ label: '...', data: [...], backgroundColor: [...] }] },
+    options: { responsive: true, plugins: { legend: { labels: { color: '#fff' } } },
+      scales: { x: { ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                y: { ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.1)' } } } }
+  });`,
+  'gsap': `GSAP is loaded via CDN. Usage:
+  gsap.from('.card', { opacity: 0, y: 30, stagger: 0.1, duration: 0.5 });
+  gsap.to('#score', { scale: 1.3, duration: 0.2, yoyo: true, repeat: 1 });`,
+  'font-awesome': `Font Awesome icons: <i class="fa-solid fa-star"></i> <i class="fa-solid fa-heart"></i>
+  Common: fa-house, fa-gear, fa-user, fa-chart-bar, fa-play, fa-pause, fa-trophy, fa-fire`,
+};
+
+function buildCdnHeadTags(cdnNeeded: string[]): string {
+  // Always include inter-font + font-awesome for visual quality
+  const always = ['inter-font', 'font-awesome'];
+  const all = [...new Set([...always, ...cdnNeeded])];
+  return all
+    .filter(id => CDN_TAGS[id])
+    .map(id => `  ${CDN_TAGS[id]}`)
+    .join('\n');
+}
+
+function buildCdnJsHints(cdnNeeded: string[]): string {
+  return cdnNeeded
+    .filter(id => CDN_USAGE_HINTS[id])
+    .map(id => `// ${id.toUpperCase()} USAGE:\n${CDN_USAGE_HINTS[id]}`)
+    .join('\n\n');
+}
+
 // ─── AI Caller — Claude first, Gemini fallback ───────────────────────────────
 
 async function callAI(prompt: string, systemPrompt: string, maxTokens = 6000): Promise<string> {
@@ -318,6 +363,10 @@ Return ONLY the JSON:`;
     const allText = (parsed.appType || '') + ' ' + (parsed.interactions || []).join(' ');
     const template = detectTemplate(parsed.appType || '', parsed.interactions || []);
 
+    // Auto-add CDNs based on template type
+    const cdnBase: string[] = [...(parsed.cdnNeeded || []), 'font-awesome', 'inter-font'];
+    if (template === 'DASHBOARD') cdnBase.push('chart.js');
+
     return {
       appName:        parsed.appName        || 'My App',
       appType:        parsed.appType        || 'web-app',
@@ -327,18 +376,19 @@ Return ONLY the JSON:`;
       screens:        parsed.screens        || [{ id: 'page-home', purpose: 'main interface' }],
       dataModel:      parsed.dataModel      || {},
       interactions:   parsed.interactions   || [],
-      cdnNeeded:      parsed.cdnNeeded      || ['font-awesome', 'inter-font'],
+      cdnNeeded:      [...new Set(cdnBase)],
       dynamicElements:parsed.dynamicElements|| [],
     };
   } catch {
-    // Fallback blueprint
     const template = detectTemplate(userPrompt, []);
+    const cdnBase  = ['font-awesome', 'inter-font'];
+    if (template === 'DASHBOARD') cdnBase.push('chart.js');
     return {
       appName: 'My App', appType: 'web-app', template, complexity: 'medium',
       description: userPrompt.slice(0, 80),
       screens: [{ id: 'page-home', purpose: 'main interface' }],
       dataModel: {}, interactions: [],
-      cdnNeeded: ['font-awesome', 'inter-font'], dynamicElements: [],
+      cdnNeeded: [...new Set(cdnBase)], dynamicElements: [],
     };
   }
 }
@@ -346,9 +396,10 @@ Return ONLY the JSON:`;
 // ─── Step 2: Generate HTML (template-aware) ───────────────────────────────────
 
 async function generateHTML(bp: AppBlueprint): Promise<string> {
-  const hints = TEMPLATE_HINTS[bp.template];
-  const screenList = bp.screens.map(s => `- ${s.id}: ${s.purpose}`).join('\n');
+  const hints    = TEMPLATE_HINTS[bp.template];
+  const screenList   = bp.screens.map(s => `- ${s.id}: ${s.purpose}`).join('\n');
   const dataModelStr = Object.entries(bp.dataModel).map(([k, v]) => `  ${k}: ${v}`).join('\n');
+  const cdnTags      = buildCdnHeadTags(bp.cdnNeeded);
 
   const sys = `You are a world-class frontend developer. Output ONLY raw HTML — no markdown fences, no explanation.`;
 
@@ -358,6 +409,9 @@ App Name: ${bp.appName}
 Type: ${bp.appType} [Template: ${bp.template}]
 Description: ${bp.description}
 Complexity: ${bp.complexity}
+
+CDN LIBRARIES (already included — use them in JS):
+${bp.cdnNeeded.filter(c => CDN_TAGS[c]).join(', ') || 'inter-font, font-awesome'}
 
 SCREENS TO BUILD:
 ${screenList}
@@ -372,12 +426,16 @@ TEMPLATE-SPECIFIC HTML REQUIREMENTS:
 ${hints.html}
 
 UNIVERSAL RULES:
-1. Link: <link rel="stylesheet" href="style.css"> and <script src="script.js" defer></script>
+1. In <head>, include EXACTLY these CDN tags (copy verbatim, before style.css link):
+${cdnTags}
+   Then: <link rel="stylesheet" href="style.css">
+   At end of <body>: <script src="script.js" defer></script>
 2. Every screen is a <div id="page-*"> — JS will show/hide them
 3. EVERY interactive element has a unique id="" — JS attaches events via IDs
-4. First screen (${bp.screens[0]?.id || 'page-home'}) visible, all others display:none inline
+4. First screen (${bp.screens[0]?.id || 'page-home'}) visible, all others have style="display:none"
 5. No inline onclick, no inline styles — JS and CSS handle those
-6. Include ALL screens and ALL UI elements — nothing placeholder
+6. Use Font Awesome icons: <i class="fa-solid fa-play"></i> etc.
+7. Include ALL screens and ALL UI elements — nothing placeholder
 
 Output ONLY the raw HTML:`;
 
@@ -387,7 +445,8 @@ Output ONLY the raw HTML:`;
 // ─── Step 3: Generate JS (template-aware, knows HTML structure) ───────────────
 
 async function generateJS(bp: AppBlueprint, htmlContent: string): Promise<string> {
-  const hints = TEMPLATE_HINTS[bp.template];
+  const hints       = TEMPLATE_HINTS[bp.template];
+  const cdnHints    = buildCdnJsHints(bp.cdnNeeded);
 
   const sys = `You are a world-class JavaScript developer. Output ONLY raw JavaScript — no markdown fences, no <script> tags.`;
 
@@ -404,18 +463,19 @@ ${htmlContent.slice(0, 9000)}
 USER INTERACTIONS TO IMPLEMENT:
 ${bp.interactions.map(i => `- ${i}`).join('\n')}
 
+${cdnHints ? `AVAILABLE CDN LIBRARIES (already loaded, use them):\n${cdnHints}\n` : ''}
 TEMPLATE-SPECIFIC JS REQUIREMENTS:
 ${hints.js}
 
 UNIVERSAL RULES (ALL MANDATORY):
 1. Wrap ALL code in: document.addEventListener('DOMContentLoaded', () => { ... });
-2. Multi-page navigation:
+2. Multi-page navigation pattern:
    function showPage(id) {
      document.querySelectorAll('[id^="page-"]').forEach(p => p.style.display = 'none');
      const el = document.getElementById(id); if (el) el.style.display = 'block';
    }
 3. Wire EVERY button from the HTML using addEventListener — no button left unwired
-4. Dynamic elements you'll create at runtime: ${bp.dynamicElements.join(', ') || 'none'}
+4. Dynamic elements you'll create at runtime: ${bp.dynamicElements.join(', ') || 'toast-notification, modal-overlay'}
 5. No TODO comments, no empty functions, no placeholder logic
 6. Show first page on load: showPage('${bp.screens[0]?.id || 'page-home'}')
 

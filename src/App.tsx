@@ -210,14 +210,6 @@ export default function App() {
   // 10.6 — Toast notifications
   const { toasts, addToast, removeToast } = useToast();
   // 10.1 — Onboarding
-  // 12.4 — A/B flag: new_onboarding_v2 may show extended flow in future
-  const _useNewOnboarding = isEnabled('new_onboarding_v2');
-  const [showOnboarding, setShowOnboarding] = useState<boolean>(() => !localStorage.getItem('navbharat_onboarded'));
-  const dismissOnboarding = () => {
-    localStorage.setItem('navbharat_onboarded', '1');
-    setShowOnboarding(false);
-    trackEvent('onboarding_dismissed', { variant: _useNewOnboarding ? 'v2' : 'v1' });
-  };
   const [proBuildProgress, setProBuildProgress] = useState<{
     active: boolean;
     stage: string;
@@ -7973,64 +7965,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
       {/* 10.6 — Toast notifications */}
       <ToastContainer toasts={toasts} onRemove={removeToast} />
 
-      {/* 10.1 — Onboarding welcome modal (first visit only) */}
-      <AnimatePresence>
-        {showOnboarding && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[600] flex items-center justify-center p-4"
-            onClick={dismissOnboarding}
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              className="w-full max-w-lg bg-[#161b22] border border-indigo-500/30 rounded-3xl p-8 shadow-[0_0_60px_rgba(99,102,241,0.2)] text-center space-y-6 relative overflow-hidden"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-600 via-violet-600 to-pink-600" />
-              <div className="w-16 h-16 bg-indigo-600 rounded-[1.5rem] flex items-center justify-center mx-auto shadow-2xl shadow-indigo-600/40">
-                <img src="/logo.png" alt="NavBharatAI" className="w-10 h-10 object-contain" />
-              </div>
-              <div>
-                <h2 className="text-2xl font-black text-white tracking-tighter">NavBharat<span className="text-indigo-400">AI</span> mein Aapka Swagat! 🙏</h2>
-                <p className="text-[#8b949e] text-sm mt-2 leading-relaxed">नए भारत का अपना AI App Maker — बस बताइए, हम बनाएंगे।</p>
-              </div>
-              <div className="grid grid-cols-2 gap-3 text-left">
-                {[
-                  { icon: '💬', title: 'AI se Baat Karo', desc: 'Hindi ya English mein apna app describe karo' },
-                  { icon: '⚡', title: 'Turant Build', desc: 'Seconds mein complete app ready ho jaati hai' },
-                  { icon: '👁', title: 'Live Preview', desc: 'App turant browser mein dekho aur test karo' },
-                  { icon: '🚀', title: 'Deploy Karo', desc: 'Ek click mein apni app live karo duniya ke liye' },
-                ].map(({ icon, title, desc }) => (
-                  <div key={title} className="bg-white/5 rounded-2xl p-4 border border-white/5">
-                    <span className="text-2xl">{icon}</span>
-                    <p className="text-white font-bold text-xs mt-2">{title}</p>
-                    <p className="text-[#8b949e] text-[10px] mt-0.5 leading-relaxed">{desc}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => { dismissOnboarding(); toggleTab('nbi_chat' as ViewType); }}
-                  className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/30 active:scale-95"
-                >
-                  Start Building →
-                </button>
-                <button
-                  onClick={() => { dismissOnboarding(); toggleTab('studio' as ViewType); }}
-                  className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-2xl font-black text-sm uppercase tracking-widest transition-all"
-                >
-                  Templates
-                </button>
-              </div>
-              <p className="text-[9px] text-[#484f58]">Press Ctrl+K for command palette • Ctrl+Z to undo</p>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Onboarding modal removed — direct home page load */}
 
       </div>
   );

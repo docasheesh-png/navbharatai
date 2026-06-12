@@ -16,9 +16,10 @@ interface PreviewPanelProps {
   previewHistory?: { id: string; label: string; ts: Date; html: string }[];
   onRestoreHistory?: (html: string) => void;
   onHtmlChange?: (html: string) => void;
+  onGoPro?: () => void;
 }
 
-export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, generatedCode, previewHistory = [], onRestoreHistory, onHtmlChange }) => {
+export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, generatedCode, previewHistory = [], onRestoreHistory, onHtmlChange, onGoPro }) => {
   const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
   const [device, setDevice] = useState<'laptop' | 'mobile' | 'full'>(isMobileScreen ? 'full' : 'laptop');
   const [visualMode, setVisualMode] = useState(false);
@@ -294,15 +295,26 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           disabled={!generatedCode || downloading}
           title="Download App as HTML"
           className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ml-1",
+            "flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest transition-all ml-1 border",
             generatedCode && !downloading
-              ? "bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-500/30 hover:border-emerald-500/60 hover:scale-105"
-              : "bg-white/5 text-[#484f58] border border-white/5 cursor-not-allowed opacity-40"
+              ? "bg-emerald-600/15 hover:bg-emerald-600/30 text-emerald-400 border-emerald-500/30 hover:border-emerald-400/60 hover:scale-105 active:scale-95"
+              : "bg-white/5 text-[#484f58] border-white/5 cursor-not-allowed opacity-40"
           )}
         >
-          <Download className={cn("w-3.5 h-3.5", downloading && "animate-bounce")} />
-          <span className="hidden sm:inline">{downloading ? 'Saving...' : 'Download'}</span>
+          <Download className={cn("w-3 h-3", downloading && "animate-bounce")} />
+          <span>{downloading ? 'Saving' : '↓'}</span>
         </button>
+        {/* Pro Chat Button */}
+        {onGoPro && (
+          <button
+            onClick={onGoPro}
+            title="Open NavBharatAI Pro"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest transition-all ml-1 border bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border-indigo-500/30 hover:border-indigo-400/60 hover:scale-105 active:scale-95"
+          >
+            <span>⚡</span>
+            <span>Pro Chat</span>
+          </button>
+        )}
       </div>
 
       {/* Preview Viewport or Visual Editor */}

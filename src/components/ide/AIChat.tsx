@@ -363,6 +363,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
   const [disliked, setDisliked] = useState<Record<string, boolean>>({});
   const [showReport, setShowReport] = useState<Record<string, boolean>>({});
   const [reportText, setReportText] = useState<Record<string, string>>({});
+  const [progressCollapsed, setProgressCollapsed] = useState(false);
 
   const [codeStudioUci] = useState<string>(() => {
     let uci = localStorage.getItem('code_studio_chat_uci');
@@ -911,53 +912,64 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                   />
                 </div>
                 <span className="text-[8px] text-white/30 font-mono">{buildProgress.percent}%</span>
+                <button
+                  onClick={() => setProgressCollapsed(p => !p)}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 border border-white/10 text-[8px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-all"
+                  title={progressCollapsed ? 'Show details' : 'Hide details'}
+                >
+                  {progressCollapsed ? '▼ Show' : '▲ Hide'}
+                </button>
               </div>
             </div>
-            {/* Stage */}
-            {buildProgress.stage && (
-              <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5">
-                <div className="w-3 h-3 rounded-full border border-amber-400/40 border-t-amber-400 animate-spin flex-shrink-0" />
-                <span className="text-[11px] text-amber-300 font-medium">{buildProgress.stage}</span>
-              </div>
-            )}
-            {/* Steps */}
-            <div className="px-4 py-2 space-y-1 max-h-56 overflow-y-auto">
-              {buildProgress.steps.map((step, i) => (
-                <div key={i} className="rounded-lg overflow-hidden border border-white/4">
-                  <div
-                    className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/3 transition-colors"
-                    onClick={() => step.code && onBuildStepToggle?.(i)}
-                  >
-                    <span className="text-[10px] w-3 text-center flex-shrink-0">
-                      {step.status === 'done' ? '✓' : step.status === 'error' ? '✕' : step.status === 'running' ? '⟳' : '○'}
-                    </span>
-                    <span className={`text-[10px] flex-1 font-medium ${
-                      step.status === 'done' ? 'text-white/70' : step.status === 'running' ? 'text-white' : step.status === 'error' ? 'text-red-400' : 'text-white/30'
-                    }`}>{step.label}</span>
-                    {step.sub && <span className="text-[8px] text-white/25">{step.sub}</span>}
-                    {step.code && (
-                      <span className="text-[8px] text-indigo-400">{step.expanded ? '▲' : '▼'}</span>
-                    )}
+            {!progressCollapsed && (
+              <>
+                {/* Stage */}
+                {buildProgress.stage && (
+                  <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5">
+                    <div className="w-3 h-3 rounded-full border border-amber-400/40 border-t-amber-400 animate-spin flex-shrink-0" />
+                    <span className="text-[11px] text-amber-300 font-medium">{buildProgress.stage}</span>
                   </div>
-                  {step.code && step.expanded && (
-                    <div className="bg-[#0a0e14] border-t border-indigo-500/20 px-3 py-2 max-h-40 overflow-y-auto">
-                      <pre className="text-[9px] text-cyan-300 font-mono leading-relaxed whitespace-pre-wrap break-all">
-                        {step.code.slice(0, 3000)}{step.code.length > 3000 ? '\n...' : ''}
-                      </pre>
+                )}
+                {/* Steps */}
+                <div className="px-4 py-2 space-y-1 max-h-56 overflow-y-auto">
+                  {buildProgress.steps.map((step, i) => (
+                    <div key={i} className="rounded-lg overflow-hidden border border-white/4">
+                      <div
+                        className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/3 transition-colors"
+                        onClick={() => step.code && onBuildStepToggle?.(i)}
+                      >
+                        <span className="text-[10px] w-3 text-center flex-shrink-0">
+                          {step.status === 'done' ? '✓' : step.status === 'error' ? '✕' : step.status === 'running' ? '⟳' : '○'}
+                        </span>
+                        <span className={`text-[10px] flex-1 font-medium ${
+                          step.status === 'done' ? 'text-white/70' : step.status === 'running' ? 'text-white' : step.status === 'error' ? 'text-red-400' : 'text-white/30'
+                        }`}>{step.label}</span>
+                        {step.sub && <span className="text-[8px] text-white/25">{step.sub}</span>}
+                        {step.code && (
+                          <span className="text-[8px] text-indigo-400">{step.expanded ? '▲' : '▼'}</span>
+                        )}
+                      </div>
+                      {step.code && step.expanded && (
+                        <div className="bg-[#0a0e14] border-t border-indigo-500/20 px-3 py-2 max-h-40 overflow-y-auto">
+                          <pre className="text-[9px] text-cyan-300 font-mono leading-relaxed whitespace-pre-wrap break-all">
+                            {step.code.slice(0, 3000)}{step.code.length > 3000 ? '\n...' : ''}
+                          </pre>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  ))}
                 </div>
-              ))}
-            </div>
-            {/* Footer */}
-            <div className="px-4 py-2 border-t border-white/5 flex items-center justify-between">
-              <span className="text-[8px] text-white/25 font-mono">
-                {Object.keys(buildProgress.generatedFiles).length > 0
-                  ? `${Object.keys(buildProgress.generatedFiles).length} file(s) generated`
-                  : 'Working...'}
-              </span>
-              <span className="text-[8px] text-white/15 font-mono">navBharatAI Pro Builder</span>
-            </div>
+                {/* Footer */}
+                <div className="px-4 py-2 border-t border-white/5 flex items-center justify-between">
+                  <span className="text-[8px] text-white/25 font-mono">
+                    {Object.keys(buildProgress.generatedFiles).length > 0
+                      ? `${Object.keys(buildProgress.generatedFiles).length} file(s) generated`
+                      : 'Working...'}
+                  </span>
+                  <span className="text-[8px] text-white/15 font-mono">navBharatAI Pro Builder</span>
+                </div>
+              </>
+            )}
           </motion.div>
         )}
       </div>

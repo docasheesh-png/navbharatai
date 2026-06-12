@@ -4959,20 +4959,6 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                        <span>NAVBHARATAI</span>
                      </div>
                      <div className="flex items-center gap-2">
-                       {/* 9.10 — Model selector quick-pick */}
-                       <select
-                         value={selectedModel}
-                         onChange={e => handleModelSelect(e.target.value)}
-                         className="bg-[#0d1117] border border-white/10 text-[8px] font-black uppercase tracking-widest text-indigo-400 rounded px-1.5 py-0.5 outline-none cursor-pointer hover:border-indigo-500/50 transition-colors"
-                         title="Select AI Model"
-                       >
-                         <option value="auto">AUTO</option>
-                         <option value="gemini">GEMINI</option>
-                         {keys.openai && <option value="openai">GPT-4</option>}
-                         {keys.claude && <option value="claude">CLAUDE</option>}
-                         {keys.groq && <option value="groq">GROQ</option>}
-                         {keys.deepseek && <option value="deepseek">DEEPSEEK</option>}
-                       </select>
                        {/* 9.5 — Teaching Mode toggle */}
                        <button
                          onClick={() => setTeachMode(p => !p)}
@@ -6683,6 +6669,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 previewHistory={previewHistory}
                 onRestoreHistory={(html) => setGeneratedCode(html)}
                 onHtmlChange={(html) => setGeneratedCode(html)}
+                onGoPro={() => toggleTab('nbi_pro_chat')}
               />
             </div>
           )}

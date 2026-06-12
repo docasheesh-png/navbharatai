@@ -10,6 +10,7 @@ export interface Message {
   sender: 'user' | 'ai';
   timestamp: Date | string;
   modelUsed?: string;
+  meta?: Record<string, unknown>;
 }
 
 export interface FileSystem {

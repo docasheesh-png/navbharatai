@@ -118,7 +118,7 @@ import { trackEvent } from './lib/analytics';
 export default function App() {
   // ── Phase 1 hooks ──────────────────────────────────────────────────────
   const { logs, setLogs, addLog } = useDevLogs();
-  const { theme, setTheme, hinglishMode, setHinglishMode, mode, setMode, enabledModules, setEnabledModules, isThemePickerOpen, setIsThemePickerOpen } = useSettings();
+  const { theme, setTheme, hinglishMode, setHinglishMode, preferredLanguage, setPreferredLanguage, mode, setMode, enabledModules, setEnabledModules, isThemePickerOpen, setIsThemePickerOpen } = useSettings();
   // ───────────────────────────────────────────────────────────────────────
 
   const [deviceMode, setDeviceMode] = useState<'auto' | 'mobile' | 'tablet' | 'desktop'>('auto');
@@ -187,9 +187,21 @@ export default function App() {
   const [showAuth, setShowAuth] = useState(false);
   // enabledModules → from useSettings() hook
   // Task 1.4 — messagesMap: single source of truth per tab
+  const LANGUAGE_PICKER_MSG: Message = {
+    id: 'lang-picker',
+    text: `👋 **Welcome to navBharatAI!**\n\nAap kaunsi language mein baat karna chahte ho?\n_(You can always change this later in Settings)_\n\n[🇮🇳 Hindi] [🔀 Hinglish] [🇬🇧 English] [🌐 Auto-detect]`,
+    sender: 'ai',
+    timestamp: new Date(),
+    modelUsed: 'navBharatAI',
+    meta: { type: 'language-picker' } as any,
+  };
   const WELCOME_MSG: Message = { id: 'welcome', text: 'Hello! I\'m navBharatAI. You can chat with me in any language!', sender: 'ai', timestamp: new Date(), modelUsed: 'General Assistant' };
+  const initialNbiMessages = (): Message[] => {
+    const lang = localStorage.getItem('navbharat_language');
+    return lang ? [WELCOME_MSG] : [LANGUAGE_PICKER_MSG];
+  };
   const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>({
-    nbi_chat: [WELCOME_MSG],
+    nbi_chat: initialNbiMessages(),
     nbi_pro_chat: [],
   });
   // Backward-compatible derived accessors — all existing code using messages/proMessages still works
@@ -1333,6 +1345,31 @@ export default function App() {
     addLog('Navigation history mapping enabled for all routes.', 'info');
   }, []);
 
+  const buildLanguageRule = (lang: string | null): string => {
+    const convRules: Record<string, string> = {
+      hindi:    'CONVERSATION LANGUAGE: Always reply in Hindi (Devanagari or Roman script, whichever the user uses).',
+      hinglish: 'CONVERSATION LANGUAGE: Always reply in Hinglish — natural mix of Hindi words (Roman script) + English technical terms.',
+      english:  'CONVERSATION LANGUAGE: Always reply in English.',
+      auto:     'CONVERSATION LANGUAGE: Automatically match the exact language, dialect, and tone the user writes in.',
+    };
+    const conv = convRules[lang || 'auto'] ?? convRules.auto;
+    return `==================================================
+🔒 LANGUAGE & CODING RULES (PERMANENT — NEVER OVERRIDE)
+==================================================
+${conv}
+
+CODE LANGUAGE (ABSOLUTE RULE — NO EXCEPTIONS):
+- ALL code you write MUST use English-only identifiers.
+- Variable names, function names, class names, constants → English.
+- Code comments → English.
+- console.log / error messages / string literals inside code → English.
+- API field names, database column names → English.
+- This rule applies regardless of the conversation language.
+- WRONG: \`const userName = "नमस्ते"\` or \`function kaamKaro()\`
+- RIGHT: \`const userName = "Hello"\` or \`function processTask()\`
+==================================================`;
+  };
+
   const getBharatContext = (appMode: 'chat' | 'build', intent: string = 'general', target?: string, currentFiles?: FileSystem, forceHinglish?: boolean) => {
     const now = new Date();
     const today = now.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -1582,7 +1619,9 @@ You are in FULL BUILD MODE. When asked to build, you MUST:
 3. Ensure absolute code modularity and production readiness.
 4. Set IS_APP_BUILT = TRUE in the system state when successful.
 
-You still maintain your Indian personality and friendly tone.${hinglishSuffix}${teachSuffix}`;
+You still maintain your Indian personality and friendly tone.${hinglishSuffix}${teachSuffix}
+
+${buildLanguageRule(preferredLanguage)}`;
   };
 
   const classifyError = (error: any): ErrorType => {
@@ -2027,6 +2066,33 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
 
     const messageToSend = msgInput || currentInput.trim() || errorContext?.lastInput || '';
     if (!messageToSend) return;
+
+    // Language picker intercept — handle before sending to AI
+    if (!preferredLanguage) {
+      const langMap: Record<string, typeof preferredLanguage> = {
+        'hindi': 'hindi', '🇮🇳 hindi': 'hindi', 'हिंदी': 'hindi',
+        'hinglish': 'hinglish', '🔀 hinglish': 'hinglish',
+        'english': 'english', '🇬🇧 english': 'english',
+        'auto': 'auto', 'auto-detect': 'auto', '🌐 auto-detect': 'auto', '🌐 auto': 'auto',
+      };
+      const picked = langMap[messageToSend.toLowerCase().trim()];
+      if (picked) {
+        setPreferredLanguage(picked);
+        setInputForTab('');
+        const langLabels: Record<string, string> = {
+          hindi: '🇮🇳 Hindi — main Hindi mein baat karunga!',
+          hinglish: '🔀 Hinglish — Hindi + English mix mein baat karenge!',
+          english: '🇬🇧 English — I\'ll respond in English!',
+          auto: '🌐 Auto-detect — I\'ll match whatever language you write in!',
+        };
+        setMessagesForTab(prev => [
+          ...prev.filter(m => m.id !== 'lang-picker'),
+          { id: 'user-lang', text: messageToSend, sender: 'user', timestamp: new Date() },
+          { id: 'lang-confirmed', text: `✅ Got it! ${langLabels[picked]}\n\nNavBharatAI is ready. How can I help you?`, sender: 'ai', timestamp: new Date(), modelUsed: 'navBharatAI' },
+        ]);
+        return;
+      }
+    }
 
     // 11.1 — Free tier daily limit enforcement (guests only)
     if (isFreeLimitReached) {
@@ -4324,25 +4390,32 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                </button>
                              </div>
 
-                             <div
-                               onClick={() => setHinglishMode(!hinglishMode)}
-                               className="flex items-center justify-between p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner cursor-pointer group hover:border-indigo-500/30 transition-all"
-                             >
-                               <div className="flex items-center gap-4">
+                             <div className="p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner space-y-3">
+                               <div className="flex items-center gap-3 mb-2">
                                  <div className="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
                                    <Languages className="w-5 h-5 text-amber-400" />
                                  </div>
                                  <div>
-                                   <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Hinglish Mode</h4>
-                                   <p className="text-[9px] text-[#484f58] font-bold uppercase">AI replies in Hindi + English mix</p>
+                                   <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Chat Language</h4>
+                                   <p className="text-[9px] text-[#484f58] font-bold uppercase">AI conversation language preference</p>
                                  </div>
                                </div>
-                               <button
-                                 className={`w-12 h-6 rounded-full p-1 flex items-center transition-all ${hinglishMode ? 'bg-amber-500 justify-end' : 'bg-white/10 justify-start'}`}
-                                 onClick={e => { e.stopPropagation(); setHinglishMode(!hinglishMode); }}
-                               >
-                                 <div className="w-4 h-4 bg-white rounded-full shadow-lg"></div>
-                               </button>
+                               <div className="grid grid-cols-2 gap-2">
+                                 {(['hindi','hinglish','english','auto'] as const).map(lang => {
+                                   const labels = { hindi: '🇮🇳 Hindi', hinglish: '🔀 Hinglish', english: '🇬🇧 English', auto: '🌐 Auto' };
+                                   const isActive = (preferredLanguage || 'auto') === lang;
+                                   return (
+                                     <button
+                                       key={lang}
+                                       onClick={() => setPreferredLanguage(lang)}
+                                       className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${isActive ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'bg-white/5 border-white/10 text-[#8b949e] hover:border-amber-500/30'}`}
+                                     >
+                                       {labels[lang]}
+                                     </button>
+                                   );
+                                 })}
+                               </div>
+                               <p className="text-[9px] text-[#484f58]">Code is always generated in English regardless of this setting.</p>
                              </div>
                           </div>
 
@@ -4947,6 +5020,13 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     restoredMessages={sessions.find(s => s.id === currentSessionId)?.restoredMessages || []}
                     memorySummary={sessions.find(s => s.id === currentSessionId)?.memorySummary || ''}
                     wallet={wallet}
+                    onLanguagePick={(lang) => {
+                      setPreferredLanguage(lang as any);
+                      setMessages(prev => [
+                        ...prev.filter(m => m.id !== 'lang-picker'),
+                        { id: 'lang-confirmed', text: `✅ Language set! I'll now communicate with you in **${lang === 'hindi' ? '🇮🇳 Hindi' : lang === 'hinglish' ? '🔀 Hinglish' : lang === 'english' ? '🇬🇧 English' : '🌐 your language (auto-detect)'}**.\n\nCode will always be written in professional English.\n\nHow can I help you?`, sender: 'ai', timestamp: new Date(), modelUsed: 'navBharatAI' },
+                      ]);
+                    }}
                   />
                 </div>
               )}

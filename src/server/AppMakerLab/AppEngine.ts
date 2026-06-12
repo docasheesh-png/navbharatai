@@ -517,7 +517,8 @@ async function generateJSSplit(bp: AppBlueprint, htmlContent: string): Promise<s
   const el = document.getElementById(id); if (el) el.style.display = 'block';
 }`;
 
-  const sys = `You are a world-class JavaScript developer. Output ONLY raw JavaScript — no markdown, no <script> tags.`;
+  const sys = `You are a world-class JavaScript developer. Output ONLY raw JavaScript — no markdown, no <script> tags.
+CRITICAL CODING RULE: ALL identifiers (variable names, function names, class names, constants, code comments, string literals, console.log messages) MUST be in English. No Hindi, Hinglish, or any other language in code. This is absolute and non-negotiable.`;
 
   // Module 1: State — data model, constants, storage
   const statePrompt = `${baseCtx}
@@ -773,7 +774,8 @@ async function generateHTML(bp: AppBlueprint): Promise<string> {
   const dataModelStr = Object.entries(bp.dataModel).map(([k, v]) => `  ${k}: ${v}`).join('\n');
   const cdnTags      = buildCdnHeadTags(bp.cdnNeeded);
 
-  const sys = `You are a world-class frontend developer. Output ONLY raw HTML — no markdown fences, no explanation.`;
+  const sys = `You are a world-class frontend developer. Output ONLY raw HTML — no markdown fences, no explanation.
+CRITICAL CODING RULE: ALL identifiers (variable names, function names, class names, constants, code comments, string literals, console.log messages) MUST be in English. No Hindi, Hinglish, or any other language in code. This is absolute and non-negotiable.`;
 
   const prompt = `Generate COMPLETE index.html for this app.
 
@@ -820,7 +822,8 @@ async function generateJS(bp: AppBlueprint, htmlContent: string): Promise<string
   const hints       = TEMPLATE_HINTS[bp.template];
   const cdnHints    = buildCdnJsHints(bp.cdnNeeded);
 
-  const sys = `You are a world-class JavaScript developer. Output ONLY raw JavaScript — no markdown fences, no <script> tags.`;
+  const sys = `You are a world-class JavaScript developer. Output ONLY raw JavaScript — no markdown fences, no <script> tags.
+CRITICAL CODING RULE: ALL identifiers (variable names, function names, class names, constants, code comments, string literals, console.log messages) MUST be in English. No Hindi, Hinglish, or any other language in code. This is absolute and non-negotiable.`;
 
   const prompt = `Generate COMPLETE script.js for this app.
 
@@ -869,7 +872,8 @@ async function generateCSS(bp: AppBlueprint, htmlContent: string): Promise<strin
     'toast-notification', 'modal-overlay', 'loading-spinner',
   ])];
 
-  const sys = `You are a world-class CSS designer. Output ONLY raw CSS — no markdown fences, no <style> tags.`;
+  const sys = `You are a world-class CSS designer. Output ONLY raw CSS — no markdown fences, no <style> tags.
+CRITICAL CODING RULE: ALL identifiers (variable names, function names, class names, constants, code comments, string literals, console.log messages) MUST be in English. No Hindi, Hinglish, or any other language in code. This is absolute and non-negotiable.`;
 
   const prompt = `Generate beautiful style.css for this app.
 

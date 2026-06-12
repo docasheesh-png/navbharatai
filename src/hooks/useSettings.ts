@@ -10,16 +10,21 @@ const DEFAULT_MODULES: Record<string, boolean> = {
   entertainment: true, studio: true, security: true,
 };
 
+export type PreferredLanguage = 'hindi' | 'hinglish' | 'english' | 'auto';
+
 export function useSettings() {
   const [theme, setThemeState] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem('theme') as ThemeMode | null;
     if (saved) return saved;
-    // 10.7 — auto-detect system theme on first visit
     return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
   const [hinglishMode, setHinglishModeState] = useState<boolean>(
     () => localStorage.getItem('navbharat_hinglish') === 'true'
   );
+  const [preferredLanguage, setPreferredLanguageState] = useState<PreferredLanguage | null>(() => {
+    const saved = localStorage.getItem('navbharat_language') as PreferredLanguage | null;
+    return saved || null;
+  });
   const [mode, setMode] = useState<AgentMode>('planning');
   const [enabledModules, setEnabledModules] = useState<Record<string, boolean>>(() => {
     const saved = localStorage.getItem('navbharat_modules');
@@ -37,11 +42,15 @@ export function useSettings() {
     localStorage.setItem('navbharat_hinglish', v.toString());
   };
 
+  const setPreferredLanguage = (v: PreferredLanguage) => {
+    setPreferredLanguageState(v);
+    localStorage.setItem('navbharat_language', v);
+  };
+
   useEffect(() => {
     localStorage.setItem('navbharat_modules', JSON.stringify(enabledModules));
   }, [enabledModules]);
 
-  // 10.7 — follow system theme changes (only if user hasn't manually set one)
   useEffect(() => {
     const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
     if (!mq) return;
@@ -57,6 +66,7 @@ export function useSettings() {
   return {
     theme, setTheme,
     hinglishMode, setHinglishMode,
+    preferredLanguage, setPreferredLanguage,
     mode, setMode,
     enabledModules, setEnabledModules,
     isThemePickerOpen, setIsThemePickerOpen,

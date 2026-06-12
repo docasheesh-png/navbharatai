@@ -253,6 +253,7 @@ interface AIChatProps {
   onAttachmentsChange?: (files: File[]) => void;
   buildProgress?: BuildProgressState | null;
   onBuildStepToggle?: (index: number) => void;
+  onLanguagePick?: (lang: string) => void;
 }
 
 export const AIChat: React.FC<AIChatProps> = ({
@@ -286,6 +287,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   onAttachmentsChange,
   buildProgress = null,
   onBuildStepToggle,
+  onLanguagePick,
 }) => {
   const { buildSteps } = useBuild();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -514,6 +516,26 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
           </ReactMarkdown>
         </div>
 
+        {/* ── Language picker buttons ── */}
+        {isAI && (msg as any).meta?.type === 'language-picker' && onLanguagePick && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {[
+              { label: '🇮🇳 Hindi', value: 'hindi' },
+              { label: '🔀 Hinglish', value: 'hinglish' },
+              { label: '🇬🇧 English', value: 'english' },
+              { label: '🌐 Auto-detect', value: 'auto' },
+            ].map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => onLanguagePick(opt.value)}
+                className="px-4 py-2 rounded-xl text-[12px] font-bold border border-indigo-500/40 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/25 hover:border-indigo-400 transition-all active:scale-95"
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* ── Urgent Build CTA — user explicitly asked to build ── */}
         {hasUrgentBuild && onModeChange && (
           <div className="mt-3 pt-3 border-t border-white/10">
@@ -521,9 +543,9 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
               <div className="bg-gradient-to-r from-orange-950/80 to-amber-950/80 px-4 py-3 flex items-start gap-3">
                 <span className="text-2xl shrink-0 mt-0.5">🔨</span>
                 <div>
-                  <p className="text-[12px] font-black text-orange-300 uppercase tracking-wider">Build Mode Chahiye?</p>
+                  <p className="text-[12px] font-black text-orange-300 uppercase tracking-wider">Switch to Build Mode?</p>
                   <p className="text-[11px] text-orange-200/80 mt-0.5 leading-snug">
-                    Planning Mode mein sirf blueprint banta hai — actual app ke liye Build Mode switch karo. Ek click mein poori working app generate ho jayegi!
+                    Planning Mode only creates a blueprint — switch to Build Mode to generate the actual working app in one click!
                   </p>
                 </div>
               </div>
@@ -537,7 +559,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                 }}
               >
                 <span style={{ fontSize: 16 }}>⚡</span>
-                Switch to Build Mode — App Banao Abhi
+                Switch to Build Mode — Build Now
                 <span style={{ fontSize: 16 }}>→</span>
               </button>
             </div>
@@ -556,7 +578,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
               }}
             >
               <span>🔨</span>
-              Build Mode mein Switch Karo
+              Switch to Build Mode
               <span style={{ fontSize: 14 }}>→</span>
             </button>
           </div>

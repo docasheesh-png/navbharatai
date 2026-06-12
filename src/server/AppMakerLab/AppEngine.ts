@@ -24,6 +24,15 @@ export interface AppFile {
   description: string;
 }
 
+export interface ValidationReport {
+  passed: boolean;
+  brokenIds: string[];
+  missingWires: string[];
+  syntaxIssues: string[];
+  repairsApplied: number;
+  score: number; // 0-100 quality score
+}
+
 export interface BuildResult {
   success: boolean;
   reply: string;
@@ -32,6 +41,8 @@ export interface BuildResult {
   previewHtml: string;
   appName: string;
   error?: string;
+  validationReport?: ValidationReport;
+  deploymentGuide?: string;
 }
 
 export interface BuildProgress {
@@ -360,7 +371,6 @@ Return ONLY the JSON:`;
     const parsed = JSON.parse(clean) as Partial<AppBlueprint>;
 
     // Detect template from appType + features extracted from blueprint
-    const allText = (parsed.appType || '') + ' ' + (parsed.interactions || []).join(' ');
     const template = detectTemplate(parsed.appType || '', parsed.interactions || []);
 
     // Auto-add CDNs based on template type
@@ -393,14 +403,33 @@ Return ONLY the JSON:`;
   }
 }
 
+// ─── Fix #2: Complexity enforcement rules ─────────────────────────────────────
+
+function enforceComplexityRules(bp: AppBlueprint): AppBlueprint {
+  // Canvas games always need complex (500+ lines of game loop)
+  if (bp.template === 'GAME_CANVAS') return { ...bp, complexity: 'complex' };
+  // Logic games with 3+ screens need complex
+  if (bp.template === 'GAME_LOGIC' && bp.screens.length >= 3) return { ...bp, complexity: 'complex' };
+  // Any app with 5+ screens is complex
+  if (bp.screens.length >= 5) return { ...bp, complexity: 'complex' };
+  return bp;
+}
+
 // ─── Phase 3: Structural Summary Extractor ───────────────────────────────────
 
 /**
  * Extracts a compact structural summary from raw HTML.
  * Replaces passing 8000 chars of raw HTML to CSS/secondary prompts.
  * Result: ~300 chars with all the IDs, classes, and page structure JS/CSS need.
+ *
+ * Fix #7: strips <script> blocks and HTML comments before regex parsing
+ * to avoid false positives from JS strings/comments that look like HTML attributes.
  */
 function extractStructuralSummary(html: string): string {
+  // Fix #7: remove script blocks and HTML comments before regex parsing
+  let cleanHtml = html.replace(/<script[\s\S]*?<\/script>/gi, '');
+  cleanHtml = cleanHtml.replace(/<!--[\s\S]*?-->/g, '');
+
   const pages:   string[] = [];
   const buttons: string[] = [];
   const inputs:  string[] = [];
@@ -408,19 +437,19 @@ function extractStructuralSummary(html: string): string {
   const classes: Set<string> = new Set();
 
   // Extract page IDs
-  for (const m of html.matchAll(/id="(page-[^"]+)"/g))  pages.push(m[1]);
+  for (const m of cleanHtml.matchAll(/id="(page-[^"]+)"/g))  pages.push(m[1]);
   // Extract button IDs + labels
-  for (const m of html.matchAll(/<button[^>]*id="([^"]+)"[^>]*>([^<]{0,30})/gi)) {
+  for (const m of cleanHtml.matchAll(/<button[^>]*id="([^"]+)"[^>]*>([^<]{0,30})/gi)) {
     buttons.push(`#${m[1]}[${m[2].trim()}]`);
   }
   // Extract input/select IDs
-  for (const m of html.matchAll(/<(?:input|select|textarea)[^>]*id="([^"]+)"/gi)) inputs.push(`#${m[1]}`);
+  for (const m of cleanHtml.matchAll(/<(?:input|select|textarea)[^>]*id="([^"]+)"/gi)) inputs.push(`#${m[1]}`);
   // Extract display/output IDs (non-button, non-input)
-  for (const m of html.matchAll(/id="(?!page-|btn-)([^"]+)"/g)) {
+  for (const m of cleanHtml.matchAll(/id="(?!page-|btn-)([^"]+)"/g)) {
     if (!buttons.find(b => b.startsWith(`#${m[1]}`))) displays.push(`#${m[1]}`);
   }
   // Extract unique class names (skip single-letter / utility names)
-  for (const m of html.matchAll(/class="([^"]+)"/g)) {
+  for (const m of cleanHtml.matchAll(/class="([^"]+)"/g)) {
     m[1].split(/\s+/).filter(c => c.length > 3).forEach(c => classes.add(c));
   }
 
@@ -437,6 +466,33 @@ function extractStructuralSummary(html: string): string {
 // ─── Phase 4: Split JS Generation for Complex Apps ───────────────────────────
 
 /**
+ * Fix #3: Generates shared state/variable contract so all 3 modules
+ * use consistent variable names and function signatures.
+ */
+async function generateModuleContract(bp: AppBlueprint, htmlSummary: string): Promise<string> {
+  const sys = `You are a JavaScript architect. Output ONLY JavaScript variable declarations and function stubs — no markdown, no explanation.`;
+  const prompt = `Define shared state variables and function signatures for: ${bp.appName}
+
+App structure:
+${htmlSummary}
+
+Data model: ${JSON.stringify(bp.dataModel)}
+Features: ${bp.interactions.slice(0, 6).join(' | ')}
+
+Output:
+1. All shared state variables with initial values (e.g. let score = 0; let lives = 3;)
+2. Function signatures as comments only (e.g. // function startGame() {} — implemented in logic module)
+3. Constants (e.g. const CANVAS_WIDTH = 800;)
+
+Output ONLY the variable declarations and comments:`;
+  try {
+    return await callAI(prompt, sys, 1500);
+  } catch {
+    return `// Shared state\nlet gameState = {};\nlet score = 0;\nlet isRunning = false;`;
+  }
+}
+
+/**
  * For complex apps (500+ lines of JS needed), splits generation into 3 focused modules:
  * - state:  data model, game/app state, storage
  * - ui:     DOM updates, page transitions, rendering, animations
@@ -444,12 +500,17 @@ function extractStructuralSummary(html: string): string {
  *
  * Each module is generated with the full HTML context + other modules as stubs,
  * then merged into one script.js.
+ *
+ * Fix #3: generates shared contract first so all modules use consistent variable names.
  */
 async function generateJSSplit(bp: AppBlueprint, htmlContent: string): Promise<string> {
   const hints    = TEMPLATE_HINTS[bp.template];
   const cdnHints = buildCdnJsHints(bp.cdnNeeded);
   const summary  = extractStructuralSummary(htmlContent);
   const baseCtx  = `App: ${bp.appName} [${bp.template}, ${bp.complexity}]\nDescription: ${bp.description}`;
+
+  // Fix #3: Generate shared contract first so all modules use consistent variable names
+  const contract = await generateModuleContract(bp, summary);
 
   const showPageFn = `function showPage(id) {
   document.querySelectorAll('[id^="page-"]').forEach(p => p.style.display = 'none');
@@ -468,6 +529,9 @@ APP STRUCTURE:
 ${summary}
 
 DATA MODEL: ${JSON.stringify(bp.dataModel, null, 2)}
+
+SHARED CONTRACT (use these exact variable names):
+${contract}
 
 Rules:
 - Define all state variables at module top
@@ -488,6 +552,9 @@ APP STRUCTURE:
 ${summary}
 
 USER INTERACTIONS: ${bp.interactions.join(' | ')}
+
+SHARED CONTRACT:
+${contract}
 
 TEMPLATE RULES:
 ${hints.js}
@@ -513,6 +580,9 @@ ${htmlContent.slice(0, 8000)}
 \`\`\`
 
 ${cdnHints ? `CDN LIBRARIES:\n${cdnHints}\n` : ''}
+
+SHARED CONTRACT:
+${contract}
 
 Rules:
 - DOMContentLoaded wraps EVERYTHING
@@ -621,6 +691,78 @@ Return ONLY the corrected JavaScript — same logic, only broken references/miss
     console.warn('[AppEngine] Auto-repair AI call failed, returning original JS');
     return js;
   }
+}
+
+// ─── Comprehensive final validation report ────────────────────────────────────
+
+function computeValidationReport(html: string, js: string, css: string, repairsApplied: number): ValidationReport {
+  const domCheck = validateDOMConsistency(html, js);
+
+  // Additional checks
+  const syntaxIssues = [...domCheck.syntaxIssues];
+
+  // Check for common JS anti-patterns that break apps
+  if (js.includes('document.write(')) syntaxIssues.push('document.write() found — breaks page');
+  if (js.match(/innerHTML\s*\+=/)) syntaxIssues.push('innerHTML += found — prefer appendChild');
+  if (!js.includes('DOMContentLoaded') && !js.includes('defer')) {
+    syntaxIssues.push('No DOMContentLoaded wrapper — elements may not exist when JS runs');
+  }
+
+  // Check CSS has :root variables defined
+  const cssIssues: string[] = [];
+  if (!css.includes(':root')) cssIssues.push('CSS: no :root variables defined');
+  if (!css.includes('display: none') && !css.includes('display:none')) {
+    cssIssues.push('CSS: no hidden page rule — multi-page navigation may not work');
+  }
+
+  const allIssues = [...domCheck.brokenIds.map(i => `Broken ID: #${i}`),
+                     ...domCheck.missingWires.map(i => `Unwired button: #${i}`),
+                     ...syntaxIssues,
+                     ...cssIssues];
+
+  // Quality score: start at 100, deduct per issue
+  let score = 100;
+  score -= domCheck.brokenIds.length * 15;
+  score -= domCheck.missingWires.length * 10;
+  score -= syntaxIssues.length * 5;
+  score -= cssIssues.length * 3;
+  score = Math.max(0, Math.min(100, score));
+
+  return {
+    passed: allIssues.length === 0,
+    brokenIds: domCheck.brokenIds,
+    missingWires: domCheck.missingWires,
+    syntaxIssues: [...syntaxIssues, ...cssIssues],
+    repairsApplied,
+    score,
+  };
+}
+
+// ─── Deployment guide generator ───────────────────────────────────────────────
+
+function generateDeploymentGuide(appName: string): string {
+  return `## ${appName} — Deployment Options
+
+### Option 1: GitHub Pages (Free, Recommended)
+1. GitHub par naya repo banao: github.com/new
+2. Upload karo: index.html, style.css, script.js
+3. Settings → Pages → Source: "main branch"
+4. 2 minute mein live: https://yourusername.github.io/repo-name
+
+### Option 2: Vercel (Free, Fastest)
+1. vercel.com par signup karo
+2. "New Project" → "Import from GitHub" ya drag-drop files
+3. Deploy click karo → 30 seconds mein live URL mil jayegi
+
+### Option 3: Netlify (Free)
+1. netlify.com → drag & drop your 3 files
+2. Instant live URL milega (e.g. https://amazing-app-123.netlify.app)
+
+### Option 4: Firebase Hosting
+1. npm install -g firebase-tools
+2. firebase login && firebase init hosting
+3. Copy files to public/ folder
+4. firebase deploy`;
 }
 
 // ─── Step 2: Generate HTML (template-aware) ───────────────────────────────────
@@ -803,13 +945,14 @@ export async function buildApp(
   };
 
   try {
-    report('Analyzing', 1, 6, 'Building deep blueprint...');
-    const bp = await generateBlueprint(userPrompt);
+    report('Analyzing', 1, 7, 'Building deep blueprint...');
+    let bp = await generateBlueprint(userPrompt);
+    bp = enforceComplexityRules(bp); // Fix #2: override AI's complexity decision
     console.log(`[AppEngine v4] Blueprint: ${bp.appName} | Template: ${bp.template} | Complexity: ${bp.complexity} | Screens: ${bp.screens.length}`);
 
-    report('Planning', 2, 6, `${bp.appName} — ${bp.screens.length} screens, ${bp.template} template`);
+    report('Planning', 2, 7, `${bp.appName} — ${bp.screens.length} screens, ${bp.template} template`);
 
-    report('Generating', 3, 6, 'Writing HTML structure...');
+    report('Generating', 3, 7, 'Writing HTML structure...');
     const htmlContent = await generateHTML(bp);
     const generatedFiles: Record<string, string> = { 'index.html': htmlContent };
     onFileGenerated?.('index.html', htmlContent);
@@ -818,27 +961,31 @@ export async function buildApp(
     let cssContent: string;
 
     if (bp.complexity === 'complex') {
-      report('Generating', 4, 6, 'Writing JavaScript (split: state + logic + ui in parallel)...');
+      report('Generating', 4, 7, 'Writing JavaScript (split: state + logic + ui in parallel)...');
       jsContent = await generateJSSplit(bp, htmlContent);
-      report('Generating', 5, 6, 'Writing CSS — styling & animations...');
+      report('Generating', 5, 7, 'Writing CSS — styling & animations...');
       cssContent = await generateCSS(bp, htmlContent);
     } else {
-      report('Generating', 4, 6, 'Writing JavaScript + CSS in parallel...');
+      report('Generating', 4, 7, 'Writing JavaScript + CSS in parallel...');
       [jsContent, cssContent] = await Promise.all([
         generateJS(bp, htmlContent),
         generateCSS(bp, htmlContent),
       ]);
-      report('Generating', 5, 6, 'JS + CSS complete.');
+      report('Generating', 5, 7, 'JS + CSS complete.');
     }
 
-    // Phase 5: Validate DOM consistency + auto-repair broken wires
-    const validation = validateDOMConsistency(htmlContent, jsContent);
-    if (!validation.valid) {
+    // Fix #1: Validation loop — max 2 repair attempts
+    let repairAttempts = 0;
+    let validation = validateDOMConsistency(htmlContent, jsContent);
+    while (!validation.valid && repairAttempts < 2) {
+      const issues = [...validation.brokenIds, ...validation.missingWires, ...validation.syntaxIssues];
       console.log(`[AppEngine] Validation issues — brokenIds: [${validation.brokenIds}] missingWires: [${validation.missingWires}] syntax: [${validation.syntaxIssues}]`);
-      report('Repairing', 5, 6, `Auto-repairing ${validation.brokenIds.length + validation.missingWires.length} issues...`);
+      report('Repairing', 5, 7, `Pass ${repairAttempts + 1}: fixing ${issues.length} issues (${validation.brokenIds.length} broken IDs, ${validation.missingWires.length} unwired buttons)...`);
       jsContent = await autoRepairJS(jsContent, htmlContent, validation, bp.appName);
-      console.log('[AppEngine] Auto-repair complete.');
-    } else {
+      validation = validateDOMConsistency(htmlContent, jsContent);
+      repairAttempts++;
+    }
+    if (validation.valid) {
       console.log('[AppEngine] Validation passed — all DOM references and button wires OK.');
     }
 
@@ -847,8 +994,14 @@ export async function buildApp(
     onFileGenerated?.('script.js',  jsContent);
     onFileGenerated?.('style.css',  cssContent);
 
-    report('Assembling', 6, 6, 'Building live preview...');
+    // Compute comprehensive validation report
+    const validationReport = computeValidationReport(htmlContent, jsContent, cssContent, repairAttempts);
+    console.log(`[AppEngine] Final quality score: ${validationReport.score}/100 | passed: ${validationReport.passed}`);
+
+    report('Assembling', 6, 7, 'Building live preview...');
     const previewHtml = buildPreviewHtml(generatedFiles, bp);
+
+    report('Assembling', 7, 7, 'Finalizing...');
 
     const fileList: AppFile[] = Object.entries(generatedFiles).map(([path, content]) => ({
       path,
@@ -865,6 +1018,8 @@ export async function buildApp(
       fileList,
       previewHtml,
       appName: bp.appName,
+      validationReport,
+      deploymentGuide: generateDeploymentGuide(bp.appName),
     };
 
   } catch (err: any) {

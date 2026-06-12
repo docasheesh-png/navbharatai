@@ -1,15 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../App';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { motion } from 'motion/react';
-import { MessageSquare, Clock, ShieldCheck, LogIn, MoreVertical, Trash2, X } from 'lucide-react';
+import { MessageSquare, Clock, ShieldCheck, LogIn, MoreVertical, Trash2, Search, X, Layers, Code2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-export const HistoryView = ({ 
+type FilterMode = 'all' | 'chat' | 'apps';
+
+const isAppSession = (session: any) =>
+  (session.files && Object.keys(session.files).length > 0) ||
+  (session.mode && (session.mode === 'build' || session.mode === 'app_builder')) ||
+  (session.current_agent && (String(session.current_agent).includes('vishwakarma') || String(session.current_agent).includes('pro')));
+
+export const HistoryView = ({
   user,
   onRestoreSession,
   onDeleteSession
-}: { 
+}: {
   user: any;
   onRestoreSession?: (uci: string) => void;
   onDeleteSession?: (id: string) => void;
@@ -18,6 +25,8 @@ export const HistoryView = ({
   const [loading, setLoading] = useState(true);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [filterMode, setFilterMode] = useState<FilterMode>('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     if (!user) return;
@@ -36,7 +45,6 @@ export const HistoryView = ({
       setSessions(data);
       setLoading(false);
     }, () => {
-      // Fallback: load from localStorage if Firestore fails
       try {
         const local = JSON.parse(localStorage.getItem('navbharat_sessions') || '[]');
         setSessions(local.sort((a: any, b: any) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime()));
@@ -45,6 +53,26 @@ export const HistoryView = ({
     });
     return () => unsubscribe();
   }, [user]);
+
+  const filteredSessions = useMemo(() => {
+    let result = sessions;
+
+    if (filterMode === 'apps') result = result.filter(isAppSession);
+    else if (filterMode === 'chat') result = result.filter(s => !isAppSession(s));
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      result = result.filter(s =>
+        (s.title && s.title.toLowerCase().includes(q)) ||
+        (s.uci && s.uci.toLowerCase().includes(q)) ||
+        (s.id && s.id.toLowerCase().includes(q)) ||
+        (s.messages && Array.isArray(s.messages) &&
+          s.messages.some((m: any) => m.text && m.text.toLowerCase().includes(q)))
+      );
+    }
+
+    return result;
+  }, [sessions, filterMode, searchQuery]);
 
   if (loading) {
     return (
@@ -55,21 +83,75 @@ export const HistoryView = ({
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-[#0d1117] h-full overflow-hidden p-8">
-      <h2 className="text-3xl font-black text-white italic tracking-tighter uppercase flex items-center gap-3 mb-8">
+    <div className="flex-1 flex flex-col bg-[#0d1117] h-full overflow-hidden p-6">
+      {/* Header */}
+      <h2 className="text-3xl font-black text-white italic tracking-tighter uppercase flex items-center gap-3 mb-5">
         <MessageSquare className="w-8 h-8 text-indigo-500" />
         Session History
       </h2>
+
+      {/* Filter + Search bar */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-5">
+        {/* Filter tabs */}
+        <div className="flex items-center gap-1 bg-[#161b22] border border-white/8 rounded-xl p-1 shrink-0">
+          {(['all', 'chat', 'apps'] as FilterMode[]).map(mode => (
+            <button
+              key={mode}
+              onClick={() => setFilterMode(mode)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                filterMode === mode
+                  ? "bg-indigo-600 text-white shadow-md"
+                  : "text-[#8b949e] hover:text-white hover:bg-white/5"
+              )}
+            >
+              {mode === 'all' && <Layers className="w-3 h-3" />}
+              {mode === 'chat' && <MessageSquare className="w-3 h-3" />}
+              {mode === 'apps' && <Code2 className="w-3 h-3" />}
+              {mode}
+            </button>
+          ))}
+        </div>
+
+        {/* Search box */}
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#484f58]" />
+          <input
+            type="text"
+            placeholder="Search by title, CUI, or message..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="w-full bg-[#161b22] border border-white/8 rounded-xl pl-8 pr-8 py-2 text-[11px] text-white placeholder-[#484f58] outline-none focus:border-indigo-500/50 transition-colors font-mono"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#484f58] hover:text-white transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Count indicator */}
+      <div className="text-[9px] font-black uppercase tracking-widest text-[#484f58] mb-3">
+        {filteredSessions.length} session{filteredSessions.length !== 1 ? 's' : ''}
+        {searchQuery ? ` matching "${searchQuery}"` : ''}
+      </div>
+
+      {/* Session list */}
       <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar">
-        {sessions.length === 0 ? (
+        {filteredSessions.length === 0 ? (
           <div className="text-center py-20 text-[#8b949e] font-black uppercase tracking-widest text-sm">
-            No past sessions found.
+            {searchQuery ? `No sessions found for "${searchQuery}"` : 'No sessions found.'}
           </div>
         ) : (
-          sessions.map((session) => {
+          filteredSessions.map((session) => {
             const isConfirming = confirmDeleteId === session.id;
+            const sessionIsApp = isAppSession(session);
             return (
-              <motion.div 
+              <motion.div
                 key={session.id}
                 layout
                 initial={{ opacity: 0, y: 10 }}
@@ -77,8 +159,8 @@ export const HistoryView = ({
                 exit={{ opacity: 0, scale: 0.95 }}
                 className={cn(
                   "border rounded-2xl p-6 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative",
-                  isConfirming 
-                    ? "bg-red-950/20 border-red-500/30 shadow-lg shadow-red-500/5 animate-pulse" 
+                  isConfirming
+                    ? "bg-red-950/20 border-red-500/30 shadow-lg shadow-red-500/5 animate-pulse"
                     : "bg-[#161b22] border-white/5 hover:border-indigo-500/30"
                 )}
               >
@@ -87,14 +169,14 @@ export const HistoryView = ({
                     <div className="space-y-1">
                       <h4 className="font-bold text-red-400 text-sm flex items-center gap-2">
                         <Trash2 className="w-4 h-4 text-red-500" />
-                        Delete this chat session permanently?
+                        Delete this session permanently?
                       </h4>
                       <p className="text-xs text-[#8b949e]">
                         All messages and context for <span className="font-mono text-red-300">CUI: {session.uci || session.id}</span> will be deleted. This cannot be undone.
                       </p>
                     </div>
                     <div className="flex items-center gap-3 shrink-0 self-start sm:self-auto">
-                      <button 
+                      <button
                         onClick={() => {
                           onDeleteSession && onDeleteSession(session.id);
                           setConfirmDeleteId(null);
@@ -103,7 +185,7 @@ export const HistoryView = ({
                       >
                         Yes, Delete
                       </button>
-                      <button 
+                      <button
                         onClick={() => setConfirmDeleteId(null)}
                         className="px-4 py-2 bg-[#21262d] hover:bg-[#30363d] text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer border border-white/10"
                       >
@@ -119,13 +201,22 @@ export const HistoryView = ({
                         <span className="inline-flex items-center px-2 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/25 rounded-md font-mono text-[10px] tracking-normal lowercase">
                           CUI: {session.uci || session.id}
                         </span>
+                        {/* App / Chat badge */}
+                        <span className={cn(
+                          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border",
+                          sessionIsApp
+                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
+                            : "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
+                        )}>
+                          {sessionIsApp ? <><Code2 className="w-2.5 h-2.5" /> App</> : <><MessageSquare className="w-2.5 h-2.5" /> Chat</>}
+                        </span>
                       </div>
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10px] text-[#8b949e] font-bold uppercase tracking-widest">
                         <span className="flex items-center gap-1.5"><Clock className="w-3 h-3 animate-pulse" /> {new Date(session.lastUpdated).toLocaleString()}</span>
                         <span className="flex items-center gap-1.5"><ShieldCheck className="w-3 h-3 text-emerald-500" /> {session.current_agent || 'navbharatai'}</span>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-3 shrink-0 self-start sm:self-auto z-10">
                       <button
                         onClick={() => onRestoreSession && onRestoreSession(session.uci || session.id)}
@@ -151,8 +242,8 @@ export const HistoryView = ({
 
                         {openDropdownId === session.id && (
                           <>
-                            <div 
-                              className="fixed inset-0 z-40 bg-black/5" 
+                            <div
+                              className="fixed inset-0 z-40 bg-black/5"
                               onClick={() => setOpenDropdownId(null)}
                             />
                             <div className="absolute right-0 mt-2 w-48 bg-[#1f242c] border border-white/10 rounded-xl shadow-2xl z-50 py-1.5 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">

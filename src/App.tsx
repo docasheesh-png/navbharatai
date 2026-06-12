@@ -2984,20 +2984,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
       if (htmlFile) {
         setGeneratedCode(htmlFile[1]);
         setHasGeneratedCode(true);
-        // Open preview tab alongside the chat tab so history preview shows
-        if (isProSession) {
-          toggleTab('nbi_pro_chat');
-          toggleTab('preview');
-        } else {
-          toggleTab('nbi_chat');
-          toggleTab('preview');
-        }
-        addLog(`UCI resumed with preview: ${uciToFind}`, 'info');
-        return true;
       }
     }
 
-    // No code to restore — just open the right chat tab
+    // Always open the chat tab (not preview) when restoring from history
     toggleTab(isProSession ? 'nbi_pro_chat' : 'nbi_chat');
 
     addLog(`UCI resumed: ${uciToFind}`, 'info');

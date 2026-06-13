@@ -1063,7 +1063,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                     onChange={handleFileSelect}
                     className="hidden"
                     multiple
-                    accept="image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp"
+                    accept="image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.txt,.csv,.json,.zip"
                   />
                   <textarea
                     ref={textareaRef}

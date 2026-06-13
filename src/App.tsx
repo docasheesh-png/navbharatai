@@ -2659,15 +2659,88 @@ ${buildLanguageRule(preferredLanguage)}`;
     return 'build';
   };
 
+  // ── ZIP Import: unzip → load into Code Studio → show preview ────────────────
+  const handleZipImport = async (zipFile: File, extraMessage?: string) => {
+    setIsProLoading(true);
+    setProMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      text: `📦 Importing ${zipFile.name}...`,
+      sender: 'user', timestamp: new Date(),
+    }]);
+    setProBuildProgress({ active: true, stage: '📦 Extracting ZIP...', steps: [], percent: 30, generatedFiles: {} });
+
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(zipFile);
+      });
+
+      const res = await fetch('/api/extract-zip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zipBase64: base64, fileName: zipFile.name }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'ZIP extraction failed');
+      const data = await res.json();
+
+      // Load into Code Studio + update preview
+      setFiles(data.files as any);
+      setGeneratedCode(data.html || '');
+      setTimeout(() => updatePreview(data.files as any), 200);
+      setProBuildProgress({ active: false, stage: '', steps: [], percent: 100, generatedFiles: data.files });
+
+      const fileListText = data.fileList.slice(0, 10).map((f: string) => `• \`${f}\``).join('\n');
+      const moreText = data.fileList.length > 10 ? `\n• ... and ${data.fileList.length - 10} more` : '';
+      setProMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        text: `📦 **${data.appName}** imported — ${data.fileCount} files loaded into Code Studio. App is live in Preview.\n\n${fileListText}${moreText}\n\nApp is ready to edit — tell me what you want to change!`,
+        sender: 'ai', timestamp: new Date(),
+      }]);
+
+      // If user also typed a message with the ZIP, run it as an edit now
+      if (extraMessage?.trim()) {
+        setTimeout(() => {
+          setProInput('');
+          handleSendForPro(extraMessage);
+        }, 800);
+      }
+    } catch (err: any) {
+      setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+      setProMessages(prev => [...prev, {
+        id: (Date.now() + 2).toString(),
+        text: `❌ ZIP import failed: ${err.message}`,
+        sender: 'ai', timestamp: new Date(),
+      }]);
+    } finally {
+      setIsProLoading(false);
+      setProInput('');
+    }
+  };
+
   const handleSendForPro = async (input?: string | File[]) => {
     const fileList = Array.isArray(input) ? input : [];
     const messageToSend = typeof input === 'string' ? input : proInput.trim();
     if (!messageToSend && fileList.length === 0 || isProLoading) return;
 
-    const oversized = fileList.filter(f => f.size > MAX_UPLOAD_BYTES);
+    // ZIP file detected → import into Code Studio instead of sending to AI chat
+    const zipFile = fileList.find(f =>
+      f.name.toLowerCase().endsWith('.zip') ||
+      f.type === 'application/zip' ||
+      f.type === 'application/x-zip-compressed'
+    );
+    if (zipFile) {
+      await handleZipImport(zipFile, messageToSend);
+      return;
+    }
+
+    // ZIP can be up to 20MB; other files max 2MB
+    const ZIP_MAX = 20 * 1024 * 1024;
+    const oversized = fileList.filter(f => f.size > (f.name.endsWith('.zip') ? ZIP_MAX : MAX_UPLOAD_BYTES));
     if (oversized.length > 0) {
       const names = oversized.map(f => `${f.name} (${(f.size/1024/1024).toFixed(1)}MB)`).join(', ');
-      addLog(`File too large: ${names}. Max 2 MB per file.`, 'error');
+      addLog(`File too large: ${names}. Max 2 MB per file (20 MB for ZIP).`, 'error');
       return;
     }
 

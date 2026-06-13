@@ -4031,11 +4031,12 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     if (!message && !Array.isArray(fileAttachments)) return res.status(400).json({ reply: 'Message is required' });
     message = message || '';
 
-    // Process attached files — text files decoded into message, images handled via Gemini vision
+    // Process attached files
+    // Images + PDFs → Gemini vision (inlineData); text/code files → decode to message text
     type FileAttachment = { name: string; type: string; base64: string };
     const attachments: FileAttachment[] = Array.isArray(fileAttachments) ? fileAttachments : [];
-    const imageAttachments = attachments.filter(f => f.type.startsWith('image/'));
-    const textAttachments = attachments.filter(f => !f.type.startsWith('image/'));
+    const visionAttachments = attachments.filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
+    const textAttachments = attachments.filter(f => !f.type.startsWith('image/') && f.type !== 'application/pdf');
 
     // Append decoded text file content to message
     if (textAttachments.length > 0) {
@@ -4045,8 +4046,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       });
       message = (message || 'Please review these files:') + textParts.join('');
     }
-    // Ensure image-only messages have a prompt
-    if (!message && imageAttachments.length > 0) message = 'Please describe and analyze this image.';
+    // Ensure file-only messages have a prompt
+    if (!message && visionAttachments.length > 0) message = visionAttachments[0].type === 'application/pdf' ? 'Please analyze this PDF and extract all relevant information.' : 'Please describe and analyze this image.';
 
     const isFree = tier === 'navbharat';
     // Free tier: always conversational — ignore canvas and build intent completely
@@ -4072,10 +4073,10 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       contextualMessage = `[CANVAS — current app on canvas (${currentApp.length} chars total)]:\n\`\`\`html\n${currentApp.slice(0, 20000)}${currentApp.length > 20000 ? '\n...[truncated — send smaller app for full edit]' : ''}\n\`\`\`\n\nUser request: ${message}`;
     }
 
-    console.log(`[CHAT] tier=${tier} isFree=${isFree} mode=${mode} intent=${intent} hasCanvas=${hasCanvas} files=${attachments.length}(img=${imageAttachments.length}) sysprompt=${isFree ? 'FREE' : hasCanvas ? 'EDIT' : isBuildIntent ? 'BUILD' : 'CHAT'}`);
+    console.log(`[CHAT] tier=${tier} isFree=${isFree} mode=${mode} intent=${intent} hasCanvas=${hasCanvas} files=${attachments.length}(vision=${visionAttachments.length}) sysprompt=${isFree ? 'FREE' : hasCanvas ? 'EDIT' : isBuildIntent ? 'BUILD' : 'CHAT'}`);
 
-    // Image attachments — direct Gemini vision call (bypasses string-only router)
-    if (imageAttachments.length > 0) {
+    // Vision attachments (images + PDFs) — Gemini/Vertex multimodal call
+    if (visionAttachments.length > 0) {
       const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
       const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
       if (geminiKey || projectId) {
@@ -4083,8 +4084,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           const { GoogleGenAI } = await import('@google/genai');
           const ai = new GoogleGenAI({ apiKey: geminiKey || 'vertex' });
           const parts: any[] = [{ text: contextualMessage }];
-          for (const img of imageAttachments) {
-            parts.push({ inlineData: { mimeType: img.type, data: img.base64 } });
+          for (const f of visionAttachments) {
+            parts.push({ inlineData: { mimeType: f.type, data: f.base64 } });
           }
           const visionConfig: any = {};
           if (systemPrompt) visionConfig.systemInstruction = systemPrompt;
@@ -4610,6 +4611,82 @@ Response Format:
       send({ type: 'error', message: userFriendly, detail: msg, suggestion });
     }
     res.end();
+  });
+
+  // ── ZIP Import: extract uploaded ZIP → structured files for Code Studio ──────
+  app.post('/api/extract-zip', async (req: any, res: any) => {
+    const { zipBase64, fileName } = req.body;
+    if (!zipBase64) return res.status(400).json({ error: 'zipBase64 required' });
+
+    const os = await import('os');
+    const tmpId = crypto.randomBytes(8).toString('hex');
+    const tmpZip = path.join(os.default.tmpdir(), `nbt-${tmpId}.zip`);
+    const tmpDir = path.join(os.default.tmpdir(), `nbt-${tmpId}`);
+
+    try {
+      fs.writeFileSync(tmpZip, Buffer.from(zipBase64, 'base64'));
+      fs.mkdirSync(tmpDir, { recursive: true });
+
+      const extractZip = require('extract-zip');
+      await extractZip(tmpZip, { dir: tmpDir });
+
+      const IMAGE_MIME: Record<string, string> = {
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+        '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+        '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+      };
+      const TEXT_EXTS = new Set([
+        '.html', '.htm', '.css', '.js', '.ts', '.jsx', '.tsx',
+        '.json', '.txt', '.md', '.csv', '.xml', '.yaml', '.yml', '.env',
+        '.gitignore', '.eslintrc', '.prettierrc',
+      ]);
+      const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', '.cache']);
+
+      const extractedFiles: Record<string, string> = {};
+      const walkDir = (dir: string, baseDir: string) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (entry.name === '.DS_Store') continue;
+          const fullPath = path.join(dir, entry.name);
+          const relPath = path.relative(baseDir, fullPath).replace(/\\/g, '/');
+          if (entry.isDirectory()) {
+            if (!SKIP_DIRS.has(entry.name)) walkDir(fullPath, baseDir);
+          } else {
+            const ext = path.extname(entry.name).toLowerCase();
+            if (IMAGE_MIME[ext]) {
+              const data = fs.readFileSync(fullPath).toString('base64');
+              extractedFiles[relPath] = `data:${IMAGE_MIME[ext]};base64,${data}`;
+            } else if (TEXT_EXTS.has(ext) || !ext) {
+              try {
+                const content = fs.readFileSync(fullPath, 'utf8');
+                if (content.length < 500000) extractedFiles[relPath] = content;
+              } catch { /* binary — skip */ }
+            }
+          }
+        }
+      };
+
+      // Strip single root folder if ZIP was created from a folder
+      const topLevel = fs.readdirSync(tmpDir);
+      const baseDir = topLevel.length === 1 && fs.statSync(path.join(tmpDir, topLevel[0])).isDirectory()
+        ? path.join(tmpDir, topLevel[0]) : tmpDir;
+      walkDir(baseDir, baseDir);
+
+      const html = extractedFiles['index.html'] || extractedFiles['index.htm'] || '';
+      const css  = extractedFiles['style.css']  || extractedFiles['styles.css'] || extractedFiles['main.css']  || extractedFiles['app.css']  || '';
+      const js   = extractedFiles['script.js']  || extractedFiles['app.js']    || extractedFiles['main.js']   || extractedFiles['index.js'] || '';
+      const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+      const appName = titleMatch?.[1]?.trim() || (fileName || 'Imported App').replace(/\.zip$/i, '');
+
+      console.log(`[extract-zip] ${Object.keys(extractedFiles).length} files from ${fileName || 'zip'}: ${Object.keys(extractedFiles).slice(0, 8).join(', ')}`);
+      return res.json({ files: extractedFiles, html, css, js, appName, fileCount: Object.keys(extractedFiles).length, fileList: Object.keys(extractedFiles) });
+
+    } catch (err: any) {
+      console.error('[extract-zip] Error:', err.message);
+      return res.status(500).json({ error: `ZIP extraction failed: ${err.message}` });
+    } finally {
+      try { fs.unlinkSync(tmpZip); } catch { /* ignore */ }
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
   });
 
   // ── One-click download: package app files as ZIP ─────────────────────────────

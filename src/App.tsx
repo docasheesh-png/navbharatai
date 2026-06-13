@@ -201,9 +201,19 @@ export default function App() {
     const lang = localStorage.getItem('navbharat_language');
     return lang ? [WELCOME_MSG] : [LANGUAGE_PICKER_MSG];
   };
+  const initialProMessages = (): Message[] => {
+    try {
+      const saved = localStorage.getItem('navbharat_pro_messages');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed as Message[];
+      }
+    } catch {}
+    return [];
+  };
   const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>({
     nbi_chat: initialNbiMessages(),
-    nbi_pro_chat: [],
+    nbi_pro_chat: initialProMessages(),
   });
   // Backward-compatible derived accessors — all existing code using messages/proMessages still works
   const messages: Message[] = messagesMap['nbi_chat'] || [];
@@ -914,6 +924,22 @@ export default function App() {
       try { localStorage.setItem('navbharat_last_app', generatedCode); } catch {}
     }
   }, [generatedCode, hasGeneratedCode]);
+
+  // Persist pro chat history so "Edit with AI" resumes the last conversation
+  useEffect(() => {
+    if (proMessages.length === 0) return;
+    try {
+      const toSave = proMessages.slice(-40).map(m => ({
+        id: m.id,
+        sender: m.sender,
+        text: String(m.text || '').slice(0, 2000),
+        timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : m.timestamp,
+        modelUsed: m.modelUsed,
+        // meta omitted — can contain huge deployFiles blobs
+      }));
+      localStorage.setItem('navbharat_pro_messages', JSON.stringify(toSave));
+    } catch {}
+  }, [proMessages]);
 
   // 9.1 — Ctrl+Z / Ctrl+Y keyboard shortcuts for undo/redo
   useEffect(() => {

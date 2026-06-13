@@ -487,9 +487,19 @@ Data model: ${JSON.stringify(bp.dataModel)}
 Features: ${bp.interactions.slice(0, 6).join(' | ')}
 
 Output:
-1. All shared state variables with initial values (e.g. let score = 0; let lives = 3;)
-2. Function signatures as comments only (e.g. // function startGame() {} — implemented in logic module)
-3. Constants (e.g. const CANVAS_WIDTH = 800;)
+1. AppState reactive manager (ALWAYS include this exact code):
+   const AppState = (() => {
+     const _s = {}, _l = {};
+     return {
+       set(k, v) { _s[k] = v; (_l[k]||[]).forEach(fn => fn(v)); },
+       get(k) { return _s[k]; },
+       on(k, fn) { (_l[k] = _l[k]||[]).push(fn); },
+     };
+   })();
+2. All shared state variables with initial values (e.g. let score = 0; let lives = 3;)
+3. Function signatures as comments only (e.g. // function startGame() {} — implemented in logic module)
+4. Constants (e.g. const CANVAS_WIDTH = 800;)
+5. loadState() and saveState() using localStorage — update AppState in loadState()
 
 Output ONLY the variable declarations and comments:`;
   try {
@@ -1027,6 +1037,97 @@ function buildPreviewHtml(files: Record<string, string>, bp: AppBlueprint): stri
   return html;
 }
 
+// ─── Phase 4: Screen-by-screen HTML for complex apps ─────────────────────────
+
+async function generateScreenContent(
+  bp: AppBlueprint,
+  screen: { id: string; purpose: string },
+  isFirst: boolean,
+  allScreenIds: string[],
+): Promise<string> {
+  const relevant = bp.interactions.filter(i => {
+    const lower = i.toLowerCase();
+    return lower.includes(screen.id.replace('page-', '')) ||
+           lower.includes(screen.purpose.split(' ')[0].toLowerCase());
+  }).slice(0, 6);
+  const interactions = relevant.length > 0 ? relevant : bp.interactions.slice(0, 4);
+
+  const prompt = `Generate the HTML for ONE screen of the "${bp.appName}" app.
+
+SCREEN: id="${screen.id}" — ${screen.purpose}
+TEMPLATE: ${bp.template}
+${isFirst ? 'VISIBILITY: style="" (first screen — visible by default)' : 'VISIBILITY: style="display:none" (hidden until navigated to)'}
+
+RELEVANT INTERACTIONS TO BUILD UI FOR:
+${interactions.map(i => `- ${i}`).join('\n')}
+
+ALL SCREENS IN APP (for reference — do NOT include them, just know they exist):
+${allScreenIds.filter(id => id !== screen.id).join(', ')}
+
+RULES:
+- Output ONLY the <div id="${screen.id}" ...> ... </div> element
+- Every interactive element (buttons, inputs, selects) needs a unique id=""
+- id prefix convention: buttons start with "btn-", inputs with "inp-"
+- Use Font Awesome icons: <i class="fa-solid fa-icon-name"></i>
+- Build COMPLETE UI — no "coming soon" or empty sections
+- DO NOT include <html>, <head>, <body>, <script>, or <link> tags
+
+Output ONLY the <div id="${screen.id}"> element:`;
+
+  return callAI(
+    prompt,
+    'You are a world-class frontend developer. Output ONLY the HTML div element — no markdown, no extra text.',
+    3000,
+  );
+}
+
+async function generateHTMLScreenByScreen(bp: AppBlueprint): Promise<string> {
+  const cdnTags      = buildCdnHeadTags(bp.cdnNeeded);
+  const screenIds    = bp.screens.map(s => s.id);
+
+  // Generate all screens in parallel
+  const screenDivs = await Promise.all(
+    bp.screens.map((screen, idx) => generateScreenContent(bp, screen, idx === 0, screenIds)),
+  );
+
+  // Assemble full HTML
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${bp.appName}</title>
+${cdnTags}
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+${screenDivs.join('\n\n')}
+
+<div id="toast-msg" class="toast-notification" style="display:none;position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:8px;z-index:9999;font-size:14px;"></div>
+<script src="script.js" defer></script>
+</body>
+</html>`;
+}
+
+// After HTML generation, verify all expected screens exist — regenerate missing ones
+async function ensureAllScreens(html: string, bp: AppBlueprint): Promise<string> {
+  let result = html;
+  const missing = bp.screens.filter(s => !html.includes(`id="${s.id}"`));
+  if (missing.length === 0) return result;
+
+  console.log(`[AppEngine] Screen completeness check: missing ${missing.map(s => s.id).join(', ')} — regenerating`);
+  const allScreenIds = bp.screens.map(s => s.id);
+  const fixedDivs = await Promise.all(
+    missing.map(s => generateScreenContent(bp, s, false, allScreenIds)),
+  );
+
+  // Inject missing screens before </body>
+  const injection = fixedDivs.join('\n\n');
+  result = result.replace('</body>', `${injection}\n</body>`);
+  return result;
+}
+
 // ─── Main: buildApp() ─────────────────────────────────────────────────────────
 
 export async function buildApp(
@@ -1048,7 +1149,16 @@ export async function buildApp(
     report('Planning', 2, 7, `${bp.appName} — ${bp.screens.length} screens, ${bp.template} template`);
 
     report('Generating', 3, 7, 'Writing HTML structure...');
-    const htmlContent = await generateHTML(bp);
+    // Phase 4: use screen-by-screen generation for complex multi-screen apps
+    let htmlContent: string;
+    if (bp.complexity === 'complex' && bp.screens.length >= 4) {
+      report('Generating', 3, 7, `Building ${bp.screens.length} screens in parallel...`);
+      htmlContent = await generateHTMLScreenByScreen(bp);
+    } else {
+      htmlContent = await generateHTML(bp);
+    }
+    // Verify all screens exist — patch missing ones
+    htmlContent = await ensureAllScreens(htmlContent, bp);
     const generatedFiles: Record<string, string> = { 'index.html': htmlContent };
     onFileGenerated?.('index.html', htmlContent);
 

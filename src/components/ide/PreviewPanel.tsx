@@ -4,7 +4,7 @@ import {
   ExternalLink, Maximize2, Shield, Globe,
   Search, ChevronLeft, ChevronRight, Download, Package,
   Share2, Copy, Check, X, Wifi, Pen, Eye, ChevronDown, ChevronUp,
-  Zap
+  Zap, Tag
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { VisualEditor } from './VisualEditor';
@@ -20,10 +20,86 @@ interface PreviewPanelProps {
   onEditWithAI?: (hint?: string) => void;
 }
 
+// ── NBTag overlay: injected into iframe when Tag Mode is ON ──────────────────
+// Scans all interactive/structural elements, assigns stable IDs (BTN-001 etc.),
+// renders floating violet badges. Clicking a badge posts a message to the parent
+// window so the AI chat can be pre-filled with the exact element reference.
+// This script is NEVER stored in the generated HTML — only injected for preview.
+const NBT_OVERLAY_SCRIPT = `<script id="__nbt_script__">
+(function(){
+  if(document.getElementById('__nbt_ov__'))return;
+  var M={button:'BTN',input:'INP',select:'SEL',textarea:'TXA',a:'LNK',
+         h1:'HDG',h2:'HDG',h3:'HDG',img:'IMG',form:'FRM',
+         nav:'NAV',header:'BAR',footer:'FTR',section:'SEC',li:'LIT'};
+  var c={},T=Object.keys(M);
+  T.forEach(function(t){
+    document.querySelectorAll(t).forEach(function(el){
+      var p=M[t];c[p]=(c[p]||0)+1;
+      if(!el._nbt)el._nbt=p+'-'+String(c[p]).padStart(3,'0');
+    });
+  });
+  var ov=document.createElement('div');
+  ov.id='__nbt_ov__';
+  ov.style.cssText='position:fixed;inset:0;pointer-events:none;z-index:2147483646;overflow:hidden;';
+  document.body.appendChild(ov);
+  function draw(){
+    ov.innerHTML='';
+    T.forEach(function(t){
+      document.querySelectorAll(t).forEach(function(el){
+        if(!el._nbt)return;
+        var r=el.getBoundingClientRect();
+        if(r.width<2&&r.height<2)return;
+        var b=document.createElement('span');
+        b.textContent=el._nbt;
+        b.title='Click to reference in AI chat';
+        b.style.cssText='position:fixed;background:#7c3aed;color:#fff;font:800 8px/1 monospace;'
+          +'padding:2px 4px 2px;border-radius:0 0 4px 0;cursor:pointer;pointer-events:all;'
+          +'white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.7);user-select:none;'
+          +'transition:background .12s,transform .1s;';
+        b.style.top=Math.max(0,r.top)+'px';
+        b.style.left=Math.max(0,r.left)+'px';
+        b.addEventListener('mouseenter',function(){b.style.transform='scale(1.15)';});
+        b.addEventListener('mouseleave',function(){b.style.transform='scale(1)';});
+        b.addEventListener('click',function(e){
+          e.stopPropagation();e.preventDefault();
+          ov.querySelectorAll('span').forEach(function(x){x.style.background='#7c3aed';});
+          b.style.background='#059669';
+          window.parent.postMessage({
+            type:'nbtag-select',
+            tag:el._nbt,
+            el:el.tagName.toLowerCase(),
+            txt:(el.textContent||el.getAttribute('placeholder')||el.getAttribute('alt')||'').trim().slice(0,50),
+            id:el.id||'',
+            cls:Array.from(el.classList).filter(function(c){return!c.startsWith('__nbt')}).slice(0,3).join(' ')
+          },'*');
+        });
+        ov.appendChild(b);
+      });
+    });
+  }
+  draw();
+  document.addEventListener('scroll',draw,true);
+  window.addEventListener('resize',draw);
+  // Re-draw after dynamic rendering (React, etc.)
+  var t;
+  new MutationObserver(function(){clearTimeout(t);t=setTimeout(draw,250);})
+    .observe(document.body,{childList:true,subtree:true});
+})();
+</script>`;
+
+function injectTagOverlay(html: string): string {
+  if (!html) return html;
+  const idx = html.lastIndexOf('</body>');
+  return idx !== -1
+    ? html.slice(0, idx) + NBT_OVERLAY_SCRIPT + html.slice(idx)
+    : html + NBT_OVERLAY_SCRIPT;
+}
+
 export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, generatedCode, previewHistory = [], onRestoreHistory, onHtmlChange, onGoPro, onEditWithAI }) => {
   const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
   const [device, setDevice] = useState<'laptop' | 'mobile' | 'full'>(isMobileScreen ? 'full' : 'laptop');
   const [visualMode, setVisualMode] = useState(false);
+  const [tagMode, setTagMode] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [url, setUrl] = useState('preview://navbharat.app/');
   const [containerRef, setContainerRef] = React.useState<HTMLDivElement | null>(null);
@@ -37,10 +113,11 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
   const [hotReloadFlash, setHotReloadFlash] = useState(false);
   const prevCodeRef = useRef<string | undefined>(undefined);
 
-  // Hot reload indicator: flash when generatedCode changes
+  // Hot reload indicator
   useEffect(() => {
     if (prevCodeRef.current !== undefined && prevCodeRef.current !== generatedCode) {
       setHotReloadFlash(true);
+      setTagMode(false); // reset tag mode on new build
       const titleMatch = generatedCode?.match(/<title[^>]*>([^<]+)<\/title>/i);
       const title = titleMatch?.[1]?.trim();
       setUrl(title ? `preview://navbharat.app/${encodeURIComponent(title).replace(/%20/g, '-').toLowerCase()}` : 'preview://navbharat.app/');
@@ -48,6 +125,22 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
     }
     prevCodeRef.current = generatedCode;
   }, [generatedCode]);
+
+  // Listen for tag badge clicks from iframe
+  useEffect(() => {
+    const handleMsg = (e: MessageEvent) => {
+      if (e.data?.type !== 'nbtag-select') return;
+      const { tag, el, txt, id, cls } = e.data;
+      const parts: string[] = [el];
+      if (id) parts.push('#' + id);
+      if (cls) parts.push('.' + cls.split(' ').filter(Boolean).join('.'));
+      if (txt) parts.push(`"${txt}"`);
+      const hint = `[${tag} — ${parts.join(' ')}] `;
+      onEditWithAI?.(hint);
+    };
+    window.addEventListener('message', handleMsg);
+    return () => window.removeEventListener('message', handleMsg);
+  }, [onEditWithAI]);
 
   const openAsPwa = async () => {
     if (!generatedCode || pwaLoading) return;
@@ -95,8 +188,6 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
     if (!files || Object.keys(files).length === 0) return;
     setDownloading(true);
     try {
-      // Build a simple ZIP-like structure using data URIs
-      // Create an HTML download page listing all files
       const fileEntries = Object.entries(files);
       const parts: string[] = [];
       parts.push(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>NavBharat App Files</title>`);
@@ -137,11 +228,11 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
   const targetWidth = 1440;
   const targetHeight = 900;
 
-  const baseScale = dimensions?.width > 0 
+  const baseScale = dimensions?.width > 0
     ? Math.min(dimensions.width / targetWidth, dimensions.height / targetHeight)
     : 1;
 
-  const displayScale = device === 'full' 
+  const displayScale = device === 'full'
     ? baseScale
     : device === 'mobile' && dimensions?.width < 400 && dimensions?.width > 0
       ? (dimensions.width - 32) / 375
@@ -152,6 +243,8 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
     { id: 'mobile' as const, label: 'Mobile', icon: Smartphone, size: 'w-[375px]' },
     { id: 'full' as const, label: 'Full Screen', icon: Maximize2, size: 'w-full h-full' },
   ];
+
+  const previewSrc = tagMode && generatedCode ? injectTagOverlay(generatedCode) : generatedCode;
 
   return (
     <div className="flex flex-col h-full bg-[#0d1117]">
@@ -165,13 +258,14 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
 
         <div className={cn(
           "flex-1 max-w-xl h-8 bg-black/40 border rounded-full px-4 flex items-center gap-2 group transition-all",
-          hotReloadFlash ? "border-emerald-500/50" : "border-white/10 focus-within:border-indigo-500/50"
+          hotReloadFlash ? "border-emerald-500/50" : tagMode ? "border-violet-500/50" : "border-white/10 focus-within:border-indigo-500/50"
         )}>
-          <Shield className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+          <Shield className={cn("w-3.5 h-3.5 flex-shrink-0", tagMode ? "text-violet-400" : "text-emerald-500")} />
           <span className="flex-1 text-[11px] text-[#8b949e] font-mono truncate select-all cursor-text">
             {url}
           </span>
           {hotReloadFlash && <Zap className="w-3 h-3 text-emerald-400 flex-shrink-0 animate-pulse" />}
+          {tagMode && !hotReloadFlash && <Tag className="w-3 h-3 text-violet-400 flex-shrink-0 animate-pulse" />}
         </div>
 
         <div className="flex items-center gap-1 bg-black/20 p-1 rounded-xl border border-white/5">
@@ -207,7 +301,6 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           <ExternalLink className="w-4 h-4" />
         </button>
 
-        {/* 8.3 — Native fullscreen on mobile */}
         <button
           onClick={() => {
             const el = document.documentElement;
@@ -274,6 +367,25 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           </button>
         )}
 
+        {/* Tag Mode — element reference badges for precision AI edits */}
+        {generatedCode && (
+          <button
+            onClick={() => setTagMode(v => !v)}
+            title={tagMode
+              ? 'Turn off Tag Mode'
+              : 'Tag Mode — badges appear on all elements. Click a badge to reference it in AI chat for precision editing.'}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ml-1 border",
+              tagMode
+                ? "bg-violet-600 text-white border-violet-500 shadow-lg shadow-violet-900/30 hover:bg-violet-500"
+                : "bg-violet-600/10 text-violet-400 border-violet-500/20 hover:bg-violet-600/30"
+            )}
+          >
+            <Tag className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Tag</span>
+          </button>
+        )}
+
         {/* PWA Install Button */}
         <button
           onClick={openAsPwa}
@@ -305,6 +417,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           <Download className={cn("w-3 h-3", downloading && "animate-bounce")} />
           <span>{downloading ? 'Saving' : '↓'}</span>
         </button>
+
         {/* Edit with AI — always visible in header */}
         {(onEditWithAI || onGoPro) && (
           <button
@@ -328,59 +441,80 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           ref={setContainerRef}
           className="flex-1 bg-[#1e1e1e] p-4 flex justify-center items-center overflow-hidden relative"
         >
-            {/* Hot reload flash */}
-            {hotReloadFlash && (
-              <div className="absolute top-2 right-2 z-50 flex items-center gap-1.5 px-2.5 py-1 bg-emerald-600/90 rounded-full text-[9px] font-black text-white uppercase tracking-widest shadow-lg animate-pulse">
-                <Zap className="w-3 h-3" />
-                Updated
-              </div>
-            )}
-            <div
-              style={{
-                width: device === 'full' ? `${targetWidth}px` : undefined,
-                height: device === 'full' ? `${targetHeight}px` : undefined,
-                transform: `scale(${displayScale})`,
-                transformOrigin: 'center center',
-                flexShrink: 0
-              }}
-              className={cn(
-              "h-full bg-white shadow-2xl transition-all duration-300 rounded-lg overflow-hidden border-8 border-black/20",
+          {/* Hot reload flash */}
+          {hotReloadFlash && (
+            <div className="absolute top-2 right-2 z-50 flex items-center gap-1.5 px-2.5 py-1 bg-emerald-600/90 rounded-full text-[9px] font-black text-white uppercase tracking-widest shadow-lg animate-pulse">
+              <Zap className="w-3 h-3" />
+              Updated
+            </div>
+          )}
+
+          {/* Tag mode hint bar */}
+          {tagMode && !hotReloadFlash && (
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-violet-700/95 backdrop-blur-sm rounded-lg text-[9px] font-black text-white uppercase tracking-widest shadow-xl border border-violet-400/30 pointer-events-none">
+              <Tag className="w-3 h-3" />
+              Tag Mode ON — click any badge → reference in AI chat
+            </div>
+          )}
+
+          <div
+            style={{
+              width: device === 'full' ? `${targetWidth}px` : undefined,
+              height: device === 'full' ? `${targetHeight}px` : undefined,
+              transform: `scale(${displayScale})`,
+              transformOrigin: 'center center',
+              flexShrink: 0
+            }}
+            className={cn(
+              "h-full bg-white shadow-2xl transition-all duration-300 rounded-lg overflow-hidden border-8",
+              tagMode ? "border-violet-500/40" : "border-black/20",
               device === 'laptop' ? 'w-full max-w-[1280px]' :
               device === 'mobile' ? 'w-[375px]' : ''
-           )}>
-              {generatedCode ? (
-                <iframe
-                  title="App Preview"
-                  srcDoc={generatedCode}
-                  className="w-full h-full bg-white border-none"
-                  sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
-                />
-              ) : (
-                <div className="w-full h-full bg-[#fafafa] flex flex-col items-center justify-center p-8 text-center space-y-4 animate-pulse">
-                  <Globe className="w-8.5 h-8.5 text-indigo-500 animate-spin" />
-                  <p className="text-xs text-gray-500 font-mono tracking-wider">Syncing workspace code...</p>
-                  <button
-                    onClick={onRun}
-                    className="px-6 py-2 bg-indigo-600 text-white rounded-full text-xs font-black uppercase tracking-widest hover:bg-indigo-700 active:scale-95 transition-all shadow-xl shadow-indigo-600/20"
-                  >
-                    Sync Changes
-                  </button>
-                </div>
-              )}
-           </div>
+            )}>
+            {generatedCode ? (
+              <iframe
+                key={tagMode ? 'tag' : 'preview'}
+                title="App Preview"
+                srcDoc={previewSrc}
+                className="w-full h-full bg-white border-none"
+                sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
+              />
+            ) : (
+              <div className="w-full h-full bg-[#fafafa] flex flex-col items-center justify-center p-8 text-center space-y-4 animate-pulse">
+                <Globe className="w-8.5 h-8.5 text-indigo-500 animate-spin" />
+                <p className="text-xs text-gray-500 font-mono tracking-wider">Syncing workspace code...</p>
+                <button
+                  onClick={onRun}
+                  className="px-6 py-2 bg-indigo-600 text-white rounded-full text-xs font-black uppercase tracking-widest hover:bg-indigo-700 active:scale-95 transition-all shadow-xl shadow-indigo-600/20"
+                >
+                  Sync Changes
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* App Ready Banner */}
       {generatedCode && (
-        <div className="shrink-0 border-t border-indigo-500/20">
-          {/* Minimized bar — always visible, shows toggle */}
-          <div className="bg-gradient-to-r from-indigo-950/80 via-[#161b22] to-emerald-950/80 px-3 py-1.5 flex items-center justify-between gap-2">
+        <div className={cn("shrink-0 border-t", tagMode ? "border-violet-500/30" : "border-indigo-500/20")}>
+          {/* Minimized bar */}
+          <div className={cn(
+            "px-3 py-1.5 flex items-center justify-between gap-2",
+            tagMode
+              ? "bg-gradient-to-r from-violet-950/80 via-[#161b22] to-violet-950/60"
+              : "bg-gradient-to-r from-indigo-950/80 via-[#161b22] to-emerald-950/80"
+          )}>
             <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-[10px] font-black text-white tracking-wide">App Ready</span>
-              {footerMinimized && (
+              <div className={cn("w-1.5 h-1.5 rounded-full animate-pulse", tagMode ? "bg-violet-400" : "bg-emerald-400")} />
+              <span className="text-[10px] font-black text-white tracking-wide">
+                {tagMode ? 'Tag Mode Active' : 'App Ready'}
+              </span>
+              {footerMinimized && !tagMode && (
                 <span className="text-[9px] text-[#8b949e] hidden sm:inline">· Install on Android or Download</span>
+              )}
+              {footerMinimized && tagMode && (
+                <span className="text-[9px] text-violet-300/70 hidden sm:inline">· Click badges to reference elements in AI chat</span>
               )}
             </div>
             <button
@@ -394,7 +528,32 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
 
           {/* Expandable action row */}
           {!footerMinimized && (
-            <div className="bg-gradient-to-r from-indigo-950/60 via-[#161b22] to-emerald-950/60 px-4 py-2.5 flex flex-col gap-2.5">
+            <div className={cn(
+              "px-4 py-2.5 flex flex-col gap-2.5",
+              tagMode
+                ? "bg-gradient-to-r from-violet-950/40 via-[#161b22] to-violet-950/30"
+                : "bg-gradient-to-r from-indigo-950/60 via-[#161b22] to-emerald-950/60"
+            )}>
+              {/* Tag mode info card */}
+              {tagMode && (
+                <div className="flex items-start gap-3 px-3 py-2.5 bg-violet-600/10 border border-violet-500/25 rounded-xl">
+                  <Tag className="w-4 h-4 text-violet-400 mt-0.5 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black text-violet-300 uppercase tracking-wide mb-0.5">Precision Edit Mode</p>
+                    <p className="text-[9px] text-violet-300/60 leading-relaxed">
+                      Every element has a badge (BTN-001, INP-002…). Click a badge → the tag is auto-inserted in AI chat.
+                      Then type what to change. Tags are never visible in the published app.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setTagMode(false)}
+                    className="p-1 hover:bg-violet-500/20 rounded text-violet-400/60 hover:text-violet-300 transition-colors shrink-0"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
               {/* Edit with AI — primary CTA + quick chips */}
               {(onEditWithAI || onGoPro) && (
                 <>
@@ -456,7 +615,6 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
       {showPwaModal && (
         <div className="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-[#161b22] border border-indigo-500/40 rounded-2xl w-full max-w-sm shadow-2xl shadow-indigo-900/30">
-            {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center">
@@ -472,7 +630,6 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
               </button>
             </div>
 
-            {/* URL Box */}
             <div className="px-5 pt-4 pb-3">
               <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest mb-2">Your App Link</p>
               <div className="flex items-center gap-2 bg-black/50 border border-white/10 rounded-xl px-3 py-2.5">
@@ -492,7 +649,6 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
               </p>
             </div>
 
-            {/* Steps */}
             <div className="px-5 pb-5">
               <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest mb-3">How to Install on Android:</p>
               <div className="space-y-2.5">
@@ -519,21 +675,27 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
 
       {/* Footer Info */}
       <div className="h-8 bg-[#161b22] border-t border-white/5 px-4 flex items-center justify-between text-[10px] text-[#484f58] font-bold uppercase tracking-widest">
-         <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1.5">
-              <div className={cn("w-1.5 h-1.5 rounded-full", generatedCode ? "bg-emerald-500 animate-pulse" : "bg-[#484f58]")} />
-              {generatedCode ? 'Preview Live' : 'No Preview'}
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-1.5">
+            <div className={cn("w-1.5 h-1.5 rounded-full", generatedCode ? "bg-emerald-500 animate-pulse" : "bg-[#484f58]")} />
+            {generatedCode ? 'Preview Live' : 'No Preview'}
+          </span>
+          <span>{Object.keys(files).length} files</span>
+          {tagMode && (
+            <span className="flex items-center gap-1 text-violet-400">
+              <Tag className="w-3 h-3" />
+              Tag Mode
             </span>
-            <span>{Object.keys(files).length} files</span>
-         </div>
-         <div className="flex items-center gap-3">
-           {generatedCode && (
-             <span className="text-[9px] text-emerald-500/70">
-               {(new Blob([generatedCode]).size / 1024).toFixed(1)} KB
-             </span>
-           )}
-           <span>Mode: {device.toUpperCase()}</span>
-         </div>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {generatedCode && (
+            <span className="text-[9px] text-emerald-500/70">
+              {(new Blob([generatedCode]).size / 1024).toFixed(1)} KB
+            </span>
+          )}
+          <span>Mode: {device.toUpperCase()}</span>
+        </div>
       </div>
     </div>
   );

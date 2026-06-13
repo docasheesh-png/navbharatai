@@ -5579,12 +5579,23 @@ Response Format:
   // ══ SENIOR DOCTOR ASSISTANT (SDA) ══
   app.post('/api/sda-chat', async (req: any, res: any) => {
     try {
-      const { message, history = [], teachingMode = false, userId, fileData, fileType, fileName } = req.body;
-      if (!message) return res.status(400).json({ error: 'Message required' });
+      let { message, history = [], teachingMode = false, userId, fileData, fileType, fileName } = req.body;
+      if (!message && !fileData) return res.status(400).json({ error: 'Message required' });
+      message = message || 'Please analyze this medical document and extract all relevant clinical findings.';
 
       const hasFile = !!(fileData && fileType);
       const isImage = hasFile && fileType.startsWith('image/');
       const isPDF = hasFile && fileType === 'application/pdf';
+      const isTextDoc = hasFile && !isImage && !isPDF &&
+        (fileType === 'text/plain' || fileType === 'text/csv' || fileType === 'text/html' || fileType === 'application/json');
+
+      // For plain-text documents: decode base64 → prepend content to message (works with all providers)
+      if (isTextDoc && fileData) {
+        try {
+          const docText = Buffer.from(fileData, 'base64').toString('utf-8').slice(0, 10000);
+          message = `[Document: ${fileName}]\n\n${docText}\n\n---\nDoctor's question: ${message}`;
+        } catch { /* keep original message */ }
+      }
 
       const SDA_SYSTEM = `You are the Senior Doctor Assistant (SDA) — a Clinical Decision Support AI inside NavBharatAI, designed exclusively for qualified doctors (MBBS, residents, consultants, specialists).
 
@@ -5709,11 +5720,14 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       ];
 
       // Build Gemini/Vertex contents array (with optional file attachment)
+      // NOTE: @google/genai SDK uses camelCase: inlineData/mimeType (NOT inline_data/mime_type)
       const buildGeminiContents = () => {
         const userParts: any[] = [];
-        if (isImage || isPDF)
-          userParts.push({ inline_data: { mime_type: fileType, data: fileData } },
-                         { text: `[${isPDF ? 'PDF Report' : 'Document'}: ${fileName}]\n${message}` });
+        if ((isImage || isPDF) && fileData)
+          userParts.push(
+            { inlineData: { mimeType: fileType, data: fileData } },
+            { text: `[${isPDF ? 'PDF Report' : 'Image'}: ${fileName}]\n${message}` }
+          );
         else
           userParts.push({ text: message });
         return [
@@ -5729,12 +5743,24 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       type SdaRacerFn = (signal: AbortSignal) => Promise<string>;
       const sdaRacers: SdaRacerFn[] = [];
 
-      if (sdaGrokKey) sdaRacers.push(async (signal) => {
+      // Grok supports images via vision models but NOT PDFs — skip Grok for PDF files
+      if (sdaGrokKey && !isPDF) sdaRacers.push(async (signal) => {
         const { default: OpenAI } = await import('openai');
         const c = new OpenAI({ apiKey: sdaGrokKey, baseURL: 'https://api.x.ai/v1' });
-        for (const m of ['grok-3', 'grok-3-fast']) {
+
+        // For images: use Grok vision model with image_url format
+        // For text: use standard Grok-3 models
+        const models = isImage ? ['grok-2-vision-1212', 'grok-2-mini-vision-1212'] : ['grok-3', 'grok-3-fast'];
+        const userContent: any = isImage && fileData
+          ? [
+              { type: 'image_url', image_url: { url: `data:${fileType};base64,${fileData}` } },
+              { type: 'text', text: `[Image: ${fileName}]\n${message}` },
+            ]
+          : message;
+
+        for (const m of models) {
           try {
-            const r = await c.chat.completions.create({ model: m, messages: buildOpenAIMsgs(message), max_tokens: 2000 }, { signal });
+            const r = await c.chat.completions.create({ model: m, messages: buildOpenAIMsgs(userContent), max_tokens: 2000 }, { signal });
             const t = r.choices[0]?.message?.content || '';
             if (t.trim()) return t;
           } catch (e: any) { if (signal.aborted) throw e; console.warn(`[SDA] Grok ${m}: ${e.message}`); }

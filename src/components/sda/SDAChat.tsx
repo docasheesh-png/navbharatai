@@ -42,7 +42,7 @@ interface SDAChatProps {
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const ACCEPTED_TYPES = 'image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp';
+const ACCEPTED_TYPES = 'image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.txt,.csv,.json';
 const MAX_FILE_MB = 10;
 const BASE_HEIGHT = 44;
 const MAX_HEIGHT = BASE_HEIGHT * 5; // 5x max grow
@@ -699,7 +699,9 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               )}
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] text-white font-medium truncate">{attachedFile.name}</p>
-                <p className="text-[9px] text-[#484f58]">{attachedFile.type.startsWith('image/') ? 'Image' : 'PDF'} · Ready to analyze</p>
+                <p className="text-[9px] text-[#484f58]">
+                  {attachedFile.type.startsWith('image/') ? 'Image' : attachedFile.type === 'application/pdf' ? 'PDF' : 'Document'} · Ready to analyze
+                </p>
               </div>
               <button onClick={() => setAttachedFile(null)} className="text-[#484f58] hover:text-red-400 p-1 transition-colors">
                 <X className="w-3.5 h-3.5" />

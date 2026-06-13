@@ -5,6 +5,7 @@ interface Version {
   id: string;
   name: string;
   code: string;
+  files?: Record<string, string>;
   timestamp: number;
   label: string;
   size: number;
@@ -13,6 +14,7 @@ interface Version {
 interface Props {
   generatedCode: string;
   onRestore: (code: string) => void;
+  onRestoreFiles?: (files: Record<string, string>) => void;
 }
 
 const MAX_VERSIONS = 50;
@@ -40,7 +42,7 @@ function relativeTime(ts: number): string {
   return `${Math.floor(diff / 86400000)}d pehle`;
 }
 
-export function CodeVersioning({ generatedCode, onRestore }: Props) {
+export function CodeVersioning({ generatedCode, onRestore, onRestoreFiles }: Props) {
   const [versions, setVersions] = useState<Version[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [autosave, setAutosave] = useState(false);
@@ -245,7 +247,11 @@ export function CodeVersioning({ generatedCode, onRestore }: Props) {
                         </div>
                         <div className="flex gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
-                            onClick={e => { e.stopPropagation(); onRestore(v.code); }}
+                            onClick={e => {
+                              e.stopPropagation();
+                              if (v.files && onRestoreFiles) onRestoreFiles(v.files);
+                              else onRestore(v.code);
+                            }}
                             className="flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 rounded-md hover:bg-emerald-500/30"
                           >
                             <RotateCcw className="w-2.5 h-2.5" /> Restore

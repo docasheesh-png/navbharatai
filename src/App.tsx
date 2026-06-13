@@ -2629,6 +2629,7 @@ ${buildLanguageRule(preferredLanguage)}`;
                   updatePreview(evt.files);
                   setIsAppBuilt(true);
                   setHasGeneratedCode(true);
+                  saveVersionSnapshot(messageToSend, evt.files);
 
                   const fileList = Object.keys(evt.files);
                   const vr = evt.validationReport as any;
@@ -2770,6 +2771,26 @@ ${buildLanguageRule(preferredLanguage)}`;
     updatePreview(lastVersion.files as any);
     addToast('Restored previous version ↩', 'success');
   }, [buildVersionStack, updatePreview, addToast]);
+
+  const saveVersionSnapshot = useCallback((buildRequest: string, builtFiles: Record<string, string>) => {
+    if (!builtFiles || Object.keys(builtFiles).length === 0) return;
+    try {
+      const saved = localStorage.getItem('navbharat_versions');
+      const existing: any[] = saved ? JSON.parse(saved) : [];
+      const allContent = Object.values(builtFiles).join('');
+      const snapshot = {
+        id: Date.now().toString(),
+        name: `Build: ${buildRequest.slice(0, 40)}`,
+        code: builtFiles['index.html'] || allContent.slice(0, 5000),
+        files: { ...builtFiles },
+        timestamp: Date.now(),
+        label: 'build',
+        size: allContent.length,
+      };
+      const updated = [snapshot, ...existing].slice(0, 50);
+      localStorage.setItem('navbharat_versions', JSON.stringify(updated));
+    } catch {}
+  }, []);
 
   // Task 2.7 — memoized: static array, rebuilt only once
   const menuItems = useMemo(() => [
@@ -6950,7 +6971,11 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {/* Phase 9 — Code Versioning */}
           {activeView === 'versioning' && (
             <div className="flex-1 h-full overflow-hidden">
-              <CodeVersioning generatedCode={generatedCode} onRestore={(c) => setGeneratedCode(c)} />
+              <CodeVersioning
+                generatedCode={generatedCode}
+                onRestore={(c) => setGeneratedCode(c)}
+                onRestoreFiles={(f) => { setFiles(f as any); updatePreview(f as any); setIsAppBuilt(true); setHasGeneratedCode(true); addToast('Version restored ✓', 'success'); }}
+              />
             </div>
           )}
 

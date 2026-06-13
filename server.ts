@@ -4320,8 +4320,8 @@ Response Format:
         // ── ITERATIVE EDIT PATH ──────────────────────────────────────────────
         const safeFiles = {
           html: sanitizeUserHtml(currentFiles.html || ''),
-          js:   (currentFiles.js  || '').slice(0, 18000),
-          css:  (currentFiles.css || '').slice(0, 12000),
+          js:   (currentFiles.js  || '').slice(0, 250000),
+          css:  (currentFiles.css || '').slice(0, 100000),
         };
         result = await editAppEngine(
           message,

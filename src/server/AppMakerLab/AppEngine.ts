@@ -1833,6 +1833,69 @@ function reconstructFile(original: string, chunk: CodeChunk, fixed: string): str
   return original.slice(0, chunk.start) + fixed + original.slice(chunk.end);
 }
 
+// ─── Patch-based editing (never truncates the file) ───────────────────────────
+
+interface FilePatch { find: string; replace: string; }
+
+function applyPatch(content: string, patches: FilePatch[]): { result: string; applied: number } {
+  let result = content;
+  let applied = 0;
+  for (const p of patches) {
+    if (!p.find || p.replace === undefined) continue;
+    if (result.includes(p.find)) {
+      result = result.split(p.find).join(p.replace);
+      applied++;
+    }
+  }
+  return { result, applied };
+}
+
+async function generatePatches(
+  request: string,
+  file: 'html' | 'js' | 'css',
+  content: string,
+  rootCauses: string[],
+  fixStrategy: string,
+  extraContext?: string,
+): Promise<FilePatch[]> {
+  // Show as much of the file as fits comfortably in input context
+  const maxChars = file === 'js' ? 30000 : file === 'html' ? 25000 : 18000;
+  const preview = content.length > maxChars
+    ? content.slice(0, maxChars) + `\n... [${content.length - maxChars} more chars — patches must target visible section]`
+    : content;
+
+  const prompt = `Edit this ${file.toUpperCase()} file via find-and-replace patches.
+
+USER REQUEST: "${request}"
+ROOT CAUSE: ${rootCauses.join('; ')}
+FIX: ${fixStrategy}${extraContext ? `\nCONTEXT: ${extraContext}` : ''}
+
+FILE (${content.length} chars total):
+${preview}
+
+Return ONLY a JSON array of patches. Each patch:
+- "find": EXACT verbatim substring from the file above (must exist as-is)
+- "replace": the replacement string
+
+Rules:
+- "find" must be verbatim text that exists in the file
+- Keep changes minimal — only what's needed for the request
+- Return [] if no changes needed for this file
+
+Return ONLY the JSON array, no markdown, no explanation.`;
+
+  try {
+    const raw = await callAI(prompt, 'Return only a valid JSON array [{find,replace}]. No markdown, no explanation.', 4000);
+    const cleaned = raw.replace(/```json?|```/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((p: any) => typeof p.find === 'string' && typeof p.replace === 'string');
+  } catch (e) {
+    console.warn('[SurgicalEditor] Patch parse failed:', e);
+    return [];
+  }
+}
+
 async function diagnoseFix(
   request: string,
   currentFiles: { html: string; css: string; js: string },
@@ -1930,10 +1993,12 @@ Return ONLY the fixed code — no markdown, no explanation. ALL identifiers must
           editSys, 2000
         ).then(fixed => { updated.html = reconstructFile(updated.html, chunk, fixed.trim()); onFileGenerated?.('index.html', updated.html); }));
       } else {
-        tasks.push(callAI(
-          `Edit this HTML.\nREQUEST: "${request}"\nROOT CAUSE: ${dx.rootCauses.join('; ')}\n\nHTML:\n${currentFiles.html.slice(0, 8000)}\n\nReturn ONLY complete updated HTML:`,
-          editSys, 6000
-        ).then(r => { updated.html = r; onFileGenerated?.('index.html', r); }));
+        tasks.push(generatePatches(request, 'html', currentFiles.html, dx.rootCauses, dx.fixStrategy)
+          .then(patches => {
+            const { result, applied } = applyPatch(currentFiles.html, patches);
+            if (applied > 0) { updated.html = result; onFileGenerated?.('index.html', result); }
+            else console.warn('[SurgicalEditor] HTML patches unapplied — file unchanged');
+          }));
       }
     }
 
@@ -1946,10 +2011,12 @@ Return ONLY the fixed code — no markdown, no explanation. ALL identifiers must
           editSys, 1000
         ).then(fixed => { updated.css = reconstructFile(updated.css, chunk, fixed.trim()); onFileGenerated?.('style.css', updated.css); }));
       } else {
-        tasks.push(callAI(
-          `Edit this CSS.\nREQUEST: "${request}"\nROOT CAUSE: ${dx.rootCauses.join('; ')}\n\nCSS:\n${currentFiles.css.slice(0, 6000)}\n\nReturn ONLY complete updated CSS:`,
-          editSys, 5000
-        ).then(r => { updated.css = r; onFileGenerated?.('style.css', r); }));
+        tasks.push(generatePatches(request, 'css', currentFiles.css, dx.rootCauses, dx.fixStrategy)
+          .then(patches => {
+            const { result, applied } = applyPatch(currentFiles.css, patches);
+            if (applied > 0) { updated.css = result; onFileGenerated?.('style.css', result); }
+            else console.warn('[SurgicalEditor] CSS patches unapplied — file unchanged');
+          }));
       }
     }
 
@@ -1962,10 +2029,12 @@ Return ONLY the fixed code — no markdown, no explanation. ALL identifiers must
           editSys, 3000
         ).then(fixed => { updated.js = reconstructFile(updated.js, chunk, fixed.trim()); onFileGenerated?.('script.js', updated.js); }));
       } else {
-        tasks.push(callAI(
-          `Edit this JavaScript.\nREQUEST: "${request}"\nROOT CAUSE: ${dx.rootCauses.join('; ')}\nHTML IDs: ${summarizeHTML(currentFiles.html)}\n\nJS:\n${currentFiles.js.slice(0, 10000)}\n\nReturn ONLY complete updated JavaScript:`,
-          editSys, 10000
-        ).then(r => { updated.js = r; onFileGenerated?.('script.js', r); }));
+        tasks.push(generatePatches(request, 'js', currentFiles.js, dx.rootCauses, dx.fixStrategy, `HTML IDs: ${summarizeHTML(currentFiles.html)}`)
+          .then(patches => {
+            const { result, applied } = applyPatch(currentFiles.js, patches);
+            if (applied > 0) { updated.js = result; onFileGenerated?.('script.js', result); }
+            else console.warn('[SurgicalEditor] JS patches unapplied — file unchanged');
+          }));
       }
     }
 

@@ -6776,10 +6776,8 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 onGoPro={() => toggleTab('nbi_pro_chat')}
                 onEditWithAI={(hint) => {
                   setMode('build');
+                  if (hint) setProInput(hint);
                   toggleTab('nbi_pro_chat');
-                  if (hint) {
-                    setTimeout(() => handleSendForPro(hint), 100);
-                  }
                 }}
               />
             </div>

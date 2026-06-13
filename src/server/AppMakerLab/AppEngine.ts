@@ -370,7 +370,11 @@ Return ONLY the JSON:`;
 
   const raw = await callAI(prompt, sys, 1200);
   try {
-    const clean = raw.replace(/```(?:json)?\s*/g, '').replace(/```/g, '').trim();
+    // Robust JSON extraction: handle code fences, trailing commas, extra text
+    let clean = raw.replace(/```(?:json)?\s*/gi, '').replace(/```/g, '').trim();
+    const jsonMatch = clean.match(/\{[\s\S]*\}/);
+    if (jsonMatch) clean = jsonMatch[0];
+    clean = clean.replace(/,\s*([\}\]])/g, '$1'); // remove trailing commas
     const parsed = JSON.parse(clean) as Partial<AppBlueprint>;
 
     // Detect template from appType + features extracted from blueprint
@@ -581,8 +585,10 @@ This module covers: all event listeners, DOM updates, page transitions, renderin
 
 EXACT HTML:
 \`\`\`html
-${htmlContent.slice(0, 8000)}
+${htmlContent.slice(0, 20000)}
 \`\`\`
+
+ALL SCREENS — wire navigation for ALL of them: ${bp.screens.map(s => `${s.id} (${s.purpose})`).join(' | ')}
 
 ${cdnHints ? `CDN LIBRARIES:\n${cdnHints}\n` : ''}
 
@@ -591,12 +597,13 @@ ${contract}
 
 Rules:
 - DOMContentLoaded wraps EVERYTHING
-- Wire EVERY button using addEventListener
+- Wire EVERY button using addEventListener — NO button left unwired
+- Include showPage() function and call it for ALL screen transitions
+- Every non-home screen must have at least ONE button that calls showPage() to reach it
 - Render functions update DOM from state variables
 - Include:
 ${showPageFn}
 - showPage('${bp.screens[0]?.id || 'page-home'}') on load
-- Dynamic elements to create: ${bp.dynamicElements.join(', ') || 'toast-notification, modal-overlay'}
 - Call logic functions, update DOM, show results
 
 Output ONLY the UI module JavaScript:`;
@@ -679,6 +686,21 @@ function validateDOMConsistency(html: string, js: string): ValidationResult {
     }
   }
 
+  // CRITICAL: Multi-screen navigation check
+  // Every page-* screen (except first) must have at least one showPage() path to reach it
+  const pageScreens = [...html.matchAll(/<div[^>]*id="(page-[^"]+)"/gi)].map(m => m[1]);
+  if (pageScreens.length > 1) {
+    if (!js.includes('showPage(')) {
+      result.syntaxIssues.push(`CRITICAL: ${pageScreens.length} screens found but no showPage() calls in JS — all navigation broken`);
+    } else {
+      for (const screenId of pageScreens.slice(1)) { // skip first (home) screen
+        if (!js.includes(`showPage('${screenId}')`) && !js.includes(`showPage("${screenId}")`)) {
+          result.brokenIds.push(screenId); // Unreachable screen
+        }
+      }
+    }
+  }
+
   // Basic syntax: unclosed braces (rough check, ±3 tolerance)
   const opens  = (js.match(/\{/g) || []).length;
   const closes = (js.match(/\}/g) || []).length;
@@ -743,21 +765,27 @@ function computeValidationReport(html: string, js: string, css: string, repairsA
   // Check CSS has :root variables defined
   const cssIssues: string[] = [];
   if (!css.includes(':root')) cssIssues.push('CSS: no :root variables defined');
-  if (!css.includes('display: none') && !css.includes('display:none')) {
-    cssIssues.push('CSS: no hidden page rule — multi-page navigation may not work');
+
+  // FATAL CSS check: page-* display rules in CSS break JS navigation
+  const hasForbiddenPageCss =
+    (css.includes('[id^="page-"]') || css.includes('[id^=\'page-\']')) &&
+    (css.includes('display: none') || css.includes('display:none'));
+  if (hasForbiddenPageCss) {
+    cssIssues.push('FATAL: CSS has display:none on [id^="page-"] — overrides JS showPage() and breaks all navigation');
   }
 
-  const allIssues = [...domCheck.brokenIds.map(i => `Broken ID: #${i}`),
+  const allIssues = [...domCheck.brokenIds.map(i => `Broken ID / Unreachable screen: #${i}`),
                      ...domCheck.missingWires.map(i => `Unwired button: #${i}`),
                      ...syntaxIssues,
                      ...cssIssues];
 
-  // Quality score: start at 100, deduct per issue
+  // Quality score: start at 100, deduct per issue severity
   let score = 100;
-  score -= domCheck.brokenIds.length * 15;
-  score -= domCheck.missingWires.length * 10;
-  score -= syntaxIssues.length * 5;
-  score -= cssIssues.length * 3;
+  score -= domCheck.brokenIds.length * 15;    // broken IDs / unreachable screens: -15 each
+  score -= domCheck.missingWires.length * 10; // unwired buttons: -10 each
+  score -= domCheck.syntaxIssues.filter(i => i.startsWith('CRITICAL')).length * 30; // fatal nav: -30
+  score -= syntaxIssues.filter(i => !i.startsWith('CRITICAL')).length * 5;
+  score -= cssIssues.length * (hasForbiddenPageCss ? 40 : 3); // fatal CSS: -40
   score = Math.max(0, Math.min(100, score));
 
   return {
@@ -828,8 +856,8 @@ ${screenList}
 DATA MODEL:
 ${dataModelStr || '  (define as needed)'}
 
-USER INTERACTIONS:
-${bp.interactions.slice(0, 8).map(i => `- ${i}`).join('\n')}
+USER INTERACTIONS (ALL — implement UI for every one):
+${bp.interactions.map(i => `- ${i}`).join('\n')}
 
 TEMPLATE-SPECIFIC HTML REQUIREMENTS:
 ${hints.html}
@@ -873,10 +901,12 @@ Description: ${bp.description}
 
 EXACT HTML STRUCTURE (use these exact IDs):
 \`\`\`html
-${htmlContent.slice(0, 9000)}
+${htmlContent.slice(0, 20000)}
 \`\`\`
 
-USER INTERACTIONS TO IMPLEMENT:
+ALL SCREENS TO WIRE NAVIGATION FOR: ${bp.screens.map(s => `${s.id} (${s.purpose})`).join(' | ')}
+
+USER INTERACTIONS TO IMPLEMENT (ALL of them):
 ${bp.interactions.map(i => `- ${i}`).join('\n')}
 
 ${cdnHints ? `AVAILABLE CDN LIBRARIES (already loaded, use them):\n${cdnHints}\n` : ''}

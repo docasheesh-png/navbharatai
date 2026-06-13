@@ -1345,7 +1345,149 @@ ALL identifiers and comments in English. Return ONLY CSS, no markdown.`;
   }
 }
 
-// ─── Iterative Edit Engine — edit existing app without full rebuild ────────────
+// ─── Surgical Edit Engine — Diagnostic + Chunk-Based Precision Editing ────────
+
+interface DiagnosisResult {
+  rootCauses: string[];
+  fixStrategy: string;
+  htmlTarget: string | null;
+  cssTarget: string | null;
+  jsFuncTarget: string | null;
+  changedFiles: ('html' | 'css' | 'js')[];
+  isFullEdit: boolean;
+}
+
+interface CodeChunk {
+  chunk: string;
+  start: number;
+  end: number;
+}
+
+function summarizeHTML(html: string): string {
+  const ids = [...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]).slice(0, 30);
+  const classes = [...new Set([...html.matchAll(/class="([^"]+)"/g)].flatMap(m => m[1].split(' ')))].slice(0, 20);
+  const buttons = [...html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/gi)].map(m => m[1].trim().replace(/<[^>]+>/g, '').slice(0, 30));
+  return `IDs: ${ids.join(', ')}\nClasses: ${classes.join(', ')}\nButtons: ${buttons.join(' | ')}`;
+}
+
+function summarizeJS(js: string): string {
+  const funcs = [...js.matchAll(/(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?(?:function|\())/g)]
+    .map(m => m[1] || m[2]).filter(Boolean).slice(0, 25);
+  const listeners = [...js.matchAll(/addEventListener\(['"`](\w+)['"`]/g)].map(m => m[1]).slice(0, 15);
+  const idRefs = [...js.matchAll(/getElementById\(['"`]([^'"`]+)['"`]\)/g)].map(m => m[1]).slice(0, 20);
+  return `Functions: ${funcs.join(', ')}\nListeners: ${listeners.join(', ')}\nID refs: ${idRefs.join(', ')}`;
+}
+
+function summarizeCSS(css: string): string {
+  const selectors = [...css.matchAll(/([.#][\w\s,>+~:.*[\]="'-]{1,60})\s*\{/g)].map(m => m[1].trim()).slice(0, 25);
+  return `Selectors: ${selectors.join(' | ')}`;
+}
+
+function extractJSChunk(js: string, funcName: string): CodeChunk | null {
+  const patterns = [
+    new RegExp(`(?:async\\s+)?function\\s+${funcName}\\s*\\([^)]*\\)\\s*\\{`),
+    new RegExp(`(?:const|let|var)\\s+${funcName}\\s*=\\s*(?:async\\s*)?(?:function[^{]*|\\([^)]*\\)\\s*=>)\\s*\\{`),
+    new RegExp(`${funcName}\\s*:\\s*(?:async\\s*)?function[^{]*\\{`),
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(js);
+    if (!match) continue;
+    let depth = 1, pos = match.index + match[0].length;
+    while (depth > 0 && pos < js.length) {
+      if (js[pos] === '{') depth++;
+      else if (js[pos] === '}') depth--;
+      pos++;
+    }
+    if (depth === 0) return { chunk: js.slice(match.index, pos), start: match.index, end: pos };
+  }
+  return null;
+}
+
+function extractCSSChunk(css: string, selector: string): CodeChunk | null {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const rx = new RegExp(`${escaped}\\s*\\{[^}]*\\}`);
+  const m = rx.exec(css);
+  if (!m) return null;
+  return { chunk: m[0], start: m.index, end: m.index + m[0].length };
+}
+
+function extractHTMLChunk(html: string, targetId: string): CodeChunk | null {
+  const escaped = targetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const openRx = new RegExp(`<([a-zA-Z][a-zA-Z0-9]*)\\b[^>]*\\bid="${escaped}"[^>]*>`, 'i');
+  const m = openRx.exec(html);
+  if (!m) return null;
+  const tag = m[1].toLowerCase();
+  const selfClose = new Set(['input','img','br','hr','meta','link','area','base','col','embed','param','source','track','wbr']);
+  if (selfClose.has(tag)) return { chunk: m[0], start: m.index, end: m.index + m[0].length };
+  let depth = 1, pos = m.index + m[0].length;
+  while (depth > 0 && pos < html.length) {
+    const sub = html.slice(pos);
+    const nOpen = new RegExp(`<${tag}[\\s>]`, 'i').exec(sub);
+    const nClose = new RegExp(`</${tag}>`, 'i').exec(sub);
+    if (!nClose) break;
+    if (nOpen && nOpen.index < nClose.index) { depth++; pos += nOpen.index + 1; }
+    else { depth--; pos += nClose.index + nClose[0].length; }
+  }
+  return { chunk: html.slice(m.index, pos), start: m.index, end: pos };
+}
+
+function reconstructFile(original: string, chunk: CodeChunk, fixed: string): string {
+  return original.slice(0, chunk.start) + fixed + original.slice(chunk.end);
+}
+
+async function diagnoseFix(
+  request: string,
+  currentFiles: { html: string; css: string; js: string },
+  preIssues: ValidationResult,
+  historyContext?: string,
+): Promise<DiagnosisResult> {
+  const issueLines = [
+    ...preIssues.brokenIds.map(id => `Broken JS ID ref: "${id}" used in JS but missing in HTML`),
+    ...preIssues.missingWires.map(id => `Button "${id}" has no event listener in JS`),
+    ...preIssues.syntaxIssues,
+  ];
+
+  const prompt = `Diagnose this web app edit request. Find the ROOT CAUSE, not just the symptom.
+
+USER REQUEST: "${request}"
+
+APP STRUCTURE:
+HTML: ${summarizeHTML(currentFiles.html)}
+JS: ${summarizeJS(currentFiles.js)}
+CSS: ${summarizeCSS(currentFiles.css)}
+
+PRE-EXISTING ISSUES (scan results):
+${issueLines.length > 0 ? issueLines.join('\n') : 'None'}
+${historyContext ? `\nCONVERSATION CONTEXT:\n${historyContext.slice(0, 1500)}` : ''}
+
+Return ONLY valid JSON (no markdown):
+{
+  "rootCauses": ["precise root cause 1", "root cause 2"],
+  "fixStrategy": "what exactly to change and why",
+  "htmlTarget": "element ID to surgically target, or null",
+  "cssTarget": "CSS selector to surgically target, or null",
+  "jsFuncTarget": "JS function name to surgically target, or null",
+  "changedFiles": ["html","css","js"],
+  "isFullEdit": false
+}
+Set isFullEdit true ONLY if the change requires restructuring entire file.`;
+
+  try {
+    const raw = await callAI(prompt, 'You are a senior code diagnostician. Return only valid JSON.', 700);
+    const parsed = JSON.parse(raw.replace(/```json?|```/g, '').trim());
+    return {
+      rootCauses: Array.isArray(parsed.rootCauses) ? parsed.rootCauses : [request],
+      fixStrategy: parsed.fixStrategy || request,
+      htmlTarget: parsed.htmlTarget || null,
+      cssTarget: parsed.cssTarget || null,
+      jsFuncTarget: parsed.jsFuncTarget || null,
+      changedFiles: Array.isArray(parsed.changedFiles) ? parsed.changedFiles : ['html', 'js', 'css'],
+      isFullEdit: parsed.isFullEdit === true,
+    };
+  } catch {
+    return { rootCauses: [request], fixStrategy: request, htmlTarget: null, cssTarget: null, jsFuncTarget: null, changedFiles: ['html', 'js', 'css'], isFullEdit: true };
+  }
+}
 
 export async function editApp(
   request: string,
@@ -1358,119 +1500,108 @@ export async function editApp(
     onProgress?.({ stage, step, total, detail });
 
   const TOTAL = 5;
+  const updated = { ...currentFiles };
 
   try {
-    // Step 1: Decide which files need changing
-    report('Analyzing', 1, TOTAL, 'Understanding what needs to change...');
-    const historySection = historyContext
-      ? `\nCONVERSATION HISTORY (what was planned and built so far):\n${historyContext.slice(0, 3000)}\n`
-      : '';
-    const analyzePrompt = `User wants to edit a web app.${historySection}
-Current edit request: "${request}"
+    // Phase 1: Pre-scan — X-ray the app before touching anything
+    report('Diagnosing', 1, TOTAL, 'Scanning app health...');
+    const preIssues = validateDOMConsistency(currentFiles.html, currentFiles.js);
+    const preIssueCount = preIssues.brokenIds.length + preIssues.missingWires.length + preIssues.syntaxIssues.length;
+    console.log(`[SurgicalEditor] Pre-scan: ${preIssueCount} existing issues`);
 
-Files present:
-- index.html (${currentFiles.html.length} chars)
-- script.js (${currentFiles.js.length} chars)
-- style.css (${currentFiles.css.length} chars)
+    // Phase 2: AI Diagnosis — root cause, not symptom
+    report('Diagnosing', 2, TOTAL, 'Finding root cause...');
+    const dx = await diagnoseFix(request, currentFiles, preIssues, historyContext);
+    console.log(`[SurgicalEditor] Root cause: ${dx.rootCauses.join(' | ')}`);
+    console.log(`[SurgicalEditor] Targets — HTML: ${dx.htmlTarget} | CSS: ${dx.cssTarget} | JS fn: ${dx.jsFuncTarget} | Full: ${dx.isFullEdit}`);
 
-Which files must be modified? Return ONLY valid JSON (no markdown):
-{"changedFiles":["html","js","css"],"reason":"brief explanation"}
-Use only the files that actually need changes.`;
+    const editSys = `You are a surgical code editor. Apply ONLY the specified fix. Preserve everything else exactly.
+ROOT CAUSE: ${dx.rootCauses.join('; ')}
+FIX: ${dx.fixStrategy}
+Return ONLY the fixed code — no markdown, no explanation. ALL identifiers must be English.`;
 
-    let changedFiles: string[] = ['html', 'js', 'css'];
-    let reason = 'full edit';
-    try {
-      const raw = await callAI(analyzePrompt, 'You analyze code edit requests. Return only valid JSON, no markdown.', 400);
-      const parsed = JSON.parse(raw.replace(/```json?|```/g, '').trim());
-      if (Array.isArray(parsed.changedFiles) && parsed.changedFiles.length > 0) {
-        changedFiles = parsed.changedFiles;
-        reason = parsed.reason || reason;
-      }
-    } catch { /* keep defaults */ }
+    report('Editing', 3, TOTAL, `Surgical fix on ${dx.changedFiles.join(', ')}...`);
+    const tasks: Promise<void>[] = [];
 
-    report('Planning', 2, TOTAL, `Editing: ${changedFiles.join(', ')} — ${reason}`);
-    console.log(`[EditEngine] Request: "${request}" | Changing: ${changedFiles.join(', ')}`);
-
-    const editSys = `You are editing an existing web app. Make ONLY the requested changes.
-Preserve all existing functionality and structure.
-Return ONLY the complete updated file content — no markdown, no explanation.
-ABSOLUTE RULE: ALL identifiers (variable names, function names, comments) MUST be in English.${historyContext ? `\n\nApp context (from conversation):\n${historyContext.slice(0, 1500)}` : ''}`;
-
-    const updated = { ...currentFiles };
-
-    // Step 2: Edit each changed file
-    report('Editing', 3, TOTAL, 'Applying changes...');
-
-    const editTasks: Promise<void>[] = [];
-
-    if (changedFiles.includes('html')) {
-      editTasks.push(
-        callAI(
-          `Edit this HTML to fulfill: "${request}"\n\nCURRENT HTML:\n${currentFiles.html.slice(0, 8000)}\n\nReturn ONLY complete updated HTML:`,
+    // ── HTML ─────────────────────────────────────────────────────────────────
+    if (dx.changedFiles.includes('html')) {
+      const chunk = !dx.isFullEdit && dx.htmlTarget ? extractHTMLChunk(currentFiles.html, dx.htmlTarget) : null;
+      if (chunk) {
+        tasks.push(callAI(
+          `Fix this HTML element.\nREQUEST: "${request}"\nROOT CAUSE: ${dx.rootCauses.join('; ')}\n\nELEMENT:\n${chunk.chunk}\n\nReturn ONLY the fixed element:`,
+          editSys, 2000
+        ).then(fixed => { updated.html = reconstructFile(updated.html, chunk, fixed.trim()); onFileGenerated?.('index.html', updated.html); }));
+      } else {
+        tasks.push(callAI(
+          `Edit this HTML.\nREQUEST: "${request}"\nROOT CAUSE: ${dx.rootCauses.join('; ')}\n\nHTML:\n${currentFiles.html.slice(0, 8000)}\n\nReturn ONLY complete updated HTML:`,
           editSys, 6000
-        ).then(r => { updated.html = r; onFileGenerated?.('index.html', r); })
-      );
+        ).then(r => { updated.html = r; onFileGenerated?.('index.html', r); }));
+      }
     }
-    if (changedFiles.includes('css')) {
-      editTasks.push(
-        callAI(
-          `Edit this CSS to fulfill: "${request}"\n\nCURRENT CSS:\n${currentFiles.css.slice(0, 6000)}\n\nReturn ONLY complete updated CSS:`,
+
+    // ── CSS ──────────────────────────────────────────────────────────────────
+    if (dx.changedFiles.includes('css')) {
+      const chunk = !dx.isFullEdit && dx.cssTarget ? extractCSSChunk(currentFiles.css, dx.cssTarget) : null;
+      if (chunk) {
+        tasks.push(callAI(
+          `Fix this CSS rule.\nREQUEST: "${request}"\nROOT CAUSE: ${dx.rootCauses.join('; ')}\n\nRULE:\n${chunk.chunk}\n\nReturn ONLY the fixed CSS rule:`,
+          editSys, 1000
+        ).then(fixed => { updated.css = reconstructFile(updated.css, chunk, fixed.trim()); onFileGenerated?.('style.css', updated.css); }));
+      } else {
+        tasks.push(callAI(
+          `Edit this CSS.\nREQUEST: "${request}"\nROOT CAUSE: ${dx.rootCauses.join('; ')}\n\nCSS:\n${currentFiles.css.slice(0, 6000)}\n\nReturn ONLY complete updated CSS:`,
           editSys, 5000
-        ).then(r => { updated.css = r; onFileGenerated?.('style.css', r); })
-      );
+        ).then(r => { updated.css = r; onFileGenerated?.('style.css', r); }));
+      }
     }
-    if (changedFiles.includes('js')) {
-      editTasks.push(
-        callAI(
-          `Edit this JavaScript to fulfill: "${request}"\n\nHTML CONTEXT (for ID reference):\n${updated.html.slice(0, 2000)}\n\nCURRENT JS:\n${currentFiles.js.slice(0, 10000)}\n\nReturn ONLY complete updated JavaScript:`,
+
+    // ── JS ───────────────────────────────────────────────────────────────────
+    if (dx.changedFiles.includes('js')) {
+      const chunk = !dx.isFullEdit && dx.jsFuncTarget ? extractJSChunk(currentFiles.js, dx.jsFuncTarget) : null;
+      if (chunk) {
+        tasks.push(callAI(
+          `Fix this JavaScript function.\nREQUEST: "${request}"\nROOT CAUSE: ${dx.rootCauses.join('; ')}\nHTML CONTEXT: ${summarizeHTML(currentFiles.html)}\n\nFUNCTION:\n${chunk.chunk}\n\nReturn ONLY the fixed function:`,
+          editSys, 3000
+        ).then(fixed => { updated.js = reconstructFile(updated.js, chunk, fixed.trim()); onFileGenerated?.('script.js', updated.js); }));
+      } else {
+        tasks.push(callAI(
+          `Edit this JavaScript.\nREQUEST: "${request}"\nROOT CAUSE: ${dx.rootCauses.join('; ')}\nHTML IDs: ${summarizeHTML(currentFiles.html)}\n\nJS:\n${currentFiles.js.slice(0, 10000)}\n\nReturn ONLY complete updated JavaScript:`,
           editSys, 10000
-        ).then(r => { updated.js = r; onFileGenerated?.('script.js', r); })
-      );
+        ).then(r => { updated.js = r; onFileGenerated?.('script.js', r); }));
+      }
     }
 
-    await Promise.all(editTasks);
+    await Promise.all(tasks);
 
-    // Step 3: Validate + repair JS if it was changed
-    report('Validating', 4, TOTAL, 'Checking code integrity...');
-    if (changedFiles.includes('js') || changedFiles.includes('html')) {
+    // Phase 4: Post-scan validate + auto-repair
+    report('Validating', 4, TOTAL, 'Verifying integrity...');
+    if (dx.changedFiles.includes('js') || dx.changedFiles.includes('html')) {
       let validation = validateDOMConsistency(updated.html, updated.js);
       let repairs = 0;
       while (!validation.valid && repairs < 3) {
-        const count = validation.brokenIds.length + validation.missingWires.length;
-        report('Repairing', 4, TOTAL, `Fixing ${count} issue(s)...`);
+        const n = validation.brokenIds.length + validation.missingWires.length;
+        report('Repairing', 4, TOTAL, `Fixing ${n} issue(s)...`);
         updated.js = await autoRepairJS(updated.js, updated.html, validation, 'app');
         validation = validateDOMConsistency(updated.html, updated.js);
         repairs++;
       }
     }
 
-    // Step 4: Assemble preview
+    // Phase 5: Assemble
     report('Assembling', 5, TOTAL, 'Building updated preview...');
     const previewHtml = assemblePreview(updated.html, updated.js, updated.css);
-    const files: Record<string, string> = {
-      'index.html': updated.html,
-      'script.js':  updated.js,
-      'style.css':  updated.css,
-    };
+    const files: Record<string, string> = { 'index.html': updated.html, 'script.js': updated.js, 'style.css': updated.css };
     const validationReport = computeValidationReport(updated.html, updated.js, updated.css, 0);
+    const replyMsg = dx.rootCauses.length > 0 ? `✅ Fixed: ${dx.rootCauses[0]}` : `✅ Done!`;
 
     return {
-      success: true,
-      reply: `✅ Done! ${reason}`,
-      files,
+      success: true, reply: replyMsg, files,
       fileList: Object.entries(files).map(([path, content]) => ({ path, content, description: path })),
-      previewHtml,
-      appName: 'Updated App',
-      validationReport,
+      previewHtml, appName: 'Updated App', validationReport,
     };
 
   } catch (err: any) {
-    console.error('[EditEngine] Edit failed:', err);
-    return {
-      success: false,
-      reply: `Edit failed: ${err.message}`,
-      files: {}, fileList: [], previewHtml: '', appName: '',
-      error: err.message,
-    };
+    console.error('[SurgicalEditor] Edit failed:', err);
+    return { success: false, reply: `Edit failed: ${err.message}`, files: {}, fileList: [], previewHtml: '', appName: '', error: err.message };
   }
 }

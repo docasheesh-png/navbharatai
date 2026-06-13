@@ -4407,23 +4407,66 @@ Response Format:
         }
       } catch (e: any) { console.warn('[PRO PLAN] Claude err:', e.message); }
 
-      // Gemini planning fallback
-      try {
-        const { GoogleGenAI } = await import('@google/genai');
-        const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
-        if (!geminiKey) throw new Error('No Gemini key');
-        const historyContents = (history || []).map((m: any) => ({
-          role: m.sender === 'user' ? 'user' : 'model',
-          parts: [{ text: String(m.text || m.content || '') }]
-        }));
-        const r = await new GoogleGenAI({ apiKey: geminiKey }).models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: [...historyContents, { role: 'user', parts: [{ text: PLAN_PROMPT + '\n\nUser: ' + message }] }],
-        });
-        return res.json({ reply: sanitizePlanningReply(r.text || ''), files: {}, suggestBuild });
-      } catch (e: any) {
-        return res.status(500).json({ error: 'Service unavailable. Check API keys.' });
+      // Gemini planning fallback (all key aliases)
+      const geminiKeyPlan = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
+      if (geminiKeyPlan) {
+        try {
+          const { GoogleGenAI } = await import('@google/genai');
+          // Trim history to last 10 msgs, ensure it starts with user, strip empty
+          const rawHistory = (history || []).slice(-10).filter((m: any) => String(m.text || m.content || '').trim().length > 0);
+          let historyContents: any[] = rawHistory.map((m: any) => ({
+            role: m.sender === 'user' ? 'user' : 'model',
+            parts: [{ text: String(m.text || m.content || '').slice(0, 600) }]
+          }));
+          // Gemini requires contents to start with 'user'
+          while (historyContents.length > 0 && historyContents[0].role !== 'user') historyContents.shift();
+          const geminiModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+          for (const gModel of geminiModels) {
+            try {
+              const r = await new GoogleGenAI({ apiKey: geminiKeyPlan }).models.generateContent({
+                model: gModel,
+                contents: [...historyContents, { role: 'user', parts: [{ text: PLAN_PROMPT + '\n\nUser: ' + message }] }],
+              });
+              if (r.text?.trim()) return res.json({ reply: sanitizePlanningReply(r.text), files: {}, suggestBuild });
+            } catch (ge: any) { console.warn(`[PRO PLAN] Gemini ${gModel}: ${ge.message}`); }
+          }
+        } catch (e: any) { console.warn('[PRO PLAN] Gemini block err:', e.message); }
       }
+
+      // Vertex AI planning fallback
+      const projectIdPlan = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
+      if (projectIdPlan) {
+        try {
+          const { GoogleGenAI: VtxAI } = await import('@google/genai');
+          const ai = new VtxAI({ vertexai: true, project: projectIdPlan, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
+          const r = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [{ role: 'user', parts: [{ text: PLAN_PROMPT + '\n\nUser: ' + message }] }],
+          });
+          if (r.text?.trim()) return res.json({ reply: sanitizePlanningReply(r.text), files: {}, suggestBuild });
+        } catch (e: any) { console.warn('[PRO PLAN] Vertex err:', e.message); }
+      }
+
+      // Grok planning fallback
+      const grokKeyPlan = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
+      if (grokKeyPlan) {
+        try {
+          const grokMsgs = [
+            { role: 'system' as const, content: PLAN_PROMPT },
+            ...(history || []).slice(-6).map((m: any) => ({
+              role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+              content: String(m.text || m.content || '').slice(0, 400),
+            })),
+            { role: 'user' as const, content: message },
+          ];
+          const grokClient = new OpenAI({ apiKey: grokKeyPlan, baseURL: 'https://api.x.ai/v1' });
+          const grokReply = await grokClient.chat.completions.create({ model: 'grok-3-fast', messages: grokMsgs, max_tokens: 1500 });
+          const grokText = grokReply.choices[0]?.message?.content || '';
+          if (grokText.trim()) return res.json({ reply: sanitizePlanningReply(grokText), files: {}, suggestBuild });
+        } catch (e: any) { console.warn('[PRO PLAN] Grok err:', e.message); }
+      }
+
+      return res.status(500).json({ error: 'All AI providers unavailable. Please check API keys in Cloud Run console.' });
 
     } catch (error: any) {
       console.error('Pro Chat Error:', error);

@@ -276,9 +276,12 @@ function buildCdnJsHints(cdnNeeded: string[]): string {
     .join('\n\n');
 }
 
-// ─── AI Caller — Claude first, Gemini fallback ───────────────────────────────
+// ─── AI Caller — 4-provider cascade: Claude → Gemini → Vertex → Grok ────────
+// Every provider checked in order; throws only if ALL fail.
+// Checks all env var aliases so any Cloud Run config works.
 
 async function callAI(prompt: string, systemPrompt: string, maxTokens = 6000): Promise<string> {
+  // ── 1. Claude (proxy-aware) ───────────────────────────────────────────────
   const claudeKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
   if (claudeKey) {
     try {
@@ -286,7 +289,6 @@ async function callAI(prompt: string, systemPrompt: string, maxTokens = 6000): P
       const baseURL = rawBaseURL?.replace(/\/v1\/?$/, '');
 
       if (baseURL) {
-        // OpenAI-compatible proxy (e.g. aicredits.in) — must send Authorization: Bearer, NOT x-api-key
         const { default: OpenAI } = await import('openai');
         const client = new OpenAI({ apiKey: claudeKey, baseURL });
         const models = [
@@ -296,12 +298,8 @@ async function callAI(prompt: string, systemPrompt: string, maxTokens = 6000): P
         for (const model of models) {
           try {
             const r = await client.chat.completions.create({
-              model,
-              max_tokens: maxTokens,
-              messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: prompt },
-              ],
+              model, max_tokens: maxTokens,
+              messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
             });
             const text = r.choices[0]?.message?.content || '';
             if (text.trim()) return text;
@@ -310,11 +308,9 @@ async function callAI(prompt: string, systemPrompt: string, maxTokens = 6000): P
           }
         }
       } else {
-        // Direct Anthropic API — sends x-api-key header
         const client = new Anthropic({ apiKey: claudeKey });
         const r = await client.messages.create({
-          model: 'claude-sonnet-4-6',
-          max_tokens: maxTokens,
+          model: 'claude-sonnet-4-6', max_tokens: maxTokens,
           system: systemPrompt,
           messages: [{ role: 'user', content: prompt }],
         });
@@ -326,21 +322,64 @@ async function callAI(prompt: string, systemPrompt: string, maxTokens = 6000): P
     }
   }
 
-  const geminiKey = process.env.GEMINI_API_KEY;
+  // ── 2. Gemini API (API key) — check all env var aliases ──────────────────
+  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
   if (geminiKey) {
-    try {
-      const ai = new GoogleGenAI({ apiKey: geminiKey });
-      const r = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + prompt }] }],
-      });
-      if (r.text?.trim()) return r.text;
-    } catch (e: any) {
-      console.warn('[AppEngine] Gemini failed:', e.message);
+    const geminiModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    for (const model of geminiModels) {
+      try {
+        const ai = new GoogleGenAI({ apiKey: geminiKey });
+        const r = await ai.models.generateContent({
+          model,
+          contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + prompt }] }],
+        });
+        if (r.text?.trim()) return r.text;
+      } catch (e: any) {
+        console.warn(`[AppEngine] Gemini ${model} failed: ${e.message}`);
+      }
     }
   }
 
-  throw new Error('Build service temporarily unavailable. Please try again.');
+  // ── 3. Vertex AI (project-based, no API key needed on Cloud Run) ─────────
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
+  if (projectId) {
+    const vertexModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    for (const model of vertexModels) {
+      try {
+        const { GoogleGenAI: VtxAI } = await import('@google/genai');
+        const ai = new VtxAI({ vertexai: true, project: projectId, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
+        const r = await ai.models.generateContent({
+          model,
+          contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + prompt }] }],
+        });
+        if (r.text?.trim()) return r.text;
+      } catch (e: any) {
+        console.warn(`[AppEngine] Vertex ${model} failed: ${e.message}`);
+      }
+    }
+  }
+
+  // ── 4. Grok (xAI) — final fallback ───────────────────────────────────────
+  const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
+  if (grokKey) {
+    const grokModels = ['grok-3', 'grok-3-fast'];
+    for (const model of grokModels) {
+      try {
+        const { default: OpenAI } = await import('openai');
+        const client = new OpenAI({ apiKey: grokKey, baseURL: 'https://api.x.ai/v1' });
+        const r = await client.chat.completions.create({
+          model, max_tokens: maxTokens,
+          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
+        });
+        const text = r.choices[0]?.message?.content || '';
+        if (text.trim()) return text;
+      } catch (e: any) {
+        console.warn(`[AppEngine] Grok ${model} failed: ${e.message}`);
+      }
+    }
+  }
+
+  throw new Error('All AI providers unavailable. Check API keys in Cloud Run console.');
 }
 
 // ─── Step 1: Generate Deep Blueprint ─────────────────────────────────────────

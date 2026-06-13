@@ -4052,6 +4052,51 @@ app.post('/api/chat', async (req, res) => {
 });
 */
 
+  // ── Proxy-aware Claude helper ─────────────────────────────────────────────
+  // Cloud Run has ANTHROPIC_BASE_URL set to an OpenAI-compatible proxy.
+  // Proxies expect "Authorization: Bearer <key>" (OpenAI format).
+  // The Anthropic SDK sends "x-api-key: <key>" — rejected with 401.
+  // This helper routes to OpenAI SDK (proxy) or Anthropic SDK (direct) correctly.
+  async function callClaudePro(
+    apiKey: string,
+    systemPrompt: string,
+    msgs: { role: 'user' | 'assistant'; content: any }[],
+    maxTokens: number,
+  ): Promise<string> {
+    const rawBaseURL = process.env.ANTHROPIC_BASE_URL;
+    const baseURL = rawBaseURL?.replace(/\/v1\/?$/, '');
+
+    if (baseURL) {
+      // OpenAI-compatible proxy path — sends Authorization: Bearer
+      const proxyMsgs = [{ role: 'system' as const, content: systemPrompt }, ...msgs];
+      const client = new OpenAI({ apiKey, baseURL });
+      const models = [
+        'anthropic/claude-sonnet-4.6', 'claude-sonnet-4-6',
+        'anthropic/claude-3.5-sonnet', 'claude-3-5-sonnet-20241022',
+      ];
+      let lastErr: any;
+      for (const model of models) {
+        try {
+          const r = await client.chat.completions.create({ model, messages: proxyMsgs, max_tokens: maxTokens });
+          const text = r.choices[0]?.message?.content;
+          if (text) return text;
+        } catch (e: any) {
+          console.warn(`[PRO-PROXY] model ${model} failed: ${e.message}`);
+          lastErr = e;
+        }
+      }
+      throw lastErr || new Error('All proxy models failed');
+    }
+
+    // Direct Anthropic SDK path — sends x-api-key
+    const A = (await import('@anthropic-ai/sdk')).default;
+    const r = await new A({ apiKey }).messages.create({
+      model: 'claude-3-5-sonnet-20241022', max_tokens: maxTokens,
+      system: systemPrompt, messages: msgs,
+    });
+    return (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
+  }
+
   app.post('/api/pro-chat', async (req, res) => {
     console.log("=== HIT /api/pro-chat ===");
     try {
@@ -4099,13 +4144,7 @@ Write complete working code. Beautiful dark UI. No placeholders. Output ONLY the
           try {
             const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
             if (key) {
-              const A = (await import('@anthropic-ai/sdk')).default;
-              const baseURL = process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
-              const r = await new A({ apiKey: key, ...(baseURL ? { baseURL } : {}) }).messages.create({
-                model: 'claude-3-5-sonnet-20241022', max_tokens: 8000,
-                system: BUILD_PROMPT, messages: [{ role: 'user', content: message }],
-              });
-              const raw = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
+              const raw = await callClaudePro(key, BUILD_PROMPT, [{ role: 'user', content: message }], 8000);
               const parsed = extractJSON(raw);
               if (parsed) return res.json({ reply: parsed.reply || 'App ready!', files: parsed.files });
             }
@@ -4132,8 +4171,6 @@ Your role:
         try {
           const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
           if (!key) return res.json({ reply: 'Hello! Describe your app idea and I will build it for you! 🚀', files: {} });
-          const A = (await import('@anthropic-ai/sdk')).default;
-          const baseURL = process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
           const msgs = [
             ...(history || []).slice(-6).map((m: any) => ({
               role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
@@ -4141,12 +4178,8 @@ Your role:
             })),
             { role: 'user' as const, content: message },
           ];
-          const r = await new A({ apiKey: key, ...(baseURL ? { baseURL } : {}) }).messages.create({
-            model: 'claude-3-5-sonnet-20241022', max_tokens: 300,
-            system: CONV_SYS, messages: msgs,
-          });
-          const reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || 'Hello! Tell me what app you want to build! 🚀';
-          return res.json({ reply, files: {} });
+          const reply = await callClaudePro(key, CONV_SYS, msgs, 300);
+          return res.json({ reply: reply || 'Hello! Tell me what app you want to build! 🚀', files: {} });
         } catch (e: any) {
           return res.json({ reply: 'Hello! Describe your app idea and I will build it! 🚀', files: {} });
         }
@@ -4201,9 +4234,7 @@ Response Format:
       try {
         const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
         if (key) {
-          const A = (await import('@anthropic-ai/sdk')).default;
-          const baseURL = process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
-          // Build user content — with optional vision attachment
+          // Build user content — with optional vision attachment (images/PDFs only work on direct Anthropic path)
           let userContent: any = message;
           if (isImageFile) {
             userContent = [
@@ -4223,11 +4254,7 @@ Response Format:
             })),
             { role: 'user' as const, content: userContent }
           ];
-          const r = await new A({ apiKey: key, ...(baseURL ? { baseURL } : {}) }).messages.create({
-            model: 'claude-3-5-sonnet-20241022', max_tokens: 1500,
-            system: PLAN_PROMPT, messages: msgs,
-          });
-          const rawReply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
+          const rawReply = await callClaudePro(key, PLAN_PROMPT, msgs, 1500);
           return res.json({ reply: sanitizePlanningReply(rawReply), files: {}, suggestBuild });
         }
       } catch (e: any) { console.warn('[PRO PLAN] Claude err:', e.message); }

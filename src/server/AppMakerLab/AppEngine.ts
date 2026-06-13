@@ -282,16 +282,45 @@ async function callAI(prompt: string, systemPrompt: string, maxTokens = 6000): P
   const claudeKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
   if (claudeKey) {
     try {
-      const baseURL = process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
-      const client = new Anthropic({ apiKey: claudeKey, ...(baseURL ? { baseURL } : {}) });
-      const r = await client.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: maxTokens,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: prompt }],
-      });
-      const text = (r.content.find(c => c.type === 'text') as any)?.text || '';
-      if (text.trim()) return text;
+      const rawBaseURL = process.env.ANTHROPIC_BASE_URL;
+      const baseURL = rawBaseURL?.replace(/\/v1\/?$/, '');
+
+      if (baseURL) {
+        // OpenAI-compatible proxy (e.g. aicredits.in) — must send Authorization: Bearer, NOT x-api-key
+        const { default: OpenAI } = await import('openai');
+        const client = new OpenAI({ apiKey: claudeKey, baseURL });
+        const models = [
+          'anthropic/claude-sonnet-4.6', 'claude-sonnet-4-6',
+          'anthropic/claude-3.5-sonnet', 'claude-3-5-sonnet-20241022',
+        ];
+        for (const model of models) {
+          try {
+            const r = await client.chat.completions.create({
+              model,
+              max_tokens: maxTokens,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: prompt },
+              ],
+            });
+            const text = r.choices[0]?.message?.content || '';
+            if (text.trim()) return text;
+          } catch (e: any) {
+            console.warn(`[AppEngine] Proxy model ${model} failed: ${e.message}`);
+          }
+        }
+      } else {
+        // Direct Anthropic API — sends x-api-key header
+        const client = new Anthropic({ apiKey: claudeKey });
+        const r = await client.messages.create({
+          model: 'claude-sonnet-4-6',
+          max_tokens: maxTokens,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: prompt }],
+        });
+        const text = (r.content.find(c => c.type === 'text') as any)?.text || '';
+        if (text.trim()) return text;
+      }
     } catch (e: any) {
       console.warn('[AppEngine] Claude failed:', e.message);
     }

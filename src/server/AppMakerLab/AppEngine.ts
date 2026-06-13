@@ -605,6 +605,12 @@ Rules:
 ${showPageFn}
 - showPage('${bp.screens[0]?.id || 'page-home'}') on load
 - Call logic functions, update DOM, show results
+- Add global error handler at the very start of DOMContentLoaded:
+  window.onerror = function(msg, src, line, col, err) {
+    const eb = document.getElementById('nbt-error-bar') || (() => { const d = document.createElement('div'); d.id='nbt-error-bar'; d.style.cssText='position:fixed;bottom:0;left:0;right:0;background:#c0392b;color:#fff;padding:8px 14px;font-size:13px;z-index:99999;display:none;'; document.body.appendChild(d); return d; })();
+    eb.textContent = '⚠ JS Error: ' + msg + (line ? ' (line ' + line + ')' : ''); eb.style.display = 'block';
+    setTimeout(() => { eb.style.display = 'none'; }, 6000); return false;
+  };
 
 Output ONLY the UI module JavaScript:`;
 
@@ -926,11 +932,17 @@ UNIVERSAL RULES (ALL MANDATORY):
      t.textContent = message; t.className = 'toast-notification toast-'+type; t.style.display = 'block';
      clearTimeout(t._timer); t._timer = setTimeout(() => { t.style.display = 'none'; }, 2800);
    }
-4. Wire EVERY button from the HTML using addEventListener — no button left unwired
-5. For login/auth apps: validate against a SAMPLE_USERS array, call showPage() on success, show inline error in a DOM element on failure — NEVER alert()
-6. ALL ${bp.screens.length} screens from the blueprint must be navigable: ${bp.screens.map(s => s.id).join(', ')}
-7. No TODO comments, no empty functions, no placeholder logic
-8. Show first page on load: showPage('${bp.screens[0]?.id || 'page-home'}')
+4. Global error handler — add this IMMEDIATELY after DOMContentLoaded opens (before any other code):
+   window.onerror = function(msg, src, line, col, err) {
+     const eb = document.getElementById('nbt-error-bar') || (() => { const d = document.createElement('div'); d.id='nbt-error-bar'; d.style.cssText='position:fixed;bottom:0;left:0;right:0;background:#c0392b;color:#fff;padding:8px 14px;font-size:13px;z-index:99999;display:none;'; document.body.appendChild(d); return d; })();
+     eb.textContent = '⚠ JS Error: ' + msg + (line ? ' (line ' + line + ')' : ''); eb.style.display = 'block';
+     setTimeout(() => { eb.style.display = 'none'; }, 6000); return false;
+   };
+5. Wire EVERY button from the HTML using addEventListener — no button left unwired
+6. For login/auth apps: validate against a SAMPLE_USERS array, call showPage() on success, show inline error in a DOM element on failure — NEVER alert()
+7. ALL ${bp.screens.length} screens from the blueprint must be navigable: ${bp.screens.map(s => s.id).join(', ')}
+8. No TODO comments, no empty functions, no placeholder logic
+9. Show first page on load: showPage('${bp.screens[0]?.id || 'page-home'}')
 
 Output ONLY the raw JavaScript:`;
 
@@ -1449,9 +1461,27 @@ function extractJSChunk(js: string, funcName: string): CodeChunk | null {
     const match = pattern.exec(js);
     if (!match) continue;
     let depth = 1, pos = match.index + match[0].length;
+    // Track string/template context so braces inside strings don't affect depth
+    let inSingle = false, inDouble = false, inTemplate = 0, inLineComment = false, inBlockComment = false;
     while (depth > 0 && pos < js.length) {
-      if (js[pos] === '{') depth++;
-      else if (js[pos] === '}') depth--;
+      const ch = js[pos];
+      const prev = pos > 0 ? js[pos - 1] : '';
+      // Line comment
+      if (!inSingle && !inDouble && !inTemplate && !inBlockComment && ch === '/' && js[pos + 1] === '/') { inLineComment = true; pos++; continue; }
+      if (inLineComment) { if (ch === '\n') inLineComment = false; pos++; continue; }
+      // Block comment
+      if (!inSingle && !inDouble && !inTemplate && ch === '/' && js[pos + 1] === '*') { inBlockComment = true; pos += 2; continue; }
+      if (inBlockComment) { if (ch === '*' && js[pos + 1] === '/') { inBlockComment = false; pos += 2; } else pos++; continue; }
+      // String literals
+      if (!inDouble && !inTemplate && ch === "'" && prev !== '\\') { inSingle = !inSingle; pos++; continue; }
+      if (!inSingle && !inTemplate && ch === '"' && prev !== '\\') { inDouble = !inDouble; pos++; continue; }
+      if (inSingle || inDouble) { pos++; continue; }
+      // Template literals (nested depth)
+      if (ch === '`' && prev !== '\\') { inTemplate = inTemplate > 0 ? inTemplate - 1 : inTemplate + 1; pos++; continue; }
+      if (inTemplate > 0) { pos++; continue; }
+      // Count braces only in real code
+      if (ch === '{') depth++;
+      else if (ch === '}') depth--;
       pos++;
     }
     if (depth === 0) return { chunk: js.slice(match.index, pos), start: match.index, end: pos };
@@ -1529,7 +1559,7 @@ Return ONLY valid JSON (no markdown):
 Set isFullEdit true ONLY if the change requires restructuring entire file.`;
 
   try {
-    const raw = await callAI(prompt, 'You are a senior code diagnostician. Return only valid JSON.', 700);
+    const raw = await callAI(prompt, 'You are a senior code diagnostician. Return only valid JSON.', 2000);
     const parsed = JSON.parse(raw.replace(/```json?|```/g, '').trim());
     return {
       rootCauses: Array.isArray(parsed.rootCauses) ? parsed.rootCauses : [request],

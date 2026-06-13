@@ -2663,7 +2663,9 @@ ${buildLanguageRule(preferredLanguage)}`;
                 throw new Error(evt.error || 'Build failed — no files generated');
               }
             } else if (evt.type === 'error') {
-              throw new Error(evt.message || 'Build error');
+              const errMsg = evt.message || 'Build error';
+              const suggestion = evt.suggestion ? `\n\n💡 ${evt.suggestion}` : '';
+              throw new Error(errMsg + suggestion);
             }
           } catch (parseErr: any) {
             if (parseErr.message && !parseErr.message.includes('JSON')) throw parseErr;

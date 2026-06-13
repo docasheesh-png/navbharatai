@@ -282,7 +282,7 @@ async function callAI(prompt: string, systemPrompt: string, maxTokens = 6000): P
       const baseURL = process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
       const client = new Anthropic({ apiKey: claudeKey, ...(baseURL ? { baseURL } : {}) });
       const r = await client.messages.create({
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'claude-sonnet-4-6',
         max_tokens: maxTokens,
         system: systemPrompt,
         messages: [{ role: 'user', content: prompt }],
@@ -603,6 +603,28 @@ Output ONLY the UI module JavaScript:`;
     callAI(logicPrompt, sys, 5000),
     callAI(uiPrompt,    sys, 6000),
   ]);
+
+  // Cross-validate: find variables used in logic/ui but not declared in state
+  const stateDeclarations = new Set<string>();
+  for (const m of stateJs.matchAll(/(?:let|const|var)\s+(\w+)/g)) stateDeclarations.add(m[1]);
+  const crossIssues: string[] = [];
+  for (const m of (logicJs + uiJs).matchAll(/\b([a-zA-Z_]\w{3,})\b/g)) {
+    const name = m[1];
+    if (!stateDeclarations.has(name) && /^[a-z]/.test(name) &&
+        !['function','return','const','let','var','if','else','for','while','switch','case',
+          'break','continue','null','true','false','undefined','document','window','console',
+          'Math','Date','JSON','Object','Array','String','Number','Boolean','Promise','fetch',
+          'setTimeout','setInterval','clearInterval','clearTimeout','addEventListener',
+          'querySelector','getElementById','classList','style','innerHTML','textContent',
+          'requestAnimationFrame','cancelAnimationFrame','localStorage','sessionStorage'].includes(name) &&
+        (logicJs.includes(`${name}(`) || uiJs.includes(`${name}(`) || // function call
+         logicJs.includes(`= ${name}`) || uiJs.includes(`= ${name}`))) { // assignment
+      crossIssues.push(name);
+    }
+  }
+  if (crossIssues.length > 0) {
+    console.log(`[AppEngine] Cross-module check: ${[...new Set(crossIssues)].slice(0,10).join(', ')} referenced but may need state declaration`);
+  }
 
   // Merge: state → logic → ui (dependency order)
   return `// ── STATE ──────────────────────────────────────────
@@ -978,19 +1000,33 @@ export async function buildApp(
       report('Generating', 5, 7, 'JS + CSS complete.');
     }
 
-    // Fix #1: Validation loop — max 2 repair attempts
+    // Validation + smart repair loop — up to 5 attempts; stops early if no progress
     let repairAttempts = 0;
+    const MAX_REPAIR = 5;
     let validation = validateDOMConsistency(htmlContent, jsContent);
-    while (!validation.valid && repairAttempts < 2) {
+    let prevIssueCount = Infinity;
+    while (!validation.valid && repairAttempts < MAX_REPAIR) {
       const issues = [...validation.brokenIds, ...validation.missingWires, ...validation.syntaxIssues];
-      console.log(`[AppEngine] Validation issues — brokenIds: [${validation.brokenIds}] missingWires: [${validation.missingWires}] syntax: [${validation.syntaxIssues}]`);
-      report('Repairing', 5, 7, `Pass ${repairAttempts + 1}: fixing ${issues.length} issues (${validation.brokenIds.length} broken IDs, ${validation.missingWires.length} unwired buttons)...`);
+      const issueCount = issues.length;
+      // If no improvement after 2 passes, stop to avoid infinite loops on unfixable issues
+      if (repairAttempts >= 2 && issueCount >= prevIssueCount) {
+        console.warn(`[AppEngine] Repair stalled at ${issueCount} issues after ${repairAttempts} attempts — stopping.`);
+        break;
+      }
+      prevIssueCount = issueCount;
+      console.log(`[AppEngine] Repair pass ${repairAttempts + 1}/${MAX_REPAIR} — brokenIds: [${validation.brokenIds}] missingWires: [${validation.missingWires}] syntax: [${validation.syntaxIssues}]`);
+      report('Repairing', 5, 7, `Pass ${repairAttempts + 1}: fixing ${issueCount} issues (${validation.brokenIds.length} broken IDs, ${validation.missingWires.length} unwired buttons)...`);
       jsContent = await autoRepairJS(jsContent, htmlContent, validation, bp.appName);
       validation = validateDOMConsistency(htmlContent, jsContent);
       repairAttempts++;
     }
     if (validation.valid) {
-      console.log('[AppEngine] Validation passed — all DOM references and button wires OK.');
+      console.log(`[AppEngine] Validation passed after ${repairAttempts} repair(s) — all DOM references OK.`);
+    } else {
+      const remaining = [...validation.brokenIds, ...validation.missingWires, ...validation.syntaxIssues];
+      console.warn(`[AppEngine] ${remaining.length} issues remain after ${repairAttempts} repair(s): ${remaining.join(', ')}`);
+      // Inject a visible warning comment at top of JS so developer knows
+      jsContent = `/* ⚠️ NavBharatAI: ${remaining.length} unresolved issue(s) after auto-repair: ${remaining.slice(0, 5).join(', ')} */\n` + jsContent;
     }
 
     generatedFiles['script.js']  = jsContent;

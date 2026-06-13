@@ -4224,9 +4224,19 @@ Response Format:
     const { message, currentApp } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
 
+    // Sanitize currentApp to prevent prompt injection via HTML comments or special strings
+    const sanitizeHtml = (html: string): string => html
+      .replace(/<!--[\s\S]*?-->/g, '')           // strip HTML comments (injection vector)
+      .replace(/\bignore\b.*\bprevious\b/gi, '') // strip "ignore previous instructions"
+      .replace(/\bsystem\s*prompt\b/gi, '')       // strip "system prompt" references
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '<script>[removed]</script>') // strip inline scripts in currentApp (keep tag for structure)
+      .slice(0, 18000);                           // hard cap
+
     // Prepend current canvas app so builder can edit/extend it
-    const buildMessage = currentApp && typeof currentApp === 'string' && currentApp.length > 200
-      ? `[CURRENT APP TO EDIT — ${currentApp.length} chars]:\n\`\`\`html\n${currentApp.slice(0, 15000)}\n\`\`\`\n\nBuild request: ${message}`
+    const safeCurrentApp = currentApp && typeof currentApp === 'string' && currentApp.length > 200
+      ? sanitizeHtml(currentApp) : null;
+    const buildMessage = safeCurrentApp
+      ? `[CURRENT APP TO EDIT — ${safeCurrentApp.length} chars]:\n\`\`\`html\n${safeCurrentApp}\n\`\`\`\n\nBuild request: ${message}`
       : message;
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -4257,7 +4267,23 @@ Response Format:
         deploymentGuide: result.deploymentGuide,
       });
     } catch (err: any) {
-      send({ type: 'error', message: err.message });
+      const msg: string = err?.message || 'Unknown build error';
+      let userFriendly = 'App build failed. Please try again.';
+      let suggestion = 'Try simplifying your request or breaking it into smaller steps.';
+      if (msg.includes('temporarily unavailable') || msg.includes('overloaded')) {
+        userFriendly = 'AI service is temporarily busy.';
+        suggestion = 'Wait 30 seconds and try again.';
+      } else if (msg.includes('rate limit') || msg.includes('429')) {
+        userFriendly = 'Rate limit reached.';
+        suggestion = 'Please wait 1 minute before building again.';
+      } else if (msg.includes('token') || msg.includes('length') || msg.includes('too long')) {
+        userFriendly = 'App request is too complex for one build.';
+        suggestion = 'Break it into phases: first build the basic structure, then add features one by one.';
+      } else if (msg.includes('API key') || msg.includes('auth') || msg.includes('401')) {
+        userFriendly = 'AI provider authentication error.';
+        suggestion = 'Contact support — API key may need renewal.';
+      }
+      send({ type: 'error', message: userFriendly, detail: msg, suggestion });
     }
     res.end();
   });

@@ -4407,21 +4407,41 @@ Response Format:
         }
       } catch (e: any) { console.warn('[PRO PLAN] Claude err:', e.message); }
 
-      // Gemini planning fallback (all key aliases)
+      // ── 2. Grok — 2nd priority for Pro ───────────────────────────────────────
+      const grokKeyPlan = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
+      if (grokKeyPlan) {
+        try {
+          const planMsgs = [
+            { role: 'system' as const, content: PLAN_PROMPT },
+            ...(history || []).slice(-8).map((m: any) => ({
+              role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+              content: String(m.text || m.content || '').slice(0, 400),
+            })),
+            { role: 'user' as const, content: message },
+          ];
+          const grokClient = new OpenAI({ apiKey: grokKeyPlan, baseURL: 'https://api.x.ai/v1' });
+          for (const grokModel of ['grok-3', 'grok-3-fast']) {
+            try {
+              const r = await grokClient.chat.completions.create({ model: grokModel, messages: planMsgs, max_tokens: 1500 });
+              const t = r.choices[0]?.message?.content || '';
+              if (t.trim()) return res.json({ reply: sanitizePlanningReply(t), files: {}, suggestBuild });
+            } catch (ge: any) { console.warn(`[PRO PLAN] Grok ${grokModel}: ${ge.message}`); }
+          }
+        } catch (e: any) { console.warn('[PRO PLAN] Grok err:', e.message); }
+      }
+
+      // ── 3. Gemini API — all key aliases, starts with user msg ─────────────────
       const geminiKeyPlan = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
       if (geminiKeyPlan) {
         try {
           const { GoogleGenAI } = await import('@google/genai');
-          // Trim history to last 10 msgs, ensure it starts with user, strip empty
           const rawHistory = (history || []).slice(-10).filter((m: any) => String(m.text || m.content || '').trim().length > 0);
           let historyContents: any[] = rawHistory.map((m: any) => ({
             role: m.sender === 'user' ? 'user' : 'model',
             parts: [{ text: String(m.text || m.content || '').slice(0, 600) }]
           }));
-          // Gemini requires contents to start with 'user'
           while (historyContents.length > 0 && historyContents[0].role !== 'user') historyContents.shift();
-          const geminiModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
-          for (const gModel of geminiModels) {
+          for (const gModel of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
             try {
               const r = await new GoogleGenAI({ apiKey: geminiKeyPlan }).models.generateContent({
                 model: gModel,
@@ -4430,40 +4450,25 @@ Response Format:
               if (r.text?.trim()) return res.json({ reply: sanitizePlanningReply(r.text), files: {}, suggestBuild });
             } catch (ge: any) { console.warn(`[PRO PLAN] Gemini ${gModel}: ${ge.message}`); }
           }
-        } catch (e: any) { console.warn('[PRO PLAN] Gemini block err:', e.message); }
+        } catch (e: any) { console.warn('[PRO PLAN] Gemini err:', e.message); }
       }
 
-      // Vertex AI planning fallback
+      // ── 4. Vertex AI — project-based, no key needed ───────────────────────────
       const projectIdPlan = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
       if (projectIdPlan) {
         try {
           const { GoogleGenAI: VtxAI } = await import('@google/genai');
           const ai = new VtxAI({ vertexai: true, project: projectIdPlan, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
-          const r = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [{ role: 'user', parts: [{ text: PLAN_PROMPT + '\n\nUser: ' + message }] }],
-          });
-          if (r.text?.trim()) return res.json({ reply: sanitizePlanningReply(r.text), files: {}, suggestBuild });
+          for (const vtxModel of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+            try {
+              const r = await ai.models.generateContent({
+                model: vtxModel,
+                contents: [{ role: 'user', parts: [{ text: PLAN_PROMPT + '\n\nUser: ' + message }] }],
+              });
+              if (r.text?.trim()) return res.json({ reply: sanitizePlanningReply(r.text), files: {}, suggestBuild });
+            } catch (ve: any) { console.warn(`[PRO PLAN] Vertex ${vtxModel}: ${ve.message}`); }
+          }
         } catch (e: any) { console.warn('[PRO PLAN] Vertex err:', e.message); }
-      }
-
-      // Grok planning fallback
-      const grokKeyPlan = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
-      if (grokKeyPlan) {
-        try {
-          const grokMsgs = [
-            { role: 'system' as const, content: PLAN_PROMPT },
-            ...(history || []).slice(-6).map((m: any) => ({
-              role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
-              content: String(m.text || m.content || '').slice(0, 400),
-            })),
-            { role: 'user' as const, content: message },
-          ];
-          const grokClient = new OpenAI({ apiKey: grokKeyPlan, baseURL: 'https://api.x.ai/v1' });
-          const grokReply = await grokClient.chat.completions.create({ model: 'grok-3-fast', messages: grokMsgs, max_tokens: 1500 });
-          const grokText = grokReply.choices[0]?.message?.content || '';
-          if (grokText.trim()) return res.json({ reply: sanitizePlanningReply(grokText), files: {}, suggestBuild });
-        } catch (e: any) { console.warn('[PRO PLAN] Grok err:', e.message); }
       }
 
       return res.status(500).json({ error: 'All AI providers unavailable. Please check API keys in Cloud Run console.' });
@@ -5687,7 +5692,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         ];
       };
 
-      // ── 1. Grok (fast, generous limits) ─────────────────────────────────────
+      // ── 1. Grok — SDA primary (fast, generous limits) ───────────────────────
       const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
       if (!reply && grokKey) {
         try {
@@ -5703,7 +5708,46 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         } catch (e: any) { console.warn('[SDA] Grok err:', e.message); }
       }
 
-      // ── 2. Claude (best clinical reasoning + vision) ─────────────────────────
+      // ── 2. Gemini (great vision + multimodal) ────────────────────────────────
+      if (!reply) {
+        try {
+          const { GoogleGenAI } = await import('@google/genai');
+          const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
+          if (!geminiKey) throw new Error('No Gemini key');
+          const contents = buildGeminiContents();
+          for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+            try {
+              const r = await new GoogleGenAI({ apiKey: geminiKey }).models.generateContent({ model, systemInstruction: SDA_SYSTEM, contents });
+              reply = r.text || '';
+              if (reply) { console.log(`[SDA] Gemini ${model} succeeded`); break; }
+            } catch (ge: any) { console.warn(`[SDA] Gemini ${model}:`, ge.message); }
+          }
+        } catch (e: any) { console.warn('[SDA] Gemini err:', e.message); }
+      }
+
+      // ── 3. Vertex AI (GCP-native, high reliability) ──────────────────────────
+      if (!reply) {
+        try {
+          const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
+          if (!projectId) throw new Error('No Vertex project ID');
+          const { VertexAI } = await import('@google-cloud/vertexai');
+          const vertexAI = new VertexAI({ project: projectId, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
+          const contents = buildGeminiContents();
+          for (const modelName of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+            try {
+              const model = vertexAI.getGenerativeModel({
+                model: modelName,
+                systemInstruction: { role: 'system', parts: [{ text: SDA_SYSTEM }] },
+              });
+              const result = await model.generateContent({ contents });
+              reply = result.response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+              if (reply) { console.log(`[SDA] Vertex ${modelName} succeeded`); break; }
+            } catch (ve: any) { console.warn(`[SDA] Vertex ${modelName}:`, ve.message); }
+          }
+        } catch (e: any) { console.warn('[SDA] Vertex err:', e.message); }
+      }
+
+      // ── 4. Claude — SDA last resort (vision + clinical depth) ────────────────
       const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
       if (!reply && anthropicKey) {
         try {
@@ -5737,45 +5781,6 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
             if (reply) console.log('[SDA] Claude direct succeeded');
           }
         } catch (e: any) { console.warn('[SDA] Claude err:', e.message); }
-      }
-
-      // ── 3. Gemini (great vision + multimodal) ────────────────────────────────
-      if (!reply) {
-        try {
-          const { GoogleGenAI } = await import('@google/genai');
-          const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
-          if (!geminiKey) throw new Error('No Gemini key');
-          const contents = buildGeminiContents();
-          for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
-            try {
-              const r = await new GoogleGenAI({ apiKey: geminiKey }).models.generateContent({ model, systemInstruction: SDA_SYSTEM, contents });
-              reply = r.text || '';
-              if (reply) { console.log(`[SDA] Gemini ${model} succeeded`); break; }
-            } catch (ge: any) { console.warn(`[SDA] Gemini ${model}:`, ge.message); }
-          }
-        } catch (e: any) { console.warn('[SDA] Gemini err:', e.message); }
-      }
-
-      // ── 4. Vertex AI (GCP-native, high reliability) ──────────────────────────
-      if (!reply) {
-        try {
-          const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
-          if (!projectId) throw new Error('No Vertex project ID');
-          const { VertexAI } = await import('@google-cloud/vertexai');
-          const vertexAI = new VertexAI({ project: projectId, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
-          const contents = buildGeminiContents();
-          for (const modelName of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
-            try {
-              const model = vertexAI.getGenerativeModel({
-                model: modelName,
-                systemInstruction: { role: 'system', parts: [{ text: SDA_SYSTEM }] },
-              });
-              const result = await model.generateContent({ contents });
-              reply = result.response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-              if (reply) { console.log(`[SDA] Vertex ${modelName} succeeded`); break; }
-            } catch (ve: any) { console.warn(`[SDA] Vertex ${modelName}:`, ve.message); }
-          }
-        } catch (e: any) { console.warn('[SDA] Vertex err:', e.message); }
       }
 
       if (!reply) {

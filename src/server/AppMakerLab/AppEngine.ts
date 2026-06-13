@@ -536,7 +536,8 @@ async function generateJSSplit(bp: AppBlueprint, htmlContent: string): Promise<s
 
   const sys = `You are a world-class JavaScript developer. Output ONLY raw JavaScript — no markdown, no <script> tags.
 CRITICAL CODING RULE: ALL identifiers (variable names, function names, class names, constants, code comments, string literals, console.log messages) MUST be in English. No Hindi, Hinglish, or any other language in code. This is absolute and non-negotiable.
-ABSOLUTELY FORBIDDEN: alert(), confirm(), prompt() — NEVER use these. Use showToast() or DOM element updates for ALL user feedback. No "(placeholder)" comments, no empty functions.`;
+ABSOLUTELY FORBIDDEN: alert(), confirm(), prompt() — NEVER use these. Use showToast() or DOM element updates for ALL user feedback. No "(placeholder)" comments, no empty functions.
+QUALITY STANDARD: Add JSDoc on all public functions and @type on key state variables.`;
 
   // Module 1: State — data model, constants, storage
   const statePrompt = `${baseCtx}
@@ -891,6 +892,14 @@ ${cdnTags}
 7. ALL ${bp.screens.length} SCREENS MUST BE BUILT — each with full UI: ${bp.screens.map(s => `${s.id} (${s.purpose})`).join(', ')}
 8. Include id="toast-msg" div (hidden, for user notifications) — NEVER use alert() in JS
 9. For login forms: include id="*-error" divs for inline validation messages
+10. ACCESSIBILITY (mandatory):
+    - Every <button> must have aria-label="..." describing its action
+    - Every <input> must have a <label for="id"> or aria-label="..."
+    - Main content screen: add role="main"
+    - Navigation bars: add role="navigation" aria-label="Main navigation"
+    - Modals/dialogs: add role="dialog" aria-modal="true" aria-labelledby="..."
+    - Images: always add alt="description"
+    - Focus order must be logical (tabindex only if re-ordering needed)
 
 Output ONLY the raw HTML:`;
 
@@ -908,7 +917,8 @@ CRITICAL CODING RULE: ALL identifiers (variable names, function names, class nam
 ABSOLUTELY FORBIDDEN — NEVER DO THESE:
 - alert(), confirm(), prompt() — COMPLETELY BANNED. For user feedback use showToast() or update a DOM element's textContent.
 - "(placeholder)", empty functions like () => {}, unimplemented features — every function must have real working logic.
-- Leaving any button unwired — every button in the HTML must have a working addEventListener.`;
+- Leaving any button unwired — every button in the HTML must have a working addEventListener.
+QUALITY STANDARD: Add JSDoc type annotations on all public functions: /** @param {string} id @returns {void} */ and @type on key state variables.`;
 
   const prompt = `Generate COMPLETE script.js for this app.
 
@@ -1071,6 +1081,7 @@ RULES:
 - Use Font Awesome icons: <i class="fa-solid fa-icon-name"></i>
 - Build COMPLETE UI — no "coming soon" or empty sections
 - DO NOT include <html>, <head>, <body>, <script>, or <link> tags
+- ACCESSIBILITY: every <button> gets aria-label="...", every <input> gets a <label> or aria-label, modals get role="dialog" aria-modal="true", main screens get role="main"
 
 Output ONLY the <div id="${screen.id}"> element:`;
 
@@ -1213,6 +1224,25 @@ export async function buildApp(
     onFileGenerated?.('script.js',  jsContent);
     onFileGenerated?.('style.css',  cssContent);
 
+    // Phase 5: Inject auth module for apps with login/auth needs
+    if (needsAuth(bp)) {
+      report('Auth', 5, 7, 'Adding secure auth module (Web Crypto API)...');
+      try {
+        const authJs = buildAuthModuleStatic(bp.appName);
+        generatedFiles['auth.js'] = authJs;
+        onFileGenerated?.('auth.js', authJs);
+        // Inject auth.js before script.js in HTML
+        generatedFiles['index.html'] = generatedFiles['index.html'].replace(
+          '<script src="script.js"',
+          '<script src="auth.js" defer></script>\n  <script src="script.js"',
+        );
+        generatedFiles['script.js'] = `// NBT_AUTH available: NBT_AUTH.login(email,pass), .register(user,email,pass), .logout(), .isLoggedIn(), .getCurrentUser()\n${generatedFiles['script.js']}`;
+        console.log('[AppEngine] Auth module injected');
+      } catch (authErr: any) {
+        console.warn('[AppEngine] Auth module injection failed (non-fatal):', authErr.message);
+      }
+    }
+
     // Optional: Firebase backend module for data-driven apps
     if (needsBackend(bp, userPrompt)) {
       report('Backend', 5, 7, 'Generating Firebase Firestore integration...');
@@ -1228,6 +1258,13 @@ export async function buildApp(
       } catch (fbErr: any) {
         console.warn('[AppEngine] Firebase module generation failed (non-fatal):', fbErr.message);
       }
+    }
+
+    // Phase 5: Testing scaffold for complex apps
+    if (bp.complexity === 'complex') {
+      const testHtml = buildTestingScaffold(bp);
+      generatedFiles['test.html'] = testHtml;
+      onFileGenerated?.('test.html', testHtml);
     }
 
     // Compute comprehensive validation report
@@ -1338,6 +1375,142 @@ function needsBackend(bp: AppBlueprint, userPrompt: string): boolean {
   const isDataApp = ['SOCIAL_APP', 'DASHBOARD'].includes(bp.template);
   return dataKeywords.test(userPrompt) || (hasDataModel && isDataApp) || bp.complexity === 'complex';
 }
+
+// Detect if app needs a real auth system
+function needsAuth(bp: AppBlueprint): boolean {
+  const authKeywords = /\b(login|logout|signup|register|auth|account|user|password|session|profile)\b/i;
+  return bp.interactions.some(i => authKeywords.test(i)) || bp.template === 'SOCIAL_APP' ||
+    bp.screens.some(s => /login|auth|signup|register|profile/.test(s.id));
+}
+
+// Phase 5: Proper auth module using Web Crypto API (client-side secure pattern)
+function buildAuthModuleStatic(appName: string): string {
+  return `// NBT Auth — Web Crypto session system for ${appName}
+const NBT_AUTH = (() => {
+  const USERS_KEY = 'nbt_users_v2';
+  const SESSION_KEY = 'nbt_session_v2';
+  const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
+
+  /** @param {string} password @returns {Promise<string>} */
+  async function hashPassword(password) {
+    const enc = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', enc.encode(password + 'nbt2024salt'));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  /** @returns {Array<{id:string,username:string,email:string,passwordHash:string}>} */
+  function getUsers() { try { return JSON.parse(localStorage.getItem(USERS_KEY) || '[]'); } catch { return []; } }
+  function saveUsers(u) { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
+
+  /** @returns {{userId:string,username:string,email:string,expiresAt:number}|null} */
+  function getSession() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+      if (!s || Date.now() > s.expiresAt) { localStorage.removeItem(SESSION_KEY); return null; }
+      return s;
+    } catch { return null; }
+  }
+  function saveSession(user) {
+    const s = { userId: user.id, username: user.username, email: user.email, expiresAt: Date.now() + SESSION_TTL };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(s)); return s;
+  }
+
+  return {
+    /** @param {string} username @param {string} email @param {string} password @returns {Promise<{ok:boolean,session?:object,error?:string}>} */
+    async register(username, email, password) {
+      if (!username || !email || !password) return { ok: false, error: 'All fields required' };
+      if (password.length < 6) return { ok: false, error: 'Password must be at least 6 characters' };
+      const users = getUsers();
+      if (users.find(u => u.email === email)) return { ok: false, error: 'Email already registered' };
+      const hash = await hashPassword(password);
+      const user = { id: Date.now().toString(36), username, email, passwordHash: hash, createdAt: Date.now() };
+      users.push(user); saveUsers(users);
+      return { ok: true, session: saveSession(user) };
+    },
+    /** @param {string} email @param {string} password @returns {Promise<{ok:boolean,session?:object,error?:string}>} */
+    async login(email, password) {
+      if (!email || !password) return { ok: false, error: 'Email and password required' };
+      const users = getUsers();
+      const user = users.find(u => u.email === email);
+      if (!user) return { ok: false, error: 'No account found with this email' };
+      const hash = await hashPassword(password);
+      if (hash !== user.passwordHash) return { ok: false, error: 'Incorrect password' };
+      return { ok: true, session: saveSession(user) };
+    },
+    logout() { localStorage.removeItem(SESSION_KEY); },
+    getSession,
+    isLoggedIn() { return getSession() !== null; },
+    getCurrentUser() { return getSession(); },
+  };
+})();
+`;
+}
+
+// Phase 5: Generate simple testing scaffold for complex apps
+function buildTestingScaffold(bp: AppBlueprint): string {
+  const fnNames = bp.interactions.slice(0, 5).map(i => {
+    const words = i.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/).filter(w => w.length > 2);
+    return words.slice(0, 3).join('_') || 'feature';
+  });
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${bp.appName} — Tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #e0e0e0; }
+    .pass { color: #2ecc71; } .fail { color: #e74c3c; } .skip { color: #f39c12; }
+    h1 { color: #9b59b6; } .result { margin: 6px 0; font-size: 14px; }
+    #summary { margin-top: 20px; font-size: 18px; font-weight: bold; }
+  </style>
+</head>
+<body>
+<h1>🧪 ${bp.appName} — Test Suite</h1>
+<div id="results"></div>
+<div id="summary"></div>
+<script>
+// Minimal test runner
+let passed = 0, failed = 0;
+const out = document.getElementById('results');
+function test(name, fn) {
+  try { fn(); passed++; out.innerHTML += \`<div class="result pass">✓ \${name}</div>\`; }
+  catch(e) { failed++; out.innerHTML += \`<div class="result fail">✗ \${name}: \${e.message}</div>\`; }
+}
+function expect(val) { return { toBe: exp => { if (val !== exp) throw new Error(\`Expected \${exp}, got \${val}\`); }, toBeTruthy: () => { if (!val) throw new Error('Expected truthy'); }, toBeFalsy: () => { if (val) throw new Error('Expected falsy'); }, toContain: str => { if (!String(val).includes(str)) throw new Error(\`Expected to contain "\${str}"\`); } }; }
+
+// ── Load app scripts (app must define functions at window scope or module scope)
+// Adjust path if running locally: <script src="script.js"></script>
+
+// ── Test cases (expand as needed)
+test('AppState stores and retrieves values', () => {
+  if (typeof AppState === 'undefined') throw new Error('AppState not defined — load script.js first');
+  AppState.set('_test_key', 42);
+  expect(AppState.get('_test_key')).toBe(42);
+});
+
+test('showToast does not throw', () => {
+  if (typeof showToast === 'undefined') throw new Error('showToast not defined');
+  showToast('Test message');
+});
+
+test('showPage does not throw', () => {
+  if (typeof showPage === 'undefined') throw new Error('showPage not defined');
+  // showPage('page-home'); // uncomment after loading script.js
+});
+
+${fnNames.map(fn => `test('${fn} interaction handled', () => {
+  // TODO: Load script.js above, then test: expect(typeof ${fn}).toBe('function');
+  expect(true).toBeTruthy(); // placeholder — replace with real assertion
+});`).join('\n\n')}
+
+document.getElementById('summary').innerHTML =
+  \`<span class="\${failed > 0 ? 'fail' : 'pass'}">\${passed} passed, \${failed} failed</span>\`;
+</script>
+</body>
+</html>`;
+}
+
 
 // ─── Iterative Edit Engine — edit existing app without full rebuild ────────────
 

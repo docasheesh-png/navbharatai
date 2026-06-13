@@ -4314,6 +4314,33 @@ Response Format:
     res.end();
   });
 
+  // ── One-click download: package app files as ZIP ─────────────────────────────
+  app.post('/api/download-zip', async (req: any, res: any) => {
+    const { files, appName } = req.body;
+    if (!files || typeof files !== 'object' || Object.keys(files).length === 0) {
+      return res.status(400).json({ error: 'No files provided' });
+    }
+    const safeName = (appName || 'navbharat-app').replace(/[^a-zA-Z0-9-_]/g, '-').slice(0, 40);
+    try {
+      const ZipStream = require('zip-stream');
+      const archive = new ZipStream({ level: 6 });
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.zip"`);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      archive.pipe(res);
+      const entries = Object.entries(files as Record<string, string>);
+      for (const [filename, content] of entries) {
+        await new Promise<void>((resolve, reject) => {
+          archive.entry(content, { name: filename }, (err: any) => err ? reject(err) : resolve());
+        });
+      }
+      archive.finish();
+    } catch (err: any) {
+      console.error('[download-zip] Error:', err);
+      if (!res.headersSent) res.status(500).json({ error: 'ZIP creation failed' });
+    }
+  });
+
   /*
   if (walletSnap.exists()) {
     walletData = walletSnap.data();

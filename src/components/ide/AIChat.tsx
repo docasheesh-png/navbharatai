@@ -254,6 +254,7 @@ interface AIChatProps {
   buildProgress?: BuildProgressState | null;
   onBuildStepToggle?: (index: number) => void;
   onLanguagePick?: (lang: string) => void;
+  onDownloadZip?: (files: Record<string, string>, appName: string) => void;
 }
 
 export const AIChat: React.FC<AIChatProps> = ({
@@ -288,6 +289,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   buildProgress = null,
   onBuildStepToggle,
   onLanguagePick,
+  onDownloadZip,
 }) => {
   const { buildSteps } = useBuild();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -493,11 +495,15 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
     const hasSwitchToBuild = isAI && text.includes('__SWITCH_TO_BUILD__');
     const hasUrgentBuild   = isAI && text.includes('__URGENT_BUILD__');
     const hasViewPreview   = isAI && text.includes('__VIEW_PREVIEW__');
+    const hasDeployActions = isAI && text.includes('__DEPLOY_ACTIONS__');
     const cleanText = text
       .replace('__SWITCH_TO_BUILD__', '')
       .replace('__URGENT_BUILD__', '')
       .replace('__VIEW_PREVIEW__', '')
+      .replace('__DEPLOY_ACTIONS__', '')
       .trim();
+    const deployFiles = (msg as any).meta?.deployFiles as Record<string, string> | undefined;
+    const deployAppName = (msg as any).meta?.appName as string | undefined;
 
     return (
       <div className="space-y-3">
@@ -586,6 +592,33 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
         )}
 
             
+        {/* Deploy Actions — shown after successful build */}
+        {hasDeployActions && deployFiles && onDownloadZip && (
+          <div className="mt-3 pt-3 border-t border-white/10">
+            <p className="text-[9px] font-black uppercase tracking-widest text-[#484f58] mb-2">🚀 Deploy your app</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => onDownloadZip(deployFiles, deployAppName || 'NavBharatAI-App')}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold rounded-xl transition-all active:scale-95"
+              >
+                📦 Download ZIP
+              </button>
+              <button
+                onClick={() => window.open('https://app.netlify.com/drop', '_blank')}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600/15 hover:bg-teal-600/25 border border-teal-500/25 text-teal-400 text-[10px] font-bold rounded-xl transition-all active:scale-95"
+              >
+                ⬆ Netlify Drop
+              </button>
+              <button
+                onClick={() => window.open('https://pages.github.com', '_blank')}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-[#8b949e] text-[10px] font-bold rounded-xl transition-all active:scale-95"
+              >
+                🐙 GitHub Pages
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Interaction Controls */}
         <div className="flex gap-2 mt-3 pt-2 border-t border-white/5 items-center">
             <button onClick={() => { navigator.clipboard.writeText(cleanText); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-1 hover:bg-white/10 rounded text-gray-500 hover:text-white">

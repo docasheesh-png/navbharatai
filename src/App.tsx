@@ -2680,9 +2680,10 @@ ${buildLanguageRule(preferredLanguage)}`;
 
                   setProMessages(prev => [...prev, {
                     id: (Date.now() + 1).toString(),
-                    text: processLog + '\n\n__VIEW_PREVIEW__',
+                    text: processLog + '\n\n__VIEW_PREVIEW____DEPLOY_ACTIONS__',
                     sender: 'ai',
                     timestamp: new Date(),
+                    meta: { deployFiles: evt.files, appName: evt.appName || 'NavBharatAI-App' } as any,
                   }]);
 
                   setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
@@ -2770,6 +2771,29 @@ ${buildLanguageRule(preferredLanguage)}`;
       setIsProLoading(false);
     }
   };
+
+  const downloadAppZip = useCallback(async (deployFiles: Record<string, string>, appName: string) => {
+    try {
+      const response = await fetch('/api/download-zip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: deployFiles, appName }),
+      });
+      if (!response.ok) throw new Error('Download failed');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${appName.replace(/[^a-zA-Z0-9-_]/g, '-')}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      addToast('App downloaded as ZIP ✓', 'success');
+    } catch {
+      addToast('Download failed — try again', 'error');
+    }
+  }, [addToast]);
 
   const handleUndoBuild = useCallback(() => {
     if (buildVersionStack.length === 0) return;
@@ -5159,6 +5183,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                       ...prev,
                       steps: prev.steps.map((s, idx) => idx === i ? { ...s, expanded: !s.expanded } : s),
                     }))}
+                    onDownloadZip={downloadAppZip}
                   />
                 </div>
             </div>

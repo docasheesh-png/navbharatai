@@ -61,41 +61,96 @@ export class AIRouter {
     onChunk: (text: string) => void,
     signal?: AbortSignal,
   ): Promise<void> {
-    for (const pass of [1, 2]) {
-      for (const provider of this.providers) {
+    if (signal?.aborted) return;
+
+    // Get available providers (skip cooldowns on first pass)
+    const available = this.providers.filter(p => !isOnCooldown(p.name) && p.executeStream);
+    const allProviders = available.length > 0 ? available : this.providers.filter(p => p.executeStream);
+
+    if (allProviders.length === 0) {
+      if (!signal?.aborted) onChunk('AI service temporarily unavailable. 🙏');
+      return;
+    }
+
+    // ── Race top 2 providers: first chunk sent commits that provider ─────────
+    const [p1, p2, ...rest] = allProviders;
+
+    if (!p2) {
+      // Only one available — use it directly
+      if (!acquireSlot(p1.name)) { onChunk('AI service at capacity. Try again.'); return; }
+      const t = Date.now();
+      try {
+        await p1.executeStream!(prompt, systemPrompt, onChunk);
+        recordProviderLatency(p1.name, Date.now() - t, false);
+      } catch (err: any) {
+        setCooldown(p1.name, cooldownSeconds(err));
+        recordProviderLatency(p1.name, 0, true);
+        if (!signal?.aborted) onChunk('AI service temporarily busy. Please try again. 🙏');
+      } finally { releaseSlot(p1.name); }
+      return;
+    }
+
+    // Race p1 and p2
+    let committed: string | null = null;
+    let commitResolve!: () => void;
+    const commitPromise = new Promise<void>(res => { commitResolve = res; });
+
+    const runStream = (p: typeof p1, index: number): Promise<void> => {
+      if (!acquireSlot(p.name)) return Promise.resolve();
+      const t = Date.now();
+      return p.executeStream!(prompt, systemPrompt, (chunk) => {
         if (signal?.aborted) return;
-        if (pass === 1 && isOnCooldown(provider.name)) continue;
-        const concurrent = inFlight.get(provider.name) || 0;
-        if (concurrent >= MAX_IN_FLIGHT) {
-          console.log(`[CAPACITY] ${provider.name} at max ${MAX_IN_FLIGHT} concurrent, skipping`);
-          continue;
+        if (!committed) {
+          committed = p.name;
+          console.log(`[RACE_STREAM] ${p.name} (p${index+1}) won — committing`);
+          commitResolve();
         }
-        const healthy = await provider.healthCheck().catch(() => false);
-        if (!healthy) continue;
-        if (!acquireSlot(provider.name)) continue;
-        const startTime = Date.now();
+        if (committed === p.name) onChunk(chunk);
+      }).then(() => {
+        recordProviderLatency(p.name, Date.now() - t, false);
+      }).catch((err: any) => {
+        setCooldown(p.name, cooldownSeconds(err));
+        recordProviderLatency(p.name, 0, true);
+        console.warn(`[RACE_STREAM] ${p.name} failed: ${err?.message?.slice(0, 60)}`);
+      }).finally(() => {
+        releaseSlot(p.name);
+        // If this was the committed provider and it's done, resolve
+        if (committed === p.name) commitResolve();
+      });
+    };
+
+    const s1 = runStream(p1, 0);
+    const s2 = runStream(p2, 1);
+
+    // Wait for commit (first chunk from either) with 12s timeout
+    const commitTimeout = new Promise<void>(res => setTimeout(() => { commitResolve(); res(); }, 12000));
+    await Promise.race([commitPromise, commitTimeout]);
+
+    if (!committed) {
+      // Neither committed in time — try sequential fallbacks
+      console.warn('[RACE_STREAM] No commit in 12s — trying sequential fallbacks');
+      for (const p of rest) {
+        if (signal?.aborted || !p.executeStream) continue;
+        if (!acquireSlot(p.name)) continue;
+        const t = Date.now();
         try {
-          if (provider.executeStream) {
-            await provider.executeStream(prompt, systemPrompt, onChunk);
-          } else {
-            const resp = await provider.execute(prompt, undefined, undefined, systemPrompt);
-            if (!signal?.aborted) onChunk(resp.content);
-          }
-          recordProviderLatency(provider.name, Date.now() - startTime, false);
+          await p.executeStream(prompt, systemPrompt, onChunk);
+          recordProviderLatency(p.name, Date.now() - t, false);
+          releaseSlot(p.name);
           return;
         } catch (err: any) {
-          const secs = cooldownSeconds(err);
-          setCooldown(provider.name, secs);
-          recordProviderLatency(provider.name, 0, true);
-          console.error(`[ROUTER_STREAM] ${provider.name} failed, cooldown ${secs}s:`, err?.message?.slice(0, 80));
-        } finally {
-          releaseSlot(provider.name);
+          setCooldown(p.name, cooldownSeconds(err));
+          recordProviderLatency(p.name, 0, true);
+          releaseSlot(p.name);
         }
       }
+      if (!signal?.aborted) onChunk('AI service temporarily busy. Please try again in 1-2 minutes. 🙏');
+      return;
     }
-    if (!signal?.aborted) {
-      onChunk('The AI service is temporarily busy. Please try again in 1-2 minutes. 🙏');
-    }
+
+    // Wait for the committed provider to finish its stream
+    if (committed === p1.name) await s1.catch(() => {});
+    else await s2.catch(() => {});
   }
 
   private async execute(prompt: string, schema?: any, systemPrompt?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {

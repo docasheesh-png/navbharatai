@@ -276,103 +276,95 @@ function buildCdnJsHints(cdnNeeded: string[]): string {
     .join('\n\n');
 }
 
-// ─── AI Caller — Pro cascade: Claude → Grok → Gemini → Vertex ────────────────
-// Pro only. Claude + Grok do real coding; Gemini/Vertex are safety nets.
-// Checks all env var aliases so any Cloud Run config works.
+// ─── AI Caller — Pro cascade: race(Claude+Grok) → Gemini → Vertex ────────────
+// Top 2 providers race simultaneously; winner's AbortController cancels the loser.
+// Falls through to Gemini → Vertex sequentially only if both racers fail.
 
 async function callAI(prompt: string, systemPrompt: string, maxTokens = 6000): Promise<string> {
-  // ── 1. Claude (proxy-aware) — best code quality ───────────────────────────
+  const msgs = [
+    { role: 'system' as const, content: systemPrompt },
+    { role: 'user' as const, content: prompt },
+  ];
+
   const claudeKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
-  if (claudeKey) {
-    try {
-      const rawBaseURL = process.env.ANTHROPIC_BASE_URL;
-      const baseURL = rawBaseURL?.replace(/\/v1\/?$/, '');
-
-      if (baseURL) {
-        const { default: OpenAI } = await import('openai');
-        const client = new OpenAI({ apiKey: claudeKey, baseURL });
-        const models = [
-          'anthropic/claude-sonnet-4.6', 'claude-sonnet-4-6',
-          'anthropic/claude-3.5-sonnet', 'claude-3-5-sonnet-20241022',
-        ];
-        for (const model of models) {
-          try {
-            const r = await client.chat.completions.create({
-              model, max_tokens: maxTokens,
-              messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
-            });
-            const text = r.choices[0]?.message?.content || '';
-            if (text.trim()) return text;
-          } catch (e: any) {
-            console.warn(`[AppEngine] Claude proxy ${model} failed: ${e.message}`);
-          }
-        }
-      } else {
-        const client = new Anthropic({ apiKey: claudeKey });
-        const r = await client.messages.create({
-          model: 'claude-sonnet-4-6', max_tokens: maxTokens,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: prompt }],
-        });
-        const text = (r.content.find(c => c.type === 'text') as any)?.text || '';
-        if (text.trim()) return text;
-      }
-    } catch (e: any) {
-      console.warn('[AppEngine] Claude failed:', e.message);
-    }
-  }
-
-  // ── 2. Grok (xAI) — strong coder, 2nd priority ───────────────────────────
-  const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
-  if (grokKey) {
-    for (const model of ['grok-3', 'grok-3-fast']) {
-      try {
-        const { default: OpenAI } = await import('openai');
-        const client = new OpenAI({ apiKey: grokKey, baseURL: 'https://api.x.ai/v1' });
-        const r = await client.chat.completions.create({
-          model, max_tokens: maxTokens,
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
-        });
-        const text = r.choices[0]?.message?.content || '';
-        if (text.trim()) return text;
-      } catch (e: any) {
-        console.warn(`[AppEngine] Grok ${model} failed: ${e.message}`);
-      }
-    }
-  }
-
-  // ── 3. Gemini API — check all env var aliases ─────────────────────────────
+  const grokKey   = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
   const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
+
+  // ── Race: Claude + Grok simultaneously ───────────────────────────────────
+  type RacerFn = (signal: AbortSignal) => Promise<string>;
+  const racers: RacerFn[] = [];
+
+  if (claudeKey) racers.push(async (signal) => {
+    const rawBase = process.env.ANTHROPIC_BASE_URL;
+    const base = rawBase?.replace(/\/v1\/?$/, '');
+    if (base) {
+      const { default: OpenAI } = await import('openai');
+      const c = new OpenAI({ apiKey: claudeKey, baseURL: base });
+      for (const m of ['anthropic/claude-sonnet-4.6', 'claude-sonnet-4-6', 'anthropic/claude-3.5-sonnet', 'claude-3-5-sonnet-20241022']) {
+        try {
+          const r = await c.chat.completions.create({ model: m, max_tokens: maxTokens, messages: msgs }, { signal });
+          const t = r.choices[0]?.message?.content || '';
+          if (t.trim()) return t;
+        } catch (e: any) { if (signal.aborted) throw e; console.warn(`[AppEngine] Claude proxy ${m}: ${e.message}`); }
+      }
+    } else {
+      const c = new Anthropic({ apiKey: claudeKey });
+      const r = await c.messages.create({ model: 'claude-sonnet-4-6', max_tokens: maxTokens, system: systemPrompt, messages: [{ role: 'user', content: prompt }] });
+      const t = (r.content.find((x: any) => x.type === 'text') as any)?.text || '';
+      if (t.trim()) return t;
+    }
+    throw new Error('Claude: no valid response');
+  });
+
+  if (grokKey) racers.push(async (signal) => {
+    const { default: OpenAI } = await import('openai');
+    const c = new OpenAI({ apiKey: grokKey, baseURL: 'https://api.x.ai/v1' });
+    for (const m of ['grok-3', 'grok-3-fast']) {
+      try {
+        const r = await c.chat.completions.create({ model: m, max_tokens: maxTokens, messages: msgs }, { signal });
+        const t = r.choices[0]?.message?.content || '';
+        if (t.trim()) return t;
+      } catch (e: any) { if (signal.aborted) throw e; console.warn(`[AppEngine] Grok ${m}: ${e.message}`); }
+    }
+    throw new Error('Grok: no valid response');
+  });
+
+  if (racers.length > 0) {
+    const acs = racers.map(() => new AbortController());
+    try {
+      const winner = await Promise.any(
+        racers.map((fn, i) => fn(acs[i].signal).then(text => {
+          acs.forEach((ac, j) => { if (j !== i && !ac.signal.aborted) ac.abort(); });
+          console.log(`[AppEngine] Race won by ${i === 0 ? 'Claude' : 'Grok'}`);
+          return text;
+        }))
+      );
+      if (winner?.trim()) return winner;
+    } catch {
+      console.warn('[AppEngine] Race (Claude+Grok) both failed → Gemini/Vertex fallback');
+    }
+  }
+
+  // ── Sequential fallback: Gemini → Vertex ─────────────────────────────────
   if (geminiKey) {
-    for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+    for (const m of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
       try {
         const ai = new GoogleGenAI({ apiKey: geminiKey });
-        const r = await ai.models.generateContent({
-          model,
-          contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + prompt }] }],
-        });
-        if (r.text?.trim()) return r.text;
-      } catch (e: any) {
-        console.warn(`[AppEngine] Gemini ${model} failed: ${e.message}`);
-      }
+        const r = await ai.models.generateContent({ model: m, contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + prompt }] }] });
+        if (r.text?.trim()) { console.log(`[AppEngine] Gemini ${m} fallback succeeded`); return r.text; }
+      } catch (e: any) { console.warn(`[AppEngine] Gemini ${m}: ${e.message}`); }
     }
   }
 
-  // ── 4. Vertex AI (project-based, no API key needed on Cloud Run) ─────────
-  const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
   if (projectId) {
-    for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+    for (const m of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
       try {
         const { GoogleGenAI: VtxAI } = await import('@google/genai');
         const ai = new VtxAI({ vertexai: true, project: projectId, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
-        const r = await ai.models.generateContent({
-          model,
-          contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + prompt }] }],
-        });
-        if (r.text?.trim()) return r.text;
-      } catch (e: any) {
-        console.warn(`[AppEngine] Vertex ${model} failed: ${e.message}`);
-      }
+        const r = await ai.models.generateContent({ model: m, contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + prompt }] }] });
+        if (r.text?.trim()) { console.log(`[AppEngine] Vertex ${m} fallback succeeded`); return r.text; }
+      } catch (e: any) { console.warn(`[AppEngine] Vertex ${m}: ${e.message}`); }
     }
   }
 

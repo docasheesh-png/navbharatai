@@ -4407,30 +4407,64 @@ Response Format:
         }
       } catch (e: any) { console.warn('[PRO PLAN] Claude err:', e.message); }
 
-      // ── 2. Grok — 2nd priority for Pro ───────────────────────────────────────
+      // ── Race 2: Claude + Grok simultaneously for planning ─────────────────
       const grokKeyPlan = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
-      if (grokKeyPlan) {
+      const claudeKeyPlan = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+      type PlanRacerFn = (signal: AbortSignal) => Promise<string>;
+      const planRacers: PlanRacerFn[] = [];
+      const planMsgs = [
+        { role: 'system' as const, content: PLAN_PROMPT },
+        ...(history || []).slice(-8).map((m: any) => ({
+          role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+          content: String(m.text || m.content || '').slice(0, 400),
+        })),
+        { role: 'user' as const, content: message },
+      ];
+
+      // NOTE: Claude race attempt — separate from the sequential attempt above
+      // (the sequential attempt above may have failed due to different conditions)
+      if (claudeKeyPlan) planRacers.push(async (signal) => {
+        const rawBase = process.env.ANTHROPIC_BASE_URL;
+        const base = rawBase?.replace(/\/v1\/?$/, '');
+        if (!base) throw new Error('No proxy for race');
+        const c = new OpenAI({ apiKey: claudeKeyPlan, baseURL: base });
+        for (const m of ['anthropic/claude-sonnet-4.6', 'claude-sonnet-4-6']) {
+          try {
+            const r = await c.chat.completions.create({ model: m, messages: planMsgs, max_tokens: 1500 }, { signal });
+            const t = r.choices[0]?.message?.content || '';
+            if (t.trim()) return t;
+          } catch (e: any) { if (signal.aborted) throw e; }
+        }
+        throw new Error('Claude plan race: empty');
+      });
+
+      if (grokKeyPlan) planRacers.push(async (signal) => {
+        const c = new OpenAI({ apiKey: grokKeyPlan, baseURL: 'https://api.x.ai/v1' });
+        for (const gm of ['grok-3', 'grok-3-fast']) {
+          try {
+            const r = await c.chat.completions.create({ model: gm, messages: planMsgs, max_tokens: 1500 }, { signal });
+            const t = r.choices[0]?.message?.content || '';
+            if (t.trim()) return t;
+          } catch (e: any) { if (signal.aborted) throw e; }
+        }
+        throw new Error('Grok plan race: empty');
+      });
+
+      if (planRacers.length > 0) {
+        const planAcs = planRacers.map(() => new AbortController());
         try {
-          const planMsgs = [
-            { role: 'system' as const, content: PLAN_PROMPT },
-            ...(history || []).slice(-8).map((m: any) => ({
-              role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
-              content: String(m.text || m.content || '').slice(0, 400),
-            })),
-            { role: 'user' as const, content: message },
-          ];
-          const grokClient = new OpenAI({ apiKey: grokKeyPlan, baseURL: 'https://api.x.ai/v1' });
-          for (const grokModel of ['grok-3', 'grok-3-fast']) {
-            try {
-              const r = await grokClient.chat.completions.create({ model: grokModel, messages: planMsgs, max_tokens: 1500 });
-              const t = r.choices[0]?.message?.content || '';
-              if (t.trim()) return res.json({ reply: sanitizePlanningReply(t), files: {}, suggestBuild });
-            } catch (ge: any) { console.warn(`[PRO PLAN] Grok ${grokModel}: ${ge.message}`); }
-          }
-        } catch (e: any) { console.warn('[PRO PLAN] Grok err:', e.message); }
+          const planWinner = await Promise.any(
+            planRacers.map((fn, i) => fn(planAcs[i].signal).then(text => {
+              planAcs.forEach((ac, j) => { if (j !== i && !ac.signal.aborted) ac.abort(); });
+              console.log(`[PRO PLAN] Race won by ${i === 0 ? 'Claude' : 'Grok'}`);
+              return text;
+            }))
+          );
+          if (planWinner?.trim()) return res.json({ reply: sanitizePlanningReply(planWinner), files: {}, suggestBuild });
+        } catch { console.warn('[PRO PLAN] Race both failed → Gemini/Vertex'); }
       }
 
-      // ── 3. Gemini API — all key aliases, starts with user msg ─────────────────
+      // ── Sequential fallback: Gemini → Vertex ──────────────────────────────
       const geminiKeyPlan = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
       if (geminiKeyPlan) {
         try {
@@ -4441,32 +4475,28 @@ Response Format:
             parts: [{ text: String(m.text || m.content || '').slice(0, 600) }]
           }));
           while (historyContents.length > 0 && historyContents[0].role !== 'user') historyContents.shift();
-          for (const gModel of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+          for (const gm of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
             try {
               const r = await new GoogleGenAI({ apiKey: geminiKeyPlan }).models.generateContent({
-                model: gModel,
+                model: gm,
                 contents: [...historyContents, { role: 'user', parts: [{ text: PLAN_PROMPT + '\n\nUser: ' + message }] }],
               });
               if (r.text?.trim()) return res.json({ reply: sanitizePlanningReply(r.text), files: {}, suggestBuild });
-            } catch (ge: any) { console.warn(`[PRO PLAN] Gemini ${gModel}: ${ge.message}`); }
+            } catch (ge: any) { console.warn(`[PRO PLAN] Gemini ${gm}: ${ge.message}`); }
           }
         } catch (e: any) { console.warn('[PRO PLAN] Gemini err:', e.message); }
       }
 
-      // ── 4. Vertex AI — project-based, no key needed ───────────────────────────
       const projectIdPlan = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
       if (projectIdPlan) {
         try {
           const { GoogleGenAI: VtxAI } = await import('@google/genai');
           const ai = new VtxAI({ vertexai: true, project: projectIdPlan, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
-          for (const vtxModel of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+          for (const vm of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
             try {
-              const r = await ai.models.generateContent({
-                model: vtxModel,
-                contents: [{ role: 'user', parts: [{ text: PLAN_PROMPT + '\n\nUser: ' + message }] }],
-              });
+              const r = await ai.models.generateContent({ model: vm, contents: [{ role: 'user', parts: [{ text: PLAN_PROMPT + '\n\nUser: ' + message }] }] });
               if (r.text?.trim()) return res.json({ reply: sanitizePlanningReply(r.text), files: {}, suggestBuild });
-            } catch (ve: any) { console.warn(`[PRO PLAN] Vertex ${vtxModel}: ${ve.message}`); }
+            } catch (ve: any) { console.warn(`[PRO PLAN] Vertex ${vm}: ${ve.message}`); }
           }
         } catch (e: any) { console.warn('[PRO PLAN] Vertex err:', e.message); }
       }
@@ -5692,53 +5722,64 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         ];
       };
 
-      // ── 1. Grok — SDA primary (fast, generous limits) ───────────────────────
-      const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
-      if (!reply && grokKey) {
+      // ── Race: Grok + Gemini simultaneously (SDA primary pair) ──────────────
+      const sdaGrokKey   = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
+      const sdaGeminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
+
+      type SdaRacerFn = (signal: AbortSignal) => Promise<string>;
+      const sdaRacers: SdaRacerFn[] = [];
+
+      if (sdaGrokKey) sdaRacers.push(async (signal) => {
+        const { default: OpenAI } = await import('openai');
+        const c = new OpenAI({ apiKey: sdaGrokKey, baseURL: 'https://api.x.ai/v1' });
+        for (const m of ['grok-3', 'grok-3-fast']) {
+          try {
+            const r = await c.chat.completions.create({ model: m, messages: buildOpenAIMsgs(message), max_tokens: 2000 }, { signal });
+            const t = r.choices[0]?.message?.content || '';
+            if (t.trim()) return t;
+          } catch (e: any) { if (signal.aborted) throw e; console.warn(`[SDA] Grok ${m}: ${e.message}`); }
+        }
+        throw new Error('Grok SDA: empty');
+      });
+
+      if (sdaGeminiKey) sdaRacers.push(async (signal) => {
+        const { GoogleGenAI } = await import('@google/genai');
+        const contents = buildGeminiContents();
+        for (const m of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+          try {
+            const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, systemInstruction: SDA_SYSTEM, contents });
+            const t = r.text || '';
+            if (t.trim()) return t;
+          } catch (e: any) { if (signal.aborted) throw e; console.warn(`[SDA] Gemini ${m}: ${e.message}`); }
+        }
+        throw new Error('Gemini SDA: empty');
+      });
+
+      if (sdaRacers.length > 0) {
+        const sdaAcs = sdaRacers.map(() => new AbortController());
         try {
-          const { default: OpenAI } = await import('openai');
-          const grokClient = new OpenAI({ apiKey: grokKey, baseURL: 'https://api.x.ai/v1' });
-          for (const model of ['grok-3', 'grok-3-fast']) {
-            try {
-              const r = await grokClient.chat.completions.create({ model, messages: buildOpenAIMsgs(message), max_tokens: 2000 });
-              reply = r.choices[0]?.message?.content || '';
-              if (reply) { console.log(`[SDA] Grok ${model} succeeded`); break; }
-            } catch (ge: any) { console.warn(`[SDA] Grok ${model}:`, ge.message); }
-          }
-        } catch (e: any) { console.warn('[SDA] Grok err:', e.message); }
+          const sdaWinner = await Promise.any(
+            sdaRacers.map((fn, i) => fn(sdaAcs[i].signal).then(text => {
+              sdaAcs.forEach((ac, j) => { if (j !== i && !ac.signal.aborted) ac.abort(); });
+              console.log(`[SDA] Race won by ${i === 0 ? 'Grok' : 'Gemini'}`);
+              return text;
+            }))
+          );
+          if (sdaWinner?.trim()) reply = sdaWinner;
+        } catch { console.warn('[SDA] Race (Grok+Gemini) both failed → Vertex/Claude'); }
       }
 
-      // ── 2. Gemini (great vision + multimodal) ────────────────────────────────
+      // ── Sequential fallback: Vertex → Claude ─────────────────────────────
       if (!reply) {
         try {
-          const { GoogleGenAI } = await import('@google/genai');
-          const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
-          if (!geminiKey) throw new Error('No Gemini key');
-          const contents = buildGeminiContents();
-          for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
-            try {
-              const r = await new GoogleGenAI({ apiKey: geminiKey }).models.generateContent({ model, systemInstruction: SDA_SYSTEM, contents });
-              reply = r.text || '';
-              if (reply) { console.log(`[SDA] Gemini ${model} succeeded`); break; }
-            } catch (ge: any) { console.warn(`[SDA] Gemini ${model}:`, ge.message); }
-          }
-        } catch (e: any) { console.warn('[SDA] Gemini err:', e.message); }
-      }
-
-      // ── 3. Vertex AI (GCP-native, high reliability) ──────────────────────────
-      if (!reply) {
-        try {
-          const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
-          if (!projectId) throw new Error('No Vertex project ID');
+          const sdaProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
+          if (!sdaProjectId) throw new Error('No Vertex project ID');
           const { VertexAI } = await import('@google-cloud/vertexai');
-          const vertexAI = new VertexAI({ project: projectId, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
+          const vertexAI = new VertexAI({ project: sdaProjectId, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
           const contents = buildGeminiContents();
           for (const modelName of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
             try {
-              const model = vertexAI.getGenerativeModel({
-                model: modelName,
-                systemInstruction: { role: 'system', parts: [{ text: SDA_SYSTEM }] },
-              });
+              const model = vertexAI.getGenerativeModel({ model: modelName, systemInstruction: { role: 'system', parts: [{ text: SDA_SYSTEM }] } });
               const result = await model.generateContent({ contents });
               reply = result.response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
               if (reply) { console.log(`[SDA] Vertex ${modelName} succeeded`); break; }
@@ -5747,40 +5788,41 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         } catch (e: any) { console.warn('[SDA] Vertex err:', e.message); }
       }
 
-      // ── 4. Claude — SDA last resort (vision + clinical depth) ────────────────
-      const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
-      if (!reply && anthropicKey) {
-        try {
-          const rawBaseURL = process.env.ANTHROPIC_BASE_URL;
-          const baseURL = rawBaseURL?.replace(/\/v1\/?$/, '');
-          if (baseURL) {
-            const { default: OpenAI } = await import('openai');
-            const client = new OpenAI({ apiKey: anthropicKey, baseURL });
-            const userContent = isImage
-              ? [{ type: 'image_url', image_url: { url: `data:${fileType};base64,${fileData}` } }, { type: 'text', text: `[Document: ${fileName}]\n${message}` }]
-              : isPDF ? `[PDF attached: ${fileName}]\n${message}` : message;
-            for (const model of ['anthropic/claude-sonnet-4.6', 'claude-sonnet-4-6', 'anthropic/claude-3.5-sonnet', 'claude-3-5-sonnet-20241022']) {
-              try {
-                const r = await client.chat.completions.create({ model, messages: buildOpenAIMsgs(userContent), max_tokens: 2000 });
-                reply = r.choices[0]?.message?.content || '';
-                if (reply) { console.log(`[SDA] Claude proxy ${model} succeeded`); break; }
-              } catch (e: any) { console.warn(`[SDA] Claude proxy ${model}:`, e.message); }
+      if (!reply) {
+        const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+        if (anthropicKey) {
+          try {
+            const rawBaseURL = process.env.ANTHROPIC_BASE_URL;
+            const baseURL = rawBaseURL?.replace(/\/v1\/?$/, '');
+            if (baseURL) {
+              const { default: OpenAI } = await import('openai');
+              const client = new OpenAI({ apiKey: anthropicKey, baseURL });
+              const userContent = isImage
+                ? [{ type: 'image_url', image_url: { url: `data:${fileType};base64,${fileData}` } }, { type: 'text', text: `[Document: ${fileName}]\n${message}` }]
+                : isPDF ? `[PDF attached: ${fileName}]\n${message}` : message;
+              for (const model of ['anthropic/claude-sonnet-4.6', 'claude-sonnet-4-6', 'anthropic/claude-3.5-sonnet', 'claude-3-5-sonnet-20241022']) {
+                try {
+                  const r = await client.chat.completions.create({ model, messages: buildOpenAIMsgs(userContent), max_tokens: 2000 });
+                  reply = r.choices[0]?.message?.content || '';
+                  if (reply) { console.log(`[SDA] Claude proxy ${model} succeeded`); break; }
+                } catch (e: any) { console.warn(`[SDA] Claude proxy ${model}:`, e.message); }
+              }
+            } else {
+              const A = (await import('@anthropic-ai/sdk')).default;
+              const userContent = isImage
+                ? [{ type: 'image', source: { type: 'base64', media_type: fileType, data: fileData } }, { type: 'text', text: `[Document: ${fileName}]\n${message}` }]
+                : isPDF
+                ? [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileData } }, { type: 'text', text: `[PDF Report: ${fileName}]\n${message}` }]
+                : message;
+              const r = await new A({ apiKey: anthropicKey }).messages.create({
+                model: 'claude-3-5-sonnet-20241022', max_tokens: 2000, system: SDA_SYSTEM,
+                messages: [...historyForAI, { role: 'user', content: userContent }],
+              });
+              reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
+              if (reply) console.log('[SDA] Claude direct succeeded');
             }
-          } else {
-            const A = (await import('@anthropic-ai/sdk')).default;
-            const userContent = isImage
-              ? [{ type: 'image', source: { type: 'base64', media_type: fileType, data: fileData } }, { type: 'text', text: `[Document: ${fileName}]\n${message}` }]
-              : isPDF
-              ? [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileData } }, { type: 'text', text: `[PDF Report: ${fileName}]\n${message}` }]
-              : message;
-            const r = await new A({ apiKey: anthropicKey }).messages.create({
-              model: 'claude-3-5-sonnet-20241022', max_tokens: 2000, system: SDA_SYSTEM,
-              messages: [...historyForAI, { role: 'user', content: userContent }],
-            });
-            reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
-            if (reply) console.log('[SDA] Claude direct succeeded');
-          }
-        } catch (e: any) { console.warn('[SDA] Claude err:', e.message); }
+          } catch (e: any) { console.warn('[SDA] Claude err:', e.message); }
+        }
       }
 
       if (!reply) {

@@ -1034,6 +1034,23 @@ export async function buildApp(
     onFileGenerated?.('script.js',  jsContent);
     onFileGenerated?.('style.css',  cssContent);
 
+    // Optional: Firebase backend module for data-driven apps
+    if (needsBackend(bp, userPrompt)) {
+      report('Backend', 5, 7, 'Generating Firebase Firestore integration...');
+      try {
+        const firebaseJs = await buildFirebaseModule(bp.appName, bp.dataModel);
+        generatedFiles['firebase.js'] = firebaseJs;
+        onFileGenerated?.('firebase.js', firebaseJs);
+        // Inject Firebase script tag into HTML before </body>
+        const firebaseScript = `\n<script type="module" src="firebase.js"></script>`;
+        generatedFiles['index.html'] = generatedFiles['index.html'].replace('</body>', `${firebaseScript}\n</body>`);
+        // Add setup note at top of app JS
+        generatedFiles['script.js'] = `// Firebase available as window.DB — use DB.saveRecord(), DB.getRecords(), etc.\n${generatedFiles['script.js']}`;
+      } catch (fbErr: any) {
+        console.warn('[AppEngine] Firebase module generation failed (non-fatal):', fbErr.message);
+      }
+    }
+
     // Compute comprehensive validation report
     const validationReport = computeValidationReport(htmlContent, jsContent, cssContent, repairAttempts);
     console.log(`[AppEngine] Final quality score: ${validationReport.score}/100 | passed: ${validationReport.passed}`);
@@ -1071,6 +1088,56 @@ export async function buildApp(
       error: err.message,
     };
   }
+}
+
+// ─── Backend Module: Firebase Firestore Integration ───────────────────────────
+
+const FIREBASE_CDN = `
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+    import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+    import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+    window._fbLoaded = true;
+  </script>`;
+
+async function buildFirebaseModule(appName: string, dataModel: Record<string, string>): Promise<string> {
+  const collections = Object.keys(dataModel).slice(0, 5);
+  const sys = `You are a Firebase Firestore expert. Write clean, modern JavaScript using Firebase v10 modular SDK.
+ALL identifiers in English. Return ONLY JavaScript code, no markdown.`;
+
+  const collectionsDesc = collections.length > 0
+    ? `Data collections needed:\n${collections.map(k => `- ${k}: ${dataModel[k]}`).join('\n')}`
+    : 'Generic CRUD data storage';
+
+  const code = await callAI(
+    `Write a firebase.js file for a web app called "${appName}".
+${collectionsDesc}
+
+Requirements:
+1. Firebase v10 modular SDK via CDN (esm.sh or gstatic)
+2. Initialize Firebase with placeholder config (comment showing where to add real config)
+3. Anonymous auth (signInAnonymously) to allow Firestore access
+4. Export these async functions:
+   - saveRecord(collectionName, data) → returns document id
+   - getRecords(collectionName) → returns array of {id, ...data}
+   - updateRecord(collectionName, id, data) → updates document
+   - deleteRecord(collectionName, id) → deletes document
+   - listenRecords(collectionName, callback) → real-time listener, returns unsubscribe fn
+5. window.DB = { saveRecord, getRecords, updateRecord, deleteRecord, listenRecords } so vanilla JS and React can use it
+6. Handle errors gracefully with console.warn
+
+Return only the complete firebase.js file content.`,
+    sys, 4000
+  );
+  return code;
+}
+
+// Detect if app needs backend data persistence
+function needsBackend(bp: AppBlueprint, userPrompt: string): boolean {
+  const dataKeywords = /\b(database|backend|firebase|firestore|save\s+data|store\s+data|user\s+data|login|auth|crud|api|server|persist|sync|realtime|real-?time|collection|record|history|cart|order|profile|signup|register)\b/i;
+  const hasDataModel = Object.keys(bp.dataModel).length > 0;
+  const isDataApp = ['SOCIAL_APP', 'DASHBOARD'].includes(bp.template);
+  return dataKeywords.test(userPrompt) || (hasDataModel && isDataApp) || bp.complexity === 'complex';
 }
 
 // ─── Iterative Edit Engine — edit existing app without full rebuild ────────────
@@ -1205,6 +1272,25 @@ ALL identifiers and comments in English. Return ONLY CSS, no markdown.`;
       'App.jsx': appJsx,
       'style.css': styleCss,
     };
+
+    // Optional Firebase module for React apps needing data persistence
+    const reactBackendKeywords = /\b(database|backend|firebase|firestore|save|store|login|auth|crud|api|persist|sync|realtime|real-?time|cart|order|profile|signup|register|user)\b/i;
+    if (reactBackendKeywords.test(userPrompt)) {
+      try {
+        report('Backend', 5, TOTAL, 'Adding Firebase Firestore integration...');
+        const dataModel = keyFeatures.reduce((acc, f) => ({ ...acc, [f.toLowerCase().replace(/\s+/g, '_')]: f }), {});
+        const firebaseJs = await buildFirebaseModule(appName, dataModel);
+        files['firebase.js'] = firebaseJs;
+        onFileGenerated?.('firebase.js', firebaseJs);
+        // window.DB available in React via script tag before Babel
+        files['index.html'] = files['index.html'].replace(
+          '<script type="text/babel" src="App.jsx">',
+          `<script type="module" src="firebase.js"></script>\n  <script type="text/babel" src="App.jsx">`
+        );
+      } catch (fbErr: any) {
+        console.warn('[ReactEngine] Firebase module generation failed (non-fatal):', fbErr.message);
+      }
+    }
 
     return {
       success: true,

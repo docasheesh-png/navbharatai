@@ -1886,7 +1886,6 @@ async function generatePatches(
   fixStrategy: string,
   extraContext?: string,
 ): Promise<FilePatch[]> {
-  // Show as much of the file as fits comfortably in input context
   const maxChars = file === 'js' ? 30000 : file === 'html' ? 25000 : 18000;
   const preview = content.length > maxChars
     ? content.slice(0, maxChars) + `\n... [${content.length - maxChars} more chars — patches must target visible section]`
@@ -1902,11 +1901,13 @@ FILE (${content.length} chars total):
 ${preview}
 
 Return ONLY a JSON array of patches. Each patch:
-- "find": EXACT verbatim substring from the file above (must exist as-is)
+- "find": EXACT verbatim substring from the file above (must exist as-is, copy character-for-character including indentation and newlines)
 - "replace": the replacement string
 
 Rules:
-- "find" must be verbatim text that exists in the file
+- "find" must be verbatim text that exists in the file — copy it exactly from the file above
+- Use at least 2-3 lines of context in "find" so it is unique and unambiguous
+- To ADD new code: use the closing bracket/line where it should go as "find", set "replace" to that same bracket/line + the new code
 - Keep changes minimal — only what's needed for the request
 - Return [] if no changes needed for this file
 
@@ -1922,6 +1923,31 @@ Return ONLY the JSON array, no markdown, no explanation.`;
     console.warn('[SurgicalEditor] Patch parse failed:', e);
     return [];
   }
+}
+
+// Full-file rewrite fallback — used when patches fail to match
+async function rewriteFile(
+  request: string,
+  file: 'html' | 'js' | 'css',
+  content: string,
+  rootCauses: string[],
+  fixStrategy: string,
+  extraContext?: string,
+): Promise<string> {
+  const maxOut = file === 'js' ? 12000 : file === 'html' ? 8000 : 6000;
+  const sys = `You are a precise code editor. Return the COMPLETE updated file — all original code preserved except the specific fix/addition applied. No markdown fences, no explanation.
+ALL identifiers must be in English. ABSOLUTELY FORBIDDEN: alert(), confirm(), prompt().`;
+  const prompt = `Apply this change to the ${file.toUpperCase()} file.
+
+USER REQUEST: "${request}"
+ROOT CAUSE: ${rootCauses.join('; ')}
+FIX: ${fixStrategy}${extraContext ? `\nCONTEXT: ${extraContext}` : ''}
+
+CURRENT ${file.toUpperCase()} FILE — return this with ONLY the required changes applied, preserving all other code:
+${content}
+
+Return the COMPLETE updated ${file.toUpperCase()} file:`;
+  return callAI(prompt, sys, maxOut);
 }
 
 async function diagnoseFix(
@@ -2021,12 +2047,17 @@ Return ONLY the fixed code — no markdown, no explanation. ALL identifiers must
           editSys, 2000
         ).then(fixed => { updated.html = reconstructFile(updated.html, chunk, fixed.trim()); onFileGenerated?.('index.html', updated.html); }));
       } else {
-        tasks.push(generatePatches(request, 'html', currentFiles.html, dx.rootCauses, dx.fixStrategy)
-          .then(patches => {
-            const { result, applied } = applyPatch(currentFiles.html, patches);
-            if (applied > 0) { updated.html = result; onFileGenerated?.('index.html', result); }
-            else console.warn('[SurgicalEditor] HTML patches unapplied — file unchanged');
-          }));
+        tasks.push((async () => {
+          const patches = await generatePatches(request, 'html', currentFiles.html, dx.rootCauses, dx.fixStrategy);
+          const { result, applied } = applyPatch(currentFiles.html, patches);
+          if (applied > 0) {
+            updated.html = result; onFileGenerated?.('index.html', result);
+          } else {
+            console.warn('[SurgicalEditor] HTML patches unapplied — falling back to full rewrite');
+            const rewritten = await rewriteFile(request, 'html', currentFiles.html, dx.rootCauses, dx.fixStrategy);
+            if (rewritten?.trim()) { updated.html = rewritten.trim(); onFileGenerated?.('index.html', rewritten.trim()); }
+          }
+        })());
       }
     }
 
@@ -2039,12 +2070,17 @@ Return ONLY the fixed code — no markdown, no explanation. ALL identifiers must
           editSys, 1000
         ).then(fixed => { updated.css = reconstructFile(updated.css, chunk, fixed.trim()); onFileGenerated?.('style.css', updated.css); }));
       } else {
-        tasks.push(generatePatches(request, 'css', currentFiles.css, dx.rootCauses, dx.fixStrategy)
-          .then(patches => {
-            const { result, applied } = applyPatch(currentFiles.css, patches);
-            if (applied > 0) { updated.css = result; onFileGenerated?.('style.css', result); }
-            else console.warn('[SurgicalEditor] CSS patches unapplied — file unchanged');
-          }));
+        tasks.push((async () => {
+          const patches = await generatePatches(request, 'css', currentFiles.css, dx.rootCauses, dx.fixStrategy);
+          const { result, applied } = applyPatch(currentFiles.css, patches);
+          if (applied > 0) {
+            updated.css = result; onFileGenerated?.('style.css', result);
+          } else {
+            console.warn('[SurgicalEditor] CSS patches unapplied — falling back to full rewrite');
+            const rewritten = await rewriteFile(request, 'css', currentFiles.css, dx.rootCauses, dx.fixStrategy);
+            if (rewritten?.trim()) { updated.css = rewritten.trim(); onFileGenerated?.('style.css', rewritten.trim()); }
+          }
+        })());
       }
     }
 
@@ -2057,12 +2093,17 @@ Return ONLY the fixed code — no markdown, no explanation. ALL identifiers must
           editSys, 3000
         ).then(fixed => { updated.js = reconstructFile(updated.js, chunk, fixed.trim()); onFileGenerated?.('script.js', updated.js); }));
       } else {
-        tasks.push(generatePatches(request, 'js', currentFiles.js, dx.rootCauses, dx.fixStrategy, `HTML IDs: ${summarizeHTML(currentFiles.html)}`)
-          .then(patches => {
-            const { result, applied } = applyPatch(currentFiles.js, patches);
-            if (applied > 0) { updated.js = result; onFileGenerated?.('script.js', result); }
-            else console.warn('[SurgicalEditor] JS patches unapplied — file unchanged');
-          }));
+        tasks.push((async () => {
+          const patches = await generatePatches(request, 'js', currentFiles.js, dx.rootCauses, dx.fixStrategy, `HTML IDs: ${summarizeHTML(currentFiles.html)}`);
+          const { result, applied } = applyPatch(currentFiles.js, patches);
+          if (applied > 0) {
+            updated.js = result; onFileGenerated?.('script.js', result);
+          } else {
+            console.warn('[SurgicalEditor] JS patches unapplied — falling back to full rewrite');
+            const rewritten = await rewriteFile(request, 'js', currentFiles.js, dx.rootCauses, dx.fixStrategy, `HTML IDs: ${summarizeHTML(currentFiles.html)}`);
+            if (rewritten?.trim()) { updated.js = rewritten.trim(); onFileGenerated?.('script.js', rewritten.trim()); }
+          }
+        })());
       }
     }
 
@@ -2087,7 +2128,12 @@ Return ONLY the fixed code — no markdown, no explanation. ALL identifiers must
     const previewHtml = assemblePreview(updated.html, updated.js, updated.css);
     const files: Record<string, string> = { 'index.html': updated.html, 'script.js': updated.js, 'style.css': updated.css };
     const validationReport = computeValidationReport(updated.html, updated.js, updated.css, 0);
-    const replyMsg = dx.rootCauses.length > 0 ? `✅ Fixed: ${dx.rootCauses[0]}` : `✅ Done!`;
+
+    // Check whether files actually changed
+    const anyChanged = updated.html !== currentFiles.html || updated.js !== currentFiles.js || updated.css !== currentFiles.css;
+    const replyMsg = anyChanged
+      ? (dx.rootCauses.length > 0 ? `✅ Applied: ${dx.rootCauses.slice(0, 2).join('; ')}` : `✅ Done!`)
+      : `⚠️ Could not apply: ${dx.rootCauses[0] || request} — try rephrasing or rebuild the app.`;
 
     return {
       success: true, reply: replyMsg, files,

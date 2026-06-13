@@ -2204,10 +2204,9 @@ ${buildLanguageRule(preferredLanguage)}`;
     const currentMode = mode;
 
     const msgInput = typeof overrideMessage === 'string' ? overrideMessage : '';
-    if (!msgInput && !input.trim() && !errorContext?.lastInput || isLoading) return;
+    if (!msgInput && !input.trim() && !errorContext?.lastInput && files.length === 0 || isLoading) return;
 
     const messageToSend = msgInput || currentInput.trim() || errorContext?.lastInput || '';
-    if (!messageToSend) return;
 
     // Language picker intercept — handle before sending to AI
     if (!preferredLanguage) {
@@ -2273,9 +2272,10 @@ ${buildLanguageRule(preferredLanguage)}`;
     const greetings = /^(ram ram|namaste|hello|hi|namaskar|sat sri akal|salam|radhe radhe|jai shri ram|kya haal hai|kaise ho)$/i;
     const isBasicGreeting = greetings.test(messageToSend.trim());
 
+    const fileLabel = files.length > 0 ? ` [📎 ${files.map(f => f.name).join(', ')}]` : '';
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: messageToSend,
+      text: (messageToSend || '') + fileLabel,
       sender: 'user',
       timestamp: new Date(),
     };
@@ -2395,7 +2395,8 @@ ${buildLanguageRule(preferredLanguage)}`;
             agent: currentAgent,
             mode: currentMode,
             intent: detectedIntent,
-            files: files,
+            // Convert File objects → base64 so they serialize over JSON
+            fileAttachments: files.length > 0 ? await filesToBase64(files) : undefined,
             // 3 — canvas memory: send current app so AI can edit it
             currentApp: hasGeneratedCode && generatedCode && generatedCode.length > 200
               ? generatedCode.slice(0, 15000)
@@ -5283,7 +5284,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     messages={messages}
                     input={input}
                     onInputChange={setInput}
-                    onSend={() => { handleSendForTab('nbi_chat'); }}
+                    onSend={(files) => { handleSendForTab('nbi_chat', undefined, files); }}
                     isLoading={isLoading}
                     activeIntent={activeIntent}
                     isPinned={sessions.find(s => s.id === currentSessionId)?.isPinned || false}

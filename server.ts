@@ -4027,8 +4027,26 @@ ${LANGUAGE_RULE}
 Be helpful, concise, and accurate. If the user wants to build an app, guide them.`;
 
   const chatHandler = async (req: any, res: any, tier: 'navbharat' | 'vishwakarma-basic' | 'vishwakarma-pro' | 'vip') => {
-    let { message, history, currentApp, mode, intent, userProfile } = req.body;
-    if (!message) return res.status(400).json({ reply: 'Message is required' });
+    let { message, history, currentApp, mode, intent, userProfile, fileAttachments } = req.body;
+    if (!message && !Array.isArray(fileAttachments)) return res.status(400).json({ reply: 'Message is required' });
+    message = message || '';
+
+    // Process attached files — text files decoded into message, images handled via Gemini vision
+    type FileAttachment = { name: string; type: string; base64: string };
+    const attachments: FileAttachment[] = Array.isArray(fileAttachments) ? fileAttachments : [];
+    const imageAttachments = attachments.filter(f => f.type.startsWith('image/'));
+    const textAttachments = attachments.filter(f => !f.type.startsWith('image/'));
+
+    // Append decoded text file content to message
+    if (textAttachments.length > 0) {
+      const textParts = textAttachments.map(f => {
+        const content = Buffer.from(f.base64, 'base64').toString('utf8').slice(0, 8000);
+        return `\n\n[Attached file: ${f.name}]\n\`\`\`\n${content}\n\`\`\``;
+      });
+      message = (message || 'Please review these files:') + textParts.join('');
+    }
+    // Ensure image-only messages have a prompt
+    if (!message && imageAttachments.length > 0) message = 'Please describe and analyze this image.';
 
     const isFree = tier === 'navbharat';
     // Free tier: always conversational — ignore canvas and build intent completely
@@ -4054,7 +4072,58 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       contextualMessage = `[CANVAS — current app on canvas (${currentApp.length} chars total)]:\n\`\`\`html\n${currentApp.slice(0, 20000)}${currentApp.length > 20000 ? '\n...[truncated — send smaller app for full edit]' : ''}\n\`\`\`\n\nUser request: ${message}`;
     }
 
-    console.log(`[CHAT] tier=${tier} isFree=${isFree} mode=${mode} intent=${intent} hasCanvas=${hasCanvas} sysprompt=${isFree ? 'FREE' : hasCanvas ? 'EDIT' : isBuildIntent ? 'BUILD' : 'CHAT'}`);
+    console.log(`[CHAT] tier=${tier} isFree=${isFree} mode=${mode} intent=${intent} hasCanvas=${hasCanvas} files=${attachments.length}(img=${imageAttachments.length}) sysprompt=${isFree ? 'FREE' : hasCanvas ? 'EDIT' : isBuildIntent ? 'BUILD' : 'CHAT'}`);
+
+    // Image attachments — direct Gemini vision call (bypasses string-only router)
+    if (imageAttachments.length > 0) {
+      const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
+      const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
+      if (geminiKey || projectId) {
+        try {
+          const { GoogleGenAI } = await import('@google/genai');
+          const ai = new GoogleGenAI({ apiKey: geminiKey || 'vertex' });
+          const parts: any[] = [{ text: contextualMessage }];
+          for (const img of imageAttachments) {
+            parts.push({ inlineData: { mimeType: img.type, data: img.base64 } });
+          }
+          const visionConfig: any = {};
+          if (systemPrompt) visionConfig.systemInstruction = systemPrompt;
+          if (req.body.stream === true) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
+            res.flushHeaders();
+            const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 20000);
+            try {
+              const stream = await ai.models.generateContentStream({
+                model: 'gemini-2.5-flash',
+                contents: [{ parts }],
+                config: Object.keys(visionConfig).length ? visionConfig : undefined,
+              });
+              for await (const chunk of stream) {
+                const text = chunk.text || '';
+                if (text && !res.writableEnded) res.write(`data: ${JSON.stringify({ c: text })}\n\n`);
+              }
+            } finally {
+              clearInterval(heartbeat);
+            }
+            if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+          } else {
+            const result = await ai.models.generateContent({
+              model: 'gemini-2.5-flash',
+              contents: [{ parts }],
+              config: Object.keys(visionConfig).length ? visionConfig : undefined,
+            });
+            return res.json({ reply: result.text || '' });
+          }
+          return;
+        } catch (visionErr: any) {
+          console.error('[CHAT/VISION] Gemini vision failed, falling through to text router:', visionErr.message);
+          // Fall through to normal text-based router
+        }
+      }
+    }
 
     try {
       if (req.body.stream === true) {

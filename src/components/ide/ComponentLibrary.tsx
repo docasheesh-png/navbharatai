@@ -253,9 +253,42 @@ const loadFavs = (): string[] => {
 };
 const saveFavs = (ids: string[]) => localStorage.setItem(FAV_KEY, JSON.stringify(ids));
 
+// ─── CDN Library Catalog ──────────────────────────────────────────────────────
+
+interface CdnLib {
+  id: string;
+  name: string;
+  description: string;
+  tag: string;
+  category: string;
+  size: string;
+  scriptTag: string;
+}
+
+const CDN_LIBRARIES: CdnLib[] = [
+  { id: 'chartjs', name: 'Chart.js', description: 'Beautiful animated charts', tag: 'Charts', category: 'Data', size: '60kb', scriptTag: '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>' },
+  { id: 'gsap', name: 'GSAP', description: 'Professional-grade animations', tag: 'Animation', category: 'UI', size: '67kb', scriptTag: '<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>' },
+  { id: 'threejs', name: 'Three.js', description: '3D graphics in the browser', tag: '3D', category: 'Graphics', size: '577kb', scriptTag: '<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>' },
+  { id: 'aos', name: 'AOS', description: 'Animate On Scroll effects', tag: 'Animation', category: 'UI', size: '14kb', scriptTag: '<link rel="stylesheet" href="https://unpkg.com/aos@2.3.1/dist/aos.css"><script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script><script>document.addEventListener("DOMContentLoaded",()=>AOS.init())</script>' },
+  { id: 'sweetalert2', name: 'SweetAlert2', description: 'Beautiful custom alert dialogs', tag: 'UI', category: 'UI', size: '42kb', scriptTag: '<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>' },
+  { id: 'sortable', name: 'SortableJS', description: 'Drag-and-drop sortable lists', tag: 'Interaction', category: 'UI', size: '25kb', scriptTag: '<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>' },
+  { id: 'dayjs', name: 'Day.js', description: 'Lightweight date/time library', tag: 'Utils', category: 'Utility', size: '2kb', scriptTag: '<script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>' },
+  { id: 'lodash', name: 'Lodash', description: 'Utility functions for arrays/objects', tag: 'Utils', category: 'Utility', size: '24kb', scriptTag: '<script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>' },
+  { id: 'particles', name: 'Particles.js', description: 'Particle animation backgrounds', tag: 'Animation', category: 'UI', size: '28kb', scriptTag: '<script src="https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js"></script>' },
+  { id: 'howler', name: 'Howler.js', description: 'Web audio library for games', tag: 'Audio', category: 'Media', size: '21kb', scriptTag: '<script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>' },
+  { id: 'qrcode', name: 'QRCode.js', description: 'Generate QR codes client-side', tag: 'Utils', category: 'Utility', size: '12kb', scriptTag: '<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>' },
+  { id: 'pdfmake', name: 'pdfmake', description: 'PDF generation in the browser', tag: 'Export', category: 'Utility', size: '490kb', scriptTag: '<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.12/pdfmake.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.12/vfs_fonts.js"></script>' },
+  { id: 'socket', name: 'Socket.io', description: 'Real-time WebSocket communication', tag: 'Network', category: 'Network', size: '44kb', scriptTag: '<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>' },
+  { id: 'leaflet', name: 'Leaflet.js', description: 'Interactive maps', tag: 'Maps', category: 'Data', size: '39kb', scriptTag: '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>' },
+  { id: 'typed', name: 'Typed.js', description: 'Typewriter animation effects', tag: 'Animation', category: 'UI', size: '11kb', scriptTag: '<script src="https://cdn.jsdelivr.net/npm/typed.js@2.1.0/dist/typed.umd.js"></script>' },
+];
+
 // ─── ComponentLibrary ─────────────────────────────────────────────────────────
 
 export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert }) => {
+  const [activeTab, setActiveTab] = useState<'components' | 'libraries'>('components');
+  const [libSearch, setLibSearch] = useState('');
+  const [libCopied, setLibCopied] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState('navigation');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Component | null>(null);
@@ -296,8 +329,86 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert }) 
     return matchCat && matchSearch;
   });
 
+  const filteredLibs = CDN_LIBRARIES.filter(l => {
+    const q = libSearch.toLowerCase();
+    return !q || l.name.toLowerCase().includes(q) || l.description.toLowerCase().includes(q) || l.tag.toLowerCase().includes(q);
+  });
+
+  const copyLibTag = (lib: CdnLib) => {
+    navigator.clipboard.writeText(lib.scriptTag).then(() => {
+      setLibCopied(lib.id);
+      setTimeout(() => setLibCopied(null), 2000);
+    });
+  };
+
   return (
-    <div className="flex h-full overflow-hidden" style={{ background: '#0d1117', color: '#e6edf3' }}>
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: '#0d1117', color: '#e6edf3' }}>
+      {/* ── Tab Bar ── */}
+      <div className="flex-shrink-0 flex items-center gap-1 px-4 py-2 border-b border-gray-800 bg-[#161b22]">
+        {([['components', '🧩 Components'], ['libraries', '📦 CDN Libraries']] as const).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              activeTab === id
+                ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/60'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'libraries' && (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-shrink-0 px-4 py-3 border-b border-gray-800">
+            <div className="relative">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+              <input
+                value={libSearch}
+                onChange={e => setLibSearch(e.target.value)}
+                placeholder="Search libraries..."
+                className="w-full pl-9 pr-4 py-2 rounded-lg text-xs outline-none"
+                style={{ background: '#161b22', border: '1px solid #30363d', color: '#e6edf3' }}
+              />
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 grid grid-cols-1 gap-3">
+            {filteredLibs.map(lib => (
+              <div key={lib.id} className="bg-[#161b22] border border-gray-800 rounded-xl p-4 hover:border-indigo-500/40 transition-all group">
+                <div className="flex items-start justify-between mb-1">
+                  <div>
+                    <span className="text-sm font-bold text-white">{lib.name}</span>
+                    <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-600/20 text-indigo-400 font-bold uppercase tracking-wider">{lib.tag}</span>
+                    <span className="ml-1 text-[9px] text-gray-600 font-mono">{lib.size}</span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-gray-400 mb-3">{lib.description}</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => copyLibTag(lib)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/30 text-indigo-300 text-[10px] font-bold rounded-lg transition-all"
+                  >
+                    {libCopied === lib.id ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                    {libCopied === lib.id ? 'Copied!' : 'Copy Tag'}
+                  </button>
+                  {onInsert && (
+                    <button
+                      onClick={() => onInsert(lib.scriptTag, lib.name)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/15 hover:bg-emerald-600/30 border border-emerald-500/25 text-emerald-400 text-[10px] font-bold rounded-lg transition-all"
+                    >
+                      + Inject
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'components' && <div className="flex flex-1 overflow-hidden">
       {/* ── Left Sidebar ── */}
       <div className="flex-shrink-0 w-[220px] border-r border-gray-800 overflow-y-auto py-3">
         <div className="px-4 py-2 mb-1">
@@ -575,6 +686,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert }) 
           </div>
         )}
       </div>
+      </div>}
 
       {/* ── Modal Preview ── */}
       {modalComp && (

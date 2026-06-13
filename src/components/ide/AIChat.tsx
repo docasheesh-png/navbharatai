@@ -255,6 +255,7 @@ interface AIChatProps {
   onBuildStepToggle?: (index: number) => void;
   onLanguagePick?: (lang: string) => void;
   onDownloadZip?: (files: Record<string, string>, appName: string) => void;
+  onSendSuggestion?: (text: string) => void;
 }
 
 export const AIChat: React.FC<AIChatProps> = ({
@@ -290,6 +291,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   onBuildStepToggle,
   onLanguagePick,
   onDownloadZip,
+  onSendSuggestion,
 }) => {
   const { buildSteps } = useBuild();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -504,6 +506,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
       .trim();
     const deployFiles = (msg as any).meta?.deployFiles as Record<string, string> | undefined;
     const deployAppName = (msg as any).meta?.appName as string | undefined;
+    const suggestions = (msg as any).meta?.suggestions as string[] | undefined;
 
     return (
       <div className="space-y-3">
@@ -615,6 +618,24 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
               >
                 🐙 GitHub Pages
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Smart Follow-Up Suggestions */}
+        {suggestions && suggestions.length > 0 && onSendSuggestion && (
+          <div className="mt-3 pt-3 border-t border-white/10">
+            <p className="text-[9px] font-black uppercase tracking-widest text-[#484f58] mb-2">💡 What to build next</p>
+            <div className="flex flex-wrap gap-1.5">
+              {suggestions.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => onSendSuggestion(s)}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600/15 hover:bg-indigo-600/30 border border-indigo-500/25 text-indigo-300 text-[10px] font-medium rounded-full transition-all active:scale-95"
+                >
+                  <span className="text-indigo-400">+</span> {s}
+                </button>
+              ))}
             </div>
           </div>
         )}

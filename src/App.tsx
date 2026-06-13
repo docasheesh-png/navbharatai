@@ -2678,12 +2678,17 @@ ${buildLanguageRule(preferredLanguage)}`;
                     deploySection,
                   ].join('\n');
 
+                  const suggestions: string[] = evt.followUpSuggestions || [];
                   setProMessages(prev => [...prev, {
                     id: (Date.now() + 1).toString(),
                     text: processLog + '\n\n__VIEW_PREVIEW____DEPLOY_ACTIONS__',
                     sender: 'ai',
                     timestamp: new Date(),
-                    meta: { deployFiles: evt.files, appName: evt.appName || 'NavBharatAI-App' } as any,
+                    meta: {
+                      deployFiles: evt.files,
+                      appName: evt.appName || 'NavBharatAI-App',
+                      suggestions,
+                    } as any,
                   }]);
 
                   setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
@@ -5184,6 +5189,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                       steps: prev.steps.map((s, idx) => idx === i ? { ...s, expanded: !s.expanded } : s),
                     }))}
                     onDownloadZip={downloadAppZip}
+                    onSendSuggestion={(text) => { setProInput(text); handleSendForPro(text); }}
                   />
                 </div>
             </div>

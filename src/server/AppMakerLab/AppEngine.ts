@@ -43,6 +43,7 @@ export interface BuildResult {
   error?: string;
   validationReport?: ValidationReport;
   deploymentGuide?: string;
+  followUpSuggestions?: string[];
 }
 
 export interface BuildProgress {
@@ -1077,6 +1078,7 @@ export async function buildApp(
       appName: bp.appName,
       validationReport,
       deploymentGuide: generateDeploymentGuide(bp.appName),
+      followUpSuggestions: generateFollowUpSuggestions(bp),
     };
 
   } catch (err: any) {
@@ -1088,6 +1090,25 @@ export async function buildApp(
       error: err.message,
     };
   }
+}
+
+// ─── Smart Follow-Up Suggestions ─────────────────────────────────────────────
+
+const SUGGESTION_SETS: Record<AppTemplate, string[]> = {
+  GAME_CANVAS: ['Add high score leaderboard', 'Add sound effects', 'Add difficulty levels', 'Add power-ups', 'Make it mobile touch-friendly'],
+  GAME_LOGIC:  ['Add multiplayer mode', 'Add AI opponent', 'Add animations', 'Add score tracking', 'Add timer/countdown'],
+  DASHBOARD:   ['Add dark/light theme toggle', 'Add export to CSV', 'Add date range filter', 'Add real-time data refresh', 'Add print/PDF export'],
+  TOOL_FORM:   ['Add input validation with error messages', 'Add copy result to clipboard', 'Add history of past calculations', 'Add share via URL', 'Add PDF export'],
+  SOCIAL_APP:  ['Add Firebase authentication', 'Add image upload support', 'Add real-time chat', 'Add user profiles', 'Add notifications'],
+  GENERIC:     ['Add dark mode', 'Make it fully responsive for mobile', 'Add loading animations', 'Add Firebase data persistence', 'Add user authentication'],
+};
+
+function generateFollowUpSuggestions(bp: AppBlueprint): string[] {
+  const base = SUGGESTION_SETS[bp.template] || SUGGESTION_SETS.GENERIC;
+  const extras: string[] = [];
+  if (!bp.cdnNeeded.some(c => c.toLowerCase().includes('chart'))) extras.push('Add charts with Chart.js');
+  if (bp.complexity !== 'complex') extras.push('Add more advanced features');
+  return [...base.slice(0, 4), ...extras.slice(0, 1)];
 }
 
 // ─── Backend Module: Firebase Firestore Integration ───────────────────────────
@@ -1292,6 +1313,14 @@ ALL identifiers and comments in English. Return ONLY CSS, no markdown.`;
       }
     }
 
+    const reactSuggestions = [
+      'Add dark/light mode toggle',
+      'Add routing with React Router',
+      'Add Firebase data persistence',
+      'Add user authentication',
+      'Extract into reusable components',
+    ];
+
     return {
       success: true,
       reply: `✅ ${appName} — React app ready! ${description}`,
@@ -1302,6 +1331,7 @@ ALL identifiers and comments in English. Return ONLY CSS, no markdown.`;
       previewHtml,
       appName,
       deploymentGuide: generateDeploymentGuide(appName),
+      followUpSuggestions: reactSuggestions,
     };
 
   } catch (err: any) {

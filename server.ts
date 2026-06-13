@@ -4291,6 +4291,7 @@ Response Format:
         error: result.error,
         validationReport: result.validationReport,
         deploymentGuide: result.deploymentGuide,
+        followUpSuggestions: result.followUpSuggestions,
       });
     } catch (err: any) {
       const msg: string = err?.message || 'Unknown build error';

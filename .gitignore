@@ -7,3 +7,4 @@ coverage/
 .env*
 !.env.example
 .claude/
+test_environment_debug.json

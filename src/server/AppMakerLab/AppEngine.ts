@@ -1072,3 +1072,143 @@ export async function buildApp(
     };
   }
 }
+
+// ─── Iterative Edit Engine — edit existing app without full rebuild ────────────
+
+function assemblePreview(html: string, js: string, css: string): string {
+  let out = html;
+  if (css) {
+    const tag = `<style>\n${css}\n</style>`;
+    out = out.includes('</head>') ? out.replace('</head>', `${tag}\n</head>`) : tag + out;
+  }
+  out = out.replace(/<link[^>]+style\.css[^>]*>/gi, '');
+  if (js) {
+    const tag = `<script>\n${js}\n</script>`;
+    out = out.includes('</body>') ? out.replace('</body>', `${tag}\n</body>`) : out + tag;
+  }
+  out = out.replace(/<script[^>]+src=["']script\.js["'][^>]*><\/script>/gi, '');
+  return out;
+}
+
+export async function editApp(
+  request: string,
+  currentFiles: { html: string; css: string; js: string },
+  onProgress?: ProgressCallback,
+  onFileGenerated?: FileGeneratedCallback,
+): Promise<BuildResult> {
+  const report = (stage: string, step: number, total: number, detail: string) =>
+    onProgress?.({ stage, step, total, detail });
+
+  const TOTAL = 5;
+
+  try {
+    // Step 1: Decide which files need changing
+    report('Analyzing', 1, TOTAL, 'Understanding what needs to change...');
+    const analyzePrompt = `User wants to edit a web app: "${request}"
+
+Files present:
+- index.html (${currentFiles.html.length} chars)
+- script.js (${currentFiles.js.length} chars)
+- style.css (${currentFiles.css.length} chars)
+
+Which files must be modified? Return ONLY valid JSON (no markdown):
+{"changedFiles":["html","js","css"],"reason":"brief explanation"}
+Use only the files that actually need changes.`;
+
+    let changedFiles: string[] = ['html', 'js', 'css'];
+    let reason = 'full edit';
+    try {
+      const raw = await callAI(analyzePrompt, 'You analyze code edit requests. Return only valid JSON, no markdown.', 400);
+      const parsed = JSON.parse(raw.replace(/```json?|```/g, '').trim());
+      if (Array.isArray(parsed.changedFiles) && parsed.changedFiles.length > 0) {
+        changedFiles = parsed.changedFiles;
+        reason = parsed.reason || reason;
+      }
+    } catch { /* keep defaults */ }
+
+    report('Planning', 2, TOTAL, `Editing: ${changedFiles.join(', ')} — ${reason}`);
+    console.log(`[EditEngine] Request: "${request}" | Changing: ${changedFiles.join(', ')}`);
+
+    const editSys = `You are editing an existing web app. Make ONLY the requested changes.
+Preserve all existing functionality and structure.
+Return ONLY the complete updated file content — no markdown, no explanation.
+ABSOLUTE RULE: ALL identifiers (variable names, function names, comments) MUST be in English.`;
+
+    const updated = { ...currentFiles };
+
+    // Step 2: Edit each changed file
+    report('Editing', 3, TOTAL, 'Applying changes...');
+
+    const editTasks: Promise<void>[] = [];
+
+    if (changedFiles.includes('html')) {
+      editTasks.push(
+        callAI(
+          `Edit this HTML to fulfill: "${request}"\n\nCURRENT HTML:\n${currentFiles.html.slice(0, 8000)}\n\nReturn ONLY complete updated HTML:`,
+          editSys, 6000
+        ).then(r => { updated.html = r; onFileGenerated?.('index.html', r); })
+      );
+    }
+    if (changedFiles.includes('css')) {
+      editTasks.push(
+        callAI(
+          `Edit this CSS to fulfill: "${request}"\n\nCURRENT CSS:\n${currentFiles.css.slice(0, 6000)}\n\nReturn ONLY complete updated CSS:`,
+          editSys, 5000
+        ).then(r => { updated.css = r; onFileGenerated?.('style.css', r); })
+      );
+    }
+    if (changedFiles.includes('js')) {
+      editTasks.push(
+        callAI(
+          `Edit this JavaScript to fulfill: "${request}"\n\nHTML CONTEXT (for ID reference):\n${updated.html.slice(0, 2000)}\n\nCURRENT JS:\n${currentFiles.js.slice(0, 10000)}\n\nReturn ONLY complete updated JavaScript:`,
+          editSys, 10000
+        ).then(r => { updated.js = r; onFileGenerated?.('script.js', r); })
+      );
+    }
+
+    await Promise.all(editTasks);
+
+    // Step 3: Validate + repair JS if it was changed
+    report('Validating', 4, TOTAL, 'Checking code integrity...');
+    if (changedFiles.includes('js') || changedFiles.includes('html')) {
+      let validation = validateDOMConsistency(updated.html, updated.js);
+      let repairs = 0;
+      while (!validation.valid && repairs < 3) {
+        const count = validation.brokenIds.length + validation.missingWires.length;
+        report('Repairing', 4, TOTAL, `Fixing ${count} issue(s)...`);
+        updated.js = await autoRepairJS(updated.js, updated.html, validation, 'app');
+        validation = validateDOMConsistency(updated.html, updated.js);
+        repairs++;
+      }
+    }
+
+    // Step 4: Assemble preview
+    report('Assembling', 5, TOTAL, 'Building updated preview...');
+    const previewHtml = assemblePreview(updated.html, updated.js, updated.css);
+    const files: Record<string, string> = {
+      'index.html': updated.html,
+      'script.js':  updated.js,
+      'style.css':  updated.css,
+    };
+    const validationReport = computeValidationReport(updated.html, updated.js, updated.css, 0);
+
+    return {
+      success: true,
+      reply: `✅ Done! ${reason}`,
+      files,
+      fileList: Object.entries(files).map(([path, content]) => ({ path, content, description: path })),
+      previewHtml,
+      appName: 'Updated App',
+      validationReport,
+    };
+
+  } catch (err: any) {
+    console.error('[EditEngine] Edit failed:', err);
+    return {
+      success: false,
+      reply: `Edit failed: ${err.message}`,
+      files: {}, fileList: [], previewHtml: '', appName: '',
+      error: err.message,
+    };
+  }
+}

@@ -439,6 +439,7 @@ export default function App() {
   // theme, isThemePickerOpen → from useSettings() hook
   const { buildSteps, setBuildSteps } = useBuild();
   const [isAppBuilt, setIsAppBuilt] = useState(false);
+  const [buildVersionStack, setBuildVersionStack] = useState<Array<{files: Record<string, string>, timestamp: string, request: string}>>([]);
 
   useEffect(() => {
     let active = true;
@@ -2540,6 +2541,21 @@ ${buildLanguageRule(preferredLanguage)}`;
         const planningContext = proMessages.length > 0
           ? proMessages.slice(-8).map((m: any) => `${m.sender === 'user' ? 'User' : 'AI'}: ${String(m.text || '').slice(0, 400)}`).join('\n')
           : '';
+        // Push current version to undo stack before building
+        if (hasGeneratedCode && Object.keys(files).length > 0) {
+          setBuildVersionStack(prev => [
+            { files: { ...files }, timestamp: new Date().toISOString(), request: messageToSend.slice(0, 100) },
+            ...prev.slice(0, 4),
+          ]);
+        }
+
+        // Detect edit intent: existing app + edit keyword
+        const editKeywords = /\b(fix|change|update|add|remove|modify|edit|adjust|improve|make|redesign|refactor|move|replace|delete|append|insert)\b/i;
+        const isEditRequest = hasGeneratedCode && Object.keys(files).length > 0 && editKeywords.test(messageToSend);
+        const htmlFile = files['index.html'] || '';
+        const cssFile = files['style.css'] || files['styles.css'] || files['main.css'] || '';
+        const jsFile = files['script.js'] || files['app.js'] || files['main.js'] || files['index.js'] || '';
+
         const buildMessage = planningContext
           ? `[PLANNING CONVERSATION]\n${planningContext}\n\n[BUILD REQUEST]\n${messageToSend}`
           : messageToSend;
@@ -2551,6 +2567,10 @@ ${buildLanguageRule(preferredLanguage)}`;
             currentApp: hasGeneratedCode && generatedCode && generatedCode.length > 200
               ? generatedCode.slice(0, 15000)
               : undefined,
+            ...(isEditRequest && htmlFile.length > 200 ? {
+              isEdit: true,
+              currentFiles: { html: htmlFile, css: cssFile, js: jsFile },
+            } : {}),
           }),
         });
 
@@ -2741,6 +2761,15 @@ ${buildLanguageRule(preferredLanguage)}`;
       setIsProLoading(false);
     }
   };
+
+  const handleUndoBuild = useCallback(() => {
+    if (buildVersionStack.length === 0) return;
+    const [lastVersion, ...rest] = buildVersionStack;
+    setBuildVersionStack(rest);
+    setFiles(lastVersion.files as any);
+    updatePreview(lastVersion.files as any);
+    addToast('Restored previous version ↩', 'success');
+  }, [buildVersionStack, updatePreview, addToast]);
 
   // Task 2.7 — memoized: static array, rebuilt only once
   const menuItems = useMemo(() => [
@@ -5040,6 +5069,16 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                        {mode === 'build' && <span className="px-1.5 py-0.5 bg-orange-900/30 border border-orange-600/30 text-orange-400 rounded text-[8px]">BUILD</span>}
                      </div>
                      <div className="flex items-center gap-2">
+                       {buildVersionStack.length > 0 && (
+                         <button
+                           onClick={handleUndoBuild}
+                           title={`Undo: "${buildVersionStack[0].request}"`}
+                           className="flex items-center gap-1 px-2 py-0.5 bg-amber-900/30 hover:bg-amber-900/50 border border-amber-600/30 rounded text-[8px] text-amber-400 hover:text-amber-300 transition-all"
+                         >
+                           <RotateCcw className="w-2.5 h-2.5" />
+                           Undo ({buildVersionStack.length})
+                         </button>
+                       )}
                        {mode === 'planning' && proMessages.length > 2 && (
                          <button
                            onClick={() => {

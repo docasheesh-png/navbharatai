@@ -44,7 +44,7 @@ import { UniversalAIRouter } from './src/server/AI/UniversalAIRouter';
 import { getProviderStats, recordProviderLatency } from './src/server/AI/Router/AIRouter';
 import { auditEnv } from './src/server/audit_env';
 import { BuildJobManager } from './src/server/AppMakerLab/jobs/BuildJobManager';
-import { buildApp as buildAppEngine } from './src/server/AppMakerLab/AppEngine';
+import { buildApp as buildAppEngine, editApp as editAppEngine } from './src/server/AppMakerLab/AppEngine';
 
 auditEnv();
 
@@ -4220,24 +4220,17 @@ Response Format:
   });
 
   // ══ SSE STREAMING BUILD ENDPOINT — Live progress to frontend ══
+  // ── Shared sanitizer for user-supplied HTML ─────────────────────────────────
+  const sanitizeUserHtml = (html: string): string => html
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\bignore\b.*\bprevious\b/gi, '')
+    .replace(/\bsystem\s*prompt\b/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '<script>[removed]</script>')
+    .slice(0, 18000);
+
   app.post('/api/pro-build', async (req: any, res: any) => {
-    const { message, currentApp } = req.body;
+    const { message, currentApp, currentFiles, isEdit } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
-
-    // Sanitize currentApp to prevent prompt injection via HTML comments or special strings
-    const sanitizeHtml = (html: string): string => html
-      .replace(/<!--[\s\S]*?-->/g, '')           // strip HTML comments (injection vector)
-      .replace(/\bignore\b.*\bprevious\b/gi, '') // strip "ignore previous instructions"
-      .replace(/\bsystem\s*prompt\b/gi, '')       // strip "system prompt" references
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '<script>[removed]</script>') // strip inline scripts in currentApp (keep tag for structure)
-      .slice(0, 18000);                           // hard cap
-
-    // Prepend current canvas app so builder can edit/extend it
-    const safeCurrentApp = currentApp && typeof currentApp === 'string' && currentApp.length > 200
-      ? sanitizeHtml(currentApp) : null;
-    const buildMessage = safeCurrentApp
-      ? `[CURRENT APP TO EDIT — ${safeCurrentApp.length} chars]:\n\`\`\`html\n${safeCurrentApp}\n\`\`\`\n\nBuild request: ${message}`
-      : message;
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -4245,16 +4238,42 @@ Response Format:
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.flushHeaders();
 
-    const send = (data: object) => {
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
+    const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+    // Detect edit mode: explicit flag OR has currentFiles with substantial content
+    const hasCurrentFiles = currentFiles &&
+      typeof currentFiles.html === 'string' && currentFiles.html.length > 200;
+    const useEdit = isEdit === true || (hasCurrentFiles && isEdit !== false);
 
     try {
-      const result = await buildAppEngine(
-        buildMessage,
-        (p) => send({ type: 'progress', stage: p.stage, step: p.step, total: p.total, detail: p.detail }),
-        (fileName, content) => send({ type: 'file', fileName, content })
-      );
+      let result;
+      if (useEdit && hasCurrentFiles) {
+        // ── ITERATIVE EDIT PATH ──────────────────────────────────────────────
+        const safeFiles = {
+          html: sanitizeUserHtml(currentFiles.html || ''),
+          js:   (currentFiles.js  || '').slice(0, 18000),
+          css:  (currentFiles.css || '').slice(0, 12000),
+        };
+        result = await editAppEngine(
+          message,
+          safeFiles,
+          (p) => send({ type: 'progress', stage: p.stage, step: p.step, total: p.total, detail: p.detail, isEdit: true }),
+          (fileName, content) => send({ type: 'file', fileName, content })
+        );
+      } else {
+        // ── FULL BUILD PATH ──────────────────────────────────────────────────
+        const safeCurrentApp = currentApp && typeof currentApp === 'string' && currentApp.length > 200
+          ? sanitizeUserHtml(currentApp) : null;
+        const buildMessage = safeCurrentApp
+          ? `[CURRENT APP TO EDIT — ${safeCurrentApp.length} chars]:\n\`\`\`html\n${safeCurrentApp}\n\`\`\`\n\nBuild request: ${message}`
+          : message;
+        result = await buildAppEngine(
+          buildMessage,
+          (p) => send({ type: 'progress', stage: p.stage, step: p.step, total: p.total, detail: p.detail }),
+          (fileName, content) => send({ type: 'file', fileName, content })
+        );
+      }
+
       send({
         type: 'complete',
         files: result.files,

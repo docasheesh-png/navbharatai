@@ -6774,6 +6774,13 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 onRestoreHistory={(html) => setGeneratedCode(html)}
                 onHtmlChange={(html) => setGeneratedCode(html)}
                 onGoPro={() => toggleTab('nbi_pro_chat')}
+                onEditWithAI={(hint) => {
+                  setMode('build');
+                  toggleTab('nbi_pro_chat');
+                  if (hint) {
+                    setTimeout(() => handleSendForPro(hint), 100);
+                  }
+                }}
               />
             </div>
           )}

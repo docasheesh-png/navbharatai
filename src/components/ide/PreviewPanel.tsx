@@ -17,9 +17,10 @@ interface PreviewPanelProps {
   onRestoreHistory?: (html: string) => void;
   onHtmlChange?: (html: string) => void;
   onGoPro?: () => void;
+  onEditWithAI?: (hint?: string) => void;
 }
 
-export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, generatedCode, previewHistory = [], onRestoreHistory, onHtmlChange, onGoPro }) => {
+export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, generatedCode, previewHistory = [], onRestoreHistory, onHtmlChange, onGoPro, onEditWithAI }) => {
   const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
   const [device, setDevice] = useState<'laptop' | 'mobile' | 'full'>(isMobileScreen ? 'full' : 'laptop');
   const [visualMode, setVisualMode] = useState(false);
@@ -304,15 +305,15 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           <Download className={cn("w-3 h-3", downloading && "animate-bounce")} />
           <span>{downloading ? 'Saving' : '↓'}</span>
         </button>
-        {/* Pro Chat Button */}
-        {onGoPro && (
+        {/* Edit with AI — always visible in header */}
+        {(onEditWithAI || onGoPro) && (
           <button
-            onClick={onGoPro}
-            title="Open NavBharatAI Pro"
-            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest transition-all ml-1 border bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border-indigo-500/30 hover:border-indigo-400/60 hover:scale-105 active:scale-95"
+            onClick={() => onEditWithAI ? onEditWithAI() : onGoPro?.()}
+            title="Edit this app with AI"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ml-1 border bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-500 hover:scale-105 active:scale-95 shadow-lg shadow-indigo-900/30"
           >
-            <span>⚡</span>
-            <span>Pro Chat</span>
+            <Pen className="w-3.5 h-3.5" />
+            <span>Edit</span>
           </button>
         )}
       </div>
@@ -393,33 +394,58 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
 
           {/* Expandable action row */}
           {!footerMinimized && (
-            <div className="bg-gradient-to-r from-indigo-950/60 via-[#161b22] to-emerald-950/60 px-4 py-2.5 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="w-7 h-7 rounded-lg bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
-                  <Smartphone className="w-4 h-4 text-indigo-400" />
+            <div className="bg-gradient-to-r from-indigo-950/60 via-[#161b22] to-emerald-950/60 px-4 py-2.5 flex flex-col gap-2.5">
+              {/* Edit with AI — primary CTA + quick chips */}
+              {(onEditWithAI || onGoPro) && (
+                <>
+                  <button
+                    onClick={() => onEditWithAI ? onEditWithAI() : onGoPro?.()}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 active:scale-[0.98] text-white rounded-xl text-[11px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-900/40"
+                  >
+                    <Pen className="w-3.5 h-3.5" />
+                    ✏️ AI se Edit Karo / Improve Karo
+                  </button>
+                  <div className="flex flex-wrap gap-1.5">
+                    {['Add dark mode', 'Improve UI design', 'Add more features', 'Fix bugs', 'Make mobile-friendly'].map(chip => (
+                      <button
+                        key={chip}
+                        onClick={() => onEditWithAI ? onEditWithAI(chip) : onGoPro?.()}
+                        className="px-2.5 py-1 bg-white/5 hover:bg-indigo-600/20 border border-white/10 hover:border-indigo-500/30 text-[#8b949e] hover:text-indigo-300 text-[9px] font-bold rounded-full transition-all active:scale-95"
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-lg bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
+                    <Smartphone className="w-4 h-4 text-indigo-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[11px] font-black text-white tracking-wide">Aapki App Ready Hai!</span>
+                    <p className="text-[9px] text-[#8b949e]">Android pe install karo ya download karo</p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <span className="text-[11px] font-black text-white tracking-wide">Aapki App Ready Hai!</span>
-                  <p className="text-[9px] text-[#8b949e]">Android pe install karo ya download karo</p>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={openAsPwa}
+                    disabled={pwaLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-900/40 disabled:opacity-60"
+                  >
+                    <Share2 className={cn("w-3.5 h-3.5", pwaLoading && "animate-spin")} />
+                    {pwaLoading ? 'Wait...' : 'Install'}
+                  </button>
+                  <button
+                    onClick={downloadApp}
+                    disabled={downloading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 active:scale-95 text-[#8b949e] hover:text-white border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-60"
+                  >
+                    <Download className={cn("w-3.5 h-3.5", downloading && "animate-bounce")} />
+                    Download
+                  </button>
                 </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={openAsPwa}
-                  disabled={pwaLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-900/40 disabled:opacity-60"
-                >
-                  <Share2 className={cn("w-3.5 h-3.5", pwaLoading && "animate-spin")} />
-                  {pwaLoading ? 'Wait...' : 'Install on Android'}
-                </button>
-                <button
-                  onClick={downloadApp}
-                  disabled={downloading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 active:scale-95 text-[#8b949e] hover:text-white border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-60"
-                >
-                  <Download className={cn("w-3.5 h-3.5", downloading && "animate-bounce")} />
-                  Download
-                </button>
               </div>
             </div>
           )}

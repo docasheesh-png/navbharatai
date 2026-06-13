@@ -2500,6 +2500,30 @@ ${buildLanguageRule(preferredLanguage)}`;
       reader.readAsDataURL(file);
     })));
 
+  // Intent classifier — prevents build engine from firing on greetings/questions
+  const classifyBuildIntent = (message: string): 'build' | 'chat' => {
+    const lower = message.trim().toLowerCase();
+    const wordCount = lower.split(/\s+/).length;
+
+    // Greetings and affirmations (up to 4 words)
+    if (wordCount <= 4 && /^(hi|hello|hey|hii|helo|ok|okay|thanks|thank you|thx|shukriya|acha|accha|theek hai|theek|samjha|samajh|haan|nahi|sure|great|nice|good|perfect|kya haal|kaise ho|namaste|bye|good morning|good night|test)\s*[!.?]*$/.test(lower)) {
+      return 'chat';
+    }
+
+    // Clear app/build keywords → always build
+    if (/\b(app|game|website|web app|tool|bana[od]?|create|make|build|generate|develop|design|calculator|todo|quiz|login|dashboard|social|blog|portfolio|ecommerce|landing page|chat app|music player|weather|notes|timer|calendar|survey|banao|banana|chahiye)\b/i.test(lower)) {
+      return 'build';
+    }
+
+    // Short questions without build keywords → chat
+    if (wordCount < 12 && (/\?$/.test(message.trim()) || /^(what|how|why|when|where|who|explain|kya|batao|bata|samjhao|tell me|kaise|kyun|kab|kaisa)\b/i.test(lower))) {
+      return 'chat';
+    }
+
+    // Default: treat as build request
+    return 'build';
+  };
+
   const handleSendForPro = async (input?: string | File[]) => {
     const fileList = Array.isArray(input) ? input : [];
     const messageToSend = typeof input === 'string' ? input : proInput.trim();
@@ -2531,6 +2555,29 @@ ${buildLanguageRule(preferredLanguage)}`;
 
     // ── Mode is the single source of truth — no keyword override ──
     const isBuildMode = mode === 'build';
+
+    // ── Phase 2: Intent check — don't build on greetings/questions ──
+    if (isBuildMode && classifyBuildIntent(messageToSend) === 'chat') {
+      try {
+        const response = await fetch('/api/pro-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: abortController.signal,
+          body: JSON.stringify({ message: messageToSend, history: proMessages, mode: 'conversation' }),
+        });
+        if (!response.ok) throw new Error(`API Error: ${response.status}`);
+        const data = await response.json();
+        setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: data.reply || '👋 Hi! Tell me what app you want to build!', sender: 'ai', timestamp: new Date() }]);
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: '👋 Hi! Describe your app and I will build it for you!', sender: 'ai', timestamp: new Date() }]);
+        }
+      } finally {
+        setIsProLoading(false);
+        proAbortControllerRef.current = null;
+      }
+      return;
+    }
 
     if (isBuildMode) {
       // ── SSE Streaming Build via /api/pro-build ──

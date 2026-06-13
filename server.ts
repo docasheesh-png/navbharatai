@@ -4115,6 +4115,43 @@ Write complete working code. Beautiful dark UI. No placeholders. Output ONLY the
         }
       }
 
+      // ══ CONVERSATION MODE — Friendly chat in Build Mode (greetings, questions) ══
+      if (mode === 'conversation') {
+        const CONV_SYS = `You are NavBharatAI Pro's friendly assistant. The user is in Build Mode — they can describe any app and you will build it instantly.
+
+LANGUAGE RULE: Reply in the EXACT same language the user writes in. Hindi → Hindi, English → English, Hinglish → Hinglish.
+
+Your role:
+- Respond warmly to greetings, small talk, and casual messages
+- If they ask what you can do: explain you can build any web app (games, social apps, tools, dashboards, quizzes, etc.) — just describe it
+- If they ask about a feature or concept: explain briefly and helpfully
+- Keep responses SHORT (2-4 sentences max)
+- End with a gentle nudge: ask them to describe their app idea if they haven't yet
+- NEVER write code`;
+
+        try {
+          const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+          if (!key) return res.json({ reply: 'Hello! Describe your app idea and I will build it for you! 🚀', files: {} });
+          const A = (await import('@anthropic-ai/sdk')).default;
+          const baseURL = process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
+          const msgs = [
+            ...(history || []).slice(-6).map((m: any) => ({
+              role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+              content: String(m.text || m.content || '').slice(0, 400),
+            })),
+            { role: 'user' as const, content: message },
+          ];
+          const r = await new A({ apiKey: key, ...(baseURL ? { baseURL } : {}) }).messages.create({
+            model: 'claude-3-5-sonnet-20241022', max_tokens: 300,
+            system: CONV_SYS, messages: msgs,
+          });
+          const reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || 'Hello! Tell me what app you want to build! 🚀';
+          return res.json({ reply, files: {} });
+        } catch (e: any) {
+          return res.json({ reply: 'Hello! Describe your app idea and I will build it! 🚀', files: {} });
+        }
+      }
+
       // ══ PLANNING MODE — No code, architecture discussion only ══
 
       // Detect build intent to flag frontend (no hard-block — AI still responds with plan)

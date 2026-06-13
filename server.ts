@@ -4229,7 +4229,7 @@ Response Format:
     .slice(0, 18000);
 
   app.post('/api/pro-build', async (req: any, res: any) => {
-    const { message, currentApp, currentFiles, isEdit, framework } = req.body;
+    const { message, currentFiles, isEdit, framework, history } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -4239,6 +4239,11 @@ Response Format:
     res.flushHeaders();
 
     const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+    // Build conversation context string from history array
+    const historyContext = Array.isArray(history) && history.length > 0
+      ? history.map((m: any) => `${m.role === 'user' ? 'User' : 'AI'}: ${String(m.content || '').slice(0, 600)}`).join('\n')
+      : '';
 
     // Detect edit mode: explicit flag OR has currentFiles with substantial content
     const hasCurrentFiles = currentFiles &&
@@ -4258,21 +4263,23 @@ Response Format:
           message,
           safeFiles,
           (p) => send({ type: 'progress', stage: p.stage, step: p.step, total: p.total, detail: p.detail, isEdit: true }),
-          (fileName, content) => send({ type: 'file', fileName, content })
+          (fileName, content) => send({ type: 'file', fileName, content }),
+          historyContext
         );
       } else if (framework === 'react') {
         // ── REACT BUILD PATH ─────────────────────────────────────────────────
+        const reactMessage = historyContext
+          ? `[CONVERSATION HISTORY]\n${historyContext}\n\n[BUILD REQUEST]\n${message}`
+          : message;
         result = await buildReactAppEngine(
-          message,
+          reactMessage,
           (p) => send({ type: 'progress', stage: p.stage, step: p.step, total: p.total, detail: p.detail }),
           (fileName, content) => send({ type: 'file', fileName, content })
         );
       } else {
         // ── FULL BUILD PATH ──────────────────────────────────────────────────
-        const safeCurrentApp = currentApp && typeof currentApp === 'string' && currentApp.length > 200
-          ? sanitizeUserHtml(currentApp) : null;
-        const buildMessage = safeCurrentApp
-          ? `[CURRENT APP TO EDIT — ${safeCurrentApp.length} chars]:\n\`\`\`html\n${safeCurrentApp}\n\`\`\`\n\nBuild request: ${message}`
+        const buildMessage = historyContext
+          ? `[CONVERSATION HISTORY]\n${historyContext}\n\n[BUILD REQUEST]\n${message}`
           : message;
         result = await buildAppEngine(
           buildMessage,

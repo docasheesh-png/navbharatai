@@ -1352,6 +1352,7 @@ export async function editApp(
   currentFiles: { html: string; css: string; js: string },
   onProgress?: ProgressCallback,
   onFileGenerated?: FileGeneratedCallback,
+  historyContext?: string,
 ): Promise<BuildResult> {
   const report = (stage: string, step: number, total: number, detail: string) =>
     onProgress?.({ stage, step, total, detail });
@@ -1361,7 +1362,11 @@ export async function editApp(
   try {
     // Step 1: Decide which files need changing
     report('Analyzing', 1, TOTAL, 'Understanding what needs to change...');
-    const analyzePrompt = `User wants to edit a web app: "${request}"
+    const historySection = historyContext
+      ? `\nCONVERSATION HISTORY (what was planned and built so far):\n${historyContext.slice(0, 3000)}\n`
+      : '';
+    const analyzePrompt = `User wants to edit a web app.${historySection}
+Current edit request: "${request}"
 
 Files present:
 - index.html (${currentFiles.html.length} chars)
@@ -1389,7 +1394,7 @@ Use only the files that actually need changes.`;
     const editSys = `You are editing an existing web app. Make ONLY the requested changes.
 Preserve all existing functionality and structure.
 Return ONLY the complete updated file content — no markdown, no explanation.
-ABSOLUTE RULE: ALL identifiers (variable names, function names, comments) MUST be in English.`;
+ABSOLUTE RULE: ALL identifiers (variable names, function names, comments) MUST be in English.${historyContext ? `\n\nApp context (from conversation):\n${historyContext.slice(0, 1500)}` : ''}`;
 
     const updated = { ...currentFiles };
 

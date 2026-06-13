@@ -2543,10 +2543,6 @@ ${buildLanguageRule(preferredLanguage)}`;
       });
 
       try {
-        // Include planning history + current app so build has full context
-        const planningContext = proMessages.length > 0
-          ? proMessages.slice(-8).map((m: any) => `${m.sender === 'user' ? 'User' : 'AI'}: ${String(m.text || '').slice(0, 400)}`).join('\n')
-          : '';
         // Push current version to undo stack before building
         if (hasGeneratedCode && Object.keys(files).length > 0) {
           setBuildVersionStack(prev => [
@@ -2559,27 +2555,28 @@ ${buildLanguageRule(preferredLanguage)}`;
         const reactKeywords = /\breact\b|\bjsx\b|\busestate\b|\bhooks?\b|\bcomponent\b/i;
         const isReactRequest = !hasGeneratedCode && reactKeywords.test(messageToSend);
 
-        // Detect edit intent: existing app + edit keyword
-        const editKeywords = /\b(fix|change|update|add|remove|modify|edit|adjust|improve|make|redesign|refactor|move|replace|delete|append|insert)\b/i;
-        const isEditRequest = !isReactRequest && hasGeneratedCode && Object.keys(files).length > 0 && editKeywords.test(messageToSend);
         const htmlFile = files['index.html'] || '';
         const cssFile = files['style.css'] || files['styles.css'] || files['main.css'] || '';
         const jsFile = files['script.js'] || files['app.js'] || files['main.js'] || files['index.js'] || '';
 
-        const buildMessage = planningContext
-          ? `[PLANNING CONVERSATION]\n${planningContext}\n\n[BUILD REQUEST]\n${messageToSend}`
-          : messageToSend;
+        // Always use edit path if code exists — no keyword detection (works for any language)
+        const isEditRequest = !isReactRequest && hasGeneratedCode && htmlFile.length > 200;
+
+        // Full conversation history as structured messages (last 20, up to 800 chars each)
+        const conversationHistory = proMessages.slice(-20).map((m: any) => ({
+          role: m.sender === 'user' ? 'user' : 'assistant',
+          content: String(m.text || '').slice(0, 800),
+        }));
+
         const response = await fetch('/api/pro-build', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: abortController.signal,
           body: JSON.stringify({
-            message: buildMessage,
-            currentApp: hasGeneratedCode && generatedCode && generatedCode.length > 200
-              ? generatedCode.slice(0, 15000)
-              : undefined,
+            message: messageToSend,
+            history: conversationHistory,
             ...(isReactRequest ? { framework: 'react' } : {}),
-            ...(isEditRequest && htmlFile.length > 200 ? {
+            ...(isEditRequest ? {
               isEdit: true,
               currentFiles: { html: htmlFile, css: cssFile, js: jsFile },
             } : {}),

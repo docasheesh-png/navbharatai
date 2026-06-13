@@ -3947,6 +3947,14 @@ One line: what you built.
 \`\`\``;
   }
 
+  // Free tier — purely conversational, never an app builder
+  const SYSTEM_PROMPT_FREE_CHAT = `You are NavBharatAI — India's friendly AI assistant (by NavBharat team).
+${LANGUAGE_RULE}
+You are a helpful conversational assistant. Answer questions, explain concepts, help with ideas.
+Do NOT build apps, generate code, or produce HTML/CSS/JS. This is chat-only mode.
+If asked to build an app, reply: "App building is available in NavBharatAI Pro — try it out!"
+Keep responses concise and warm.`;
+
   const SYSTEM_PROMPT_CHAT = `You are NavBharatAI — India's best AI assistant and app builder (by NavBharat team).
 ${LANGUAGE_RULE}
 Be helpful, concise, and accurate. If the user wants to build an app, guide them.`;
@@ -3955,13 +3963,17 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     let { message, history, currentApp, mode, intent } = req.body;
     if (!message) return res.status(400).json({ reply: 'Message is required' });
 
-    const hasCanvas = !!(currentApp && typeof currentApp === 'string' && currentApp.length > 200);
+    const isFree = tier === 'navbharat';
+    // Free tier: always conversational — ignore canvas and build intent completely
+    const hasCanvas = !isFree && !!(currentApp && typeof currentApp === 'string' && currentApp.length > 200);
     const buildIntents = ['create', 'build', 'generate', 'edit', 'fix', 'add', 'modify', 'update', 'change'];
-    const isBuildIntent = mode === 'build' || (intent && buildIntents.includes(String(intent).toLowerCase()));
+    const isBuildIntent = !isFree && (mode === 'build' || (intent && buildIntents.includes(String(intent).toLowerCase())));
 
-    // Pick system prompt based on context
+    // Pick system prompt based on tier + context
     let systemPrompt: string;
-    if (hasCanvas) {
+    if (isFree) {
+      systemPrompt = SYSTEM_PROMPT_FREE_CHAT;
+    } else if (hasCanvas) {
       systemPrompt = SYSTEM_PROMPT_EDIT;
     } else if (isBuildIntent) {
       systemPrompt = buildDynamicPrompt(message); // Phase 9: template-aware dynamic prompt
@@ -3969,13 +3981,13 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       systemPrompt = SYSTEM_PROMPT_CHAT;
     }
 
-    // Build contextual message with canvas app prepended
+    // Build contextual message with canvas app prepended (Pro/VIP only)
     let contextualMessage = message;
     if (hasCanvas) {
       contextualMessage = `[CANVAS — current app on canvas (${currentApp.length} chars total)]:\n\`\`\`html\n${currentApp.slice(0, 20000)}${currentApp.length > 20000 ? '\n...[truncated — send smaller app for full edit]' : ''}\n\`\`\`\n\nUser request: ${message}`;
     }
 
-    console.log(`[CHAT] tier=${tier} mode=${mode} intent=${intent} hasCanvas=${hasCanvas} sysprompt=${hasCanvas ? 'EDIT' : isBuildIntent ? 'BUILD' : 'CHAT'}`);
+    console.log(`[CHAT] tier=${tier} isFree=${isFree} mode=${mode} intent=${intent} hasCanvas=${hasCanvas} sysprompt=${isFree ? 'FREE' : hasCanvas ? 'EDIT' : isBuildIntent ? 'BUILD' : 'CHAT'}`);
 
     try {
       if (req.body.stream === true) {

@@ -1031,8 +1031,8 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
       </div>
 
       <div
-        className="p-4 border-t border-white/5 bg-[var(--theme-card)] backdrop-blur-xl select-none shadow-[0_-12px_40px_rgba(0,0,0,0.5)] pb-6 md:pb-4"
-        style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : undefined }}
+        className="p-4 border-t border-white/5 bg-[var(--theme-card)] backdrop-blur-xl select-none shadow-[0_-12px_40px_rgba(0,0,0,0.5)]"
+        style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : 'max(16px, env(safe-area-inset-bottom, 16px))' }}
       >
         <div className="max-w-4xl mx-auto space-y-3">
             {/* Fix 2: attachment chips above input, outside the flex row */}

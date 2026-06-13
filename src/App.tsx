@@ -4419,8 +4419,8 @@ ${pending.map(p => `  - ${p}`).join('\n')}
         }>
         <div ref={mainContentRef} className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
           ['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem)] supports-[height:100dvh]:h-[calc(100dvh-3.5rem)] max-h-[calc(100vh-3.5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem)]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
-          // 8.1 — space for bottom nav on mobile
-          effectiveDeviceMode !== 'desktop' && !['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "pb-16" : ""
+          // 8.1 — space for bottom nav on mobile (all views including chat)
+          effectiveDeviceMode !== 'desktop' ? "pb-14" : ""
         )}>
           {activeView === 'home' && (
              <HomeView 

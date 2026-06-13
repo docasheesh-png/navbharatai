@@ -5575,7 +5575,23 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         ];
       };
 
-      // ── 1. Claude (best clinical reasoning + vision) ─────────────────────────
+      // ── 1. Grok (fast, generous limits) ─────────────────────────────────────
+      const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
+      if (!reply && grokKey) {
+        try {
+          const { default: OpenAI } = await import('openai');
+          const grokClient = new OpenAI({ apiKey: grokKey, baseURL: 'https://api.x.ai/v1' });
+          for (const model of ['grok-3', 'grok-3-fast']) {
+            try {
+              const r = await grokClient.chat.completions.create({ model, messages: buildOpenAIMsgs(message), max_tokens: 2000 });
+              reply = r.choices[0]?.message?.content || '';
+              if (reply) { console.log(`[SDA] Grok ${model} succeeded`); break; }
+            } catch (ge: any) { console.warn(`[SDA] Grok ${model}:`, ge.message); }
+          }
+        } catch (e: any) { console.warn('[SDA] Grok err:', e.message); }
+      }
+
+      // ── 2. Claude (best clinical reasoning + vision) ─────────────────────────
       const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
       if (!reply && anthropicKey) {
         try {
@@ -5591,7 +5607,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
               try {
                 const r = await client.chat.completions.create({ model, messages: buildOpenAIMsgs(userContent), max_tokens: 2000 });
                 reply = r.choices[0]?.message?.content || '';
-                if (reply) { console.log(`[SDA] Claude proxy model ${model} succeeded`); break; }
+                if (reply) { console.log(`[SDA] Claude proxy ${model} succeeded`); break; }
               } catch (e: any) { console.warn(`[SDA] Claude proxy ${model}:`, e.message); }
             }
           } else {
@@ -5611,7 +5627,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         } catch (e: any) { console.warn('[SDA] Claude err:', e.message); }
       }
 
-      // ── 2. Gemini (great vision + multimodal) ────────────────────────────────
+      // ── 3. Gemini (great vision + multimodal) ────────────────────────────────
       if (!reply) {
         try {
           const { GoogleGenAI } = await import('@google/genai');
@@ -5628,7 +5644,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         } catch (e: any) { console.warn('[SDA] Gemini err:', e.message); }
       }
 
-      // ── 3. Vertex AI (GCP-native, high reliability) ──────────────────────────
+      // ── 4. Vertex AI (GCP-native, high reliability) ──────────────────────────
       if (!reply) {
         try {
           const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
@@ -5648,23 +5664,6 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
             } catch (ve: any) { console.warn(`[SDA] Vertex ${modelName}:`, ve.message); }
           }
         } catch (e: any) { console.warn('[SDA] Vertex err:', e.message); }
-      }
-
-      // ── 4. Grok (final fallback) ──────────────────────────────────────────────
-      if (!reply) {
-        try {
-          const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
-          if (!grokKey) throw new Error('No Grok key');
-          const { default: OpenAI } = await import('openai');
-          const grokClient = new OpenAI({ apiKey: grokKey, baseURL: 'https://api.x.ai/v1' });
-          for (const model of ['grok-3', 'grok-3-fast']) {
-            try {
-              const r = await grokClient.chat.completions.create({ model, messages: buildOpenAIMsgs(message), max_tokens: 2000 });
-              reply = r.choices[0]?.message?.content || '';
-              if (reply) { console.log(`[SDA] Grok ${model} succeeded`); break; }
-            } catch (ge: any) { console.warn(`[SDA] Grok ${model}:`, ge.message); }
-          }
-        } catch (e: any) { console.warn('[SDA] Grok err:', e.message); }
       }
 
       if (!reply) {

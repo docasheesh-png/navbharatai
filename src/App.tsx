@@ -1887,11 +1887,14 @@ ${buildLanguageRule(preferredLanguage)}`;
       return content ? `<style data-src="${filename}">${content}</style>` : match;
     });
 
-    // Inline external script src that reference local files
-    finalHtml = finalHtml.replace(/<script[^>]+src=["']([^"']+)["'][^>]*><\/script>/gi, (match, src) => {
+    // Inline external script src — preserve type attribute (e.g. type="text/babel" for React/JSX)
+    finalHtml = finalHtml.replace(/<script([^>]+)src=["']([^"']+)["'][^>]*><\/script>/gi, (match, attrs, src) => {
       const filename = src.replace(/^\.\//, '').replace(/^\//, '');
       const content = currentFiles[filename];
-      return content ? `<script data-src="${filename}">${content}<\/script>` : match;
+      if (!content) return match;
+      const typeMatch = attrs.match(/type=["']([^"']+)["']/);
+      const typeAttr = typeMatch ? ` type="${typeMatch[1]}"` : '';
+      return `<script${typeAttr} data-src="${filename}">${content}<\/script>`;
     });
 
     // Inject any remaining CSS not already inlined
@@ -2549,9 +2552,13 @@ ${buildLanguageRule(preferredLanguage)}`;
           ]);
         }
 
+        // Detect React framework intent
+        const reactKeywords = /\breact\b|\bjsx\b|\busestate\b|\bhooks?\b|\bcomponent\b/i;
+        const isReactRequest = !hasGeneratedCode && reactKeywords.test(messageToSend);
+
         // Detect edit intent: existing app + edit keyword
         const editKeywords = /\b(fix|change|update|add|remove|modify|edit|adjust|improve|make|redesign|refactor|move|replace|delete|append|insert)\b/i;
-        const isEditRequest = hasGeneratedCode && Object.keys(files).length > 0 && editKeywords.test(messageToSend);
+        const isEditRequest = !isReactRequest && hasGeneratedCode && Object.keys(files).length > 0 && editKeywords.test(messageToSend);
         const htmlFile = files['index.html'] || '';
         const cssFile = files['style.css'] || files['styles.css'] || files['main.css'] || '';
         const jsFile = files['script.js'] || files['app.js'] || files['main.js'] || files['index.js'] || '';
@@ -2567,6 +2574,7 @@ ${buildLanguageRule(preferredLanguage)}`;
             currentApp: hasGeneratedCode && generatedCode && generatedCode.length > 200
               ? generatedCode.slice(0, 15000)
               : undefined,
+            ...(isReactRequest ? { framework: 'react' } : {}),
             ...(isEditRequest && htmlFile.length > 200 ? {
               isEdit: true,
               currentFiles: { html: htmlFile, css: cssFile, js: jsFile },

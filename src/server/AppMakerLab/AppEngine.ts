@@ -1090,6 +1090,147 @@ function assemblePreview(html: string, js: string, css: string): string {
   return out;
 }
 
+// ─── React App Builder — CDN React + Babel, no build step needed ─────────────
+
+export async function buildReactApp(
+  userPrompt: string,
+  onProgress?: ProgressCallback,
+  onFileGenerated?: FileGeneratedCallback,
+): Promise<BuildResult> {
+  const report = (stage: string, step: number, total: number, detail: string) => {
+    console.log(`[ReactEngine] [${step}/${total}] ${stage}: ${detail}`);
+    onProgress?.({ stage, step, total, detail });
+  };
+  const TOTAL = 5;
+
+  try {
+    report('Analyzing', 1, TOTAL, 'Understanding React app requirements...');
+
+    // Step 1: Quick blueprint for app name + description
+    const blueprintRaw = await callAI(
+      `User wants to build a React app: "${userPrompt}"\n\nReturn ONLY valid JSON:\n{"appName":"Short Name","description":"one sentence","complexity":"simple|medium|complex","keyFeatures":["feat1","feat2","feat3"]}`,
+      'You are a React app planner. Return only valid JSON, no markdown.',
+      500
+    );
+    let appName = 'React App';
+    let description = userPrompt.slice(0, 80);
+    let complexity = 'medium';
+    let keyFeatures: string[] = [];
+    try {
+      const bp = JSON.parse(blueprintRaw.replace(/```json?|```/g, '').trim());
+      appName = bp.appName || appName;
+      description = bp.description || description;
+      complexity = bp.complexity || complexity;
+      keyFeatures = Array.isArray(bp.keyFeatures) ? bp.keyFeatures : [];
+    } catch { /* keep defaults */ }
+
+    report('Planning', 2, TOTAL, `${appName} — ${complexity} React app`);
+
+    // Step 2: Generate App.jsx + style.css in parallel
+    report('Generating', 3, TOTAL, 'Writing React components + styles...');
+    const reactSys = `You are an expert React developer. Write modern React using hooks (useState, useEffect, useCallback, useMemo).
+RULES:
+1. Use React 18 UMD globals: const { useState, useEffect, useCallback, useMemo, useRef } = React;
+2. const root = ReactDOM.createRoot(document.getElementById('root')); root.render(<App />); at the bottom
+3. NO import/export statements — React is available globally via CDN
+4. NO TypeScript — plain JSX only
+5. ALL identifiers in English only
+6. Make it fully functional with real data/logic — not just placeholders
+7. Tailwind CSS available via CDN — use utility classes freely
+8. Return ONLY the JSX code, no markdown fences`;
+
+    const cssSys = `You are a CSS expert. Write clean modern CSS.
+ALL identifiers and comments in English. Return ONLY CSS, no markdown.`;
+
+    const featuresText = keyFeatures.length > 0 ? `\nKey features to implement:\n${keyFeatures.map(f => `- ${f}`).join('\n')}` : '';
+
+    const [appJsx, styleCss] = await Promise.all([
+      callAI(
+        `Build a complete React app for: "${userPrompt}"${featuresText}\n\nApp name: ${appName}\nComplexity: ${complexity}\n\nWrite the complete App.jsx file. Include ALL components in this single file. Make it fully functional and beautiful.`,
+        reactSys, 10000
+      ),
+      callAI(
+        `Write CSS for a React app called "${appName}": ${description}\n\nRequirements:\n- Dark theme preferred (#0d1117 background, #c9d1d9 text)\n- Responsive (mobile-first)\n- Smooth transitions and hover effects\n- Modern card/section layouts\n- Custom scrollbar if needed`,
+        cssSys, 4000
+      ),
+    ]);
+
+    onFileGenerated?.('App.jsx', appJsx);
+    onFileGenerated?.('style.css', styleCss);
+
+    // Step 3: Generate index.html with CDN React + Babel
+    report('Generating', 4, TOTAL, 'Building HTML shell with React CDN...');
+    const indexHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${appName}</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@3/dist/tailwind.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" src="App.jsx"></script>
+</body>
+</html>`;
+
+    onFileGenerated?.('index.html', indexHtml);
+
+    // Step 4: Assemble preview (inline App.jsx as text/babel)
+    report('Assembling', 5, TOTAL, 'Building live React preview...');
+    const previewHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${appName}</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@3/dist/tailwind.min.css" rel="stylesheet">
+  <style>${styleCss}</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">${appJsx}</script>
+</body>
+</html>`;
+
+    const files: Record<string, string> = {
+      'index.html': indexHtml,
+      'App.jsx': appJsx,
+      'style.css': styleCss,
+    };
+
+    return {
+      success: true,
+      reply: `✅ ${appName} — React app ready! ${description}`,
+      files,
+      fileList: Object.entries(files).map(([path, content]) => ({
+        path, content, description: path === 'App.jsx' ? 'React component' : path,
+      })),
+      previewHtml,
+      appName,
+      deploymentGuide: generateDeploymentGuide(appName),
+    };
+
+  } catch (err: any) {
+    console.error('[ReactEngine] Build failed:', err);
+    return {
+      success: false,
+      reply: `React build failed: ${err.message}`,
+      files: {}, fileList: [], previewHtml: '', appName: 'React App',
+      error: err.message,
+    };
+  }
+}
+
+// ─── Iterative Edit Engine — edit existing app without full rebuild ────────────
+
 export async function editApp(
   request: string,
   currentFiles: { html: string; css: string; js: string },

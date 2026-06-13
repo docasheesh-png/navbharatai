@@ -44,7 +44,7 @@ import { UniversalAIRouter } from './src/server/AI/UniversalAIRouter';
 import { getProviderStats, recordProviderLatency } from './src/server/AI/Router/AIRouter';
 import { auditEnv } from './src/server/audit_env';
 import { BuildJobManager } from './src/server/AppMakerLab/jobs/BuildJobManager';
-import { buildApp as buildAppEngine, editApp as editAppEngine } from './src/server/AppMakerLab/AppEngine';
+import { buildApp as buildAppEngine, editApp as editAppEngine, buildReactApp as buildReactAppEngine } from './src/server/AppMakerLab/AppEngine';
 
 auditEnv();
 
@@ -4229,7 +4229,7 @@ Response Format:
     .slice(0, 18000);
 
   app.post('/api/pro-build', async (req: any, res: any) => {
-    const { message, currentApp, currentFiles, isEdit } = req.body;
+    const { message, currentApp, currentFiles, isEdit, framework } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -4258,6 +4258,13 @@ Response Format:
           message,
           safeFiles,
           (p) => send({ type: 'progress', stage: p.stage, step: p.step, total: p.total, detail: p.detail, isEdit: true }),
+          (fileName, content) => send({ type: 'file', fileName, content })
+        );
+      } else if (framework === 'react') {
+        // ── REACT BUILD PATH ─────────────────────────────────────────────────
+        result = await buildReactAppEngine(
+          message,
+          (p) => send({ type: 'progress', stage: p.stage, step: p.step, total: p.total, detail: p.detail }),
           (fileName, content) => send({ type: 'file', fileName, content })
         );
       } else {

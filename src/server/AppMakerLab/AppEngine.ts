@@ -82,46 +82,43 @@ const TEMPLATE_HINTS: Record<AppTemplate, { html: string; js: string; css: strin
 
   GAME_CANVAS: {
     html: `Structure requirements:
-- <canvas id="game-canvas"> as the main game surface
-- Overlay divs: id="overlay-start", id="overlay-pause", id="overlay-gameover"
-- HUD strip: id="hud" containing id="score-display", id="lives-display", id="level-display"
-- All overlays exist simultaneously in HTML — JS toggles visibility
-- Buttons: id="btn-start", id="btn-pause", id="btn-restart", id="btn-resume"`,
+- SPLASH SCREEN (id="page-home", visible first): title, description, id="btn-start" button
+- GAME SCREEN (id="page-game", style="display:none"): <canvas id="game-canvas">, HUD strip id="hud" with id="score-display" id="lives-display" id="level-display", id="btn-pause", id="btn-restart"
+- GAMEOVER SCREEN (id="page-gameover", style="display:none"): final score display, id="btn-play-again"
+- ALL screens use id="page-*" — showPage() controls visibility, no separate overlay divs`,
 
     js: `Implementation requirements:
-- Canvas 2D context: const ctx = canvas.getContext('2d')
+- Navigation: showPage('page-home') on load, showPage('page-game') when btn-start clicked, showPage('page-gameover') on game over
+- Canvas 2D context: const canvas = document.getElementById('game-canvas'); const ctx = canvas.getContext('2d');
 - requestAnimationFrame game loop: function gameLoop(ts) { update(ts); draw(); requestAnimationFrame(gameLoop); }
 - Game state machine: const STATE = { IDLE:'idle', PLAYING:'playing', PAUSED:'paused', GAMEOVER:'gameover' }; let state = STATE.IDLE;
 - Keyboard events: document.addEventListener('keydown', handleKey)
-- showOverlay(id) / hideOverlay(id) helpers for screen transitions
 - All game objects as plain JS objects with x, y, w, h, vx, vy properties
 - Collision: AABB — if (a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y)
 - Score/lives update DOM in real-time: scoreDisplay.textContent = score`,
 
     css: `Design requirements:
 - canvas { display: block; border-radius: 12px; box-shadow: 0 0 40px rgba(var(--accent-rgb), 0.3); }
-- .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); }
 - .hud { display: flex; gap: 24px; padding: 12px 24px; background: rgba(255,255,255,0.05); border-radius: 50px; }
-- Game container: position: relative so overlays stack on canvas
-- Neon glow on score: text-shadow: 0 0 20px currentColor`,
+- Neon glow on score: text-shadow: 0 0 20px currentColor
+- NEVER add display:none to page-* elements in CSS`,
   },
 
   GAME_LOGIC: {
     html: `Structure requirements:
-- Game board as CSS grid or table: id="game-board"
-- Turn indicator: id="turn-indicator" and id="current-player"
-- Score panel: id="score-panel" with player scores
-- Overlays: id="overlay-start", id="overlay-gameover", id="overlay-winner"
-- Buttons: id="btn-start", id="btn-restart", id="btn-undo" (if applicable)
+- SPLASH SCREEN (id="page-home", visible first): game title, rules summary, id="btn-start" button
+- GAME SCREEN (id="page-game", style="display:none"): id="game-board" (CSS grid/table for cells), id="turn-indicator", id="current-player", id="score-panel", id="btn-restart", id="btn-undo" (if applicable)
+- GAMEOVER SCREEN (id="page-gameover", style="display:none"): winner message (id="winner-msg"), final scores, id="btn-play-again"
+- ALL screens use id="page-*" — showPage() controls visibility
 - Every interactive cell/piece gets data-attributes: data-row, data-col, data-piece`,
 
     js: `Implementation requirements:
-- Game state as plain object: let gameState = { board: [], currentPlayer: 1, score: {1:0, 2:0}, moveCount: 0 }
-- Immutable move: function makeMove(state, move) { return { ...state, board: newBoard, currentPlayer: next } }
-- Win check after every move: function checkWin(board, lastMove) { ... }
+- Navigation: showPage('page-home') on load; btn-start → showPage('page-game') and initGame(); btn-play-again → showPage('page-home')
+- Game state: let gameState = { board: [], currentPlayer: 1, score: {1:0, 2:0}, moveCount: 0 }
+- Win check after every move: function checkWin(board) { ... } → if win: update winner-msg, showPage('page-gameover')
 - Event delegation on board: board.addEventListener('click', e => { const cell = e.target.closest('[data-row]'); })
 - Animate moves: element.classList.add('animate-move'); setTimeout(() => el.classList.remove('animate-move'), 300)
-- AI opponent (if single-player): simple minimax or random valid move`,
+- AI opponent (if single-player): minimax or random valid move`,
 
     css: `Design requirements:
 - .game-board { display: grid; gap: 4px; aspect-ratio: 1; }
@@ -129,7 +126,8 @@ const TEMPLATE_HINTS: Record<AppTemplate, { html: string; js: string; css: strin
 - .cell:hover { transform: scale(1.05); }
 - .cell.animate-move { animation: piece-drop 0.3s ease; }
 - @keyframes piece-drop { from { transform: scale(0) rotate(180deg); } to { transform: scale(1) rotate(0deg); } }
-- Player colors: --p1-color: #6366f1; --p2-color: #f43f5e`,
+- Player colors: --p1-color: #6366f1; --p2-color: #f43f5e
+- NEVER add display:none to page-* elements in CSS`,
   },
 
   DASHBOARD: {
@@ -664,6 +662,9 @@ function validateDOMConsistency(html: string, js: string): ValidationResult {
   for (const m of js.matchAll(/getElementById\(['"`]([^'"`]+)['"`]\)/g))  jsIdRefs.add(m[1]);
   for (const m of js.matchAll(/querySelector\(['"`]#([^'"`\s]+)['"`]\)/g)) jsIdRefs.add(m[1]);
 
+  // CRITICAL: Check showPage() and showScreen() calls — most common broken navigation
+  for (const m of js.matchAll(/show(?:Page|Screen)\(['"`]([^'"`]+)['"`]\)/g)) jsIdRefs.add(m[1]);
+
   // Broken: JS references ID not in HTML
   for (const id of jsIdRefs) {
     if (!htmlIds.has(id)) result.brokenIds.push(id);
@@ -699,6 +700,7 @@ async function autoRepairJS(
   if (validation.syntaxIssues.length) issues.push(`Syntax issues: ${validation.syntaxIssues.join(', ')}`);
 
   const htmlIds = [...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]).join(', ');
+  const pageIds = [...html.matchAll(/id="(page-[^"]+)"/g)].map(m => m[1]).join(', ');
 
   const sys = `You are a JavaScript debugger. Fix ONLY the listed issues. Change no other logic. Output ONLY fixed JavaScript.`;
   const prompt = `Fix these issues in the JavaScript for "${appName}":
@@ -706,6 +708,7 @@ async function autoRepairJS(
 ISSUES TO FIX:
 ${issues.join('\n')}
 
+VALID PAGE IDs for showPage() calls (these exact strings exist in HTML): ${pageIds || 'none found'}
 ALL VALID HTML IDs (use these exact strings):
 ${htmlIds}
 
@@ -942,11 +945,12 @@ UNIVERSAL RULES:
 1. :root { --bg: #0a0a0f; --surface: rgba(255,255,255,0.05); --accent: #6366f1; --accent-rgb: 99,102,241; --text: #f1f5f9; --text-muted: #64748b; }
 2. * { box-sizing: border-box; margin: 0; padding: 0; }
 3. body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-4. [id^="page-"] { display: none; }  ← JS controls page visibility
+4. NEVER add CSS display rules for [id^="page-"] elements — page visibility is controlled ONLY by JS inline styles. Adding display:none or display:block in CSS for page elements BREAKS navigation.
 5. @keyframes spin { to { transform: rotate(360deg); } }
 6. @keyframes slide-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 7. Fully responsive: mobile (320px) → desktop (1400px+)
 8. ALL classes from the structure above must be styled — nothing left as browser default
+9. NEVER use !important on display properties — it prevents JS from showing/hiding screens
 
 Output ONLY the raw CSS:`;
 

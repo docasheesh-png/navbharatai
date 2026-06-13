@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import crypto from 'crypto';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 // Traceability Infrastructure
 export interface TraceContext {
@@ -381,7 +381,7 @@ setInterval(() => {
   const chatLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 20,   // 20 req/min per user — generous for normal chat, tight for abuse
-    keyGenerator: (req) => (req.headers['x-user-id'] as string) || req.ip || 'anon',
+    keyGenerator: (req) => (req.headers['x-user-id'] as string) || ipKeyGenerator(req),
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests. Please wait a moment before sending again.' },
@@ -390,7 +390,7 @@ setInterval(() => {
   const paymentLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 5,
-    keyGenerator: (req) => req.ip || 'anon',
+    keyGenerator: (req) => ipKeyGenerator(req),
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many payment requests. Please slow down.' },
@@ -399,7 +399,7 @@ setInterval(() => {
   const adminLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 5,
-    keyGenerator: (req) => req.ip || 'anon',
+    keyGenerator: (req) => ipKeyGenerator(req),
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many admin requests.' },
@@ -427,7 +427,7 @@ setInterval(() => {
   // Trust proxy for correct req.protocol and req.get('host') behind reverse proxies
   app.set('trust proxy', true);
 
-    app.use(express.json());
+    app.use(express.json({ limit: '5mb' }));
 
   // Hit counter middleware
   app.use((req: any, _res: any, next: any) => {

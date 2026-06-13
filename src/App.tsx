@@ -2563,7 +2563,7 @@ ${buildLanguageRule(preferredLanguage)}`;
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: abortController.signal,
-          body: JSON.stringify({ message: messageToSend, history: proMessages, mode: 'conversation' }),
+          body: JSON.stringify({ message: messageToSend, history: proMessages.slice(-8).map((m: any) => ({ sender: m.sender, text: String(m.text || '').slice(0, 400) })), mode: 'conversation' }),
         });
         if (!response.ok) throw new Error(`API Error: ${response.status}`);
         const data = await response.json();
@@ -2797,13 +2797,18 @@ ${buildLanguageRule(preferredLanguage)}`;
     } else {
       // ── Planning mode — simple fetch ──
       try {
+        // Strip meta.deployFiles before sending — they can be 100KB+ and blow the body limit
+        const safeHistory = proMessages.slice(-12).map((m: any) => ({
+          sender: m.sender,
+          text: String(m.text || '').slice(0, 600),
+        }));
         const response = await fetch('/api/pro-chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: abortController.signal,
           body: JSON.stringify({
             message: messageToSend,
-            history: proMessages,
+            history: safeHistory,
             mode: 'planning',
             currentApp: hasGeneratedCode && generatedCode && generatedCode.length > 200
               ? generatedCode.slice(0, 3000)

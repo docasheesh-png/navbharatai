@@ -188,40 +188,44 @@ const TEMPLATE_HINTS: Record<AppTemplate, { html: string; js: string; css: strin
 
   SOCIAL_APP: {
     html: `Structure requirements:
-- Top navbar: id="navbar" with app logo, search bar, profile avatar
-- Feed section: id="feed" containing id="posts-container"
-- Post card template (use JS to clone/create): class="post-card" with class="post-header", class="post-content", class="post-actions"
-- Sidebar: trending tags, suggested users
-- Create post modal: id="modal-create-post" (hidden by default)
-- Profile page: id="section-profile" (switchable with JS)
-- Buttons: id="btn-create-post", like/comment/share buttons generated dynamically`,
+- LOGIN SCREEN (id="page-login", visible first): form with id="login-username", id="login-password", id="btn-login", id="login-error" (hidden div for inline error messages — NEVER alert())
+- FEED SCREEN (id="page-feed", display:none): top navbar (id="navbar") with logo, search (id="search-input"), post button (id="btn-open-create"), avatar; id="posts-container" for feed cards; id="stories-bar" for stories strip
+- PROFILE SCREEN (id="page-profile", display:none): id="profile-avatar", id="profile-name", id="profile-stats", id="profile-posts-grid"
+- CREATE POST MODAL (id="modal-create-post", display:none): textarea id="post-content-input", id="btn-submit-post", id="btn-cancel-post"
+- NOTIFICATION TOAST (id="toast-msg", display:none): for success/error feedback — use this INSTEAD of alert()
+- Bottom nav (on feed/profile screens): id="nav-feed", id="nav-profile", id="nav-logout"`,
 
     js: `Implementation requirements:
-- Sample data: const SAMPLE_POSTS = [ { id, author, avatar, content, likes, comments, time, tags } ]
-- Render function: function renderPosts(posts) { container.innerHTML = posts.map(renderPostCard).join('') }
-- Like toggle: event delegation on feed container, toggle liked state, update count
-- Create post: modal form → prepend new post to feed with current timestamp
-- Feed filtering by tags: filter SAMPLE_POSTS array, re-render
-- Relative timestamps: "2 minutes ago", "yesterday" etc.`,
+- Auth: const SAMPLE_USERS = [{ username: 'demo', password: 'demo123', name: 'Demo User', avatar: 'DU' }, { username: 'admin', password: 'admin123', name: 'Admin', avatar: 'AD' }]; let currentUser = null;
+- Login handler: getElementById('btn-login').addEventListener('click', () => { const u = SAMPLE_USERS.find(x => x.username === usernameInput.value && x.password === passwordInput.value); if (u) { currentUser = u; showPage('page-feed'); renderPosts(); } else { loginError.textContent = 'Invalid username or password'; loginError.style.display = 'block'; } }) — NEVER alert()
+- Sample data: const SAMPLE_POSTS = [ { id:1, author:'Demo User', avatar:'DU', content:'Welcome to the app! 🚀', likes:12, liked:false, comments:[], time: Date.now()-120000, tags:['welcome'] }, ... (5+ posts) ]
+- Render function: function renderPosts(posts=SAMPLE_POSTS) { container.innerHTML = posts.map(p => renderPostCard(p)).join('') }
+- Like toggle: event delegation, toggle p.liked, update count in DOM
+- Create post: modal → new post object → unshift to SAMPLE_POSTS → re-render → close modal → showToast('Post shared!')
+- Logout: currentUser = null; showPage('page-login')
+- showToast(msg): update id="toast-msg" textContent, show for 2.5s, then hide — NEVER alert()
+- Relative timestamps: "just now", "2m ago", "1h ago" etc.`,
 
     css: `Design requirements:
 - .post-card { background: rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; margin-bottom: 16px; transition: transform 0.2s; }
 - .post-card:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
-- .avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: linear-gradient(135deg, var(--accent), #f43f5e); display: flex; align-items: center; justify-content: center; }
+- .avatar { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), #f43f5e); display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; }
+- #login-error { color: #f87171; font-size: 0.85rem; margin-top: 8px; }
 - .like-btn.liked { color: #f43f5e; }
-- .like-btn.liked svg { fill: #f43f5e; animation: heart-pop 0.3s ease; }
+- #toast-msg { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:rgba(99,102,241,0.95); color:#fff; padding:12px 24px; border-radius:50px; z-index:9999; transition:opacity 0.3s; }
 - @keyframes heart-pop { 50% { transform: scale(1.4); } }`,
   },
 
   GENERIC: {
     html: `Structure requirements:
-- Clean semantic HTML5 structure
-- All sections present with proper IDs
-- Every interactive element has an id for JS event wiring`,
+- Clean semantic HTML5 structure with all screens present
+- Every interactive element has a unique id for JS event wiring
+- Inline error/feedback divs (id="*-error", id="*-status") for user messages — NEVER alert()`,
     js: `Implementation requirements:
-- Complete working logic for all features
-- All buttons wired with addEventListener
-- Multi-page navigation via showPage() pattern`,
+- Complete working logic for ALL features — zero placeholders
+- All buttons wired with addEventListener — no button left unwired
+- Multi-page navigation via showPage() pattern
+- showToast(message) helper instead of alert() for all user feedback`,
     css: `Design requirements:
 - Dark theme with glassmorphism cards
 - Smooth CSS transitions on all interactive elements
@@ -519,7 +523,8 @@ async function generateJSSplit(bp: AppBlueprint, htmlContent: string): Promise<s
 }`;
 
   const sys = `You are a world-class JavaScript developer. Output ONLY raw JavaScript — no markdown, no <script> tags.
-CRITICAL CODING RULE: ALL identifiers (variable names, function names, class names, constants, code comments, string literals, console.log messages) MUST be in English. No Hindi, Hinglish, or any other language in code. This is absolute and non-negotiable.`;
+CRITICAL CODING RULE: ALL identifiers (variable names, function names, class names, constants, code comments, string literals, console.log messages) MUST be in English. No Hindi, Hinglish, or any other language in code. This is absolute and non-negotiable.
+ABSOLUTELY FORBIDDEN: alert(), confirm(), prompt() — NEVER use these. Use showToast() or DOM element updates for ALL user feedback. No "(placeholder)" comments, no empty functions.`;
 
   // Module 1: State — data model, constants, storage
   const statePrompt = `${baseCtx}
@@ -798,7 +803,11 @@ async function generateHTML(bp: AppBlueprint): Promise<string> {
   const cdnTags      = buildCdnHeadTags(bp.cdnNeeded);
 
   const sys = `You are a world-class frontend developer. Output ONLY raw HTML — no markdown fences, no explanation.
-CRITICAL CODING RULE: ALL identifiers (variable names, function names, class names, constants, code comments, string literals, console.log messages) MUST be in English. No Hindi, Hinglish, or any other language in code. This is absolute and non-negotiable.`;
+CRITICAL CODING RULE: ALL identifiers (variable names, function names, class names, constants, code comments, string literals, console.log messages) MUST be in English. No Hindi, Hinglish, or any other language in code. This is absolute and non-negotiable.
+ABSOLUTELY FORBIDDEN — NEVER DO THESE OR THE APP BREAKS:
+- alert(), confirm(), prompt() — these are BANNED. Use inline DOM elements for ALL feedback.
+- "(placeholder)", "TODO", empty functions — build every feature fully, no exceptions.
+- Leaving any screen empty — every screen in SCREENS TO BUILD must have complete UI.`;
 
   const prompt = `Generate COMPLETE index.html for this app.
 
@@ -832,7 +841,9 @@ ${cdnTags}
 4. First screen (${bp.screens[0]?.id || 'page-home'}) visible, all others have style="display:none"
 5. No inline onclick, no inline styles — JS and CSS handle those
 6. Use Font Awesome icons: <i class="fa-solid fa-play"></i> etc.
-7. Include ALL screens and ALL UI elements — nothing placeholder
+7. ALL ${bp.screens.length} SCREENS MUST BE BUILT — each with full UI: ${bp.screens.map(s => `${s.id} (${s.purpose})`).join(', ')}
+8. Include id="toast-msg" div (hidden, for user notifications) — NEVER use alert() in JS
+9. For login forms: include id="*-error" divs for inline validation messages
 
 Output ONLY the raw HTML:`;
 
@@ -846,7 +857,11 @@ async function generateJS(bp: AppBlueprint, htmlContent: string): Promise<string
   const cdnHints    = buildCdnJsHints(bp.cdnNeeded);
 
   const sys = `You are a world-class JavaScript developer. Output ONLY raw JavaScript — no markdown fences, no <script> tags.
-CRITICAL CODING RULE: ALL identifiers (variable names, function names, class names, constants, code comments, string literals, console.log messages) MUST be in English. No Hindi, Hinglish, or any other language in code. This is absolute and non-negotiable.`;
+CRITICAL CODING RULE: ALL identifiers (variable names, function names, class names, constants, code comments, string literals, console.log messages) MUST be in English. No Hindi, Hinglish, or any other language in code. This is absolute and non-negotiable.
+ABSOLUTELY FORBIDDEN — NEVER DO THESE:
+- alert(), confirm(), prompt() — COMPLETELY BANNED. For user feedback use showToast() or update a DOM element's textContent.
+- "(placeholder)", empty functions like () => {}, unimplemented features — every function must have real working logic.
+- Leaving any button unwired — every button in the HTML must have a working addEventListener.`;
 
   const prompt = `Generate COMPLETE script.js for this app.
 
@@ -867,15 +882,22 @@ ${hints.js}
 
 UNIVERSAL RULES (ALL MANDATORY):
 1. Wrap ALL code in: document.addEventListener('DOMContentLoaded', () => { ... });
-2. Multi-page navigation pattern:
+2. Multi-page navigation — include this exact function:
    function showPage(id) {
      document.querySelectorAll('[id^="page-"]').forEach(p => p.style.display = 'none');
      const el = document.getElementById(id); if (el) el.style.display = 'block';
    }
-3. Wire EVERY button from the HTML using addEventListener — no button left unwired
-4. Dynamic elements you'll create at runtime: ${bp.dynamicElements.join(', ') || 'toast-notification, modal-overlay'}
-5. No TODO comments, no empty functions, no placeholder logic
-6. Show first page on load: showPage('${bp.screens[0]?.id || 'page-home'}')
+3. Toast feedback — include this exact function (use INSTEAD of alert() for ALL user messages):
+   function showToast(message, type='success') {
+     const t = document.getElementById('toast-msg') || (() => { const d = document.createElement('div'); d.id='toast-msg'; document.body.appendChild(d); return d; })();
+     t.textContent = message; t.className = 'toast-notification toast-'+type; t.style.display = 'block';
+     clearTimeout(t._timer); t._timer = setTimeout(() => { t.style.display = 'none'; }, 2800);
+   }
+4. Wire EVERY button from the HTML using addEventListener — no button left unwired
+5. For login/auth apps: validate against a SAMPLE_USERS array, call showPage() on success, show inline error in a DOM element on failure — NEVER alert()
+6. ALL ${bp.screens.length} screens from the blueprint must be navigable: ${bp.screens.map(s => s.id).join(', ')}
+7. No TODO comments, no empty functions, no placeholder logic
+8. Show first page on load: showPage('${bp.screens[0]?.id || 'page-home'}')
 
 Output ONLY the raw JavaScript:`;
 

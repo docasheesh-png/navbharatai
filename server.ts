@@ -5557,35 +5557,61 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
       if (anthropicKey) {
         try {
-          const A = (await import('@anthropic-ai/sdk')).default;
-          const baseURL = process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
+          const rawBaseURL = process.env.ANTHROPIC_BASE_URL;
+          const baseURL = rawBaseURL?.replace(/\/v1\/?$/, '');
 
-          // Build the user message content (with optional file attachment)
-          let userContent: any;
-          if (isImage) {
-            userContent = [
-              { type: 'image', source: { type: 'base64', media_type: fileType, data: fileData } },
-              { type: 'text', text: `[Document: ${fileName}]\n${message}` },
-            ];
-          } else if (isPDF) {
-            userContent = [
-              { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileData } },
-              { type: 'text', text: `[PDF Report: ${fileName}]\n${message}` },
-            ];
-          } else {
-            userContent = message;
-          }
-
-          const r = await new A({ apiKey: anthropicKey, ...(baseURL ? { baseURL } : {}) }).messages.create({
-            model: 'claude-3-5-sonnet-20241022',
-            max_tokens: 1500,
-            system: SDA_SYSTEM,
-            messages: [
+          if (baseURL) {
+            // OpenAI-compatible proxy — convert content to OpenAI format
+            const { default: OpenAI } = await import('openai');
+            const client = new OpenAI({ apiKey: anthropicKey, baseURL });
+            let openAIUserContent: any = message;
+            if (isImage) {
+              openAIUserContent = [
+                { type: 'image_url', image_url: { url: `data:${fileType};base64,${fileData}` } },
+                { type: 'text', text: `[Document: ${fileName}]\n${message}` },
+              ];
+            } else if (isPDF) {
+              // PDF not natively supported via OpenAI proxy — include as text note
+              openAIUserContent = `[PDF attached: ${fileName}]\n${message}`;
+            }
+            const proxyMsgs: any[] = [
+              { role: 'system', content: SDA_SYSTEM },
               ...historyForAI,
-              { role: 'user', content: userContent },
-            ],
-          });
-          reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
+              { role: 'user', content: openAIUserContent },
+            ];
+            const models = ['anthropic/claude-sonnet-4.6', 'claude-sonnet-4-6', 'anthropic/claude-3.5-sonnet', 'claude-3-5-sonnet-20241022'];
+            for (const model of models) {
+              try {
+                const r = await client.chat.completions.create({ model, messages: proxyMsgs, max_tokens: 1500 });
+                reply = r.choices[0]?.message?.content || '';
+                if (reply) break;
+              } catch (e: any) { console.warn(`[SDA] Proxy model ${model} failed:`, e.message); }
+            }
+          } else {
+            // Direct Anthropic API — supports native image/PDF format
+            const A = (await import('@anthropic-ai/sdk')).default;
+            let userContent: any;
+            if (isImage) {
+              userContent = [
+                { type: 'image', source: { type: 'base64', media_type: fileType, data: fileData } },
+                { type: 'text', text: `[Document: ${fileName}]\n${message}` },
+              ];
+            } else if (isPDF) {
+              userContent = [
+                { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileData } },
+                { type: 'text', text: `[PDF Report: ${fileName}]\n${message}` },
+              ];
+            } else {
+              userContent = message;
+            }
+            const r = await new A({ apiKey: anthropicKey }).messages.create({
+              model: 'claude-3-5-sonnet-20241022',
+              max_tokens: 1500,
+              system: SDA_SYSTEM,
+              messages: [...historyForAI, { role: 'user', content: userContent }],
+            });
+            reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
+          }
         } catch (e: any) { console.warn('[SDA] Claude err:', e.message); }
       }
 

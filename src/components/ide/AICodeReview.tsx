@@ -64,10 +64,10 @@ function analyzeCode(code: string): ReviewIssue[] {
   if (hasNoCatch) {
     issues.push({
       id: String(id++), severity: 'critical', category: 'bugs',
-      title: 'Async operations mein error handling nahi',
-      description: 'await ya .then() use ho raha hai bina try/catch ya .catch() ke. Ye unhandled promise rejection cause kar sakta hai.',
-      lineHint: 'fetch() ya async function wali line',
-      fix: 'Async calls ko try/catch mein wrap karo',
+      title: 'No error handling in async operations',
+      description: 'await or .then() is used without try/catch or .catch(). This can cause unhandled promise rejections.',
+      lineHint: 'Line with fetch() or async function',
+      fix: 'Wrap async calls in try/catch',
       fixCode: `try {\n  const data = await fetchData();\n} catch (error) {\n  console.error('Error:', error);\n  setError(error.message);\n}`,
     });
   }
@@ -75,22 +75,22 @@ function analyzeCode(code: string): ReviewIssue[] {
   if (hasNoKey) {
     issues.push({
       id: String(id++), severity: 'critical', category: 'bugs',
-      title: '.map() mein key prop missing',
-      description: 'React list items mein unique key prop nahi hai. Ye render issues aur performance problems create karta hai.',
-      lineHint: '.map() wali line',
-      fix: 'Har list item ko unique key do',
-      fixCode: `items.map((item) => (\n  <div key={item.id}>  {/* Unique key zaroori */}\n    {item.name}\n  </div>\n))`,
+      title: 'Missing key prop in .map()',
+      description: 'React list items are missing a unique key prop. This causes render issues and performance problems.',
+      lineHint: 'Line with .map()',
+      fix: 'Give each list item a unique key',
+      fixCode: `items.map((item) => (\n  <div key={item.id}>  {/* Unique key required */}\n    {item.name}\n  </div>\n))`,
     });
   }
 
   if (hasHardcodedKey) {
     issues.push({
       id: String(id++), severity: 'critical', category: 'security',
-      title: 'Hardcoded API key ya password detect hua!',
-      description: 'Source code mein sensitive credentials directly likhe hain. Ye major security vulnerability hai — GitHub pe push karne pe expose ho jayenge.',
-      lineHint: 'API key / password wali line',
-      fix: 'Environment variables use karo',
-      fixCode: `// .env file mein:\nAPI_KEY=your_actual_key\n\n// Code mein:\nconst apiKey = process.env.API_KEY;\n// Ya React: process.env.REACT_APP_API_KEY`,
+      title: 'Hardcoded API key or password detected!',
+      description: 'Sensitive credentials are written directly in source code. This is a major security vulnerability — they will be exposed if pushed to GitHub.',
+      lineHint: 'Line with API key / password',
+      fix: 'Use environment variables',
+      fixCode: `// In .env file:\nAPI_KEY=your_actual_key\n\n// In code:\nconst apiKey = process.env.API_KEY;\n// React: process.env.REACT_APP_API_KEY`,
     });
   }
 
@@ -98,9 +98,9 @@ function analyzeCode(code: string): ReviewIssue[] {
     issues.push({
       id: String(id++), severity: 'critical', category: 'security',
       title: 'dangerouslySetInnerHTML / innerHTML XSS risk',
-      description: 'User input ko directly HTML mein inject karna XSS (Cross-Site Scripting) attack allow karta hai.',
-      lineHint: 'dangerouslySetInnerHTML ya innerHTML wali line',
-      fix: 'DOMPurify use karo HTML sanitize karne ke liye',
+      description: 'Injecting user input directly into HTML allows XSS (Cross-Site Scripting) attacks.',
+      lineHint: 'Line with dangerouslySetInnerHTML or innerHTML',
+      fix: 'Use DOMPurify to sanitize HTML',
       fixCode: `import DOMPurify from 'dompurify';\n\n// Safe HTML rendering:\n<div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(userContent) }} />`,
     });
   }
@@ -109,29 +109,29 @@ function analyzeCode(code: string): ReviewIssue[] {
   if (hasNoMemo) {
     issues.push({
       id: String(id++), severity: 'warning', category: 'performance',
-      title: 'Expensive computations useMemo se optimize karo',
-      description: 'Component mein useEffect aur heavy operations hain lekin useMemo/useCallback nahi use ho raha. Unnecessary re-renders ho sakte hain.',
-      lineHint: 'useEffect ya heavy computation wali line',
-      fix: 'Memoization use karo',
-      fixCode: `const expensiveValue = useMemo(() => {\n  return heavyComputation(data);\n}, [data]); // data change hone pe hi recalculate\n\nconst handleClick = useCallback(() => {\n  doSomething();\n}, []);`,
+      title: 'Optimize expensive computations with useMemo',
+      description: 'Component has useEffect and heavy operations but is not using useMemo/useCallback. This can cause unnecessary re-renders.',
+      lineHint: 'Line with useEffect or heavy computation',
+      fix: 'Use memoization',
+      fixCode: `const expensiveValue = useMemo(() => {\n  return heavyComputation(data);\n}, [data]); // recalculates only when data changes\n\nconst handleClick = useCallback(() => {\n  doSomething();\n}, []);`,
     });
   }
 
   if (hasLargeComponent) {
     issues.push({
       id: String(id++), severity: 'warning', category: 'performance',
-      title: 'Component bahut bada hai (200+ lines)',
-      description: 'Large components slow render aur poor maintainability cause karte hain. Split karo smaller components mein.',
-      fix: 'Feature ke hisaab se alag components banao',
+      title: 'Component is too large (200+ lines)',
+      description: 'Large components cause slow renders and poor maintainability. Split into smaller components.',
+      fix: 'Extract feature-specific sub-components',
     });
   }
 
   if (hasSyncStorage) {
     issues.push({
       id: String(id++), severity: 'warning', category: 'bugs',
-      title: 'localStorage mein error handling missing',
-      description: 'Private/incognito mode ya storage full hone pe localStorage exception throw karta hai. App crash ho sakta hai.',
-      fix: 'try/catch wrap karo',
+      title: 'Missing error handling for localStorage',
+      description: 'localStorage throws exceptions in private/incognito mode or when storage is full. The app may crash.',
+      fix: 'Wrap in try/catch',
       fixCode: `try {\n  localStorage.setItem(key, JSON.stringify(value));\n} catch (e) {\n  // Storage unavailable — gracefully handle\n  console.warn('Storage unavailable', e);\n}`,
     });
   }
@@ -141,9 +141,9 @@ function analyzeCode(code: string): ReviewIssue[] {
     issues.push({
       id: String(id++), severity: 'warning', category: 'bestpractice',
       title: 'TypeScript "any" type overuse',
-      description: '"any" type TypeScript ke safety benefits khatam kar deta hai. Proper types define karo.',
-      lineHint: ': any wali lines',
-      fix: 'Specific types define karo',
+      description: 'The "any" type removes TypeScript\'s safety guarantees. Define proper types instead.',
+      lineHint: 'Lines with ": any"',
+      fix: 'Define specific types',
       fixCode: `// Bad:\nconst data: any = fetchData();\n\n// Good:\ninterface User { id: string; name: string; }\nconst data: User = fetchData();`,
     });
   }
@@ -151,9 +151,9 @@ function analyzeCode(code: string): ReviewIssue[] {
   if (hasConsoleLog > 3) {
     issues.push({
       id: String(id++), severity: 'info', category: 'bestpractice',
-      title: `${hasConsoleLog} console.log statements production mein hain`,
-      description: 'Production code mein console.log debug output expose hota hai. Use proper logging ya remove karo.',
-      fix: 'Production mein console.log remove/disable karo',
+      title: `${hasConsoleLog} console.log statements in production code`,
+      description: 'console.log exposes debug output in production. Use proper logging or remove them.',
+      fix: 'Remove or disable console.log in production',
       fixCode: `// Environment check:\nif (process.env.NODE_ENV === 'development') {\n  console.log('Debug:', data);\n}`,
     });
   }
@@ -162,8 +162,8 @@ function analyzeCode(code: string): ReviewIssue[] {
     issues.push({
       id: String(id++), severity: 'info', category: 'bestpractice',
       title: 'Deeply nested ternary operators',
-      description: 'Multiple nested ternaries code readability kam karte hain. if/else ya early return use karo.',
-      fix: 'Readable conditional logic use karo',
+      description: 'Multiple nested ternaries reduce code readability. Use if/else or early returns instead.',
+      fix: 'Use readable conditional logic',
       fixCode: `// Bad: a ? b ? c : d : e\n\n// Good:\nif (a) {\n  if (b) return c;\n  return d;\n}\nreturn e;`,
     });
   }
@@ -171,9 +171,9 @@ function analyzeCode(code: string): ReviewIssue[] {
   if (hasMagicNumbers) {
     issues.push({
       id: String(id++), severity: 'suggestion', category: 'bestpractice',
-      title: 'Magic numbers — named constants use karo',
-      description: 'Code mein unexplained numbers (like 86400, 1000, 500) hain. Named constants readability improve karte hain.',
-      fix: 'Descriptive constants define karo',
+      title: 'Magic numbers — use named constants',
+      description: 'Unexplained numbers (like 86400, 1000, 500) in code. Named constants improve readability.',
+      fix: 'Define descriptive constants',
       fixCode: `// Bad:\nsetTimeout(refresh, 86400000);\n\n// Good:\nconst ONE_DAY_MS = 24 * 60 * 60 * 1000;\nsetTimeout(refresh, ONE_DAY_MS);`,
     });
   }
@@ -181,17 +181,17 @@ function analyzeCode(code: string): ReviewIssue[] {
   if (hasColorHardcoded) {
     issues.push({
       id: String(id++), severity: 'suggestion', category: 'bestpractice',
-      title: 'Hardcoded colors — CSS variables use karo',
-      description: 'Inline styles mein hardcoded hex colors theming aur dark mode support mushkil banate hain.',
-      fix: 'CSS variables ya Tailwind use karo',
+      title: 'Hardcoded colors — use CSS variables',
+      description: 'Hardcoded hex colors in inline styles make theming and dark mode support difficult.',
+      fix: 'Use CSS variables or Tailwind',
     });
   }
 
   if (hasPassedPropsDestructure) {
     issues.push({
       id: String(id++), severity: 'info', category: 'bestpractice',
-      title: 'Props spreading (...props) — type safety check karo',
-      description: '"...props" ya "...rest" spread karna unexpected props pass kar sakta hai. Explicit props better hai.',
+      title: 'Props spreading (...props) — check type safety',
+      description: 'Spreading "...props" or "...rest" can pass unexpected props down. Explicit props are safer.',
     });
   }
 
@@ -199,20 +199,20 @@ function analyzeCode(code: string): ReviewIssue[] {
   if (hasNoAlt) {
     issues.push({
       id: String(id++), severity: 'warning', category: 'accessibility',
-      title: '<img> tags mein alt attribute missing',
-      description: 'Screen readers ke liye alt text zaroori hai. WCAG 2.1 compliance ke liye bhi required hai.',
-      lineHint: '<img> wali lines',
-      fix: 'Sab images mein alt add karo',
-      fixCode: `<img src={logo} alt="Company logo" />\n\n{/* Decorative images ke liye empty alt: */}\n<img src={divider} alt="" role="presentation" />`,
+      title: 'Missing alt attribute on <img> tags',
+      description: 'Alt text is required for screen readers and WCAG 2.1 compliance.',
+      lineHint: 'Lines with <img>',
+      fix: 'Add alt to all images',
+      fixCode: `<img src={logo} alt="Company logo" />\n\n{/* Decorative images use empty alt: */}\n<img src={divider} alt="" role="presentation" />`,
     });
   }
 
   if (!hasAriaLabel && code.includes('<button')) {
     issues.push({
       id: String(id++), severity: 'info', category: 'accessibility',
-      title: 'Icon-only buttons mein aria-label missing ho sakta hai',
-      description: 'Buttons jo sirf icons contain karte hain unhe screen readers ke liye aria-label chahiye.',
-      fix: 'Accessible button labels add karo',
+      title: 'Icon-only buttons may be missing aria-label',
+      description: 'Buttons that contain only icons need aria-label for screen reader accessibility.',
+      fix: 'Add accessible button labels',
       fixCode: `<button aria-label="Close dialog" onClick={onClose}>\n  <X className="w-4 h-4" />\n</button>`,
     });
   }
@@ -221,8 +221,8 @@ function analyzeCode(code: string): ReviewIssue[] {
     issues.push({
       id: String(id++), severity: 'info', category: 'accessibility',
       title: 'Button type attribute missing',
-      description: 'Form ke andar buttons without type="button" default form submit kar dete hain unintentionally.',
-      fix: 'Explicit type="button" add karo',
+      description: 'Buttons inside forms without type="button" will submit the form unintentionally by default.',
+      fix: 'Add explicit type="button"',
       fixCode: `<button type="button" onClick={handleClick}>Click</button>\n<button type="submit">Submit Form</button>`,
     });
   }
@@ -232,7 +232,7 @@ function analyzeCode(code: string): ReviewIssue[] {
     issues.push({
       id: String(id++), severity: 'info', category: 'bestpractice',
       title: '✓ No critical bugs detected',
-      description: 'Code mein koi critical bug nahi mila. Good job! Baaki warnings aur suggestions bhi fix karo for best quality.',
+      description: 'No critical bugs found in the code. Great job! Fix the remaining warnings and suggestions for best quality.',
     });
   }
 
@@ -338,7 +338,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
         </div>
         <div>
           <h2 className="font-semibold text-white text-base">AI Code Review</h2>
-          <p className="text-xs text-white/40">Code ko analyze karo — bugs, security, performance sab check hoga</p>
+          <p className="text-xs text-white/40">Analyze your code — bugs, security, and performance checks</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {reviewed && (
@@ -381,7 +381,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
               <div className="w-14 h-14 bg-red-500/10 rounded-2xl flex items-center justify-center border border-red-500/20">
                 <Code className="w-7 h-7 text-red-400" />
               </div>
-              <p className="text-xs text-white/30">Code generate karo, phir review button dabao</p>
+              <p className="text-xs text-white/30">Generate code first, then press the Review button</p>
             </div>
           )}
 
@@ -390,7 +390,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
               <div className="w-14 h-14 bg-red-500/10 rounded-2xl flex items-center justify-center border border-red-500/20 animate-pulse">
                 <RefreshCw className="w-7 h-7 text-red-400 animate-spin" />
               </div>
-              <p className="text-xs text-white/40">Code analyze ho raha hai...</p>
+              <p className="text-xs text-white/40">Analyzing code...</p>
             </div>
           )}
 
@@ -430,11 +430,11 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
                 ))}
               </div>
               <p className="text-sm text-white/30 text-center max-w-xs">
-                AI aapka code scan karega — bugs, security holes, performance issues sab find karega
+                AI will scan your code — finding bugs, security holes, and performance issues
               </p>
               {!generatedCode.trim() && (
                 <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-4 py-2 rounded-xl">
-                  <AlertCircle className="w-3.5 h-3.5" /> Pehle code generate karo
+                  <AlertCircle className="w-3.5 h-3.5" /> Generate code first
                 </div>
               )}
             </div>
@@ -443,7 +443,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
           {reviewed && filtered.length === 0 && (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
               <CheckCircle2 className="w-10 h-10 text-emerald-400" />
-              <p className="text-sm text-white/40">Is category mein koi issues nahi</p>
+              <p className="text-sm text-white/40">No issues in this category</p>
             </div>
           )}
 

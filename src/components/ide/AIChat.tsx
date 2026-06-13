@@ -256,6 +256,7 @@ interface AIChatProps {
   onLanguagePick?: (lang: string) => void;
   onDownloadZip?: (files: Record<string, string>, appName: string) => void;
   onSendSuggestion?: (text: string) => void;
+  onStop?: () => void;
 }
 
 export const AIChat: React.FC<AIChatProps> = ({
@@ -292,6 +293,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   onLanguagePick,
   onDownloadZip,
   onSendSuggestion,
+  onStop,
 }) => {
   const { buildSteps } = useBuild();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1110,13 +1112,23 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                     >
                       {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                     </button>
-                    <button
-                      onClick={() => { onSend(attachments); setAttachments([]); }}
-                      disabled={(!input.trim() && attachments.length === 0) || isLoading}
-                      className="p-2.5 bg-indigo-600 text-white rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                    </button>
+                    {isLoading && onStop ? (
+                      <button
+                        onClick={onStop}
+                        title="Stop generation"
+                        className="p-2.5 bg-red-600 text-white rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95"
+                      >
+                        <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[11px]">■</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => { onSend(attachments); setAttachments([]); }}
+                        disabled={(!input.trim() && attachments.length === 0) || isLoading}
+                        className="p-2.5 bg-indigo-600 text-white rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                   </div>{/* end inner flex row */}
             </div>{/* end outer rounded container */}

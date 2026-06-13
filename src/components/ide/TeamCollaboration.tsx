@@ -84,16 +84,16 @@ const DEFAULT_MEMBERS: TeamMember[] = [
 ];
 
 const DEFAULT_ACTIVITIES: ActivityEntry[] = [
-  { id: 'a1',  member: 'Priya Sharma', action: 'ne file edit kiya',         time: '5 min ago'    },
-  { id: 'a2',  member: 'You',          action: 'ne app deploy kiya',         time: '1 hour ago'   },
-  { id: 'a3',  member: 'Rahul Dev',    action: 'joined the project',         time: '2 hours ago'  },
-  { id: 'a4',  member: 'Priya Sharma', action: 'ne component banaya',        time: '3 hours ago'  },
-  { id: 'a5',  member: 'You',          action: 'ne new branch create kiya',  time: '5 hours ago'  },
-  { id: 'a6',  member: 'Rahul Dev',    action: 'ne comment add kiya',        time: '6 hours ago'  },
-  { id: 'a7',  member: 'Priya Sharma', action: 'ne build run kiya',          time: '8 hours ago'  },
-  { id: 'a8',  member: 'You',          action: 'ne settings update kiya',    time: '10 hours ago' },
-  { id: 'a9',  member: 'Priya Sharma', action: 'ne file delete kiya',        time: '12 hours ago' },
-  { id: 'a10', member: 'Rahul Dev',    action: 'ne project dekha',           time: '1 day ago'    },
+  { id: 'a1',  member: 'Priya Sharma', action: 'edited a file',            time: '5 min ago'    },
+  { id: 'a2',  member: 'You',          action: 'deployed the app',          time: '1 hour ago'   },
+  { id: 'a3',  member: 'Rahul Dev',    action: 'joined the project',        time: '2 hours ago'  },
+  { id: 'a4',  member: 'Priya Sharma', action: 'created a component',       time: '3 hours ago'  },
+  { id: 'a5',  member: 'You',          action: 'created a new branch',      time: '5 hours ago'  },
+  { id: 'a6',  member: 'Rahul Dev',    action: 'added a comment',           time: '6 hours ago'  },
+  { id: 'a7',  member: 'Priya Sharma', action: 'ran the build',             time: '8 hours ago'  },
+  { id: 'a8',  member: 'You',          action: 'updated settings',          time: '10 hours ago' },
+  { id: 'a9',  member: 'Priya Sharma', action: 'deleted a file',            time: '12 hours ago' },
+  { id: 'a10', member: 'Rahul Dev',    action: 'viewed the project',        time: '1 day ago'    },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -259,11 +259,11 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
   // — Invite handler
   const handleInvite = async () => {
     if (!inviteEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteEmail)) {
-      showToast('Valid email address enter karein', 'error');
+      showToast('Enter a valid email address', 'error');
       return;
     }
     if (members.some(m => m.email === inviteEmail)) {
-      showToast('Yeh member already team mein hai', 'error');
+      showToast('This member is already in the team', 'error');
       return;
     }
     setInviting(true);
@@ -274,10 +274,10 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
         body: JSON.stringify({ email: inviteEmail, role: inviteRole, projectId, userId }),
       });
       if (!res.ok) throw new Error('API failed');
-      showToast(`Invite bheja gaya: ${inviteEmail}`);
+      showToast(`Invite sent: ${inviteEmail}`);
     } catch {
       // Mock fallback
-      showToast(`Invite (mock) bheja gaya: ${inviteEmail}`);
+      showToast(`Invite sent (mock): ${inviteEmail}`);
     }
     const invite: PendingInvite = {
       id: Math.random().toString(36).slice(2),
@@ -292,21 +292,21 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
 
   const revokeInvite = (id: string) => {
     setPendingInvites(prev => prev.filter(i => i.id !== id));
-    showToast('Invite revoke ho gaya');
+    showToast('Invite revoked');
   };
 
   // — Role change
   const changeMemberRole = (memberId: string, newRole: Role) => {
     setMembers(prev => prev.map(m => m.id === memberId ? { ...m, role: newRole } : m));
     setMenuOpen(null);
-    showToast('Role update ho gaya');
+    showToast('Role updated');
   };
 
   // — Remove member
   const removeMember = (memberId: string) => {
     setMembers(prev => prev.filter(m => m.id !== memberId));
     setMenuOpen(null);
-    showToast('Member remove ho gaya');
+    showToast('Member removed');
   };
 
   // — Copy link
@@ -324,7 +324,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
     setShareLink(`https://navbharat.ai/shared/${generateProjectId()}`);
     setRegenerating(false);
     setConfirmRegenerate(false);
-    showToast('New link generate ho gaya');
+    showToast('New link generated');
   };
 
   const currentUserIsAdmin = members.find(m => m.isYou)?.role === 'Admin';
@@ -344,7 +344,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
             Team Collaboration
             {projectName && <span className="text-sm font-normal text-gray-400 ml-1">— {projectName}</span>}
           </h1>
-          <p className="text-gray-500 text-sm mt-1">Team manage karein, invite karein, aur project share karein</p>
+          <p className="text-gray-500 text-sm mt-1">Manage your team, send invites, and share the project</p>
         </div>
 
         <div className="flex gap-4 flex-col lg:flex-row">
@@ -381,7 +381,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                     className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg px-3 py-2 flex items-center justify-center gap-1.5 transition-colors"
                   >
                     {inviting ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
-                    {inviting ? 'Bhejna...' : 'Invite Karo'}
+                    {inviting ? 'Sending...' : 'Invite'}
                   </button>
                 </div>
               </div>
@@ -491,15 +491,15 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                   <div className="mt-2 flex flex-col gap-1.5 text-xs text-gray-400">
                     <div className="flex items-start gap-2 p-2 bg-[#0d1117] rounded-lg">
                       <Crown size={12} className="text-red-400 mt-0.5 flex-shrink-0" />
-                      <div><span className="text-red-400 font-medium">Admin:</span> Full access, invite/remove members, deploy kar sakta hai</div>
+                      <div><span className="text-red-400 font-medium">Admin:</span> Full access, can invite/remove members and deploy</div>
                     </div>
                     <div className="flex items-start gap-2 p-2 bg-[#0d1117] rounded-lg">
                       <Edit3 size={12} className="text-blue-400 mt-0.5 flex-shrink-0" />
-                      <div><span className="text-blue-400 font-medium">Editor:</span> Code edit kar sakta hai, files create aur builds run kar sakta hai</div>
+                      <div><span className="text-blue-400 font-medium">Editor:</span> Can edit code, create files, and run builds</div>
                     </div>
                     <div className="flex items-start gap-2 p-2 bg-[#0d1117] rounded-lg">
                       <Eye size={12} className="text-gray-400 mt-0.5 flex-shrink-0" />
-                      <div><span className="text-gray-400 font-medium">Viewer:</span> Read-only access, comments de sakta hai</div>
+                      <div><span className="text-gray-400 font-medium">Viewer:</span> Read-only access, can add comments</div>
                     </div>
                   </div>
                 )}
@@ -566,12 +566,12 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                   <QrDisplay url={shareLink} />
                   <div className="text-xs text-gray-600">
                     <QrCode size={14} className="inline mr-1 text-gray-500" />
-                    QR scan karein
+                    Scan QR code
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1">
                   {confirmRegenerate && (
-                    <p className="text-xs text-yellow-400">Purana link expire ho jayega. Confirm?</p>
+                    <p className="text-xs text-yellow-400">Old link will expire. Confirm?</p>
                   )}
                   <button
                     onClick={handleRegenerate}
@@ -635,7 +635,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                     <Avatar key={m.id} member={m} ring />
                   ))}
                   {onlineMembers.length === 0 && (
-                    <p className="text-xs text-gray-600">Abhi koi online nahi</p>
+                    <p className="text-xs text-gray-600">No one online right now</p>
                   )}
                 </div>
                 <div className="relative group inline-block">

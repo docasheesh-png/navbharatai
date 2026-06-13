@@ -84,13 +84,13 @@ function getCliCommand(platform: Platform, domain: string): string {
 
 function getPlatformInstructions(platform: Platform, dnsProvider: DnsProvider): string[] {
   const providerLogin: Record<DnsProvider, string> = {
-    GoDaddy: 'GoDaddy.com me login karo → My Products → DNS → Add Record',
-    Namecheap: 'Namecheap.com me login karo → Domain List → Manage → Advanced DNS',
-    Cloudflare: 'Cloudflare Dashboard → apna domain select karo → DNS → Add Record',
-    'Google Domains': 'domains.google.com → apna domain → DNS → Manage custom records',
-    BigRock: 'BigRock.in me login karo → My Domains → DNS Management → Add Record',
-    Hostinger: 'Hostinger hPanel me login karo → Domains → DNS / Nameservers → Add Record',
-    Other: 'Apne DNS provider ke dashboard me login karo aur DNS management section dhundho',
+    GoDaddy: 'Log in to GoDaddy.com → My Products → DNS → Add Record',
+    Namecheap: 'Log in to Namecheap.com → Domain List → Manage → Advanced DNS',
+    Cloudflare: 'Cloudflare Dashboard → select your domain → DNS → Add Record',
+    'Google Domains': 'domains.google.com → your domain → DNS → Manage custom records',
+    BigRock: 'Log in to BigRock.in → My Domains → DNS Management → Add Record',
+    Hostinger: 'Log in to Hostinger hPanel → Domains → DNS / Nameservers → Add Record',
+    Other: 'Log in to your DNS provider dashboard and find the DNS management section',
   };
 
   const step1 = providerLogin[dnsProvider];
@@ -98,33 +98,33 @@ function getPlatformInstructions(platform: Platform, dnsProvider: DnsProvider): 
   if (platform === 'firebase') {
     return [
       step1,
-      'Type field me "A" select karo, Name "@" dalo, Value me IP address paste karo',
-      'Ek aur record add karo: Type "TXT", verification value paste karo',
-      'Save karo aur 24-48 ghante wait karo propagation ke liye',
+      'In Type field select "A", Name "@", paste the IP address in Value',
+      'Add another record: Type "TXT", paste the verification value',
+      'Save and wait 24-48 hours for propagation',
     ];
   }
   if (platform === 'vercel') {
     return [
       step1,
-      'Type "A" select karo, Name "@" dalo, Value "76.76.19.19" dalo',
-      'Type "CNAME" select karo, Name "www" dalo, Value "cname.vercel-dns.com" dalo',
-      'Vercel dashboard me apna domain add karo: Settings → Domains',
+      'Select Type "A", Name "@", Value "76.76.19.19"',
+      'Select Type "CNAME", Name "www", Value "cname.vercel-dns.com"',
+      'Add your domain in the Vercel dashboard: Settings → Domains',
     ];
   }
   if (platform === 'cloudrun') {
     return [
       step1,
-      'Type "CNAME" select karo, Name "www" dalo, Value "ghs.googlehosted.com" dalo',
-      'Google Cloud Console → Cloud Run → apni service → Custom domains me domain add karo',
-      'Verification ke liye TXT record bhi add karna pad sakta hai',
+      'Select Type "CNAME", Name "www", Value "ghs.googlehosted.com"',
+      'Google Cloud Console → Cloud Run → your service → Custom domains → add domain',
+      'You may also need to add a TXT record for verification',
     ];
   }
   if (platform === 'netlify') {
     return [
       step1,
-      'Type "CNAME" select karo, Name "@" dalo, Value apna Netlify app URL dalo',
-      'Netlify Dashboard → Sites → apni site → Domain settings me domain add karo',
-      'Netlify DNS ya external DNS dono kaam karte hain',
+      'Select Type "CNAME", Name "@", paste your Netlify app URL in Value',
+      'Netlify Dashboard → Sites → your site → Domain settings → add domain',
+      'Both Netlify DNS and external DNS are supported',
     ];
   }
   return [];
@@ -261,8 +261,8 @@ export const CustomDomain: React.FC = () => {
   }, []);
 
   const validateDomain = (val: string) => {
-    if (!val) { setDomainError('Domain required hai'); return false; }
-    if (!DOMAIN_REGEX.test(val)) { setDomainError('Valid domain format dalo (e.g. apnadomain.com)'); return false; }
+    if (!val) { setDomainError('Domain is required'); return false; }
+    if (!DOMAIN_REGEX.test(val)) { setDomainError('Enter a valid domain format (e.g. mydomain.com)'); return false; }
     setDomainError('');
     return true;
   };
@@ -390,9 +390,9 @@ export const CustomDomain: React.FC = () => {
           {step === 1 && (
             <div className="space-y-5">
               <div>
-                <h2 className="text-lg font-semibold mb-1">Apna Domain Connect Karo</h2>
+                <h2 className="text-lg font-semibold mb-1">Connect Your Domain</h2>
                 <p className="text-sm text-white/50">
-                  Apna custom domain enter karo jo tum <span className="text-indigo-400">{PLATFORMS.find((p) => p.id === platform)?.label}</span> se connect karna chahte ho.
+                  Enter the custom domain you want to connect to <span className="text-indigo-400">{PLATFORMS.find((p) => p.id === platform)?.label}</span>.
                 </p>
               </div>
 
@@ -438,8 +438,8 @@ export const CustomDomain: React.FC = () => {
                   <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${addWww ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </div>
                 <div>
-                  <span className="text-sm text-white/80">www subdomain bhi add karo</span>
-                  <p className="text-[10px] text-white/40">Both @ and www CNAME records configure honge</p>
+                  <span className="text-sm text-white/80">Also add www subdomain</span>
+                  <p className="text-[10px] text-white/40">Both @ and www CNAME records will be configured</p>
                 </div>
               </label>
             </div>
@@ -449,9 +449,9 @@ export const CustomDomain: React.FC = () => {
           {step === 2 && (
             <div className="space-y-5">
               <div>
-                <h2 className="text-lg font-semibold mb-1">DNS Records Configure Karo</h2>
+                <h2 className="text-lg font-semibold mb-1">Configure DNS Records</h2>
                 <p className="text-sm text-white/50">
-                  In records ko apne DNS provider (<span className="text-indigo-300">{dnsProvider}</span>) ke dashboard mein add karo.
+                  Add these records in your DNS provider (<span className="text-indigo-300">{dnsProvider}</span>) dashboard.
                 </p>
               </div>
 
@@ -495,7 +495,7 @@ export const CustomDomain: React.FC = () => {
               <div className="bg-[#161b22] border border-white/10 rounded-xl p-4">
                 <div className="text-xs font-semibold text-white/60 mb-3 flex items-center gap-2">
                   <span>{PLATFORMS.find((p) => p.id === platform)?.icon}</span>
-                  {dnsProvider} pe {PLATFORMS.find((p) => p.id === platform)?.label} setup karne ke steps
+                  Steps to set up {PLATFORMS.find((p) => p.id === platform)?.label} on {dnsProvider}
                 </div>
                 <ol className="space-y-2">
                   {instructions.map((step, i) => (
@@ -517,7 +517,7 @@ export const CustomDomain: React.FC = () => {
               <div>
                 <h2 className="text-lg font-semibold mb-1">DNS Propagation Check</h2>
                 <p className="text-sm text-white/50">
-                  DNS propagation mein 24-48 ghante lag sakte hain. Neeche check karo.
+                  DNS propagation can take 24-48 hours. Check the status below.
                 </p>
               </div>
 
@@ -556,14 +556,14 @@ export const CustomDomain: React.FC = () => {
                     {propagationStatus === 'not_found' && <AlertCircle size={16} className="text-red-400 mt-0.5 shrink-0" />}
                     <div>
                       {propagationStatus === 'propagated' && (
-                        <><p className="font-medium text-green-300">Propagated! DNS records mil gaye.</p><p className="text-xs text-white/50 mt-0.5">IP: {dnsResult}</p></>
+                        <><p className="font-medium text-green-300">Propagated! DNS records found.</p><p className="text-xs text-white/50 mt-0.5">IP: {dnsResult}</p></>
                       )}
-                      {propagationStatus === 'checking' && <p className="text-indigo-300">DNS check ho raha hai...</p>}
+                      {propagationStatus === 'checking' && <p className="text-indigo-300">Checking DNS...</p>}
                       {propagationStatus === 'propagating' && (
-                        <><p className="font-medium text-yellow-300">Propagating... thoda wait karo</p><p className="text-xs text-white/50 mt-0.5">DNS changes propagate hone mein 24-48 ghante lag sakte hain.</p></>
+                        <><p className="font-medium text-yellow-300">Propagating... please wait</p><p className="text-xs text-white/50 mt-0.5">DNS changes can take 24-48 hours to propagate.</p></>
                       )}
                       {propagationStatus === 'not_found' && (
-                        <><p className="font-medium text-red-300">DNS record nahi mila</p><p className="text-xs text-white/50 mt-0.5">Records sahi se add karo aur dobara check karo.</p></>
+                        <><p className="font-medium text-red-300">DNS record not found</p><p className="text-xs text-white/50 mt-0.5">Make sure the records are added correctly and try again.</p></>
                       )}
                     </div>
                   </div>
@@ -577,7 +577,7 @@ export const CustomDomain: React.FC = () => {
                   >
                     <div className={`absolute top-0.5 w-3.5 h-3.5 bg-white rounded-full shadow transition-transform ${autoRetry ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
                   </div>
-                  <span className="text-xs text-white/60">Auto-retry (har 30 seconds mein check)</span>
+                  <span className="text-xs text-white/60">Auto-retry (check every 30 seconds)</span>
                 </label>
               </div>
             </div>
@@ -589,7 +589,7 @@ export const CustomDomain: React.FC = () => {
               <div>
                 <h2 className="text-lg font-semibold mb-1">SSL Certificate</h2>
                 <p className="text-sm text-white/50">
-                  SSL automatically configure ho jaata hai platform ke through. Koi manual step nahi chahiye.
+                  SSL is automatically configured by the platform. No manual steps required.
                 </p>
               </div>
 
@@ -604,7 +604,7 @@ export const CustomDomain: React.FC = () => {
                   </span>
                 </div>
                 <p className="text-xs text-white/50 leading-relaxed">
-                  Domain propagate hone ke baad SSL certificate automatically issue aur renew hota hai. Pehli baar mein 10-15 minutes lag sakte hain.
+                  After domain propagation, the SSL certificate is automatically issued and renewed. The first issuance may take 10-15 minutes.
                 </p>
               </div>
 
@@ -634,7 +634,7 @@ export const CustomDomain: React.FC = () => {
               {allDone && (
                 <div className="bg-green-500/10 border border-green-500/30 rounded-xl px-4 py-3 text-sm text-green-300 flex items-center gap-2.5">
                   <CheckCircle2 size={16} className="shrink-0" />
-                  🎉 Tumhara domain ready hai! <span className="font-semibold">{domain}</span> live hai.
+                  🎉 Your domain is ready! <span className="font-semibold">{domain}</span> is live.
                 </div>
               )}
             </div>
@@ -661,7 +661,7 @@ export const CustomDomain: React.FC = () => {
                 onClick={() => { setStep(1); setPropagationStatus('idle'); }}
                 className="px-5 py-2 bg-white/10 hover:bg-white/15 rounded-lg text-sm font-medium transition-colors"
               >
-                New Domain Add Karo
+                Add New Domain
               </button>
             )}
           </div>

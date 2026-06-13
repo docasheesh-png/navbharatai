@@ -380,7 +380,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="text-[10px] font-black text-white tracking-wide">App Ready</span>
               {footerMinimized && (
-                <span className="text-[9px] text-[#8b949e] hidden sm:inline">· Install on Android ya Download karo</span>
+                <span className="text-[9px] text-[#8b949e] hidden sm:inline">· Install on Android or Download</span>
               )}
             </div>
             <button
@@ -403,7 +403,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
                     className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 active:scale-[0.98] text-white rounded-xl text-[11px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-900/40"
                   >
                     <Pen className="w-3.5 h-3.5" />
-                    ✏️ AI se Edit Karo / Improve Karo
+                    ✏️ Edit with AI / Improve
                   </button>
                   <div className="flex flex-wrap gap-1.5">
                     {['Add dark mode', 'Improve UI design', 'Add more features', 'Fix bugs', 'Make mobile-friendly'].map(chip => (
@@ -424,8 +424,8 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
                     <Smartphone className="w-4 h-4 text-indigo-400" />
                   </div>
                   <div className="min-w-0">
-                    <span className="text-[11px] font-black text-white tracking-wide">Aapki App Ready Hai!</span>
-                    <p className="text-[9px] text-[#8b949e]">Android pe install karo ya download karo</p>
+                    <span className="text-[11px] font-black text-white tracking-wide">Your App is Ready!</span>
+                    <p className="text-[9px] text-[#8b949e]">Install on Android or download</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -463,8 +463,8 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
                   <Smartphone className="w-4 h-4 text-indigo-400" />
                 </div>
                 <div>
-                  <p className="text-xs font-black text-white">Android pe Install Karo</p>
-                  <p className="text-[9px] text-indigo-400">PWA — Bilkul native app jaisi!</p>
+                  <p className="text-xs font-black text-white">Install on Android</p>
+                  <p className="text-[9px] text-indigo-400">PWA — Works like a native app!</p>
                 </div>
               </div>
               <button onClick={() => setShowPwaModal(false)} className="p-1.5 hover:bg-white/10 rounded-lg text-[#484f58] hover:text-white transition-colors">
@@ -474,7 +474,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
 
             {/* URL Box */}
             <div className="px-5 pt-4 pb-3">
-              <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest mb-2">Aapki App Ka Link</p>
+              <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest mb-2">Your App Link</p>
               <div className="flex items-center gap-2 bg-black/50 border border-white/10 rounded-xl px-3 py-2.5">
                 <code className="text-[10px] text-indigo-300 flex-1 break-all leading-relaxed">{pwaUrl}</code>
                 <button
@@ -488,20 +488,20 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
                 </button>
               </div>
               <p className="text-[9px] text-[#484f58] mt-1.5 flex items-center gap-1">
-                <Wifi className="w-3 h-3" /> Link 24 ghante valid hai · Offline bhi kaam karega
+                <Wifi className="w-3 h-3" /> Link valid for 24 hours · Works offline too
               </p>
             </div>
 
             {/* Steps */}
             <div className="px-5 pb-5">
-              <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest mb-3">Android pe Install Kaise Karein:</p>
+              <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest mb-3">How to Install on Android:</p>
               <div className="space-y-2.5">
                 {[
-                  { n: '1', text: 'Yeh link copy karo (upar button se)', sub: 'Ya seedha scan karo agar QR ho' },
-                  { n: '2', text: 'Android phone mein Chrome browser kholo' },
-                  { n: '3', text: 'Link paste karo aur page load hone do' },
-                  { n: '4', text: 'Top-right 3 dots (⋮) tap karo', sub: 'Menu open hoga' },
-                  { n: '5', text: '"Add to Home Screen" select karo', sub: 'App icon home screen pe aa jayegi!' },
+                  { n: '1', text: 'Copy the link (button above)', sub: 'Or scan QR code if available' },
+                  { n: '2', text: 'Open Chrome on your Android phone' },
+                  { n: '3', text: 'Paste the link and let the page load' },
+                  { n: '4', text: 'Tap the 3 dots (⋮) at top-right', sub: 'Opens the menu' },
+                  { n: '5', text: 'Select "Add to Home Screen"', sub: 'App icon will appear on your home screen!' },
                 ].map(({ n, text, sub }) => (
                   <div key={n} className="flex items-start gap-3">
                     <span className="w-5 h-5 rounded-full bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-[9px] font-black flex items-center justify-center shrink-0 mt-0.5">{n}</span>

@@ -36,10 +36,10 @@ function simpleDiff(oldCode: string, newCode: string) {
 
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
-  if (diff < 60000) return 'Abhi';
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m pehle`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h pehle`;
-  return `${Math.floor(diff / 86400000)}d pehle`;
+  if (diff < 60000) return 'Just now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  return `${Math.floor(diff / 86400000)}d ago`;
 }
 
 export function CodeVersioning({ generatedCode, onRestore, onRestoreFiles }: Props) {
@@ -147,7 +147,7 @@ export function CodeVersioning({ generatedCode, onRestore, onRestoreFiles }: Pro
         </div>
         <div>
           <h2 className="font-semibold text-white text-base">Code Versioning</h2>
-          <p className="text-xs text-white/40">Har change save hoga — kabhi bhi restore karo</p>
+          <p className="text-xs text-white/40">Every change saved — restore anytime</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button
@@ -181,7 +181,7 @@ export function CodeVersioning({ generatedCode, onRestore, onRestoreFiles }: Pro
               <input
                 autoFocus
                 className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-white/20 focus:outline-none focus:border-emerald-500/50 mb-2"
-                placeholder="Version naam (optional)"
+                placeholder="Version name (optional)"
                 value={newName}
                 onChange={e => setNewName(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') saveSnapshot(); if (e.key === 'Escape') setShowNameInput(false); }}
@@ -201,8 +201,8 @@ export function CodeVersioning({ generatedCode, onRestore, onRestoreFiles }: Pro
             {versions.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-40 gap-2 p-4 text-center">
                 <GitCommit className="w-8 h-8 text-white/10" />
-                <p className="text-xs text-white/30">Koi versions nahi hain</p>
-                <p className="text-[10px] text-white/20">Pehla snapshot save karo!</p>
+                <p className="text-xs text-white/30">No versions yet</p>
+                <p className="text-[10px] text-white/20">Save your first snapshot!</p>
               </div>
             ) : (
               <div className="relative p-2 space-y-1">
@@ -292,7 +292,7 @@ export function CodeVersioning({ generatedCode, onRestore, onRestoreFiles }: Pro
                 </button>
               </>
             ) : (
-              <span className="text-xs text-white/30">← Ek version select karo diff dekhne ke liye</span>
+              <span className="text-xs text-white/30">← Select a version to view the diff</span>
             )}
           </div>
 
@@ -300,7 +300,7 @@ export function CodeVersioning({ generatedCode, onRestore, onRestoreFiles }: Pro
             {!selectedVersion ? (
               <div className="flex flex-col items-center justify-center h-full gap-3">
                 <GitCommit className="w-12 h-12 text-white/5" />
-                <p className="text-sm text-white/20">Version select karo preview ya diff dekhne ke liye</p>
+                <p className="text-sm text-white/20">Select a version to preview or view its diff</p>
               </div>
             ) : diff ? (
               <div className="grid grid-cols-2 h-full overflow-auto text-[10px] font-mono">
@@ -358,7 +358,7 @@ export function CodeVersioning({ generatedCode, onRestore, onRestoreFiles }: Pro
                 <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${autosave ? 'translate-x-4' : 'translate-x-0.5'}`} />
               </button>
             </div>
-            <p className="text-[9px] text-white/20">Code change hone ke 3 second baad auto snapshot</p>
+            <p className="text-[9px] text-white/20">Auto snapshot 3 seconds after code changes</p>
           </div>
 
           {/* Actions */}
@@ -373,7 +373,7 @@ export function CodeVersioning({ generatedCode, onRestore, onRestoreFiles }: Pro
 
             {confirmClear ? (
               <div className="space-y-1.5">
-                <p className="text-[10px] text-red-400 text-center">Sab versions delete honge!</p>
+                <p className="text-[10px] text-red-400 text-center">All versions will be deleted!</p>
                 <div className="flex gap-1.5">
                   <button onClick={() => { persist([]); setConfirmClear(false); setSelectedId(null); }}
                     className="flex-1 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 rounded-lg text-xs">Delete</button>
@@ -396,10 +396,10 @@ export function CodeVersioning({ generatedCode, onRestore, onRestoreFiles }: Pro
           <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-3">
             <p className="text-[10px] text-emerald-400 font-medium mb-1.5">Tips</p>
             <ul className="text-[9px] text-white/30 space-y-1">
-              <li>• Feature add karne se pehle snapshot lo</li>
-              <li>• Auto-save background mein chhote versions banata hai</li>
+              <li>• Save a snapshot before adding features</li>
+              <li>• Auto-save creates incremental versions in the background</li>
               <li>• Max 50 versions stored</li>
-              <li>• Version click karke diff dekhna</li>
+              <li>• Click a version to view its diff</li>
             </ul>
           </div>
         </div>

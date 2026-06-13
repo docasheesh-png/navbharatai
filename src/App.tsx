@@ -1189,6 +1189,7 @@ export default function App() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const mainContentRef = useRef<HTMLDivElement>(null);
+  const proAbortControllerRef = useRef<AbortController | null>(null);
 
   // 8.5 — touch swipe to switch tabs (left = next tab, right = previous tab)
   useSwipe(mainContentRef, {
@@ -2525,6 +2526,8 @@ ${buildLanguageRule(preferredLanguage)}`;
     setProMessages(prev => [...prev, userMessage]);
     setProInput('');
     setIsProLoading(true);
+    const abortController = new AbortController();
+    proAbortControllerRef.current = abortController;
 
     // ── Mode is the single source of truth — no keyword override ──
     const isBuildMode = mode === 'build';
@@ -2569,6 +2572,7 @@ ${buildLanguageRule(preferredLanguage)}`;
         const response = await fetch('/api/pro-build', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: abortController.signal,
           body: JSON.stringify({
             message: buildMessage,
             currentApp: hasGeneratedCode && generatedCode && generatedCode.length > 200
@@ -2719,6 +2723,17 @@ ${buildLanguageRule(preferredLanguage)}`;
         }
 
       } catch (e: any) {
+        if (e.name === 'AbortError') {
+          setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+          setProMessages(prev => [...prev, {
+            id: (Date.now() + 1).toString(),
+            text: '🛑 Generation stopped.',
+            sender: 'ai',
+            timestamp: new Date(),
+          }]);
+          setIsProLoading(false);
+          return;
+        }
         setProBuildProgress(prev => ({
           ...prev,
           active: true,
@@ -2741,6 +2756,7 @@ ${buildLanguageRule(preferredLanguage)}`;
         const response = await fetch('/api/pro-chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: abortController.signal,
           body: JSON.stringify({
             message: messageToSend,
             history: proMessages,
@@ -2766,15 +2782,29 @@ ${buildLanguageRule(preferredLanguage)}`;
           timestamp: new Date(),
         }]);
       } catch (e: any) {
-        setProMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          text: `⚠️ Error: ${e.message}`,
-          sender: 'ai',
-          timestamp: new Date(),
-        }]);
+        if (e.name !== 'AbortError') {
+          setProMessages(prev => [...prev, {
+            id: (Date.now() + 1).toString(),
+            text: `⚠️ Error: ${e.message}`,
+            sender: 'ai',
+            timestamp: new Date(),
+          }]);
+        } else {
+          setProMessages(prev => [...prev, {
+            id: (Date.now() + 1).toString(),
+            text: '🛑 Generation stopped.',
+            sender: 'ai',
+            timestamp: new Date(),
+          }]);
+        }
       }
       setIsProLoading(false);
     }
+  };
+
+  const handleStopPro = () => {
+    proAbortControllerRef.current?.abort();
+    proAbortControllerRef.current = null;
   };
 
   const downloadAppZip = useCallback(async (deployFiles: Record<string, string>, appName: string) => {
@@ -5190,6 +5220,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     }))}
                     onDownloadZip={downloadAppZip}
                     onSendSuggestion={(text) => { setProInput(text); handleSendForPro(text); }}
+                    onStop={isProLoading ? handleStopPro : undefined}
                   />
                 </div>
             </div>

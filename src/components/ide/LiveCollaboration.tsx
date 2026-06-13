@@ -82,7 +82,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
       await joinRoom(id);
     } catch (e: any) {
       setStatus('error');
-      setErrorMsg('Room create nahi hui: ' + (e.message || 'Unknown error'));
+      setErrorMsg('Room could not be created: ' + (e.message || 'Unknown error'));
     }
   };
 
@@ -93,7 +93,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
       const roomSnap = await getDoc(roomRef);
       if (!roomSnap.exists()) {
         setStatus('error');
-        setErrorMsg('Room nahi mili. ID check karo.');
+        setErrorMsg('Room not found. Check the ID.');
         return;
       }
       const data = roomSnap.data();
@@ -125,7 +125,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
       setStatus('connected');
     } catch (e: any) {
       setStatus('error');
-      setErrorMsg('Room join nahi hua: ' + (e.message || 'Check Firestore rules'));
+      setErrorMsg('Failed to join room: ' + (e.message || 'Check Firestore rules'));
     }
   };
 
@@ -200,7 +200,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
         </div>
         <div>
           <h2 className="font-semibold text-white text-base">Live Collaboration</h2>
-          <p className="text-xs text-white/40">Real-time code sharing — team ke saath milke banao</p>
+          <p className="text-xs text-white/40">Real-time code sharing — build together with your team</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <div className={`w-2 h-2 rounded-full ${status === 'connected' ? 'bg-emerald-400 animate-pulse' : status === 'connecting' ? 'bg-amber-400 animate-pulse' : 'bg-white/20'}`} />
@@ -217,8 +217,8 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
             <Users className="w-8 h-8 text-blue-400" />
           </div>
           <div className="text-center">
-            <h3 className="text-lg font-semibold text-white mb-1">Team ke saath code karo</h3>
-            <p className="text-sm text-white/40">Room banao ya existing room join karo</p>
+            <h3 className="text-lg font-semibold text-white mb-1">Code with your team</h3>
+            <p className="text-sm text-white/40">Create a room or join an existing one</p>
           </div>
 
           {status === 'error' && (
@@ -241,7 +241,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
           <div className="flex gap-2 w-full max-w-sm">
             <input
               className="flex-1 bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/20 focus:outline-none focus:border-blue-500/50"
-              placeholder="Room ID paste karo (e.g. AB1C2D)"
+              placeholder="Paste Room ID (e.g. AB1C2D)"
               value={joinInput}
               onChange={e => setJoinInput(e.target.value.toUpperCase())}
               onKeyDown={e => { if (e.key === 'Enter' && joinInput.trim()) joinRoom(joinInput.trim()); }}
@@ -256,7 +256,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
           </div>
 
           <p className="text-[10px] text-white/20 text-center max-w-xs">
-            Firestore real-time sync use karta hai. Room ID share karo teammates ke saath.
+            Uses Firestore real-time sync. Share the Room ID with your teammates.
           </p>
         </div>
       ) : (
@@ -283,7 +283,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
               className="flex-1 bg-[#0d1117] font-mono text-xs text-white/80 p-4 resize-none focus:outline-none"
               value={sharedCode}
               onChange={e => handleCodeChange(e.target.value)}
-              placeholder="Yahan code likho — sab members ko live dikhega..."
+              placeholder="Write code here — all members see it live..."
             />
           </div>
 
@@ -299,7 +299,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
                       {c.name[0].toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[10px] text-white truncate">{c.name} {c.id === myId ? '(aap)' : ''}</p>
+                      <p className="text-[10px] text-white truncate">{c.name} {c.id === myId ? '(you)' : ''}</p>
                     </div>
                     <div className={`w-1.5 h-1.5 rounded-full ${c.online ? 'bg-emerald-400' : 'bg-white/20'}`} />
                   </div>
@@ -312,7 +312,7 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
               <p className="text-[10px] text-white/30 uppercase tracking-wider px-3 py-2 border-b border-white/5">Chat</p>
               <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
                 {chatMessages.length === 0 ? (
-                  <p className="text-[10px] text-white/20 text-center py-4">Pehla message bhejo!</p>
+                  <p className="text-[10px] text-white/20 text-center py-4">Send the first message!</p>
                 ) : (
                   chatMessages.map(msg => (
                     <div key={msg.id} className={`flex flex-col ${msg.authorId === myId ? 'items-end' : 'items-start'}`}>

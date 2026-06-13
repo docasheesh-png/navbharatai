@@ -4341,7 +4341,7 @@ Response Format:
       // Gemini planning fallback
       try {
         const { GoogleGenAI } = await import('@google/genai');
-        const geminiKey = process.env.GEMINI_API_KEY || '';
+        const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
         if (!geminiKey) throw new Error('No Gemini key');
         const historyContents = (history || []).map((m: any) => ({
           role: m.sender === 'user' ? 'user' : 'model',
@@ -5619,7 +5619,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       if (!reply) {
         try {
           const { GoogleGenAI } = await import('@google/genai');
-          const geminiKey = process.env.GEMINI_API_KEY || '';
+          const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
           if (!geminiKey) throw new Error('No Gemini key');
 
           // Build the current user parts with optional file
@@ -5635,16 +5635,25 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
             ...historyForAI.map((m: any) => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] })),
             { role: 'user', parts: currentParts },
           ];
-          const r = await new GoogleGenAI({ apiKey: geminiKey }).models.generateContent({
-            model: 'gemini-2.5-flash',
-            systemInstruction: SDA_SYSTEM,
-            contents,
-          });
-          reply = r.text || '';
-        } catch (e: any) { console.warn('[SDA] Gemini err:', e.message); }
+          const geminiModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+          for (const gModel of geminiModels) {
+            try {
+              const r = await new GoogleGenAI({ apiKey: geminiKey }).models.generateContent({
+                model: gModel,
+                systemInstruction: SDA_SYSTEM,
+                contents,
+              });
+              reply = r.text || '';
+              if (reply) break;
+            } catch (ge: any) { console.warn(`[SDA] Gemini ${gModel} err:`, ge.message); }
+          }
+        } catch (e: any) { console.warn('[SDA] Gemini fallback err:', e.message); }
       }
 
-      if (!reply) return res.status(503).json({ error: 'AI service unavailable. Please check API keys.' });
+      if (!reply) {
+        console.error('[SDA] All AI providers failed — returning 503');
+        return res.status(503).json({ error: 'AI service unavailable. Please check API keys.' });
+      }
 
       // Strip [CASE_COMPLETE] marker from reply before sending to client
       const suggestPDF = reply.includes('[CASE_COMPLETE]');

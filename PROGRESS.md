@@ -44,6 +44,10 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
 - **Milestone 1.5 — DONE (2026-06-14)**: Extracted encryption/secret helpers
   (`encrypt`/`decrypt`/`getSecretValue`) → `src/server/lib/secrets.ts`, and secrets
   CRUD routes → `src/server/routes/secrets.ts`. routes 60 → 57. Verified green.
+- **Milestone 1.6 — DONE (2026-06-14)**: Extracted shared `serverStats` singleton
+  → `src/server/lib/serverStats.ts`, and the entire admin dashboard (12 routes +
+  HMAC `verifyAdminToken` middleware) → `src/server/routes/admin.ts`. routes 57 → 45.
+  Verified green (server bundle, admin+serverStats strict tsc clean, frontend tsc 0, tests).
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

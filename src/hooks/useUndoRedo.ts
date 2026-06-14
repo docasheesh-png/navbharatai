@@ -1,30 +1,38 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 
 export function useUndoRedo<T>(initial: T, maxHistory = 50) {
-  const [history, setHistory] = useState<T[]>([initial]);
-  const [index, setIndex] = useState(0);
+  const [state, setState] = useState<{ history: T[]; index: number }>({
+    history: [initial],
+    index: 0,
+  });
 
-  const current = history[index];
+  const current = state.history[state.index];
 
+  // Single atomic state update — no stale-closure race between setHistory + setIndex
   const push = useCallback((value: T) => {
-    setHistory(prev => {
-      const truncated = prev.slice(0, index + 1);
+    setState(prev => {
+      const truncated = prev.history.slice(0, prev.index + 1);
       const next = [...truncated, value].slice(-maxHistory);
-      return next;
+      return { history: next, index: next.length - 1 };
     });
-    setIndex(prev => Math.min(prev + 1, maxHistory - 1));
-  }, [index, maxHistory]);
+  }, [maxHistory]);
 
   const undo = useCallback(() => {
-    setIndex(prev => Math.max(0, prev - 1));
+    setState(prev =>
+      prev.index > 0 ? { ...prev, index: prev.index - 1 } : prev
+    );
   }, []);
 
   const redo = useCallback(() => {
-    setIndex(prev => Math.min(history.length - 1, prev + 1));
-  }, [history.length]);
+    setState(prev =>
+      prev.index < prev.history.length - 1
+        ? { ...prev, index: prev.index + 1 }
+        : prev
+    );
+  }, []);
 
-  const canUndo = index > 0;
-  const canRedo = index < history.length - 1;
+  const canUndo = state.index > 0;
+  const canRedo = state.index < state.history.length - 1;
 
   return { current, push, undo, redo, canUndo, canRedo };
 }

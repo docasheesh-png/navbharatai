@@ -10,7 +10,7 @@ import {
   FolderOpen, Trash2, Plus, FilePlus, FolderPlus, Save, MoreHorizontal, Rocket, LayoutDashboard, Database, 
   Github, HardDrive, RefreshCw, Menu, History, Clock, Smartphone, ThumbsUp, ThumbsDown, Copy, Check,
   Link as LinkIcon, List, GitCommit, Share2, Box, Folder, UploadCloud, ChevronLeft,
-  Edit2, Camera, Upload, Image as ImageIcon, Info, LogIn,
+  Edit2, Camera, Upload, Download, Image as ImageIcon, Info, LogIn,
   GitFork, GitMerge, History as HistoryIcon, UserPlus, LogOut, CheckCircle2, AlertCircle, RotateCcw,
   Gift, Palette, TestTube,
   Mic, BarChart2, Languages, Layout, TrendingUp,
@@ -1004,6 +1004,8 @@ export default function App() {
   });
   const [activeFile, setActiveFile] = useState<string>('index.html');
   const [previewHistory, setPreviewHistory] = useState<{ id: string; label: string; ts: Date; html: string }[]>([]);
+  const [fileUploadConflict, setFileUploadConflict] = useState<{ file: File; existingKey: string; isZip: boolean } | null>(null);
+  const filesUploadRef = useRef<HTMLInputElement>(null);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isDeployed, setIsDeployed] = useState(false);
   const [deployUrl, setDeployUrl] = useState('');
@@ -3197,7 +3199,7 @@ ${buildLanguageRule(preferredLanguage)}`;
     }
   };
 
-  const handleSendForPro = async (input?: string | File[]) => {
+  const handleSendForPro = async (input?: string | File[], forceBuild = false) => {
     const fileList = Array.isArray(input) ? input : [];
     const messageToSend = typeof input === 'string' ? input : proInput.trim();
     if (!messageToSend && fileList.length === 0 || isProLoading) return;
@@ -3234,30 +3236,32 @@ ${buildLanguageRule(preferredLanguage)}`;
       dataUrl: `data:${f.type};base64,${f.base64}`,
     }));
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      text: messageToSend,
-      sender: 'user',
-      timestamp: new Date(),
-      ...(proAttachmentPreviews.length > 0 ? { attachments: proAttachmentPreviews } : {}),
-    };
-
-    setProMessages(prev => [...prev, userMessage]);
+    // Don't show __CONFIRM_AUTO_BUILD__ as a visible chat message
+    const isConfirmBuildTap = messageToSend === '__CONFIRM_AUTO_BUILD__';
+    if (!isConfirmBuildTap) {
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        text: messageToSend,
+        sender: 'user',
+        timestamp: new Date(),
+        ...(proAttachmentPreviews.length > 0 ? { attachments: proAttachmentPreviews } : {}),
+      };
+      setProMessages(prev => [...prev, userMessage]);
+    }
     setProInput('');
     setIsProLoading(true);
     const abortController = new AbortController();
     proAbortControllerRef.current = abortController;
 
-    // ── Mode is the single source of truth — no keyword override ──
-    const isBuildMode = mode === 'build';
-    const isAutoMode  = mode === 'auto';
+    // ── Mode is the single source of truth — forceBuild skips auto routing ──
+    const isBuildMode = mode === 'build' || forceBuild;
+    const isAutoMode  = mode === 'auto' && !forceBuild;
 
     // ── AUTO MODE — smart routing: human-like chat, clarify, or build ──
     if (isAutoMode) {
-      // "__CONFIRM_AUTO_BUILD__" is sent when user taps "Haan, Build Karo" after seeing plan
-      const isConfirmBuild = messageToSend === '__CONFIRM_AUTO_BUILD__';
+      const isConfirmBuild = isConfirmBuildTap;
       const actualMessage = isConfirmBuild
-        ? (proMessages.filter(m => m.sender === 'user').slice(-2, -1)[0]?.text || messageToSend)
+        ? (proMessages.filter(m => m.sender === 'user').slice(-1)[0]?.text || messageToSend)
         : messageToSend;
 
       const intent = isConfirmBuild ? 'direct_build' : classifyAutoIntent(messageToSend, proMessages);
@@ -3289,8 +3293,8 @@ ${buildLanguageRule(preferredLanguage)}`;
             }
             setIsProLoading(false);
             proAbortControllerRef.current = null;
-            // Small delay so message renders, then build
-            setTimeout(() => handleSendForPro(actualMessage !== '__CONFIRM_AUTO_BUILD__' ? actualMessage : messageToSend), 400);
+            // forceBuild=true bypasses auto routing → goes straight to /api/pro-build
+            setTimeout(() => handleSendForPro(actualMessage, true), 400);
             return;
           } else {
             // __AUTO_PLAN__ or no marker — show plan with "Build" button
@@ -3699,6 +3703,93 @@ ${buildLanguageRule(preferredLanguage)}`;
       addToast('Download failed — try again', 'error');
     }
   }, [addToast]);
+
+  const handleFilesUpload = useCallback(async (selectedFile: File) => {
+    const isZip = selectedFile.name.toLowerCase().endsWith('.zip') ||
+      selectedFile.type === 'application/zip' ||
+      selectedFile.type === 'application/x-zip-compressed';
+
+    if (isZip) {
+      // ZIP always asks: replace workspace or merge
+      const hasExisting = Object.keys(files).filter(k => !k.startsWith('.')).length > 0;
+      if (hasExisting) {
+        setFileUploadConflict({ file: selectedFile, existingKey: '', isZip: true });
+      } else {
+        handleZipImport(selectedFile);
+      }
+      return;
+    }
+
+    // Non-ZIP: read as text or base64, then check for conflict
+    const existingKey = Object.keys(files).find(k => k === selectedFile.name || k.endsWith('/' + selectedFile.name));
+    const isText = /\.(html|htm|css|scss|js|ts|jsx|tsx|json|md|txt|xml|svg|yaml|yml|py|php|vue|svelte)$/i.test(selectedFile.name);
+
+    const readFile = (): Promise<string> => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      if (isText) {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsText(selectedFile);
+      } else {
+        reader.onload = () => resolve(reader.result as string); // base64 data URL
+        reader.onerror = reject;
+        reader.readAsDataURL(selectedFile);
+      }
+    });
+
+    try {
+      const content = await readFile();
+      if (existingKey) {
+        setFileUploadConflict({ file: selectedFile, existingKey, isZip: false });
+        // Store content in a ref-like way via a temp key — resolved in conflict handler
+        setFiles(prev => ({ ...prev, [`__pending__${selectedFile.name}`]: content }));
+      } else {
+        setFiles(prev => ({ ...prev, [selectedFile.name]: content }));
+        setHasGeneratedCode(true);
+        setIsAppBuilt(true);
+        addToast(`${selectedFile.name} added ✓`, 'success');
+      }
+    } catch {
+      addToast('File read failed — try again', 'error');
+    }
+  }, [files, addToast, handleZipImport]);
+
+  const resolveFileConflict = useCallback(async (choice: 'replace' | 'merge') => {
+    if (!fileUploadConflict) return;
+    const { file, existingKey, isZip } = fileUploadConflict;
+    setFileUploadConflict(null);
+
+    if (isZip) {
+      if (choice === 'replace') {
+        setFiles({});
+        setHasGeneratedCode(false);
+        setIsAppBuilt(false);
+        setTimeout(() => handleZipImport(file), 50);
+      } else {
+        handleZipImport(file); // merge = add on top of existing
+      }
+      return;
+    }
+
+    // Non-ZIP conflict
+    const pendingContent = files[`__pending__${file.name}`] || '';
+    setFiles(prev => {
+      const next = { ...prev };
+      delete next[`__pending__${file.name}`];
+      if (choice === 'replace') {
+        next[existingKey] = pendingContent;
+      } else {
+        // Keep both: add with _new suffix
+        const parts = file.name.split('.');
+        const newName = parts.length > 1
+          ? `${parts.slice(0, -1).join('.')}_new.${parts[parts.length - 1]}`
+          : `${file.name}_new`;
+        next[newName] = pendingContent;
+      }
+      return next;
+    });
+    addToast(`${file.name} ${choice === 'replace' ? 'replaced' : 'added as ' + file.name.replace(/(\.[^.]+)$/, '_new$1')} ✓`, 'success');
+  }, [fileUploadConflict, files, addToast, handleZipImport]);
 
   const handleUndoBuild = useCallback(() => {
     if (buildVersionStack.length === 0) return;
@@ -7694,14 +7785,58 @@ ${pending.map(p => `  - ${p}`).join('\n')}
 
           {activeView === 'files' && (
             <div className="flex-1 h-full overflow-hidden bg-[#0d1117] flex flex-col">
+              {/* Upload conflict popup */}
+              {fileUploadConflict && (
+                <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" onClick={() => setFileUploadConflict(null)}>
+                  <div className="bg-[#161b22] border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+                    <p className="text-[13px] font-black text-white mb-1">
+                      {fileUploadConflict.isZip ? 'ZIP Upload' : `File Conflict: ${fileUploadConflict.file.name}`}
+                    </p>
+                    <p className="text-[11px] text-[#8b949e] mb-5">
+                      {fileUploadConflict.isZip
+                        ? 'Workspace already has files. Replace everything or merge new files alongside existing ones?'
+                        : `"${fileUploadConflict.existingKey}" already exists. Replace it or keep both versions?`}
+                    </p>
+                    <div className="flex gap-3">
+                      <button onClick={() => resolveFileConflict('replace')} className="flex-1 py-2.5 rounded-xl bg-red-600/20 border border-red-500/30 text-red-400 text-[11px] font-black hover:bg-red-600/30 transition-all active:scale-95">Replace</button>
+                      <button onClick={() => resolveFileConflict('merge')} className="flex-1 py-2.5 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 text-[11px] font-black hover:bg-indigo-600/30 transition-all active:scale-95">Merge</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {/* Hidden file input for upload */}
+              <input
+                ref={filesUploadRef}
+                type="file"
+                className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) handleFilesUpload(f); e.target.value = ''; }}
+              />
               <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5 bg-[#161b22]">
                 <FolderOpen className="w-4 h-4 text-indigo-400" />
                 <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Project Files</span>
-                {hasGeneratedCode && (
-                  <span className="ml-auto text-[8px] text-emerald-400 font-black uppercase tracking-widest">
-                    {Object.keys(files).length} files
-                  </span>
-                )}
+                <div className="ml-auto flex items-center gap-2">
+                  {hasGeneratedCode && (
+                    <span className="text-[8px] text-emerald-400 font-black uppercase tracking-widest mr-1">
+                      {Object.keys(files).filter(k => !k.startsWith('__pending__')).length} files
+                    </span>
+                  )}
+                  <button
+                    onClick={() => filesUploadRef.current?.click()}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[9px] font-black uppercase tracking-wider text-[#8b949e] hover:text-white transition-all active:scale-95"
+                    title="Upload any file"
+                  >
+                    <Upload className="w-3 h-3" /> Upload
+                  </button>
+                  {hasGeneratedCode && (
+                    <button
+                      onClick={() => downloadAppZip(files as any, 'NavBharatApp')}
+                      className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/30 rounded-lg text-[9px] font-black uppercase tracking-wider text-indigo-400 hover:text-indigo-300 transition-all active:scale-95"
+                      title="Download all files as ZIP"
+                    >
+                      <Download className="w-3 h-3" /> Download ZIP
+                    </button>
+                  )}
+                </div>
               </div>
               {!hasGeneratedCode ? (
                 <div className="flex-1 flex items-center justify-center flex-col gap-3 text-center p-8">

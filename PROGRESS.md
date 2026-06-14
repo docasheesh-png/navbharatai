@@ -55,6 +55,10 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
 - **Milestone 1.8 — DONE (2026-06-14)**: Extracted `verifyPaymentInternal`
   (Cashfree verify + wallet-credit, ~170 lines) → `src/server/lib/payments.ts`.
   server.ts 6598 → 5719 lines. Verified green. (Payment ROUTES next.)
+- **Milestone 1.9 — DONE (2026-06-14)**: Extracted 5 payment routes (create-order,
+  verify-payment, webhook, verify-redirect, redeem-coupon) → `src/server/routes/payment.ts`
+  (`registerPaymentRoutes(app, paymentLimiter)`). routes 43 → 38; server.ts 5719 → 5393.
+  Verified green (server bundle, payment strict tsc clean, frontend tsc 0, tests).
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

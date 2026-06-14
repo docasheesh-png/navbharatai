@@ -97,6 +97,12 @@ service cloud.firestore {
       allow write: if false; // server-only writes
     }
 
+    // Cloud-synced workspace (chat sessions + last app) — owner read, server writes
+    match /user_workspaces/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if false; // server-only writes via /api/sync
+    }
+
     // AI usage logs — server writes only, user can read own logs
     match /ai_usage_logs/{logId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;

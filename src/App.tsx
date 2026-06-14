@@ -437,18 +437,81 @@ export default function App() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>(() => Date.now().toString());
 
+  // Tracks whether the initial cloud load finished — guards the auto-save effect
+  // so we never overwrite cloud data before we've pulled it in.
+  const cloudSyncReady = useRef(false);
+
   useEffect(() => {
-    if (user) {
-      const saved = localStorage.getItem('navbharat_sessions');
-      if (saved) {
-        setSessions(JSON.parse(saved));
-      } else {
-        setSessions([]);
-      }
-    } else {
+    if (!user) {
       setSessions([]);
+      cloudSyncReady.current = false;
+      return;
     }
+
+    cloudSyncReady.current = false;
+
+    // 1) Instant: show whatever is cached locally
+    let local: ChatSession[] = [];
+    try {
+      const saved = localStorage.getItem('navbharat_sessions');
+      if (saved) local = JSON.parse(saved);
+    } catch {}
+    setSessions(local);
+
+    // 2) Cloud: pull cross-device workspace and merge (newer lastUpdated wins)
+    (async () => {
+      try {
+        const res = await fetch(`/api/sync/${user.uid}`);
+        if (res.ok) {
+          const data = await res.json();
+          const cloud: ChatSession[] = Array.isArray(data.sessions) ? data.sessions : [];
+          const byId: Record<string, ChatSession> = {};
+          for (const s of local) if (s?.id) byId[s.id] = s;
+          for (const s of cloud) {
+            if (!s?.id) continue;
+            const existing = byId[s.id];
+            if (!existing) { byId[s.id] = s; continue; }
+            const a = new Date(existing.lastUpdated || 0).getTime();
+            const b = new Date(s.lastUpdated || 0).getTime();
+            byId[s.id] = b > a ? s : existing;
+          }
+          const merged = Object.values(byId).sort(
+            (a, b) => new Date(b.lastUpdated || 0).getTime() - new Date(a.lastUpdated || 0).getTime()
+          );
+          setSessions(merged);
+          safeLS('navbharat_sessions', JSON.stringify(merged));
+
+          // Restore last generated app from cloud if local cache is empty
+          if (data.lastApp && typeof data.lastApp === 'string' && data.lastApp.length > 200) {
+            try {
+              if (!localStorage.getItem('navbharat_last_app')) {
+                safeLS('navbharat_last_app', data.lastApp);
+              }
+            } catch {}
+          }
+        }
+      } catch {
+        // Offline / sync unavailable — local cache stays in effect
+      } finally {
+        cloudSyncReady.current = true;
+      }
+    })();
   }, [user]);
+
+  // Debounced push of sessions + last app to the cloud whenever they change
+  useEffect(() => {
+    if (!user || !cloudSyncReady.current) return;
+    const handle = setTimeout(() => {
+      let lastApp = '';
+      try { lastApp = localStorage.getItem('navbharat_last_app') || ''; } catch {}
+      fetch(`/api/sync/${user.uid}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessions, lastApp }),
+      }).catch(() => {});
+    }, 2500);
+    return () => clearTimeout(handle);
+  }, [sessions, user]);
   
   // Universal Chat Continuation (UCI) State Managers inside App.tsx
   const [copiedUci, setCopiedUci] = useState(false);

@@ -116,11 +116,54 @@ import { GitHubService } from './lib/githubService';
 import { trackEvent } from './lib/analytics';
 // AgentMode → re-exported from ./types
 
+// Large keys that can be evicted when localStorage is nearly full.
+// Ordered from least-important to most-important.
+const LS_EVICTABLE = [
+  'navbharat_versions',
+  'navbharat_last_app',
+  'navbharat_gh_context',
+  'navbharat_pro_messages',
+  'navbharat_sessions',
+];
+
+/** localStorage.setItem that auto-evicts large non-essential keys on QuotaExceededError. */
+function safeLS(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e: unknown) {
+    if (e instanceof DOMException && (e.code === 22 || e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+      // Evict stale large keys one by one until it fits
+      for (const evict of LS_EVICTABLE) {
+        if (evict === key) continue;
+        localStorage.removeItem(evict);
+        try {
+          localStorage.setItem(key, value);
+          return;
+        } catch {}
+      }
+    }
+  }
+}
+
 export default function App() {
   // ── Phase 1 hooks ──────────────────────────────────────────────────────
   const { logs, setLogs, addLog } = useDevLogs();
   const { theme, setTheme, hinglishMode, setHinglishMode, preferredLanguage, setPreferredLanguage, mode, setMode, enabledModules, setEnabledModules, isThemePickerOpen, setIsThemePickerOpen } = useSettings();
   // ───────────────────────────────────────────────────────────────────────
+
+  // Startup: evict large cached data if localStorage is > 3 MB to keep space for Firebase auth
+  useEffect(() => {
+    try {
+      let totalSize = 0;
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k) totalSize += (localStorage.getItem(k) || '').length;
+      }
+      if (totalSize > 3_000_000) {
+        for (const key of LS_EVICTABLE) localStorage.removeItem(key);
+      }
+    } catch {}
+  }, []);
 
   const [deviceMode, setDeviceMode] = useState<'auto' | 'mobile' | 'tablet' | 'desktop'>('auto');
   const [effectiveDeviceMode, setEffectiveDeviceMode] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
@@ -836,7 +879,7 @@ export default function App() {
       const next = prev.map(s => 
         s.id === sessionId ? { ...s, isPinned: !s.isPinned } : s
       );
-      localStorage.setItem('navbharat_sessions', JSON.stringify(next));
+      safeLS('navbharat_sessions', JSON.stringify(next));
       return next;
     });
     addLog('Session pin status updated.', 'info');
@@ -875,7 +918,7 @@ export default function App() {
 
   useEffect(() => {
     if (githubRepoContext) {
-      localStorage.setItem('navbharat_gh_context', JSON.stringify(githubRepoContext));
+      safeLS('navbharat_gh_context', JSON.stringify(githubRepoContext));
     }
   }, [githubRepoContext]);
 
@@ -918,10 +961,11 @@ export default function App() {
     try { return !!localStorage.getItem('navbharat_last_app'); } catch { return false; }
   });
 
-  // 8.7 — persist last generated app for offline access
+  // 8.7 — persist last generated app for offline access (cap at 256 KB to avoid quota issues)
   useEffect(() => {
     if (hasGeneratedCode && generatedCode && generatedCode.length > 200) {
-      try { localStorage.setItem('navbharat_last_app', generatedCode); } catch {}
+      const toStore = generatedCode.length > 256_000 ? generatedCode.slice(0, 256_000) : generatedCode;
+      safeLS('navbharat_last_app', toStore);
     }
   }, [generatedCode, hasGeneratedCode]);
 
@@ -937,7 +981,7 @@ export default function App() {
         modelUsed: m.modelUsed,
         // meta omitted — can contain huge deployFiles blobs
       }));
-      localStorage.setItem('navbharat_pro_messages', JSON.stringify(toSave));
+      safeLS('navbharat_pro_messages', JSON.stringify(toSave));
     } catch {}
   }, [proMessages]);
 
@@ -1389,7 +1433,7 @@ export default function App() {
         next = [updatedSession, ...prev];
       }
 
-      localStorage.setItem('navbharat_sessions', JSON.stringify(next));
+      safeLS('navbharat_sessions', JSON.stringify(next));
 
       // Sync with Firestore collection: chat_sessions under authenticated user contexts
       // Helper to sanitize data for Firestore
@@ -3386,17 +3430,21 @@ ${buildLanguageRule(preferredLanguage)}`;
       const saved = localStorage.getItem('navbharat_versions');
       const existing: any[] = saved ? JSON.parse(saved) : [];
       const allContent = Object.values(builtFiles).join('');
+      // Strip base64 image data-URLs from files before storing to keep versions lean
+      const strippedFiles = Object.fromEntries(
+        Object.entries(builtFiles).map(([k, v]) => [k, v.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '(image)')])
+      );
       const snapshot = {
         id: Date.now().toString(),
         name: `Build: ${buildRequest.slice(0, 40)}`,
-        code: builtFiles['index.html'] || allContent.slice(0, 5000),
-        files: { ...builtFiles },
+        code: (builtFiles['index.html'] || allContent).slice(0, 5000),
+        files: strippedFiles,
         timestamp: Date.now(),
         label: 'build',
         size: allContent.length,
       };
-      const updated = [snapshot, ...existing].slice(0, 50);
-      localStorage.setItem('navbharat_versions', JSON.stringify(updated));
+      const updated = [snapshot, ...existing].slice(0, 10);
+      safeLS('navbharat_versions', JSON.stringify(updated));
     } catch {}
   }, []);
 
@@ -3629,7 +3677,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
       } else {
         next = [updatedSession, ...next];
       }
-      localStorage.setItem('navbharat_sessions', JSON.stringify(next));
+      safeLS('navbharat_sessions', JSON.stringify(next));
       return next;
     });
     
@@ -3752,7 +3800,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
   const deleteSession = async (id: string) => {
     setSessions(prev => {
       const next = prev.filter(s => s.id !== id);
-      localStorage.setItem('navbharat_sessions', JSON.stringify(next));
+      safeLS('navbharat_sessions', JSON.stringify(next));
       return next;
     });
     if (user) {
@@ -3825,7 +3873,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     if (user) {
       setSessions(prev => {
         const next = [initSession, ...prev];
-        localStorage.setItem('navbharat_sessions', JSON.stringify(next));
+        safeLS('navbharat_sessions', JSON.stringify(next));
         return next;
       });
     }

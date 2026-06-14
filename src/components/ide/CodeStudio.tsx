@@ -8,7 +8,6 @@ import { ExtensionMarket } from './ExtensionMarket';
 import { GitPanel } from './GitPanel';
 import { PreviewPanel } from './PreviewPanel';
 import { AIChat } from './AIChat';
-import { AgentSelector } from './AgentSelector';
 import { SecurityScan } from './SecurityScan';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { CursorPopup } from './CursorPopup';
@@ -20,7 +19,7 @@ import { cn } from '../../lib/utils';
 import { 
   Menu as MenuIcon, X, Maximize2, Minimize2, 
   ChevronUp, ChevronDown, Rocket, Command, Search, Keyboard,
-  Bot, Palette
+  Bot, Palette, Monitor
 } from 'lucide-react';
 
 interface CodeStudioProps {
@@ -545,9 +544,17 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               <Bot className="w-4 h-4 mr-1" />
               <span className="text-[10px] font-bold">AI</span>
             </button>
-             <div className="h-7 bg-indigo-600 border-l border-indigo-400/50 flex items-center px-1 rounded-r-lg border-y border-r border-indigo-400/20">
-                <AgentSelector activeAgent={activeAgent} onAgentChange={onAgentChange || (() => {})} />
-             </div>
+            <button
+              onClick={() => handleScreenChange('preview')}
+              className={cn(
+                "w-20 h-7 rounded-r-lg flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-r border-l border-indigo-400/20",
+                activeScreen === 'preview' ? "bg-indigo-700" : "bg-indigo-600 hover:bg-indigo-700"
+              )}
+              title="Open Preview"
+            >
+              <Monitor className="w-4 h-4 mr-1" />
+              <span className="text-[10px] font-bold">Preview</span>
+            </button>
          </div>
       </div>
 

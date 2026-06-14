@@ -3106,6 +3106,13 @@ ${buildLanguageRule(preferredLanguage)}`;
       setFiles(loadedFiles as any);
       setHasGeneratedCode(true);  // ← marks workspace as occupied so next prompt = edit, not rebuild
       setIsAppBuilt(true);
+
+      // Detect framework/build-tool apps that can't be previewed in-browser as-is
+      const pkg = loadedFiles['package.json'] || '';
+      const hasBuildTool = /["'](vite|webpack|rollup|parcel|next|nuxt|gatsby|create-react-app|@vitejs)\s*["']/.test(pkg);
+      const hasJsxEntry = Object.keys(loadedFiles).some(k => /\.(tsx|jsx)$/i.test(k));
+      const isFrameworkApp = (hasBuildTool || hasJsxEntry) && !!pkg;
+
       setTimeout(() => updatePreview(loadedFiles as any), 100);
       const generatedFilesObj = Object.fromEntries(
         Object.entries(loadedFiles).map(([k, v]) => [k, { content: v, expanded: false }])
@@ -3114,15 +3121,31 @@ ${buildLanguageRule(preferredLanguage)}`;
 
       const fileListText = fileList.slice(0, 10).map(f => `• \`${f}\``).join('\n');
       const moreText = fileList.length > 10 ? `\n• ... and ${fileList.length - 10} more` : '';
-      setProMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        text: `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio. App is live in Preview.\n\n${fileListText}${moreText}\n\nApp is ready to edit — tell me what you want to change!`,
-        sender: 'ai', timestamp: new Date(),
-      }]);
 
-      // If user typed a message alongside the ZIP, run it as an edit
-      if (extraMessage?.trim()) {
-        setTimeout(() => handleSendForPro(extraMessage), 800);
+      if (isFrameworkApp) {
+        // Framework app (React/Vite/Next etc.) — can't preview raw source. Auto-convert.
+        setProMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          text: `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n⚠️ This is a **React/framework app** that needs a build step to run in the browser. I'll convert it to a self-contained preview automatically...`,
+          sender: 'ai', timestamp: new Date(),
+        }]);
+        // Auto-trigger conversion after a short delay so the message renders first
+        setTimeout(() => handleSendForPro(
+          `Convert this uploaded React app into a fully working self-contained single-file HTML preview. ` +
+          `Preserve ALL the original functionality, components, and UI. ` +
+          `Use inline CSS and vanilla JS (or React via CDN if needed). ` +
+          `Make it render correctly in an iframe without any build step.`
+        ), 1200);
+      } else {
+        setProMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          text: `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio. App is live in Preview.\n\n${fileListText}${moreText}\n\nApp is ready to edit — tell me what you want to change!`,
+          sender: 'ai', timestamp: new Date(),
+        }]);
+        // If user typed a message alongside the ZIP, run it as an edit
+        if (extraMessage?.trim()) {
+          setTimeout(() => handleSendForPro(extraMessage), 800);
+        }
       }
     } catch (err: any) {
       setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });

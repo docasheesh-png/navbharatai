@@ -31,6 +31,9 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   (`registerPwaRoutes(app, pwaStore)`, new module is fully strict-typed). Removed
   dead `estimateTokens()`. Verified: server esbuild bundle ✅, module strict tsc ✅,
   frontend tsc 0 ✅, tests ✅.
+- **Milestone 1.2 — DONE (2026-06-14)**: Extracted 3 self-contained routes
+  (`/api/analyze/pagespeed`, `/api/logs/error`, `/api/analytics/event`) →
+  `src/server/routes/telemetry.ts`. server.ts routes 71 → 64. Verified green.
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`), wallet,
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

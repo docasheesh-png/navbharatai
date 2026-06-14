@@ -3,6 +3,7 @@ import express from 'express';
 import crypto from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
+import { registerTelemetryRoutes } from './src/server/routes/telemetry';
 
 // ─── Legacy embedded API key (sentinel + historical fallback) ────────────────
 // SECURITY: This Google API key was previously hardcoded inline in 3 places.
@@ -6474,56 +6475,8 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
     return res.json({ ok: true, inviteId, message: `Invite sent to ${email}`, inviteUrl: `/join/${inviteId}` });
   });
 
-  // --- PageSpeed Analysis Proxy ---
-  app.get('/api/analyze/pagespeed', async (req, res) => {
-    const { url } = req.query;
-    if (!url || typeof url !== 'string') return res.status(400).json({ error: 'url required' });
-    try {
-      const apiKey = process.env.PAGESPEED_API_KEY || '';
-      const endpoint = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=mobile${apiKey ? '&key=' + apiKey : ''}`;
-      const r = await fetch(endpoint, { signal: AbortSignal.timeout(20000) });
-      const data = await r.json() as any;
-      if (!r.ok) return res.status(r.status).json({ error: data.error?.message || 'PageSpeed API error' });
-      const cats = data.lighthouseResult?.categories || {};
-      const audits = data.lighthouseResult?.audits || {};
-      return res.json({
-        performance: Math.round((cats.performance?.score || 0) * 100),
-        accessibility: Math.round((cats.accessibility?.score || 0) * 100),
-        seo: Math.round((cats.seo?.score || 0) * 100),
-        bestPractices: Math.round((cats['best-practices']?.score || 0) * 100),
-        fcp: audits['first-contentful-paint']?.displayValue,
-        lcp: audits['largest-contentful-paint']?.displayValue,
-        cls: audits['cumulative-layout-shift']?.displayValue,
-        tbt: audits['total-blocking-time']?.displayValue,
-      });
-    } catch (err: any) {
-      return res.status(500).json({ error: err.message || 'Failed to analyze' });
-    }
-  });
-
-  // 12.1 — Frontend error ingestion endpoint
-  app.post('/api/logs/error', (req, res) => {
-    try {
-      const { message, source, line, col, stack, url, ts, type } = req.body || {};
-      const ip = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || '').split(',')[0].trim();
-      console.error('[CLIENT_ERROR]', JSON.stringify({ message, source, line, col, stack, url, ts, type, ip }));
-      res.status(204).end();
-    } catch {
-      res.status(204).end();
-    }
-  });
-
-  // 12.2 — User analytics event ingestion endpoint
-  app.post('/api/analytics/event', (req, res) => {
-    try {
-      const { event, props, userId, sessionId, ts } = req.body || {};
-      if (!event) return res.status(400).json({ error: 'event required' });
-      console.log('[ANALYTICS]', JSON.stringify({ event, props, userId: userId || 'anon', sessionId, ts: ts || Date.now() }));
-      res.status(204).end();
-    } catch {
-      res.status(204).end();
-    }
-  });
+  // Telemetry / analysis routes — extracted to src/server/routes/telemetry.ts (Phase 1).
+  registerTelemetryRoutes(app);
 
   // Final diagnostic and server start
 

@@ -243,6 +243,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [suggestPDF, setSuggestPDF] = useState(false);
+  const [lightbox, setLightbox] = useState<{ src: string; name: string } | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -490,6 +491,21 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
   return (
     <div className="flex h-full bg-[#0a0f1a] overflow-hidden">
+      {/* In-chat image lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[200] bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <div className="relative max-w-[95vw] max-h-[92vh] flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
+            <img src={lightbox.src} alt={lightbox.name} className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain" />
+            <p className="text-[10px] text-white/60 font-mono truncate max-w-full">{lightbox.name}</p>
+            <button onClick={() => setLightbox(null)} className="absolute -top-3 -right-3 w-8 h-8 bg-white/10 hover:bg-white/25 rounded-full flex items-center justify-center text-white transition-colors border border-white/20">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Left Panel ──────────────────────────────────────────────────── */}
       {showPatientPanel && (
@@ -659,16 +675,18 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                   <div className="mb-2 pb-2 border-b border-white/10">
                     {msg.attachedFile.type.startsWith('image/') && msg.attachedFile.dataUrl ? (
                       <button
-                        onClick={() => { const w = window.open(); if (w) { w.document.write(`<img src="${msg.attachedFile!.dataUrl}" style="max-width:100%;height:auto"/>`); w.document.title = msg.attachedFile!.name; } }}
+                        onClick={() => setLightbox({ src: msg.attachedFile!.dataUrl!, name: msg.attachedFile!.name })}
                         className="group relative focus:outline-none"
-                        title={`${msg.attachedFile.name} — click to zoom`}
+                        title={msg.attachedFile.name}
                       >
                         <img
                           src={msg.attachedFile.dataUrl}
                           alt={msg.attachedFile.name}
-                          className="max-h-48 rounded-xl object-cover border border-white/20 group-hover:opacity-90 transition-opacity cursor-zoom-in"
+                          className="w-16 h-16 rounded-lg object-cover border border-white/20 group-hover:brightness-110 transition-all cursor-zoom-in"
                         />
-                        <span className="absolute bottom-1 left-1 right-1 text-[9px] text-white/80 bg-black/50 rounded px-1 py-0.5 truncate font-mono hidden group-hover:block">{msg.attachedFile.name}</span>
+                        <div className="absolute inset-0 rounded-lg bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                          <Navigation className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow rotate-45" />
+                        </div>
                       </button>
                     ) : (
                       <div className="flex items-center gap-2">

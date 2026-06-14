@@ -4092,34 +4092,46 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           }
           const visionConfig: any = {};
           if (systemPrompt) visionConfig.systemInstruction = systemPrompt;
+          // gemini-2.0-flash: fast vision, no thinking delay (2.5-flash can take 5-10 min on images)
+          const VISION_MODEL = 'gemini-2.0-flash';
+          const visionCfg: any = { ...visionConfig, thinkingConfig: { thinkingBudget: 0 } };
           if (req.body.stream === true) {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
             res.setHeader('X-Accel-Buffering', 'no');
             res.flushHeaders();
-            const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 20000);
+            const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 15000);
+            const visionAc = new AbortController();
+            const visionTimeout = setTimeout(() => visionAc.abort(), 28000); // 28s hard cap
+            req.on('close', () => visionAc.abort());
             try {
               const stream = await ai.models.generateContentStream({
-                model: 'gemini-2.5-flash',
+                model: VISION_MODEL,
                 contents: [{ parts }],
-                config: Object.keys(visionConfig).length ? visionConfig : undefined,
+                config: Object.keys(visionCfg).length ? visionCfg : undefined,
               });
               for await (const chunk of stream) {
+                if (visionAc.signal.aborted) break;
                 const text = chunk.text || '';
                 if (text && !res.writableEnded) res.write(`data: ${JSON.stringify({ c: text })}\n\n`);
               }
             } finally {
+              clearTimeout(visionTimeout);
               clearInterval(heartbeat);
             }
             if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
           } else {
-            const result = await ai.models.generateContent({
-              model: 'gemini-2.5-flash',
-              contents: [{ parts }],
-              config: Object.keys(visionConfig).length ? visionConfig : undefined,
-            });
-            return res.json({ reply: result.text || '' });
+            const visionAc2 = new AbortController();
+            const t2 = setTimeout(() => visionAc2.abort(), 28000);
+            try {
+              const result = await ai.models.generateContent({
+                model: VISION_MODEL,
+                contents: [{ parts }],
+                config: Object.keys(visionCfg).length ? visionCfg : undefined,
+              });
+              return res.json({ reply: result.text || '' });
+            } finally { clearTimeout(t2); }
           }
           return;
         } catch (visionErr: any) {
@@ -6214,9 +6226,9 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       if (sdaGeminiKey) sdaRacers.push(async (signal) => {
         const { GoogleGenAI } = await import('@google/genai');
         const contents = buildGeminiContents();
-        for (const m of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+        for (const m of ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']) {
           try {
-            const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, systemInstruction: SDA_SYSTEM, contents });
+            const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, systemInstruction: SDA_SYSTEM, contents, config: { thinkingConfig: { thinkingBudget: 0 } } });
             const t = r.text || '';
             if (t.trim()) return t;
           } catch (e: any) { if (signal.aborted) throw e; console.warn(`[SDA] Gemini ${m}: ${e.message}`); }

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff } from 'lucide-react';
+import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -303,6 +303,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const kbHeight = useKeyboardHeight();
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [lightbox, setLightbox] = useState<{ src: string; name: string } | null>(null);
 
   // Fix 1: reset textarea height when input is cleared after send
   useEffect(() => {
@@ -673,6 +674,28 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
 
   return (
     <div className="flex flex-col h-full min-h-0 max-h-full bg-[var(--theme-bg)] transition-colors duration-500 overflow-hidden relative">
+      {/* In-chat image lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[200] bg-black/90 flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setLightbox(null)}
+        >
+          <div className="relative max-w-[95vw] max-h-[92vh] flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
+            <img
+              src={lightbox.src}
+              alt={lightbox.name}
+              className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain"
+            />
+            <p className="text-[10px] text-white/60 font-mono truncate max-w-full">{lightbox.name}</p>
+            <button
+              onClick={() => setLightbox(null)}
+              className="absolute -top-3 -right-3 w-8 h-8 bg-white/10 hover:bg-white/25 rounded-full flex items-center justify-center text-white transition-colors border border-white/20"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
       {isExpanded && (
         <div className="fixed inset-0 z-[100] bg-[var(--theme-bg)] flex flex-col p-4 md:p-6 animate-in fade-in zoom-in-95 duration-200">
           <div className="flex justify-between items-center mb-4">
@@ -877,26 +900,25 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                     ? "bg-indigo-600 text-white rounded-tr-none"
                     : "bg-[#161b22] text-[#c9d1d9] border border-white/5 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
                 )}>
-                  {/* Attachment image previews */}
+                  {/* Attachment image previews — compact grid */}
                   {msg.attachments && msg.attachments.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mb-2">
+                    <div className="flex flex-wrap gap-1.5 mb-2">
                       {msg.attachments.map((att, ai) => (
                         att.type.startsWith('image/') && att.dataUrl ? (
                           <button
                             key={ai}
-                            onClick={() => {
-                              const win = window.open();
-                              if (win) { win.document.write(`<img src="${att.dataUrl}" style="max-width:100%;height:auto" />`); win.document.title = att.name; }
-                            }}
+                            onClick={() => setLightbox({ src: att.dataUrl!, name: att.name })}
                             className="relative group shrink-0 focus:outline-none"
-                            title={`${att.name} — click to zoom`}
+                            title={att.name}
                           >
                             <img
                               src={att.dataUrl}
                               alt={att.name}
-                              className="max-h-48 max-w-[220px] rounded-xl object-cover border border-white/20 group-hover:opacity-90 transition-opacity cursor-zoom-in"
+                              className="w-16 h-16 rounded-lg object-cover border border-white/20 group-hover:brightness-110 transition-all cursor-zoom-in"
                             />
-                            <span className="absolute bottom-1 left-1 right-1 text-[9px] text-white/80 bg-black/50 rounded px-1 py-0.5 truncate font-mono hidden group-hover:block">{att.name}</span>
+                            <div className="absolute inset-0 rounded-lg bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                              <Maximize2 className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow" />
+                            </div>
                           </button>
                         ) : (
                           <div key={ai} className="flex items-center gap-1.5 px-2 py-1 bg-white/10 rounded-lg text-[10px] font-bold">

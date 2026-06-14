@@ -3,6 +3,13 @@ import express from 'express';
 import crypto from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
+// ─── Legacy embedded API key (sentinel + historical fallback) ────────────────
+// SECURITY: This Google API key was previously hardcoded inline in 3 places.
+// It is centralized here so it can be rotated/removed in one spot.
+// ACTION REQUIRED: rotate this key in Google Cloud and set GEMINI_API_KEY via env.
+// Override at runtime with LEGACY_EMBEDDED_API_KEY to avoid shipping it in source.
+const LEGACY_EMBEDDED_API_KEY = process.env.LEGACY_EMBEDDED_API_KEY || 'AIzaSyDOIA2mdmdDyVh4hYhEsCMD3zOnqLQ0Nxg';
+
 // Traceability Infrastructure
 export interface TraceContext {
   requestId: string;
@@ -102,7 +109,7 @@ try {
     envSummary[k] = {
       exists: !!val,
       length: val ? val.length : 0,
-      isPlaceholder: val === 'AIzaSyDOIA2mdmdDyVh4hYhEsCMD3zOnqLQ0Nxg',
+      isPlaceholder: val === LEGACY_EMBEDDED_API_KEY,
       prefix: val ? val.substring(0, Math.min(6, val.length)) : ''
     };
   });
@@ -683,7 +690,7 @@ setInterval(() => {
     if (!key) return true;
     const k = key.trim();
     if (
-      k === 'AIzaSyDOIA2mdmdDyVh4hYhEsCMD3zOnqLQ0Nxg' || 
+      k === LEGACY_EMBEDDED_API_KEY ||
       k.startsWith('MY_') || 
       k === 'undefined' || 
       k === 'null' || 
@@ -723,7 +730,7 @@ setInterval(() => {
     
     console.log(`[DEBUG_AUTH] Provider: ${provider}. System key found: ${!!envKey}`);
     
-    if (envKey && (!isPlaceholder(envKey, true, provider) || envKey === 'AIzaSyDOIA2mdmdDyVh4hYhEsCMD3zOnqLQ0Nxg')) { 
+    if (envKey && (!isPlaceholder(envKey, true, provider) || envKey === LEGACY_EMBEDDED_API_KEY)) { 
       envKey = envKey.trim();
       const masked = envKey.substring(0, 6) + '...' + envKey.substring(envKey.length - 4);
       console.log(`[AUTH] Using SYSTEM ${p} key (Fallback): ${masked}`);

@@ -9,6 +9,9 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "gcloud:build": "gcloud builds submit --config=cloudbuild.yaml .",
     "gcloud:deploy": "gcloud run deploy navbharat-cloud-run --image=gcr.io/gcp-navbharat-core/navbharat-cloud-run:latest --platform=managed --region=asia-southeast1 --port=8080 --set-env-vars=NODE_ENV=production --allow-unauthenticated"
   },
@@ -60,6 +63,7 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "vitest": "^2.1.9"
   }
 }

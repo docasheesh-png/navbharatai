@@ -4610,7 +4610,7 @@ Response Format:
     .slice(0, 18000);
 
   app.post('/api/pro-build', async (req: any, res: any) => {
-    let { message, currentFiles, isEdit, framework, history, fileAttachments } = req.body;
+    let { message, currentFiles, isEdit, framework, history, fileAttachments, allFiles } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
 
     // Process file attachments: text files decoded and prepended; images described via vision AI
@@ -4672,20 +4672,35 @@ Response Format:
 
     // Detect edit mode: explicit flag OR has currentFiles with substantial content
     const hasCurrentFiles = currentFiles &&
-      typeof currentFiles.html === 'string' && currentFiles.html.length > 200;
+      (typeof currentFiles.html === 'string' && currentFiles.html.length > 50) ||
+      (allFiles && typeof allFiles === 'object' && Object.keys(allFiles).length > 0);
     const useEdit = isEdit === true || (hasCurrentFiles && isEdit !== false);
+
+    // Build allFiles context string so edit engine knows full workspace
+    let allFilesContext = '';
+    if (allFiles && typeof allFiles === 'object') {
+      const fileNames = Object.keys(allFiles);
+      if (fileNames.length > 0) {
+        const fileSnippets = fileNames.slice(0, 40).map(name => {
+          const content = String(allFiles[name] || '').slice(0, 3000);
+          return `\n\n### ${name}\n\`\`\`\n${content}${String(allFiles[name] || '').length > 3000 ? '\n...[truncated]' : ''}\n\`\`\``;
+        }).join('');
+        allFilesContext = `\n\n[WORKSPACE — ${fileNames.length} files total. Edit ONLY what the user requested; all other files will be preserved automatically]${fileSnippets}`;
+      }
+    }
 
     try {
       let result;
       if (useEdit && hasCurrentFiles) {
         // ── ITERATIVE EDIT PATH ──────────────────────────────────────────────
         const safeFiles = {
-          html: sanitizeUserHtml(currentFiles.html || ''),
-          js:   (currentFiles.js  || '').slice(0, 250000),
-          css:  (currentFiles.css || '').slice(0, 100000),
+          html: sanitizeUserHtml((currentFiles?.html || allFiles?.['index.html'] || allFiles?.[Object.keys(allFiles || {}).find((k: string) => k.endsWith('.html')) || ''] || '')),
+          js:   ((currentFiles?.js  || allFiles?.['script.js'] || allFiles?.[Object.keys(allFiles || {}).find((k: string) => k.match(/\.(js|ts|jsx|tsx)$/) && !k.endsWith('.d.ts')) || ''] || '')).slice(0, 250000),
+          css:  ((currentFiles?.css || allFiles?.['style.css']  || allFiles?.[Object.keys(allFiles || {}).find((k: string) => k.match(/\.(css|scss)$/)) || ''] || '')).slice(0, 100000),
         };
+        const editMessage = allFilesContext ? message + allFilesContext : message;
         result = await editAppEngine(
-          message,
+          editMessage,
           safeFiles,
           (p) => send({ type: 'progress', stage: p.stage, step: p.step, total: p.total, detail: p.detail, isEdit: true }),
           (fileName, content) => send({ type: 'file', fileName, content }),

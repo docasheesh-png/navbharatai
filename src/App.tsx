@@ -3089,9 +3089,9 @@ ${buildLanguageRule(preferredLanguage)}`;
       if (fileCount === 0) throw new Error('No files extracted from ZIP — it may be empty or contain only binaries.');
 
       // Final state — ensure everything is synced.
-      // updatePreview builds the correct runnable doc (handles React/TS source apps too),
-      // so we never set raw index.html as generatedCode (which would blank the preview).
       setFiles(loadedFiles as any);
+      setHasGeneratedCode(true);  // ← marks workspace as occupied so next prompt = edit, not rebuild
+      setIsAppBuilt(true);
       setTimeout(() => updatePreview(loadedFiles as any), 100);
       const generatedFilesObj = Object.fromEntries(
         Object.entries(loadedFiles).map(([k, v]) => [k, { content: v, expanded: false }])
@@ -3214,23 +3214,39 @@ ${buildLanguageRule(preferredLanguage)}`;
 
       try {
         // Push current version to undo stack before building
-        if (hasGeneratedCode && Object.keys(files).length > 0) {
+        if (Object.keys(files).filter(k => !k.startsWith('.')).length > 0) {
           setBuildVersionStack(prev => [
             { files: { ...files }, timestamp: new Date().toISOString(), request: messageToSend.slice(0, 100) },
             ...prev.slice(0, 4),
           ]);
         }
 
-        // Detect React framework intent
+        // Detect React framework intent — only when workspace is truly empty
         const reactKeywords = /\breact\b|\bjsx\b|\busestate\b|\bhooks?\b|\bcomponent\b/i;
-        const isReactRequest = !hasGeneratedCode && reactKeywords.test(messageToSend);
+        const workspaceHasFiles = hasGeneratedCode || Object.keys(files).filter(k => !k.startsWith('.')).length > 2;
+        const isReactRequest = !workspaceHasFiles && reactKeywords.test(messageToSend);
 
-        const htmlFile = files['index.html'] || '';
-        const cssFile = files['style.css'] || files['styles.css'] || files['main.css'] || '';
-        const jsFile = files['script.js'] || files['app.js'] || files['main.js'] || files['index.js'] || '';
+        // Collect the primary entry-point files for the edit engine
+        const htmlKey = Object.keys(files).find(k => k.endsWith('.html')) || 'index.html';
+        const cssKey  = Object.keys(files).find(k => k.match(/\.(css|scss|sass)$/)) || 'style.css';
+        const jsKey   = Object.keys(files).find(k => k.match(/\.(js|ts|jsx|tsx)$/) && !k.endsWith('.d.ts')) || 'script.js';
+        const htmlFile = files[htmlKey] || files['index.html'] || '';
+        const cssFile  = files[cssKey]  || files['style.css']  || '';
+        const jsFile   = files[jsKey]   || files['script.js']  || '';
 
-        // Always use edit path if code exists — no keyword detection (works for any language)
-        const isEditRequest = !isReactRequest && hasGeneratedCode && htmlFile.length > 200;
+        // Edit if workspace has ANY files — not just when hasGeneratedCode flag is set
+        const isEditRequest = !isReactRequest && workspaceHasFiles;
+
+        // Collect ALL text/code files from workspace to send as context (cap 200 KB total)
+        const TEXT_EXTS = /\.(html|htm|css|scss|sass|js|ts|jsx|tsx|json|md|txt|py|php|yaml|yml|xml|svg|vue|svelte)$/i;
+        const allTextFiles: Record<string, string> = {};
+        let wsBytes = 0;
+        for (const [k, v] of Object.entries(files)) {
+          if (TEXT_EXTS.test(k) && typeof v === 'string' && wsBytes + v.length < 200_000) {
+            allTextFiles[k] = v;
+            wsBytes += v.length;
+          }
+        }
 
         // Full conversation history as structured messages (last 20, up to 800 chars each)
         const conversationHistory = proMessages.slice(-20).map((m: any) => ({
@@ -3250,6 +3266,7 @@ ${buildLanguageRule(preferredLanguage)}`;
             ...(isEditRequest ? {
               isEdit: true,
               currentFiles: { html: htmlFile, css: cssFile, js: jsFile },
+              allFiles: allTextFiles,   // complete workspace — server uses as edit context
             } : {}),
           }),
         });
@@ -3305,8 +3322,13 @@ ${buildLanguageRule(preferredLanguage)}`;
                 }));
 
                 setTimeout(() => {
-                  setFiles(evt.files);
-                  updatePreview(evt.files);
+                  // MERGE: preserve all existing workspace files (ZIP assets, fonts, etc.)
+                  // Only the files the AI returned get overwritten; everything else stays.
+                  setFiles((prev: any) => {
+                    const merged = { ...prev, ...evt.files };
+                    return merged;
+                  });
+                  updatePreview({ ...files, ...evt.files });
                   setIsAppBuilt(true);
                   setHasGeneratedCode(true);
                   saveVersionSnapshot(messageToSend, evt.files);

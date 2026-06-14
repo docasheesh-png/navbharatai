@@ -3245,6 +3245,16 @@ ${buildLanguageRule(preferredLanguage)}`;
         const workspaceHasFiles = hasGeneratedCode || Object.keys(files).filter(k => !k.startsWith('.')).length > 2;
         const isReactRequest = !workspaceHasFiles && reactKeywords.test(messageToSend);
 
+        // Detect "fresh build" requests — user wants a BRAND NEW app even when workspace has old files.
+        // Signals: starts with build verb + has app noun + long (detailed requirements) + no edit references.
+        const hasBuildVerb = /^(build|create|make|generate|develop|design)\s+\w/i.test(messageToSend.trim());
+        const hasAppNoun = /\b(app|application|game|website|tool|dashboard|calculator|quiz|generator|system|platform|portal)\b/i.test(messageToSend);
+        const hasEditRef = /\b(the existing|my app|this app|above app|current app|already built|add to|update the|change the|fix the|fix this)\b/i.test(messageToSend.slice(0, 80));
+        const hasMultipleRequirements = (messageToSend.match(/^\d+\.\s+/gm) || []).length >= 3; // numbered list with 3+ items
+        const isFreshBuildRequest = workspaceHasFiles &&
+          (hasBuildVerb || hasMultipleRequirements) && hasAppNoun && !hasEditRef &&
+          messageToSend.length > 80;
+
         // Collect the primary entry-point files for the edit engine
         const htmlKey = Object.keys(files).find(k => k.endsWith('.html')) || 'index.html';
         const cssKey  = Object.keys(files).find(k => k.match(/\.(css|scss|sass)$/)) || 'style.css';
@@ -3253,8 +3263,8 @@ ${buildLanguageRule(preferredLanguage)}`;
         const cssFile  = files[cssKey]  || files['style.css']  || '';
         const jsFile   = files[jsKey]   || files['script.js']  || '';
 
-        // Edit if workspace has ANY files — not just when hasGeneratedCode flag is set
-        const isEditRequest = !isReactRequest && workspaceHasFiles;
+        // Edit if workspace has files AND it's not a fresh-build request
+        const isEditRequest = !isReactRequest && workspaceHasFiles && !isFreshBuildRequest;
 
         // Collect ALL text/code files from workspace to send as context (cap 200 KB total)
         const TEXT_EXTS = /\.(html|htm|css|scss|sass|js|ts|jsx|tsx|json|md|txt|py|php|yaml|yml|xml|svg|vue|svelte)$/i;

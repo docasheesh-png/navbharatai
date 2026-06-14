@@ -4716,6 +4716,21 @@ Response Format:
           js:   ((currentFiles?.js  || allFiles?.['script.js'] || allFiles?.[Object.keys(allFiles || {}).find((k: string) => k.match(/\.(js|ts|jsx|tsx)$/) && !k.endsWith('.d.ts')) || ''] || '')).slice(0, 250000),
           css:  ((currentFiles?.css || allFiles?.['style.css']  || allFiles?.[Object.keys(allFiles || {}).find((k: string) => k.match(/\.(css|scss)$/)) || ''] || '')).slice(0, 100000),
         };
+
+        // Server-side guard: if the existing HTML is too short/placeholder AND message looks
+        // like a full new build, route to buildApp instead of editApp to avoid broken rewrites.
+        const isPlaceholderWorkspace = safeFiles.html.length < 400;
+        const looksFreshBuild = /\b(build|create|make|generate)\b/i.test(message) &&
+          /\b(app|game|website|tool|dashboard|calculator|quiz|generator)\b/i.test(message);
+        if (isPlaceholderWorkspace && looksFreshBuild) {
+          console.log('[PRO-BUILD] Placeholder workspace + fresh-build request detected → routing to buildApp');
+          const buildMsg = historyContext ? `[CONVERSATION HISTORY]\n${historyContext}\n\n[BUILD REQUEST]\n${message}` : message;
+          result = await buildAppEngine(
+            buildMsg,
+            (p) => send({ type: 'progress', stage: p.stage, step: p.step, total: p.total, detail: p.detail }),
+            (fileName, content) => send({ type: 'file', fileName, content })
+          );
+        } else {
         const editMessage = allFilesContext ? message + allFilesContext : message;
         result = await editAppEngine(
           editMessage,
@@ -4724,6 +4739,7 @@ Response Format:
           (fileName, content) => send({ type: 'file', fileName, content }),
           historyContext
         );
+        } // end else (non-placeholder edit path)
       } else if (framework === 'react') {
         // ── REACT BUILD PATH ─────────────────────────────────────────────────
         const reactMessage = historyContext

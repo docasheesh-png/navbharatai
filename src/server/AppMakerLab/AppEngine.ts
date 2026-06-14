@@ -2018,6 +2018,16 @@ export async function editApp(
   const updated = { ...currentFiles };
 
   try {
+    // Safety valve: if workspace is essentially empty/placeholder but request describes a
+    // full new app, hand off to buildApp immediately instead of trying to surgically edit nothing.
+    const isWorkspaceThin = (currentFiles.html || '').length < 400 && (currentFiles.js || '').length < 200;
+    const isBuildRequest = /\b(build|create|make|generate)\b/i.test(request) &&
+      /\b(app|game|website|tool|dashboard|calculator|quiz|generator|system)\b/i.test(request);
+    if (isWorkspaceThin && isBuildRequest) {
+      console.log('[SurgicalEditor] Placeholder workspace + build request → delegating to buildApp');
+      return buildApp(request, onProgress, onFileGenerated);
+    }
+
     // Phase 1: Pre-scan — X-ray the app before touching anything
     report('Diagnosing', 1, TOTAL, 'Scanning app health...');
     const preIssues = validateDOMConsistency(currentFiles.html, currentFiles.js);

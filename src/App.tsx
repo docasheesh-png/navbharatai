@@ -2158,6 +2158,9 @@ ${buildLanguageRule(preferredLanguage)}`;
   const PREVIEW_BOOTSTRAP = `
 (function(){
   var FILES=window.__FILES||{};var ENTRY=window.__ENTRY||'';var IMAP=window.__IMAP||{};var ESM='https://esm.sh/';
+  // Polyfill import.meta.env (Vite) and process.env (Node/CRA) so apps don't throw on startup
+  if(typeof process==='undefined')window.process={env:{NODE_ENV:'production'}};
+  window.__importMetaEnv__=window.__importMetaEnv__||{};
   function fail(m){if(window.__nbShowError)window.__nbShowError(m);}
   if(typeof Babel==='undefined'){fail('Could not load the preview compiler (network blocked?).');return;}
   function dirname(p){var i=p.lastIndexOf('/');return i<0?'':p.slice(0,i);}
@@ -2180,6 +2183,10 @@ ${buildLanguageRule(preferredLanguage)}`;
     if(/\\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/.test(path)){cache[path]={exports:{default:src,__esModule:true}};return cache[path].exports;}
     var isTs=/\\.tsx?$/.test(path),isTsx=/\\.tsx$/.test(path);
     var presets=isTs?[['react',{runtime:'automatic'}],['typescript',{isTSX:isTsx,allExtensions:true}]]:[['react',{runtime:'automatic'}]];
+    // Replace import.meta.* — not valid inside new Function() (non-module context)
+    src=src.replace(/import\\.meta\\.env\\b/g,'(window.__importMetaEnv__||{})');
+    src=src.replace(/import\\.meta\\.url\\b/g,'location.href');
+    src=src.replace(/import\\.meta\\b/g,'{env:(window.__importMetaEnv__||{}),url:location.href}');
     var code;
     try{code=Babel.transform(src,{filename:path,presets:presets,plugins:['transform-modules-commonjs'],sourceType:'module'}).code;}
     catch(e){throw new Error('Compile '+path+': '+e.message);}

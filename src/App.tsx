@@ -10,7 +10,7 @@ import {
   FolderOpen, Trash2, Plus, FilePlus, FolderPlus, Save, MoreHorizontal, Rocket, LayoutDashboard, Database, 
   Github, HardDrive, RefreshCw, Menu, History, Clock, Smartphone, ThumbsUp, ThumbsDown, Copy, Check,
   Link as LinkIcon, List, GitCommit, Share2, Box, Folder, UploadCloud, ChevronLeft,
-  Edit2, Camera, Upload, Image as ImageIcon, Info, LogIn,
+  Edit2, Camera, Upload, Download, Image as ImageIcon, Info, LogIn,
   GitFork, GitMerge, History as HistoryIcon, UserPlus, LogOut, CheckCircle2, AlertCircle, RotateCcw,
   Gift, Palette, TestTube,
   Mic, BarChart2, Languages, Layout, TrendingUp,
@@ -114,6 +114,9 @@ import { MessageContent } from './components/MessageContent';
 import { HomeView } from './components/home/HomeView';
 import { GitHubService } from './lib/githubService';
 import { trackEvent } from './lib/analytics';
+import { saveFile, saveAllFiles, loadAllFiles, clearWorkspace } from './lib/storage';
+import { ZipSizeModal } from './components/ide/ZipSizeModal';
+import type { ZipSizeModalVariant } from './components/ide/ZipSizeModal';
 // AgentMode → re-exported from ./types
 
 // Large keys that can be evicted when localStorage is nearly full.
@@ -1003,6 +1006,9 @@ export default function App() {
   });
   const [activeFile, setActiveFile] = useState<string>('index.html');
   const [previewHistory, setPreviewHistory] = useState<{ id: string; label: string; ts: Date; html: string }[]>([]);
+  const [fileUploadConflict, setFileUploadConflict] = useState<{ file: File; existingKey: string; isZip: boolean } | null>(null);
+  const [zipSizeModal, setZipSizeModal] = useState<{ variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null>(null);
+  const filesUploadRef = useRef<HTMLInputElement>(null);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isDeployed, setIsDeployed] = useState(false);
   const [deployUrl, setDeployUrl] = useState('');
@@ -1031,6 +1037,20 @@ export default function App() {
       safeLS('navbharat_last_app', toStore);
     }
   }, [generatedCode, hasGeneratedCode]);
+
+  // Storage: restore persisted workspace files on mount
+  useEffect(() => {
+    let cancelled = false;
+    loadAllFiles()
+      .then((persisted) => {
+        if (cancelled || Object.keys(persisted).length === 0) return;
+        setFiles(persisted as any);
+        setHasGeneratedCode(true);
+        setIsAppBuilt(true);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persist pro chat history so "Edit with AI" resumes the last conversation
   useEffect(() => {
@@ -1426,13 +1446,15 @@ export default function App() {
       setInput('');
     }
 
-    // When pro chat is closed, wipe preview state so old app doesn't bleed into next session
+    // When pro chat is closed, wipe workspace + preview so old app doesn't bleed into next session
     if (view === 'nbi_pro_chat') {
+      setFiles({});
+      clearWorkspace().catch(() => {});
       setGeneratedCode('<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>');
       setHasGeneratedCode(false);
       setIsAppBuilt(false);
     }
-  }, [activeView, toggleTab, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt]);
+  }, [activeView, toggleTab, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt, setFiles]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const mainContentRef = useRef<HTMLDivElement>(null);
@@ -3101,6 +3123,7 @@ ${buildLanguageRule(preferredLanguage)}`;
 
       // Final state — ensure everything is synced.
       setFiles(loadedFiles as any);
+      saveAllFiles(loadedFiles).catch(() => {}); // persist to IndexedDB/Cache API
       setHasGeneratedCode(true);  // ← marks workspace as occupied so next prompt = edit, not rebuild
       setIsAppBuilt(true);
       setTimeout(() => updatePreview(loadedFiles as any), 100);
@@ -3146,6 +3169,15 @@ ${buildLanguageRule(preferredLanguage)}`;
       f.type === 'application/x-zip-compressed'
     );
     if (zipFile) {
+      const sizeMB = zipFile.size / (1024 * 1024);
+      if (sizeMB > 500) {
+        setZipSizeModal({ variant: 'too-large', fileName: zipFile.name, fileSizeMB: sizeMB });
+        return;
+      }
+      if (sizeMB > 50) {
+        setZipSizeModal({ variant: 'github', fileName: zipFile.name, fileSizeMB: sizeMB });
+        return;
+      }
       await handleZipImport(zipFile, messageToSend);
       return;
     }
@@ -3543,6 +3575,99 @@ ${buildLanguageRule(preferredLanguage)}`;
       addToast('Download failed — try again', 'error');
     }
   }, [addToast]);
+
+  const handleFilesUpload = useCallback(async (selectedFile: File) => {
+    const isZip = selectedFile.name.toLowerCase().endsWith('.zip') ||
+      selectedFile.type === 'application/zip' ||
+      selectedFile.type === 'application/x-zip-compressed';
+
+    if (isZip) {
+      const sizeMB = selectedFile.size / (1024 * 1024);
+      if (sizeMB > 500) {
+        setZipSizeModal({ variant: 'too-large', fileName: selectedFile.name, fileSizeMB: sizeMB });
+        return;
+      }
+      if (sizeMB > 50) {
+        setZipSizeModal({ variant: 'github', fileName: selectedFile.name, fileSizeMB: sizeMB });
+        return;
+      }
+      const hasExisting = Object.keys(files).filter(k => !k.startsWith('.')).length > 0;
+      if (hasExisting) {
+        setFileUploadConflict({ file: selectedFile, existingKey: '', isZip: true });
+      } else {
+        handleZipImport(selectedFile);
+      }
+      return;
+    }
+
+    const existingKey = Object.keys(files).find(k => k === selectedFile.name || k.endsWith('/' + selectedFile.name));
+    const isText = /\.(html|htm|css|scss|js|ts|jsx|tsx|json|md|txt|xml|svg|yaml|yml|py|php|vue|svelte)$/i.test(selectedFile.name);
+
+    const readFile = (): Promise<string> => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      if (isText) {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsText(selectedFile);
+      } else {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(selectedFile);
+      }
+    });
+
+    try {
+      const content = await readFile();
+      if (existingKey) {
+        setFileUploadConflict({ file: selectedFile, existingKey, isZip: false });
+        setFiles(prev => ({ ...prev, [`__pending__${selectedFile.name}`]: content }));
+      } else {
+        setFiles(prev => ({ ...prev, [selectedFile.name]: content }));
+        setHasGeneratedCode(true);
+        setIsAppBuilt(true);
+        saveFile(selectedFile.name, content).catch(() => {});
+        addToast(`${selectedFile.name} added ✓`, 'success');
+      }
+    } catch {
+      addToast('File read failed — try again', 'error');
+    }
+  }, [files, addToast, handleZipImport]);
+
+  const resolveFileConflict = useCallback(async (choice: 'replace' | 'merge') => {
+    if (!fileUploadConflict) return;
+    const { file, existingKey, isZip } = fileUploadConflict;
+    setFileUploadConflict(null);
+
+    if (isZip) {
+      if (choice === 'replace') {
+        setFiles({});
+        clearWorkspace().catch(() => {});
+        setHasGeneratedCode(false);
+        setIsAppBuilt(false);
+        setTimeout(() => handleZipImport(file), 50);
+      } else {
+        handleZipImport(file);
+      }
+      return;
+    }
+
+    const pendingContent = files[`__pending__${file.name}`] || '';
+    setFiles(prev => {
+      const next = { ...prev };
+      delete next[`__pending__${file.name}`];
+      if (choice === 'replace') {
+        next[existingKey] = pendingContent;
+      } else {
+        const parts = file.name.split('.');
+        const newName = parts.length > 1
+          ? `${parts.slice(0, -1).join('.')}_new.${parts[parts.length - 1]}`
+          : `${file.name}_new`;
+        next[newName] = pendingContent;
+      }
+      return next;
+    });
+    addToast(`${file.name} ${choice === 'replace' ? 'replaced' : 'added as ' + file.name.replace(/(\.[^.]+)$/, '_new$1')} ✓`, 'success');
+  }, [fileUploadConflict, files, addToast, handleZipImport]);
 
   const handleUndoBuild = useCallback(() => {
     if (buildVersionStack.length === 0) return;
@@ -7537,14 +7662,67 @@ ${pending.map(p => `  - ${p}`).join('\n')}
 
           {activeView === 'files' && (
             <div className="flex-1 h-full overflow-hidden bg-[#0d1117] flex flex-col">
+              {/* ZIP size warning modal */}
+              {zipSizeModal && (
+                <ZipSizeModal
+                  variant={zipSizeModal.variant}
+                  fileName={zipSizeModal.fileName}
+                  fileSizeMB={zipSizeModal.fileSizeMB}
+                  onClose={() => setZipSizeModal(null)}
+                />
+              )}
+              {/* Upload conflict popup */}
+              {fileUploadConflict && (
+                <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" onClick={() => setFileUploadConflict(null)}>
+                  <div className="bg-[#161b22] border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+                    <p className="text-[13px] font-black text-white mb-1">
+                      {fileUploadConflict.isZip ? 'ZIP Upload' : `File Conflict: ${fileUploadConflict.file.name}`}
+                    </p>
+                    <p className="text-[11px] text-[#8b949e] mb-5">
+                      {fileUploadConflict.isZip
+                        ? 'Workspace already has files. Replace everything or merge new files alongside existing ones?'
+                        : `"${fileUploadConflict.existingKey}" already exists. Replace it or keep both versions?`}
+                    </p>
+                    <div className="flex gap-3">
+                      <button onClick={() => resolveFileConflict('replace')} className="flex-1 py-2.5 rounded-xl bg-red-600/20 border border-red-500/30 text-red-400 text-[11px] font-black hover:bg-red-600/30 transition-all active:scale-95">Replace</button>
+                      <button onClick={() => resolveFileConflict('merge')} className="flex-1 py-2.5 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 text-[11px] font-black hover:bg-indigo-600/30 transition-all active:scale-95">Merge</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {/* Hidden file input */}
+              <input
+                ref={filesUploadRef}
+                type="file"
+                className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) handleFilesUpload(f); e.target.value = ''; }}
+              />
               <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5 bg-[#161b22]">
                 <FolderOpen className="w-4 h-4 text-indigo-400" />
                 <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Project Files</span>
-                {hasGeneratedCode && (
-                  <span className="ml-auto text-[8px] text-emerald-400 font-black uppercase tracking-widest">
-                    {Object.keys(files).length} files
-                  </span>
-                )}
+                <div className="ml-auto flex items-center gap-2">
+                  {hasGeneratedCode && (
+                    <span className="text-[8px] text-emerald-400 font-black uppercase tracking-widest mr-1">
+                      {Object.keys(files).filter(k => !k.startsWith('__pending__')).length} files
+                    </span>
+                  )}
+                  <button
+                    onClick={() => filesUploadRef.current?.click()}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[9px] font-black uppercase tracking-wider text-[#8b949e] hover:text-white transition-all active:scale-95"
+                    title="Upload file or ZIP"
+                  >
+                    <Upload className="w-3 h-3" /> Upload
+                  </button>
+                  {hasGeneratedCode && (
+                    <button
+                      onClick={() => downloadAppZip(files as any, 'my-app')}
+                      className="flex items-center gap-1 px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[9px] font-black uppercase tracking-wider text-[#8b949e] hover:text-white transition-all active:scale-95"
+                      title="Download project as ZIP"
+                    >
+                      <Download className="w-3 h-3" /> ZIP
+                    </button>
+                  )}
+                </div>
               </div>
               {!hasGeneratedCode ? (
                 <div className="flex-1 flex items-center justify-center flex-col gap-3 text-center p-8">

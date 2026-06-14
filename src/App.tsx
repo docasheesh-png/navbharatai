@@ -2784,8 +2784,13 @@ ${buildLanguageRule(preferredLanguage)}`;
         throw new Error('Unreachable');
       };
 
+      // File attachments (images/PDFs/docs) MUST go to the backend — the frontend
+      // pipeline is text-only and would make the AI hallucinate about the file.
+      const hasAttachments = files.length > 0;
+
       // Call Gemini locally if we are on NBI or preferred model is gemini, etc.
-      const isGeminiSovereign = isNbi || selectedModel === 'gemini' || (selectedModel === 'auto' && !keys.openai && !keys.claude);
+      // (but never for attachments — those need the backend vision route)
+      const isGeminiSovereign = !hasAttachments && (isNbi || selectedModel === 'gemini' || (selectedModel === 'auto' && !keys.openai && !keys.claude));
       if (isGeminiSovereign) {
         try {
           // Extract potential URL from message if security intent

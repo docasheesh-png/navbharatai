@@ -303,21 +303,69 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
   // ── File Select ──────────────────────────────────────────────────────────
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Downscale large images to ≤1568px / JPEG so the payload stays small and vision quality stays high
+  const downscaleImage = (file: File, maxDim = 1568, quality = 0.85): Promise<{ base64: string; type: string; preview: string }> =>
+    new Promise(resolve => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          if (scale === 1 && file.size <= 900 * 1024) {
+            URL.revokeObjectURL(url);
+            const r = new FileReader();
+            r.onload = () => { const res = r.result as string; resolve({ base64: res.split(',')[1] || '', type: file.type, preview: res }); };
+            r.readAsDataURL(file);
+            return;
+          }
+          const w = Math.max(1, Math.round(img.width * scale));
+          const h = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('no ctx');
+          ctx.drawImage(img, 0, 0, w, h);
+          URL.revokeObjectURL(url);
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          resolve({ base64: dataUrl.split(',')[1] || '', type: 'image/jpeg', preview: dataUrl });
+        } catch {
+          URL.revokeObjectURL(url);
+          const r = new FileReader();
+          r.onload = () => { const res = r.result as string; resolve({ base64: res.split(',')[1] || '', type: file.type, preview: res }); };
+          r.readAsDataURL(file);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        const r = new FileReader();
+        r.onload = () => { const res = r.result as string; resolve({ base64: res.split(',')[1] || '', type: file.type, preview: res }); };
+        r.readAsDataURL(file);
+      };
+      img.src = url;
+    });
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > MAX_FILE_MB * 1024 * 1024) {
-      alert(`File too large. Max ${MAX_FILE_MB}MB allowed.`);
+    // Images get downscaled (so the 10MB cap rarely matters); docs are capped raw
+    if (!file.type.startsWith('image/') && file.size > MAX_FILE_MB * 1024 * 1024) {
+      alert(`File too large. Max ${MAX_FILE_MB}MB allowed for documents.`);
+      e.target.value = '';
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const base64 = result.split(',')[1];
-      const preview = file.type.startsWith('image/') ? result : undefined;
-      setAttachedFile({ name: file.name, type: file.type, base64, preview });
-    };
-    reader.readAsDataURL(file);
+    if (file.type.startsWith('image/') && file.type !== 'image/svg+xml') {
+      const { base64, type, preview } = await downscaleImage(file);
+      setAttachedFile({ name: file.name.replace(/\.(png|webp|gif|bmp|heic|heif)$/i, '.jpg'), type, base64, preview });
+    } else {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1] || '';
+        const preview = file.type.startsWith('image/') ? result : undefined;
+        setAttachedFile({ name: file.name, type: file.type, base64, preview });
+      };
+      reader.readAsDataURL(file);
+    }
     e.target.value = '';
   };
 

@@ -2796,15 +2796,52 @@ ${buildLanguageRule(preferredLanguage)}`;
     await handleSendForTab(tabId, overrideMessage);
   };
 
-  const filesToBase64 = (files: File[]): Promise<{ name: string; type: string; base64: string }[]> =>
-    Promise.all(files.map(file => new Promise<{ name: string; type: string; base64: string }>(resolve => {
+  // Read a file as raw base64 (no transformation)
+  const readFileRaw = (file: File): Promise<{ name: string; type: string; base64: string }> =>
+    new Promise(resolve => {
       const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        resolve({ name: file.name, type: file.type, base64: result.split(',')[1] });
-      };
+      reader.onload = () => resolve({ name: file.name, type: file.type, base64: (reader.result as string).split(',')[1] || '' });
+      reader.onerror = () => resolve({ name: file.name, type: file.type, base64: '' });
       reader.readAsDataURL(file);
-    })));
+    });
+
+  // Downscale large images to a vision-optimal size (≤1568px longest edge) and re-encode as JPEG.
+  // Keeps payloads tiny (most photos → <500KB) and matches how Claude/Gemini downsample internally.
+  const downscaleImage = (file: File, maxDim = 1568, quality = 0.85): Promise<{ name: string; type: string; base64: string }> =>
+    new Promise(resolve => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          // Already small enough → send as-is (avoids needless re-encode of clean screenshots)
+          if (scale === 1 && file.size <= 900 * 1024) { URL.revokeObjectURL(url); readFileRaw(file).then(resolve); return; }
+          const w = Math.max(1, Math.round(img.width * scale));
+          const h = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { URL.revokeObjectURL(url); readFileRaw(file).then(resolve); return; }
+          ctx.drawImage(img, 0, 0, w, h);
+          URL.revokeObjectURL(url);
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          resolve({ name: file.name.replace(/\.(png|webp|gif|bmp|heic|heif)$/i, '.jpg'), type: 'image/jpeg', base64: dataUrl.split(',')[1] || '' });
+        } catch {
+          URL.revokeObjectURL(url);
+          readFileRaw(file).then(resolve);
+        }
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); readFileRaw(file).then(resolve); };
+      img.src = url;
+    });
+
+  const filesToBase64 = (files: File[]): Promise<{ name: string; type: string; base64: string }[]> =>
+    Promise.all(files.map(file =>
+      // Raster images get downscaled; SVG/PDF/text pass through untouched
+      (file.type.startsWith('image/') && file.type !== 'image/svg+xml')
+        ? downscaleImage(file)
+        : readFileRaw(file)
+    ));
 
   // Intent classifier — prevents build engine from firing on greetings/questions
   const classifyBuildIntent = (message: string): 'build' | 'chat' => {
@@ -2867,6 +2904,8 @@ ${buildLanguageRule(preferredLanguage)}`;
       const decoder = new TextDecoder();
       let buffer = '';
 
+      let didIncrementalPreview = false;
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -2879,36 +2918,52 @@ ${buildLanguageRule(preferredLanguage)}`;
           let evt: any;
           try { evt = JSON.parse(line.slice(6)); } catch { continue; }
 
-          if (evt.type === 'file') {
-            loadedFiles[evt.path] = evt.content;
-            fileList.push(evt.path);
-            fileCount++;
-            // Load each file into Code Studio immediately as it arrives
-            setFiles(prev => ({ ...prev, [evt.path]: evt.content }));
-            // Live preview on key files — but only for static apps. Source/React apps are
-            // previewed once at the end (rebuilding the Babel runtime per file would be wasteful).
-            const isKey = evt.path === 'index.html' || evt.path.endsWith('.css') || evt.path.endsWith('.js');
-            const looksSource = !!loadedFiles['package.json'] || Object.keys(loadedFiles).some(k => /\.(tsx|jsx)$/i.test(k));
-            if (isKey && !looksSource) {
-              const snapshot = { ...loadedFiles };
-              setTimeout(() => updatePreview(snapshot as any), 50);
+          // Per-event crash isolation: one bad event must never abort the whole import
+          try {
+            if (evt.type === 'file') {
+              if (typeof evt.path !== 'string' || typeof evt.content !== 'string') continue;
+              loadedFiles[evt.path] = evt.content;
+              fileList.push(evt.path);
+              fileCount++;
+
+              // Throttle React state updates — flushing per-file would mean thousands of
+              // re-renders for a big app (jank/crash). Show first few instantly, then batch.
+              if (fileCount <= 8 || fileCount % 20 === 0) {
+                setFiles({ ...loadedFiles } as any);
+              }
+
+              // Live preview on key files — only for static apps, and only once (source/React
+              // apps rebuild the Babel runtime, so we preview them once at the very end).
+              const isKey = evt.path === 'index.html' || evt.path.endsWith('.css') || evt.path.endsWith('.js');
+              const looksSource = !!loadedFiles['package.json'] || Object.keys(loadedFiles).some(k => /\.(tsx|jsx)$/i.test(k));
+              if (isKey && !looksSource && !didIncrementalPreview && evt.path === 'index.html') {
+                didIncrementalPreview = true;
+                const snapshot = { ...loadedFiles };
+                setTimeout(() => { try { updatePreview(snapshot as any); } catch { /* harness covers it */ } }, 50);
+              }
+
+              if (fileCount % 8 === 0) {
+                setProBuildProgress(prev => ({ ...prev, stage: `📂 Loading ${fileCount} files...`, percent: Math.min(90, 5 + fileCount) }));
+              }
+            } else if (evt.type === 'progress') {
+              setProBuildProgress(prev => ({ ...prev, stage: evt.stage || evt.message || prev.stage }));
+            } else if (evt.type === 'skipped') {
+              // a single file was skipped (binary/too large) — fine, keep going
+            } else if (evt.type === 'complete') {
+              appName = evt.appName || appName;
+            } else if (evt.type === 'error') {
+              // Only fatal if NOTHING loaded; otherwise import the partial app
+              if (fileCount === 0) throw new Error(evt.message || 'ZIP extraction error');
+              console.warn('[ZIP] partial error (continuing):', evt.message);
             }
-            setProBuildProgress(prev => ({
-              ...prev,
-              stage: `📂 Loading: ${evt.path}`,
-              percent: Math.min(90, 5 + fileCount * 2),
-            }));
-          } else if (evt.type === 'progress') {
-            setProBuildProgress(prev => ({ ...prev, stage: evt.message || prev.stage }));
-          } else if (evt.type === 'complete') {
-            appName = evt.appName || appName;
-          } else if (evt.type === 'error') {
-            throw new Error(evt.message || 'ZIP extraction error');
+          } catch (evtErr) {
+            if (fileCount === 0) throw evtErr;
+            console.warn('[ZIP] event error (continuing):', evtErr);
           }
         }
       }
 
-      if (fileCount === 0) throw new Error('No files extracted from ZIP');
+      if (fileCount === 0) throw new Error('No files extracted from ZIP — it may be empty or contain only binaries.');
 
       // Final state — ensure everything is synced.
       // updatePreview builds the correct runnable doc (handles React/TS source apps too),
@@ -2961,11 +3016,14 @@ ${buildLanguageRule(preferredLanguage)}`;
       return;
     }
 
-    // Non-ZIP files max 2MB (ZIPs are handled above via streaming)
-    const oversized = fileList.filter(f => f.size > MAX_UPLOAD_BYTES);
+    // Images are downscaled client-side, so only cap their raw size generously (25 MB).
+    // Non-image docs (PDF/text) go raw into the request body → tighter 12 MB cap.
+    const IMG_RAW_MAX = 25 * 1024 * 1024;
+    const DOC_MAX = 12 * 1024 * 1024;
+    const oversized = fileList.filter(f => f.size > (f.type.startsWith('image/') ? IMG_RAW_MAX : DOC_MAX));
     if (oversized.length > 0) {
       const names = oversized.map(f => `${f.name} (${(f.size/1024/1024).toFixed(1)}MB)`).join(', ');
-      addLog(`File too large: ${names}. Max 2 MB per file.`, 'error');
+      addLog(`File too large: ${names}. Max 25 MB for images, 12 MB for documents.`, 'error');
       return;
     }
 

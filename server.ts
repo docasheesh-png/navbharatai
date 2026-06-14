@@ -427,7 +427,7 @@ setInterval(() => {
   // Trust proxy for correct req.protocol and req.get('host') behind reverse proxies
   app.set('trust proxy', true);
 
-    app.use(express.json({ limit: '5mb' }));
+    app.use(express.json({ limit: '30mb' }));  // room for vision attachments (images/PDFs as base64)
 
   // Hit counter middleware
   app.use((req: any, _res: any, next: any) => {
@@ -4763,17 +4763,31 @@ Response Format:
     const tmpId = (crypto as any).randomBytes(8).toString('hex');
     const tmpZip = path.join(os.default.tmpdir(), `nbt-${tmpId}.zip`);
 
-    const IMAGE_MIME: Record<string, string> = {
+    // Assets embedded as base64 data-URLs so the preview can use them directly (images + web fonts)
+    const ASSET_MIME: Record<string, string> = {
       '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
       '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
-      '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+      '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.avif': 'image/avif',
+      '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
+      '.otf': 'font/otf', '.eot': 'application/vnd.ms-fontobject',
     };
-    const TEXT_EXTS = new Set([
-      '.html', '.htm', '.css', '.js', '.ts', '.jsx', '.tsx', '.vue',
-      '.json', '.txt', '.md', '.csv', '.xml', '.yaml', '.yml',
-      '.env', '.gitignore', '.babelrc', '.eslintrc', '.prettierrc', '.nvmrc',
+    // True binaries that are NOT editable and NOT useful in a web preview — skipped entirely.
+    const BINARY_SKIP = new Set([
+      '.exe', '.dll', '.so', '.dylib', '.bin', '.o', '.a', '.class', '.wasm', '.node', '.pyc',
+      '.zip', '.tar', '.gz', '.tgz', '.rar', '.7z', '.bz2', '.xz', '.jar', '.war',
+      '.mp4', '.webm', '.mov', '.avi', '.mkv', '.flv', '.wmv', '.m4v',
+      '.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma',
+      '.pdf', '.psd', '.ai', '.sketch', '.fig', '.xd', '.blend',
+      '.db', '.sqlite', '.sqlite3', '.mdb', '.dat',
+      '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
     ]);
-    const SKIP_RE = /(?:^|\/)(node_modules|\.git|\.svn|dist|build|\.next|__pycache__|\.cache|coverage|\.turbo|\.yarn)(?:\/|$)/i;
+    // Skip dependency/build-cache/VCS/IDE dirs (generated, not user source). Keep dist/build/out
+    // so a user can upload a built static site and preview it.
+    const SKIP_RE = /(?:^|\/)(node_modules|\.git|\.svn|\.hg|\.next|\.nuxt|\.svelte-kit|__pycache__|\.cache|\.turbo|\.parcel-cache|\.pytest_cache|\.gradle|\.idea|\.vscode|\.DS_Store|Thumbs\.db)(?:\/|$)/i;
+    // Caps to protect the browser from runaway imports (still high enough to load whole apps)
+    const MAX_FILES = 4000;
+    const MAX_TOTAL_BYTES = 120 * 1024 * 1024; // 120 MB of decoded content
+    let totalBytes = 0;
 
     try {
       // ── Step 1: Stream raw binary body to disk (no memory limit) ──────────
@@ -4809,73 +4823,104 @@ Response Format:
         yauzl.open(tmpZip, { lazyEntries: true, autoClose: true }, (err: any, zipfile: any) => {
           if (err) return reject(new Error(`Invalid ZIP: ${err.message}`));
 
+          // Continue to the next entry — wrapped so a readEntry() throw can't kill the stream
+          const next = () => { try { zipfile.readEntry(); } catch { resolve(); } };
+
           zipfile.readEntry();
 
           zipfile.on('entry', (entry: any) => {
-            const rawPath = entry.fileName.replace(/\\/g, '/');
+            // Per-entry crash isolation: ONE bad file must never abort the whole import
+            try {
+              const rawPath = String(entry.fileName || '').replace(/\\/g, '/');
 
-            // Auto-detect and strip single root folder (e.g., myapp-main/ from GitHub)
-            if (!prefixChecked) {
-              prefixChecked = true;
-              const firstSlash = rawPath.indexOf('/');
-              if (firstSlash > 0 && !rawPath.slice(0, firstSlash).includes('.')) {
-                prefixToStrip = rawPath.slice(0, firstSlash + 1);
+              // Auto-detect and strip single root folder (e.g., myapp-main/ from GitHub)
+              if (!prefixChecked) {
+                prefixChecked = true;
+                const firstSlash = rawPath.indexOf('/');
+                if (firstSlash > 0 && !rawPath.slice(0, firstSlash).includes('.')) {
+                  prefixToStrip = rawPath.slice(0, firstSlash + 1);
+                }
               }
-            }
 
-            let entryPath = (prefixToStrip && rawPath.startsWith(prefixToStrip))
-              ? rawPath.slice(prefixToStrip.length) : rawPath;
+              const entryPath = (prefixToStrip && rawPath.startsWith(prefixToStrip))
+                ? rawPath.slice(prefixToStrip.length) : rawPath;
 
-            // Skip empty paths, directories, and unwanted folders
-            if (!entryPath || entryPath.endsWith('/') || SKIP_RE.test('/' + rawPath)) {
-              zipfile.readEntry();
-              return;
-            }
+              // Skip empty paths, directories, and unwanted folders (node_modules/.git/etc.)
+              if (!entryPath || entryPath.endsWith('/') || SKIP_RE.test('/' + rawPath)) { next(); return; }
 
-            const ext = path.extname(entryPath).toLowerCase();
-            const isImage = !!IMAGE_MIME[ext];
-            const isText  = TEXT_EXTS.has(ext);
+              // Stop accepting more once caps are hit (protects the browser)
+              if (fileCount >= MAX_FILES || totalBytes >= MAX_TOTAL_BYTES) { next(); return; }
 
-            if (!isImage && !isText) {
-              zipfile.readEntry(); // skip binaries (exe, wasm, mp4, etc.)
-              return;
-            }
+              const ext = path.extname(entryPath).toLowerCase();
+              const assetMime = ASSET_MIME[ext];
+              const isAsset = !!assetMime;
 
-            // Per-file size limits: 10 MB images, 2 MB text
-            const maxBytes = isImage ? 10 * 1024 * 1024 : 2 * 1024 * 1024;
-            if (entry.uncompressedSize > maxBytes) {
-              send({ type: 'skipped', path: entryPath, reason: 'too large' });
-              zipfile.readEntry();
-              return;
-            }
+              // Skip only true binaries — EVERYTHING else is treated as editable text
+              if (!isAsset && BINARY_SKIP.has(ext)) { send({ type: 'skipped', path: entryPath, reason: 'binary' }); next(); return; }
 
-            zipfile.openReadStream(entry, (streamErr: any, readStream: any) => {
-              if (streamErr) { zipfile.readEntry(); return; }
+              // Per-file size limits: 8 MB assets, 5 MB text
+              const maxBytes = isAsset ? 8 * 1024 * 1024 : 5 * 1024 * 1024;
+              if (typeof entry.uncompressedSize === 'number' && entry.uncompressedSize > maxBytes) {
+                send({ type: 'skipped', path: entryPath, reason: 'too large' });
+                next();
+                return;
+              }
 
-              const chunks: Buffer[] = [];
-              readStream.on('data', (c: Buffer) => chunks.push(c));
-              readStream.on('error', () => zipfile.readEntry());
-              readStream.on('end', () => {
-                const buf = Buffer.concat(chunks);
-                const content = isImage
-                  ? `data:${IMAGE_MIME[ext]};base64,${buf.toString('base64')}`
-                  : buf.toString('utf8');
+              zipfile.openReadStream(entry, (streamErr: any, readStream: any) => {
+                if (streamErr || !readStream) { next(); return; }
+                const chunks: Buffer[] = [];
+                let aborted = false;
+                readStream.on('data', (c: Buffer) => {
+                  chunks.push(c);
+                  // Guard against lying uncompressedSize — abort if a single file blows the limit
+                  if (!aborted && chunks.reduce((n, b) => n + b.length, 0) > maxBytes) {
+                    aborted = true;
+                    try { readStream.destroy(); } catch { /* ignore */ }
+                    send({ type: 'skipped', path: entryPath, reason: 'too large' });
+                    next();
+                  }
+                });
+                readStream.on('error', () => { if (!aborted) { aborted = true; next(); } });
+                readStream.on('end', () => {
+                  if (aborted) return;
+                  try {
+                    const buf = Buffer.concat(chunks);
+                    // Binary-sniff: if a non-asset file is actually binary (has NUL bytes), embed as data-URL instead of garbled text
+                    let content: string;
+                    if (isAsset) {
+                      content = `data:${assetMime};base64,${buf.toString('base64')}`;
+                    } else if (buf.includes(0)) {
+                      content = `data:application/octet-stream;base64,${buf.toString('base64')}`;
+                    } else {
+                      content = buf.toString('utf8');
+                    }
 
-                if (entryPath === 'index.html' || entryPath === 'index.htm') htmlContent = content;
+                    totalBytes += content.length;
+                    if (entryPath === 'index.html' || entryPath === 'index.htm') htmlContent = content;
 
-                send({ type: 'file', path: entryPath, content });
-                fileCount++;
+                    send({ type: 'file', path: entryPath, content });
+                    fileCount++;
 
-                if (fileCount % 5 === 0)
-                  send({ type: 'progress', stage: `Loaded ${fileCount} files...`, percent: Math.min(90, 10 + fileCount) });
-
-                zipfile.readEntry();
+                    if (fileCount % 10 === 0)
+                      send({ type: 'progress', stage: `Loaded ${fileCount} files...`, percent: Math.min(90, 10 + Math.floor(fileCount / 2)) });
+                  } catch (e: any) {
+                    send({ type: 'skipped', path: entryPath, reason: 'read error' });
+                  }
+                  next();
+                });
               });
-            });
+            } catch (entryErr: any) {
+              console.warn('[extract-zip] entry error:', entryErr?.message);
+              next();
+            }
           });
 
           zipfile.on('end', resolve);
-          zipfile.on('error', reject);
+          zipfile.on('error', (ze: any) => {
+            // Don't reject — resolve with whatever we got so partial imports still work
+            console.warn('[extract-zip] zipfile error:', ze?.message);
+            resolve();
+          });
         });
       });
 

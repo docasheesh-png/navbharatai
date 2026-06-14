@@ -41,6 +41,9 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   `src/server/lib/db.ts` (`setDb`/`getDb`); server bootstrap now shares the handle.
   Extracted 3 wallet read routes → `src/server/routes/wallet.ts`. routes 63 → 60.
   Verified green (server bundle, wallet+db strict tsc clean, frontend tsc 0, tests).
+- **Milestone 1.5 — DONE (2026-06-14)**: Extracted encryption/secret helpers
+  (`encrypt`/`decrypt`/`getSecretValue`) → `src/server/lib/secrets.ts`, and secrets
+  CRUD routes → `src/server/routes/secrets.ts`. routes 60 → 57. Verified green.
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

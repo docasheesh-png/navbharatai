@@ -8,6 +8,8 @@ import { registerTeamRoutes } from './src/server/routes/team';
 import { audit } from './src/server/lib/audit';
 import { setDb as setSharedDb } from './src/server/lib/db';
 import { registerWalletRoutes } from './src/server/routes/wallet';
+import { registerSecretsRoutes } from './src/server/routes/secrets';
+import { getSecretValue } from './src/server/lib/secrets';
 
 // ─── Legacy embedded API key (sentinel + historical fallback) ────────────────
 // SECURITY: This Google API key was previously hardcoded inline in 3 places.
@@ -147,56 +149,7 @@ try {
   console.error('⚠️ Failed to initialize Firebase:', error);
 }
 
-// ENCRYPTION & SECRETS HELPERS
-const ENCRYPTION_KEY = process.env.SECRET_ENCRYPTION_KEY || 'navBharatAISecurityLedgerFallbackKey';
-
-const encrypt = (text: string) => {
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY.padEnd(32, '0')), iv);
-  let encrypted = cipher.update(text);
-  encrypted = Buffer.concat([encrypted, cipher.final()]);
-  return iv.toString('hex') + ':' + encrypted.toString('hex');
-};
-
-const decrypt = (encryptedText: string) => {
-  try {
-    const parts = encryptedText.split(':');
-    if (parts.length !== 2) return '';
-    const iv = Buffer.from(parts[0], 'hex');
-    const encrypted = Buffer.from(parts[1], 'hex');
-    const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY.padEnd(32, '0')), iv);
-    let decrypted = decipher.update(encrypted);
-    decrypted = Buffer.concat([decrypted, decipher.final()]);
-    return decrypted.toString();
-  } catch (err) {
-    console.error('Decryption failed:', err);
-    return '';
-  }
-};
-
-async function getSecretValue(userId: string, secretName: string): Promise<string | null> {
-  // First check process.env:
-  if (process.env[secretName]) {
-    return process.env[secretName];
-  }
-  if (!db) return null;
-  try {
-    const q = query(
-      collection(db, 'user_secrets'),
-      where('user_id', '==', userId),
-      where('secret_name', '==', secretName)
-    );
-    const snap = await getDocs(q);
-    const docData = snap.docs.find(d => !d.data()?.deleted);
-    if (docData) {
-      const encryptedValue = docData.data().encrypted_secret_value;
-      return decrypt(encryptedValue);
-    }
-  } catch (err) {
-    console.error(`Error loading secret ${secretName}:`, err);
-  }
-  return null;
-}
+// Encryption & secrets helpers — extracted to src/server/lib/secrets.ts (Phase 1).
 
 // Reusable internal payment verification service
 async function verifyPaymentInternal(orderId: string): Promise<{ success: boolean; data?: any; error?: string }> {
@@ -5965,19 +5918,8 @@ Response Format:
 
   // SECRETS
 
-  app.get('/api/secrets/:userId', async (req, res) => {
-    console.log('[DEBUG] GET /api/secrets/:userId called for:', req.params.userId);
-    try {
-      const { userId } = req.params;
-      const secretsSnapshot = await getDocs(query(collection(db, 'user_secrets'), where('user_id', '==', userId)));
-      const secrets = secretsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as { deleted?: boolean }[];
-      console.log('[DEBUG] Secrets found:', secrets);
-      res.json(secrets.filter(s => !s.deleted));
-    } catch (err) {
-      console.error('[DEBUG] Error fetching secrets:', err);
-      res.status(500).json({ error: 'Failed to fetch secrets' });
-    }
-  });
+  // Secrets CRUD routes — extracted to src/server/routes/secrets.ts (Phase 1).
+  registerSecretsRoutes(app);
 
   app.post('/api/anthropic', async (req, res) => {
     try {
@@ -6019,36 +5961,6 @@ Response Format:
       res.status(500).json({ error: 'Failed to call Anthropic API' });
     }
   });
-
-  app.post('/api/secrets/:userId', async (req, res) => {
-    try {
-      const { userId } = req.params;
-      const { secret_name, secret_value } = req.body;
-      const encryptedValue = encrypt(secret_value);
-      await addDoc(collection(db, 'user_secrets'), {
-        user_id: userId,
-        secret_name,
-        encrypted_secret_value: encryptedValue,
-        created_at: new Date()
-      });
-      res.json({ success: true });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to save secret' });
-    }
-  });
-
-  app.delete('/api/secrets/:userId/:secretId', async (req, res) => {
-      try {
-        const { secretId } = req.params;
-        await updateDoc(doc(db, 'user_secrets', secretId), { deleted: true }); // Soft delete
-        res.json({ success: true });
-      } catch (err) {
-        res.status(500).json({ error: 'Failed to delete secret' });
-      }
-  });
-
-
-  // ══ PWA ROUTES — Save & Serve generated apps as installable PWAs ══
 
   // ══ SENIOR DOCTOR ASSISTANT (SDA) ══
   app.post('/api/sda-chat', async (req: any, res: any) => {

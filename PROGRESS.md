@@ -48,6 +48,10 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   → `src/server/lib/serverStats.ts`, and the entire admin dashboard (12 routes +
   HMAC `verifyAdminToken` middleware) → `src/server/routes/admin.ts`. routes 57 → 45.
   Verified green (server bundle, admin+serverStats strict tsc clean, frontend tsc 0, tests).
+- **Milestone 1.7 — DONE (2026-06-14)**: Extracted cloud sync routes
+  (`GET/POST /api/sync/:userId`) + `slimSession`/`WORKSPACE_MAX_BYTES` →
+  `src/server/routes/sync.ts`. routes 45 → 43. Verified green. (Lossy slimming
+  noted for Phase 2 redesign.)
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

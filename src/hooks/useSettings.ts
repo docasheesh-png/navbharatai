@@ -25,7 +25,7 @@ export function useSettings() {
     const saved = localStorage.getItem('navbharat_language') as PreferredLanguage | null;
     return saved || null;
   });
-  const [mode, setMode] = useState<AgentMode>('planning');
+  const [mode, setMode] = useState<AgentMode>('auto');
   const [enabledModules, setEnabledModules] = useState<Record<string, boolean>>(() => {
     const saved = localStorage.getItem('navbharat_modules');
     return saved ? { ...DEFAULT_MODULES, ...JSON.parse(saved) } : DEFAULT_MODULES;

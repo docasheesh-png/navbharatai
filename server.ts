@@ -4405,6 +4405,57 @@ Your role:
         }
       }
 
+      // ══ AUTO MODE — Human-like: chat, clarify, plan, or trigger build ══
+      if (mode === 'auto' || mode === 'auto_plan' || mode === 'auto_build') {
+        const isAutoPlan  = mode === 'auto_plan';
+        const isAutoBuild = mode === 'auto_build';
+
+        const AUTO_SYS = `You are NavBharatAI, a friendly expert who helps people build web apps. Talk like a real human — warm, natural, conversational. No corporate speak, no robotic tone.
+
+LANGUAGE RULE: Always reply in the EXACT language the user writes in. Hindi → Hindi. Hinglish → Hinglish. English → English.
+
+${isAutoPlan ? `MODE: PLAN THEN BUILD
+The user wants to build something complex. Write a clear, friendly plan covering:
+- What will be built (1-2 lines)
+- Key features (bullets)
+- UI/screens overview
+
+Keep it concise — not a formal document. Then at the very end of your reply (on its own line), add exactly: __AUTO_PLAN__
+This tells the frontend to show a "Build Now" button. Do NOT explain the marker.` : ''}
+
+${isAutoBuild ? `MODE: DIRECT BUILD
+The user wants something simple built. Respond in 1-2 friendly lines confirming what you'll make, then at the very end add exactly: __AUTO_BUILD__
+This triggers the actual build. Do NOT explain the marker. Keep the human text very short.` : ''}
+
+${mode === 'auto' ? `MODE: CONVERSATION
+The user is asking a question, discussing something, or their intent is unclear.
+- If they ask a question: answer naturally and helpfully
+- If they mention an app vaguely: ask ONE simple clarifying question ("Banau kya? Koi features chahiye?")
+- If they say "coding nahi" or similar: just talk, don't mention building
+- Keep responses SHORT (2-5 sentences usually enough)
+- Be helpful and warm` : ''}
+
+NEVER write any code or HTML in your response.`;
+
+        try {
+          const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+          if (!key) return res.json({ reply: isAutoPlan ? 'Plan ready! __AUTO_PLAN__' : 'Theek hai, bana raha hun! __AUTO_BUILD__', files: {} });
+          const msgs = [
+            ...(history || []).slice(-10).map((m: any) => ({
+              role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+              content: String(m.text || m.content || '').slice(0, 800),
+            })),
+            { role: 'user' as const, content: message },
+          ];
+          const maxTokens = isAutoBuild ? 200 : isAutoPlan ? 500 : 400;
+          const reply = await callClaudePro(key, AUTO_SYS, msgs, maxTokens);
+          return res.json({ reply: reply || 'Haan, batao!', files: {} });
+        } catch (e: any) {
+          const fallback = isAutoBuild ? 'Theek hai, bana raha hun! __AUTO_BUILD__' : isAutoPlan ? 'Plan ready! __AUTO_PLAN__' : 'Haan, batao kya chahiye?';
+          return res.json({ reply: fallback, files: {} });
+        }
+      }
+
       // ══ PLANNING MODE — No code, architecture discussion only ══
 
       // Detect build intent to flag frontend (no hard-block — AI still responds with plan)

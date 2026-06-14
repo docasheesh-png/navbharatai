@@ -504,11 +504,14 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
     const hasUrgentBuild   = isAI && text.includes('__URGENT_BUILD__');
     const hasViewPreview   = isAI && text.includes('__VIEW_PREVIEW__');
     const hasDeployActions = isAI && text.includes('__DEPLOY_ACTIONS__');
+    const hasAutoPlan      = isAI && text.includes('__AUTO_PLAN__');
     const cleanText = text
       .replace('__SWITCH_TO_BUILD__', '')
       .replace('__URGENT_BUILD__', '')
       .replace('__VIEW_PREVIEW__', '')
       .replace('__DEPLOY_ACTIONS__', '')
+      .replace('__AUTO_PLAN__', '')
+      .replace('__AUTO_BUILD__', '')
       .trim();
     const deployFiles = (msg as any).meta?.deployFiles as Record<string, string> | undefined;
     const deployAppName = (msg as any).meta?.appName as string | undefined;
@@ -577,6 +580,26 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                 <span style={{ fontSize: 16 }}>⚡</span>
                 Switch to Build Mode — Build Now
                 <span style={{ fontSize: 16 }}>→</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Auto Plan: show "Build Now" button after AI presents the plan ── */}
+        {hasAutoPlan && onSendSuggestion && (
+          <div className="mt-3 pt-3 border-t border-indigo-500/20">
+            <div className="rounded-2xl overflow-hidden border border-indigo-500/30 shadow-lg shadow-indigo-900/20">
+              <div className="bg-gradient-to-r from-indigo-950/80 to-violet-950/80 px-4 py-2.5 flex items-center gap-2">
+                <span className="text-lg shrink-0">✨</span>
+                <p className="text-[11px] font-black text-indigo-300 uppercase tracking-wider">Plan ready — build kar du?</p>
+              </div>
+              <button
+                onClick={() => onSendSuggestion('__CONFIRM_AUTO_BUILD__')}
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 font-black text-[13px] uppercase tracking-widest transition-all active:scale-[0.98] hover:brightness-110"
+                style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: 'white' }}
+              >
+                <span>🚀</span>
+                Haan, Build Karo
               </button>
             </div>
           </div>

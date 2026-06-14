@@ -3004,6 +3004,43 @@ ${buildLanguageRule(preferredLanguage)}`;
     return 'build';
   };
 
+  // Auto mode: classify what the user wants — chat, clarify, or which kind of build
+  const classifyAutoIntent = (message: string, history: Message[]): 'chat' | 'clarify' | 'direct_build' | 'plan_build' => {
+    const msg = message.trim();
+    const lower = msg.toLowerCase();
+
+    // Explicit "no coding / no build" signal — just converse
+    if (/\b(coding nahi|build nahi|mat bana|don't build|no code|no build|sirf bata|sirf samjha|just (tell|explain|discuss)|without (building|coding)|abhi nahi|bas batao)\b/i.test(lower)) return 'chat';
+
+    // Pure question with no build verb
+    const isQuestion = /\?$/.test(msg) || /^(kya|kaise|kyun|what|how|why|explain|batao|samjhao|tell me|describe)\b/i.test(lower);
+    const hasBuildVerb = /\b(bana|banao|banana|build|create|make|generate|develop|chahiye|chahie|design|kar do|karo)\b/i.test(lower);
+    if (isQuestion && !hasBuildVerb) return 'chat';
+
+    // User confirming after AI asked "Banau kya?" — build directly
+    const lastAi = [...history].reverse().find(m => m.sender === 'ai');
+    const aiWasAsking = !!(lastAi && /\?/.test(lastAi.text) && /\b(bana|build|banau|shall i|chahiye)\b/i.test(lastAi.text.toLowerCase()));
+    const isConfirm = /^(haan|yes|ok|sure|bilkul|karo|go ahead|ha\b|👍|theek|kar do|bana do)\s*[!.]*$/i.test(msg.trim());
+    if (isConfirm && aiWasAsking) return 'direct_build';
+
+    const hasAppNoun = /\b(app|application|game|website|tool|dashboard|calculator|quiz|generator|system|platform|portal|page|form|tracker|timer|clock|todo|chat|login|signup|landing)\b/i.test(lower);
+
+    // Has no app noun and no build verb → just chat
+    if (!hasBuildVerb && !hasAppNoun) return 'chat';
+
+    // Has app noun but no clear build verb → clarify
+    if (hasAppNoun && !hasBuildVerb && msg.length < 60) return 'clarify';
+
+    // Complex build: long message OR many features → show plan first
+    const isComplex = msg.length > 120 ||
+      (lower.match(/\b(aur|and|with|plus|bhi|also)\b/g) || []).length >= 3 ||
+      (msg.match(/^\d+\./gm) || []).length >= 2 ||
+      /\b(auth|login|database|api|dark mode|responsive|animation|filter|search|sort|registration|profile|payment|categories|multiple)\b/i.test(lower);
+
+    if (hasBuildVerb && isComplex) return 'plan_build';
+    return 'direct_build';
+  };
+
   // ── ZIP Import: stream raw binary → SSE extraction → real-time Code Studio load ──
   const handleZipImport = async (zipFile: File, extraMessage?: string) => {
     setIsProLoading(true);
@@ -3213,6 +3250,89 @@ ${buildLanguageRule(preferredLanguage)}`;
 
     // ── Mode is the single source of truth — no keyword override ──
     const isBuildMode = mode === 'build';
+    const isAutoMode  = mode === 'auto';
+
+    // ── AUTO MODE — smart routing: human-like chat, clarify, or build ──
+    if (isAutoMode) {
+      // "__CONFIRM_AUTO_BUILD__" is sent when user taps "Haan, Build Karo" after seeing plan
+      const isConfirmBuild = messageToSend === '__CONFIRM_AUTO_BUILD__';
+      const actualMessage = isConfirmBuild
+        ? (proMessages.filter(m => m.sender === 'user').slice(-2, -1)[0]?.text || messageToSend)
+        : messageToSend;
+
+      const intent = isConfirmBuild ? 'direct_build' : classifyAutoIntent(messageToSend, proMessages);
+
+      if (intent === 'direct_build' || intent === 'plan_build') {
+        // For plan_build → ask AI to plan first, then show "Build" button
+        // For direct_build → ask AI to confirm briefly, then trigger build via __AUTO_BUILD__
+        try {
+          const response = await fetch('/api/pro-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: abortController.signal,
+            body: JSON.stringify({
+              message: isConfirmBuild ? `User confirmed build. Now build this: ${actualMessage}` : messageToSend,
+              history: proMessages.slice(-20).map((m: any) => ({ sender: m.sender, text: String(m.text || '').replace(/__CONFIRM_AUTO_BUILD__|__AUTO_PLAN__|__AUTO_BUILD__/g, '').slice(0, 1500) })),
+              mode: intent === 'plan_build' ? 'auto_plan' : 'auto_build',
+              ...(fileAttachments.length > 0 ? { fileData: fileAttachments[0].base64, fileType: fileAttachments[0].type, fileName: fileAttachments[0].name } : {}),
+            }),
+          });
+          if (!response.ok) throw new Error(`API Error: ${response.status}`);
+          const data = await response.json();
+          const reply: string = data.reply || '';
+
+          if (reply.includes('__AUTO_BUILD__') || isConfirmBuild) {
+            // Show brief confirmation message (clean), then trigger actual build
+            const cleanReply = reply.replace('__AUTO_BUILD__', '').trim();
+            if (cleanReply) {
+              setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: cleanReply, sender: 'ai', timestamp: new Date() }]);
+            }
+            setIsProLoading(false);
+            proAbortControllerRef.current = null;
+            // Small delay so message renders, then build
+            setTimeout(() => handleSendForPro(actualMessage !== '__CONFIRM_AUTO_BUILD__' ? actualMessage : messageToSend), 400);
+            return;
+          } else {
+            // __AUTO_PLAN__ or no marker — show plan with "Build" button
+            setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: reply, sender: 'ai', timestamp: new Date() }]);
+          }
+        } catch (e: any) {
+          if (e.name !== 'AbortError') {
+            setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: 'Something went wrong. Try again!', sender: 'ai', timestamp: new Date() }]);
+          }
+        } finally {
+          setIsProLoading(false);
+          proAbortControllerRef.current = null;
+        }
+        return;
+      }
+
+      // intent === 'chat' or 'clarify' — human-like conversation
+      try {
+        const response = await fetch('/api/pro-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: abortController.signal,
+          body: JSON.stringify({
+            message: messageToSend,
+            history: proMessages.slice(-20).map((m: any) => ({ sender: m.sender, text: String(m.text || '').replace(/__CONFIRM_AUTO_BUILD__|__AUTO_PLAN__|__AUTO_BUILD__/g, '').slice(0, 1500) })),
+            mode: 'auto',
+            ...(fileAttachments.length > 0 ? { fileData: fileAttachments[0].base64, fileType: fileAttachments[0].type, fileName: fileAttachments[0].name } : {}),
+          }),
+        });
+        if (!response.ok) throw new Error(`API Error: ${response.status}`);
+        const data = await response.json();
+        setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: data.reply || 'Haan, batao!', sender: 'ai', timestamp: new Date() }]);
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: 'Kuch gadbad ho gayi. Dobara try karo!', sender: 'ai', timestamp: new Date() }]);
+        }
+      } finally {
+        setIsProLoading(false);
+        proAbortControllerRef.current = null;
+      }
+      return;
+    }
 
     // ── Phase 2: Intent check — don't build on greetings/questions ──
     if (isBuildMode && classifyBuildIntent(messageToSend) === 'chat') {
@@ -5910,6 +6030,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                      <div className="flex items-center gap-2">
                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping shrink-0" />
                        <span>NAVBHARATAI-PRO</span>
+                       {mode === 'auto'     && <span className="px-1.5 py-0.5 bg-indigo-900/30 border border-indigo-600/30 text-indigo-400 rounded text-[8px]">AUTO</span>}
                        {mode === 'planning' && <span className="px-1.5 py-0.5 bg-amber-900/30 border border-amber-600/30 text-amber-400 rounded text-[8px]">PLANNING</span>}
                        {mode === 'build' && <span className="px-1.5 py-0.5 bg-orange-900/30 border border-orange-600/30 text-orange-400 rounded text-[8px]">BUILD</span>}
                      </div>

@@ -52,6 +52,9 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   (`GET/POST /api/sync/:userId`) + `slimSession`/`WORKSPACE_MAX_BYTES` →
   `src/server/routes/sync.ts`. routes 45 → 43. Verified green. (Lossy slimming
   noted for Phase 2 redesign.)
+- **Milestone 1.8 — DONE (2026-06-14)**: Extracted `verifyPaymentInternal`
+  (Cashfree verify + wallet-credit, ~170 lines) → `src/server/lib/payments.ts`.
+  server.ts 6598 → 5719 lines. Verified green. (Payment ROUTES next.)
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

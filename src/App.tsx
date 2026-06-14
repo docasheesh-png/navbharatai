@@ -1975,89 +1975,260 @@ ${buildLanguageRule(preferredLanguage)}`;
     };
   };
 
+  // ── Preview harness: injected into EVERY preview so it can never silently go blank ──
+  // Catches runtime errors + detects empty render → shows a friendly overlay instead of a white page.
+  const PREVIEW_HARNESS = `<style>
+.__nb_overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;background:#0d1117;font-family:system-ui,-apple-system,sans-serif;z-index:2147483647}
+.__nb_card{max-width:520px;width:100%;background:#161b22;border:1px solid rgba(245,158,11,0.25);border-radius:16px;padding:24px;color:#c9d1d9;box-sizing:border-box}
+.__nb_h{font-weight:800;color:#f59e0b;font-size:13px;margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em}
+.__nb_card pre{white-space:pre-wrap;word-break:break-word;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px;font-size:11px;line-height:1.5;color:#ff7b72;max-height:180px;overflow:auto;margin:0}
+.__nb_s{margin-top:12px;font-size:12px;color:#8b949e;line-height:1.5}
+</style>
+<script>
+(function(){
+  function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");}
+  function show(kind,msg){
+    if(document.getElementById('__nb_err'))return;
+    var o=document.createElement('div');o.id='__nb_err';o.className='__nb_overlay';
+    o.innerHTML='<div class="__nb_card"><div class="__nb_h">'+esc(kind)+'</div>'+(msg?('<pre>'+esc(msg)+'</pre>'):'')+'<div class="__nb_s">All files are loaded in Code Studio. Ask the AI to fix or convert this app and the preview will update.</div></div>';
+    (document.body||document.documentElement).appendChild(o);
+  }
+  window.__nbShowError=function(m){show('Preview Error',m);};
+  window.addEventListener('error',function(e){show('Preview Error',(e&&e.message)||(e&&e.error&&e.error.message)||'Script error');});
+  window.addEventListener('unhandledrejection',function(e){show('Preview Error',(e&&e.reason&&e.reason.message)||(e&&e.reason)||'Promise rejected');});
+  function isEmpty(){
+    var t=(document.body&&document.body.innerText||'').trim();
+    var v=document.querySelector('canvas,svg,img,video,input,button,#root *,#app *,[data-reactroot] *');
+    return !t&&!v;
+  }
+  // Double-check (2s then 3.5s) so apps that render slightly late don't trigger a false overlay.
+  setTimeout(function(){
+    if(document.getElementById('__nb_err')||!isEmpty())return;
+    setTimeout(function(){
+      if(!document.getElementById('__nb_err')&&isEmpty())show('Preview is empty','The app rendered nothing — it may need a build step, or hit a runtime error.');
+    },1500);
+  },2000);
+})();
+</script>`;
+
+  // In-iframe mini-bundler: transpiles JSX/TSX with Babel, resolves relative imports,
+  // and loads bare deps (react etc.) via esm.sh import map. Failures surface via the harness.
+  const PREVIEW_BOOTSTRAP = `
+(function(){
+  var FILES=window.__FILES||{};var ENTRY=window.__ENTRY||'';var ESM='https://esm.sh/';
+  function fail(m){if(window.__nbShowError)window.__nbShowError(m);}
+  if(typeof Babel==='undefined'){fail('Could not load the preview compiler (network blocked?).');return;}
+  function dirname(p){var i=p.lastIndexOf('/');return i<0?'':p.slice(0,i);}
+  function normalize(p){var a=p.split('/'),o=[];for(var i=0;i<a.length;i++){var s=a[i];if(s===''||s==='.')continue;if(s==='..')o.pop();else o.push(s);}return o.join('/');}
+  function resolve(importer,spec){
+    var base=spec.charAt(0)==='/'?spec.slice(1):normalize((dirname(importer)?dirname(importer)+'/':'')+spec);
+    var t=[base,base+'.tsx',base+'.ts',base+'.jsx',base+'.js',base+'.mjs',base+'.json',base+'.css',base+'/index.tsx',base+'/index.ts',base+'/index.jsx',base+'/index.js'];
+    for(var i=0;i<t.length;i++){if(Object.prototype.hasOwnProperty.call(FILES,t[i]))return t[i];}
+    return base;
+  }
+  function injectCss(src){var s=document.createElement('style');s.textContent=src;document.head.appendChild(s);}
+  function interop(ns){var m={};for(var k in ns){m[k]=ns[k];}m.__esModule=true;if(m.default===undefined)m.default=ns;return m;}
+  var bareCache={},cache={};
+  function requireMod(path){
+    if(cache[path])return cache[path].exports;
+    var src=FILES[path];
+    if(src==null)throw new Error('Module not found: '+path);
+    if(/\\.css$/.test(path)){injectCss(src);cache[path]={exports:{}};return cache[path].exports;}
+    if(/\\.json$/.test(path)){cache[path]={exports:JSON.parse(src)};return cache[path].exports;}
+    if(/\\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/.test(path)){cache[path]={exports:{default:src,__esModule:true}};return cache[path].exports;}
+    var isTs=/\\.tsx?$/.test(path),isTsx=/\\.tsx$/.test(path);
+    var presets=isTs?[['react',{runtime:'automatic'}],['typescript',{isTSX:isTsx,allExtensions:true}]]:[['react',{runtime:'automatic'}]];
+    var code;
+    try{code=Babel.transform(src,{filename:path,presets:presets,plugins:['transform-modules-commonjs'],sourceType:'module'}).code;}
+    catch(e){throw new Error('Compile '+path+': '+e.message);}
+    var module={exports:{}};cache[path]=module;
+    var req=function(spec){
+      if(spec.charAt(0)!=='.'&&spec.charAt(0)!=='/'){if(bareCache[spec])return bareCache[spec];throw new Error('Missing dependency: '+spec);}
+      return requireMod(resolve(path,spec));
+    };
+    try{(new Function('require','module','exports',code))(req,module,module.exports);}
+    catch(e){throw new Error('Run '+path+': '+e.message);}
+    return module.exports;
+  }
+  function collectBare(){
+    var found={},re=/(?:from|import|require\\(|import\\()\\s*['"]([^'"]+)['"]/g;
+    Object.keys(FILES).forEach(function(p){var src=FILES[p]||'',m;re.lastIndex=0;while((m=re.exec(src))){var s=m[1];if(s&&s.charAt(0)!=='.'&&s.charAt(0)!=='/')found[s]=true;}});
+    return Object.keys(found);
+  }
+  var forced=['react','react-dom','react-dom/client','react/jsx-runtime','react/jsx-dev-runtime'];
+  (async function(){
+    try{
+      var bare=collectBare();forced.forEach(function(s){if(bare.indexOf(s)<0)bare.push(s);});
+      await Promise.all(bare.map(async function(spec){
+        try{var url=(spec.indexOf('react')===0)?spec:(ESM+spec);bareCache[spec]=interop(await import(url));}catch(e){}
+      }));
+      if(!ENTRY){fail('No runnable entry file found in this app.');return;}
+      requireMod(ENTRY);
+    }catch(e){fail((e&&e.message)||String(e));}
+  })();
+})();`;
+
+  // Detect whether the app is a React/TS source app (needs transpilation) vs a static app.
+  const detectAppType = (f: FileSystem): 'react' | 'static' => {
+    const keys = Object.keys(f);
+    if (keys.some(k => /\.(tsx|jsx)$/i.test(k))) return 'react';
+    const pkg = f['package.json'];
+    if (pkg && /"react"\s*:/.test(pkg)) return 'react';
+    // Vite-style entry pointing at a TS/JS module under src/
+    const html = f['index.html'] || '';
+    if (/<script[^>]+type=["']module["'][^>]+src=["']\/?(src\/)?[^"']+\.(ts|jsx|tsx)["']/i.test(html)) return 'react';
+    return 'static';
+  };
+
+  // Build a runnable in-iframe document for source/framework apps.
+  const buildSourceAppPreview = (f: FileSystem): string => {
+    const rawHtml = f['index.html'] || '';
+    // Include code, styles, data, AND image assets (images arrive as base64 data-URLs from the server,
+    // so `import logo from './logo.svg'` resolves to a usable URL string in the preview).
+    const srcExtRe = /\.(jsx|tsx|ts|js|mjs|cjs|css|json|png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i;
+    const srcFiles: Record<string, string> = {};
+    Object.keys(f).forEach(k => { if (srcExtRe.test(k) && !k.includes('node_modules')) srcFiles[k] = f[k]; });
+
+    // Resolve the entry module
+    let entry = '';
+    const m = rawHtml.match(/<script[^>]+type=["']module["'][^>]+src=["']([^"']+)["']/i);
+    if (m) entry = m[1].replace(/^\//, '').replace(/^\.\//, '');
+    if (!entry || !srcFiles[entry]) {
+      const cands = ['src/main.tsx','src/main.jsx','src/main.ts','src/index.tsx','src/index.jsx','src/index.ts','main.tsx','main.jsx','index.tsx','index.jsx','src/App.tsx','src/App.jsx','App.tsx','App.jsx'];
+      entry = cands.find(c => srcFiles[c]) || Object.keys(srcFiles).find(k => /\.(tsx|jsx)$/i.test(k)) || '';
+    }
+
+    // Reuse the app's <body> markup (minus module/external scripts) so #root etc. survive
+    let bodyInner = '<div id="root"></div>';
+    const bm = rawHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    if (bm) {
+      bodyInner = bm[1]
+        .replace(/<script[^>]*type=["']module["'][^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<script[^>]+src=["'][^"']+["'][^>]*>\s*<\/script>/gi, '');
+      if (!/id=["'](root|app)["']/.test(bodyInner)) bodyInner += '<div id="root"></div>';
+    }
+
+    const importmap = JSON.stringify({ imports: {
+      'react': 'https://esm.sh/react@18.3.1',
+      'react-dom': 'https://esm.sh/react-dom@18.3.1',
+      'react-dom/client': 'https://esm.sh/react-dom@18.3.1/client',
+      'react/jsx-runtime': 'https://esm.sh/react@18.3.1/jsx-runtime',
+      'react/jsx-dev-runtime': 'https://esm.sh/react@18.3.1/jsx-dev-runtime',
+    }});
+
+    return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+      + PREVIEW_HARNESS
+      + '<script type="importmap">' + importmap + '</' + 'script>'
+      + '<script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></' + 'script>'
+      + '</head><body>' + bodyInner
+      + '<script>window.__FILES=' + JSON.stringify(srcFiles) + ';window.__ENTRY=' + JSON.stringify(entry) + ';</' + 'script>'
+      + '<script>' + PREVIEW_BOOTSTRAP + '</' + 'script>'
+      + '</body></html>';
+  };
+
+  // Inject the never-blank harness into a static HTML document
+  const injectHarness = (doc: string): string => {
+    if (doc.includes('__nb_overlay')) return doc;
+    if (/<\/head>/i.test(doc)) return doc.replace(/<\/head>/i, PREVIEW_HARNESS + '</head>');
+    if (/<body[^>]*>/i.test(doc)) return doc.replace(/(<body[^>]*>)/i, '$1' + PREVIEW_HARNESS);
+    return PREVIEW_HARNESS + doc;
+  };
+
   const updatePreview = (currentFiles: FileSystem) => {
-    let html = currentFiles['index.html'] || '';
+    let finalHtml: string;
 
-    if (!html) {
-      html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body><div id="root"></div></body></html>';
-    } else if (!html.toLowerCase().includes('viewport')) {
-      if (html.includes('</head>')) {
-        html = html.replace('</head>', '<meta name="viewport" content="width=device-width, initial-scale=1.0"></head>');
-      } else if (html.includes('<head>')) {
-        html = html.replace('<head>', '<head><meta name="viewport" content="width=device-width, initial-scale=1.0">');
-      } else if (html.includes('<html>')) {
-        html = html.replace('<html>', '<html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>');
+    // Source/framework apps (React, Vite, TS) need transpilation — run them via the mini-bundler
+    if (detectAppType(currentFiles) === 'react') {
+      finalHtml = buildSourceAppPreview(currentFiles);
+    } else {
+      let html = currentFiles['index.html'] || '';
+
+      if (!html) {
+        html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body><div id="root"></div></body></html>';
+      } else if (!html.toLowerCase().includes('viewport')) {
+        if (html.includes('</head>')) {
+          html = html.replace('</head>', '<meta name="viewport" content="width=device-width, initial-scale=1.0"></head>');
+        } else if (html.includes('<head>')) {
+          html = html.replace('<head>', '<head><meta name="viewport" content="width=device-width, initial-scale=1.0">');
+        } else if (html.includes('<html>')) {
+          html = html.replace('<html>', '<html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>');
+        }
       }
-    }
 
-    // Collect all CSS files (style.css, styles.css, main.css, app.css, index.css, etc.)
-    const CSS_NAMES = ['style.css', 'styles.css', 'main.css', 'app.css', 'index.css'];
-    const allCss = [
-      ...CSS_NAMES.map(n => currentFiles[n] || ''),
-      ...Object.entries(currentFiles)
-        .filter(([k]) => k.endsWith('.css') && !CSS_NAMES.includes(k))
-        .map(([, v]) => v as string),
-    ].filter(Boolean).join('\n');
+      // Collect all CSS files (style.css, styles.css, main.css, app.css, index.css, etc.)
+      const CSS_NAMES = ['style.css', 'styles.css', 'main.css', 'app.css', 'index.css'];
+      const allCss = [
+        ...CSS_NAMES.map(n => currentFiles[n] || ''),
+        ...Object.entries(currentFiles)
+          .filter(([k]) => k.endsWith('.css') && !CSS_NAMES.includes(k))
+          .map(([, v]) => v as string),
+      ].filter(Boolean).join('\n');
 
-    // Collect all JS files (script.js, app.js, main.js, index.js, etc.)
-    const JS_NAMES = ['script.js', 'app.js', 'main.js', 'index.js'];
-    const allJs = [
-      ...JS_NAMES.map(n => currentFiles[n] || ''),
-      ...Object.entries(currentFiles)
-        .filter(([k]) => k.endsWith('.js') && !JS_NAMES.includes(k) && !k.includes('node_modules') && !k.includes('.min.js'))
-        .map(([, v]) => v as string),
-    ].filter(Boolean).join('\n');
+      // Collect all JS files (script.js, app.js, main.js, index.js, etc.)
+      const JS_NAMES = ['script.js', 'app.js', 'main.js', 'index.js'];
+      const allJs = [
+        ...JS_NAMES.map(n => currentFiles[n] || ''),
+        ...Object.entries(currentFiles)
+          .filter(([k]) => k.endsWith('.js') && !JS_NAMES.includes(k) && !k.includes('node_modules') && !k.includes('.min.js'))
+          .map(([, v]) => v as string),
+      ].filter(Boolean).join('\n');
 
-    let finalHtml = html;
+      finalHtml = html;
 
-    // Inline external CSS links that reference local files
-    finalHtml = finalHtml.replace(/<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["'][^>]*\/?>/gi, (match, href) => {
-      const filename = href.replace(/^\.\//, '').replace(/^\//, '');
-      const content = currentFiles[filename];
-      return content ? `<style data-src="${filename}">${content}</style>` : match;
-    });
+      // Inline external CSS links that reference local files
+      finalHtml = finalHtml.replace(/<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["'][^>]*\/?>/gi, (match, href) => {
+        const filename = href.replace(/^\.\//, '').replace(/^\//, '');
+        const content = currentFiles[filename];
+        return content ? `<style data-src="${filename}">${content}</style>` : match;
+      });
 
-    // Inline external script src — preserve type attribute (e.g. type="text/babel" for React/JSX)
-    finalHtml = finalHtml.replace(/<script([^>]+)src=["']([^"']+)["'][^>]*><\/script>/gi, (match, attrs, src) => {
-      const filename = src.replace(/^\.\//, '').replace(/^\//, '');
-      const content = currentFiles[filename];
-      if (!content) return match;
-      const typeMatch = attrs.match(/type=["']([^"']+)["']/);
-      const typeAttr = typeMatch ? ` type="${typeMatch[1]}"` : '';
-      return `<script${typeAttr} data-src="${filename}">${content}<\/script>`;
-    });
+      // Inline external script src — preserve type attribute (e.g. type="text/babel" for React/JSX)
+      finalHtml = finalHtml.replace(/<script([^>]+)src=["']([^"']+)["'][^>]*><\/script>/gi, (match, attrs, src) => {
+        const filename = src.replace(/^\.\//, '').replace(/^\//, '');
+        const content = currentFiles[filename];
+        if (!content) return match;
+        const typeMatch = attrs.match(/type=["']([^"']+)["']/);
+        const typeAttr = typeMatch ? ` type="${typeMatch[1]}"` : '';
+        return `<script${typeAttr} data-src="${filename}">${content}<\/script>`;
+      });
 
-    // Inject any remaining CSS not already inlined
-    if (allCss) {
-      const styleTag = `<style id="nb-injected-css">${allCss}</style>`;
-      if (finalHtml.includes('</head>')) {
-        finalHtml = finalHtml.replace('</head>', `${styleTag}</head>`);
-      } else if (finalHtml.includes('<body>')) {
-        finalHtml = finalHtml.replace('<body>', `<head>${styleTag}</head><body>`);
-      } else {
-        finalHtml = `<head>${styleTag}</head>${finalHtml}`;
+      // Inject any remaining CSS not already inlined
+      if (allCss) {
+        const styleTag = `<style id="nb-injected-css">${allCss}</style>`;
+        if (finalHtml.includes('</head>')) {
+          finalHtml = finalHtml.replace('</head>', `${styleTag}</head>`);
+        } else if (finalHtml.includes('<body>')) {
+          finalHtml = finalHtml.replace('<body>', `<head>${styleTag}</head><body>`);
+        } else {
+          finalHtml = `<head>${styleTag}</head>${finalHtml}`;
+        }
       }
-    }
 
-    // Inject any remaining JS not already inlined
-    if (allJs) {
-      const scriptTag = `<script id="nb-injected-js">${allJs}<\/script>`;
-      if (finalHtml.includes('</body>')) {
-        finalHtml = finalHtml.replace('</body>', `${scriptTag}</body>`);
-      } else {
-        finalHtml = `${finalHtml}${scriptTag}`;
+      // Inject any remaining JS not already inlined
+      if (allJs) {
+        const scriptTag = `<script id="nb-injected-js">${allJs}<\/script>`;
+        if (finalHtml.includes('</body>')) {
+          finalHtml = finalHtml.replace('</body>', `${scriptTag}</body>`);
+        } else {
+          finalHtml = `${finalHtml}${scriptTag}`;
+        }
       }
+
+      finalHtml = injectHarness(finalHtml);
     }
 
     setGeneratedCode(finalHtml);
     trackEvent('app_generated', { agent: activeAgent, htmlBytes: finalHtml.length });
 
-    // Save to preview history (max 5)
-    setPreviewHistory(prev => {
-      const title = (finalHtml.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || 'App Preview').trim();
-      const entry = { id: Date.now().toString(), label: title, ts: new Date(), html: finalHtml };
-      return [entry, ...prev.filter(h => h.id !== entry.id)].slice(0, 5);
-    });
+    // Save to preview history (max 5). Skip very large docs (e.g. imports with many
+    // inlined base64 images) — keeping 5 multi-MB copies would balloon memory.
+    if (finalHtml.length < 2_000_000) {
+      setPreviewHistory(prev => {
+        const title = (finalHtml.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || 'App Preview').trim();
+        const entry = { id: Date.now().toString(), label: title, ts: new Date(), html: finalHtml };
+        return [entry, ...prev.filter(h => h.id !== entry.id)].slice(0, 5);
+      });
+    }
   };
 
   const handleFileChange = (path: string, content: string) => {
@@ -2714,9 +2885,11 @@ ${buildLanguageRule(preferredLanguage)}`;
             fileCount++;
             // Load each file into Code Studio immediately as it arrives
             setFiles(prev => ({ ...prev, [evt.path]: evt.content }));
-            // Trigger live preview on key files
+            // Live preview on key files — but only for static apps. Source/React apps are
+            // previewed once at the end (rebuilding the Babel runtime per file would be wasteful).
             const isKey = evt.path === 'index.html' || evt.path.endsWith('.css') || evt.path.endsWith('.js');
-            if (isKey) {
+            const looksSource = !!loadedFiles['package.json'] || Object.keys(loadedFiles).some(k => /\.(tsx|jsx)$/i.test(k));
+            if (isKey && !looksSource) {
               const snapshot = { ...loadedFiles };
               setTimeout(() => updatePreview(snapshot as any), 50);
             }
@@ -2737,9 +2910,10 @@ ${buildLanguageRule(preferredLanguage)}`;
 
       if (fileCount === 0) throw new Error('No files extracted from ZIP');
 
-      // Final state — ensure everything is synced
+      // Final state — ensure everything is synced.
+      // updatePreview builds the correct runnable doc (handles React/TS source apps too),
+      // so we never set raw index.html as generatedCode (which would blank the preview).
       setFiles(loadedFiles as any);
-      setGeneratedCode(loadedFiles['index.html'] || '');
       setTimeout(() => updatePreview(loadedFiles as any), 100);
       const generatedFilesObj = Object.fromEntries(
         Object.entries(loadedFiles).map(([k, v]) => [k, { content: v, expanded: false }])

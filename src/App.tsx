@@ -7849,17 +7849,18 @@ ${pending.map(p => `  - ${p}`).join('\n')}
             </div>
           )}
 
+          {/* ZIP size modal — global so it appears regardless of active view */}
+          {zipSizeModal && (
+            <ZipSizeModal
+              variant={zipSizeModal.variant}
+              fileName={zipSizeModal.fileName}
+              fileSizeMB={zipSizeModal.fileSizeMB}
+              onClose={() => setZipSizeModal(null)}
+            />
+          )}
+
           {activeView === 'files' && (
             <div className="flex-1 h-full overflow-hidden bg-[#0d1117] flex flex-col">
-              {/* ZIP size warning modal */}
-              {zipSizeModal && (
-                <ZipSizeModal
-                  variant={zipSizeModal.variant}
-                  fileName={zipSizeModal.fileName}
-                  fileSizeMB={zipSizeModal.fileSizeMB}
-                  onClose={() => setZipSizeModal(null)}
-                />
-              )}
               {/* Upload conflict popup */}
               {fileUploadConflict && (
                 <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" onClick={() => setFileUploadConflict(null)}>

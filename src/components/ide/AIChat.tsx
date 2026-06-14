@@ -1126,15 +1126,6 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                     </div>
                   )}
                   <div className="relative flex items-center">
-                  {(() => {
-                    const DEBUG_MODE = false;
-                    console.log('DEBUG AIChat:', {isLoggedIn, onModeChange: !!onModeChange, activeAgent});
-                    return DEBUG_MODE && (
-                      <div className="absolute -top-6 left-0 text-[8px] text-red-400 font-mono">
-                        DBUG: LoggedIn={isLoggedIn?'T':'F'} ModeChg={onModeChange?'T':'F'} Agent='{activeAgent}' Cond={onModeChange && activeAgent === 'navbharatai-pro' ? 'TRUE' : 'FALSE'}
-                      </div>
-                    );
-                  })()}
                   <input
                     type="file"
                     ref={fileInputRef}

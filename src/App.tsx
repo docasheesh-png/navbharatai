@@ -3166,7 +3166,16 @@ ${buildLanguageRule(preferredLanguage)}`;
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: abortController.signal,
-          body: JSON.stringify({ message: messageToSend, history: proMessages.slice(-8).map((m: any) => ({ sender: m.sender, text: String(m.text || '').slice(0, 400) })), mode: 'conversation' }),
+          body: JSON.stringify({
+            message: messageToSend,
+            history: proMessages.slice(-8).map((m: any) => ({ sender: m.sender, text: String(m.text || '').slice(0, 400) })),
+            mode: 'conversation',
+            ...(fileAttachments.length > 0 ? {
+              fileData: fileAttachments[0].base64,
+              fileType: fileAttachments[0].type,
+              fileName: fileAttachments[0].name,
+            } : {}),
+          }),
         });
         if (!response.ok) throw new Error(`API Error: ${response.status}`);
         const data = await response.json();

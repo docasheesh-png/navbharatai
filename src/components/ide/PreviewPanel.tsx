@@ -246,6 +246,20 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
 
   const previewSrc = tagMode && generatedCode ? injectTagOverlay(generatedCode) : generatedCode;
 
+  // Write iframe content imperatively so device/zoom state changes never reload it.
+  // Only actual content changes (new build, tag mode toggle) should reload.
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const writtenSrcRef = useRef<string>('');
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe || previewSrc === writtenSrcRef.current) return;
+    writtenSrcRef.current = previewSrc || '';
+    try {
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (doc) { doc.open(); doc.write(previewSrc || ''); doc.close(); }
+    } catch { /* cross-origin guard */ }
+  }, [previewSrc]);
+
   return (
     <div className="flex flex-col h-full bg-[#0d1117]">
       {/* Browser-like Header */}
@@ -473,9 +487,9 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
             )}>
             {generatedCode ? (
               <iframe
+                ref={iframeRef}
                 key={tagMode ? 'tag' : 'preview'}
                 title="App Preview"
-                srcDoc={previewSrc}
                 className="w-full h-full bg-white border-none"
                 sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
               />

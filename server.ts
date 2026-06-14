@@ -4027,7 +4027,7 @@ ${LANGUAGE_RULE}
 Be helpful, concise, and accurate. If the user wants to build an app, guide them.`;
 
   const chatHandler = async (req: any, res: any, tier: 'navbharat' | 'vishwakarma-basic' | 'vishwakarma-pro' | 'vip') => {
-    let { message, history, currentApp, mode, intent, userProfile, fileAttachments } = req.body;
+    let { message, history, currentApp, mode, intent, userProfile, fileAttachments, memorySummary } = req.body;
     if (!message && !Array.isArray(fileAttachments)) return res.status(400).json({ reply: 'Message is required' });
     message = message || '';
 
@@ -4069,8 +4069,11 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
 
     // Build contextual message with canvas app prepended (Pro/VIP only)
     let contextualMessage = message;
+    if (memorySummary && typeof memorySummary === 'string' && memorySummary.trim().length > 20) {
+      contextualMessage = `[CONVERSATION MEMORY — summary of earlier discussion:\n${memorySummary.trim().slice(0, 2000)}]\n\nCurrent message: ${message}`;
+    }
     if (hasCanvas) {
-      contextualMessage = `[CANVAS — current app on canvas (${currentApp.length} chars total)]:\n\`\`\`html\n${currentApp.slice(0, 20000)}${currentApp.length > 20000 ? '\n...[truncated — send smaller app for full edit]' : ''}\n\`\`\`\n\nUser request: ${message}`;
+      contextualMessage = `[CANVAS — current app on canvas (${currentApp.length} chars total)]:\n\`\`\`html\n${currentApp.slice(0, 20000)}${currentApp.length > 20000 ? '\n...[truncated — send smaller app for full edit]' : ''}\n\`\`\`\n\nUser request: ${memorySummary && typeof memorySummary === 'string' && memorySummary.trim().length > 20 ? `[MEMORY: ${memorySummary.trim().slice(0, 500)}]\n\n` : ''}${message}`;
     }
 
     console.log(`[CHAT] tier=${tier} isFree=${isFree} mode=${mode} intent=${intent} hasCanvas=${hasCanvas} files=${attachments.length}(vision=${visionAttachments.length}) sysprompt=${isFree ? 'FREE' : hasCanvas ? 'EDIT' : isBuildIntent ? 'BUILD' : 'CHAT'}`);
@@ -4289,9 +4292,12 @@ app.post('/api/chat', async (req, res) => {
   app.post('/api/pro-chat', async (req, res) => {
     console.log("=== HIT /api/pro-chat ===");
     try {
-      let { message, history, mode, fileData, fileType, fileName, currentApp } = req.body;
+      let { message, history, mode, fileData, fileType, fileName, currentApp, memorySummary } = req.body;
       if (!message && !fileData) return res.status(400).json({ error: 'Message required' });
       message = message || '';
+      if (memorySummary && typeof memorySummary === 'string' && memorySummary.trim().length > 20) {
+        message = `[CONVERSATION MEMORY — summary of earlier discussion:\n${memorySummary.trim().slice(0, 2000)}]\n\nCurrent message: ${message}`;
+      }
       const hasFile = !!(fileData && fileType);
       const isImageFile = hasFile && (fileType as string).startsWith('image/');
       const isPDFFile = hasFile && fileType === 'application/pdf';

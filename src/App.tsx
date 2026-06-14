@@ -2690,7 +2690,8 @@ ${buildLanguageRule(preferredLanguage)}`;
           body: JSON.stringify({
             message: messageToSend,
             preferredModel: isNbi ? 'gemini' : selectedModel,
-            history: historyForAPI,
+            history: historyForAPI.slice(-40).map(m => ({ sender: m.sender, text: String(m.text || '').slice(0, 2000) })),
+            memorySummary: memorySummary || undefined,
             agent: currentAgent,
             mode: currentMode,
             intent: detectedIntent,
@@ -3196,7 +3197,8 @@ ${buildLanguageRule(preferredLanguage)}`;
           signal: abortController.signal,
           body: JSON.stringify({
             message: messageToSend,
-            history: proMessages.slice(-8).map((m: any) => ({ sender: m.sender, text: String(m.text || '').slice(0, 400) })),
+            history: proMessages.slice(-30).map((m: any) => ({ sender: m.sender, text: String(m.text || '').slice(0, 2000) })),
+            memorySummary: sessions.find(s => s.id === currentSessionId)?.memorySummary || undefined,
             mode: 'conversation',
             ...(fileAttachments.length > 0 ? {
               fileData: fileAttachments[0].base64,

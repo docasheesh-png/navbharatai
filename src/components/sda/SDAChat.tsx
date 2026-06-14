@@ -249,6 +249,28 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
 
+  // Restore messages from localStorage on mount (handles 1-2 hour gaps without reload)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('sda_messages');
+      if (saved) {
+        const parsed: SDAMessage[] = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 1) {
+          setMessages(parsed.map(m => ({ ...m, timestamp: new Date(m.timestamp) })));
+        }
+      }
+    } catch { /* ignore corrupt storage */ }
+  }, []);
+
+  // Persist messages to localStorage on every change (skip if only welcome msg)
+  useEffect(() => {
+    if (messages.length > 1) {
+      try {
+        localStorage.setItem('sda_messages', JSON.stringify(messages.slice(-150)));
+      } catch { /* quota */ }
+    }
+  }, [messages]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -461,6 +483,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
     setInput('');
     setAttachedFile(null);
     setSuggestPDF(false);
+    try { localStorage.removeItem('sda_messages'); } catch {}
   };
 
   // ── Render ────────────────────────────────────────────────────────────────

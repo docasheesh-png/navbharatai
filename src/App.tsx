@@ -1410,9 +1410,20 @@ export default function App() {
       return nextHistories;
     });
 
-    // Reset messages only if explicitly closed chat
-    if (view === 'chat' || view === 'nbi_chat' || view === 'nbi_pro_chat' || view === 'asc_chat') {
-        setMessages([]);
+    // Reset messages when chat tab is explicitly closed — full clean slate on reopen
+    if (view === 'nbi_chat') {
+      setMessages([]);
+      setInput('');
+    }
+    if (view === 'nbi_pro_chat') {
+      setProMessages([]);
+      setProInput('');
+      // Wipe persisted pro history so it doesn't reload on next open
+      try { localStorage.removeItem('navbharat_pro_messages'); } catch {}
+    }
+    if (view === 'asc_chat') {
+      setMessages([]);
+      setInput('');
     }
 
     // When pro chat is closed, wipe preview state so old app doesn't bleed into next session
@@ -1421,7 +1432,7 @@ export default function App() {
       setHasGeneratedCode(false);
       setIsAppBuilt(false);
     }
-  }, [activeView, toggleTab, setMessages, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt]);
+  }, [activeView, toggleTab, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const mainContentRef = useRef<HTMLDivElement>(null);
@@ -3759,7 +3770,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     });
     
     setCurrentSessionId(targetSession.id);
-    setMessages([continuationGreeting]);
+    // Show the last 40 messages from previous conversation so user can scroll up and see context,
+    // then append the continuation greeting at the bottom.
+    const visibleHistory = uniqueHistory.slice(-40);
+    setMessages([...visibleHistory, continuationGreeting]);
 
     // Detect target tab — use saved tab field first, then broad agent/mode detection
     const savedTab = (targetSession as any).meta?.tab as ViewType | undefined;

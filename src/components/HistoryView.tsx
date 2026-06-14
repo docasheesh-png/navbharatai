@@ -2,10 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../App';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { motion } from 'motion/react';
-import { MessageSquare, Clock, ShieldCheck, LogIn, MoreVertical, Trash2, Search, X, Layers, Code2 } from 'lucide-react';
+import { MessageSquare, Clock, ShieldCheck, LogIn, MoreVertical, Trash2, Search, X, Layers, Code2, Zap, Cpu, Stethoscope } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-type FilterMode = 'all' | 'chat' | 'apps';
+type FilterMode = 'all' | 'chat' | 'apps' | 'free' | 'pro' | 'sda';
 
 const isAppSession = (session: any) =>
   (session.files && Object.keys(session.files).length > 0) ||
@@ -54,11 +54,24 @@ export const HistoryView = ({
     return () => unsubscribe();
   }, [user]);
 
+  const isProSession = (s: any) => {
+    const a = String(s.agent || s.current_agent || s.currentAgent || '').toLowerCase();
+    return a.includes('pro') || a.includes('vishwakarma');
+  };
+  const isSdaSession = (s: any) => {
+    const a = String(s.agent || s.current_agent || s.currentAgent || '').toLowerCase();
+    return a.includes('sda') || a.includes('doctor');
+  };
+  const isFreeSession = (s: any) => !isProSession(s) && !isSdaSession(s);
+
   const filteredSessions = useMemo(() => {
     let result = sessions;
 
     if (filterMode === 'apps') result = result.filter(isAppSession);
     else if (filterMode === 'chat') result = result.filter(s => !isAppSession(s));
+    else if (filterMode === 'free') result = result.filter(isFreeSession);
+    else if (filterMode === 'pro')  result = result.filter(isProSession);
+    else if (filterMode === 'sda')  result = result.filter(isSdaSession);
 
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
@@ -91,26 +104,47 @@ export const HistoryView = ({
       </h2>
 
       {/* Filter + Search bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-5">
-        {/* Filter tabs */}
-        <div className="flex items-center gap-1 bg-[#161b22] border border-white/8 rounded-xl p-1 shrink-0">
-          {(['all', 'chat', 'apps'] as FilterMode[]).map(mode => (
-            <button
-              key={mode}
-              onClick={() => setFilterMode(mode)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                filterMode === mode
-                  ? "bg-indigo-600 text-white shadow-md"
-                  : "text-[#8b949e] hover:text-white hover:bg-white/5"
-              )}
-            >
-              {mode === 'all' && <Layers className="w-3 h-3" />}
-              {mode === 'chat' && <MessageSquare className="w-3 h-3" />}
-              {mode === 'apps' && <Code2 className="w-3 h-3" />}
-              {mode}
-            </button>
-          ))}
+      <div className="flex flex-col gap-2 mb-5">
+        {/* Row 1: type filters */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 bg-[#161b22] border border-white/8 rounded-xl p-1 shrink-0">
+            {([
+              { key: 'all',  label: 'All',  icon: <Layers className="w-3 h-3" /> },
+              { key: 'chat', label: 'Chat', icon: <MessageSquare className="w-3 h-3" /> },
+              { key: 'apps', label: 'Apps', icon: <Code2 className="w-3 h-3" /> },
+            ] as { key: FilterMode; label: string; icon: React.ReactNode }[]).map(({ key, label, icon }) => (
+              <button
+                key={key}
+                onClick={() => setFilterMode(key)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                  filterMode === key ? "bg-indigo-600 text-white shadow-md" : "text-[#8b949e] hover:text-white hover:bg-white/5"
+                )}
+              >
+                {icon}{label}
+              </button>
+            ))}
+          </div>
+
+          {/* Row 2: AI mode filters */}
+          <div className="flex items-center gap-1 bg-[#161b22] border border-white/8 rounded-xl p-1 shrink-0">
+            {([
+              { key: 'free', label: 'Free', icon: <Zap className="w-3 h-3" />, color: 'bg-emerald-600' },
+              { key: 'pro',  label: 'Pro',  icon: <Cpu className="w-3 h-3" />, color: 'bg-violet-600' },
+              { key: 'sda',  label: 'SDA',  icon: <Stethoscope className="w-3 h-3" />, color: 'bg-rose-600' },
+            ] as { key: FilterMode; label: string; icon: React.ReactNode; color: string }[]).map(({ key, label, icon, color }) => (
+              <button
+                key={key}
+                onClick={() => setFilterMode(key)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                  filterMode === key ? `${color} text-white shadow-md` : "text-[#8b949e] hover:text-white hover:bg-white/5"
+                )}
+              >
+                {icon}{label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Search box */}

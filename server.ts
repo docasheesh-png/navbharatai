@@ -6,6 +6,8 @@ import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
 import { registerTeamRoutes } from './src/server/routes/team';
 import { audit } from './src/server/lib/audit';
+import { setDb as setSharedDb } from './src/server/lib/db';
+import { registerWalletRoutes } from './src/server/routes/wallet';
 
 // ─── Legacy embedded API key (sentinel + historical fallback) ────────────────
 // SECURITY: This Google API key was previously hardcoded inline in 3 places.
@@ -135,6 +137,7 @@ try {
     const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     firebaseApp = initializeApp(firebaseConfig);
     db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+    setSharedDb(db); // share the handle with extracted route modules (Phase 1)
     firebaseApiKey = firebaseConfig.apiKey;
     console.log('✅ Firebase initialized successfully. Resolved fallback ApiKey:', firebaseApiKey ? 'present' : 'absent');
   } else {
@@ -5205,122 +5208,8 @@ Response Format:
   // WALLET & PAYMENT BILLING SYSTEM ENDPOINTS
   // =============================================
 
-  app.get('/api/wallet/:userId', async (req, res) => {
-    const { userId } = req.params;
-    const email = req.query.email as string || '';
-    const name = req.query.name as string || '';
-
-    try {
-      const walletRef = doc(db, 'user_token_wallets', userId);
-      const snap = await getDoc(walletRef);
-      if (snap.exists()) {
-        const data = snap.data();
-        let updated = false;
-
-        if (data.hasVishwakarmaPass === undefined) { data.hasVishwakarmaPass = false; updated = true; }
-        if (data.tokenBalance === undefined) { data.tokenBalance = 0; updated = true; }
-        if (data.totalTokensPurchased === undefined) { data.totalTokensPurchased = 0; updated = true; }
-        if (data.totalTokensUsed === undefined) { data.totalTokensUsed = 0; updated = true; }
-        if (data.walletLedger === undefined) { data.walletLedger = []; updated = true; }
-
-        if (updated) {
-          await setDoc(walletRef, data, { merge: true });
-        }
-        return res.json(data);
-      } else {
-        const welcomeBalance = 10.00;
-        const welcomeTokens = 1000; // ₹10 = 1000 tokens
-        const initialWallet = {
-          userId,
-          userEmail: email,
-          userName: name,
-          total_balance: welcomeBalance,
-          remaining_balance: welcomeBalance,
-          total_output_tokens_used: 0,
-          total_money_spent: 0,
-          hasVishwakarmaPass: false,
-          vishwakarmaPassActivatedAt: null,
-          tokenBalance: welcomeTokens,
-          totalTokensPurchased: welcomeTokens,
-          totalTokensUsed: 0,
-          lastRechargeAt: null,
-          walletLedger: [
-            {
-              type: 'purchase',
-              amountCoinsOrTokens: welcomeTokens,
-              moneySpent: 0,
-              timestamp: new Date().toISOString(),
-              description: 'Welcome Bonus: 1,000 AI Tokens Credited!'
-            }
-          ],
-          updatedAt: new Date().toISOString()
-        };
-        await setDoc(walletRef, initialWallet);
-        
-        // Add welcome bonus transaction to transaction list
-        const welcomeTxRef = doc(db, 'payment_transactions', `welcome_${userId}`);
-        await setDoc(welcomeTxRef, {
-          transactionId: `welcome_${userId}`,
-          userId,
-          amountPaid: 0,
-          balanceAdded: welcomeBalance,
-          paymentProvider: 'WELCOME_BONUS',
-          paymentStatus: 'SUCCESS',
-          paymentReference: 'WELCOME_BONUS',
-          createdAt: new Date().toISOString()
-        });
-
-        return res.json(initialWallet);
-      }
-    } catch (err: any) {
-      console.error('[API WALLET GET ERROR]:', err);
-      return res.status(500).json({ error: err.message || 'Unknown internal wallet error' });
-    }
-  });
-
-  app.get('/api/wallet/:userId/logs', async (req, res) => {
-    const { userId } = req.params;
-    try {
-      const logsRef = collection(db, 'ai_usage_logs');
-      const q = query(logsRef, where('userId', '==', userId), orderBy('createdAt', 'desc'), limit(50));
-      const snap = await getDocs(q);
-      const logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      return res.json(logs);
-    } catch (err: any) {
-      try {
-        const logsRef = collection(db, 'ai_usage_logs');
-        const q = query(logsRef, where('userId', '==', userId), limit(100));
-        const snap = await getDocs(q);
-        const logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        logs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        return res.json(logs);
-      } catch (fallbackErr: any) {
-        return res.status(500).json({ error: fallbackErr.message });
-      }
-    }
-  });
-
-  app.get('/api/wallet/:userId/transactions', async (req, res) => {
-    const { userId } = req.params;
-    try {
-      const txRef = collection(db, 'payment_transactions');
-      const q = query(txRef, where('userId', '==', userId), orderBy('createdAt', 'desc'), limit(50));
-      const snap = await getDocs(q);
-      const txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      return res.json(txs);
-    } catch (err: any) {
-      try {
-        const txRef = collection(db, 'payment_transactions');
-        const q = query(txRef, where('userId', '==', userId), limit(100));
-        const snap = await getDocs(q);
-        const txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        txs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        return res.json(txs);
-      } catch (fallbackErr: any) {
-        return res.status(500).json({ error: fallbackErr.message });
-      }
-    }
-  });
+  // Wallet read routes — extracted to src/server/routes/wallet.ts (Phase 1).
+  registerWalletRoutes(app);
 
   // ─── Cloud Sync: chat sessions + last generated app (cross-device) ──────────
   // Stored in Firestore `user_workspaces/{userId}` so a user's work follows them

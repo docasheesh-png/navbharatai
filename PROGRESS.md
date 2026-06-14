@@ -37,7 +37,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
 - **Milestone 1.3 — DONE (2026-06-14)**: Extracted shared `audit()` logger →
   `src/server/lib/audit.ts` (with unit tests), and team route → `routes/team.ts`.
   server.ts routes 64 → 63. Verified green.
-- **Next milestones**: extract remaining groups — admin (`/api/admin/*`), wallet,
+- **Milestone 1.4 — DONE (2026-06-14)**: Added shared Firestore accessor
+  `src/server/lib/db.ts` (`setDb`/`getDb`); server bootstrap now shares the handle.
+  Extracted 3 wallet read routes → `src/server/routes/wallet.ts`. routes 63 → 60.
+  Verified green (server bundle, wallet+db strict tsc clean, frontend tsc 0, tests).
+- **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict
   per extracted module (burn down the 539-error debt), shrink server.ts to bootstrap.

@@ -17,7 +17,7 @@ interface SDAMessage {
   sender: 'doctor' | 'sda';
   timestamp: Date;
   isRedFlag?: boolean;
-  attachedFile?: { name: string; type: string };
+  attachedFile?: { name: string; type: string; dataUrl?: string };
 }
 
 interface PatientSnapshot {
@@ -388,7 +388,12 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
       text: displayText,
       sender: 'doctor',
       timestamp: new Date(),
-      attachedFile: fileForMsg ? { name: fileForMsg.name, type: fileForMsg.type } : undefined,
+      attachedFile: fileForMsg ? {
+        name: fileForMsg.name,
+        type: fileForMsg.type,
+        // dataUrl already computed when file was attached (downscaleImage / FileReader)
+        dataUrl: fileForMsg.preview || (fileForMsg.base64 ? `data:${fileForMsg.type};base64,${fileForMsg.base64}` : undefined),
+      } : undefined,
     };
     setMessages(prev => [...prev, userMsg]);
     setLoading(true);
@@ -628,13 +633,26 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                   </div>
                 )}
                 {msg.attachedFile && (
-                  <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/10">
-                    {msg.attachedFile.type.startsWith('image/') ? (
-                      <ImageIcon className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                  <div className="mb-2 pb-2 border-b border-white/10">
+                    {msg.attachedFile.type.startsWith('image/') && msg.attachedFile.dataUrl ? (
+                      <button
+                        onClick={() => { const w = window.open(); if (w) { w.document.write(`<img src="${msg.attachedFile!.dataUrl}" style="max-width:100%;height:auto"/>`); w.document.title = msg.attachedFile!.name; } }}
+                        className="group relative focus:outline-none"
+                        title={`${msg.attachedFile.name} — click to zoom`}
+                      >
+                        <img
+                          src={msg.attachedFile.dataUrl}
+                          alt={msg.attachedFile.name}
+                          className="max-h-48 rounded-xl object-cover border border-white/20 group-hover:opacity-90 transition-opacity cursor-zoom-in"
+                        />
+                        <span className="absolute bottom-1 left-1 right-1 text-[9px] text-white/80 bg-black/50 rounded px-1 py-0.5 truncate font-mono hidden group-hover:block">{msg.attachedFile.name}</span>
+                      </button>
                     ) : (
-                      <FileSearch className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                      <div className="flex items-center gap-2">
+                        <FileSearch className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                        <span className="text-[10px] text-[#8b949e] truncate">{msg.attachedFile.name}</span>
+                      </div>
                     )}
-                    <span className="text-[10px] text-[#8b949e] truncate">{msg.attachedFile.name}</span>
                   </div>
                 )}
                 <div className="prose prose-invert prose-xs max-w-none prose-p:leading-relaxed prose-p:my-1 prose-headings:text-emerald-300 prose-strong:text-white prose-li:my-0.5">

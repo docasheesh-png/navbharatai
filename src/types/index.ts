@@ -4,6 +4,12 @@
 import type { AgentMode } from '../components/ide/ModeSelector';
 export type { AgentMode };
 
+export interface MessageAttachment {
+  name: string;
+  type: string;   // MIME type
+  dataUrl?: string; // base64 data URL for display/zoom
+}
+
 export interface Message {
   id: string;
   text: string;
@@ -11,6 +17,7 @@ export interface Message {
   timestamp: Date | string;
   modelUsed?: string;
   meta?: Record<string, unknown>;
+  attachments?: MessageAttachment[];
 }
 
 export interface FileSystem {

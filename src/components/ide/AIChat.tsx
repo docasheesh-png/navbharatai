@@ -15,6 +15,9 @@ interface Message {
   text: string;
   sender: 'user' | 'ai';
   timestamp: Date | string;
+  modelUsed?: string;
+  meta?: Record<string, unknown>;
+  attachments?: Array<{ name: string; type: string; dataUrl?: string }>;
 }
 
 interface SecretQuickFillProps {
@@ -870,10 +873,40 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
               >
                 <div className={cn(
                   "max-w-[90%] p-3.5 rounded-2xl text-[11px] font-medium leading-relaxed shadow-sm break-words select-text",
-                  msg.sender === 'user' 
-                    ? "bg-indigo-600 text-white rounded-tr-none" 
+                  msg.sender === 'user'
+                    ? "bg-indigo-600 text-white rounded-tr-none"
                     : "bg-[#161b22] text-[#c9d1d9] border border-white/5 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
                 )}>
+                  {/* Attachment image previews */}
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {msg.attachments.map((att, ai) => (
+                        att.type.startsWith('image/') && att.dataUrl ? (
+                          <button
+                            key={ai}
+                            onClick={() => {
+                              const win = window.open();
+                              if (win) { win.document.write(`<img src="${att.dataUrl}" style="max-width:100%;height:auto" />`); win.document.title = att.name; }
+                            }}
+                            className="relative group shrink-0 focus:outline-none"
+                            title={`${att.name} — click to zoom`}
+                          >
+                            <img
+                              src={att.dataUrl}
+                              alt={att.name}
+                              className="max-h-48 max-w-[220px] rounded-xl object-cover border border-white/20 group-hover:opacity-90 transition-opacity cursor-zoom-in"
+                            />
+                            <span className="absolute bottom-1 left-1 right-1 text-[9px] text-white/80 bg-black/50 rounded px-1 py-0.5 truncate font-mono hidden group-hover:block">{att.name}</span>
+                          </button>
+                        ) : (
+                          <div key={ai} className="flex items-center gap-1.5 px-2 py-1 bg-white/10 rounded-lg text-[10px] font-bold">
+                            <span>📎</span>
+                            <span className="truncate max-w-[120px]">{att.name}</span>
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  )}
                   {isLongMessage ? (
                     <div className="relative">
                       <div className={cn("transition-all duration-300", !expandedMessages[msg.id] ? "max-h-[120px] overflow-hidden" : "max-h-[5000px]")}>
@@ -883,8 +916,8 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                         onClick={() => setExpandedMessages(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
                         className={cn(
                           "mt-2 text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center gap-1 cursor-pointer",
-                          msg.sender === 'user' 
-                            ? "text-indigo-200 hover:text-white" 
+                          msg.sender === 'user'
+                            ? "text-indigo-200 hover:text-white"
                             : "text-blue-500 hover:text-blue-400 font-extrabold"
                         )}
                       >
@@ -894,7 +927,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                   ) : (
                     renderMessageContent(msg)
                   )}
-                  
+
                 </div>
                 
 

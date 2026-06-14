@@ -2561,12 +2561,22 @@ ${buildLanguageRule(preferredLanguage)}`;
     const greetings = /^(ram ram|namaste|hello|hi|namaskar|sat sri akal|salam|radhe radhe|jai shri ram|kya haal hai|kaise ho)$/i;
     const isBasicGreeting = greetings.test(messageToSend.trim());
 
-    const fileLabel = files.length > 0 ? ` [📎 ${files.map(f => f.name).join(', ')}]` : '';
+    // Build attachment previews (data URLs) so the image shows in chat
+    const attachmentPreviews: import('./types').MessageAttachment[] = await Promise.all(
+      files.map(f => new Promise<import('./types').MessageAttachment>(resolve => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: f.name, type: f.type, dataUrl: reader.result as string });
+        reader.onerror = () => resolve({ name: f.name, type: f.type });
+        reader.readAsDataURL(f);
+      }))
+    );
+
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: (messageToSend || '') + fileLabel,
+      text: messageToSend || '',
       sender: 'user',
       timestamp: new Date(),
+      ...(attachmentPreviews.length > 0 ? { attachments: attachmentPreviews } : {}),
     };
 
     setMessagesForTab((prev) => [...prev, userMessage]);
@@ -3152,13 +3162,20 @@ ${buildLanguageRule(preferredLanguage)}`;
 
     // Convert any attached files to base64 for AI vision
     const fileAttachments = fileList.length > 0 ? await filesToBase64(fileList) : [];
-    const fileLabel = fileAttachments.length > 0 ? ` [📎 ${fileAttachments.map(f => f.name).join(', ')}]` : '';
+
+    // Build attachment previews for chat display (reuse base64 already computed)
+    const proAttachmentPreviews: import('./types').MessageAttachment[] = fileAttachments.map(f => ({
+      name: f.name,
+      type: f.type,
+      dataUrl: `data:${f.type};base64,${f.base64}`,
+    }));
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: messageToSend + fileLabel,
+      text: messageToSend,
       sender: 'user',
       timestamp: new Date(),
+      ...(proAttachmentPreviews.length > 0 ? { attachments: proAttachmentPreviews } : {}),
     };
 
     setProMessages(prev => [...prev, userMessage]);

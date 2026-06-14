@@ -2154,10 +2154,10 @@ ${buildLanguageRule(preferredLanguage)}`;
 </script>`;
 
   // In-iframe mini-bundler: transpiles JSX/TSX with Babel, resolves relative imports,
-  // and loads bare deps (react etc.) via esm.sh import map. Failures surface via the harness.
+  // and loads ALL bare deps via esm.sh (importmap from package.json). Failures surface via the harness.
   const PREVIEW_BOOTSTRAP = `
 (function(){
-  var FILES=window.__FILES||{};var ENTRY=window.__ENTRY||'';var ESM='https://esm.sh/';
+  var FILES=window.__FILES||{};var ENTRY=window.__ENTRY||'';var IMAP=window.__IMAP||{};var ESM='https://esm.sh/';
   function fail(m){if(window.__nbShowError)window.__nbShowError(m);}
   if(typeof Babel==='undefined'){fail('Could not load the preview compiler (network blocked?).');return;}
   function dirname(p){var i=p.lastIndexOf('/');return i<0?'':p.slice(0,i);}
@@ -2197,12 +2197,20 @@ ${buildLanguageRule(preferredLanguage)}`;
     Object.keys(FILES).forEach(function(p){var src=FILES[p]||'',m;re.lastIndex=0;while((m=re.exec(src))){var s=m[1];if(s&&s.charAt(0)!=='.'&&s.charAt(0)!=='/')found[s]=true;}});
     return Object.keys(found);
   }
+  // Resolve a bare import spec to CDN URL: importmap first, then esm.sh
+  function specUrl(spec){
+    if(IMAP[spec])return IMAP[spec];
+    var root=spec.charAt(0)==='@'?spec.split('/').slice(0,2).join('/'):spec.split('/')[0];
+    if(IMAP[root])return IMAP[root]+spec.slice(root.length);
+    return ESM+spec;
+  }
   var forced=['react','react-dom','react-dom/client','react/jsx-runtime','react/jsx-dev-runtime'];
   (async function(){
     try{
       var bare=collectBare();forced.forEach(function(s){if(bare.indexOf(s)<0)bare.push(s);});
       await Promise.all(bare.map(async function(spec){
-        try{var url=(spec.indexOf('react')===0)?spec:(ESM+spec);bareCache[spec]=interop(await import(url));}catch(e){}
+        try{bareCache[spec]=interop(await import(specUrl(spec)));}
+        catch(e){console.warn('[preview] failed to load',spec,e&&e.message);}
       }));
       if(!ENTRY){fail('No runnable entry file found in this app.');return;}
       requireMod(ENTRY);
@@ -2225,8 +2233,6 @@ ${buildLanguageRule(preferredLanguage)}`;
   // Build a runnable in-iframe document for source/framework apps.
   const buildSourceAppPreview = (f: FileSystem): string => {
     const rawHtml = f['index.html'] || '';
-    // Include code, styles, data, AND image assets (images arrive as base64 data-URLs from the server,
-    // so `import logo from './logo.svg'` resolves to a usable URL string in the preview).
     const srcExtRe = /\.(jsx|tsx|ts|js|mjs|cjs|css|json|png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i;
     const srcFiles: Record<string, string> = {};
     Object.keys(f).forEach(k => { if (srcExtRe.test(k) && !k.includes('node_modules')) srcFiles[k] = f[k]; });
@@ -2250,20 +2256,40 @@ ${buildLanguageRule(preferredLanguage)}`;
       if (!/id=["'](root|app)["']/.test(bodyInner)) bodyInner += '<div id="root"></div>';
     }
 
-    const importmap = JSON.stringify({ imports: {
-      'react': 'https://esm.sh/react@18.3.1',
-      'react-dom': 'https://esm.sh/react-dom@18.3.1',
-      'react-dom/client': 'https://esm.sh/react-dom@18.3.1/client',
-      'react/jsx-runtime': 'https://esm.sh/react@18.3.1/jsx-runtime',
-      'react/jsx-dev-runtime': 'https://esm.sh/react@18.3.1/jsx-dev-runtime',
-    }});
+    // Build importmap from package.json dependencies + always-needed React packages
+    const ESM = 'https://esm.sh/';
+    const pkgDeps: Record<string, string> = {};
+    try {
+      const pkg = JSON.parse(f['package.json'] || '{}');
+      Object.assign(pkgDeps, pkg.dependencies || {}, pkg.devDependencies || {});
+    } catch {}
+    // Strip semver prefix (^1.2.3 → 1.2.3)
+    const ver = (name: string) => {
+      const v = pkgDeps[name];
+      return v ? '@' + v.replace(/^[\^~>=<\s]*/,'').split(/\s/)[0] : '';
+    };
+    const reactVer = ver('react') || '@18.3.1';
+    const rdVer = ver('react-dom') || '@18.3.1';
+    const imapEntries: Record<string, string> = {
+      'react': ESM + 'react' + reactVer,
+      'react-dom': ESM + 'react-dom' + rdVer,
+      'react-dom/client': ESM + 'react-dom' + rdVer + '/client',
+      'react/jsx-runtime': ESM + 'react' + reactVer + '/jsx-runtime',
+      'react/jsx-dev-runtime': ESM + 'react' + reactVer + '/jsx-dev-runtime',
+    };
+    // Add all package.json deps to importmap with version pins
+    Object.keys(pkgDeps).forEach(pkg => {
+      if (!imapEntries[pkg]) imapEntries[pkg] = ESM + pkg + ver(pkg);
+    });
+
+    const importmap = JSON.stringify({ imports: imapEntries });
 
     return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
       + PREVIEW_HARNESS
       + '<script type="importmap">' + importmap + '</' + 'script>'
       + '<script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></' + 'script>'
       + '</head><body>' + bodyInner
-      + '<script>window.__FILES=' + JSON.stringify(srcFiles) + ';window.__ENTRY=' + JSON.stringify(entry) + ';</' + 'script>'
+      + '<script>window.__FILES=' + JSON.stringify(srcFiles) + ';window.__ENTRY=' + JSON.stringify(entry) + ';window.__IMAP=' + JSON.stringify(imapEntries) + ';</' + 'script>'
       + '<script>' + PREVIEW_BOOTSTRAP + '</' + 'script>'
       + '</body></html>';
   };

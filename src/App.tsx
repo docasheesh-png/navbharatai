@@ -282,6 +282,7 @@ export default function App() {
     percent: number;
     generatedFiles: Record<string, { content: string; expanded: boolean }>;
   }>({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+  const [sdaResetKey, setSdaResetKey] = useState(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isProLoading, setIsProLoading] = useState<boolean>(false);
   const [activeIntent, setActiveIntent] = useState<string>('social');
@@ -1410,29 +1411,31 @@ export default function App() {
       return nextHistories;
     });
 
-    // Reset messages when chat tab is explicitly closed — full clean slate on reopen
+    // Full state reset when chat tab is explicitly closed — clean slate on reopen
     if (view === 'nbi_chat') {
       setMessages([]);
       setInput('');
+      // Reset session so memorySummary doesn't bleed into next conversation
+      setCurrentSessionId(Date.now().toString());
     }
     if (view === 'nbi_pro_chat') {
       setProMessages([]);
       setProInput('');
-      // Wipe persisted pro history so it doesn't reload on next open
       try { localStorage.removeItem('navbharat_pro_messages'); } catch {}
-    }
-    if (view === 'asc_chat') {
-      setMessages([]);
-      setInput('');
-    }
-
-    // When pro chat is closed, wipe preview state so old app doesn't bleed into next session
-    if (view === 'nbi_pro_chat') {
+      // Wipe workspace so next open starts with a blank canvas
+      setFiles({});
+      setBuildVersionStack([]);
+      setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
       setGeneratedCode('<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>');
       setHasGeneratedCode(false);
       setIsAppBuilt(false);
     }
-  }, [activeView, toggleTab, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt]);
+    if (view === 'sda_chat') {
+      // Force SDAChat to fully remount, wiping all its internal state
+      try { localStorage.removeItem('sda_messages'); } catch {}
+      setSdaResetKey(k => k + 1);
+    }
+  }, [activeView, toggleTab, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt, setFiles, setBuildVersionStack, setProBuildProgress, setCurrentSessionId, setSdaResetKey]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const mainContentRef = useRef<HTMLDivElement>(null);
@@ -5960,7 +5963,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {/* ── Senior Doctor Assistant ── */}
           {activeView === 'sda_chat' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <SDAChat userId={user?.uid} />
+              <SDAChat key={sdaResetKey} userId={user?.uid} />
             </div>
           )}
 

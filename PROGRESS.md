@@ -21,8 +21,20 @@ Each phase: complete → `tsc --noEmit` + tests + build green → push → next.
 
 ---
 
-## ⏳ PHASE 1 — Break server.ts god-file (NEXT)
-6,598 lines / 71 routes → domain routers + services + typed AI gateway; enable strict per module; server tsconfig. (See plan file.)
+## 🔄 PHASE 1 — Break server.ts god-file (IN PROGRESS)
+6,598 lines / 71 routes, all inside one giant `(async () => {...})()` IIFE.
+Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
+`registerXxxRoutes(app, deps)`, one green milestone at a time (no behavior change).
+
+- **Milestone 1.1 — DONE (2026-06-14)**: Extracted 4 PWA routes (`/api/pwa/save`,
+  `/pwa/:id`, `/pwa/:id/manifest.json`, `/pwa/:id/sw.js`) → `src/server/routes/pwa.ts`
+  (`registerPwaRoutes(app, pwaStore)`, new module is fully strict-typed). Removed
+  dead `estimateTokens()`. Verified: server esbuild bundle ✅, module strict tsc ✅,
+  frontend tsc 0 ✅, tests ✅.
+- **Next milestones**: extract remaining groups — admin (`/api/admin/*`), wallet,
+  sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
+  Then move shared helpers/limiters to modules, add server tsconfig, enable strict
+  per extracted module (burn down the 539-error debt), shrink server.ts to bootstrap.
 
 ## ⏳ PHASE 2 — Real project model (VFS, persistence, versioning)
 ## ⏳ PHASE 3 — Real hybrid build/preview runtime (WebContainer + server containers)

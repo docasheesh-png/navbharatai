@@ -4768,9 +4768,70 @@ Response Format:
           css:  ((currentFiles?.css || allFiles?.['style.css']  || allFiles?.[Object.keys(allFiles || {}).find((k: string) => k.match(/\.(css|scss)$/)) || ''] || '')).slice(0, 100000),
         };
 
+        // ── TypeScript/React source workspace: file-level editing ──────────────
+        // When allFiles has .tsx/.ts source files, the workspace is a framework app.
+        // editAppEngine expects single-file {html,css,js} — it can't handle TSX.
+        // Instead: ask AI which specific file(s) to change, edit them directly.
+        const tsxSourceFiles = allFiles
+          ? Object.keys(allFiles).filter((k: string) => /\.(tsx|ts|jsx)$/.test(k) && !k.includes('node_modules') && !k.endsWith('.d.ts'))
+          : [];
+        const isTsxSourceWorkspace = tsxSourceFiles.length > 0;
+
+        if (isTsxSourceWorkspace) {
+          send({ type: 'progress', stage: 'Analyzing workspace', step: 1, total: 3, detail: `${tsxSourceFiles.length} TypeScript files found` });
+
+          // Step 1: AI identifies which file(s) to edit
+          const fileListStr = tsxSourceFiles.slice(0, 60).join('\n');
+          let targets: string[] = [];
+          try {
+            const planRaw = await aiRouter.route(
+              `User request: "${message.slice(0, 500)}"\n\nFiles:\n${fileListStr}\n\nWhich 1-2 files to edit? JSON only: {"targets":["path"]}`,
+              [], 'free', undefined,
+              'TypeScript architect. Return only valid JSON {"targets":["path/to/file.tsx"]}.'
+            );
+            const parsed = JSON.parse(planRaw.replace(/```json?|```/g, '').trim());
+            targets = ((parsed.targets || []) as string[]).filter((f: string) => allFiles?.[f]);
+          } catch {}
+          if (targets.length === 0) targets = [tsxSourceFiles[0]]; // fallback to first TS file
+
+          send({ type: 'progress', stage: 'Editing source files', step: 2, total: 3, detail: `Updating ${targets.join(', ')}` });
+
+          // Step 2: Edit each target file
+          const updatedFiles: Record<string, string> = {};
+          for (const filePath of targets.slice(0, 2)) {
+            const original = String(allFiles?.[filePath] || '').slice(0, 20000);
+            try {
+              const updated = await aiRouter.route(
+                `Edit this TypeScript/React file.\n\nUSER REQUEST: "${message.slice(0, 500)}"${historyContext ? `\nHISTORY:\n${historyContext.slice(0, 600)}` : ''}\n\nFILE: ${filePath}\n\n${original}\n\nReturn ONLY the complete updated file. No markdown.`,
+                [], 'free', undefined,
+                'TypeScript/React expert. Return ONLY the complete updated file content. No markdown fences, no explanation.'
+              );
+              updatedFiles[filePath] = updated;
+              send({ type: 'file', fileName: filePath, content: updated });
+            } catch (e: any) {
+              console.warn(`[TSX-EDIT] ${filePath}:`, e.message);
+            }
+          }
+
+          result = {
+            success: true,
+            reply: Object.keys(updatedFiles).length > 0
+              ? `Updated ${Object.keys(updatedFiles).join(', ')}`
+              : `Could not identify which files to edit — please be more specific about what to change.`,
+            files: updatedFiles,
+            fileList: Object.entries(updatedFiles).map(([p, c]) => ({ path: p, content: c, description: p })),
+            previewHtml: '',
+            appName: 'Updated App',
+            validationReport: null,
+            followUpSuggestions: [],
+          };
+
+        } else {
         // Server-side guard: if the existing HTML is too short/placeholder AND message looks
         // like a full new build, route to buildApp instead of editApp to avoid broken rewrites.
-        const isPlaceholderWorkspace = safeFiles.html.length < 400;
+        // Only treat as placeholder if allFiles is also small (Vite HTML is < 400 chars but has many source files).
+        const hasSubstantialWorkspace = allFiles ? Object.keys(allFiles).length > 5 : false;
+        const isPlaceholderWorkspace = safeFiles.html.length < 400 && !hasSubstantialWorkspace;
         const looksFreshBuild = /\b(build|create|make|generate)\b/i.test(message) &&
           /\b(app|game|website|tool|dashboard|calculator|quiz|generator)\b/i.test(message);
         if (isPlaceholderWorkspace && looksFreshBuild) {
@@ -4791,6 +4852,7 @@ Response Format:
           historyContext
         );
         } // end else (non-placeholder edit path)
+        } // end else (non-TSX workspace)
       } else if (framework === 'react') {
         // ── REACT BUILD PATH ─────────────────────────────────────────────────
         const reactMessage = historyContext

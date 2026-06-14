@@ -3590,11 +3590,14 @@ ${buildLanguageRule(preferredLanguage)}`;
                     ? `\n\n**Ready to deploy?** 🚀\nType \`deploy\` for step-by-step deployment options!\n\n<details>\n<summary>📋 Deployment Options (click to expand)</summary>\n\n${deployGuide}\n</details>`
                     : `\n\n**App is ready!** Check the preview → type "deploy" to get deployment options.`;
 
+                  const replyText = evt.reply || 'App successfully generated!';
+                  const replyPrefix = replyText.startsWith('⚠️') || replyText.startsWith('Could not') ? '' : '✅ ';
+                  const isFileEdit = evt.isEdit || replyText.startsWith('Updated ');
                   const processLog = [
-                    `✅ ${evt.reply || 'App successfully generated!'}`,
+                    `${replyPrefix}${replyText}`,
                     ``,
                     `**Build Summary**`,
-                    fileList.map((f: string) => `> \`${f}\` — created`).join('\n'),
+                    fileList.map((f: string) => `> \`${f}\` — ${isFileEdit ? 'updated' : 'created'}`).join('\n'),
                     validationSection,
                     ``,
                     `**App is live in Preview** →`,

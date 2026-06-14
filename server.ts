@@ -4,6 +4,8 @@ import crypto from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
+import { registerTeamRoutes } from './src/server/routes/team';
+import { audit } from './src/server/lib/audit';
 
 // ─── Legacy embedded API key (sentinel + historical fallback) ────────────────
 // SECURITY: This Google API key was previously hardcoded inline in 3 places.
@@ -410,11 +412,6 @@ setInterval(() => {
   });
 
   // ── Structured Audit Logger (4.7) ────────────────────────────────────────
-  const audit = (event: string, meta: Record<string, any> = {}) => {
-    const entry = { ts: new Date().toISOString(), event, ...meta };
-    console.log(`[AUDIT] ${JSON.stringify(entry)}`);
-  };
-
   // ── Security Middleware: Block malware scanner paths ─────────────────────
   app.use((req, res, next) => {
     const maliciousPaths = ['/wp-admin', '/wp-content', '/wp-includes', '/.env', '/config.php'];
@@ -6463,17 +6460,8 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
   // PWA "App Store" routes — extracted to src/server/routes/pwa.ts (Phase 1).
   registerPwaRoutes(app, pwaStore);
 
-  // --- Team Invite ---
-  app.post('/api/team/invite', async (req, res) => {
-    const { email, projectId, userId, role = 'viewer' } = req.body || {};
-    if (!email || !userId) return res.status(400).json({ error: 'email and userId required' });
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ error: 'Invalid email address' });
-    }
-    const inviteId = crypto.randomBytes(8).toString('hex');
-    audit('TEAM_INVITE', { userId, email, projectId, role });
-    return res.json({ ok: true, inviteId, message: `Invite sent to ${email}`, inviteUrl: `/join/${inviteId}` });
-  });
+  // Team collaboration routes — extracted to src/server/routes/team.ts (Phase 1).
+  registerTeamRoutes(app);
 
   // Telemetry / analysis routes — extracted to src/server/routes/telemetry.ts (Phase 1).
   registerTelemetryRoutes(app);

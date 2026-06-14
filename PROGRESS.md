@@ -34,6 +34,9 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
 - **Milestone 1.2 — DONE (2026-06-14)**: Extracted 3 self-contained routes
   (`/api/analyze/pagespeed`, `/api/logs/error`, `/api/analytics/event`) →
   `src/server/routes/telemetry.ts`. server.ts routes 71 → 64. Verified green.
+- **Milestone 1.3 — DONE (2026-06-14)**: Extracted shared `audit()` logger →
+  `src/server/lib/audit.ts` (with unit tests), and team route → `routes/team.ts`.
+  server.ts routes 64 → 63. Verified green.
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`), wallet,
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

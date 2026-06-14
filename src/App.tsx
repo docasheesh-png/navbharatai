@@ -114,6 +114,9 @@ import { MessageContent } from './components/MessageContent';
 import { HomeView } from './components/home/HomeView';
 import { GitHubService } from './lib/githubService';
 import { trackEvent } from './lib/analytics';
+import { saveFile, saveAllFiles, loadAllFiles, clearWorkspace } from './lib/storage';
+import { ZipSizeModal } from './components/ide/ZipSizeModal';
+import type { ZipSizeModalVariant } from './components/ide/ZipSizeModal';
 // AgentMode → re-exported from ./types
 
 // Large keys that can be evicted when localStorage is nearly full.
@@ -1005,6 +1008,7 @@ export default function App() {
   const [activeFile, setActiveFile] = useState<string>('index.html');
   const [previewHistory, setPreviewHistory] = useState<{ id: string; label: string; ts: Date; html: string }[]>([]);
   const [fileUploadConflict, setFileUploadConflict] = useState<{ file: File; existingKey: string; isZip: boolean } | null>(null);
+  const [zipSizeModal, setZipSizeModal] = useState<{ variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null>(null);
   const filesUploadRef = useRef<HTMLInputElement>(null);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isDeployed, setIsDeployed] = useState(false);
@@ -1034,6 +1038,20 @@ export default function App() {
       safeLS('navbharat_last_app', toStore);
     }
   }, [generatedCode, hasGeneratedCode]);
+
+  // Storage: restore persisted workspace files on mount
+  useEffect(() => {
+    let cancelled = false;
+    loadAllFiles()
+      .then((persisted) => {
+        if (cancelled || Object.keys(persisted).length === 0) return;
+        setFiles(persisted as any);
+        setHasGeneratedCode(true);
+        setIsAppBuilt(true);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persist pro chat history so "Edit with AI" resumes the last conversation
   useEffect(() => {
@@ -1426,6 +1444,7 @@ export default function App() {
       try { localStorage.removeItem('navbharat_pro_messages'); } catch {}
       // Wipe workspace so next open starts with a blank canvas
       setFiles({});
+      clearWorkspace().catch(() => {});
       setBuildVersionStack([]);
       setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
       setGeneratedCode('<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>');
@@ -3143,6 +3162,7 @@ ${buildLanguageRule(preferredLanguage)}`;
 
       // Final state — ensure everything is synced.
       setFiles(loadedFiles as any);
+      saveAllFiles(loadedFiles).catch(() => {}); // persist to IndexedDB/Cache API
       setHasGeneratedCode(true);  // ← marks workspace as occupied so next prompt = edit, not rebuild
       setIsAppBuilt(true);
 
@@ -3211,6 +3231,15 @@ ${buildLanguageRule(preferredLanguage)}`;
       f.type === 'application/x-zip-compressed'
     );
     if (zipFile) {
+      const sizeMB = zipFile.size / (1024 * 1024);
+      if (sizeMB > 500) {
+        setZipSizeModal({ variant: 'too-large', fileName: zipFile.name, fileSizeMB: sizeMB });
+        return;
+      }
+      if (sizeMB > 50) {
+        setZipSizeModal({ variant: 'github', fileName: zipFile.name, fileSizeMB: sizeMB });
+        return;
+      }
       await handleZipImport(zipFile, messageToSend);
       return;
     }
@@ -3710,7 +3739,16 @@ ${buildLanguageRule(preferredLanguage)}`;
       selectedFile.type === 'application/x-zip-compressed';
 
     if (isZip) {
-      // ZIP always asks: replace workspace or merge
+      const sizeMB = selectedFile.size / (1024 * 1024);
+      if (sizeMB > 500) {
+        setZipSizeModal({ variant: 'too-large', fileName: selectedFile.name, fileSizeMB: sizeMB });
+        return;
+      }
+      if (sizeMB > 50) {
+        setZipSizeModal({ variant: 'github', fileName: selectedFile.name, fileSizeMB: sizeMB });
+        return;
+      }
+      // < 50 MB: proceed with normal conflict check + import
       const hasExisting = Object.keys(files).filter(k => !k.startsWith('.')).length > 0;
       if (hasExisting) {
         setFileUploadConflict({ file: selectedFile, existingKey: '', isZip: true });
@@ -3747,6 +3785,7 @@ ${buildLanguageRule(preferredLanguage)}`;
         setFiles(prev => ({ ...prev, [selectedFile.name]: content }));
         setHasGeneratedCode(true);
         setIsAppBuilt(true);
+        saveFile(selectedFile.name, content).catch(() => {}); // persist
         addToast(`${selectedFile.name} added ✓`, 'success');
       }
     } catch {
@@ -3762,6 +3801,7 @@ ${buildLanguageRule(preferredLanguage)}`;
     if (isZip) {
       if (choice === 'replace') {
         setFiles({});
+        clearWorkspace().catch(() => {}); // wipe persisted workspace before re-import
         setHasGeneratedCode(false);
         setIsAppBuilt(false);
         setTimeout(() => handleZipImport(file), 50);
@@ -7785,6 +7825,15 @@ ${pending.map(p => `  - ${p}`).join('\n')}
 
           {activeView === 'files' && (
             <div className="flex-1 h-full overflow-hidden bg-[#0d1117] flex flex-col">
+              {/* ZIP size warning modal */}
+              {zipSizeModal && (
+                <ZipSizeModal
+                  variant={zipSizeModal.variant}
+                  fileName={zipSizeModal.fileName}
+                  fileSizeMB={zipSizeModal.fileSizeMB}
+                  onClose={() => setZipSizeModal(null)}
+                />
+              )}
               {/* Upload conflict popup */}
               {fileUploadConflict && (
                 <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" onClick={() => setFileUploadConflict(null)}>

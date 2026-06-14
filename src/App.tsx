@@ -2283,13 +2283,16 @@ ${buildLanguageRule(preferredLanguage)}`;
     });
 
     const importmap = JSON.stringify({ imports: imapEntries });
+    // Safe JSON for embedding in <script> tags: escape </ to prevent </script> from
+    // closing the tag early when file content contains that string.
+    const sj = (v: unknown) => JSON.stringify(v).replace(/<\//g, '<\\/');
 
     return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
       + PREVIEW_HARNESS
       + '<script type="importmap">' + importmap + '</' + 'script>'
       + '<script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></' + 'script>'
       + '</head><body>' + bodyInner
-      + '<script>window.__FILES=' + JSON.stringify(srcFiles) + ';window.__ENTRY=' + JSON.stringify(entry) + ';window.__IMAP=' + JSON.stringify(imapEntries) + ';</' + 'script>'
+      + '<script>window.__FILES=' + sj(srcFiles) + ';window.__ENTRY=' + sj(entry) + ';window.__IMAP=' + sj(imapEntries) + ';</' + 'script>'
       + '<script>' + PREVIEW_BOOTSTRAP + '</' + 'script>'
       + '</body></html>';
   };
@@ -2357,7 +2360,7 @@ ${buildLanguageRule(preferredLanguage)}`;
         if (!content) return match;
         const typeMatch = attrs.match(/type=["']([^"']+)["']/);
         const typeAttr = typeMatch ? ` type="${typeMatch[1]}"` : '';
-        return `<script${typeAttr} data-src="${filename}">${content}<\/script>`;
+        return `<script${typeAttr} data-src="${filename}">${content.replace(/<\//g, '<\\/')}<\/script>`;
       });
 
       // Inject any remaining CSS not already inlined
@@ -2374,7 +2377,7 @@ ${buildLanguageRule(preferredLanguage)}`;
 
       // Inject any remaining JS not already inlined
       if (allJs) {
-        const scriptTag = `<script id="nb-injected-js">${allJs}<\/script>`;
+        const scriptTag = `<script id="nb-injected-js">${allJs.replace(/<\//g, '<\\/')}<\/script>`;
         if (finalHtml.includes('</body>')) {
           finalHtml = finalHtml.replace('</body>', `${scriptTag}</body>`);
         } else {

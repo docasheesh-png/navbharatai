@@ -2659,52 +2659,104 @@ ${buildLanguageRule(preferredLanguage)}`;
     return 'build';
   };
 
-  // ── ZIP Import: unzip → load into Code Studio → show preview ────────────────
+  // ── ZIP Import: stream raw binary → SSE extraction → real-time Code Studio load ──
   const handleZipImport = async (zipFile: File, extraMessage?: string) => {
     setIsProLoading(true);
+    setProInput('');
     setProMessages(prev => [...prev, {
       id: Date.now().toString(),
-      text: `📦 Importing ${zipFile.name}...`,
+      text: `📦 Uploading ${zipFile.name} (${(zipFile.size / 1024 / 1024).toFixed(1)} MB)...`,
       sender: 'user', timestamp: new Date(),
     }]);
-    setProBuildProgress({ active: true, stage: '📦 Extracting ZIP...', steps: [], percent: 30, generatedFiles: {} });
+    setProBuildProgress({ active: true, stage: `📦 Streaming ${zipFile.name}...`, steps: [], percent: 5, generatedFiles: {} });
+
+    const loadedFiles: Record<string, string> = {};
+    let fileCount = 0;
+    let appName = zipFile.name.replace(/\.zip$/i, '');
+    const fileList: string[] = [];
 
     try {
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve((reader.result as string).split(',')[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(zipFile);
-      });
-
-      const res = await fetch('/api/extract-zip', {
+      // Send raw binary — no base64 encoding, browser streams directly to server
+      const response = await fetch('/api/extract-zip', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zipBase64: base64, fileName: zipFile.name }),
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'X-File-Name': encodeURIComponent(zipFile.name),
+        },
+        body: zipFile,
       });
-      if (!res.ok) throw new Error((await res.json()).error || 'ZIP extraction failed');
-      const data = await res.json();
 
-      // Load into Code Studio + update preview
-      setFiles(data.files as any);
-      setGeneratedCode(data.html || '');
-      setTimeout(() => updatePreview(data.files as any), 200);
-      setProBuildProgress({ active: false, stage: '', steps: [], percent: 100, generatedFiles: data.files });
+      if (!response.ok || !response.body) {
+        const errText = await response.text().catch(() => `HTTP ${response.status}`);
+        throw new Error(errText || `Upload failed: ${response.status}`);
+      }
 
-      const fileListText = data.fileList.slice(0, 10).map((f: string) => `• \`${f}\``).join('\n');
-      const moreText = data.fileList.length > 10 ? `\n• ... and ${data.fileList.length - 10} more` : '';
+      // Read SSE stream and load files into Code Studio in real-time
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let evt: any;
+          try { evt = JSON.parse(line.slice(6)); } catch { continue; }
+
+          if (evt.type === 'file') {
+            loadedFiles[evt.path] = evt.content;
+            fileList.push(evt.path);
+            fileCount++;
+            // Load each file into Code Studio immediately as it arrives
+            setFiles(prev => ({ ...prev, [evt.path]: evt.content }));
+            // Trigger live preview on key files
+            const isKey = evt.path === 'index.html' || evt.path.endsWith('.css') || evt.path.endsWith('.js');
+            if (isKey) {
+              const snapshot = { ...loadedFiles };
+              setTimeout(() => updatePreview(snapshot as any), 50);
+            }
+            setProBuildProgress(prev => ({
+              ...prev,
+              stage: `📂 Loading: ${evt.path}`,
+              percent: Math.min(90, 5 + fileCount * 2),
+            }));
+          } else if (evt.type === 'progress') {
+            setProBuildProgress(prev => ({ ...prev, stage: evt.message || prev.stage }));
+          } else if (evt.type === 'complete') {
+            appName = evt.appName || appName;
+          } else if (evt.type === 'error') {
+            throw new Error(evt.message || 'ZIP extraction error');
+          }
+        }
+      }
+
+      if (fileCount === 0) throw new Error('No files extracted from ZIP');
+
+      // Final state — ensure everything is synced
+      setFiles(loadedFiles as any);
+      setGeneratedCode(loadedFiles['index.html'] || '');
+      setTimeout(() => updatePreview(loadedFiles as any), 100);
+      const generatedFilesObj = Object.fromEntries(
+        Object.entries(loadedFiles).map(([k, v]) => [k, { content: v, expanded: false }])
+      );
+      setProBuildProgress({ active: false, stage: '', steps: [], percent: 100, generatedFiles: generatedFilesObj });
+
+      const fileListText = fileList.slice(0, 10).map(f => `• \`${f}\``).join('\n');
+      const moreText = fileList.length > 10 ? `\n• ... and ${fileList.length - 10} more` : '';
       setProMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
-        text: `📦 **${data.appName}** imported — ${data.fileCount} files loaded into Code Studio. App is live in Preview.\n\n${fileListText}${moreText}\n\nApp is ready to edit — tell me what you want to change!`,
+        text: `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio. App is live in Preview.\n\n${fileListText}${moreText}\n\nApp is ready to edit — tell me what you want to change!`,
         sender: 'ai', timestamp: new Date(),
       }]);
 
-      // If user also typed a message with the ZIP, run it as an edit now
+      // If user typed a message alongside the ZIP, run it as an edit
       if (extraMessage?.trim()) {
-        setTimeout(() => {
-          setProInput('');
-          handleSendForPro(extraMessage);
-        }, 800);
+        setTimeout(() => handleSendForPro(extraMessage), 800);
       }
     } catch (err: any) {
       setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
@@ -2735,12 +2787,11 @@ ${buildLanguageRule(preferredLanguage)}`;
       return;
     }
 
-    // ZIP can be up to 20MB; other files max 2MB
-    const ZIP_MAX = 20 * 1024 * 1024;
-    const oversized = fileList.filter(f => f.size > (f.name.endsWith('.zip') ? ZIP_MAX : MAX_UPLOAD_BYTES));
+    // Non-ZIP files max 2MB (ZIPs are handled above via streaming)
+    const oversized = fileList.filter(f => f.size > MAX_UPLOAD_BYTES);
     if (oversized.length > 0) {
       const names = oversized.map(f => `${f.name} (${(f.size/1024/1024).toFixed(1)}MB)`).join(', ');
-      addLog(`File too large: ${names}. Max 2 MB per file (20 MB for ZIP).`, 'error');
+      addLog(`File too large: ${names}. Max 2 MB per file.`, 'error');
       return;
     }
 

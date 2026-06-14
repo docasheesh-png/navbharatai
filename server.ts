@@ -4613,79 +4613,151 @@ Response Format:
     res.end();
   });
 
-  // ── ZIP Import: extract uploaded ZIP → structured files for Code Studio ──────
+  // ── ZIP Import: streaming upload → yauzl entry-by-entry → SSE to frontend ───
+  // Architecture:
+  //   1. Frontend sends raw binary (Content-Type: application/octet-stream) → no base64, no JSON
+  //   2. Server pipes req directly to disk → no memory buffer, handles any size
+  //   3. yauzl reads ZIP entry-by-entry (skips node_modules/dist etc. without extracting them)
+  //   4. SSE sends each file as it's read → frontend loads into Code Studio in real-time
+  //   5. Preview updates live as HTML/CSS/JS arrive
   app.post('/api/extract-zip', async (req: any, res: any) => {
-    const { zipBase64, fileName } = req.body;
-    if (!zipBase64) return res.status(400).json({ error: 'zipBase64 required' });
+    const fileName = req.headers['x-file-name']
+      ? decodeURIComponent(String(req.headers['x-file-name']))
+      : 'upload.zip';
 
     const os = await import('os');
-    const tmpId = crypto.randomBytes(8).toString('hex');
+    const tmpId = (crypto as any).randomBytes(8).toString('hex');
     const tmpZip = path.join(os.default.tmpdir(), `nbt-${tmpId}.zip`);
-    const tmpDir = path.join(os.default.tmpdir(), `nbt-${tmpId}`);
+
+    const IMAGE_MIME: Record<string, string> = {
+      '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+      '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+      '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+    };
+    const TEXT_EXTS = new Set([
+      '.html', '.htm', '.css', '.js', '.ts', '.jsx', '.tsx', '.vue',
+      '.json', '.txt', '.md', '.csv', '.xml', '.yaml', '.yml',
+      '.env', '.gitignore', '.babelrc', '.eslintrc', '.prettierrc', '.nvmrc',
+    ]);
+    const SKIP_RE = /(?:^|\/)(node_modules|\.git|\.svn|dist|build|\.next|__pycache__|\.cache|coverage|\.turbo|\.yarn)(?:\/|$)/i;
 
     try {
-      fs.writeFileSync(tmpZip, Buffer.from(zipBase64, 'base64'));
-      fs.mkdirSync(tmpDir, { recursive: true });
+      // ── Step 1: Stream raw binary body to disk (no memory limit) ──────────
+      await new Promise<void>((resolve, reject) => {
+        const ws = fs.createWriteStream(tmpZip);
+        req.pipe(ws);
+        ws.on('finish', resolve);
+        ws.on('error', reject);
+        req.on('error', reject);
+      });
 
-      const extractZip = require('extract-zip');
-      await extractZip(tmpZip, { dir: tmpDir });
+      const zipSize = fs.statSync(tmpZip).size;
+      console.log(`[extract-zip] ${fileName} received: ${(zipSize / 1024 / 1024).toFixed(1)} MB`);
 
-      const IMAGE_MIME: Record<string, string> = {
-        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
-        '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
-        '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
-      };
-      const TEXT_EXTS = new Set([
-        '.html', '.htm', '.css', '.js', '.ts', '.jsx', '.tsx',
-        '.json', '.txt', '.md', '.csv', '.xml', '.yaml', '.yml', '.env',
-        '.gitignore', '.eslintrc', '.prettierrc',
-      ]);
-      const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', '.cache']);
+      // ── Step 2: SSE response setup ─────────────────────────────────────────
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.flushHeaders();
+      const send = (data: object) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`); };
 
-      const extractedFiles: Record<string, string> = {};
-      const walkDir = (dir: string, baseDir: string) => {
-        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-          if (entry.name === '.DS_Store') continue;
-          const fullPath = path.join(dir, entry.name);
-          const relPath = path.relative(baseDir, fullPath).replace(/\\/g, '/');
-          if (entry.isDirectory()) {
-            if (!SKIP_DIRS.has(entry.name)) walkDir(fullPath, baseDir);
-          } else {
-            const ext = path.extname(entry.name).toLowerCase();
-            if (IMAGE_MIME[ext]) {
-              const data = fs.readFileSync(fullPath).toString('base64');
-              extractedFiles[relPath] = `data:${IMAGE_MIME[ext]};base64,${data}`;
-            } else if (TEXT_EXTS.has(ext) || !ext) {
-              try {
-                const content = fs.readFileSync(fullPath, 'utf8');
-                if (content.length < 500000) extractedFiles[relPath] = content;
-              } catch { /* binary — skip */ }
+      send({ type: 'progress', stage: `Scanning ZIP (${(zipSize / 1024 / 1024).toFixed(1)} MB)...`, percent: 5 });
+
+      // ── Step 3: yauzl streaming extraction ─────────────────────────────────
+      const yauzl = require('yauzl');
+      let fileCount = 0;
+      let htmlContent = '';
+      let prefixToStrip = '';   // auto-detect single root folder
+      let prefixChecked = false;
+
+      await new Promise<void>((resolve, reject) => {
+        yauzl.open(tmpZip, { lazyEntries: true, autoClose: true }, (err: any, zipfile: any) => {
+          if (err) return reject(new Error(`Invalid ZIP: ${err.message}`));
+
+          zipfile.readEntry();
+
+          zipfile.on('entry', (entry: any) => {
+            const rawPath = entry.fileName.replace(/\\/g, '/');
+
+            // Auto-detect and strip single root folder (e.g., myapp-main/ from GitHub)
+            if (!prefixChecked) {
+              prefixChecked = true;
+              const firstSlash = rawPath.indexOf('/');
+              if (firstSlash > 0 && !rawPath.slice(0, firstSlash).includes('.')) {
+                prefixToStrip = rawPath.slice(0, firstSlash + 1);
+              }
             }
-          }
-        }
-      };
 
-      // Strip single root folder if ZIP was created from a folder
-      const topLevel = fs.readdirSync(tmpDir);
-      const baseDir = topLevel.length === 1 && fs.statSync(path.join(tmpDir, topLevel[0])).isDirectory()
-        ? path.join(tmpDir, topLevel[0]) : tmpDir;
-      walkDir(baseDir, baseDir);
+            let entryPath = (prefixToStrip && rawPath.startsWith(prefixToStrip))
+              ? rawPath.slice(prefixToStrip.length) : rawPath;
 
-      const html = extractedFiles['index.html'] || extractedFiles['index.htm'] || '';
-      const css  = extractedFiles['style.css']  || extractedFiles['styles.css'] || extractedFiles['main.css']  || extractedFiles['app.css']  || '';
-      const js   = extractedFiles['script.js']  || extractedFiles['app.js']    || extractedFiles['main.js']   || extractedFiles['index.js'] || '';
-      const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-      const appName = titleMatch?.[1]?.trim() || (fileName || 'Imported App').replace(/\.zip$/i, '');
+            // Skip empty paths, directories, and unwanted folders
+            if (!entryPath || entryPath.endsWith('/') || SKIP_RE.test('/' + rawPath)) {
+              zipfile.readEntry();
+              return;
+            }
 
-      console.log(`[extract-zip] ${Object.keys(extractedFiles).length} files from ${fileName || 'zip'}: ${Object.keys(extractedFiles).slice(0, 8).join(', ')}`);
-      return res.json({ files: extractedFiles, html, css, js, appName, fileCount: Object.keys(extractedFiles).length, fileList: Object.keys(extractedFiles) });
+            const ext = path.extname(entryPath).toLowerCase();
+            const isImage = !!IMAGE_MIME[ext];
+            const isText  = TEXT_EXTS.has(ext);
+
+            if (!isImage && !isText) {
+              zipfile.readEntry(); // skip binaries (exe, wasm, mp4, etc.)
+              return;
+            }
+
+            // Per-file size limits: 10 MB images, 2 MB text
+            const maxBytes = isImage ? 10 * 1024 * 1024 : 2 * 1024 * 1024;
+            if (entry.uncompressedSize > maxBytes) {
+              send({ type: 'skipped', path: entryPath, reason: 'too large' });
+              zipfile.readEntry();
+              return;
+            }
+
+            zipfile.openReadStream(entry, (streamErr: any, readStream: any) => {
+              if (streamErr) { zipfile.readEntry(); return; }
+
+              const chunks: Buffer[] = [];
+              readStream.on('data', (c: Buffer) => chunks.push(c));
+              readStream.on('error', () => zipfile.readEntry());
+              readStream.on('end', () => {
+                const buf = Buffer.concat(chunks);
+                const content = isImage
+                  ? `data:${IMAGE_MIME[ext]};base64,${buf.toString('base64')}`
+                  : buf.toString('utf8');
+
+                if (entryPath === 'index.html' || entryPath === 'index.htm') htmlContent = content;
+
+                send({ type: 'file', path: entryPath, content });
+                fileCount++;
+
+                if (fileCount % 5 === 0)
+                  send({ type: 'progress', stage: `Loaded ${fileCount} files...`, percent: Math.min(90, 10 + fileCount) });
+
+                zipfile.readEntry();
+              });
+            });
+          });
+
+          zipfile.on('end', resolve);
+          zipfile.on('error', reject);
+        });
+      });
+
+      const titleMatch = htmlContent.match(/<title[^>]*>([^<]+)<\/title>/i);
+      const appName = titleMatch?.[1]?.trim() || fileName.replace(/\.zip$/i, '');
+      console.log(`[extract-zip] Done: ${fileCount} files, appName="${appName}"`);
+      send({ type: 'complete', fileCount, appName });
 
     } catch (err: any) {
       console.error('[extract-zip] Error:', err.message);
-      return res.status(500).json({ error: `ZIP extraction failed: ${err.message}` });
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
+      }
     } finally {
+      if (!res.writableEnded) res.end();
       try { fs.unlinkSync(tmpZip); } catch { /* ignore */ }
-      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
     }
   });
 

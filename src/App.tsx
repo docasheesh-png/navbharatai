@@ -2881,6 +2881,7 @@ ${buildLanguageRule(preferredLanguage)}`;
           body: JSON.stringify({
             message: messageToSend,
             history: conversationHistory,
+            ...(fileAttachments.length > 0 ? { fileAttachments } : {}),
             ...(isReactRequest ? { framework: 'react' } : {}),
             ...(isEditRequest ? {
               isEdit: true,

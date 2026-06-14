@@ -4120,8 +4120,48 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           }
           return;
         } catch (visionErr: any) {
-          console.error('[CHAT/VISION] Gemini vision failed, falling through to text router:', visionErr.message);
-          // Fall through to normal text-based router
+          console.error('[CHAT/VISION] Gemini vision failed, trying Grok vision:', visionErr.message);
+          // Grok fallback for images (Grok doesn't support PDFs)
+          const imageOnly = visionAttachments.filter(f => f.type.startsWith('image/'));
+          if (imageOnly.length > 0) {
+            const grokVisionKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
+            if (grokVisionKey) {
+              try {
+                const grokVision = new OpenAI({ apiKey: grokVisionKey, baseURL: 'https://api.x.ai/v1' });
+                const grokContent: any[] = [
+                  ...imageOnly.map(f => ({ type: 'image_url', image_url: { url: `data:${f.type};base64,${f.base64}` } })),
+                  { type: 'text', text: contextualMessage },
+                ];
+                const grokMsgsV: any[] = [
+                  ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+                  { role: 'user', content: grokContent },
+                ];
+                for (const gm of ['grok-2-vision-1212', 'grok-2-mini-vision-1212']) {
+                  try {
+                    const r = await grokVision.chat.completions.create({ model: gm, messages: grokMsgsV, max_tokens: 1500 });
+                    const gText = r.choices[0]?.message?.content?.trim();
+                    if (gText) {
+                      if (!res.headersSent && req.body.stream === true) {
+                        res.setHeader('Content-Type', 'text/event-stream');
+                        res.setHeader('Cache-Control', 'no-cache');
+                        res.setHeader('Connection', 'keep-alive');
+                        res.setHeader('X-Accel-Buffering', 'no');
+                        res.flushHeaders();
+                      }
+                      if (req.body.stream === true) {
+                        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: gText })}\n\n`);
+                        if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+                      } else {
+                        res.json({ reply: gText });
+                      }
+                      return;
+                    }
+                  } catch (ge: any) { console.warn(`[CHAT/VISION] Grok ${gm}: ${ge.message}`); }
+                }
+              } catch (grokVisionErr: any) { console.warn('[CHAT/VISION] Grok vision failed:', grokVisionErr.message); }
+            }
+          }
+          // All vision providers failed — fall through to text router
         }
       }
     }
@@ -4249,11 +4289,24 @@ app.post('/api/chat', async (req, res) => {
   app.post('/api/pro-chat', async (req, res) => {
     console.log("=== HIT /api/pro-chat ===");
     try {
-      const { message, history, mode, fileData, fileType, fileName, currentApp } = req.body;
-      if (!message) return res.status(400).json({ error: 'Message required' });
+      let { message, history, mode, fileData, fileType, fileName, currentApp } = req.body;
+      if (!message && !fileData) return res.status(400).json({ error: 'Message required' });
+      message = message || '';
       const hasFile = !!(fileData && fileType);
       const isImageFile = hasFile && (fileType as string).startsWith('image/');
       const isPDFFile = hasFile && fileType === 'application/pdf';
+      const isTextDoc = hasFile && !isImageFile && !isPDFFile;
+
+      // Decode text/code files and prepend to message so all providers can use them
+      if (isTextDoc && fileData) {
+        try {
+          const decoded = Buffer.from(fileData, 'base64').toString('utf-8').slice(0, 8000);
+          message = `[Attached document: ${fileName}]\n\`\`\`\n${decoded}\n\`\`\`\n\n${message}`;
+        } catch { /* keep original */ }
+      }
+      // Ensure file-only messages have a prompt
+      if (!message.trim() && hasFile) message = isImageFile ? 'Please analyze this image in detail.' : isPDFFile ? 'Please analyze this document.' : 'Please review the attached file.';
+
       // currentApp context for planning mode
       const canvasContext = currentApp && typeof currentApp === 'string' && currentApp.length > 200
         ? `\n\n### CURRENT APP ON CANVAS (${currentApp.length} chars):\n\`\`\`html\n${currentApp.slice(0, 3000)}\n\`\`\`\nUser is discussing modifications/additions to THIS app.`
@@ -4413,25 +4466,43 @@ Response Format:
       const claudeKeyPlan = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
       type PlanRacerFn = (signal: AbortSignal) => Promise<string>;
       const planRacers: PlanRacerFn[] = [];
-      const planMsgs = [
+
+      // Build the last user message content — include file for vision providers
+      const buildRaceUserContent = (supportsImages: boolean): any => {
+        if (!hasFile || !supportsImages) return message;
+        if (isImageFile) return [
+          { type: 'image_url', image_url: { url: `data:${fileType};base64,${fileData}` } },
+          { type: 'text', text: `[Image: ${fileName}]\n${message}` },
+        ];
+        // PDFs: fallback to text label (OpenAI-format race doesn't support PDF natively)
+        return `[PDF attached: ${fileName}]\n${message}`;
+      };
+
+      const planHistoryMsgs = (history || []).slice(-8).map((m: any) => ({
+        role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: String(m.text || m.content || '').slice(0, 400),
+      }));
+
+      const planMsgsText = [
         { role: 'system' as const, content: PLAN_PROMPT },
-        ...(history || []).slice(-8).map((m: any) => ({
-          role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
-          content: String(m.text || m.content || '').slice(0, 400),
-        })),
+        ...planHistoryMsgs,
         { role: 'user' as const, content: message },
       ];
 
       // NOTE: Claude race attempt — separate from the sequential attempt above
-      // (the sequential attempt above may have failed due to different conditions)
       if (claudeKeyPlan) planRacers.push(async (signal) => {
         const rawBase = process.env.ANTHROPIC_BASE_URL;
         const base = rawBase?.replace(/\/v1\/?$/, '');
         if (!base) throw new Error('No proxy for race');
         const c = new OpenAI({ apiKey: claudeKeyPlan, baseURL: base });
+        const claudeMsgs = [
+          { role: 'system' as const, content: PLAN_PROMPT },
+          ...planHistoryMsgs,
+          { role: 'user' as const, content: buildRaceUserContent(true) },
+        ];
         for (const m of ['anthropic/claude-sonnet-4.6', 'claude-sonnet-4-6']) {
           try {
-            const r = await c.chat.completions.create({ model: m, messages: planMsgs, max_tokens: 1500 }, { signal });
+            const r = await c.chat.completions.create({ model: m, messages: claudeMsgs, max_tokens: 1500 }, { signal });
             const t = r.choices[0]?.message?.content || '';
             if (t.trim()) return t;
           } catch (e: any) { if (signal.aborted) throw e; }
@@ -4441,9 +4512,16 @@ Response Format:
 
       if (grokKeyPlan) planRacers.push(async (signal) => {
         const c = new OpenAI({ apiKey: grokKeyPlan, baseURL: 'https://api.x.ai/v1' });
-        for (const gm of ['grok-3', 'grok-3-fast']) {
+        // Use vision model for images, text model for everything else
+        const grokModels = (hasFile && isImageFile) ? ['grok-2-vision-1212', 'grok-2-mini-vision-1212'] : ['grok-3', 'grok-3-fast'];
+        const grokMsgs = [
+          { role: 'system' as const, content: PLAN_PROMPT },
+          ...planHistoryMsgs,
+          { role: 'user' as const, content: buildRaceUserContent(!isPDFFile) },
+        ];
+        for (const gm of grokModels) {
           try {
-            const r = await c.chat.completions.create({ model: gm, messages: planMsgs, max_tokens: 1500 }, { signal });
+            const r = await c.chat.completions.create({ model: gm, messages: grokMsgs, max_tokens: 1500 }, { signal });
             const t = r.choices[0]?.message?.content || '';
             if (t.trim()) return t;
           } catch (e: any) { if (signal.aborted) throw e; }
@@ -4465,7 +4543,19 @@ Response Format:
         } catch { console.warn('[PRO PLAN] Race both failed → Gemini/Vertex'); }
       }
 
-      // ── Sequential fallback: Gemini → Vertex ──────────────────────────────
+      // ── Sequential fallback: Gemini → Vertex (both support images + PDFs via inlineData) ──
+      // Build user parts with optional vision content
+      const buildGeminiPlanParts = (): any[] => {
+        const parts: any[] = [];
+        if (hasFile && (isImageFile || isPDFFile)) {
+          parts.push({ inlineData: { mimeType: fileType, data: fileData } });
+          parts.push({ text: `[${isPDFFile ? 'PDF' : 'Image'}: ${fileName}]\n${PLAN_PROMPT}\n\nUser: ${message}` });
+        } else {
+          parts.push({ text: PLAN_PROMPT + '\n\nUser: ' + message });
+        }
+        return parts;
+      };
+
       const geminiKeyPlan = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
       if (geminiKeyPlan) {
         try {
@@ -4480,7 +4570,7 @@ Response Format:
             try {
               const r = await new GoogleGenAI({ apiKey: geminiKeyPlan }).models.generateContent({
                 model: gm,
-                contents: [...historyContents, { role: 'user', parts: [{ text: PLAN_PROMPT + '\n\nUser: ' + message }] }],
+                contents: [...historyContents, { role: 'user', parts: buildGeminiPlanParts() }],
               });
               if (r.text?.trim()) return res.json({ reply: sanitizePlanningReply(r.text), files: {}, suggestBuild });
             } catch (ge: any) { console.warn(`[PRO PLAN] Gemini ${gm}: ${ge.message}`); }
@@ -4495,7 +4585,7 @@ Response Format:
           const ai = new VtxAI({ vertexai: true, project: projectIdPlan, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
           for (const vm of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
             try {
-              const r = await ai.models.generateContent({ model: vm, contents: [{ role: 'user', parts: [{ text: PLAN_PROMPT + '\n\nUser: ' + message }] }] });
+              const r = await ai.models.generateContent({ model: vm, contents: [{ role: 'user', parts: buildGeminiPlanParts() }] });
               if (r.text?.trim()) return res.json({ reply: sanitizePlanningReply(r.text), files: {}, suggestBuild });
             } catch (ve: any) { console.warn(`[PRO PLAN] Vertex ${vm}: ${ve.message}`); }
           }
@@ -4520,8 +4610,52 @@ Response Format:
     .slice(0, 18000);
 
   app.post('/api/pro-build', async (req: any, res: any) => {
-    const { message, currentFiles, isEdit, framework, history } = req.body;
+    let { message, currentFiles, isEdit, framework, history, fileAttachments } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
+
+    // Process file attachments: text files decoded and prepended; images described via vision AI
+    if (Array.isArray(fileAttachments) && fileAttachments.length > 0) {
+      type FA = { name: string; type: string; base64: string };
+      const fas: FA[] = fileAttachments;
+      const textParts: string[] = [];
+      const visionFas = fas.filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
+      const textFas = fas.filter(f => !f.type.startsWith('image/') && f.type !== 'application/pdf');
+
+      // Decode text/code files and prepend
+      for (const f of textFas) {
+        try {
+          const decoded = Buffer.from(f.base64, 'base64').toString('utf8').slice(0, 6000);
+          textParts.push(`\n\n[Reference file: ${f.name}]\n\`\`\`\n${decoded}\n\`\`\``);
+        } catch { /* skip corrupt */ }
+      }
+
+      // For images/PDFs: use Gemini vision to get a description, inject into build prompt
+      for (const f of visionFas) {
+        try {
+          const gemKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
+          if (gemKey) {
+            const { GoogleGenAI } = await import('@google/genai');
+            const visionAI = new GoogleGenAI({ apiKey: gemKey });
+            const descResult = await visionAI.models.generateContent({
+              model: 'gemini-2.5-flash',
+              contents: [{ parts: [
+                { inlineData: { mimeType: f.type, data: f.base64 } },
+                { text: 'Describe this image/document in detail for a developer building a web app: layout, colors, components, text, UI elements. Be precise and comprehensive.' },
+              ]}],
+            });
+            const desc = descResult.text?.trim();
+            if (desc) textParts.push(`\n\n[Reference ${f.type.startsWith('image/') ? 'image' : 'document'}: ${f.name}]\n${desc}`);
+          } else {
+            textParts.push(`\n\n[Reference ${f.type.startsWith('image/') ? 'image' : 'document'}: ${f.name} — vision AI unavailable, build based on the text description]`);
+          }
+        } catch (ve: any) {
+          console.warn(`[PRO-BUILD] Vision description failed for ${f.name}: ${ve.message}`);
+          textParts.push(`\n\n[Reference file: ${f.name} — use this as design inspiration]`);
+        }
+      }
+
+      if (textParts.length > 0) message = message + textParts.join('');
+    }
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');

@@ -127,6 +127,9 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   `routes/githubAuth.ts`, and extracted legacy `/api/create-order` (Cashfree
   PGCreateOrder) → `src/server/routes/createOrder.ts`. routes 18 → 16; server.ts
   4270 → 4220. Verified green.
+- **Milestone 1.18 — DONE (2026-06-15)**: Moved `/api/admin/login` into
+  `routes/admin.ts` (`registerAdminRoutes(app, adminLimiter)`). routes 16 → 15;
+  server.ts 4220 → 4188. Verified green.
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

@@ -3860,40 +3860,8 @@ Response Format:
   // Payment routes — extracted to src/server/routes/payment.ts (Phase 1).
   registerPaymentRoutes(app, paymentLimiter);
 
-  // ── Admin server-side auth (4.6) ─────────────────────────────────────────
-  app.post('/api/admin/login', adminLimiter, (req, res) => {
-    const username = String(req.body?.username || '').trim();
-    const password = String(req.body?.password || '').trim();
-    const validUser = (process.env.ADMIN_USERNAME || 'aashishcpmt09').trim();
-    const validPass = (process.env.ADMIN_PASSWORD || '').trim();
-
-    if (!validPass) {
-      audit('ADMIN_LOGIN_BLOCKED', { reason: 'ADMIN_PASSWORD not set', ip: req.ip });
-      return res.status(503).json({ error: 'Admin access not configured on server.' });
-    }
-
-    const passHash    = crypto.createHash('sha256').update(password).digest('hex');
-    const expectedHash = crypto.createHash('sha256').update(validPass).digest('hex');
-
-    console.log(`[ADMIN_LOGIN] user="${username}" validUser="${validUser}" match=${username === validUser} passLen=${password.length} validPassLen=${validPass.length}`);
-
-    if (username === validUser && passHash === expectedHash) {
-      const token = crypto.createHmac('sha256', validPass)
-        .update(`admin:${Math.floor(Date.now() / 86400000)}:${username}`)
-        .digest('hex');
-      audit('ADMIN_LOGIN_SUCCESS', { username, ip: req.ip });
-      return res.json({ ok: true, token });
-    }
-
-    audit('ADMIN_LOGIN_FAILED', { username, ip: req.ip });
-    serverStats.failedLogins++;
-    serverStats.failedLoginIPs.push({ ip: String(req.ip), time: Date.now(), username });
-    if (serverStats.failedLoginIPs.length > 100) serverStats.failedLoginIPs.shift();
-    return res.status(401).json({ error: 'Invalid credentials.' });
-  });
-
   // Admin dashboard routes — extracted to src/server/routes/admin.ts (Phase 1).
-  registerAdminRoutes(app);
+  registerAdminRoutes(app, adminLimiter);
   // SECRETS
 
   // Secrets CRUD routes — extracted to src/server/routes/secrets.ts (Phase 1).

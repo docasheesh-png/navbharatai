@@ -183,6 +183,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   Verified bundle+load+aiCalls strict tsc+tsc+tests. NOTE: `generateOfflineResponse`
   is HUGE (~886 lines, server.ts ~292-1178) — extract it as its own step (b2) →
   `lib/offlineResponse.ts` next, THEN step c (chatHandler) → routes/chat.ts.
+- **Milestone 1.25 — DONE (2026-06-15, AI-core step b2)**: Extracted the huge
+  `generateOfflineResponse` (~886 lines, offline fallback + templated mini-apps) →
+  `src/server/lib/offlineResponse.ts` (self-contained). server.ts 2841 → 1956 (<2k!).
+  Verified bundle+load+tsc+tests. NEXT = step c: `chatHandler` + routeRequest +
+  `/api/chat/*` + `/api/chat` → `routes/chat.ts` (uses aiCalls + offlineResponse + db).
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallbac
 import { useSwipe } from './hooks/useSwipe';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
+import { EngineBuilder } from './components/EngineBuilder';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
@@ -5234,6 +5235,16 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                   </button>
                   <button
                     onClick={() => {
+                        toggleTab('engine_builder');
+                        setIsMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group ${activeView === 'engine_builder' ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:bg-white/5 hover:text-white'}`}
+                  >
+                    <Info className="w-4.5 h-4.5 text-indigo-400" />
+                    <span className="text-sm font-bold tracking-tight">App Builder (New Engine)</span>
+                  </button>
+                  <button
+                    onClick={() => {
                         toggleTab('admin');
                         setIsMenuOpen(false);
                     }}
@@ -7411,6 +7422,12 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                   )}
                 </div>
               </div>
+            </div>
+          )}
+
+          {activeView === 'engine_builder' && (
+            <div className="flex-1 min-h-screen">
+              <EngineBuilder />
             </div>
           )}
 

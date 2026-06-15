@@ -443,3 +443,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   (~5k lines, strict:false) uses internal state-based view switching, so mounting is the next
   (careful) step: render `<EngineBuilder/>` in a new IDE tab/view. Mount in fresh context with
   full vite-build verify, then it becomes user-visible; afterwards retire the legacy build path.
+- **Milestone 5.3 — DONE (2026-06-15) — NEW ENGINE IS NOW USER-VISIBLE**: Mounted
+  `EngineBuilder` into the live app — added `'engine_builder'` to `ViewType`, a sidebar nav
+  button "App Builder (New Engine)" (`toggleTab('engine_builder')`), and a render block in
+  App.tsx. Users can now reach the REAL engine (prompt → multi-file build → live preview +
+  verify/repair) from the UI, alongside the legacy flow. Verified frontend tsc 0 + guardrail 0
+  + 87 tests + **full vite build ✅** (App.tsx change compiles in prod bundle). NEXT: dogfood/
+  polish the EngineBuilder UX; multi-file planning prompt upgrades; then migrate the primary Pro
+  build button to it & retire legacy iframe+CDN; Cloud Run Docker / WebContainer; Phase 5 rest.

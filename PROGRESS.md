@@ -210,6 +210,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   (`registerChatRoutes(app, chatLimiter)`; routes via shared aiRouter; db via getDb).
   server.ts 1820 → 1408. Verified bundle+load+tsc+tests. NEXT = step d: the Pro engine
   (`/api/pro-chat` + `/api/pro-build` + callClaudePro + helpers) → `routes/pro.ts` (biggest).
+- **Milestone 1.30 — DONE (2026-06-15, AI-core step d)**: Extracted the Pro engine
+  (`callClaudePro` + `/api/pro-chat` + `/api/pro-build`, ~755 lines) → `src/server/routes/pro.ts`
+  (`registerProRoutes(app)`; uses aiRouter + AppEngine build/edit + SDKs). server.ts
+  1408 → 650 (down 90% from original 6598!). Verified bundle+load+tsc+tests.
+  NEXT = step e: `/api/sda-chat` → `routes/sda.ts`, then step f: server.ts → thin bootstrap.
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

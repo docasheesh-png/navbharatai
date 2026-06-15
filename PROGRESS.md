@@ -71,6 +71,10 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   routes (`/api/appmaker/executions`, `/executions/:id`, `/jobs/:jobId`) →
   `src/server/routes/appmaker.ts`. routes 30 → 27; server.ts 5019 → 4968 (<5k!).
   Verified green.
+- **Milestone 1.13 — DONE (2026-06-15)**: Extracted OTP anti-spam gateway
+  (`POST /api/auth/send-otp` + its state maps/type) → `src/server/routes/auth.ts`.
+  routes 27 → 26; server.ts 4968 → 4883. Verified green. (GitHub/Firebase OAuth
+  routes still inline — next.)
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

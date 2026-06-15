@@ -389,3 +389,10 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   apply via EditEngine; multi-file aware planning; agentic build/run/repair loop; real
   auto-repair (compile/run errors, not regex score). (Phase 3 finish — proxy WS/HMR + Cloud
   Run wrapper + Pro→/api/preview — also pending.)
+- **Milestone 4.2 — DONE (2026-06-15)**: Built the real **ProjectVerifier** →
+  `src/server/project/ProjectVerifier.ts` (`verifyProject(vfs)`): concrete, false-positive-averse
+  checks — invalid JSON (error), missing static entry (error), broken LOCAL html refs (warning;
+  CDN/data: ignored). Replaces the audit-flagged "heuristic score /100" that shipped known-broken
+  apps; this is the detection foundation for real auto-repair. 5 unit tests (67 total).
+  frontend tsc 0 + guardrail 0 + tests green. NEXT: feed verifier errors into an agentic
+  repair loop (fix → re-verify) using EditEngine; wire EditEngine+verifier into the Pro edit flow.

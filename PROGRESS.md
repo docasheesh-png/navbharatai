@@ -172,6 +172,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   server.ts imports it. server.ts 3803 → 3398. Verified bundle+node --check+tsc+tests.
   REMAINING b0: move the context builders (`getBharatContext` + siblings, server.ts
   ~285-660 region) into prompts.ts too, then step b (call* → lib/aiCalls.ts).
+- **Milestone 1.23 — DONE (2026-06-15, AI-core step b0 COMPLETE)**: Moved all 5 mode/agent
+  context builders (`getBharatContext`, `getApiKeysInstruction`, `getVishwakarmaBasicContext`,
+  `getVishwakarmaProContext` [huge audit prompt], `getVishwakarmaVipContext`) → `lib/prompts.ts`
+  (exported); server.ts imports them. server.ts 3398 → 3017. Verified bundle+load+tsc+tests.
+  NEXT = step b: `call*` (6 fns, server.ts ~290-470 now) + `generateOfflineResponse` → `lib/aiCalls.ts`.
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

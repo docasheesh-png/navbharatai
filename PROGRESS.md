@@ -462,3 +462,13 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   scratch as a complete runnable multi-file project" path. Verified server tsc 0 + frontend
   tsc 0 + **89 tests** (2 new: content-in-context + fresh-build). NEXT: migrate primary Pro
   build button to engine & retire legacy; Cloud Run Docker / WebContainer; Phase 5 rest.
+- **Milestone 5.5 — DONE (2026-06-15) — FRAMEWORK SCAFFOLDS (Phase 4 item 23)**: New
+  `src/server/project/Scaffold.ts` — `detectFramework(prompt)` (vite-react vs static heuristic),
+  `scaffold(vfs, fw)` seeds a REAL runnable skeleton (vite-react: package.json + vite.config +
+  index.html → src/main.jsx → src/App.jsx + index.css; static: index.html+styles.css+app.js)
+  into an EMPTY vfs only (never overwrites), `scaffoldSummary()`. Wired into `BuildPipeline`:
+  fresh builds (count 0) now seed a working foundation before generation (`scaffold` flag,
+  default on; result exposes `scaffolded`). So complex apps start from a verified, wired,
+  dangling-ref-free base instead of nothing. 9 new tests (scaffold + 2 pipeline). server tsc 0
+  + frontend tsc 0 + **98 tests** green. NEXT: surface scaffold choice in EngineBuilder/Pro UI;
+  migrate primary Pro build button; Cloud Run Docker / WebContainer; Phase 5 rest.

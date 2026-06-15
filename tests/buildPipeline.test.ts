@@ -10,13 +10,33 @@ describe('runBuild', () => {
     ] as FileEdit[]);
     const fix = vi.fn(async () => [] as FileEdit[]);
 
-    const r = await runBuild({ prompt: 'make a todo app', generate, fix });
+    // scaffold:false → test the pure generation path (no skeleton seeding)
+    const r = await runBuild({ prompt: 'make a todo app', generate, fix, scaffold: false });
     expect(r.ok).toBe(true);
     expect(r.applied).toBe(2);
     expect(r.fileCount).toBe(2);
     expect(r.files['index.html']).toContain('Todo App');
     expect(fix).not.toHaveBeenCalled(); // already clean → no repair needed
     expect(r.baselineSnapshotId).toBeTruthy();
+  });
+
+  it('seeds a runnable framework skeleton for a fresh build (scaffold default)', async () => {
+    // generator adds nothing; the scaffold alone must produce a clean project
+    const r = await runBuild({ prompt: 'a react dashboard', generate: async () => [], fix: async () => [] });
+    expect(r.scaffolded).toBe('vite-react');
+    expect(r.files['src/main.jsx']).toBeTruthy();
+    expect(r.files['package.json']).toBeTruthy();
+    expect(r.ok).toBe(true); // skeleton verifies clean (no dangling refs)
+  });
+
+  it('does not scaffold when editing an existing project', async () => {
+    const r = await runBuild({
+      prompt: 'tweak it',
+      files: { 'index.html': '<h1>mine</h1>' },
+      generate: async () => [], fix: async () => [],
+    });
+    expect(r.scaffolded).toBeUndefined();
+    expect(r.fileCount).toBe(1);
   });
 
   it('auto-repairs a broken generation before returning', async () => {

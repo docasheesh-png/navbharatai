@@ -16,6 +16,7 @@ import { ProjectVersionStore } from './VersionStore';
 import { applyEdits, type FileEdit } from './EditEngine';
 import { verifyProject, type VerifyResult } from './ProjectVerifier';
 import { autoRepair, type FixGenerator } from './RepairLoop';
+import { detectFramework, scaffold, type Framework } from './Scaffold';
 
 export type EditGenerator = (prompt: string, vfs: VirtualFileSystem) => Promise<FileEdit[]>;
 
@@ -25,6 +26,11 @@ export interface BuildPipelineInput {
   generate: EditGenerator;
   fix: FixGenerator;
   maxRepairAttempts?: number;
+  /**
+   * Seed a runnable framework skeleton for FRESH builds (no existing files).
+   * Defaults to true; pass false to let the generator produce every file.
+   */
+  scaffold?: boolean;
 }
 
 export interface BuildPipelineResult {
@@ -37,11 +43,21 @@ export interface BuildPipelineResult {
   /** Snapshot id of the pre-build state (full rollback point). */
   baselineSnapshotId: string;
   fileCount: number;
+  /** Framework skeleton seeded for a fresh build, if any. */
+  scaffolded?: Framework;
 }
 
 export async function runBuild(input: BuildPipelineInput): Promise<BuildPipelineResult> {
   const vfs = VirtualFileSystem.fromRecord(input.files);
   const versions = new ProjectVersionStore();
+
+  // 0. Fresh build → seed a runnable framework skeleton so the generator edits
+  //    a working foundation instead of inventing all wiring from scratch.
+  let scaffolded: Framework | undefined;
+  if (input.scaffold !== false && vfs.count === 0) {
+    scaffolded = scaffold(vfs, detectFramework(input.prompt)) ?? undefined;
+  }
+
   const baselineSnapshotId = versions.takeSnapshot(vfs, 'before build').id;
 
   // 1. Generate + apply the requested change.
@@ -64,5 +80,6 @@ export async function runBuild(input: BuildPipelineInput): Promise<BuildPipeline
     repairAttempts: repair.attempts,
     baselineSnapshotId,
     fileCount: vfs.count,
+    scaffolded,
   };
 }

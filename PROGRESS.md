@@ -377,3 +377,15 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   via fetch (WS/HMR upgrade is a follow-up). 3 helper unit tests (58 total). Verified
   frontend tsc 0 + guardrail 0 + 58 tests + boot:check PASS (route registers without crash).
   NEXT: WS/HMR upgrade for the proxy; Cloud Run Docker wrapper; point Pro build at /api/preview.
+
+## 🔄 PHASE 4 — Generation & editing engine (IN PROGRESS)
+- **Milestone 4.1 — DONE (2026-06-15)**: Built the surgical **EditEngine** →
+  `src/server/project/EditEngine.ts` (`applyEdits(vfs, edits, versions?)`): structured
+  per-file ops (write/delete/rename/patch with occurrence guard) applied to the VFS,
+  ALWAYS snapshotting first (reversible — user edits never lost), per-op failure reporting
+  (batch doesn't abort). Directly fixes the audit's "full-file regeneration clobbers edits"
+  + "no rollback". 4 unit tests (62 total). frontend tsc 0 + guardrail 0 + tests green.
+  NEXT (Phase 4): have the Pro edit flow emit FileEdit ops (instead of full rewrites) and
+  apply via EditEngine; multi-file aware planning; agentic build/run/repair loop; real
+  auto-repair (compile/run errors, not regex score). (Phase 3 finish — proxy WS/HMR + Cloud
+  Run wrapper + Pro→/api/preview — also pending.)

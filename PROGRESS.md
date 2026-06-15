@@ -369,3 +369,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   3. Point the Pro build at /api/preview (retire iframe+CDN hack).
   4. WebContainer adapter once StackBlitz license decided.
   Then Phase 4 (diff-edit + agentic generation) → Phase 5 → final re-audit (re-confirm 3 guardrails).
+- **Milestone 3.11 — DONE (2026-06-15)**: Added the reverse-proxy route
+  `ALL /preview-app/:sessionId/*` in `routes/preview.ts` — forwards to the server-container
+  session's internal dev server (via `previewService.serverTarget` + pure `buildProxyUrl`
+  helper), so server-container previews are reachable through the main server without
+  exposing raw internal ports (404 if session unknown, 502 if upstream down). HTTP proxying
+  via fetch (WS/HMR upgrade is a follow-up). 3 helper unit tests (58 total). Verified
+  frontend tsc 0 + guardrail 0 + 58 tests + boot:check PASS (route registers without crash).
+  NEXT: WS/HMR upgrade for the proxy; Cloud Run Docker wrapper; point Pro build at /api/preview.

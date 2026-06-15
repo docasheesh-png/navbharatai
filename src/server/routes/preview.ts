@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { PreviewService } from '../runtime/PreviewService';
+import { buildProxyUrl } from '../runtime/proxyUrl';
 
 /**
  * Preview routes (Phase 3). Starts a live preview for a project's files via the
@@ -26,6 +27,37 @@ export function registerPreviewRoutes(app: Express): void {
     } catch (err: any) {
       console.error('[PREVIEW] start error:', err?.message || err);
       return res.status(500).json({ error: err?.message || 'Preview failed' });
+    }
+  });
+
+  // Reverse proxy: server-container previews are reachable via the main server
+  // (no raw internal port exposed). Forwards /preview-app/:sessionId/<rest> to the
+  // session's dev server. (HTTP only for now; WS/HMR upgrade handled separately.)
+  app.all('/preview-app/:sessionId/*', async (req: Request, res: Response) => {
+    const target = previewService.serverTarget(req.params.sessionId);
+    if (!target) return res.status(404).json({ error: 'Preview session not found or not running' });
+    try {
+      const rest = (req.params as any)[0] || '';
+      const url = buildProxyUrl(target.origin, rest, req.originalUrl);
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries(req.headers)) {
+        if (typeof v === 'string' && k.toLowerCase() !== 'host') headers[k] = v;
+      }
+      const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
+      const upstream = await fetch(url, {
+        method: req.method,
+        headers,
+        body: hasBody ? (req as any).rawBody ?? undefined : undefined,
+        redirect: 'manual',
+      });
+      res.status(upstream.status);
+      upstream.headers.forEach((value, key) => {
+        if (key.toLowerCase() !== 'content-encoding' && key.toLowerCase() !== 'transfer-encoding') res.setHeader(key, value);
+      });
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      res.send(buf);
+    } catch (err: any) {
+      res.status(502).json({ error: 'Preview upstream unreachable', detail: err?.message });
     }
   });
 

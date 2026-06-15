@@ -498,3 +498,10 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   **110 tests** + **vite build ✅**. NOTE for user: to see this live, the branch must be deployed/
   merged — the screenshot error is the OLD preview path. NEXT: migrate primary Pro button to the
   engine & retire legacy; Cloud Run / WebContainer; Phase 5 rest.
+- **Milestone 5.8 — DONE (2026-06-15) — VERIFIER CATCHES REAL MODULE ERRORS**: `ProjectVerifier`
+  now does module-level checks for JS/TS source apps so the auto-repair loop fixes real complex-app
+  breakage: (a) **dangling relative imports** (`import x from './missing'` that resolves to no
+  project file, trying extensions + /index) → ERROR; (b) **bare deps imported but not in
+  package.json** (skips node builtins + scoped-pkg roots) → WARNING. False-positive-averse. 5 new
+  tests. server tsc 0 + **114 tests** green. NEXT: migrate primary Pro button to engine; deploy/
+  merge branch so the new engine is live; Cloud Run / WebContainer; Phase 5 rest.

@@ -44,4 +44,45 @@ describe('verifyProject', () => {
     expect(r.issues.some(i => /No entry point/.test(i.message))).toBe(false);
     expect(r.ok).toBe(true);
   });
+
+  it('flags a dangling relative import as an error', () => {
+    const r = verifyProject(vfsFrom({
+      'index.html': '<div id="root"></div><script type="module" src="main.jsx"></script>',
+      'main.jsx': "import App from './App.jsx';\n",
+    }));
+    expect(r.ok).toBe(false);
+    expect(r.issues.some(i => /Broken import.*App\.jsx/.test(i.message))).toBe(true);
+  });
+
+  it('resolves relative imports across extensions and /index', () => {
+    const r = verifyProject(vfsFrom({
+      'index.html': '<script type="module" src="main.jsx"></script>',
+      'main.jsx': "import App from './App';\nimport './styles.css';\nimport { x } from './util/index';\n",
+      'App.jsx': 'export default function App(){return null;}',
+      'styles.css': 'body{}',
+      'util/index.js': 'export const x = 1;',
+    }));
+    expect(r.issues.some(i => /Broken import/.test(i.message))).toBe(false);
+    expect(r.ok).toBe(true);
+  });
+
+  it('warns when a bare dependency is not declared in package.json', () => {
+    const r = verifyProject(vfsFrom({
+      'package.json': JSON.stringify({ dependencies: { react: '^18' } }),
+      'index.html': '<script type="module" src="src/main.jsx"></script>',
+      'src/main.jsx': "import React from 'react';\nimport { create } from 'zustand';\n",
+    }));
+    expect(r.issues.some(i => /zustand.*not in package\.json/.test(i.message))).toBe(true);
+    expect(r.issues.some(i => /react.*not in package\.json/.test(i.message))).toBe(false); // react is declared
+    expect(r.ok).toBe(true); // it's a warning, not an error
+  });
+
+  it('does not flag node builtins or scoped deps incorrectly', () => {
+    const r = verifyProject(vfsFrom({
+      'package.json': JSON.stringify({ dependencies: { '@scope/lib': '^1' } }),
+      'src/index.ts': "import fs from 'node:fs';\nimport path from 'path';\nimport x from '@scope/lib/sub';\n",
+      'index.html': '<script type="module" src="src/index.ts"></script>',
+    }));
+    expect(r.warnings).toBe(0);
+  });
 });

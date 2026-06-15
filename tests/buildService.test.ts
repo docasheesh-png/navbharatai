@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { buildApp, startPreview, previewIframeSrc } from '../src/services/buildService';
+import { buildApp, startPreview, previewIframeSrc, previewSrcFor } from '../src/services/buildService';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -42,5 +42,12 @@ describe('buildService', () => {
 
   it('previewIframeSrc builds the static preview path', () => {
     expect(previewIframeSrc('abc')).toBe('/preview/abc');
+  });
+
+  it('previewSrcFor resolves the iframe src per runtime target', () => {
+    expect(previewSrcFor({ ok: true, target: 'static', sessionId: 'abc' })).toBe('/preview/abc');
+    expect(previewSrcFor({ ok: true, target: 'server-container', sessionId: 'srv' })).toBe('/preview-app/srv/');
+    expect(previewSrcFor({ ok: false, target: 'webcontainer', reason: 'pending' })).toBeNull();
+    expect(previewSrcFor(undefined)).toBeNull();
   });
 });

@@ -18,9 +18,8 @@
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { normalizePath } from '../project/ProjectModel';
 
-const REACT_CDN = 'https://unpkg.com/react@18/umd/react.development.js';
-const REACTDOM_CDN = 'https://unpkg.com/react-dom@18/umd/react-dom.development.js';
-const BABEL_CDN = 'https://unpkg.com/@babel/standalone@7/babel.min.js';
+const BABEL_CDN = 'https://unpkg.com/@babel/standalone@7.26.4/babel.min.js';
+const ESM = 'https://esm.sh/';
 
 const SOURCE_EXT = ['.jsx', '.js', '.tsx', '.ts', '.mjs'];
 const CSS_EXT = ['.css'];
@@ -105,11 +104,15 @@ export function buildReactPreview(vfs: VirtualFileSystem): string {
       + `<p>Expected a module entry (e.g. <code>src/main.jsx</code>) referenced by index.html.</p></body></html>`;
   }
 
-  const payload = JSON.stringify({ entry, modules });
+  const payload = JSON.stringify({ entry, modules }).replace(/<\//g, '<\\/');
+  const importmap = JSON.stringify({ imports: buildImportmap(vfs) }).replace(/<\//g, '<\\/');
   const css = baseStyles(vfs);
 
-  // The loader runs in the browser. It transpiles each module with Babel and wires
-  // a CommonJS-style require graph; react specifiers map to the CDN globals.
+  // The loader runs in the browser. It transpiles each module with Babel (JSX
+  // automatic runtime, so no React-in-scope needed), wires a CommonJS-style
+  // require graph for the project's own files, and loads EVERY bare dependency
+  // (react, react-dom, and any npm package in package.json) from esm.sh — so
+  // complex React apps (router/state/UI libs) preview without a server.
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -117,28 +120,28 @@ export function buildReactPreview(vfs: VirtualFileSystem): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Preview</title>
 ${css ? `<style>\n${css}\n</style>` : ''}
-<script src="${REACT_CDN}" crossorigin></script>
-<script src="${REACTDOM_CDN}" crossorigin></script>
+<script type="importmap">${importmap}</script>
 <script src="${BABEL_CDN}"></script>
 </head>
 <body>
 <div id="root"></div>
-<script type="application/json" id="__bundle__">${payload.replace(/</g, '\\u003c')}</script>
+<script type="application/json" id="__bundle__">${payload}</script>
 <script>
 (function () {
   var bundle = JSON.parse(document.getElementById('__bundle__').textContent);
   var SOURCES = bundle.modules;
   var ENTRY = bundle.entry;
+  var IMAP = ${importmap ? 'JSON.parse(document.querySelector(\'script[type="importmap"]\').textContent).imports' : '{}'};
+  var ESM = '${ESM}';
   var cache = {};
+  var bareCache = {};
   var SRC_EXT = ['.jsx', '.js', '.tsx', '.ts', '.mjs'];
-  var CSS_EXT = ['.css'];
 
   function showError(msg) {
     var el = document.getElementById('root');
     el.innerHTML = '<pre style="white-space:pre-wrap;color:#b00;padding:16px;font:13px/1.5 monospace">Preview error:\\n' +
       String(msg).replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</pre>';
   }
-
   function dirname(p) { var i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); }
   function normalize(p) {
     var parts = p.split('/'), out = [];
@@ -149,60 +152,111 @@ ${css ? `<style>\n${css}\n</style>` : ''}
     }
     return out.join('/');
   }
-
   function resolve(importer, spec) {
     var base = spec.charAt(0) === '/' ? spec.slice(1) : normalize(dirname(importer) + '/' + spec);
-    if (SOURCES.hasOwnProperty(base)) return base;
-    for (var i = 0; i < SRC_EXT.length; i++) if (SOURCES.hasOwnProperty(base + SRC_EXT[i])) return base + SRC_EXT[i];
-    for (var j = 0; j < CSS_EXT.length; j++) if (SOURCES.hasOwnProperty(base + CSS_EXT[j])) return base + CSS_EXT[j];
-    for (var k = 0; k < SRC_EXT.length; k++) if (SOURCES.hasOwnProperty(base + '/index' + SRC_EXT[k])) return base + '/index' + SRC_EXT[k];
-    return null;
+    var t = [base];
+    for (var i = 0; i < SRC_EXT.length; i++) t.push(base + SRC_EXT[i]);
+    t.push(base + '.css', base + '.json');
+    for (var k = 0; k < SRC_EXT.length; k++) t.push(base + '/index' + SRC_EXT[k]);
+    for (var j = 0; j < t.length; j++) if (SOURCES.hasOwnProperty(t[j])) return t[j];
+    return base;
   }
-
-  function bareModule(spec) {
-    if (spec === 'react') return window.React;
-    if (spec === 'react-dom') return window.ReactDOM;
-    if (spec === 'react-dom/client') return window.ReactDOM;
-    return undefined;
-  }
-
-  function requireModule(path) {
-    if (cache.hasOwnProperty(path)) return cache[path].exports;
-    if (path.slice(-4) === '.css') { injectCss(SOURCES[path]); cache[path] = { exports: {} }; return cache[path].exports; }
-    var code = SOURCES[path];
-    var transformed = Babel.transform(code, {
-      presets: [['react'], ['typescript', { allExtensions: true, isTSX: true }]],
-      plugins: ['transform-modules-commonjs'],
-      filename: path
-    }).code;
-    var module = { exports: {} };
-    cache[path] = module;
-    function localRequire(spec) {
-      var bare = bareModule(spec);
-      if (bare !== undefined) return bare;
-      var resolved = resolve(path, spec);
-      if (!resolved) throw new Error('Cannot resolve "' + spec + '" from ' + path);
-      return requireModule(resolved);
-    }
-    var fn = new Function('require', 'module', 'exports', 'React', 'ReactDOM', transformed);
-    fn(localRequire, module, module.exports, window.React, window.ReactDOM);
-    return module.exports;
-  }
-
+  function interop(ns) { var m = {}; for (var k in ns) m[k] = ns[k]; m.__esModule = true; if (m.default === undefined) m.default = ns; return m; }
   var styleEl;
   function injectCss(text) {
     if (!styleEl) { styleEl = document.createElement('style'); document.head.appendChild(styleEl); }
     styleEl.appendChild(document.createTextNode('\\n' + (text || '')));
   }
 
-  window.addEventListener('error', function (e) { showError(e.message); });
-  try {
-    requireModule(ENTRY);
-  } catch (err) {
-    showError((err && err.stack) || err);
+  function requireModule(path) {
+    if (cache.hasOwnProperty(path)) return cache[path].exports;
+    var code = SOURCES[path];
+    if (code == null) throw new Error('Module not found: ' + path);
+    if (/\\.css$/.test(path)) { injectCss(code); cache[path] = { exports: {} }; return cache[path].exports; }
+    if (/\\.json$/.test(path)) { cache[path] = { exports: JSON.parse(code) }; return cache[path].exports; }
+    var isTs = /\\.tsx?$/.test(path), isTsx = /\\.tsx$/.test(path);
+    var presets = isTs
+      ? [['react', { runtime: 'automatic' }], ['typescript', { isTSX: isTsx, allExtensions: true }]]
+      : [['react', { runtime: 'automatic' }]];
+    var transformed;
+    try { transformed = Babel.transform(code, { filename: path, presets: presets, plugins: ['transform-modules-commonjs'], sourceType: 'module' }).code; }
+    catch (e) { throw new Error('Compile ' + path + ': ' + e.message); }
+    var module = { exports: {} };
+    cache[path] = module;
+    function localRequire(spec) {
+      if (spec.charAt(0) !== '.' && spec.charAt(0) !== '/') {
+        if (bareCache[spec]) return bareCache[spec];
+        throw new Error('Missing dependency: ' + spec);
+      }
+      return requireModule(resolve(path, spec));
+    }
+    try { (new Function('require', 'module', 'exports', transformed))(localRequire, module, module.exports); }
+    catch (e) { throw new Error('Run ' + path + ': ' + e.message); }
+    return module.exports;
   }
+
+  function collectBare() {
+    var found = {}, re = /(?:from|import|require\\(|import\\()\\s*['"]([^'"]+)['"]/g;
+    Object.keys(SOURCES).forEach(function (p) {
+      var src = SOURCES[p] || '', m; re.lastIndex = 0;
+      while ((m = re.exec(src))) { var s = m[1]; if (s && s.charAt(0) !== '.' && s.charAt(0) !== '/') found[s] = true; }
+    });
+    return Object.keys(found);
+  }
+  function specUrl(spec) {
+    if (IMAP[spec]) return IMAP[spec];
+    var root = spec.charAt(0) === '@' ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
+    if (IMAP[root]) return IMAP[root] + spec.slice(root.length);
+    return ESM + spec;
+  }
+
+  window.addEventListener('error', function (e) { showError((e && e.message) || 'Script error'); });
+  window.addEventListener('unhandledrejection', function (e) { showError((e && e.reason && e.reason.message) || e.reason || 'Promise rejected'); });
+
+  if (typeof Babel === 'undefined') { showError('Could not load the preview compiler (network blocked?).'); return; }
+
+  var forced = ['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime'];
+  (async function () {
+    try {
+      var bare = collectBare();
+      forced.forEach(function (s) { if (bare.indexOf(s) < 0) bare.push(s); });
+      await Promise.all(bare.map(async function (spec) {
+        try { bareCache[spec] = interop(await import(specUrl(spec))); }
+        catch (e) { console.warn('[preview] failed to load', spec, e && e.message); }
+      }));
+      requireModule(ENTRY);
+    } catch (err) {
+      showError((err && err.stack) || err);
+    }
+  })();
 })();
 </script>
 </body>
 </html>`;
+}
+
+/** Build an esm.sh importmap from package.json deps (+ always-needed React entries). */
+function buildImportmap(vfs: VirtualFileSystem): Record<string, string> {
+  const deps: Record<string, string> = {};
+  try {
+    const pkg = JSON.parse(vfs.readText('package.json') || '{}');
+    Object.assign(deps, pkg.dependencies || {}, pkg.devDependencies || {});
+  } catch { /* ignore */ }
+  const ver = (name: string): string => {
+    const v = deps[name];
+    return v ? '@' + v.replace(/^[\^~>=<\s]*/, '').split(/\s/)[0] : '';
+  };
+  const reactVer = ver('react') || '@18.3.1';
+  const rdVer = ver('react-dom') || '@18.3.1';
+  const imap: Record<string, string> = {
+    react: ESM + 'react' + reactVer,
+    'react-dom': ESM + 'react-dom' + rdVer,
+    'react-dom/client': ESM + 'react-dom' + rdVer + '/client',
+    'react/jsx-runtime': ESM + 'react' + reactVer + '/jsx-runtime',
+    'react/jsx-dev-runtime': ESM + 'react' + reactVer + '/jsx-dev-runtime',
+  };
+  for (const name of Object.keys(deps)) {
+    if (!imap[name]) imap[name] = ESM + name + ver(name);
+  }
+  return imap;
 }

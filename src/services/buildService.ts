@@ -79,3 +79,16 @@ export function startPreview(files: Record<string, string>, projectId = 'project
 export function previewIframeSrc(sessionId: string): string {
   return `/preview/${sessionId}`;
 }
+
+/**
+ * Resolve the right iframe src for a preview result, regardless of runtime:
+ *   - static          → /preview/:id (self-contained HTML, incl. in-browser React)
+ *   - server-container → /preview-app/:id/ (reverse-proxied dev server)
+ * Returns null when there is nothing embeddable (e.g. webcontainer not provisioned).
+ */
+export function previewSrcFor(preview: PreviewInfo | undefined): string | null {
+  if (!preview || !preview.ok || !preview.sessionId) return null;
+  if (preview.target === 'static') return `/preview/${preview.sessionId}`;
+  if (preview.target === 'server-container') return `/preview-app/${preview.sessionId}/`;
+  return preview.url || null;
+}

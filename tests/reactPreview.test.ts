@@ -39,6 +39,22 @@ describe('buildReactPreview', () => {
     expect(html).toContain('"entry":"src/main.jsx"');
   });
 
+  it('wires arbitrary npm deps via an esm.sh importmap (complex apps)', () => {
+    const vfs = VirtualFileSystem.fromRecord({
+      'package.json': JSON.stringify({ dependencies: { react: '^18.3.1', 'react-router-dom': '^6.26.0', zustand: '^4.5.0' } }),
+      'index.html': '<div id="root"></div><script type="module" src="/src/main.jsx"></script>',
+      'src/main.jsx': "import { create } from 'zustand';\nimport { BrowserRouter } from 'react-router-dom';\n",
+    });
+    const html = buildReactPreview(vfs);
+    expect(html).toContain('<script type="importmap">');
+    expect(html).toContain('esm.sh/react-router-dom@6.26.0');
+    expect(html).toContain('esm.sh/zustand@4.5.0');
+  });
+
+  it('uses the JSX automatic runtime (no React-in-scope requirement)', () => {
+    expect(buildReactPreview(reactVfs())).toContain("runtime: 'automatic'");
+  });
+
   it('falls back to a clear notice when no entry module exists', () => {
     const html = buildReactPreview(VirtualFileSystem.fromRecord({ 'foo.txt': 'x' }));
     expect(html).toContain('No React entry module found');

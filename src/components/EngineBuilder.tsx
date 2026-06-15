@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { buildApp, previewIframeSrc, type BuildResponse } from '../services/buildService';
+import { buildApp, previewSrcFor, type BuildResponse } from '../services/buildService';
 
 /**
  * EngineBuilder — a self-contained UI for the real Phase 3/4 build engine.
@@ -36,8 +36,7 @@ export function EngineBuilder() {
 
   const files = result?.files || {};
   const fileNames = Object.keys(files).sort();
-  const previewSession = result?.preview?.ok && result.preview.target === 'static'
-    ? result.preview.sessionId : undefined;
+  const previewSrc = previewSrcFor(result?.preview);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0d1117', color: '#c9d1d9', fontFamily: 'system-ui, sans-serif' }}>
@@ -91,12 +90,12 @@ export function EngineBuilder() {
 
         {/* live preview */}
         <div style={{ width: '40%', borderLeft: '1px solid #30363d', background: '#fff' }}>
-          {previewSession ? (
-            <iframe title="preview" src={previewIframeSrc(previewSession)} style={{ width: '100%', height: '100%', border: 'none' }} />
+          {previewSrc ? (
+            <iframe title="preview" src={previewSrc} style={{ width: '100%', height: '100%', border: 'none' }} />
           ) : (
             <div style={{ color: '#8b949e', fontSize: 12, padding: 16 }}>
               {result?.preview && !result.preview.ok
-                ? `Preview: ${result.preview.reason || 'not available'}`
+                ? `Preview (${result.preview.target}): ${result.preview.reason || 'not available'}`
                 : 'Live preview appears here after a build.'}
             </div>
           )}

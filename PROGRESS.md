@@ -484,3 +484,17 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   now previews live in EngineBuilder. 13 new/updated tests (reactPreview + router + previewService).
   server tsc 0 + frontend tsc 0 + **107 tests** green. NEXT: surface scaffold/runtime in UI;
   migrate primary Pro build button; Cloud Run / WebContainer for heavier apps; Phase 5 rest.
+- **Milestone 5.7 — DONE (2026-06-15) — PREVIEW HARDENING (user reported preview error)**: User
+  hit a preview error (screenshot = LEGACY 3-file flow on the live site; the new engine is on the
+  unmerged branch, separate "App Builder (New Engine)" tab). Two real fixes: (1) `ReactPreview.ts`
+  upgraded from React-only (threw on any other bare import) to a dependency-robust loader matching
+  the legacy bundler — builds an esm.sh **importmap** from package.json, async-loads EVERY bare dep
+  (react/react-dom + router/state/UI libs) via esm.sh, JSX **automatic** runtime (no React-in-scope
+  needed), supports .json/.css imports, honest error overlay instead of blank/throw. So complex
+  React apps preview without a server. (2) EngineBuilder + new `previewSrcFor(preview)` in
+  buildService now render the live iframe for ANY successful runtime (static → /preview/:id;
+  server-container → /preview-app/:id/), not just static, and show target-tagged honest status.
+  4 new tests (esm.sh deps, automatic runtime, previewSrcFor). server tsc 0 + frontend tsc 0 +
+  **110 tests** + **vite build ✅**. NOTE for user: to see this live, the branch must be deployed/
+  merged — the screenshot error is the OLD preview path. NEXT: migrate primary Pro button to the
+  engine & retire legacy; Cloud Run / WebContainer; Phase 5 rest.

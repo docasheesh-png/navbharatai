@@ -204,6 +204,12 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   server.ts 1927 → 1820. NEXT = step c: chatHandler (~515-730 now) + chat prompt
   builders (LANGUAGE_RULE, SYSTEM_PROMPT_EDIT/CHAT, buildDynamicPrompt, buildFreeSystemPrompt)
   + `/api/chat/*` registrations → `routes/chat.ts` (+ move prompt builders to prompts.ts).
+- **Milestone 1.29 — DONE (2026-06-15, AI-core step c)**: Extracted the whole chat
+  unit (LANGUAGE_RULE, SYSTEM_PROMPT_EDIT/CHAT, buildDynamicPrompt, buildFreeSystemPrompt
+  + ApnapanProfile, chatHandler, `/api/chat/*` tier routes) → `src/server/routes/chat.ts`
+  (`registerChatRoutes(app, chatLimiter)`; routes via shared aiRouter; db via getDb).
+  server.ts 1820 → 1408. Verified bundle+load+tsc+tests. NEXT = step d: the Pro engine
+  (`/api/pro-chat` + `/api/pro-build` + callClaudePro + helpers) → `routes/pro.ts` (biggest).
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

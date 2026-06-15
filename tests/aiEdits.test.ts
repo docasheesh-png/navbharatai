@@ -48,6 +48,21 @@ describe('makeAiEditGenerator', () => {
     expect(callModel.mock.calls[0][1]).toContain('make a page');
   });
 
+  it('generate includes existing file CONTENTS (not just paths) for edits', async () => {
+    const callModel = vi.fn(async () => '[]');
+    const { generate } = makeAiEditGenerator(callModel);
+    const vfs = VirtualFileSystem.fromRecord({ 'index.html': '<h1>SENTINEL_CONTENT</h1>' });
+    await generate('change the heading', vfs);
+    expect(callModel.mock.calls[0][1]).toContain('SENTINEL_CONTENT');
+  });
+
+  it('generate treats an empty project as a fresh from-scratch build', async () => {
+    const callModel = vi.fn(async () => '[]');
+    const { generate } = makeAiEditGenerator(callModel);
+    await generate('a todo app', VirtualFileSystem.fromRecord({}));
+    expect(callModel.mock.calls[0][1]).toContain('from scratch');
+  });
+
   it('fix returns [] when there are no issues (no model call)', async () => {
     const callModel = vi.fn(async () => '[]');
     const { fix } = makeAiEditGenerator(callModel);

@@ -72,24 +72,68 @@ const EDIT_FORMAT = `Reply with ONLY a JSON array of edit operations, no prose, 
 {"op":"patch","path":"src/App.tsx","find":"<exact snippet>","replace":"<new snippet>","count":1}
 {"op":"rename","path":"old","to":"new"}
 {"op":"delete","path":"file"}
-Use relative paths. Prefer "patch" for small changes; "write" for new/rewritten files. ALL code identifiers in English.`;
+Use relative paths. Prefer "patch" for small, localized changes; "write" for new files or full rewrites. ALL code identifiers in English.`;
+
+/** Engineering standards the model must follow for real, complex apps. */
+const ENGINEERING_RULES = `Rules for production-quality output:
+- Plan the WHOLE app first: decide the file tree (entry point + every module/component/style/asset it needs), then emit complete, consistent files. Do not stop at a single HTML file for a non-trivial request.
+- Separate concerns: split UI into components, keep state/logic/data in dedicated modules, put styles in their own files. Avoid one giant file.
+- EVERY file you reference (imports, <script src>, <link href>, asset paths) MUST also exist — either already in the project or written in THIS reply. Never leave a dangling reference.
+- Provide a working entry point (e.g. index.html, or src/main.tsx + index.html for a bundled app). Wire everything together so it runs.
+- Write real, complete code. No TODO/placeholder/"...rest of code" stubs, no empty handlers. Implement the behavior the user asked for.
+- Keep JSON valid: escape newlines/quotes inside "content". Output the FULL content of every file you write.`;
+
+/** How much of each existing file's content to inline for edit context. */
+const MAX_FILE_CHARS = 4000;
+const MAX_CONTEXT_FILES = 40;
+const MAX_TOTAL_CONTEXT = 120_000;
 
 function fileList(vfs: VirtualFileSystem): string {
   const paths = vfs.paths();
   return paths.length ? paths.join('\n') : '(empty project)';
 }
 
+/** Inline current file contents (bounded) so edits/patches can target exact text. */
+function fileContext(vfs: VirtualFileSystem): string {
+  const paths = vfs.paths();
+  if (!paths.length) return '(empty project — this is a fresh build)';
+  let total = 0;
+  const blocks: string[] = [];
+  for (const path of paths.slice(0, MAX_CONTEXT_FILES)) {
+    const file = vfs.read(path);
+    if (!file) continue;
+    if (file.encoding === 'base64') {
+      blocks.push(`--- ${path} (binary, ${file.size} bytes, omitted) ---`);
+      continue;
+    }
+    let body = file.content;
+    if (body.length > MAX_FILE_CHARS) {
+      body = body.slice(0, MAX_FILE_CHARS) + `\n… (truncated, ${file.content.length - MAX_FILE_CHARS} more chars)`;
+    }
+    if (total + body.length > MAX_TOTAL_CONTEXT) {
+      blocks.push(`--- ${path} (omitted: context budget reached) ---`);
+      continue;
+    }
+    total += body.length;
+    blocks.push(`--- ${path} ---\n${body}`);
+  }
+  return blocks.join('\n\n');
+}
+
 /** Build generate+fix functions for the BuildPipeline backed by an injected model. */
 export function makeAiEditGenerator(callModel: ModelCall) {
   const generate = async (prompt: string, vfs: VirtualFileSystem): Promise<FileEdit[]> => {
-    const sys = `You are an expert full-stack engineer building/editing a real multi-file web app. ${EDIT_FORMAT}`;
-    const user = `Current files:\n${fileList(vfs)}\n\nUser request:\n${prompt}`;
+    const fresh = vfs.paths().length === 0;
+    const sys = `You are a world-class full-stack engineer building a real, multi-file web application that must actually build and run. ${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
+    const user = fresh
+      ? `Build this application from scratch as a complete, runnable multi-file project.\n\nUser request:\n${prompt}\n\nReturn the full set of files needed to run it.`
+      : `Current project files (with contents — use exact text for "patch" finds):\n\n${fileContext(vfs)}\n\nUser request:\n${prompt}\n\nApply the minimal correct set of edits. Keep all existing references valid.`;
     return parseFileEdits(await callModel(sys, user));
   };
   const fix = async (issues: ProjectIssue[], vfs: VirtualFileSystem): Promise<FileEdit[]> => {
     if (issues.length === 0) return [];
-    const sys = `You are fixing build/verification errors in a web app. ${EDIT_FORMAT}`;
-    const user = `Files:\n${fileList(vfs)}\n\nFix these issues:\n${issues.map(i => `- [${i.severity}] ${i.file}: ${i.message}`).join('\n')}`;
+    const sys = `You are fixing real build/verification errors in a web app so it builds and runs cleanly. ${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
+    const user = `Current project files (with contents):\n\n${fileContext(vfs)}\n\nFix exactly these issues without breaking anything else:\n${issues.map(i => `- [${i.severity}] ${i.file}: ${i.message}`).join('\n')}`;
     return parseFileEdits(await callModel(sys, user));
   };
   return { generate, fix };

@@ -451,3 +451,14 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   + 87 tests + **full vite build ✅** (App.tsx change compiles in prod bundle). NEXT: dogfood/
   polish the EngineBuilder UX; multi-file planning prompt upgrades; then migrate the primary Pro
   build button to it & retire legacy iframe+CDN; Cloud Run Docker / WebContainer; Phase 5 rest.
+- **Milestone 5.4 — DONE (2026-06-15) — GENERATION QUALITY FOR COMPLEX APPS**: Upgraded the
+  AI⇄engine prompts in `src/server/project/aiEdits.ts` so the engine genuinely handles large,
+  complex apps (the core goal). Added (1) `ENGINEERING_RULES`: plan the WHOLE file tree first,
+  separate concerns into components/modules/styles, guarantee every referenced file exists
+  (no dangling imports/`<script src>`), a real wired entry point, NO TODO/placeholder stubs,
+  valid escaped JSON. (2) `fileContext(vfs)`: edits now see existing file CONTENTS (bounded:
+  4k/file, 40 files, 120k total budget; binary omitted), so `patch` finds target exact text
+  instead of guessing from path-only context. (3) Fresh empty project → explicit "build from
+  scratch as a complete runnable multi-file project" path. Verified server tsc 0 + frontend
+  tsc 0 + **89 tests** (2 new: content-in-context + fresh-build). NEXT: migrate primary Pro
+  build button to engine & retire legacy; Cloud Run Docker / WebContainer; Phase 5 rest.

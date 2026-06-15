@@ -305,3 +305,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   + frontend tsc 0 + tests green. NEXT: (b) WebContainer adapter (StackBlitz SDK, frontend),
   (c) server-container adapter (on PreviewRunner/Sandbox), then unified preview endpoint via
   RuntimeRouter + wire into Pro build (replacing the iframe+CDN hack).
+- **Milestone 3.3 — DONE (2026-06-15)**: Built unified **PreviewService** + **StaticRuntime**
+  (`src/server/runtime/PreviewService.ts`, `StaticRuntime.ts`). `startPreview(projectId, vfs)`
+  routes via RuntimeRouter: 'static' is FULLY working (builds self-contained HTML, stores in a
+  24h-TTL session map, returns `/preview/{id}`); 'webcontainer'/'server-container' return an
+  HONEST `{ok:false, reason}` (never fake success) until their adapters land. 4 unit tests
+  (10 runtime tests total). guardrail 0 + frontend tsc 0 + tests green. NEXT: add a `/preview`
+  HTTP route (start + serve /preview/:id) wired into the bootstrap; then WebContainer + server
+  adapters; then point Pro build at PreviewService (retire iframe+CDN hack).

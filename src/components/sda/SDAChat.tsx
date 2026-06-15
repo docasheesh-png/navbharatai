@@ -47,29 +47,6 @@ const MAX_FILE_MB = 10;
 const BASE_HEIGHT = 44;
 const MAX_HEIGHT = BASE_HEIGHT * 5; // 5x max grow
 
-const WELCOME: SDAMessage = {
-  id: 'welcome',
-  text: `**Namaste, Doctor.**
-
-I am your **Senior Doctor Assistant (SDA)** — a clinical decision support system designed to assist you in structured case evaluation.
-
-I work like an experienced senior consultant sitting beside you, guiding you through a complete, systematic clinical assessment — one step at a time.
-
-**How this works:**
-- I will ask you questions one at a time
-- Each of your answers shapes my next question
-- You can upload lab reports, X-rays, ECGs, or any medical document — I will analyze them
-- Use Quick Tools below for scores, drug checks, dosing, protocols, and more
-- Final diagnosis and treatment decisions remain entirely yours
-
----
-
-To begin, please tell me — **what is the patient's age and sex?**
-
-*(Example: 45-year-old male / 28-year-old female)*`,
-  sender: 'sda',
-  timestamp: new Date(),
-};
 
 const QUICK_TOOLS = [
   {
@@ -232,7 +209,7 @@ const buildCasePDF = (
 // ── Component ──────────────────────────────────────────────────────────────
 
 export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
-  const [messages, setMessages] = useState<SDAMessage[]>([WELCOME]);
+  const [messages, setMessages] = useState<SDAMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [teachingMode, setTeachingMode] = useState(false);
@@ -265,7 +242,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
   // Persist messages to localStorage on every change (skip if only welcome msg)
   useEffect(() => {
-    if (messages.length > 1) {
+    if (messages.length > 0) {
       try {
         localStorage.setItem('sda_messages', JSON.stringify(messages.slice(-150)));
       } catch { /* quota */ }
@@ -478,7 +455,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const requestSummary = () => handleSend('Please generate a complete structured case summary based on all information collected so far.');
   const requestMissingCheck = () => handleSend('What am I missing? Review the case and identify any missing history, examination findings, investigations, or alternative diagnoses I should consider.');
   const startNewCase = () => {
-    setMessages([WELCOME]);
+    setMessages([]);
     setPatient({});
     setActiveRedFlags([]);
     setInput('');

@@ -322,3 +322,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   server guardrail 0 + 45 tests + **bundled server boots to "🚀 Server running"**.
   NEXT: WebContainer adapter (StackBlitz SDK) + server-container adapter; then point the
   Pro build at /api/preview (retire the iframe+CDN hack). (External infra decisions pending.)
+- **Milestone 3.5 — DONE (2026-06-15)**: Removed 13 ad-hoc debug/test scripts from
+  `src/server/` (e2e_test, repair_test, run_chess_build, test_generator_audit, verify_generator,
+  verify_persistence, memory_test, master_gen_test, phase2_*, audit_test, test_notes_app — none
+  imported by the app). Kept real `audit_env.ts` (startup env audit, imported by server.ts),
+  ObservabilityManager, TokenUsageManager. (Caught & restored audit_env mid-cleanup via the
+  boot/guardrail check — process working as intended.) Verified: frontend tsc 0 + guardrail 0
+  + 45 tests + clean boot. (CI is GREEN on PR #2.) Deep fake-BuildEngine refactor deferred to
+  Phase 3/4 with fresh context (interconnected with AppMakerLab).

@@ -14,6 +14,7 @@ import { verifyPaymentInternal } from './src/server/lib/payments';
 import { registerPaymentRoutes } from './src/server/routes/payment';
 import { registerGithubRoutes } from './src/server/routes/github';
 import { registerCloudsyncRoutes } from './src/server/routes/cloudsync';
+import { registerAppmakerRoutes } from './src/server/routes/appmaker';
 import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
 import { registerSyncRoutes } from './src/server/routes/sync';
@@ -357,60 +358,8 @@ setInterval(() => {
     res.json({ status: 'ok', uptime: process.uptime(), port: PORT });
   });
 
-  // AppMaker Execution Telemetry Endpoints
-  const HISTORY_DIR = path.join(process.cwd(), 'runtime', 'build-history');
-
-  app.get('/api/appmaker/executions', async (req, res) => {
-    try {
-      if (!fs.existsSync(HISTORY_DIR)) {
-        return res.json([]);
-      }
-      const files = fs.readdirSync(HISTORY_DIR);
-      const executions = files.map(file => {
-        const filePath = path.join(HISTORY_DIR, file);
-        const stats = fs.statSync(filePath);
-        const content = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-        return {
-          executionId: content.executionId,
-          timestamp: content.timestamp,
-          status: content.buildResult.success ? 'SUCCESS' : 'FAILED'
-        };
-      });
-      res.json(executions);
-    } catch (err) {
-      console.error('Error fetching executions:', err);
-      res.status(500).json({ error: 'Failed to fetch executions' });
-    }
-  });
-
-  app.get('/api/appmaker/executions/:executionId', async (req, res) => {
-    try {
-      const { executionId } = req.params;
-      const filePath = path.join(HISTORY_DIR, `${executionId}.json`);
-      if (!fs.existsSync(filePath)) {
-        return res.status(404).json({ error: 'Execution not found' });
-      }
-      const content = fs.readFileSync(filePath, 'utf8');
-      res.json(JSON.parse(content));
-    } catch (err) {
-      console.error('Error fetching execution:', err);
-      res.status(500).json({ error: 'Failed to fetch execution' });
-    }
-  });
-
-  app.get('/api/appmaker/jobs/:jobId', async (req, res) => {
-    try {
-      const { jobId } = req.params;
-      const job = await BuildJobManager.getJob(jobId);
-      if (!job) {
-        return res.status(404).json({ error: 'Job not found' });
-      }
-      res.json(job);
-    } catch (err) {
-      console.error('Error fetching job:', err);
-      res.status(500).json({ error: 'Failed to fetch job' });
-    }
-  });
+  // AppMaker telemetry/job routes — extracted to src/server/routes/appmaker.ts (Phase 1).
+  registerAppmakerRoutes(app);
 
   // Create Order Endpoint
   app.post('/api/create-order', async (req, res) => {

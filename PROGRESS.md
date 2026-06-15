@@ -254,5 +254,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   diff / bounded history). git-like checkpoints over the VFS; serializable for persistence;
   replaces the lossy in-memory undo-stack. 4 unit tests (`tests/versionStore.test.ts`).
   Additive — module strict tsc + frontend tsc 0 + 17 tests green.
+- **Milestone 2.3 — DONE (2026-06-15)**: Built lossless workspace persistence codec →
+  `src/server/project/WorkspaceStore.ts` (`encodeWorkspace`/`decodeWorkspace` — splits any
+  large workspace into ~900KB Firestore-safe chunks + manifest, reassembles losslessly).
+  Kills the old 60KB-file-drop + 800KB-cap data loss. 5 unit tests (`tests/workspaceStore.test.ts`).
+  Additive. module strict tsc + frontend tsc 0 + 22 tests green. NEXT: wire into routes/sync.ts
+  (chunked GET/POST, drop slimSession's lossy 60KB/800KB logic) — careful, touches live route.
   NEXT: wire VFS into AppEngine/sync (replace Record<string,string>), then persistence
   redesign (per-file storage, drop the 60KB/800KB caps) + real versioning (snapshot/diff/rollback).

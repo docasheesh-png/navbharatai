@@ -154,6 +154,13 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
 - **Milestone 1.20 — DONE (2026-06-15)**: Extracted pure `getSecurityContext`
   prompt builder → `src/server/lib/prompts.ts`. server.ts 3979 → 3950. Verified green.
   (Remaining = coupled AI core; see AI-CORE EXTRACTION SUB-PLAN at top of this file.)
+- **Milestone 1.21 — DONE (2026-06-15, AI-core step a)**: Extracted AI provider
+  clients + key resolution (`LEGACY_EMBEDDED_API_KEY`, lazy client singletons,
+  `isPlaceholder`, `resolveApiKey`, `hasKey`, `getGemini/getGroq/getDeepSeek/getOpenAI/
+  getOpenRouter/getClaude`) → `src/server/lib/aiClients.ts`. Fixed a name collision
+  (renamed the env-loader helper to `isEnvPlaceholder`). server.ts 3950 → 3803.
+  Verified: esbuild bundle + `node --check` (no dup-decl) + actual load + tsc 0 + tests.
+  NEXT AI-core step (b): callGemini/callGroq/callOpenAI/callOpenRouter → lib/aiCalls.ts.
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

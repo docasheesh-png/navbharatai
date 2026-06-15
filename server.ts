@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import crypto from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import { LEGACY_EMBEDDED_API_KEY, isPlaceholder, resolveApiKey, hasKey, getGemini, getGroq, getDeepSeek, getOpenAI, getOpenRouter, getClaude } from './src/server/lib/aiClients';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
 import { registerTeamRoutes } from './src/server/routes/team';
@@ -26,12 +27,6 @@ import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
 import { registerSyncRoutes } from './src/server/routes/sync';
 
-// ─── Legacy embedded API key (sentinel + historical fallback) ────────────────
-// SECURITY: This Google API key was previously hardcoded inline in 3 places.
-// It is centralized here so it can be rotated/removed in one spot.
-// ACTION REQUIRED: rotate this key in Google Cloud and set GEMINI_API_KEY via env.
-// Override at runtime with LEGACY_EMBEDDED_API_KEY to avoid shipping it in source.
-const LEGACY_EMBEDDED_API_KEY = process.env.LEGACY_EMBEDDED_API_KEY || 'AIzaSyDOIA2mdmdDyVh4hYhEsCMD3zOnqLQ0Nxg';
 
 // Traceability Infrastructure
 export interface TraceContext {
@@ -84,7 +79,7 @@ auditEnv();
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
 // Fallback: load .env file first, then .env.example (skip placeholder values)
-const isPlaceholder = (v: string) =>
+const isEnvPlaceholder = (v: string) =>
   v.startsWith('your_') || v.endsWith('_here') || v === '' || v === 'undefined';
 
 const loadEnvFile = (filePath: string) => {
@@ -97,7 +92,7 @@ const loadEnvFile = (filePath: string) => {
           const eqIdx = trimmed.indexOf('=');
           const key = trimmed.slice(0, eqIdx).trim();
           const val = trimmed.slice(eqIdx + 1).trim();
-          if (key && val && !process.env[key] && !isPlaceholder(val)) {
+          if (key && val && !process.env[key] && !isEnvPlaceholder(val)) {
             process.env[key] = val;
           }
         }
@@ -286,149 +281,7 @@ setInterval(() => {
   // Create-order route — extracted to src/server/routes/createOrder.ts (Phase 1).
   registerCreateOrderRoute(app);
 
-  // AI Clients Initialization (Lazy)
-  let geminiClient: GoogleGenAI | null = null;
-  let groqClient: OpenAI | null = null;
-  let deepseekClient: OpenAI | null = null;
-  let openaiClient: OpenAI | null = null;
-  let openrouterClient: OpenAI | null = null;
-  
-  const isPlaceholder = (key: string | undefined, strict: boolean = true, provider?: string) => {
-    if (!key) return true;
-    const k = key.trim();
-    if (
-      k === LEGACY_EMBEDDED_API_KEY ||
-      k.startsWith('MY_') || 
-      k === 'undefined' || 
-      k === 'null' || 
-      k === 'YOUR_API_KEY'
-    ) return true;
-    
-    if (strict) {
-      if (provider && provider.toLowerCase() === 'gemini') {
-        return k.length < 20 || !k.startsWith('AIza');
-      }
-      return k.length < 10;
-    }
-    return false;
-  };
-  
-  const resolveApiKey = (provider: string, userKey?: string) => {
-    const p = provider.toUpperCase();
-    
-    // 1. Check user key if provided and not a placeholder
-    if (userKey && !isPlaceholder(userKey, true, provider)) {
-      const masked = userKey.substring(0, 6) + '...' + userKey.substring(userKey.length - 4);
-      console.log(`[AUTH] Using USER ${p} key: ${masked}`);
-      return { key: userKey, source: 'USER' };
-    }
-    
-    // 2. Check provider-specific system environment keys
-    let envKey: string | undefined = undefined;
-    const providerLower = provider.toLowerCase();
-    
-    if (providerLower === 'gemini') {
-      envKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.VITE_GEMINI_API_KEY;
-    } else if (providerLower === 'claude' || providerLower === 'anthropic') {
-      envKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || process.env.VITE_ANTHROPIC_API_KEY || process.env.VITE_CLAUDE_API_KEY;
-    } else {
-      envKey = process.env[`${p}_API_KEY`] || process.env[`${p}_KEY`];
-    }
-    
-    console.log(`[DEBUG_AUTH] Provider: ${provider}. System key found: ${!!envKey}`);
-    
-    if (envKey && (!isPlaceholder(envKey, true, provider) || envKey === LEGACY_EMBEDDED_API_KEY)) { 
-      envKey = envKey.trim();
-      const masked = envKey.substring(0, 6) + '...' + envKey.substring(envKey.length - 4);
-      console.log(`[AUTH] Using SYSTEM ${p} key (Fallback): ${masked}`);
-      return { key: envKey, source: 'SYSTEM' };
-    }
-    
-    console.log(`[AUTH] No valid key found for ${p}. UserKey provided: ${userKey ? 'present' : 'absent'}.`);
-    return { key: null, source: 'NONE' };
-  };
-
-  const hasKey = (provider: string, userKey?: string) => {
-    return resolveApiKey(provider, userKey).source !== 'NONE';
-  };
-
-  const getGemini = (userKey?: string) => {
-    // If user provides a key, we *must* create a new client for it
-    if (userKey && !isPlaceholder(userKey, true, 'gemini')) {
-        return new GoogleGenAI({ apiKey: userKey });
-    }
-    
-    // Fallback to system key
-    if (!geminiClient) {
-        const { key, source } = resolveApiKey('gemini', undefined);
-        console.log(`[AUTH] Attempting to resolve system Gemini key. Source: ${source}, Key found: ${!!key}`);
-        if (key) {
-            geminiClient = new GoogleGenAI({ apiKey: key });
-        } else {
-            console.error(`[AUTH] CRITICAL: System Gemini key resolution failed!`);
-        }
-    }
-    return geminiClient;
-  };
-
-  const getGroq = (userKey?: string) => {
-    const { key } = resolveApiKey('groq', userKey);
-    if (!key) return null;
-    return new OpenAI({
-      apiKey: key,
-      baseURL: 'https://api.groq.com/openai/v1',
-    });
-  };
-
-  const getDeepSeek = (userKey?: string) => {
-    const { key } = resolveApiKey('deepseek', userKey);
-    if (!key) return null;
-    return new OpenAI({
-      apiKey: key,
-      baseURL: 'https://api.deepseek.com',
-    });
-  };
-
-  const getOpenAI = (userKey?: string) => {
-    const { key } = resolveApiKey('openai', userKey);
-    if (!key) return null;
-    return new OpenAI({ apiKey: key });
-  };
-
-  const getOpenRouter = (userKey?: string) => {
-    const { key } = resolveApiKey('openrouter', userKey);
-    if (!key) return null;
-    return new OpenAI({
-      apiKey: key,
-      baseURL: 'https://openrouter.ai/api/v1',
-      defaultHeaders: {
-        'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000',
-        'X-Title': 'navBharatAI',
-      },
-    });
-  };
-
-  const getClaude = (userKey?: string) => {
-    const { key, source } = resolveApiKey('claude', userKey);
-    if (!key) {
-        console.log(`[DEBUG] getClaude: No key found.`);
-        return null;
-    }
-    console.log(`[DEBUG] getClaude: Key found, source: ${source}, length: ${key.length}`);
-    let baseUrl = process.env.ANTHROPIC_BASE_URL;
-    if (baseUrl && source === 'SYSTEM') {
-      if (baseUrl.endsWith('/v1')) {
-        baseUrl = baseUrl.slice(0, -3);
-      } else if (baseUrl.endsWith('/v1/')) {
-        baseUrl = baseUrl.slice(0, -4);
-      }
-    }
-    console.log(`[DEBUG] getClaude: BaseURL: ${baseUrl || 'default'}`);
-    return new Anthropic({ 
-      apiKey: key,
-      ...(baseUrl ? { baseURL: baseUrl } : {})
-    });
-  };
+  // AI clients + key resolution — extracted to src/server/lib/aiClients.ts (Phase 1, AI-core step a).
 
    const NAVBHARAT_OS_V2 = `# SYSTEM PROMPT — navBharatAI OS v2.0
 Advanced Hybrid AI + Multi-Model Intelligence Engine

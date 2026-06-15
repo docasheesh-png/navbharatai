@@ -13,9 +13,11 @@
 >    the established pattern: create `registerXxxRoutes(app, deps)`, replace the
 >    inline block in `server.ts` with the call + import, share state via existing
 >    libs (`getDb`, `audit`, `serverStats`, `getSecretValue`, `verifyPaymentInternal`).
-> 4. VERIFY before every push: `npx esbuild server.ts --bundle --platform=node
->    --format=cjs --packages=external --outfile=/tmp/s.cjs` (exit 0) +
->    `npx tsc --noEmit` (0 errors) + `npx vitest run` (pass). Only then commit+push.
+> 4. VERIFY before every push (read OUTPUT explicitly — `tail` can hide failures):
+>    `npx tsc --noEmit` (0) + `npx tsc -p tsconfig.server.json` (0) + `npx vitest run`
+>    (grep the 'Tests' line — ZERO failed) + esbuild bundle (exit 0). For any
+>    server.ts/route change ALSO run the bundled server with `node` and confirm it
+>    reaches "🚀 Server running" (a ReferenceError exits instantly — never trust head -1).
 > 5. Update this file, commit, push. Repeat. Don't stop until all 6 phases + the
 >    final re-audit loop are done.
 >

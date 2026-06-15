@@ -47,6 +47,16 @@ describe('ServerContainerRuntime', () => {
     expect(await rt.status(sessionId)).toBe('error');
   });
 
+  it('exposes a reverse-proxy target while running, null after stop', async () => {
+    const { rt } = makeRuntime();
+    const vfs = VirtualFileSystem.fromRecord({ 'package.json': '{}' });
+    const { sessionId } = await rt.start('proj', vfs);
+    const t = rt.getTarget(sessionId);
+    expect(t).toEqual({ host: 'localhost', port: 3005, origin: 'http://localhost:3005' });
+    await rt.stop(sessionId);
+    expect(rt.getTarget(sessionId)).toBeNull();
+  });
+
   it('stop terminates, releases port, and clears the session', async () => {
     const { rt, calls } = makeRuntime();
     const vfs = VirtualFileSystem.fromRecord({ 'package.json': '{}' });

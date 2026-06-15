@@ -358,3 +358,14 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   checks alone can miss for legacy `any` code). The project now has THREE guardrails in CI:
   frontend tsc, strict server typecheck (`tsconfig.server.json`), and boot smoke-check —
   plus the vitest suite (53 tests). Verified all green locally.
+- **Milestone 3.9 — DONE (2026-06-15)**: Added `ServerContainerRuntime.getTarget(sessionId)`
+  → internal `{host,port,origin}` a reverse proxy forwards to (null after stop). Sets up the
+  next step: a `/preview-app/:sessionId/*` reverse-proxy route so server-container previews
+  are reachable without exposing raw internal ports. 1 test (54 total). frontend tsc 0 +
+  guardrail 0 + 54 tests green.
+  **▶ NEXT (Phase 3 finish, fresh context — server-touching, do with full boot-check):**
+  1. reverse-proxy route `/preview-app/:id/*` → ServerContainerRuntime target (+ WS/HMR upgrade).
+  2. Cloud Run/Docker: ensure the prod image can spawn child dev servers + proxy (single instance).
+  3. Point the Pro build at /api/preview (retire iframe+CDN hack).
+  4. WebContainer adapter once StackBlitz license decided.
+  Then Phase 4 (diff-edit + agentic generation) → Phase 5 → final re-audit (re-confirm 3 guardrails).

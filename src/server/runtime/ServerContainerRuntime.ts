@@ -110,4 +110,16 @@ export class ServerContainerRuntime implements PreviewRuntime {
   async status(sessionId: string): Promise<RunStatus> {
     return this.sessions.get(sessionId)?.status ?? 'stopped';
   }
+
+  /**
+   * Internal origin (host:port) a reverse proxy should forward to for this
+   * session. Returns null if the session is unknown/stopped. Used by the
+   * preview proxy route so clients reach the dev server without exposing
+   * the raw internal port.
+   */
+  getTarget(sessionId: string): { host: string; port: number; origin: string } | null {
+    const s = this.sessions.get(sessionId);
+    if (!s) return null;
+    return { host: this.host, port: s.port, origin: `http://${this.host}:${s.port}` };
+  }
 }

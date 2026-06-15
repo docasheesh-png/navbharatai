@@ -315,3 +315,10 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   (10 runtime tests total). guardrail 0 + frontend tsc 0 + tests green. NEXT: add a `/preview`
   HTTP route (start + serve /preview/:id) wired into the bootstrap; then WebContainer + server
   adapters; then point Pro build at PreviewService (retire iframe+CDN hack).
+- **Milestone 3.4 — DONE (2026-06-15)**: Wired live preview HTTP routes →
+  `src/server/routes/preview.ts` (`POST /api/preview` builds a VFS from posted files and
+  starts a preview via PreviewService; `GET /preview/:sessionId` serves the built static
+  HTML). Registered in the bootstrap. Verified per hardened protocol: frontend tsc 0 +
+  server guardrail 0 + 45 tests + **bundled server boots to "🚀 Server running"**.
+  NEXT: WebContainer adapter (StackBlitz SDK) + server-container adapter; then point the
+  Pro build at /api/preview (retire the iframe+CDN hack). (External infra decisions pending.)

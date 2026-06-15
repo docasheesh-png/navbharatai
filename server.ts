@@ -30,6 +30,7 @@ import { registerChatRoutes } from './src/server/routes/chat';
 import { registerProRoutes } from './src/server/routes/pro';
 import { registerSdaRoutes } from './src/server/routes/sda';
 import { registerZipRoutes } from './src/server/routes/zip';
+import { registerPreviewRoutes } from './src/server/routes/preview';
 import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
 import { registerSyncRoutes } from './src/server/routes/sync';
@@ -335,6 +336,8 @@ setInterval(() => {
   registerSecretsRoutes(app);
   registerAnthropicRoutes(app);
   registerZipRoutes(app);
+  // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
+  registerPreviewRoutes(app);
 
   // PWA "App Store" routes — extracted to src/server/routes/pwa.ts (Phase 1).
   registerPwaRoutes(app, pwaStore);

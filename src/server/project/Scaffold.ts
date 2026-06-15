@@ -1,0 +1,114 @@
+/**
+ * Phase 4 — Framework scaffolds.
+ *
+ * For a FRESH build, seeding a real, runnable project skeleton before the AI
+ * generates feature code dramatically improves reliability for complex apps:
+ * the model edits a working foundation (correct package.json, entry point,
+ * build config, wiring) instead of inventing all of it from scratch and often
+ * leaving dangling references.
+ *
+ * `detectFramework(prompt)` picks a skeleton from the request; `scaffold(vfs,
+ * framework)` writes the skeleton files INTO an empty VFS only (it never
+ * overwrites an existing project). The chosen framework is surfaced so the
+ * generator prompt can tell the model what foundation it is building on.
+ */
+import type { VirtualFileSystem } from './ProjectModel';
+
+export type Framework = 'vite-react' | 'static';
+
+const REACT_HINTS = [
+  'react', 'vite', 'jsx', 'tsx', 'component', 'spa', 'single page',
+  'dashboard', 'router', 'usestate', 'hook',
+];
+
+/** Heuristically choose a starting framework from the user's prompt. */
+export function detectFramework(prompt: string): Framework {
+  const p = (prompt || '').toLowerCase();
+  // Explicit "plain html"/"static" requests stay static.
+  if (/\b(plain|static|simple|landing page|single html|one html)\b/.test(p)) {
+    // ...unless they also explicitly asked for react.
+    if (!/\breact\b/.test(p)) return 'static';
+  }
+  return REACT_HINTS.some((h) => p.includes(h)) ? 'vite-react' : 'static';
+}
+
+const VITE_REACT_FILES: Record<string, string> = {
+  'package.json': JSON.stringify(
+    {
+      name: 'app',
+      private: true,
+      version: '0.0.0',
+      type: 'module',
+      scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+      dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' },
+      devDependencies: {
+        '@vitejs/plugin-react': '^4.3.1',
+        vite: '^5.4.0',
+      },
+    },
+    null,
+    2,
+  ) + '\n',
+  'vite.config.js':
+    `import { defineConfig } from 'vite';\n` +
+    `import react from '@vitejs/plugin-react';\n\n` +
+    `export default defineConfig({ plugins: [react()] });\n`,
+  'index.html':
+    `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
+    `    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n` +
+    `    <title>App</title>\n  </head>\n  <body>\n    <div id="root"></div>\n` +
+    `    <script type="module" src="/src/main.jsx"></script>\n  </body>\n</html>\n`,
+  'src/main.jsx':
+    `import React from 'react';\n` +
+    `import { createRoot } from 'react-dom/client';\n` +
+    `import App from './App.jsx';\n` +
+    `import './index.css';\n\n` +
+    `createRoot(document.getElementById('root')).render(\n` +
+    `  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n);\n`,
+  'src/App.jsx':
+    `export default function App() {\n` +
+    `  return <h1>Hello from App</h1>;\n` +
+    `}\n`,
+  'src/index.css':
+    `:root { font-family: system-ui, sans-serif; }\n` +
+    `body { margin: 0; }\n`,
+};
+
+const STATIC_FILES: Record<string, string> = {
+  'index.html':
+    `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
+    `    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n` +
+    `    <title>App</title>\n    <link rel="stylesheet" href="styles.css" />\n` +
+    `  </head>\n  <body>\n    <main id="app"></main>\n` +
+    `    <script src="app.js"></script>\n  </body>\n</html>\n`,
+  'styles.css':
+    `:root { font-family: system-ui, sans-serif; }\n` +
+    `body { margin: 0; }\n`,
+  'app.js':
+    `document.getElementById('app').innerHTML = '<h1>Hello</h1>';\n`,
+};
+
+const SKELETONS: Record<Framework, Record<string, string>> = {
+  'vite-react': VITE_REACT_FILES,
+  static: STATIC_FILES,
+};
+
+/**
+ * Seed a framework skeleton into an EMPTY vfs. Returns the framework that was
+ * applied, or null if the project already had files (never overwrites).
+ */
+export function scaffold(vfs: VirtualFileSystem, framework: Framework): Framework | null {
+  if (vfs.count > 0) return null;
+  const files = SKELETONS[framework];
+  for (const [path, content] of Object.entries(files)) {
+    vfs.write(path, content);
+  }
+  return framework;
+}
+
+/** One-line description of the seeded foundation, for the generator prompt. */
+export function scaffoldSummary(framework: Framework): string {
+  return framework === 'vite-react'
+    ? 'a Vite + React (JSX) project: index.html → src/main.jsx → src/App.jsx, styles in src/index.css, deps in package.json'
+    : 'a plain static project: index.html + styles.css + app.js';
+}

@@ -8,12 +8,12 @@ export class WorkspaceLauncher {
         return 'npm';
     }
 
-    installDependencies(workspaceId: string, packageManager: string): string[] {
-        // Return command and args
+    installDependencies(workspaceId: string, packageManager: string): [string, string[]] {
+        // Return [command, args]
         return [packageManager, ['install']];
     }
-    
-    getStartCommand(workspaceId: string, packageManager: string): string[] {
+
+    getStartCommand(workspaceId: string, packageManager: string): [string, string[]] {
         const pkg = JSON.parse(fs.readFileSync(path.join(workspaceId, 'package.json'), 'utf8'));
         const scripts = pkg.scripts || {};
         const script = scripts['dev'] ? 'dev' : scripts['start'] ? 'start' : scripts['preview'] ? 'preview' : 'start';

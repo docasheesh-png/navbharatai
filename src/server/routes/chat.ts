@@ -1,0 +1,430 @@
+import OpenAI from 'openai';
+import type { Express, Request, Response } from 'express';
+import type { RateLimitRequestHandler } from 'express-rate-limit';
+import { collection, addDoc } from 'firebase/firestore';
+import { getDb } from '../lib/db';
+import { aiRouter } from '../lib/aiRouter';
+
+/**
+ * Chat routes (general + Vishwakarma tiers) extracted from the server.ts monolith
+ * (Phase 1, AI-core step c). Hosts the prompt builders + chatHandler + /api/chat/*
+ * tier endpoints. Behavior unchanged; the legacy /api/chat catch route stays
+ * deprecated/removed. Routing to providers is delegated to the shared aiRouter.
+ */
+export function registerChatRoutes(app: Express, chatLimiter: RateLimitRequestHandler): void {
+  const LANGUAGE_RULE = `
+LANGUAGE RULE (MANDATORY):
+- Detect the language/tone/style the user is writing in
+- Reply in EXACTLY the same language, tone, and emotion — Hindi, English, Hinglish, Tamil, Telugu, Bengali, Marathi, Punjabi, or any other language
+- If user writes casually → you write casually; if formally → formally; if with emojis → with emojis
+- EXCEPTION: All code (variable names, comments, function names, strings) must ALWAYS be in professional English regardless of conversation language`;
+
+  const SYSTEM_PROMPT_EDIT = `You are NavBharatAI — world's best AI App Editor.
+${LANGUAGE_RULE}
+
+CURRENT TASK: Fix/edit/extend the EXISTING app shown in [CANVAS] above.
+
+═══ IRON RULES ═══
+1. Read the existing code COMPLETELY — understand every function, ID, and feature
+2. Make ONLY the changes the user asked for — nothing more, nothing less
+3. PRESERVE every existing feature, style, animation, and working button
+4. Return the COMPLETE updated HTML — full file, nothing truncated
+
+BUTTON/NAVIGATION FIX (if user reports broken buttons):
+- Find every <button>, <a>, and clickable element
+- Ensure each has a working addEventListener or onclick
+- Multi-page navigation: use show/hide pattern — document.querySelectorAll('[id^="page-"]').forEach(p => p.style.display='none'); then show target page
+
+OUTPUT FORMAT (MANDATORY):
+1-2 lines what changed.
+\`\`\`html
+[complete updated HTML — every existing line preserved + your changes]
+\`\`\``;
+
+  // Dynamic build prompt — injects template hints based on detected app type
+  function buildDynamicPrompt(message: string): string {
+    const m = message.toLowerCase();
+    const isGame      = /\b(game|play|cricket|chess|snake|tetris|puzzle|quiz|arcade|ludo|card game|flappy|pacman|shooter|platformer)\b/.test(m);
+    const isCanvasGame = /\b(snake|tetris|pacman|flappy|shooter|arcade|cricket|football|space|asteroid|runner)\b/.test(m);
+    const isDashboard = /\b(dashboard|analytics|chart|graph|report|admin|stats|metric|monitor)\b/.test(m);
+    const isSocial    = /\b(social|feed|post|like|comment|share|follow|profile|tweet|community)\b/.test(m);
+
+    const cdnTags = [
+      '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">',
+      '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">',
+      ...(isDashboard ? ['<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>'] : []),
+    ].join('\n  ');
+
+    let templateHint = '';
+    if (isCanvasGame) {
+      templateHint = `GAME (Canvas) RULES:
+• <canvas id="game-canvas"> as main surface + HUD strip + overlay divs for start/pause/gameover
+• requestAnimationFrame game loop: function gameLoop(ts) { update(ts); draw(ctx); requestAnimationFrame(gameLoop); }
+• Game state machine: const STATE = {IDLE,PLAYING,PAUSED,GAMEOVER}; let state = STATE.IDLE;
+• Keyboard: document.addEventListener('keydown', handleKey) — arrow keys / WASD / space
+• All game objects: { x, y, w, h, vx, vy } — AABB collision detection`;
+    } else if (isGame) {
+      templateHint = `GAME (Logic/Board) RULES:
+• Board as CSS grid, every cell has data-row + data-col attributes
+• Game state object: let gs = { board:[], currentPlayer:1, scores:{}, moveCount:0 }
+• Win check after every move, AI opponent for single-player
+• Event delegation: board.addEventListener('click', e => e.target.closest('[data-row]'))
+• Animate moves: .animate-move class with CSS @keyframes`;
+    } else if (isDashboard) {
+      templateHint = `DASHBOARD RULES:
+• Sidebar nav + main content area with multiple sections
+• Chart.js loaded via CDN — use: new Chart(ctx, { type:'bar', data:{...}, options:{ responsive:true, plugins:{legend:{labels:{color:'#fff'}}}, scales:{x:{ticks:{color:'#aaa'}},y:{ticks:{color:'#aaa'}}} } })
+• Sample data tables, stat cards, filter controls
+• Section switching via showSection(id) function`;
+    } else if (isSocial) {
+      templateHint = `SOCIAL APP RULES:
+• Feed with post cards (like/comment/share buttons)
+• renderPosts(posts) function — builds cards from data array
+• Event delegation on feed container for like/comment
+• localStorage to persist posts and user data`;
+    } else {
+      templateHint = `APP RULES:
+• Input validation before processing
+• Result display area, copy to clipboard button
+• localStorage for persistence
+• Step-by-step flow if multi-stage`;
+    }
+
+    return `You are NavBharatAI — India's most powerful AI App Builder.
+${LANGUAGE_RULE}
+
+Build a COMPLETE, FULLY FUNCTIONAL app — NOT just a home page.
+
+INCLUDE THESE CDN TAGS IN <head> (copy verbatim):
+  ${cdnTags}
+
+${templateHint}
+
+═══ UNIVERSAL RULES — ALL MANDATORY ═══
+
+1. EVERY BUTTON MUST WORK:
+   Every <button> has addEventListener('click',...) — NO exceptions
+   href="#" is BANNED. Every click navigates or triggers real action.
+
+2. MULTI-PAGE NAVIGATION:
+   function showPage(id) {
+     document.querySelectorAll('[id^="page-"]').forEach(p => p.style.display='none');
+     document.getElementById(id).style.display='block';
+   }
+   Every page is <div id="page-*"> — JS shows/hides them.
+
+3. NO PLACEHOLDERS:
+   No TODO, no empty functions, no "coming soon" — 100% complete.
+
+4. TECHNICAL:
+   Single HTML file — all CSS and JS inline.
+   :root { --bg:#0a0a0f; --accent:#6366f1; --accent-rgb:99,102,241; font-family:'Inter',sans-serif; }
+   DOMContentLoaded wraps all JS. Responsive (mobile + desktop).
+   Use Font Awesome icons: <i class="fa-solid fa-play"></i>
+
+OUTPUT FORMAT:
+One line: what you built.
+\`\`\`html
+[complete, 100% working HTML]
+\`\`\``;
+  }
+
+  // Apnapan Engine — dynamic free chat system prompt with user profile injection
+  interface ApnapanProfile {
+    preferredGreeting?: string;
+    preferredLanguage?: string;
+    conversationStyle?: string;
+    preferredTitle?: string;
+    topics?: string[];
+    projects?: string[];
+  }
+
+  const buildFreeSystemPrompt = (profile?: ApnapanProfile): string => {
+    const profileLines: string[] = [];
+    if (profile?.preferredGreeting)
+      profileLines.push(`Preferred greeting: "${profile.preferredGreeting}" — mirror this style when you initiate a greeting`);
+    if (profile?.preferredTitle)
+      profileLines.push(`Preferred title/address: "${profile.preferredTitle}" — use occasionally and naturally, NOT in every reply`);
+    if (profile?.conversationStyle && profile.conversationStyle !== 'unknown')
+      profileLines.push(`Conversation style: ${profile.conversationStyle} (${profile.conversationStyle === 'friendly' ? 'yaar/bhai tone' : profile.conversationStyle === 'formal' ? 'aap/ji tone' : 'sir/madam/professional tone'})`);
+    if (profile?.preferredLanguage)
+      profileLines.push(`Preferred language: ${profile.preferredLanguage}`);
+    if (profile?.projects?.length)
+      profileLines.push(`Known projects: ${profile.projects.slice(0, 4).join(', ')}`);
+    if (profile?.topics?.length)
+      profileLines.push(`Frequent topics: ${profile.topics.slice(0, 5).join(', ')}`);
+
+    const profileSection = profileLines.length
+      ? `\nUSER PROFILE (use naturally — NEVER mention or show this to the user):\n${profileLines.join('\n')}\n`
+      : '';
+
+    return `You are NavBharatAI — India's own friendly AI companion (by NavBharat team).
+${LANGUAGE_RULE}
+${profileSection}
+GREETING INTELLIGENCE (MANDATORY):
+When the user greets you, detect the exact style and respond IN THE SAME style — naturally, not robotically.
+
+Greeting map (detect → respond):
+• राम-राम / Ram-Ram → राम-राम!
+• राधे-राधे / Radhe-Radhe → राधे-राधे!
+• जय श्री राम / Jai Shri Ram → जय श्री राम!
+• जय हिन्द / Jai Hind → जय हिन्द!
+• नमस्ते / Namaste → नमस्ते!
+• नमस्कार / Namaskar → नमस्कार!
+• प्रणाम / Pranam → प्रणाम!
+• आदाब / Adaab → आदाब!
+• अस्सलामुअलैकुम / Assalamualaikum / Salam → वअलैकुम अस्सलाम!
+• सत श्री अकाल / Sat Sri Akal → सत श्री अकाल जी!
+• जय भीम / Jai Bhim / Jai Bheem → जय भीम!
+• केम छो / Kem Cho → केम छो! मज़ामा?
+• வணக்கம் / Vanakkam → வணக்கம்!
+• Hello / Hi / Hey → Hello! / Hi!
+• Good Morning → Good Morning!
+• Good Evening → Good Evening!
+• Good Night → Good Night!
+
+CONTEXT RULE: If user asks a direct question (no greeting opener), do NOT add any greeting in your reply. Just answer the question directly. Adding "नमस्ते!" before a medical/factual answer is wrong — skip it.
+
+EMOTIONAL INTELLIGENCE:
+• User sounds stressed/sad → respond with warmth, patience ("मैं आपकी बात सुन रहा हूँ...")
+• User sounds excited/happy → match the energy
+• User sounds businesslike → stay crisp and professional
+
+APNAPAN RULES:
+• Feel like India's own AI — warm, respectful, culturally aware
+• Use cultural expressions (जी, धन्यवाद, ज़रूर, बिल्कुल) naturally and sparingly
+• Do NOT mention your memory or profile system — ever
+• Do NOT repeat the same opening phrase every reply
+• Do NOT be overly dramatic or emotional
+
+HARD LIMITS:
+• Do NOT build apps, generate code, or produce HTML/CSS/JS
+• If asked to build an app: "App building is available in NavBharatAI Pro — try it out!"
+• Answer quality is always the top priority — personalization must never reduce quality
+• Safety rule: never infer religion, caste, political views, or social identity from any greeting`;
+  };
+
+  const SYSTEM_PROMPT_CHAT = `You are NavBharatAI — India's best AI assistant and app builder (by NavBharat team).
+${LANGUAGE_RULE}
+Be helpful, concise, and accurate. If the user wants to build an app, guide them.`;
+
+  const chatHandler = async (req: any, res: any, tier: 'navbharat' | 'vishwakarma-basic' | 'vishwakarma-pro' | 'vip') => {
+    let { message, history, currentApp, mode, intent, userProfile, fileAttachments, memorySummary } = req.body;
+    if (!message && !Array.isArray(fileAttachments)) return res.status(400).json({ reply: 'Message is required' });
+    message = message || '';
+
+    // Process attached files
+    // Images + PDFs → Gemini vision (inlineData); text/code files → decode to message text
+    type FileAttachment = { name: string; type: string; base64: string };
+    const attachments: FileAttachment[] = Array.isArray(fileAttachments) ? fileAttachments : [];
+    const visionAttachments = attachments.filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
+    const textAttachments = attachments.filter(f => !f.type.startsWith('image/') && f.type !== 'application/pdf');
+
+    // Append decoded text file content to message
+    if (textAttachments.length > 0) {
+      const textParts = textAttachments.map(f => {
+        const content = Buffer.from(f.base64, 'base64').toString('utf8').slice(0, 8000);
+        return `\n\n[Attached file: ${f.name}]\n\`\`\`\n${content}\n\`\`\``;
+      });
+      message = (message || 'Please review these files:') + textParts.join('');
+    }
+    // Ensure file-only messages have a prompt
+    if (!message && visionAttachments.length > 0) message = visionAttachments[0].type === 'application/pdf' ? 'Please analyze this PDF and extract all relevant information.' : 'Please describe and analyze this image.';
+
+    const isFree = tier === 'navbharat';
+    // Free tier: always conversational — ignore canvas and build intent completely
+    const hasCanvas = !isFree && !!(currentApp && typeof currentApp === 'string' && currentApp.length > 200);
+    const buildIntents = ['create', 'build', 'generate', 'edit', 'fix', 'add', 'modify', 'update', 'change'];
+    const isBuildIntent = !isFree && (mode === 'build' || (intent && buildIntents.includes(String(intent).toLowerCase())));
+
+    // Pick system prompt based on tier + context
+    let systemPrompt: string;
+    if (isFree) {
+      systemPrompt = buildFreeSystemPrompt(userProfile || undefined);
+    } else if (hasCanvas) {
+      systemPrompt = SYSTEM_PROMPT_EDIT;
+    } else if (isBuildIntent) {
+      systemPrompt = buildDynamicPrompt(message); // Phase 9: template-aware dynamic prompt
+    } else {
+      systemPrompt = SYSTEM_PROMPT_CHAT;
+    }
+
+    // Build contextual message with canvas app prepended (Pro/VIP only)
+    let contextualMessage = message;
+    if (memorySummary && typeof memorySummary === 'string' && memorySummary.trim().length > 20) {
+      contextualMessage = `[CONVERSATION MEMORY — summary of earlier discussion:\n${memorySummary.trim().slice(0, 2000)}]\n\nCurrent message: ${message}`;
+    }
+    if (hasCanvas) {
+      contextualMessage = `[CANVAS — current app on canvas (${currentApp.length} chars total)]:\n\`\`\`html\n${currentApp.slice(0, 20000)}${currentApp.length > 20000 ? '\n...[truncated — send smaller app for full edit]' : ''}\n\`\`\`\n\nUser request: ${memorySummary && typeof memorySummary === 'string' && memorySummary.trim().length > 20 ? `[MEMORY: ${memorySummary.trim().slice(0, 500)}]\n\n` : ''}${message}`;
+    }
+
+    console.log(`[CHAT] tier=${tier} isFree=${isFree} mode=${mode} intent=${intent} hasCanvas=${hasCanvas} files=${attachments.length}(vision=${visionAttachments.length}) sysprompt=${isFree ? 'FREE' : hasCanvas ? 'EDIT' : isBuildIntent ? 'BUILD' : 'CHAT'}`);
+
+    // Vision attachments (images + PDFs) — Gemini/Vertex multimodal call
+    if (visionAttachments.length > 0) {
+      const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
+      const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
+      if (geminiKey || projectId) {
+        try {
+          const { GoogleGenAI } = await import('@google/genai');
+          const ai = new GoogleGenAI({ apiKey: geminiKey || 'vertex' });
+          const parts: any[] = [{ text: contextualMessage }];
+          for (const f of visionAttachments) {
+            parts.push({ inlineData: { mimeType: f.type, data: f.base64 } });
+          }
+          const visionConfig: any = {};
+          if (systemPrompt) visionConfig.systemInstruction = systemPrompt;
+          // gemini-2.0-flash: fast vision, no thinking delay (2.5-flash can take 5-10 min on images)
+          const VISION_MODEL = 'gemini-2.0-flash';
+          const visionCfg: any = { ...visionConfig, thinkingConfig: { thinkingBudget: 0 } };
+          if (req.body.stream === true) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
+            res.flushHeaders();
+            const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 15000);
+            const visionAc = new AbortController();
+            const visionTimeout = setTimeout(() => visionAc.abort(), 28000); // 28s hard cap
+            req.on('close', () => visionAc.abort());
+            try {
+              const stream = await ai.models.generateContentStream({
+                model: VISION_MODEL,
+                contents: [{ parts }],
+                config: Object.keys(visionCfg).length ? visionCfg : undefined,
+              });
+              for await (const chunk of stream) {
+                if (visionAc.signal.aborted) break;
+                const text = chunk.text || '';
+                if (text && !res.writableEnded) res.write(`data: ${JSON.stringify({ c: text })}\n\n`);
+              }
+            } finally {
+              clearTimeout(visionTimeout);
+              clearInterval(heartbeat);
+            }
+            if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+          } else {
+            const visionAc2 = new AbortController();
+            const t2 = setTimeout(() => visionAc2.abort(), 28000);
+            try {
+              const result = await ai.models.generateContent({
+                model: VISION_MODEL,
+                contents: [{ parts }],
+                config: Object.keys(visionCfg).length ? visionCfg : undefined,
+              });
+              return res.json({ reply: result.text || '' });
+            } finally { clearTimeout(t2); }
+          }
+          return;
+        } catch (visionErr: any) {
+          console.error('[CHAT/VISION] Gemini vision failed, trying Grok vision:', visionErr.message);
+          // Grok fallback for images (Grok doesn't support PDFs)
+          const imageOnly = visionAttachments.filter(f => f.type.startsWith('image/'));
+          if (imageOnly.length > 0) {
+            const grokVisionKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
+            if (grokVisionKey) {
+              try {
+                const grokVision = new OpenAI({ apiKey: grokVisionKey, baseURL: 'https://api.x.ai/v1' });
+                const grokContent: any[] = [
+                  ...imageOnly.map(f => ({ type: 'image_url', image_url: { url: `data:${f.type};base64,${f.base64}` } })),
+                  { type: 'text', text: contextualMessage },
+                ];
+                const grokMsgsV: any[] = [
+                  ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+                  { role: 'user', content: grokContent },
+                ];
+                for (const gm of ['grok-2-vision-1212', 'grok-2-mini-vision-1212']) {
+                  try {
+                    const r = await grokVision.chat.completions.create({ model: gm, messages: grokMsgsV, max_tokens: 1500 });
+                    const gText = r.choices[0]?.message?.content?.trim();
+                    if (gText) {
+                      if (!res.headersSent && req.body.stream === true) {
+                        res.setHeader('Content-Type', 'text/event-stream');
+                        res.setHeader('Cache-Control', 'no-cache');
+                        res.setHeader('Connection', 'keep-alive');
+                        res.setHeader('X-Accel-Buffering', 'no');
+                        res.flushHeaders();
+                      }
+                      if (req.body.stream === true) {
+                        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: gText })}\n\n`);
+                        if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+                      } else {
+                        res.json({ reply: gText });
+                      }
+                      return;
+                    }
+                  } catch (ge: any) { console.warn(`[CHAT/VISION] Grok ${gm}: ${ge.message}`); }
+                }
+              } catch (grokVisionErr: any) { console.warn('[CHAT/VISION] Grok vision failed:', grokVisionErr.message); }
+            }
+          }
+          // All vision providers failed — fall through to text router
+        }
+      }
+    }
+
+    try {
+      if (req.body.stream === true) {
+        // SSE stream — proper format so proxies/load balancers don't drop idle connections
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders(); // send headers immediately, don't buffer
+
+        const controller = new AbortController();
+
+        // Keepalive ping every 20s — prevents proxy/LB from closing idle connection
+        const heartbeat = setInterval(() => {
+          if (!res.writableEnded) res.write(': ping\n\n');
+        }, 20000);
+
+        // Cancel upstream AI call when client disconnects (saves quota)
+        req.on('close', () => {
+          controller.abort();
+          clearInterval(heartbeat);
+        });
+
+        try {
+          await aiRouter.routeStream(
+            contextualMessage, history, tier, systemPrompt,
+            (chunk: string) => {
+              if (!res.writableEnded) {
+                // JSON-encode each chunk so newlines/special chars are safe in SSE
+                res.write(`data: ${JSON.stringify({ c: chunk })}\n\n`);
+              }
+            },
+            controller.signal,
+          );
+        } finally {
+          clearInterval(heartbeat);
+        }
+        if (!res.writableEnded) {
+          res.write('data: [DONE]\n\n');
+          res.end();
+        }
+      } else {
+        const aiResponse = await aiRouter.route(contextualMessage, history, tier, undefined, systemPrompt);
+        // Fire-and-forget usage logging
+        const userId2 = req.body?.userId || req.body?.uid || 'anonymous';
+        addDoc(collection(getDb() as any, 'ai_usage_logs'), {
+          userId: userId2, tier, latencyMs: 0, outputTokens: Math.round((aiResponse.length || 0) / 4),
+          modelName: 'auto', providerName: 'auto', estimated_provider_cost: 0,
+          createdAt: new Date().toISOString(),
+        }).catch(() => {});
+        res.json({ reply: aiResponse });
+      }
+    } catch(e: any) {
+      console.error(`Error for tier ${tier}:`, e.message);
+      if (!res.headersSent) {
+        res.status(500).json({ reply: 'Backend AI inference failed', error: e.message });
+      }
+    }
+  };
+
+  app.post('/api/chat/navbharat',       chatLimiter, (req, res) => chatHandler(req, res, 'navbharat'));
+  app.post('/api/chat/navbharatai',     chatLimiter, (req, res) => chatHandler(req, res, 'navbharat'));
+  app.post('/api/chat/vishwakarma-basic', chatLimiter, (req, res) => chatHandler(req, res, 'vishwakarma-basic'));
+  app.post('/api/chat/vishwakarma-pro', chatLimiter, (req, res) => chatHandler(req, res, 'vishwakarma-pro'));
+  app.post('/api/chat/vip',             chatLimiter, (req, res) => chatHandler(req, res, 'vip'));
+}

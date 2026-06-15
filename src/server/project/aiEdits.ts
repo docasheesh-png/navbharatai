@@ -1,0 +1,140 @@
+/**
+ * Phase 4 — AI ⇄ engine bridge.
+ *
+ * Turns an LLM's (often messy) text reply into validated `FileEdit[]` for the
+ * BuildPipeline, and builds the prompts that ask the model for that JSON. The
+ * model call is injected so the bridge is unit-testable without a live model.
+ *
+ * Robust parsing: strips ```json fences and surrounding prose, accepts either a
+ * bare array or an object with an `edits` array, and drops malformed ops rather
+ * than throwing (a partial-but-valid edit set is better than a hard failure).
+ */
+import type { FileEdit } from './EditEngine';
+import type { VirtualFileSystem } from './ProjectModel';
+import type { ProjectIssue } from './ProjectVerifier';
+
+/** Extract the first JSON value (array or object) from arbitrary model text. */
+function extractJson(raw: string): unknown {
+  if (!raw) return null;
+  let s = raw.trim();
+  // strip code fences
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) s = fence[1].trim();
+  // try direct parse, else slice from first [ or { to its matching last bracket
+  try { return JSON.parse(s); } catch { /* fall through */ }
+  const start = s.search(/[[{]/);
+  if (start < 0) return null;
+  const open = s[start];
+  const close = open === '[' ? ']' : '}';
+  const end = s.lastIndexOf(close);
+  if (end <= start) return null;
+  try { return JSON.parse(s.slice(start, end + 1)); } catch { return null; }
+}
+
+const VALID_OPS = new Set(['write', 'delete', 'rename', 'patch']);
+
+/** Validate + coerce a raw object into a FileEdit, or null if malformed. */
+function toFileEdit(o: any): FileEdit | null {
+  if (!o || typeof o !== 'object' || typeof o.op !== 'string' || !VALID_OPS.has(o.op)) return null;
+  if (typeof o.path !== 'string' || !o.path.trim()) return null;
+  switch (o.op) {
+    case 'write':
+      return typeof o.content === 'string' ? { op: 'write', path: o.path, content: o.content } : null;
+    case 'delete':
+      return { op: 'delete', path: o.path };
+    case 'rename':
+      return typeof o.to === 'string' && o.to.trim() ? { op: 'rename', path: o.path, to: o.to } : null;
+    case 'patch':
+      return typeof o.find === 'string' && typeof o.replace === 'string'
+        ? { op: 'patch', path: o.path, find: o.find, replace: o.replace, count: o.count } : null;
+    default:
+      return null;
+  }
+}
+
+/** Parse an LLM reply into a validated, deduped FileEdit[] (malformed ops dropped). */
+export function parseFileEdits(raw: string): FileEdit[] {
+  const json: any = extractJson(raw);
+  const arr: any[] = Array.isArray(json) ? json : Array.isArray(json?.edits) ? json.edits : [];
+  const edits: FileEdit[] = [];
+  for (const item of arr) {
+    const e = toFileEdit(item);
+    if (e) edits.push(e);
+  }
+  return edits;
+}
+
+/** A model call: (system, user) → assistant text. Injected (defaults to aiCalls). */
+export type ModelCall = (system: string, user: string) => Promise<string>;
+
+const EDIT_FORMAT = `Reply with ONLY a JSON array of edit operations, no prose, no markdown fences. Each op is one of:
+{"op":"write","path":"src/App.tsx","content":"<full file content>"}
+{"op":"patch","path":"src/App.tsx","find":"<exact snippet>","replace":"<new snippet>","count":1}
+{"op":"rename","path":"old","to":"new"}
+{"op":"delete","path":"file"}
+Use relative paths. Prefer "patch" for small, localized changes; "write" for new files or full rewrites. ALL code identifiers in English.`;
+
+/** Engineering standards the model must follow for real, complex apps. */
+const ENGINEERING_RULES = `Rules for production-quality output:
+- Plan the WHOLE app first: decide the file tree (entry point + every module/component/style/asset it needs), then emit complete, consistent files. Do not stop at a single HTML file for a non-trivial request.
+- Separate concerns: split UI into components, keep state/logic/data in dedicated modules, put styles in their own files. Avoid one giant file.
+- EVERY file you reference (imports, <script src>, <link href>, asset paths) MUST also exist — either already in the project or written in THIS reply. Never leave a dangling reference.
+- Provide a working entry point (e.g. index.html, or src/main.tsx + index.html for a bundled app). Wire everything together so it runs.
+- Write real, complete code. No TODO/placeholder/"...rest of code" stubs, no empty handlers. Implement the behavior the user asked for.
+- Keep JSON valid: escape newlines/quotes inside "content". Output the FULL content of every file you write.`;
+
+/** How much of each existing file's content to inline for edit context. */
+const MAX_FILE_CHARS = 4000;
+const MAX_CONTEXT_FILES = 40;
+const MAX_TOTAL_CONTEXT = 120_000;
+
+function fileList(vfs: VirtualFileSystem): string {
+  const paths = vfs.paths();
+  return paths.length ? paths.join('\n') : '(empty project)';
+}
+
+/** Inline current file contents (bounded) so edits/patches can target exact text. */
+function fileContext(vfs: VirtualFileSystem): string {
+  const paths = vfs.paths();
+  if (!paths.length) return '(empty project — this is a fresh build)';
+  let total = 0;
+  const blocks: string[] = [];
+  for (const path of paths.slice(0, MAX_CONTEXT_FILES)) {
+    const file = vfs.read(path);
+    if (!file) continue;
+    if (file.encoding === 'base64') {
+      blocks.push(`--- ${path} (binary, ${file.size} bytes, omitted) ---`);
+      continue;
+    }
+    let body = file.content;
+    if (body.length > MAX_FILE_CHARS) {
+      body = body.slice(0, MAX_FILE_CHARS) + `\n… (truncated, ${file.content.length - MAX_FILE_CHARS} more chars)`;
+    }
+    if (total + body.length > MAX_TOTAL_CONTEXT) {
+      blocks.push(`--- ${path} (omitted: context budget reached) ---`);
+      continue;
+    }
+    total += body.length;
+    blocks.push(`--- ${path} ---\n${body}`);
+  }
+  return blocks.join('\n\n');
+}
+
+/** Build generate+fix functions for the BuildPipeline backed by an injected model. */
+export function makeAiEditGenerator(callModel: ModelCall) {
+  const generate = async (prompt: string, vfs: VirtualFileSystem): Promise<FileEdit[]> => {
+    const fresh = vfs.paths().length === 0;
+    const sys = `You are a world-class full-stack engineer building a real, multi-file web application that must actually build and run. ${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
+    const user = fresh
+      ? `Build this application from scratch as a complete, runnable multi-file project.\n\nUser request:\n${prompt}\n\nReturn the full set of files needed to run it.`
+      : `Current project files (with contents — use exact text for "patch" finds):\n\n${fileContext(vfs)}\n\nUser request:\n${prompt}\n\nApply the minimal correct set of edits. Keep all existing references valid.`;
+    return parseFileEdits(await callModel(sys, user));
+  };
+  const fix = async (issues: ProjectIssue[], vfs: VirtualFileSystem): Promise<FileEdit[]> => {
+    if (issues.length === 0) return [];
+    const sys = `You are fixing real build/verification errors in a web app so it builds and runs cleanly. ${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
+    const user = `Current project files (with contents):\n\n${fileContext(vfs)}\n\nFix exactly these issues without breaking anything else:\n${issues.map(i => `- [${i.severity}] ${i.file}: ${i.message}`).join('\n')}`;
+    return parseFileEdits(await callModel(sys, user));
+  };
+  return { generate, fix };
+}

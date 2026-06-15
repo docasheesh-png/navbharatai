@@ -16,6 +16,11 @@
     "moduleDetection": "force",
     "allowJs": true,
     "jsx": "react-jsx",
+    // Strict mode is the migration target. The legacy frontend currently has
+    // 539 strict violations (400 implicit-any params, 117 null-guards, 22 real
+    // type bugs). These are burned down module-by-module during the Phase 1
+    // modularization, then this is flipped to true. Kept false now so the build
+    // stays green and the app does not break mid-migration.
     "strict": false,
     "noImplicitAny": false,
     "strictNullChecks": false,

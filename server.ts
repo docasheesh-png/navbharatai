@@ -19,6 +19,7 @@ import { registerAuthRoutes } from './src/server/routes/auth';
 import { registerAnthropicRoutes } from './src/server/routes/anthropic';
 import { registerGithubAuthRoutes } from './src/server/routes/githubAuth';
 import { registerFirebaseAuthRoutes } from './src/server/routes/firebaseAuth';
+import { registerCreateOrderRoute } from './src/server/routes/createOrder';
 import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
 import { registerSyncRoutes } from './src/server/routes/sync';
@@ -280,45 +281,8 @@ setInterval(() => {
   registerAppmakerRoutes(app);
 
   // Create Order Endpoint
-  app.post('/api/create-order', async (req, res) => {
-    try {
-      const { orderAmount, orderCurrency, customerId, customerPhone, customerEmail, customerName, userId } = req.body;
-      const finalAmount = Number(orderAmount);
-      const orderId = `order_${crypto.randomBytes(8).toString('hex')}`;
-      
-      // Ensure alphanumeric customer_id (Cashfree requirement)
-      const sanitizedCustomerId = (customerId || 'customer123').replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
-      
-      const request = {
-        order_id: orderId,
-        order_amount: parseFloat(finalAmount.toFixed(2)),
-        order_currency: orderCurrency || "INR",
-        customer_details: {
-          customer_id: sanitizedCustomerId,
-          customer_name: (customerName || "Customer").substring(0, 50),
-          customer_phone: (customerPhone || "9999999999").substring(0, 15),
-          customer_email: (customerEmail || "test@test.com")
-        },
-      };
-      
-      const response = await (Cashfree as any).PGCreateOrder("2023-08-01", request);
-      
-      await setDoc(doc(db, 'payment_transactions', orderId), {
-          userId,
-          amountPaid: parseFloat(finalAmount.toFixed(2)),
-          createdAt: new Date().toISOString(),
-          paymentStatus: 'PENDING'
-      });
-
-      res.json(response.data);
-    } catch (error: any) {
-      console.error('[CASHFREE] Order creation failed:', JSON.stringify(error.response?.data || error.message, null, 2));
-      res.status(500).json({ 
-        error: "Failed to create order", 
-        details: error.response?.data || error.message
-      });
-    }
-  });
+  // Create-order route — extracted to src/server/routes/createOrder.ts (Phase 1).
+  registerCreateOrderRoute(app);
 
   // AI Clients Initialization (Lazy)
   let geminiClient: GoogleGenAI | null = null;
@@ -2467,20 +2431,6 @@ You can preview and interact with this template immediately in the **Live Previe
   // Firebase OAuth / Google Consent Mock Flow
   // Firebase auth (mock) routes — extracted to src/server/routes/firebaseAuth.ts (Phase 1).
   registerFirebaseAuthRoutes(app);
-
-  app.get('/api/github/repos', async (req, res) => {
-    const token = req.headers.authorization?.split(' ')[1];
-    if (!token) return res.status(401).json({ error: 'Unauthorized' });
-
-    try {
-      const response = await axios.get('https://api.github.com/user/repos?sort=updated&per_page=100', {
-        headers: { Authorization: `token ${token}` }
-      });
-      res.json(response.data);
-    } catch (err: any) {
-      res.status(err.response?.status || 500).json({ error: err.message });
-    }
-  });
 
   // Secure Cloud Sync Endpoints (with Authenticated user validation check)
   // Cloud-sync provider routes — extracted to src/server/routes/cloudsync.ts (Phase 1).

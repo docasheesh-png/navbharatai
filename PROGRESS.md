@@ -123,6 +123,10 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
 - **Milestone 1.16 — DONE (2026-06-15)**: Extracted Firebase auth (mock) flow
   (`/api/auth/firebase`, `/consent`, `/callback`) → `src/server/routes/firebaseAuth.ts`.
   routes 21 → 18; server.ts 4639 → 4270. Verified green. (Mock flow — flagged Phase 5.)
+- **Milestone 1.17 — DONE (2026-06-15)**: Moved `/api/github/repos` into
+  `routes/githubAuth.ts`, and extracted legacy `/api/create-order` (Cashfree
+  PGCreateOrder) → `src/server/routes/createOrder.ts`. routes 18 → 16; server.ts
+  4270 → 4220. Verified green.
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

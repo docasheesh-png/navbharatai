@@ -213,4 +213,18 @@ export function registerGithubAuthRoutes(app: Express): void {
       res.status(err.response?.status || 500).json({ error: err.message });
     }
   });
+
+  app.get('/api/github/repos', async (req: Request, res: Response) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+    try {
+      const response = await axios.get('https://api.github.com/user/repos?sort=updated&per_page=100', {
+        headers: { Authorization: `token ${token}` }
+      });
+      res.json(response.data);
+    } catch (err: any) {
+      res.status(err.response?.status || 500).json({ error: err.message });
+    }
+  });
 }

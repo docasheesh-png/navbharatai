@@ -215,6 +215,12 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   (`registerProRoutes(app)`; uses aiRouter + AppEngine build/edit + SDKs). server.ts
   1408 → 650 (down 90% from original 6598!). Verified bundle+load+tsc+tests.
   NEXT = step e: `/api/sda-chat` → `routes/sda.ts`, then step f: server.ts → thin bootstrap.
+- **Milestone 1.31 — DONE (2026-06-15, AI-core step e)**: Extracted SDA chat
+  (`/api/sda-chat` + local helpers, ~294 lines) → `src/server/routes/sda.ts`. server.ts
+  650 → 359 (down 95% from original 6598!). Only the SPA catch-all + /api/health +
+  one dead/commented route remain. **server.ts is now effectively a bootstrap.**
+  NEXT = step f: tidy server.ts (it's already ~359 lines); optional `tsconfig.server.json`
+  + per-module strict; then PHASE 1 done → start PHASE 2 (real project model).
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

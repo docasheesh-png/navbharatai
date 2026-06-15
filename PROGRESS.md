@@ -405,3 +405,12 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   **Phase-4 engine core now in place** (EditEngine + ProjectVerifier + RepairLoop) — all pure,
   tested, infra-independent. NEXT (integration): wire these + aiCalls into the Pro build/edit
   flow so it emits FileEdits + self-repairs; multi-file planning; then Phase 3 finish + Phase 5.
+- **Milestone 4.4 — DONE (2026-06-15)**: Built the **BuildPipeline** orchestration brain →
+  `src/server/project/BuildPipeline.ts` (`runBuild({prompt, files, generate, fix})`): lift files
+  → VFS (+ baseline snapshot) → generate FileEdits → apply (EditEngine) → verify + auto-repair
+  (RepairLoop) → return files + verification. Edits existing files surgically (unrelated files
+  preserved). generate/fix injected (AI) → 4 unit tests with fakes (76 total). This is the real
+  replacement for the old fire-and-forget full-rewrite Pro build. frontend tsc 0 + guardrail 0 +
+  tests green. **Phase-4 engine COMPLETE as a pure, tested unit** (VFS + EditEngine + Verifier +
+  RepairLoop + BuildPipeline). NEXT = INTEGRATION: thin HTTP route wiring runBuild's generate/fix
+  to real aiCalls (prompt→FileEdit JSON), then point the Pro frontend at it + /api/preview.

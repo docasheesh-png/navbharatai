@@ -435,3 +435,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   + guardrail 0 + tests green. NEXT: wire a Pro UI action (e.g. a "Build v2" path or the existing
   build button) to `buildApp` + render preview via `startPreview`/`previewIframeSrc`; then retire
   the legacy iframe+CDN path once parity confirmed.
+- **Milestone 5.2 — DONE (2026-06-15)**: Built a complete, production-ready UI for the new
+  engine → `src/components/EngineBuilder.tsx` (prompt → `buildApp` → file-tree + code view +
+  live static-preview iframe + verify/repair status). Self-contained, dark-theme, uses only
+  `buildService` (no legacy dependency). Verified frontend tsc 0 + guardrail 0 + 87 tests +
+  **full `vite build` ✅** (compiles in the real production bundle). NOT yet mounted — App.tsx
+  (~5k lines, strict:false) uses internal state-based view switching, so mounting is the next
+  (careful) step: render `<EngineBuilder/>` in a new IDE tab/view. Mount in fresh context with
+  full vite-build verify, then it becomes user-visible; afterwards retire the legacy build path.

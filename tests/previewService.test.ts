@@ -53,6 +53,13 @@ describe('PreviewService', () => {
     expect(fake.started).toEqual(['p3']);
   });
 
+  it('serverTarget delegates to the server runtime (and null when absent)', async () => {
+    const fake = { ...fakeServerRuntime(), getTarget: (id: string) => id === 'srv-1' ? { host: 'localhost', port: 3007, origin: 'http://localhost:3007' } : null };
+    const svc = new PreviewService({ serverRuntime: fake as any });
+    expect(svc.serverTarget('srv-1')).toEqual({ host: 'localhost', port: 3007, origin: 'http://localhost:3007' });
+    expect(svc.serverTarget('nope')).toBeNull();
+  });
+
   it('returns an honest not-ready result for a Vite (webcontainer) app', async () => {
     const svc = new PreviewService();
     const vfs = VirtualFileSystem.fromRecord({

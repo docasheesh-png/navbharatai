@@ -43,6 +43,16 @@ export class PreviewService {
     return this.staticRuntime;
   }
 
+  /**
+   * Internal origin a reverse proxy should forward to for a server-container
+   * preview session (or null if unknown/not a server runtime). Used by the
+   * `/preview-app/:id/*` proxy route.
+   */
+  serverTarget(sessionId: string): { host: string; port: number; origin: string } | null {
+    const rt = this.serverRuntime as { getTarget?: (id: string) => { host: string; port: number; origin: string } | null };
+    return typeof rt.getTarget === 'function' ? rt.getTarget(sessionId) : null;
+  }
+
   async startPreview(projectId: string, vfs: VirtualFileSystem): Promise<PreviewResult> {
     const { target } = routeRuntime(vfs);
 

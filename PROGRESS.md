@@ -25,8 +25,14 @@
 > a. **AI clients + key resolution** → `src/server/lib/aiClients.ts`: move the lazy
 >    `geminiClient`/`groqClient`/`deepseekClient`/`openaiClient`/`openrouterClient`
 >    singletons, `isPlaceholder` (~295), `resolveApiKey` (~315). Export getters; import back.
-> b. **AI call functions** → `src/server/lib/aiCalls.ts`: `callGemini`/`callGroq`/`callOpenAI`
->    /`callOpenRouter` (~1253+); they use the clients lib + resolveApiKey.
+> b0. **PROMPTS LAYER FIRST** → add to `src/server/lib/prompts.ts`: move the huge
+>    `NAVBHARAT_OS_V2` system-prompt const (server.ts ~286–691, ~405 lines) + context
+>    builders using it: `getBharatContext` (~693–713) and siblings (more
+>    `return \`${NAVBHARAT_OS_V2}...\`` builders ~730/748/1060). Export; import back.
+> b. **AI call functions** → `src/server/lib/aiCalls.ts`: `callGemini`/`callGroq`/`callDeepSeek`
+>    /`callOpenAI`/`callClaude`/`callOpenRouter` (server.ts ~1077–1254) + `generateOfflineResponse`
+>    (~1256). Use aiClients getters + `resolveApiKey` + `getBharatContext` (from prompts).
+>    NOTE: `callClaude` also uses `OpenAI` SDK directly for the ANTHROPIC_BASE_URL proxy path.
 > c. **chatHandler** (~2674) → `routes/chat.ts` (`registerChatRoutes(app, chatLimiter)`)
 >    hosting `/api/chat/*` + `/api/chat`. Depends on aiCalls + db + serverStats.
 > d. **pro-chat + pro-build** → `routes/pro.ts` (Pro engine; biggest — pulls in AppEngine/

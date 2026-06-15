@@ -276,4 +276,14 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   whole bug class (undefined names / missing imports) permanently. Fixed the 6 surfaced
   type issues with behavior-preserving casts (server.ts ipKeyGenerator x3, pro.ts 'free'
   tier x2, sda.ts generateContent). Verified: frontend tsc 0 + server guardrail 0 + 22
-  tests + server boots cleanly ("🚀 Server running"). 
+  tests + server boots cleanly ("🚀 Server running").
+- **Milestone 2.6 — DONE (2026-06-15) — PHASE 2 CORE COMPLETE**: Added legacy→new-model
+  migration → `src/server/project/ProjectMigrator.ts` (`migrateLegacyFiles`/`migrateLegacyLastApp`/
+  `migrateLegacySession` → VFS + initial snapshot; lifts old 3-file workspaces & lastApp HTML
+  losslessly). 5 unit tests. Verified server guardrail 0 + frontend tsc 0 + 27 tests green.
+  **Phase 2 delivered:** typed VFS (no caps, binary-safe) + version history (snapshot/diff/rollback)
+  + lossless chunked persistence (live in sync route) + legacy migration + server typecheck guardrail.
+  Remaining Phase-2 integration (have AppEngine/Pro build actually USE the VFS instead of
+  Record<string,string>) overlaps with Phase 3/4 and is best done alongside the runtime work.
+  **▶ NEXT: PHASE 3 — real hybrid build/preview runtime** (WebContainer + server containers;
+  real PreviewRunner; replace fake BuildEngine/CodeGenerator; kill iframe+CDN hack).

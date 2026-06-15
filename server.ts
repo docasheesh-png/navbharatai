@@ -6183,9 +6183,35 @@ Response Format:
   // ══ SENIOR DOCTOR ASSISTANT (SDA) ══
   app.post('/api/sda-chat', async (req: any, res: any) => {
     try {
-      let { message, history = [], teachingMode = false, userId, fileData, fileType, fileName } = req.body;
+      let { message, history = [], teachingMode = false, userId, sessionId, fileData, fileType, fileName } = req.body;
       if (!message && !fileData) return res.status(400).json({ error: 'Message required' });
       message = message || 'Please analyze this medical document and extract all relevant clinical findings.';
+
+      // ── Session / clinical-store resolution ──────────────────────────────────
+      // sessionId is preferred; fall back to userId for backwards compat.
+      // If neither provided, create a new ephemeral session.
+      const sdaSessionId: string = sessionId || userId || crypto.randomBytes(8).toString('hex');
+      const now = Date.now();
+
+      // Load or initialise the clinical store entry for this session
+      let clinicalEntry = sdaClinicalStore.get(sdaSessionId);
+      if (!clinicalEntry) {
+        clinicalEntry = { patientData: {}, redFlags: [], stage: 'demographics', createdAt: now, updatedAt: now };
+        sdaClinicalStore.set(sdaSessionId, clinicalEntry);
+      }
+
+      // Retrieve server-side message history; fall back to client-provided history
+      // for the very first turn or when a legacy client omits sessionId.
+      let storedMsgs = sdaRecentMessages.get(sdaSessionId);
+      if (!storedMsgs) {
+        // Seed from client-provided history so existing sessions are not lost
+        storedMsgs = (history as Array<{ role: string; content: string }>).map(m => ({
+          role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
+          content: String(m.content || ''),
+          ts: now,
+        }));
+        sdaRecentMessages.set(sdaSessionId, storedMsgs);
+      }
 
       const hasFile = !!(fileData && fileType);
       const isImage = hasFile && fileType.startsWith('image/');
@@ -6301,6 +6327,12 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           [/\bgi bleed\b|\bmelena\b|\bhematemesis\b/i, 'GI Bleeding'],
           [/\bdka\b|\bdiabetic ketoacidosis\b/i, 'DKA'],
           [/bp.{0,10}[0-7]\d\/|hypotension/i, 'Hypotension'],
+          [/\bpulse.{0,10}1[2-9]\d|tachycardia/i, 'Tachycardia'],
+          [/\btemp.{0,10}1(?:0[4-9]|[1-9]\d)|fever.{0,20}high|hyperpyrexia/i, 'High Fever'],
+          [/\baltered.{0,20}conscious|unconscious|unresponsive/i, 'Altered Consciousness'],
+          [/\beclampsia\b|\bpre-?eclampsia\b.*severe/i, 'Eclampsia'],
+          [/\bhb.{0,10}[0-6]\.?\d?\b|severe.{0,15}anaemia|severe.{0,15}anemia/i, 'Severe Anaemia'],
+          [/\bneck stiffness\b|\bphotophobia\b|\bmeningism\b/i, 'Meningism'],
         ];
         for (const [pattern, label] of patterns) {
           if (pattern.test(text) || pattern.test(message)) flags.push(label);
@@ -6308,9 +6340,10 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         return flags;
       };
 
-      const historyForAI = history.slice(-20).map((m: any) => ({
-        role: m.role as 'user' | 'assistant',
-        content: String(m.content || ''),
+      // Use server-side stored history (last 20 turns) as the authoritative context
+      const historyForAI = storedMsgs.slice(-20).map(m => ({
+        role: m.role,
+        content: m.content,
       }));
 
       let reply = '';
@@ -6468,7 +6501,23 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       const patientUpdate = extractPatientUpdate(cleanReply, message);
       const redFlagDetected = redFlags.length > 0 || /\bRED FLAG\b|\bEMERGENCY\b|\bURGENT\b/i.test(cleanReply);
 
-      return res.json({ reply: cleanReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF });
+      // ── Persist exchange to server-side clinical store ───────────────────────
+      storedMsgs.push({ role: 'user', content: message, ts: now });
+      storedMsgs.push({ role: 'assistant', content: cleanReply, ts: Date.now() });
+      // Keep at most 100 messages to bound memory per session
+      if (storedMsgs.length > 100) storedMsgs.splice(0, storedMsgs.length - 100);
+
+      // Merge newly extracted patient data into the clinical entry
+      clinicalEntry.patientData = { ...clinicalEntry.patientData, ...patientUpdate };
+      // Accumulate unique red flags
+      for (const flag of redFlags) {
+        if (!clinicalEntry.redFlags.includes(flag)) clinicalEntry.redFlags.push(flag);
+      }
+      // Advance stage heuristic: once [CASE_COMPLETE] appears, mark as complete
+      if (suggestPDF) clinicalEntry.stage = 'complete';
+      clinicalEntry.updatedAt = Date.now();
+
+      return res.json({ reply: cleanReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF, sessionId: sdaSessionId });
 
     } catch (err: any) {
       console.error('[SDA] Error:', err);

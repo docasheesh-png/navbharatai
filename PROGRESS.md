@@ -59,6 +59,10 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   verify-payment, webhook, verify-redirect, redeem-coupon) → `src/server/routes/payment.ts`
   (`registerPaymentRoutes(app, paymentLimiter)`). routes 43 → 38; server.ts 5719 → 5393.
   Verified green (server bundle, payment strict tsc clean, frontend tsc 0, tests).
+- **Milestone 1.10 — DONE (2026-06-15)**: Extracted 5 self-contained GitHub
+  data-API routes (fetch, file, branches, push, push-enhanced) →
+  `src/server/routes/github.ts`. routes 38 → 33; server.ts 5393 → 5088.
+  Verified green. (GitHub OAuth url/callback + cloudsync still inline — next.)
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

@@ -167,6 +167,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   (renamed the env-loader helper to `isEnvPlaceholder`). server.ts 3950 → 3803.
   Verified: esbuild bundle + `node --check` (no dup-decl) + actual load + tsc 0 + tests.
   NEXT AI-core step (b): callGemini/callGroq/callOpenAI/callOpenRouter → lib/aiCalls.ts.
+- **Milestone 1.22 — DONE (2026-06-15, AI-core step b0 part 1)**: Moved the 405-line
+  `NAVBHARAT_OS_V2` master system-prompt const → `src/server/lib/prompts.ts` (exported);
+  server.ts imports it. server.ts 3803 → 3398. Verified bundle+node --check+tsc+tests.
+  REMAINING b0: move the context builders (`getBharatContext` + siblings, server.ts
+  ~285-660 region) into prompts.ts too, then step b (call* → lib/aiCalls.ts).
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

@@ -1,5 +1,44 @@
 # NavBharatAI Pro → Real App Maker — Execution Progress
 
+> ## ▶ RESUME HERE (read this first, every new session)
+> **Goal:** world-best AI app maker. **Rules:** real (no hacks) • app NEVER breaks •
+> zero bugs before push • commit+push every green milestone • keep this file updated.
+> **Branch:** `claude/kind-lovelace-chcxp6` · **PR:** #2 (push = auto-updates it).
+>
+> **How to resume (do this automatically, no need to ask the user):**
+> 1. `npm install` if `node_modules` missing.
+> 2. Find current state below (latest Milestone). We are mid **Phase 1** (breaking
+>    the `server.ts` monolith into `src/server/routes/*` + `src/server/lib/*`).
+> 3. Pick the next un-extracted route group from "NEXT STEPS" and extract it using
+>    the established pattern: create `registerXxxRoutes(app, deps)`, replace the
+>    inline block in `server.ts` with the call + import, share state via existing
+>    libs (`getDb`, `audit`, `serverStats`, `getSecretValue`, `verifyPaymentInternal`).
+> 4. VERIFY before every push: `npx esbuild server.ts --bundle --platform=node
+>    --format=cjs --packages=external --outfile=/tmp/s.cjs` (exit 0) +
+>    `npx tsc --noEmit` (0 errors) + `npx vitest run` (pass). Only then commit+push.
+> 5. Update this file, commit, push. Repeat. Don't stop until all 6 phases + the
+>    final re-audit loop are done.
+>
+> **▶ NEXT STEPS (in order):**
+> 1. Extract remaining server.ts route groups: **github OAuth** (`/api/auth/github*`),
+>    **firebase auth** (`/api/auth/firebase*`), **security/scan + audit/full**,
+>    **create-order** (Cashfree SDK), and the BIG one — **chat handler + `/api/chat` +
+>    `/api/pro-chat` + `/api/pro-build` + `/api/sda-chat`** (~2,500 lines, the Pro
+>    engine; extract carefully into `routes/chat.ts`, `routes/pro.ts`, `routes/sda.ts`
+>    with services in `src/server/services/`).
+> 2. Shrink `server.ts` to a thin bootstrap (<300 lines); add `tsconfig.server.json`;
+>    enable strict TS per-module (burn down the 539-error frontend debt too); flip
+>    global `strict:true`.
+> 3. Then **Phase 2** (real project model/VFS/versioning) → **Phase 3** (hybrid
+>    WebContainer + server-container runtime; kill iframe+CDN hack; real PreviewRunner;
+>    replace fake BuildEngine/CodeGenerator) → **Phase 4** (diff-edit + agentic
+>    generation + real auto-repair) → **Phase 5** (deploy, Pro-gating, integrated IDE,
+>    QA, observability). See plan file for full step list.
+> 4. **Final re-audit loop:** re-audit from 0; any new problems → new phases → fix → push.
+>
+> **⚠️ User action still pending:** rotate the legacy Google API key (now in
+> `LEGACY_EMBEDDED_API_KEY`, git history) and set it via env.
+
 Roadmap: 6 phases (0–5), then a full re-audit loop. Working branch: `claude/kind-lovelace-chcxp6`.
 Rules: real (no hacks) • app never breaks • zero bugs before push • resume from here next cycle.
 

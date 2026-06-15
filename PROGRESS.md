@@ -241,3 +241,13 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
 ## ⏳ PHASE 4 — Generation & editing engine (diff-edits, agentic loop, real auto-repair)
 ## ⏳ PHASE 5 — Product (deploy, Pro-gating, integrated IDE, QA, observability)
 ## ⏳ FINAL — Re-audit from 0; new problems → phases → fix → push, until clean.
+
+## 🔄 PHASE 2 — Real Project Model (IN PROGRESS)
+- **Milestone 2.1 — DONE (2026-06-15)**: Built the Phase-2 foundation — a typed,
+  binary-safe Virtual File System with NO size caps → `src/server/project/ProjectModel.ts`
+  (`VirtualFileSystem` + `ProjectFile`/`ProjectFileTreeNode` types + `normalizePath`,
+  `looksBinary`). Path-traversal safe; backward-compatible `fromRecord`/`toRecord`
+  bridge to the legacy `{path:content}` shape. 9 unit tests in `tests/projectModel.test.ts`.
+  Additive (no existing flow touched) — verified module strict tsc + frontend tsc 0 + 13 tests.
+  NEXT: wire VFS into AppEngine/sync (replace Record<string,string>), then persistence
+  redesign (per-file storage, drop the 60KB/800KB caps) + real versioning (snapshot/diff/rollback).

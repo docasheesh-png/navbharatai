@@ -8,7 +8,7 @@
 import crypto from 'crypto';
 import type { PreviewRuntime, RuntimeTarget } from './RuntimeRouter';
 import { VirtualFileSystem } from '../project/ProjectModel';
-import { buildStaticPreview } from './StaticPreview';
+import { renderPreview } from './renderPreview';
 
 interface StaticSession {
   html: string;
@@ -25,7 +25,7 @@ export class StaticRuntime implements PreviewRuntime {
   async start(projectId: string, vfs: VirtualFileSystem): Promise<{ url: string; sessionId: string }> {
     this.sweep();
     const sessionId = crypto.randomBytes(8).toString('hex');
-    const html = buildStaticPreview(vfs);
+    const html = renderPreview(vfs);
     this.sessions.set(sessionId, { html, projectId, createdAt: Date.now() });
     return { url: `/preview/${sessionId}`, sessionId };
   }

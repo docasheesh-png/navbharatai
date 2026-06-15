@@ -41,10 +41,10 @@ describe('RuntimeRouter.chooseRuntime', () => {
   it('static → static', () => {
     expect(chooseRuntime(analyzeProject(vfsFrom({ 'index.html': '<h1>x</h1>' })))).toBe('static');
   });
-  it('vite frontend → webcontainer', () => {
+  it('vite frontend → static (bundled in-browser, no server needed)', () => {
     expect(routeRuntime(vfsFrom({
       'package.json': JSON.stringify({ devDependencies: { vite: '^5' } }), 'index.html': 'x',
-    })).target).toBe('webcontainer');
+    })).target).toBe('static');
   });
   it('express backend → server-container', () => {
     expect(routeRuntime(vfsFrom({

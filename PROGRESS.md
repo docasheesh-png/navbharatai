@@ -472,3 +472,15 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   dangling-ref-free base instead of nothing. 9 new tests (scaffold + 2 pipeline). server tsc 0
   + frontend tsc 0 + **98 tests** green. NEXT: surface scaffold choice in EngineBuilder/Pro UI;
   migrate primary Pro build button; Cloud Run Docker / WebContainer; Phase 5 rest.
+- **Milestone 5.6 — DONE (2026-06-15) — IN-BROWSER REACT PREVIEW (closes the vite-react preview gap)**:
+  The default `vite-react` scaffold previously routed to `webcontainer` → no preview (gap vs
+  "preview always works"). New `src/server/runtime/ReactPreview.ts` (`buildReactPreview`,
+  `isReactProject`) builds ONE self-contained HTML that bundles a React/Vite frontend ENTIRELY
+  in-browser: React/ReactDOM CDN + Babel-standalone (JSX/TS transpile) + a tiny CommonJS-style
+  module loader (relative imports, CSS imports → injected <style>, react/react-dom specifiers →
+  CDN globals; unresolved bare deps → clear in-preview error). New `renderPreview.ts` selects
+  react-vs-static. `StaticRuntime` now uses `renderPreview`; `chooseRuntime` routes vite/cra
+  frontends (no node server) → `static` (browser-bundled, zero infra). So a fresh React build
+  now previews live in EngineBuilder. 13 new/updated tests (reactPreview + router + previewService).
+  server tsc 0 + frontend tsc 0 + **107 tests** green. NEXT: surface scaffold/runtime in UI;
+  migrate primary Pro build button; Cloud Run / WebContainer for heavier apps; Phase 5 rest.

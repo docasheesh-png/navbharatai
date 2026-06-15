@@ -60,12 +60,24 @@ describe('PreviewService', () => {
     expect(svc.serverTarget('nope')).toBeNull();
   });
 
-  it('returns an honest not-ready result for a Vite (webcontainer) app', async () => {
+  it('previews a Vite frontend in-browser as a static bundle (no infra)', async () => {
     const svc = new PreviewService();
     const vfs = VirtualFileSystem.fromRecord({
-      'package.json': JSON.stringify({ devDependencies: { vite: '^5' } }), 'index.html': 'x',
+      'package.json': JSON.stringify({ devDependencies: { vite: '^5' }, dependencies: { react: '^18' } }),
+      'index.html': '<div id="root"></div><script type="module" src="/src/main.jsx"></script>',
+      'src/main.jsx': 'console.log("hi")',
     });
     const r = await svc.startPreview('p2', vfs);
+    expect(r.ok).toBe(true);
+    expect(r.target).toBe('static');
+  });
+
+  it('returns an honest not-ready result for a non-vite package.json frontend', async () => {
+    const svc = new PreviewService();
+    const vfs = VirtualFileSystem.fromRecord({
+      'package.json': JSON.stringify({ dependencies: { svelte: '^4' } }), 'index.html': 'x',
+    });
+    const r = await svc.startPreview('p3', vfs);
     expect(r.ok).toBe(false);
     expect(r.target).toBe('webcontainer');
     expect(r.reason).toMatch(/not provisioned/i);

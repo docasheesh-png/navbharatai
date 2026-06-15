@@ -78,7 +78,10 @@ export function analyzeProject(vfs: VirtualFileSystem): ProjectProfile {
 export function chooseRuntime(profile: ProjectProfile): RuntimeTarget {
   if (profile.isStatic || (!profile.hasPackageJson && profile.framework === 'static')) return 'static';
   if (profile.needsNodeServer) return 'server-container';
-  // Has package.json + build tooling but no persistent server → browser WebContainer.
+  // Frontend build (Vite/CRA) with no persistent server → bundle in-browser as a
+  // self-contained static preview (React via Babel-standalone). No external infra.
+  if (profile.framework === 'vite' || profile.framework === 'cra') return 'static';
+  // Other package.json frontends → browser WebContainer (adapter pending).
   return 'webcontainer';
 }
 

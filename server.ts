@@ -6204,12 +6204,15 @@ Response Format:
       // for the very first turn or when a legacy client omits sessionId.
       let storedMsgs = sdaRecentMessages.get(sdaSessionId);
       if (!storedMsgs) {
-        // Seed from client-provided history so existing sessions are not lost
-        storedMsgs = (history as Array<{ role: string; content: string }>).map(m => ({
+        // Seed from client history — skip leading assistant messages (e.g. welcome message)
+        // because Gemini/Vertex require contents to start with a 'user' turn.
+        const allMapped = (history as Array<{ role: string; content: string }>).map(m => ({
           role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
           content: String(m.content || ''),
           ts: now,
         }));
+        const firstUserIdx = allMapped.findIndex(m => m.role === 'user');
+        storedMsgs = firstUserIdx >= 0 ? allMapped.slice(firstUserIdx) : [];
         sdaRecentMessages.set(sdaSessionId, storedMsgs);
       }
 
@@ -6412,8 +6415,11 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           );
         else
           userParts.push({ text: message });
+        // Gemini requires contents to start with 'user' — drop any leading model turns
+        const geminiHistory = historyForAI.map((m: any) => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
+        const firstUserTurn = geminiHistory.findIndex(m => m.role === 'user');
         return [
-          ...historyForAI.map((m: any) => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] })),
+          ...(firstUserTurn >= 0 ? geminiHistory.slice(firstUserTurn) : []),
           { role: 'user', parts: userParts },
         ];
       };

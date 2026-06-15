@@ -505,3 +505,20 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   package.json** (skips node builtins + scoped-pkg roots) → WARNING. False-positive-averse. 5 new
   tests. server tsc 0 + **114 tests** green. NEXT: migrate primary Pro button to engine; deploy/
   merge branch so the new engine is live; Cloud Run / WebContainer; Phase 5 rest.
+- **Milestone 5.9 — DONE (2026-06-15) — MERGED main + PORTED PR#3 SDA**: Merged origin/main
+  (PR #3 had advanced it) into the branch. Only server.ts conflicted (my modular bootstrap vs
+  main's monolith); kept the bootstrap and PORTED all of PR #3's SDA upgrades into modular
+  `routes/sda.ts`: in-memory clinical store + recent-message memory (24h TTL, session-keyed),
+  pinned clinical-snapshot context (never forgets turn-1 data), CLINICAL_JSON parse/strip/persist,
+  expanded red-flag patterns, rural/PHC prompt + structured Rx + doctor disclaimer, returns
+  sessionId. Verified server tsc 0 + frontend tsc 0 + 114 tests + boot-check PASS + vite build.
+  PR #2 now conflict-free (mergeable).
+- **Milestone 5.10 — DONE (2026-06-15) — PRIMARY PRO BUTTON → NEW ENGINE**: The primary Pro
+  build now runs the REAL engine FIRST. In App.tsx's build handler: factored a `finishBuild()`
+  helper (applies built files → workspace + preview + chat summary + version snapshot), then calls
+  `buildApp()` (/api/build: VFS + EditEngine + Verifier + RepairLoop) as the PRIMARY path; on
+  success it finishes and returns. If the engine errors or returns nothing, it transparently FALLS
+  BACK to the legacy streaming /api/pro-build flow — so a build can never end broken (Rule #2).
+  Maps the engine's verify report → the existing Quality-Check UI. Verified frontend tsc 0 + 114
+  tests + **vite build ✅**. NEXT: final clean production merge of PR #2; then retire legacy path
+  once parity confirmed; Cloud Run / WebContainer; Phase 5 rest; final re-audit.

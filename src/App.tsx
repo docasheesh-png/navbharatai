@@ -3,6 +3,7 @@ import { useSwipe } from './hooks/useSwipe';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { EngineBuilder } from './components/EngineBuilder';
+import { buildApp } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
@@ -3490,6 +3491,105 @@ ${buildLanguageRule(preferredLanguage)}`;
           role: m.sender === 'user' ? 'user' : 'assistant',
           content: String(m.text || '').slice(0, 800),
         }));
+
+        // Apply a finished multi-file build into the workspace + chat (shared by
+        // the new engine path below and reused logic for the legacy SSE complete).
+        const finishBuild = (
+          builtFiles: Record<string, string>,
+          meta: { reply?: string; validationReport?: any; deploymentGuide?: string; followUpSuggestions?: string[]; appName?: string; isEdit?: boolean },
+        ) => {
+          setProBuildProgress(prev => ({
+            ...prev,
+            percent: 100,
+            stage: '✅ App ready!',
+            steps: prev.steps.map(s => ({ ...s, status: 'done' as const })),
+            generatedFiles: Object.fromEntries(Object.entries(builtFiles).map(([k, v]) => [k, { content: v, expanded: false }])),
+          }));
+          setTimeout(() => {
+            setFiles((prev: any) => ({ ...prev, ...builtFiles }));
+            updatePreview({ ...files, ...builtFiles });
+            setIsAppBuilt(true);
+            setHasGeneratedCode(true);
+            saveVersionSnapshot(messageToSend, builtFiles);
+
+            const fileList = Object.keys(builtFiles);
+            const vr = meta.validationReport;
+            let validationSection = '';
+            if (vr) {
+              const score = vr.score ?? 100;
+              const scoreEmoji = score >= 90 ? '🟢' : score >= 70 ? '🟡' : '🔴';
+              const issues: string[] = [
+                ...(vr.brokenIds || []).map((id: string) => `⚠️ Broken ID: #${id}`),
+                ...(vr.missingWires || []).map((id: string) => `⚠️ Unwired button: #${id}`),
+                ...(vr.syntaxIssues || []).map((s: string) => `⚠️ ${s}`),
+              ];
+              validationSection = [
+                ``,
+                `**Quality Check** ${scoreEmoji} Score: ${score}/100`,
+                vr.passed
+                  ? `> ✅ All checks passed${vr.repairsApplied > 0 ? ` (${vr.repairsApplied} auto-repair${vr.repairsApplied > 1 ? 's' : ''} applied)` : ''}`
+                  : issues.map((i: string) => `> ${i}`).join('\n'),
+              ].join('\n');
+            }
+            const deployGuide = meta.deploymentGuide;
+            const deploySection = deployGuide
+              ? `\n\n**Ready to deploy?** 🚀\nType \`deploy\` for step-by-step deployment options!\n\n<details>\n<summary>📋 Deployment Options (click to expand)</summary>\n\n${deployGuide}\n</details>`
+              : `\n\n**App is ready!** Check the preview → type "deploy" to get deployment options.`;
+            const replyText = meta.reply || 'App successfully generated!';
+            const replyPrefix = replyText.startsWith('⚠️') || replyText.startsWith('Could not') ? '' : '✅ ';
+            const isFileEdit = meta.isEdit || replyText.startsWith('Updated ');
+            const processLog = [
+              `${replyPrefix}${replyText}`,
+              ``,
+              `**Build Summary**`,
+              fileList.map((f: string) => `> \`${f}\` — ${isFileEdit ? 'updated' : 'created'}`).join('\n'),
+              validationSection,
+              ``,
+              `**App is live in Preview** →`,
+              deploySection,
+            ].join('\n');
+            setProMessages(prev => [...prev, {
+              id: (Date.now() + 1).toString(),
+              text: processLog + '\n\n__VIEW_PREVIEW____DEPLOY_ACTIONS__',
+              sender: 'ai',
+              timestamp: new Date(),
+              meta: { deployFiles: builtFiles, appName: meta.appName || 'NavBharatAI-App', suggestions: meta.followUpSuggestions || [] } as any,
+            }]);
+            setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+            setIsProLoading(false);
+          }, 1200);
+        };
+
+        // ── PRIMARY: real engine (VFS + EditEngine + Verifier + RepairLoop). ──
+        // The legacy streaming /api/pro-build path below is the automatic fallback,
+        // so a transient engine issue can never leave the build broken.
+        try {
+          setProBuildProgress(prev => ({ ...prev, percent: 30, stage: '⚙️ Building with the new engine…' }));
+          const engineRes = await buildApp({
+            prompt: messageToSend,
+            files: Object.keys(allTextFiles).length ? allTextFiles : undefined,
+            preview: false,
+          });
+          if (engineRes && engineRes.fileCount > 0 && Object.keys(engineRes.files).length > 0) {
+            const v = engineRes.verify;
+            const score = v.ok ? 100 : Math.max(0, 100 - v.errors * 20 - v.warnings * 5);
+            finishBuild(engineRes.files, {
+              reply: engineRes.ok ? 'Built with the new engine — verified clean.' : 'Built with the new engine (with warnings).',
+              validationReport: {
+                score,
+                passed: v.ok,
+                repairsApplied: engineRes.repairAttempts,
+                syntaxIssues: v.issues.map((i: any) => `${i.file}: ${i.message}`),
+              },
+              isEdit: isEditRequest,
+            });
+            return;
+          }
+          console.warn('[pro-build] new engine returned no files — falling back to legacy');
+        } catch (engineErr: any) {
+          if (engineErr?.name === 'AbortError') throw engineErr;
+          console.warn('[pro-build] new engine failed — falling back to legacy:', engineErr?.message || engineErr);
+        }
 
         const response = await fetch('/api/pro-build', {
           method: 'POST',

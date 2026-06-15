@@ -297,3 +297,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   NEXT: implement the runtime backends — (a) static/iframe (simplest), (b) WebContainer adapter
   (frontend), (c) server-container adapter on top of the existing PreviewRunner/Sandbox/PortManager;
   then a unified preview endpoint that routes via RuntimeRouter; then replace fake BuildEngine/CodeGenerator.
+- **Milestone 3.2 — DONE (2026-06-15)**: Built the real **static preview builder** →
+  `src/server/runtime/StaticPreview.ts` (`buildStaticPreview(vfs)`): produces ONE self-contained
+  HTML from the multi-file VFS — inlines local CSS/JS, rewrites local image/asset refs to
+  data-URLs, leaves CDN urls alone, synthesizes a shell when no index.html. Replaces the old
+  3-file-only `buildPreviewHtml` hack with a real VFS-based renderer. 6 unit tests; guardrail 0
+  + frontend tsc 0 + tests green. NEXT: (b) WebContainer adapter (StackBlitz SDK, frontend),
+  (c) server-container adapter (on PreviewRunner/Sandbox), then unified preview endpoint via
+  RuntimeRouter + wire into Pro build (replacing the iframe+CDN hack).

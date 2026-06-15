@@ -322,16 +322,6 @@ setInterval(() => {
   // Chat routes (general + Vishwakarma tiers) — extracted to src/server/routes/chat.ts (Phase 1, AI-core step c).
   registerChatRoutes(app, chatLimiter);
 
-  // Legacy /api/chat route has been deprecated. Users should use /api/chat/:tier endpoints.
-/*
-app.post('/api/chat', async (req, res) => {
-  return res.status(403).json({
-    error: 'DEPRECATED_ROUTE',
-    message: 'This endpoint is deprecated. Please use /api/chat/:tier endpoints.'
-  });
-});
-*/
-
   // Pro engine routes (pro-chat + pro-build + callClaudePro) — extracted to src/server/routes/pro.ts (Phase 1, AI-core step d).
   registerProRoutes(app);
   // Senior Doctor Assistant (SDA) chat route — extracted to src/server/routes/sda.ts (Phase 1, AI-core step e).

@@ -85,7 +85,7 @@ Each phase: complete → `tsc --noEmit` + tests + build green → push → next.
 
 ---
 
-## 🔄 PHASE 1 — Break server.ts god-file (IN PROGRESS)
+## ✅ PHASE 1 — Break server.ts god-file — **CORE DONE** (2026-06-15)
 6,598 lines / 71 routes, all inside one giant `(async () => {...})()` IIFE.
 Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
 `registerXxxRoutes(app, deps)`, one green milestone at a time (no behavior change).
@@ -221,6 +221,16 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   one dead/commented route remain. **server.ts is now effectively a bootstrap.**
   NEXT = step f: tidy server.ts (it's already ~359 lines); optional `tsconfig.server.json`
   + per-module strict; then PHASE 1 done → start PHASE 2 (real project model).
+- **Milestone 1.32 — PHASE 1 CORE COMPLETE (2026-06-15)**: Removed last dead commented
+  `/api/chat` block; server.ts now a clean **349-line bootstrap** (env load, firebase init,
+  middleware, rate limiters, `registerXxxRoutes(...)` wiring, SPA catch-all + health, listen).
+  Original god-file 6,598 → 349 (**95% smaller**), 71 inline routes → 0 (all in 20 route
+  modules + 10 lib modules). Verified: esbuild bundle + node --check + load + tsc 0 + vitest
+  + **full `vite build`** all green. App never broke across 32 commits.
+  Optional remaining polish (deferred, non-blocking): add `tsconfig.server.json` + per-module
+  strict TS to typecheck the backend (currently `src/server` excluded), and burn down the
+  539 frontend strict errors. These can be done anytime; they don't block Phase 2.
+  **▶ NEXT: PHASE 2 — real project model (VFS / per-file persistence / versioning).** See plan file.
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

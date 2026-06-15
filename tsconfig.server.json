@@ -15,6 +15,7 @@
   "include": [
     "src/server/routes/**/*.ts",
     "src/server/lib/**/*.ts",
-    "src/server/project/**/*.ts"
+    "src/server/project/**/*.ts",
+    "src/server/runtime/**/*.ts"
   ]
 }

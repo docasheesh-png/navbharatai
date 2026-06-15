@@ -287,3 +287,13 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   Record<string,string>) overlaps with Phase 3/4 and is best done alongside the runtime work.
   **▶ NEXT: PHASE 3 — real hybrid build/preview runtime** (WebContainer + server containers;
   real PreviewRunner; replace fake BuildEngine/CodeGenerator; kill iframe+CDN hack).
+
+## 🔄 PHASE 3 — Real hybrid build/preview runtime (IN PROGRESS)
+- **Milestone 3.1 — DONE (2026-06-15)**: Built the hybrid **RuntimeRouter** →
+  `src/server/runtime/RuntimeRouter.ts` (`analyzeProject` reads the VFS's package.json to
+  profile framework/deps; `chooseRuntime` → 'static' | 'webcontainer' | 'server-container';
+  `PreviewRuntime` interface for backends to implement). Pure decision layer, 8 unit tests,
+  added to the server typecheck guardrail. Verified guardrail 0 + frontend tsc 0 + tests green.
+  NEXT: implement the runtime backends — (a) static/iframe (simplest), (b) WebContainer adapter
+  (frontend), (c) server-container adapter on top of the existing PreviewRunner/Sandbox/PortManager;
+  then a unified preview endpoint that routes via RuntimeRouter; then replace fake BuildEngine/CodeGenerator.

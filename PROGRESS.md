@@ -249,5 +249,10 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   `looksBinary`). Path-traversal safe; backward-compatible `fromRecord`/`toRecord`
   bridge to the legacy `{path:content}` shape. 9 unit tests in `tests/projectModel.test.ts`.
   Additive (no existing flow touched) — verified module strict tsc + frontend tsc 0 + 13 tests.
+- **Milestone 2.2 — DONE (2026-06-15)**: Built real version history →
+  `src/server/project/VersionStore.ts` (`ProjectVersionStore`: snapshot / list / restore /
+  diff / bounded history). git-like checkpoints over the VFS; serializable for persistence;
+  replaces the lossy in-memory undo-stack. 4 unit tests (`tests/versionStore.test.ts`).
+  Additive — module strict tsc + frontend tsc 0 + 17 tests green.
   NEXT: wire VFS into AppEngine/sync (replace Record<string,string>), then persistence
   redesign (per-file storage, drop the 60KB/800KB caps) + real versioning (snapshot/diff/rollback).

@@ -177,6 +177,12 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   `getVishwakarmaProContext` [huge audit prompt], `getVishwakarmaVipContext`) → `lib/prompts.ts`
   (exported); server.ts imports them. server.ts 3398 → 3017. Verified bundle+load+tsc+tests.
   NEXT = step b: `call*` (6 fns, server.ts ~290-470 now) + `generateOfflineResponse` → `lib/aiCalls.ts`.
+- **Milestone 1.24 — DONE (2026-06-15, AI-core step b)**: Extracted the 6 provider
+  call functions (`callGemini/callGroq/callDeepSeek/callOpenAI/callClaude/callOpenRouter`)
+  → `src/server/lib/aiCalls.ts` (uses aiClients + prompts). server.ts 3017 → 2841.
+  Verified bundle+load+aiCalls strict tsc+tsc+tests. NOTE: `generateOfflineResponse`
+  is HUGE (~886 lines, server.ts ~292-1178) — extract it as its own step (b2) →
+  `lib/offlineResponse.ts` next, THEN step c (chatHandler) → routes/chat.ts.
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

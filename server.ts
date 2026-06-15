@@ -327,6 +327,15 @@ setInterval(() => {
   // Senior Doctor Assistant (SDA) chat route — extracted to src/server/routes/sda.ts (Phase 1, AI-core step e).
   registerSdaRoutes(app);
 
+  // Wallet / sync / payment / admin / secrets / anthropic / zip routes (Phase 1 extractions).
+  registerWalletRoutes(app);
+  registerSyncRoutes(app);
+  registerPaymentRoutes(app, paymentLimiter);
+  registerAdminRoutes(app, adminLimiter);
+  registerSecretsRoutes(app);
+  registerAnthropicRoutes(app);
+  registerZipRoutes(app);
+
   // PWA "App Store" routes — extracted to src/server/routes/pwa.ts (Phase 1).
   registerPwaRoutes(app, pwaStore);
 

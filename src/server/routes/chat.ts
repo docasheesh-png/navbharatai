@@ -1,3 +1,4 @@
+import OpenAI from 'openai';
 import type { Express, Request, Response } from 'express';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { collection, addDoc } from 'firebase/firestore';

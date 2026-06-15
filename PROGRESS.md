@@ -117,6 +117,9 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
 - **Milestone 1.14 — DONE (2026-06-15)**: Extracted Anthropic streaming proxy
   (`POST /api/anthropic`, Pro/VIP-gated) → `src/server/routes/anthropic.ts`.
   routes 26 → 25; server.ts 4883 → 4846. Verified green.
+- **Milestone 1.15 — DONE (2026-06-15)**: Extracted GitHub OAuth routes (authorize
+  url, redirect, token-exchange callback, user profile) → `src/server/routes/githubAuth.ts`.
+  routes 25 → 21; server.ts 4846 → 4639. Verified green.
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

@@ -16,6 +16,7 @@ import { registerGithubRoutes } from './src/server/routes/github';
 import { registerCloudsyncRoutes } from './src/server/routes/cloudsync';
 import { registerAppmakerRoutes } from './src/server/routes/appmaker';
 import { registerAuthRoutes } from './src/server/routes/auth';
+import { registerAnthropicRoutes } from './src/server/routes/anthropic';
 import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
 import { registerSyncRoutes } from './src/server/routes/sync';
@@ -4524,46 +4525,8 @@ Response Format:
   // Secrets CRUD routes — extracted to src/server/routes/secrets.ts (Phase 1).
   registerSecretsRoutes(app);
 
-  app.post('/api/anthropic', async (req, res) => {
-    try {
-      const { userId, messages, model } = req.body;
-      if (!userId || !messages) return res.status(400).json({ error: 'Missing parameters' });
-
-      // Check User Tier
-      const userDoc = await getDoc(doc(db, 'users', userId));
-      if (!userDoc.exists()) return res.status(404).json({ error: 'User not found' });
-      
-      const userData = userDoc.data();
-      if (userData.tier !== 'pro' && userData.tier !== 'vip') {
-        return res.status(403).json({ error: 'Forbidden: Pro or VIP access required' });
-      }
-
-      // Proxy request
-      const response = await axios.post(
-        `${process.env.ANTHROPIC_BASE_URL}/chat/completions`,
-        {
-          model: model || 'anthropic/claude-opus-4.7-fast',
-          messages,
-          stream: true
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${process.env.ANTHROPIC_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          responseType: 'stream'
-        }
-      );
-
-      // Pipe response
-      res.setHeader('Content-Type', 'text/event-stream');
-      response.data.pipe(res);
-      
-    } catch (err: any) {
-      console.error('[API] Anthropic proxy error:', err.message);
-      res.status(500).json({ error: 'Failed to call Anthropic API' });
-    }
-  });
+  // Anthropic proxy route — extracted to src/server/routes/anthropic.ts (Phase 1).
+  registerAnthropicRoutes(app);
 
   // ══ SENIOR DOCTOR ASSISTANT (SDA) ══
   app.post('/api/sda-chat', async (req: any, res: any) => {

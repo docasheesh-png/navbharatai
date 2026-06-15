@@ -194,6 +194,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
 - **Milestone 1.26 — DONE (2026-06-15)**: Extracted `aiRouter` (UniversalAIRouter)
   into shared singleton `src/server/lib/aiRouter.ts` (used by chat + pro). server.ts
   imports it. Verified bundle+check+tsc+tests. Unblocks step c (chat) & d (pro).
+- **Milestone 1.27 — DONE (2026-06-15, AI-core step e)**: Extracted security/scan +
+  audit/full routes → `src/server/routes/audit.ts` (uses callGemini + getSecurityContext).
+  server.ts 1957 → 1927. This de-interleaves the chat unit. NEXT = step c:
+  `routeRequest` (~296-403) + `chatHandler` (~620-830) + LANGUAGE_RULE + `/api/chat/*`
+  registrations → `routes/chat.ts` (uses aiCalls + offlineResponse + aiRouter + db + audit).
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

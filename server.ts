@@ -25,6 +25,7 @@ import { getSecurityContext, NAVBHARAT_OS_V2, getBharatContext, getApiKeysInstru
 import { callGemini, callGroq, callDeepSeek, callOpenAI, callClaude, callOpenRouter } from './src/server/lib/aiCalls';
 import { generateOfflineResponse } from './src/server/lib/offlineResponse';
 import { aiRouter } from './src/server/lib/aiRouter';
+import { registerAuditRoutes } from './src/server/routes/audit';
 import { registerZipRoutes } from './src/server/routes/zip';
 import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
@@ -418,39 +419,8 @@ setInterval(() => {
   // GitHub data-API routes — extracted to src/server/routes/github.ts (Phase 1).
   registerGithubRoutes(app);
 
-  app.post('/api/security/scan', async (req, res) => {
-    const { target, files } = req.body;
-    const userKeys = {
-      gemini: req.headers['x-gemini-key'] as string,
-    };
-
-    if (!target) return res.status(400).json({ error: 'Target is required' });
-
-    try {
-      const prompt = `Perform a deep security scan on the following target: ${target}. 
-Current Project Files (if applicable): ${JSON.stringify(files || {})}
-Analyze the target for any vulnerabilities, configuration issues, or exposed secrets.`;
-
-      const reply = await callGemini(prompt, userKeys.gemini, [], getSecurityContext(target));
-      res.json({ reply });
-    } catch (error: any) {
-      console.error('Security scan failure:', error.message);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // REAL WEBSITE AUDIT ENGINE ENDPOINT
-  app.post('/api/audit/full', async (req, res) => {
-    const { url } = req.body;
-    if (!url) return res.status(400).json({ error: 'URL is required' });
-    try {
-      // const report = await fullWebsiteAudit(url);
-      const report = { status: 'audit_not_available' }; // Placeholder
-      res.json(report);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
+  // Security scan + website audit routes — extracted to src/server/routes/audit.ts (Phase 1, AI-core step e).
+  registerAuditRoutes(app);
 
   // New Isolated Chat Endpoints
   const LANGUAGE_RULE = `

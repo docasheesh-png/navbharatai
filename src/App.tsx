@@ -2204,8 +2204,9 @@ ${buildLanguageRule(preferredLanguage)}`;
     Object.keys(FILES).forEach(function(p){var src=FILES[p]||'',m;re.lastIndex=0;while((m=re.exec(src))){var s=m[1];if(s&&s.charAt(0)!=='.'&&s.charAt(0)!=='/')found[s]=true;}});
     return Object.keys(found);
   }
-  // Resolve a bare import spec to CDN URL: importmap first, then esm.sh
+  // Resolve a bare import spec to CDN URL: absolute URLs pass through, importmap next, then esm.sh
   function specUrl(spec){
+    if(spec.slice(0,8)==='https://'||spec.slice(0,7)==='http://')return spec;
     if(IMAP[spec])return IMAP[spec];
     var root=spec.charAt(0)==='@'?spec.split('/').slice(0,2).join('/'):spec.split('/')[0];
     if(IMAP[root])return IMAP[root]+spec.slice(root.length);
@@ -2226,14 +2227,20 @@ ${buildLanguageRule(preferredLanguage)}`;
 })();`;
 
   // Detect whether the app is a React/TS source app (needs transpilation) vs a static app.
+  // Priority: index.html structure wins — prevents stale .tsx workspace files from forcing bundler
+  // mode on freshly generated vanilla-JS or Firebase apps.
   const detectAppType = (f: FileSystem): 'react' | 'static' => {
+    const html = f['index.html'] || '';
+    // Vite/CRA: HTML has a .tsx/.ts/.jsx module entry → must use bundler
+    if (/<script[^>]+type=["']module["'][^>]+src=["']\/?(src\/)?[^"']+\.(ts|jsx|tsx)["']/i.test(html)) return 'react';
+    // If an index.html exists, trust its structure — don't let residual .tsx files in the workspace
+    // confuse detection and route vanilla/Firebase apps through the Babel bundler.
+    if (html) return 'static';
+    // No index.html: infer from file types alone
     const keys = Object.keys(f);
     if (keys.some(k => /\.(tsx|jsx)$/i.test(k))) return 'react';
     const pkg = f['package.json'];
     if (pkg && /"react"\s*:/.test(pkg)) return 'react';
-    // Vite-style entry pointing at a TS/JS module under src/
-    const html = f['index.html'] || '';
-    if (/<script[^>]+type=["']module["'][^>]+src=["']\/?(src\/)?[^"']+\.(ts|jsx|tsx)["']/i.test(html)) return 'react';
     return 'static';
   };
 
@@ -2253,7 +2260,21 @@ ${buildLanguageRule(preferredLanguage)}`;
       entry = cands.find(c => srcFiles[c]) || Object.keys(srcFiles).find(k => /\.(tsx|jsx)$/i.test(k)) || '';
     }
 
-    // Reuse the app's <body> markup (minus module/external scripts) so #root etc. survive
+    // Collect CDN <script src> tags from the original HTML (head + body) to preserve in output.
+    // Firebase compat and other CDN libs must survive even though we rebuild the HTML from scratch.
+    const rawCdnScripts: string[] = [];
+    const seenCdnUrls = new Set(['https://unpkg.com/@babel/standalone@7.26.4/babel.min.js']); // already injected
+    const cdnSrcRe = /<script[^>]+src=["'](https?:\/\/[^"']+)["'][^>]*><\/script>/gi;
+    let cdnM: RegExpExecArray | null;
+    while ((cdnM = cdnSrcRe.exec(rawHtml)) !== null) {
+      if (!seenCdnUrls.has(cdnM[1])) {
+        seenCdnUrls.add(cdnM[1]);
+        rawCdnScripts.push(cdnM[0]);
+      }
+    }
+
+    // Reuse the app's <body> markup — strip module scripts and local src scripts;
+    // CDN src scripts are collected above and re-injected in head, so strip them from body too.
     let bodyInner = '<div id="root"></div>';
     const bm = rawHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
     if (bm) {
@@ -2262,6 +2283,16 @@ ${buildLanguageRule(preferredLanguage)}`;
         .replace(/<script[^>]+src=["'][^"']+["'][^>]*>\s*<\/script>/gi, '');
       if (!/id=["'](root|app)["']/.test(bodyInner)) bodyInner += '<div id="root"></div>';
     }
+
+    // If firebase.js exists in the workspace, inline it synchronously in the head so window.DB
+    // is available when the app code runs. CDN compat scripts must come first.
+    const fbJs = srcFiles['firebase.js'];
+    const firebaseHeadBlock = fbJs
+      ? (rawCdnScripts.length === 0
+          // No CDN scripts found in raw HTML (e.g. unit test env) — add nothing
+          ? `\n<script data-src="firebase.js">${fbJs.replace(/<\//g, '<\\/')}<\/${'script'}>`
+          : `\n<script data-src="firebase.js">${fbJs.replace(/<\//g, '<\\/')}<\/${'script'}>`)
+      : '';
 
     // Build importmap from package.json dependencies + always-needed React packages
     const ESM = 'https://esm.sh/';
@@ -2298,6 +2329,8 @@ ${buildLanguageRule(preferredLanguage)}`;
       + PREVIEW_HARNESS
       + '<script type="importmap">' + importmap + '</' + 'script>'
       + '<script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></' + 'script>'
+      + (rawCdnScripts.length ? rawCdnScripts.join('\n') + '\n' : '')
+      + firebaseHeadBlock
       + '</head><body>' + bodyInner
       + '<script>window.__FILES=' + sj(srcFiles) + ';window.__ENTRY=' + sj(entry) + ';window.__IMAP=' + sj(imapEntries) + ';</' + 'script>'
       + '<script>' + PREVIEW_BOOTSTRAP + '</' + 'script>'
@@ -2333,46 +2366,46 @@ ${buildLanguageRule(preferredLanguage)}`;
         }
       }
 
-      // Collect all CSS files (style.css, styles.css, main.css, app.css, index.css, etc.)
       const CSS_NAMES = ['style.css', 'styles.css', 'main.css', 'app.css', 'index.css'];
-      const allCss = [
-        ...CSS_NAMES.map(n => currentFiles[n] || ''),
-        ...Object.entries(currentFiles)
-          .filter(([k]) => k.endsWith('.css') && !CSS_NAMES.includes(k))
-          .map(([, v]) => v as string),
-      ].filter(Boolean).join('\n');
+      const JS_NAMES  = ['script.js', 'app.js', 'main.js', 'index.js'];
 
-      // Collect all JS files (script.js, app.js, main.js, index.js, etc.)
-      const JS_NAMES = ['script.js', 'app.js', 'main.js', 'index.js'];
-      const allJs = [
-        ...JS_NAMES.map(n => currentFiles[n] || ''),
-        ...Object.entries(currentFiles)
-          .filter(([k]) => k.endsWith('.js') && !JS_NAMES.includes(k) && !k.includes('node_modules') && !k.includes('.min.js'))
-          .map(([, v]) => v as string),
-      ].filter(Boolean).join('\n');
+      // Track which files were inlined via <link href> / <script src> replacement so we
+      // don't inject the same content a second time in the catch-all blocks below.
+      const inlinedCss = new Set<string>();
+      const inlinedJs  = new Set<string>();
 
       finalHtml = html;
 
-      // Inline external CSS links that reference local files
+      // Step 1 — Inline <link rel="stylesheet" href="local.css">
       finalHtml = finalHtml.replace(/<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["'][^>]*\/?>/gi, (match, href) => {
         const filename = href.replace(/^\.\//, '').replace(/^\//, '');
         const content = currentFiles[filename];
-        return content ? `<style data-src="${filename}">${content}</style>` : match;
+        if (!content) return match;
+        inlinedCss.add(filename);
+        return `<style data-src="${filename}">${content}</style>`;
       });
 
-      // Inline external script src — preserve type attribute (e.g. type="text/babel" for React/JSX)
+      // Step 2 — Inline <script src="local.js"> — preserve type attr (e.g. type="module" for Firebase)
       finalHtml = finalHtml.replace(/<script([^>]+)src=["']([^"']+)["'][^>]*><\/script>/gi, (match, attrs, src) => {
         const filename = src.replace(/^\.\//, '').replace(/^\//, '');
         const content = currentFiles[filename];
         if (!content) return match;
+        inlinedJs.add(filename);
         const typeMatch = attrs.match(/type=["']([^"']+)["']/);
         const typeAttr = typeMatch ? ` type="${typeMatch[1]}"` : '';
         return `<script${typeAttr} data-src="${filename}">${content.replace(/<\//g, '<\\/')}<\/script>`;
       });
 
-      // Inject any remaining CSS not already inlined
-      if (allCss) {
-        const styleTag = `<style id="nb-injected-css">${allCss}</style>`;
+      // Step 3 — Inject CSS files not already inlined (catch-all for unreferenced stylesheets)
+      const remainingCss = [
+        ...CSS_NAMES.filter(n => !inlinedCss.has(n)).map(n => currentFiles[n] || ''),
+        ...Object.entries(currentFiles)
+          .filter(([k]) => k.endsWith('.css') && !CSS_NAMES.includes(k) && !inlinedCss.has(k))
+          .map(([, v]) => v as string),
+      ].filter(Boolean).join('\n');
+
+      if (remainingCss) {
+        const styleTag = `<style id="nb-injected-css">${remainingCss}</style>`;
         if (finalHtml.includes('</head>')) {
           finalHtml = finalHtml.replace('</head>', `${styleTag}</head>`);
         } else if (finalHtml.includes('<body>')) {
@@ -2382,9 +2415,19 @@ ${buildLanguageRule(preferredLanguage)}`;
         }
       }
 
-      // Inject any remaining JS not already inlined
-      if (allJs) {
-        const scriptTag = `<script id="nb-injected-js">${allJs.replace(/<\//g, '<\\/')}<\/script>`;
+      // Step 4 — Inject JS files not already inlined (catch-all for unreferenced scripts).
+      // Excludes ES-module files that were inlined as type="module" — those execute in their
+      // own module scope and must not be re-run as plain scripts.
+      const remainingJs = [
+        ...JS_NAMES.filter(n => !inlinedJs.has(n)).map(n => currentFiles[n] || ''),
+        ...Object.entries(currentFiles)
+          .filter(([k]) => k.endsWith('.js') && !JS_NAMES.includes(k) && !inlinedJs.has(k)
+            && !k.includes('node_modules') && !k.includes('.min.js'))
+          .map(([, v]) => v as string),
+      ].filter(Boolean).join('\n');
+
+      if (remainingJs) {
+        const scriptTag = `<script id="nb-injected-js">${remainingJs.replace(/<\//g, '<\\/')}<\/script>`;
         if (finalHtml.includes('</body>')) {
           finalHtml = finalHtml.replace('</body>', `${scriptTag}</body>`);
         } else {

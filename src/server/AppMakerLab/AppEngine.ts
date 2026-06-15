@@ -1080,26 +1080,50 @@ Output ONLY the raw CSS:`;
 
 function buildPreviewHtml(files: Record<string, string>, bp: AppBlueprint): string {
   let html = files['index.html'] || '';
-  const css = files['style.css'] || '';
-  const js  = files['script.js'] || '';
+  const css        = files['style.css'] || '';
+  const firebaseJs = files['firebase.js'] || '';
+  const authJs     = files['auth.js'] || '';
+  const js         = files['script.js'] || '';
 
   if (!html) {
     html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${bp.appName}</title></head><body></body></html>`;
   }
+
+  // Remove external file references that will be inlined below
+  html = html.replace(/<link[^>]+style\.css[^>]*>/gi, '');
+  html = html.replace(/<script[^>]+src=["']firebase\.js["'][^>]*><\/script>/gi, '');
+  html = html.replace(/<script[^>]+src=["']auth\.js["'][^>]*><\/script>/gi, '');
+  html = html.replace(/<script[^>]+src=["']script\.js["'][^>]*><\/script>/gi, '');
 
   // Inject CSS
   if (css) {
     const tag = `<style>\n${css}\n</style>`;
     html = html.includes('</head>') ? html.replace('</head>', `${tag}\n</head>`) : tag + html;
   }
-  html = html.replace(/<link[^>]+style\.css[^>]*>/gi, '');
 
-  // Inject JS
+  // Firebase: inject compat CDN scripts + inline firebase.js (plain IIFE — no module imports)
+  if (firebaseJs) {
+    const cdnTags = [
+      '  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>',
+      '  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>',
+      '  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>',
+    ].join('\n');
+    html = html.includes('</head>') ? html.replace('</head>', `${cdnTags}\n</head>`) : cdnTags + html;
+    const fbTag = `<script data-src="firebase.js">\n${firebaseJs}\n</script>`;
+    html = html.includes('</body>') ? html.replace('</body>', `${fbTag}\n</body>`) : html + fbTag;
+  }
+
+  // Inline auth module before main script
+  if (authJs) {
+    const authTag = `<script data-src="auth.js">\n${authJs}\n</script>`;
+    html = html.includes('</body>') ? html.replace('</body>', `${authTag}\n</body>`) : html + authTag;
+  }
+
+  // Inline main JS last
   if (js) {
     const tag = `<script>\n${js}\n</script>`;
     html = html.includes('</body>') ? html.replace('</body>', `${tag}\n</body>`) : html + tag;
   }
-  html = html.replace(/<script[^>]+src=["']script\.js["'][^>]*><\/script>/gi, '');
 
   return html;
 }
@@ -1307,8 +1331,15 @@ export async function buildApp(
         const firebaseJs = await buildFirebaseModule(bp.appName, bp.dataModel);
         generatedFiles['firebase.js'] = firebaseJs;
         onFileGenerated?.('firebase.js', firebaseJs);
-        // Inject Firebase script tag into HTML before </body>
-        const firebaseScript = `\n<script type="module" src="firebase.js"></script>`;
+        // Inject Firebase compat CDN scripts (must be in <head>, before firebase.js runs)
+        const fbCdn = [
+          '  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>',
+          '  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>',
+          '  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>',
+        ].join('\n');
+        generatedFiles['index.html'] = generatedFiles['index.html'].replace('</head>', `${fbCdn}\n</head>`);
+        // firebase.js as a regular deferred script (not module — uses window.firebase global)
+        const firebaseScript = `\n<script defer src="firebase.js"></script>`;
         generatedFiles['index.html'] = generatedFiles['index.html'].replace('</body>', `${firebaseScript}\n</body>`);
         // Add setup note at top of app JS
         generatedFiles['script.js'] = `// Firebase available as window.DB — use DB.saveRecord(), DB.getRecords(), etc.\n${generatedFiles['script.js']}`;
@@ -1385,18 +1416,17 @@ function generateFollowUpSuggestions(bp: AppBlueprint): string[] {
 
 // ─── Backend Module: Firebase Firestore Integration ───────────────────────────
 
-const FIREBASE_CDN = `
-  <script type="module">
-    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-    import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-    import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-    window._fbLoaded = true;
-  </script>`;
+const FIREBASE_CDN = [
+  '<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>',
+  '<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>',
+  '<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>',
+].join('\n');
 
 async function buildFirebaseModule(appName: string, dataModel: Record<string, string>): Promise<string> {
   const collections = Object.keys(dataModel).slice(0, 5);
-  const sys = `You are a Firebase Firestore expert. Write clean, modern JavaScript using Firebase v10 modular SDK.
-ALL identifiers in English. Return ONLY JavaScript code, no markdown.`;
+  const sys = `You are a Firebase expert. Write plain JavaScript — NO import/export statements.
+The Firebase v10 COMPAT SDK is already loaded as global CDN scripts (window.firebase is available).
+ALL identifiers in English. Return ONLY JavaScript code, no markdown, no module syntax.`;
 
   const collectionsDesc = collections.length > 0
     ? `Data collections needed:\n${collections.map(k => `- ${k}: ${dataModel[k]}`).join('\n')}`
@@ -1406,20 +1436,22 @@ ALL identifiers in English. Return ONLY JavaScript code, no markdown.`;
     `Write a firebase.js file for a web app called "${appName}".
 ${collectionsDesc}
 
-Requirements:
-1. Firebase v10 modular SDK via CDN (esm.sh or gstatic)
-2. Initialize Firebase with placeholder config (comment showing where to add real config)
-3. Anonymous auth (signInAnonymously) to allow Firestore access
-4. Export these async functions:
-   - saveRecord(collectionName, data) → returns document id
+CRITICAL RULES:
+1. DO NOT use import or export — the Firebase compat SDK is already on window.firebase (loaded by CDN <script> tags)
+2. Wrap everything in an IIFE: (function() { ... })();
+3. Initialize with a placeholder config object (add comment: // Replace with your Firebase console config)
+4. Anonymous auth: firebase.auth().signInAnonymously() to allow Firestore access
+5. Use firebase.firestore() for database operations
+6. Implement these async functions (plain function declarations, no export):
+   - saveRecord(collectionName, data) → returns document id string
    - getRecords(collectionName) → returns array of {id, ...data}
    - updateRecord(collectionName, id, data) → updates document
    - deleteRecord(collectionName, id) → deletes document
    - listenRecords(collectionName, callback) → real-time listener, returns unsubscribe fn
-5. window.DB = { saveRecord, getRecords, updateRecord, deleteRecord, listenRecords } so vanilla JS and React can use it
-6. Handle errors gracefully with console.warn
+7. Set window.DB = { saveRecord, getRecords, updateRecord, deleteRecord, listenRecords }
+8. Handle errors gracefully with console.warn
 
-Return only the complete firebase.js file content.`,
+Return only the complete firebase.js — plain JavaScript IIFE, zero import/export.`,
     sys, 4000
   );
   return code;
@@ -1711,10 +1743,16 @@ ALL identifiers and comments in English. Return ONLY CSS, no markdown.`;
         const firebaseJs = await buildFirebaseModule(appName, dataModel);
         files['firebase.js'] = firebaseJs;
         onFileGenerated?.('firebase.js', firebaseJs);
-        // window.DB available in React via script tag before Babel
+        // Inject Firebase compat CDN + firebase.js (plain IIFE) before Babel processes App.jsx
+        const fbCdnReact = [
+          '  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>',
+          '  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>',
+          '  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>',
+        ].join('\n');
+        files['index.html'] = files['index.html'].replace('</head>', `${fbCdnReact}\n</head>`);
         files['index.html'] = files['index.html'].replace(
           '<script type="text/babel" src="App.jsx">',
-          `<script type="module" src="firebase.js"></script>\n  <script type="text/babel" src="App.jsx">`
+          `<script defer src="firebase.js"></script>\n  <script type="text/babel" src="App.jsx">`
         );
       } catch (fbErr: any) {
         console.warn('[ReactEngine] Firebase module generation failed (non-fatal):', fbErr.message);

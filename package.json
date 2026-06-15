@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "gcloud:build": "gcloud builds submit --config=cloudbuild.yaml .",
-    "gcloud:deploy": "gcloud run deploy navbharat-cloud-run --image=gcr.io/gcp-navbharat-core/navbharat-cloud-run:latest --platform=managed --region=asia-southeast1 --port=8080 --set-env-vars=NODE_ENV=production --allow-unauthenticated"
+    "gcloud:deploy": "gcloud run deploy navbharat-cloud-run --image=gcr.io/gcp-navbharat-core/navbharat-cloud-run:latest --platform=managed --region=asia-southeast1 --port=8080 --set-env-vars=NODE_ENV=production --allow-unauthenticated",
+    "boot:check": "bash scripts/boot-check.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",

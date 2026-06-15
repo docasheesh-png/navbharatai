@@ -351,3 +351,10 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   (was `string[]`, actually `[cmd, args]`). Verified frontend tsc 0 + guardrail 0 + 53 tests
   + clean boot. NEXT: a Dockerfile/Cloud Run wrapper for prod + point Pro build at /api/preview;
   WebContainer adapter when StackBlitz license decided.
+- **Milestone 3.8 — DONE (2026-06-15) — GUARDRAIL STRENGTHENED**: Added a CI **boot
+  smoke-check** (`scripts/boot-check.sh`, `npm run boot:check`, new CI step): bundles
+  server.ts, boots it, and FAILS the build unless it reaches "🚀 Server running" (catches
+  the startup-crash class — undefined names in route registrars — at CI level, which type
+  checks alone can miss for legacy `any` code). The project now has THREE guardrails in CI:
+  frontend tsc, strict server typecheck (`tsconfig.server.json`), and boot smoke-check —
+  plus the vitest suite (53 tests). Verified all green locally.

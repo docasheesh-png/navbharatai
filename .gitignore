@@ -14,3 +14,5 @@ project_memory.json
 test_workspace/
 whereami.txt
 test_environment_debug.json
+
+.boot-check.cjs

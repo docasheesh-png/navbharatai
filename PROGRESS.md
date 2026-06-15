@@ -414,3 +414,14 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   tests green. **Phase-4 engine COMPLETE as a pure, tested unit** (VFS + EditEngine + Verifier +
   RepairLoop + BuildPipeline). NEXT = INTEGRATION: thin HTTP route wiring runBuild's generate/fix
   to real aiCalls (prompt→FileEdit JSON), then point the Pro frontend at it + /api/preview.
+- **Milestone 4.5 — DONE (2026-06-15) — ENGINE GOES LIVE**: Built the AI⇄engine bridge
+  `src/server/project/aiEdits.ts` (`parseFileEdits` — robust JSON extraction from messy LLM
+  replies, drops malformed ops; `makeAiEditGenerator(callModel)` → generate/fix prompts) and
+  wired the real endpoint `POST /api/build` (`src/server/routes/build.ts`): prompt+files →
+  runBuild (AI generates FileEdits via callClaude → EditEngine → Verifier → RepairLoop) →
+  returns files + verify report (+ optional live preview). Registered in bootstrap. This is the
+  modern, engine-backed replacement for the old fire-and-forget full-rewrite /api/pro-build
+  (legacy route untouched; frontend can migrate incrementally). 7 parser/generator tests (83
+  total). Verified frontend tsc 0 + server guardrail 0 + 83 tests + clean boot (Server running).
+  NEXT: point the Pro frontend at /api/build + /api/preview; multi-file planning prompt upgrades;
+  Phase 3 finish (proxy WS/HMR, Cloud Run Docker); Phase 5; final re-audit.

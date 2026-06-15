@@ -425,3 +425,13 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   total). Verified frontend tsc 0 + server guardrail 0 + 83 tests + clean boot (Server running).
   NEXT: point the Pro frontend at /api/build + /api/preview; multi-file planning prompt upgrades;
   Phase 3 finish (proxy WS/HMR, Cloud Run Docker); Phase 5; final re-audit.
+
+## 🔄 PHASE 5/integration — Wire frontend to the real engine (IN PROGRESS)
+- **Milestone 5.1 — DONE (2026-06-15)**: Added the typed frontend engine client →
+  `src/services/buildService.ts` (`buildApp` → /api/build, `startPreview` → /api/preview,
+  `previewIframeSrc`) with full BuildResponse/PreviewInfo/VerifyReport types. This is the clean
+  bridge the Pro UI will call to drive the real engine instead of the legacy full-rewrite flow.
+  Additive (no existing call site touched). 4 unit tests (fetch mocked, 87 total). frontend tsc 0
+  + guardrail 0 + tests green. NEXT: wire a Pro UI action (e.g. a "Build v2" path or the existing
+  build button) to `buildApp` + render preview via `startPreview`/`previewIframeSrc`; then retire
+  the legacy iframe+CDN path once parity confirmed.

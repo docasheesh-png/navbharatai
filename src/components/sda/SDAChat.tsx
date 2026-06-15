@@ -750,13 +750,6 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           <div ref={bottomRef} />
         </div>
 
-        {/* Disclaimer */}
-        <div className="shrink-0 px-4 py-1.5 bg-[#0d1520] border-t border-white/5">
-          <p className="text-[8px] text-[#2d3748] text-center">
-            SDA is a clinical decision support tool. All diagnoses and treatment decisions remain the sole responsibility of the treating physician.
-          </p>
-        </div>
-
         {/* Quick Tools Row */}
         <div className="shrink-0 bg-[#0d1520] border-t border-emerald-900/20 px-4 py-2">
           <div className="flex items-center gap-1.5 mb-1.5">

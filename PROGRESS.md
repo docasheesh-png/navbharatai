@@ -330,3 +330,12 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   boot/guardrail check — process working as intended.) Verified: frontend tsc 0 + guardrail 0
   + 45 tests + clean boot. (CI is GREEN on PR #2.) Deep fake-BuildEngine refactor deferred to
   Phase 3/4 with fresh context (interconnected with AppMakerLab).
+- **Milestone 3.6 — DONE (2026-06-15)**: Built `WorkspaceMaterializer` →
+  `src/server/runtime/WorkspaceMaterializer.ts` — writes a VFS to a real on-disk dir
+  (nested dirs, base64-binary decode, path-traversal-safe) + `cleanupWorkspace`. This is
+  the missing core that turns the typed VFS into a runnable workspace for the existing
+  WorkspaceLauncher (pkg-manager/start-cmd) + SandboxManager (child-process spawn) — i.e.
+  the heart of the Cloud-Run server-container runtime. 4 fs-backed unit tests (49 total).
+  Verified frontend tsc 0 + guardrail 0 + 49 tests. NEXT: ServerContainerRuntime adapter
+  (materialize → npm install → launch dev server on allocated port → health-check → proxy URL)
+  wiring the existing PreviewRunner pieces; then route 'server-container' target to it.

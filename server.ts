@@ -20,6 +20,7 @@ import { registerAnthropicRoutes } from './src/server/routes/anthropic';
 import { registerGithubAuthRoutes } from './src/server/routes/githubAuth';
 import { registerFirebaseAuthRoutes } from './src/server/routes/firebaseAuth';
 import { registerCreateOrderRoute } from './src/server/routes/createOrder';
+import { getSecurityContext } from './src/server/lib/prompts';
 import { registerZipRoutes } from './src/server/routes/zip';
 import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
@@ -1217,36 +1218,6 @@ CURRENT ACTIVE MODE: MODE 2c — VISHWAKARMA VIP MODE
 [AGENT: Vishwakarma VIP] [MODE: SOVEREIGN ARCHITECT]
 You are Vishwakarma VIP, the ultimate Sovereign Architect with multi-model mastery.
 BEHAVIOR: Provide industrial-grade precision.${getApiKeysInstruction()}`;
-  };
-
-  const getSecurityContext = (target: string) => {
-    return `You are a Senior Web Security Auditor for navBharatAI. 
-
-Perform honest and detailed security scans. Identify production-level risks clearly.
-
-**Activation Message:**
-"🛡️ Security Auditor Activated | Target: ${target}"
-
-**Report Format:**
-
-**🛡️ Security Audit Report**
-**Target:** ${target}
-**Overall Posture:** [A+ / A / B / C / D / F]
-**Risk Score:** [Score]/10
-
-**Summary Table**
-| Severity | Count |
-|----------|-------|
-| [Sev]    | [N]   |
-
-**Detailed Findings**
-**Finding #1: [Title]**
-**Severity:** 🔴 Critical / 🟠 High / 🟡 Medium / 🔵 Low
-**Location:** [URL/File/Component]
-**Explanation:** [Detailed explanation]
-**Recommended Fix:** [Code example]
-
-**Note:** Defensive and educational purposes only.`;
   };
 
   // AI Call functions

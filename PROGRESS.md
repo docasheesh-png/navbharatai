@@ -19,6 +19,22 @@
 > 5. Update this file, commit, push. Repeat. Don't stop until all 6 phases + the
 >    final re-audit loop are done.
 >
+> **▶ AI-CORE EXTRACTION SUB-PLAN (the remaining server.ts work — do in THIS order, one green+push per step):**
+> The last ~13 routes (`chat/*`, `/api/chat`, `pro-chat`, `pro-build`, `sda-chat`,
+> `security/scan`, `audit/full`) are coupled to IIFE closures. Extract bottom-up:
+> a. **AI clients + key resolution** → `src/server/lib/aiClients.ts`: move the lazy
+>    `geminiClient`/`groqClient`/`deepseekClient`/`openaiClient`/`openrouterClient`
+>    singletons, `isPlaceholder` (~295), `resolveApiKey` (~315). Export getters; import back.
+> b. **AI call functions** → `src/server/lib/aiCalls.ts`: `callGemini`/`callGroq`/`callOpenAI`
+>    /`callOpenRouter` (~1253+); they use the clients lib + resolveApiKey.
+> c. **chatHandler** (~2674) → `routes/chat.ts` (`registerChatRoutes(app, chatLimiter)`)
+>    hosting `/api/chat/*` + `/api/chat`. Depends on aiCalls + db + serverStats.
+> d. **pro-chat + pro-build** → `routes/pro.ts` (Pro engine; biggest — pulls in AppEngine/
+>    AppMakerLab; do carefully, can split chat vs build).
+> e. **sda-chat** → `routes/sda.ts`; **security/scan + audit/full** → `routes/audit.ts`.
+> f. Leave `app.get('*')` SPA catch-all + `/api/health` + bootstrap in server.ts (<300 lines).
+> Verify each step (esbuild + tsc 0 + vitest) before push. `getSecurityContext` already in `lib/prompts.ts`.
+>
 > **▶ NEXT STEPS (in order):**
 > 1. Extract remaining server.ts route groups: **github OAuth** (`/api/auth/github*`),
 >    **firebase auth** (`/api/auth/firebase*`), **security/scan + audit/full**,
@@ -135,6 +151,9 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   routes 15 → 13; server.ts 4188 → 3979 (<4k!). Verified green. Remaining in
   server.ts: the coupled AI core (chat/* , /api/chat, pro-chat, pro-build,
   sda-chat, security/scan, audit/full) + SPA catch-all/health.
+- **Milestone 1.20 — DONE (2026-06-15)**: Extracted pure `getSecurityContext`
+  prompt builder → `src/server/lib/prompts.ts`. server.ts 3979 → 3950. Verified green.
+  (Remaining = coupled AI core; see AI-CORE EXTRACTION SUB-PLAN at top of this file.)
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

@@ -171,6 +171,26 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000);
 
+// ══ SDA Clinical Store (in-memory, 24h TTL) ══
+interface SdaClinicalEntry {
+  patientData: Record<string, any>;
+  redFlags: string[];
+  stage: string;
+  createdAt: number;
+  updatedAt: number;
+}
+const sdaClinicalStore = new Map<string, SdaClinicalEntry>();
+const sdaRecentMessages = new Map<string, Array<{ role: 'user' | 'assistant'; content: string; ts: number }>>();
+setInterval(() => {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [id, entry] of sdaClinicalStore.entries()) {
+    if (entry.updatedAt < cutoff) sdaClinicalStore.delete(id);
+  }
+  for (const [id, msgs] of sdaRecentMessages.entries()) {
+    if (!sdaClinicalStore.has(id)) sdaRecentMessages.delete(id);
+  }
+}, 60 * 60 * 1000);
+
 (async () => {
   const app = express();
   app.use(traceMiddleware);

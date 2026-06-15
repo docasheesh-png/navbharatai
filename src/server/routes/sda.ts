@@ -1,18 +1,66 @@
-import OpenAI from 'openai';
-import { GoogleGenAI } from '@google/genai';
-import type { Express, Request, Response } from 'express';
+import crypto from 'crypto';
+import type { Express } from 'express';
 
 /**
  * Senior Doctor Assistant (SDA) chat route extracted from the server.ts monolith
  * (Phase 1, AI-core step e). Self-contained — instantiates Gemini/OpenAI clients
- * (and dynamically Vertex AI) itself; helpers are local. Behavior unchanged.
+ * (and dynamically Vertex AI) itself; helpers are local.
+ *
+ * Includes the PR #3 SDA upgrades (ported into the modular route):
+ *  - server-side clinical store + recent-message memory (24h TTL) keyed by session
+ *  - pinned clinical snapshot context so SDA never forgets early case data
+ *  - CLINICAL_JSON memory block parsed/stripped per response
+ *  - rural/PHC prompt guidance + structured final Rx + doctor disclaimer
  */
+
+// ══ SDA Clinical Store (in-memory, 24h TTL) ══
+interface SdaClinicalEntry {
+  patientData: Record<string, any>;
+  redFlags: string[];
+  stage: string;
+  createdAt: number;
+  updatedAt: number;
+}
+const sdaClinicalStore = new Map<string, SdaClinicalEntry>();
+const sdaRecentMessages = new Map<string, Array<{ role: 'user' | 'assistant'; content: string; ts: number }>>();
+setInterval(() => {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [id, entry] of sdaClinicalStore.entries()) {
+    if (entry.updatedAt < cutoff) sdaClinicalStore.delete(id);
+  }
+  for (const [id] of sdaRecentMessages.entries()) {
+    if (!sdaClinicalStore.has(id)) sdaRecentMessages.delete(id);
+  }
+}, 60 * 60 * 1000);
+
 export function registerSdaRoutes(app: Express): void {
   app.post('/api/sda-chat', async (req: any, res: any) => {
     try {
-      let { message, history = [], teachingMode = false, userId, fileData, fileType, fileName } = req.body;
+      let { message, history = [], teachingMode = false, userId, sessionId, fileData, fileType, fileName } = req.body;
       if (!message && !fileData) return res.status(400).json({ error: 'Message required' });
       message = message || 'Please analyze this medical document and extract all relevant clinical findings.';
+
+      // ── Session / clinical-store resolution ──────────────────────────────────
+      // sessionId is preferred; fall back to userId for backwards compat.
+      const sdaSessionId: string = sessionId || userId || crypto.randomBytes(8).toString('hex');
+      const now = Date.now();
+
+      let clinicalEntry = sdaClinicalStore.get(sdaSessionId);
+      if (!clinicalEntry) {
+        clinicalEntry = { patientData: {}, redFlags: [], stage: 'demographics', createdAt: now, updatedAt: now };
+        sdaClinicalStore.set(sdaSessionId, clinicalEntry);
+      }
+
+      // Server-side history; seed from client-provided history on first turn.
+      let storedMsgs = sdaRecentMessages.get(sdaSessionId);
+      if (!storedMsgs) {
+        storedMsgs = (history as Array<{ role: string; content: string }>).map(m => ({
+          role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
+          content: String(m.content || ''),
+          ts: now,
+        }));
+        sdaRecentMessages.set(sdaSessionId, storedMsgs);
+      }
 
       const hasFile = !!(fileData && fileType);
       const isImage = hasFile && fileType.startsWith('image/');
@@ -95,10 +143,45 @@ CLINICAL TOOLS (when doctor requests via Quick Tools or in conversation):
 - PREGNANCY SAFETY: For each drug — FDA category (A/B/C/D/X), trimester-specific risks, breast milk transfer, neonatal effects, safer alternatives, dose adjustments in pregnancy.
 - REFERRAL DECISION: Referral yes/no with clear criteria, specialty, urgency (emergency/urgent/routine/elective), what to include in referral letter, pre-referral workup, escalation triggers.
 
-END-OF-CASE SIGNAL: When you provide a final diagnosis, treatment plan, management summary, or discharge advice — conclude your response with this exact line on its own:
+RURAL & RESOURCE-LIMITED SETTINGS (CRITICAL FOR VILLAGE/PHC DOCTORS):
+- Always give a clear "Manage here" vs "Refer NOW" decision with explicit criteria
+- For every investigation: provide clinical alternative if test unavailable ("If ECG unavailable, assess by...")
+- Prioritize drugs from India NLEM / WHO Essential Medicines List (available at PHC/CHC level)
+- Referral: include pre-transfer stabilization steps, mode of transport, and what to tell the referral centre
+- Flag region- and season-specific Indian conditions: Malaria, Dengue, Typhoid, TB, Leptospirosis, Snake bite, Kala-azar, Scrub typhus, Pesticide/organophosphate poisoning, Nutritional deficiencies (iron, B12, Vit D)
+- Pediatric: apply IMCI guidelines, screen for SAM/MAM criteria
+- Telemedicine-ready: assessments must be communicable over phone/WhatsApp when needed
+
+END-OF-CASE SIGNAL: When you provide a final diagnosis, treatment plan, management summary, or discharge advice — structure your final response EXACTLY as follows, then end with [CASE_COMPLETE] on its own line:
+
+---
+**📋 Chief Complaint:** [single sentence]
+
+**🔬 Diagnosis:** [primary diagnosis + key differentials if relevant]
+
+**🧪 Suggestive Investigations:** [list — always include affordable/basic options first; note which can be skipped if unavailable]
+
+**💊 Rx:**
+| Drug | Dose | Route | Frequency | Duration |
+|------|------|-------|-----------|----------|
+| ... | ... | ... | ... | ... |
+
+[Add any critical precautions, drug interactions, or monitoring parameters here]
+
+---
+> ⚠️ **Doctor ke liye zaroori note:** Yeh SDA (AI) ka suggestion hai — ek experienced consultant ki tarah guidance deta hai, lekin aapki jagah nahi le sakta. Aapki physical examination, local clinical context, aur apna judgment SABSE IMPORTANT hai. Koi bhi treatment start karne se pehle apna dimaag zaroor lagaiye — AI ko blindly follow karna patient ke liye safe nahi hai. **Aap doctor hain, final decision aapka hai.** 🩺
+---
+
 [CASE_COMPLETE]
 
 LANGUAGE: Primarily English medical terminology. Can use Hinglish for brief clarifications if needed.
+
+CLINICAL NOTE UPDATE — MANDATORY ON EVERY RESPONSE:
+At the very START of your response (before your reply to the doctor), output a clinical note block:
+[CLINICAL_JSON]
+{"demographics":{"age":"...","sex":"...","weight":"..."},"chiefComplaint":"...","hpi":"...","vitals":{"temp":"...","pulse":"...","bp":"...","rr":"...","spo2":"..."},"pmh":[],"medications":[],"allergies":[],"examination":"...","investigations":[],"redFlags":[],"differentials":[],"stage":"demographics|cc|hpi|history|examination|investigations|differential|complete"}
+[/CLINICAL_JSON]
+Rules: Only include fields collected so far. Merge and UPDATE — never remove previously collected data. Keep values brief (machine-readable, not prose). This block is stripped before the doctor sees it — it is purely for memory continuity across the full case.
 
 IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, evidence-based, and respectful of physician authority.`;
 
@@ -128,6 +211,12 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           [/\bgi bleed\b|\bmelena\b|\bhematemesis\b/i, 'GI Bleeding'],
           [/\bdka\b|\bdiabetic ketoacidosis\b/i, 'DKA'],
           [/bp.{0,10}[0-7]\d\/|hypotension/i, 'Hypotension'],
+          [/\bpulse.{0,10}1[2-9]\d|tachycardia/i, 'Tachycardia'],
+          [/\btemp.{0,10}1(?:0[4-9]|[1-9]\d)|fever.{0,20}high|hyperpyrexia/i, 'High Fever'],
+          [/\baltered.{0,20}conscious|unconscious|unresponsive/i, 'Altered Consciousness'],
+          [/\beclampsia\b|\bpre-?eclampsia\b.*severe/i, 'Eclampsia'],
+          [/\bhb.{0,10}[0-6]\.?\d?\b|severe.{0,15}anaemia|severe.{0,15}anemia/i, 'Severe Anaemia'],
+          [/\bneck stiffness\b|\bphotophobia\b|\bmeningism\b/i, 'Meningism'],
         ];
         for (const [pattern, label] of patterns) {
           if (pattern.test(text) || pattern.test(message)) flags.push(label);
@@ -135,10 +224,21 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         return flags;
       };
 
-      const historyForAI = history.slice(-20).map((m: any) => ({
-        role: m.role as 'user' | 'assistant',
-        content: String(m.content || ''),
-      }));
+      // Build AI context: pinned clinical snapshot + last 6 raw exchanges. The
+      // snapshot encodes ALL collected patient data in ~200 tokens regardless of
+      // session length, so SDA never forgets demographics/symptoms from turn 1.
+      const hasClinicalData = Object.keys(clinicalEntry.patientData).length > 0 || clinicalEntry.redFlags.length > 0;
+      const clinicalSnapshot = hasClinicalData
+        ? JSON.stringify({ patientData: clinicalEntry.patientData, redFlags: clinicalEntry.redFlags, stage: clinicalEntry.stage })
+        : null;
+
+      const historyForAI: Array<{ role: 'user' | 'assistant'; content: string }> = [
+        ...(clinicalSnapshot ? [
+          { role: 'user' as const, content: `[CASE_CONTEXT]\n${clinicalSnapshot}\n[/CASE_CONTEXT]\nContinue the clinical assessment. Do NOT re-ask anything already recorded in the context above.` },
+          { role: 'assistant' as const, content: 'Understood. Full clinical context loaded. Continuing without repeating any question already answered.' },
+        ] : []),
+        ...storedMsgs.slice(-6).map(m => ({ role: m.role, content: m.content })),
+      ];
 
       let reply = '';
 
@@ -287,6 +387,28 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         return res.status(503).json({ error: 'AI service unavailable. Please check API keys.' });
       }
 
+      // ── Extract CLINICAL_JSON from reply and persist to session store ──────────
+      const clinicalJsonMatch = reply.match(/\[CLINICAL_JSON\]([\s\S]*?)\[\/CLINICAL_JSON\]/);
+      if (clinicalJsonMatch) {
+        try {
+          const x = JSON.parse(clinicalJsonMatch[1].trim());
+          if (x.demographics) clinicalEntry.patientData = { ...clinicalEntry.patientData, ...x.demographics };
+          if (x.vitals) clinicalEntry.patientData.vitals = { ...(clinicalEntry.patientData.vitals || {}), ...x.vitals };
+          if (x.hpi) clinicalEntry.patientData.hpi = x.hpi;
+          if (x.chiefComplaint) clinicalEntry.patientData.chiefComplaint = x.chiefComplaint;
+          if (x.examination) clinicalEntry.patientData.examination = x.examination;
+          for (const k of ['pmh', 'medications', 'allergies', 'investigations', 'differentials'] as const) {
+            if ((x as any)[k]?.length) (clinicalEntry.patientData as any)[k] = (x as any)[k];
+          }
+          if (x.redFlags?.length) {
+            for (const f of x.redFlags) if (!clinicalEntry.redFlags.includes(f)) clinicalEntry.redFlags.push(f);
+          }
+          if (x.stage) clinicalEntry.stage = x.stage;
+          console.log(`[SDA] Clinical JSON updated — stage: ${clinicalEntry.stage}, session: ${sdaSessionId}`);
+        } catch (e) { console.warn('[SDA] Clinical JSON parse error:', e); }
+        reply = reply.replace(/\[CLINICAL_JSON\][\s\S]*?\[\/CLINICAL_JSON\]\s*/g, '').trim();
+      }
+
       // Strip [CASE_COMPLETE] marker from reply before sending to client
       const suggestPDF = reply.includes('[CASE_COMPLETE]');
       const cleanReply = reply.replace(/\[CASE_COMPLETE\]\s*/g, '').trim();
@@ -295,7 +417,19 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       const patientUpdate = extractPatientUpdate(cleanReply, message);
       const redFlagDetected = redFlags.length > 0 || /\bRED FLAG\b|\bEMERGENCY\b|\bURGENT\b/i.test(cleanReply);
 
-      return res.json({ reply: cleanReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF });
+      // ── Persist exchange to server-side clinical store ───────────────────────
+      storedMsgs.push({ role: 'user', content: message, ts: now });
+      storedMsgs.push({ role: 'assistant', content: cleanReply, ts: Date.now() });
+      if (storedMsgs.length > 100) storedMsgs.splice(0, storedMsgs.length - 100);
+
+      clinicalEntry.patientData = { ...clinicalEntry.patientData, ...patientUpdate };
+      for (const flag of redFlags) {
+        if (!clinicalEntry.redFlags.includes(flag)) clinicalEntry.redFlags.push(flag);
+      }
+      if (suggestPDF) clinicalEntry.stage = 'complete';
+      clinicalEntry.updatedAt = Date.now();
+
+      return res.json({ reply: cleanReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF, sessionId: sdaSessionId });
 
     } catch (err: any) {
       console.error('[SDA] Error:', err);

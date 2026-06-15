@@ -33,8 +33,11 @@
 >    /`callOpenAI`/`callClaude`/`callOpenRouter` (server.ts ~1077–1254) + `generateOfflineResponse`
 >    (~1256). Use aiClients getters + `resolveApiKey` + `getBharatContext` (from prompts).
 >    NOTE: `callClaude` also uses `OpenAI` SDK directly for the ANTHROPIC_BASE_URL proxy path.
-> c. **chatHandler** (~2674) → `routes/chat.ts` (`registerChatRoutes(app, chatLimiter)`)
->    hosting `/api/chat/*` + `/api/chat`. Depends on aiCalls + db + serverStats.
+> c. **chatHandler + routeRequest** → `routes/chat.ts` (`registerChatRoutes(app, chatLimiter)`)
+>    hosting `/api/chat/*` (the `/api/chat` catch route is DEAD/commented). routeRequest
+>    (~296-650) uses aiCalls + offlineResponse + hasKey (all imported). chatHandler
+>    (~651-864) uses routeRequest + `aiRouter` (now `lib/aiRouter.ts`) + db(addDoc/collection)
+>    + audit. Pass chatLimiter as param. NOTE `callClaudePro` belongs to step d (pro), not chat.
 > d. **pro-chat + pro-build** → `routes/pro.ts` (Pro engine; biggest — pulls in AppEngine/
 >    AppMakerLab; do carefully, can split chat vs build).
 > e. **sda-chat** → `routes/sda.ts`; **security/scan + audit/full** → `routes/audit.ts`.
@@ -188,6 +191,9 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   `src/server/lib/offlineResponse.ts` (self-contained). server.ts 2841 → 1956 (<2k!).
   Verified bundle+load+tsc+tests. NEXT = step c: `chatHandler` + routeRequest +
   `/api/chat/*` + `/api/chat` → `routes/chat.ts` (uses aiCalls + offlineResponse + db).
+- **Milestone 1.26 — DONE (2026-06-15)**: Extracted `aiRouter` (UniversalAIRouter)
+  into shared singleton `src/server/lib/aiRouter.ts` (used by chat + pro). server.ts
+  imports it. Verified bundle+check+tsc+tests. Unblocks step c (chat) & d (pro).
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

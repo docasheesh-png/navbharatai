@@ -24,6 +24,7 @@ import { registerCreateOrderRoute } from './src/server/routes/createOrder';
 import { getSecurityContext, NAVBHARAT_OS_V2, getBharatContext, getApiKeysInstruction, getVishwakarmaBasicContext, getVishwakarmaProContext, getVishwakarmaVipContext } from './src/server/lib/prompts';
 import { callGemini, callGroq, callDeepSeek, callOpenAI, callClaude, callOpenRouter } from './src/server/lib/aiCalls';
 import { generateOfflineResponse } from './src/server/lib/offlineResponse';
+import { aiRouter } from './src/server/lib/aiRouter';
 import { registerZipRoutes } from './src/server/routes/zip';
 import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
@@ -208,7 +209,7 @@ setInterval(() => {
   });
 
   const PORT = Number(process.env.PORT || 8080);
-  const aiRouter = new UniversalAIRouter();
+  // aiRouter — shared singleton from src/server/lib/aiRouter.ts (Phase 1, AI-core).
 
   // Trust proxy for correct req.protocol and req.get('host') behind reverse proxies
   app.set('trust proxy', true);

@@ -339,3 +339,15 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   Verified frontend tsc 0 + guardrail 0 + 49 tests. NEXT: ServerContainerRuntime adapter
   (materialize → npm install → launch dev server on allocated port → health-check → proxy URL)
   wiring the existing PreviewRunner pieces; then route 'server-container' target to it.
+- **Milestone 3.7 — DONE (2026-06-15)**: Built **ServerContainerRuntime** →
+  `src/server/runtime/ServerContainerRuntime.ts` (implements PreviewRuntime for the
+  'server-container' target): materialize VFS → detect pkg manager → `npm install` →
+  launch dev server on an allocated port (reuses WorkspaceLauncher/SandboxManager/
+  PortManager/PreviewHealthChecker) → health-check → preview URL; stop terminates +
+  releases port + cleans dir; errors clean up + rethrow. Same flow runs inside Cloud Run/
+  Docker in prod. Wired into PreviewService (server-container target now REAL, no longer a
+  stub; webcontainer still honest-pending). Collaborators injectable → fully unit-tested
+  (5 orchestration tests; 53 total). Also fixed 2 real return-type bugs in WorkspaceLauncher
+  (was `string[]`, actually `[cmd, args]`). Verified frontend tsc 0 + guardrail 0 + 53 tests
+  + clean boot. NEXT: a Dockerfile/Cloud Run wrapper for prod + point Pro build at /api/preview;
+  WebContainer adapter when StackBlitz license decided.

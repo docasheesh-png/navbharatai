@@ -13,6 +13,7 @@ import { getSecretValue } from './src/server/lib/secrets';
 import { verifyPaymentInternal } from './src/server/lib/payments';
 import { registerPaymentRoutes } from './src/server/routes/payment';
 import { registerGithubRoutes } from './src/server/routes/github';
+import { registerCloudsyncRoutes } from './src/server/routes/cloudsync';
 import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
 import { registerSyncRoutes } from './src/server/routes/sync';
@@ -3193,78 +3194,8 @@ You can preview and interact with this template immediately in the **Live Previe
   });
 
   // Secure Cloud Sync Endpoints (with Authenticated user validation check)
-  app.post('/api/cloudsync/github', async (req, res) => {
-    const token = req.headers.authorization?.split(' ')[1] || req.body.token;
-    const { owner, repo, branch = 'main' } = req.body;
-    if (!token) return res.status(401).json({ error: 'Unauthorized' });
-
-    try {
-      const headers = { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' };
-      const branchRes = await axios.get(`https://api.github.com/repos/${owner}/${repo}/branches/${branch}`, { headers });
-      const treeSha = branchRes.data.commit.commit.tree.sha;
-      const treeRes = await axios.get(`https://api.github.com/repos/${owner}/${repo}/git/trees/${treeSha}?recursive=1`, { headers });
-      const tree = treeRes.data.tree;
-      const files: Record<string, string> = {};
-      const textExtensions = new Set(['.html', '.css', '.js', '.jsx', '.ts', '.tsx', '.json', '.md', '.txt', '.py', '.yml', '.yaml']);
-      
-      let fetchedCount = 0;
-      for (const item of tree) {
-        if (item.type === 'blob' && fetchedCount < 100) {
-          const ext = path.extname(item.path).toLowerCase();
-          if (textExtensions.has(ext) || path.basename(item.path) === 'Dockerfile' || path.basename(item.path).startsWith('.')) {
-            try {
-              const blobRes = await axios.get(`https://api.github.com/repos/${owner}/${repo}/git/blobs/${item.sha}`, { headers });
-              files[item.path] = Buffer.from(blobRes.data.content, 'base64').toString('utf-8');
-              fetchedCount++;
-            } catch (blobErr) {
-              console.warn(`Failed to fetch blob for ${item.path}:`, blobErr);
-            }
-          }
-        }
-      }
-      res.json({ status: 'success', files, tree });
-    } catch (err: any) {
-      res.status(err.response?.status || 500).json({ error: err.response?.data?.message || err.message });
-    }
-  });
-
-  app.post('/api/cloudsync/firebase', async (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
-
-    try {
-      res.json({
-        status: 'success',
-        projects: [
-          { id: 'navbharat-sandbox-7729', name: 'navBharat Sandbox (Default)', hosting: 'navbharat-sandbox-7729.web.app', functions: ['api-gateway', 'telemetry-worker'] },
-          { id: 'navbharat-saas-enterprise', name: 'navBharat SaaS Enterprise (Production)', hosting: 'navbharat-saas-enterprise.web.app', functions: ['billing-service', 'user-provisioner'] },
-          { id: 'navbharat-ecom-99a3', name: 'navBharat E-Commerce Portal', hosting: 'navbharat-ecom-99a3.web.app', functions: ['cart-handler', 'checkout-listener'] },
-          { id: 'firebase-custom-build', name: 'Custom Firebase Target', hosting: 'firebase-custom-build.web.app', functions: ['webhook-receiver'] }
-        ]
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post('/api/cloudsync/vercel', async (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
-
-    try {
-      res.json({
-        status: 'success',
-        deployments: [
-          { id: 'dep-44a1', name: 'my-ecommerce-app', url: 'https://my-ecommerce-app.vercel.app', repo: 'workspace/my-ecommerce-app', env: 'production' },
-          { id: 'dep-09b2', name: 'mitrify', url: 'https://mitrify-stream.vercel.app', repo: 'workspace/mitrify', env: 'production' },
-          { id: 'dep-77c8', name: 'navbharat-dashboard', url: 'https://navbharat-dash.vercel.app', repo: 'workspace/navbharat-dashboard', env: 'staging' },
-          { id: 'dep-88d9', name: 'portfolio-site', url: 'https://ashish-portfolio.vercel.app', repo: 'workspace/portfolio-site', env: 'production' }
-        ]
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  // Cloud-sync provider routes — extracted to src/server/routes/cloudsync.ts (Phase 1).
+  registerCloudsyncRoutes(app);
 
   // GitHub data-API routes — extracted to src/server/routes/github.ts (Phase 1).
   registerGithubRoutes(app);

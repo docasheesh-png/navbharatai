@@ -63,6 +63,10 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   data-API routes (fetch, file, branches, push, push-enhanced) →
   `src/server/routes/github.ts`. routes 38 → 33; server.ts 5393 → 5088.
   Verified green. (GitHub OAuth url/callback + cloudsync still inline — next.)
+- **Milestone 1.11 — DONE (2026-06-15)**: Extracted 3 cloud-sync provider routes
+  (`/api/cloudsync/{github,firebase,vercel}`) → `src/server/routes/cloudsync.ts`.
+  routes 33 → 30; server.ts 5088 → 5019. Verified green. (Firebase/Vercel are
+  static mocks — flagged for Phase 5.)
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

@@ -6,11 +6,12 @@ import { StaticRuntime } from '../src/server/runtime/StaticRuntime';
 describe('StaticRuntime', () => {
   it('starts, serves HTML, reports status, stops', async () => {
     const rt = new StaticRuntime();
-    const vfs = VirtualFileSystem.fromRecord({ 'index.html': '<h1>hi</h1>', 'script.js': 'var a=1;' });
+    const vfs = VirtualFileSystem.fromRecord({ 'index.html': '<h1>hi</h1><script src="script.js"></script>', 'script.js': 'var a=1;' });
     const { url, sessionId } = await rt.start('p1', vfs);
     expect(url).toBe(`/preview/${sessionId}`);
     expect(await rt.status(sessionId)).toBe('ready');
-    expect(rt.getHtml(sessionId)).toContain('var a=1;'); // inlined
+    expect(rt.getHtml(sessionId)).toContain('<h1>hi</h1>');
+    expect(rt.getHtml(sessionId)).toContain('var a=1;'); // script.js inlined
     await rt.stop(sessionId);
     expect(await rt.status(sessionId)).toBe('stopped');
     expect(rt.getHtml(sessionId)).toBeUndefined();

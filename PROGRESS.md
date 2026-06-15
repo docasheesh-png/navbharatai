@@ -262,3 +262,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   (chunked GET/POST, drop slimSession's lossy 60KB/800KB logic) — careful, touches live route.
   NEXT: wire VFS into AppEngine/sync (replace Record<string,string>), then persistence
   redesign (per-file storage, drop the 60KB/800KB caps) + real versioning (snapshot/diff/rollback).
+- **Milestone 2.4 — DONE (2026-06-15)**: Wired the chunked codec into the LIVE sync
+  route → `src/server/routes/sync.ts` now persists workspaces LOSSLESSLY (manifest +
+  `{userId}__c{i}` chunk docs, stale-chunk cleanup, 8MB safety ceiling with honest 413
+  instead of silent drops). Removed the lossy `slimSession` (60KB-file-drop/800KB-cap/
+  60-msg truncation). Legacy v1 single-doc workspaces still read transparently (backward
+  compat — no existing user data breaks). Verified module strict tsc + server bundle +
+  load + frontend tsc 0 + 22 tests. **Phase 2 persistence redesign DONE.**
+  NEXT (Phase 2 remaining): wire VFS/VersionStore into AppEngine/pro build flow; then PHASE 3.

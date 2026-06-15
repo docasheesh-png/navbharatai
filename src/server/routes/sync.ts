@@ -1,54 +1,24 @@
 import type { Express, Request, Response } from 'express';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { getDb } from '../lib/db';
+import { encodeWorkspace, decodeWorkspace } from '../project/WorkspaceStore';
 
 /**
  * Cross-device cloud sync routes (chat sessions + last generated app), stored in
- * Firestore `user_workspaces/{userId}`. Extracted from the server.ts monolith
- * (Phase 1) with behavior unchanged.
+ * Firestore. Phase 2 redesign: workspaces are now persisted LOSSLESSLY via the
+ * chunked codec (`WorkspaceStore`) — the old slimSession logic that dropped any
+ * file > 60KB and truncated whole workspaces past 800KB is gone.
  *
- * NOTE: the lossy slimming (60KB/file, 800KB/workspace, 60 msgs) is a known
- * limitation flagged in the audit — it is redesigned in Phase 2 (real project
- * model + per-file storage). Kept as-is here to preserve behavior.
+ * Storage layout:
+ *   user_workspaces/{userId}           → v2 manifest { version, chunkCount, totalBytes, updatedAt }
+ *   user_workspaces/{userId}__c{i}     → { data: <chunk> }
+ * Legacy v1 single-doc workspaces are still read transparently (backward compat).
  */
-const WORKSPACE_MAX_BYTES = 800_000; // stay safely under Firestore's 1 MB doc limit
 
-// Strip large/embedded blobs from a session so the workspace doc stays small.
-const slimSession = (s: any) => {
-  if (!s || typeof s !== 'object') return s;
-  const stripBlobs = (str: any) =>
-    typeof str === 'string'
-      ? str.replace(/data:[^;]+;base64,[A-Za-z0-9+/=]+/g, '(binary)')
-      : str;
-  const slimMsg = (m: any) => ({
-    id: m?.id,
-    sender: m?.sender,
-    text: stripBlobs(String(m?.text || '')).slice(0, 4000),
-    timestamp: m?.timestamp,
-    modelUsed: m?.modelUsed,
-  });
-  const slimFiles: Record<string, string> = {};
-  if (s.files && typeof s.files === 'object') {
-    for (const [k, v] of Object.entries(s.files)) {
-      const cleaned = stripBlobs(String(v ?? ''));
-      if (cleaned.length <= 60_000) slimFiles[k] = cleaned; // skip giant files
-    }
-  }
-  return {
-    id: s.id,
-    title: s.title,
-    messages: Array.isArray(s.messages) ? s.messages.slice(-60).map(slimMsg) : [],
-    restoredMessages: Array.isArray(s.restoredMessages) ? s.restoredMessages.slice(-60).map(slimMsg) : [],
-    files: slimFiles,
-    lastUpdated: s.lastUpdated,
-    isPinned: s.isPinned,
-    mode: s.mode,
-    agent: s.agent,
-    originalAgent: s.originalAgent,
-    currentAgent: s.currentAgent,
-    memorySummary: typeof s.memorySummary === 'string' ? s.memorySummary.slice(0, 4000) : s.memorySummary,
-  };
-};
+// Hard safety ceiling to avoid unbounded writes; generous (≈ many MB of code).
+const MAX_WORKSPACE_BYTES = 8_000_000;
+
+const chunkDocId = (userId: string, i: number) => `${userId}__c${i}`;
 
 export function registerSyncRoutes(app: Express): void {
   app.get('/api/sync/:userId', async (req: Request, res: Response) => {
@@ -56,10 +26,26 @@ export function registerSyncRoutes(app: Express): void {
     const { userId } = req.params;
     if (!db) return res.json({ sessions: [], lastApp: '', updatedAt: null });
     try {
-      const ref = doc(db, 'user_workspaces', userId);
-      const snap = await getDoc(ref);
+      const snap = await getDoc(doc(db, 'user_workspaces', userId));
       if (!snap.exists()) return res.json({ sessions: [], lastApp: '', updatedAt: null });
       const data = snap.data();
+
+      // v2: chunked, lossless payload
+      if (data.version === 2 && typeof data.chunkCount === 'number') {
+        const chunks: string[] = [];
+        for (let i = 0; i < data.chunkCount; i++) {
+          const cs = await getDoc(doc(db, 'user_workspaces', chunkDocId(userId, i)));
+          chunks.push(cs.exists() ? (cs.data().data || '') : '');
+        }
+        const payload = decodeWorkspace<{ sessions?: any[]; lastApp?: string }>(chunks) || {};
+        return res.json({
+          sessions: payload.sessions || [],
+          lastApp: payload.lastApp || '',
+          updatedAt: data.updatedAt || null,
+        });
+      }
+
+      // Legacy v1: single inline doc (read transparently)
       return res.json({
         sessions: data.sessions || [],
         lastApp: data.lastApp || '',
@@ -77,28 +63,47 @@ export function registerSyncRoutes(app: Express): void {
     if (!userId) return res.status(400).json({ error: 'User is not authenticated' });
     if (!db) return res.json({ ok: false, reason: 'db_unavailable' });
     try {
-      const incoming = Array.isArray(req.body?.sessions) ? req.body.sessions : [];
-      let lastApp = typeof req.body?.lastApp === 'string' ? req.body.lastApp : '';
-      if (lastApp.length > 200_000) lastApp = lastApp.slice(0, 200_000);
+      const sessions = Array.isArray(req.body?.sessions) ? req.body.sessions : [];
+      const lastApp = typeof req.body?.lastApp === 'string' ? req.body.lastApp : '';
 
-      // Newest first, then slim, then drop oldest until under the size budget
-      let slim = incoming
-        .map(slimSession)
-        .sort((a: any, b: any) => new Date(b.lastUpdated || 0).getTime() - new Date(a.lastUpdated || 0).getTime());
+      const encoded = encodeWorkspace({ sessions, lastApp });
+      if (encoded.manifest.totalBytes > MAX_WORKSPACE_BYTES) {
+        return res.status(413).json({
+          error: 'Workspace too large to sync',
+          totalBytes: encoded.manifest.totalBytes,
+          limit: MAX_WORKSPACE_BYTES,
+        });
+      }
 
-      const fits = (arr: any[]) =>
-        Buffer.byteLength(JSON.stringify({ sessions: arr, lastApp }), 'utf8') <= WORKSPACE_MAX_BYTES;
+      // Find how many chunks existed before (to clean up stale chunk docs).
+      let prevChunkCount = 0;
+      const prevSnap = await getDoc(doc(db, 'user_workspaces', userId));
+      if (prevSnap.exists() && typeof prevSnap.data().chunkCount === 'number') {
+        prevChunkCount = prevSnap.data().chunkCount;
+      }
 
-      while (slim.length > 0 && !fits(slim)) slim = slim.slice(0, -1);
+      // Write all chunk docs.
+      for (let i = 0; i < encoded.chunks.length; i++) {
+        await setDoc(doc(db, 'user_workspaces', chunkDocId(userId, i)), { data: encoded.chunks[i] });
+      }
+      // Delete any leftover chunks from a previously-larger save.
+      for (let i = encoded.chunks.length; i < prevChunkCount; i++) {
+        await deleteDoc(doc(db, 'user_workspaces', chunkDocId(userId, i)));
+      }
 
-      const payload = {
+      // Write the manifest last (so a partial write is never read as complete).
+      await setDoc(doc(db, 'user_workspaces', userId), {
         userId,
-        sessions: slim,
-        lastApp,
-        updatedAt: new Date().toISOString(),
-      };
-      await setDoc(doc(db, 'user_workspaces', userId), payload);
-      return res.json({ ok: true, stored: slim.length, updatedAt: payload.updatedAt });
+        ...encoded.manifest,
+      });
+
+      return res.json({
+        ok: true,
+        stored: sessions.length,
+        chunks: encoded.chunks.length,
+        totalBytes: encoded.manifest.totalBytes,
+        updatedAt: encoded.manifest.updatedAt,
+      });
     } catch (err: any) {
       console.error('[API SYNC POST ERROR]:', err?.message || err);
       return res.status(500).json({ error: err?.message || 'Sync save failed' });

@@ -199,6 +199,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   server.ts 1957 → 1927. This de-interleaves the chat unit. NEXT = step c:
   `routeRequest` (~296-403) + `chatHandler` (~620-830) + LANGUAGE_RULE + `/api/chat/*`
   registrations → `routes/chat.ts` (uses aiCalls + offlineResponse + aiRouter + db + audit).
+- **Milestone 1.28 — DONE (2026-06-15)**: Removed dead `routeRequest` function
+  (~107 lines, defined but never called — chatHandler uses `aiRouter.route()` directly).
+  server.ts 1927 → 1820. NEXT = step c: chatHandler (~515-730 now) + chat prompt
+  builders (LANGUAGE_RULE, SYSTEM_PROMPT_EDIT/CHAT, buildDynamicPrompt, buildFreeSystemPrompt)
+  + `/api/chat/*` registrations → `routes/chat.ts` (+ move prompt builders to prompts.ts).
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

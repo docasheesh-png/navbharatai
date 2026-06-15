@@ -6294,10 +6294,26 @@ CLINICAL TOOLS (when doctor requests via Quick Tools or in conversation):
 - PREGNANCY SAFETY: For each drug — FDA category (A/B/C/D/X), trimester-specific risks, breast milk transfer, neonatal effects, safer alternatives, dose adjustments in pregnancy.
 - REFERRAL DECISION: Referral yes/no with clear criteria, specialty, urgency (emergency/urgent/routine/elective), what to include in referral letter, pre-referral workup, escalation triggers.
 
+RURAL & RESOURCE-LIMITED SETTINGS (CRITICAL FOR VILLAGE/PHC DOCTORS):
+- Always give a clear "Manage here" vs "Refer NOW" decision with explicit criteria
+- For every investigation: provide clinical alternative if test unavailable ("If ECG unavailable, assess by...")
+- Prioritize drugs from India NLEM / WHO Essential Medicines List (available at PHC/CHC level)
+- Referral: include pre-transfer stabilization steps, mode of transport, and what to tell the referral centre
+- Flag region- and season-specific Indian conditions: Malaria, Dengue, Typhoid, TB, Leptospirosis, Snake bite, Kala-azar, Scrub typhus, Pesticide/organophosphate poisoning, Nutritional deficiencies (iron, B12, Vit D)
+- Pediatric: apply IMCI guidelines, screen for SAM/MAM criteria
+- Telemedicine-ready: assessments must be communicable over phone/WhatsApp when needed
+
 END-OF-CASE SIGNAL: When you provide a final diagnosis, treatment plan, management summary, or discharge advice — conclude your response with this exact line on its own:
 [CASE_COMPLETE]
 
 LANGUAGE: Primarily English medical terminology. Can use Hinglish for brief clarifications if needed.
+
+CLINICAL NOTE UPDATE — MANDATORY ON EVERY RESPONSE:
+At the very START of your response (before your reply to the doctor), output a clinical note block:
+[CLINICAL_JSON]
+{"demographics":{"age":"...","sex":"...","weight":"..."},"chiefComplaint":"...","hpi":"...","vitals":{"temp":"...","pulse":"...","bp":"...","rr":"...","spo2":"..."},"pmh":[],"medications":[],"allergies":[],"examination":"...","investigations":[],"redFlags":[],"differentials":[],"stage":"demographics|cc|hpi|history|examination|investigations|differential|complete"}
+[/CLINICAL_JSON]
+Rules: Only include fields collected so far. Merge and UPDATE — never remove previously collected data. Keep values brief (machine-readable, not prose). This block is stripped before the doctor sees it — it is purely for memory continuity across the full case.
 
 IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, evidence-based, and respectful of physician authority.`;
 
@@ -6340,11 +6356,21 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         return flags;
       };
 
-      // Use server-side stored history (last 20 turns) as the authoritative context
-      const historyForAI = storedMsgs.slice(-20).map(m => ({
-        role: m.role,
-        content: m.content,
-      }));
+      // Build AI context: pinned clinical snapshot + last 6 raw exchanges
+      // The clinical snapshot encodes ALL collected patient data in ~200 tokens regardless of session length.
+      // This means SDA never forgets demographics/symptoms from turn 1 even at turn #300.
+      const hasClinicalData = Object.keys(clinicalEntry.patientData).length > 0 || clinicalEntry.redFlags.length > 0;
+      const clinicalSnapshot = hasClinicalData
+        ? JSON.stringify({ patientData: clinicalEntry.patientData, redFlags: clinicalEntry.redFlags, stage: clinicalEntry.stage })
+        : null;
+
+      const historyForAI: Array<{ role: 'user' | 'assistant'; content: string }> = [
+        ...(clinicalSnapshot ? [
+          { role: 'user' as const, content: `[CASE_CONTEXT]\n${clinicalSnapshot}\n[/CASE_CONTEXT]\nContinue the clinical assessment. Do NOT re-ask anything already recorded in the context above.` },
+          { role: 'assistant' as const, content: 'Understood. Full clinical context loaded. Continuing without repeating any question already answered.' },
+        ] : []),
+        ...storedMsgs.slice(-6).map(m => ({ role: m.role, content: m.content })),
+      ];
 
       let reply = '';
 
@@ -6491,6 +6517,28 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       if (!reply) {
         console.error('[SDA] All AI providers failed — returning 503');
         return res.status(503).json({ error: 'AI service unavailable. Please check API keys.' });
+      }
+
+      // ── Extract CLINICAL_JSON from reply and persist to session store ──────────
+      const clinicalJsonMatch = reply.match(/\[CLINICAL_JSON\]([\s\S]*?)\[\/CLINICAL_JSON\]/);
+      if (clinicalJsonMatch) {
+        try {
+          const x = JSON.parse(clinicalJsonMatch[1].trim());
+          if (x.demographics) clinicalEntry.patientData = { ...clinicalEntry.patientData, ...x.demographics };
+          if (x.vitals) clinicalEntry.patientData.vitals = { ...(clinicalEntry.patientData.vitals || {}), ...x.vitals };
+          if (x.hpi) clinicalEntry.patientData.hpi = x.hpi;
+          if (x.chiefComplaint) clinicalEntry.patientData.chiefComplaint = x.chiefComplaint;
+          if (x.examination) clinicalEntry.patientData.examination = x.examination;
+          for (const k of ['pmh', 'medications', 'allergies', 'investigations', 'differentials'] as const) {
+            if ((x as any)[k]?.length) (clinicalEntry.patientData as any)[k] = (x as any)[k];
+          }
+          if (x.redFlags?.length) {
+            for (const f of x.redFlags) if (!clinicalEntry.redFlags.includes(f)) clinicalEntry.redFlags.push(f);
+          }
+          if (x.stage) clinicalEntry.stage = x.stage;
+          console.log(`[SDA] Clinical JSON updated — stage: ${clinicalEntry.stage}, session: ${sdaSessionId}`);
+        } catch (e) { console.warn('[SDA] Clinical JSON parse error:', e); }
+        reply = reply.replace(/\[CLINICAL_JSON\][\s\S]*?\[\/CLINICAL_JSON\]\s*/g, '').trim();
       }
 
       // Strip [CASE_COMPLETE] marker from reply before sending to client

@@ -130,6 +130,11 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
 - **Milestone 1.18 — DONE (2026-06-15)**: Moved `/api/admin/login` into
   `routes/admin.ts` (`registerAdminRoutes(app, adminLimiter)`). routes 16 → 15;
   server.ts 4220 → 4188. Verified green.
+- **Milestone 1.19 — DONE (2026-06-15)**: Extracted ZIP import/export routes
+  (`/api/extract-zip` SSE, `/api/download-zip`) → `src/server/routes/zip.ts`.
+  routes 15 → 13; server.ts 4188 → 3979 (<4k!). Verified green. Remaining in
+  server.ts: the coupled AI core (chat/* , /api/chat, pro-chat, pro-build,
+  sda-chat, security/scan, audit/full) + SPA catch-all/health.
 - **Next milestones**: extract remaining groups — admin (`/api/admin/*`),
   sync, payment, github, secrets, chat/pro-chat/pro-build/sda — each green+push.
   Then move shared helpers/limiters to modules, add server tsconfig, enable strict

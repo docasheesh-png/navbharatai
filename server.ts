@@ -177,7 +177,7 @@ setInterval(() => {
   const chatLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 20,   // 20 req/min per user — generous for normal chat, tight for abuse
-    keyGenerator: (req) => (req.headers['x-user-id'] as string) || ipKeyGenerator(req),
+    keyGenerator: (req) => (req.headers['x-user-id'] as string) || ipKeyGenerator(req as any),
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests. Please wait a moment before sending again.' },
@@ -186,7 +186,7 @@ setInterval(() => {
   const paymentLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 5,
-    keyGenerator: (req) => ipKeyGenerator(req),
+    keyGenerator: (req) => ipKeyGenerator(req as any),
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many payment requests. Please slow down.' },
@@ -195,7 +195,7 @@ setInterval(() => {
   const adminLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 5,
-    keyGenerator: (req) => ipKeyGenerator(req),
+    keyGenerator: (req) => ipKeyGenerator(req as any),
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many admin requests.' },

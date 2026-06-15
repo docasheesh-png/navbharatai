@@ -23,5 +23,8 @@ jobs:
       - name: Typecheck (frontend)
         run: npm run typecheck
 
+      - name: Typecheck (server modules - strict guardrail)
+        run: npm run typecheck:server
+
       - name: Test
         run: npm test

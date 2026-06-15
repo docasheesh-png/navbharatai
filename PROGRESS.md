@@ -270,3 +270,10 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   compat — no existing user data breaks). Verified module strict tsc + server bundle +
   load + frontend tsc 0 + 22 tests. **Phase 2 persistence redesign DONE.**
   NEXT (Phase 2 remaining): wire VFS/VersionStore into AppEngine/pro build flow; then PHASE 3.
+- **Milestone 2.5 — DONE (2026-06-15)**: Added a **server strict-typecheck guardrail** —
+  `tsconfig.server.json` (strict over routes/lib/project), `npm run typecheck:server`,
+  wired into CI. This is the check that caught the 1.30 startup crash; it now blocks that
+  whole bug class (undefined names / missing imports) permanently. Fixed the 6 surfaced
+  type issues with behavior-preserving casts (server.ts ipKeyGenerator x3, pro.ts 'free'
+  tier x2, sda.ts generateContent). Verified: frontend tsc 0 + server guardrail 0 + 22
+  tests + server boots cleanly ("🚀 Server running"). 

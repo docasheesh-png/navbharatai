@@ -538,7 +538,7 @@ Response Format:
           try {
             const planRaw = await aiRouter.route(
               `User request: "${message.slice(0, 500)}"\n\nFiles:\n${fileListStr}\n\nWhich 1-2 files to edit? JSON only: {"targets":["path"]}`,
-              [], 'free', undefined,
+              [], 'free' as any, undefined,
               'TypeScript architect. Return only valid JSON {"targets":["path/to/file.tsx"]}.'
             );
             const parsed = JSON.parse(planRaw.replace(/```json?|```/g, '').trim());
@@ -555,7 +555,7 @@ Response Format:
             try {
               const updated = await aiRouter.route(
                 `Edit this TypeScript/React file.\n\nUSER REQUEST: "${message.slice(0, 500)}"${historyContext ? `\nHISTORY:\n${historyContext.slice(0, 600)}` : ''}\n\nFILE: ${filePath}\n\n${original}\n\nReturn ONLY the complete updated file. No markdown.`,
-                [], 'free', undefined,
+                [], 'free' as any, undefined,
                 'TypeScript/React expert. Return ONLY the complete updated file content. No markdown fences, no explanation.'
               );
               updatedFiles[filePath] = updated;

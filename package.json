@@ -10,6 +10,7 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
+    "typecheck:server": "tsc -p tsconfig.server.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "gcloud:build": "gcloud builds submit --config=cloudbuild.yaml .",

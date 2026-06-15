@@ -396,3 +396,12 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   apps; this is the detection foundation for real auto-repair. 5 unit tests (67 total).
   frontend tsc 0 + guardrail 0 + tests green. NEXT: feed verifier errors into an agentic
   repair loop (fix → re-verify) using EditEngine; wire EditEngine+verifier into the Pro edit flow.
+- **Milestone 4.3 — DONE (2026-06-15)**: Built the real **auto-repair loop** →
+  `src/server/project/RepairLoop.ts` (`autoRepair(vfs, {generateFixes, versions, maxAttempts})`):
+  verify → AI fixer emits surgical FileEdits → apply via EditEngine (snapshotted) → re-verify →
+  repeat; stops when clean / no edits / no progress (no infinite loops). Replaces the audit's
+  regex-score-then-ship-broken behavior with a real iterative fix loop. Fixer is INJECTED →
+  5 unit tests with fakes (72 total). frontend tsc 0 + guardrail 0 + tests green.
+  **Phase-4 engine core now in place** (EditEngine + ProjectVerifier + RepairLoop) — all pure,
+  tested, infra-independent. NEXT (integration): wire these + aiCalls into the Pro build/edit
+  flow so it emits FileEdits + self-repairs; multi-file planning; then Phase 3 finish + Phase 5.

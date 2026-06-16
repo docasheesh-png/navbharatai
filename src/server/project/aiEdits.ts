@@ -13,6 +13,7 @@ import type { FileEdit } from './EditEngine';
 import type { VirtualFileSystem } from './ProjectModel';
 import type { ProjectIssue } from './ProjectVerifier';
 import { selectArchitecture, manifestContract } from './ArchitectureManifest';
+import { featureChecklist } from './FeatureCoverage';
 
 /** Extract the first JSON value (array or object) from arbitrary model text. */
 function extractJson(raw: string): unknown {
@@ -141,8 +142,9 @@ function isScaffoldState(vfs: VirtualFileSystem): boolean {
 /** Ask the model for a complete file plan (architecture) for a fresh app build. */
 async function planFiles(callModel: ModelCall, prompt: string): Promise<PlannedFile[]> {
   const contract = manifestContract(selectArchitecture(prompt));
+  const checklist = featureChecklist(prompt);
   const sys = `You are a senior software architect planning a real, runnable multi-file web app.\n\n${contract}\n\n${ENGINEERING_RULES}\n\n${PLAN_FORMAT}`;
-  const raw = await callModel(sys, `App request:\n${prompt}\n\nPlan the full file tree now. Conform strictly to the ARCHITECTURE above — one framework only.`);
+  const raw = await callModel(sys, `App request:\n${prompt}\n\n${checklist ? checklist + '\n\n' : ''}Plan the full file tree now. Conform strictly to the ARCHITECTURE above — one framework only. Ensure EVERY checklist feature maps to concrete files.`);
   const json: any = extractJson(raw);
   const arr: any[] = Array.isArray(json) ? json : Array.isArray(json?.files) ? json.files : [];
   const seen = new Set<string>();
@@ -160,12 +162,13 @@ async function planFiles(callModel: ModelCall, prompt: string): Promise<PlannedF
 async function generateBatched(callModel: ModelCall, prompt: string, plan: PlannedFile[]): Promise<FileEdit[]> {
   const BATCH = 3;
   const contract = manifestContract(selectArchitecture(prompt));
+  const checklist = featureChecklist(prompt);
   const planStr = plan.map(f => `- ${f.path}: ${f.purpose}`).join('\n');
   const edits: FileEdit[] = [];
   const done = new Set<string>();
   for (let i = 0; i < plan.length; i += BATCH) {
     const batch = plan.slice(i, i + BATCH);
-    const sys = `You are a world-class engineer writing complete files of a real multi-file app.\n\n${contract}\n\n${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
+    const sys = `You are a world-class engineer writing complete files of a real multi-file app.\n\n${contract}\n\n${checklist ? checklist + '\n\n' : ''}${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
     const user = `App request:\n${prompt}\n\nFull file plan (for cross-file imports):\n${planStr}\n\n`
       + `Write COMPLETE, fully-functional content for ONLY these files (one write op each):\n${batch.map(f => `- ${f.path}: ${f.purpose}`).join('\n')}\n`
       + `Make imports/paths match the plan exactly. No TODOs, no placeholders.`;
@@ -192,10 +195,12 @@ export function makeAiEditGenerator(callModel: ModelCall) {
       } catch { /* fall through to single-shot below */ }
     }
 
-    const contract = isScaffoldState(vfs) ? manifestContract(selectArchitecture(prompt)) + '\n\n' : '';
-    const sys = `You are a world-class full-stack engineer building a real, multi-file web application that must actually build and run.\n\n${contract}${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
-    const user = isScaffoldState(vfs)
-      ? `Build this application from scratch as a complete, runnable multi-file project.\n\nUser request:\n${prompt}\n\nReturn the full set of files needed to run it.`
+    const fresh = isScaffoldState(vfs);
+    const contract = fresh ? manifestContract(selectArchitecture(prompt)) + '\n\n' : '';
+    const checklist = fresh ? featureChecklist(prompt) : '';
+    const sys = `You are a world-class full-stack engineer building a real, multi-file web application that must actually build and run.\n\n${contract}${checklist ? checklist + '\n\n' : ''}${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
+    const user = fresh
+      ? `Build this application from scratch as a complete, runnable multi-file project.\n\nUser request:\n${prompt}\n\nReturn the full set of files needed to run it — implement EVERY requested feature, not just a shell.`
       : `Current project files (with contents — use exact text for "patch" finds):\n\n${fileContext(vfs)}\n\nUser request:\n${prompt}\n\nApply the minimal correct set of edits. Keep all existing references valid.`;
     return parseFileEdits(await callModel(sys, user));
   };

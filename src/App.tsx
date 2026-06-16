@@ -3739,40 +3739,35 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
       const intent = isConfirmBuild ? 'direct_build' : classifyAutoIntent(messageToSend, proMessages);
 
       if (intent === 'direct_build' || intent === 'plan_build') {
-        // For plan_build → ask AI to plan first, then show "Build" button
-        // For direct_build → ask AI to confirm briefly, then trigger build via __AUTO_BUILD__
+        // AUTO mode NEVER auto-starts a build and NEVER switches mode by itself.
+        // A build request only produces a friendly reply + an explicit "Build"
+        // button; the actual build runs ONLY when the user taps it (which sends
+        // __CONFIRM_AUTO_BUILD__ → isConfirmBuild).
+        if (isConfirmBuild) {
+          setIsProLoading(false);
+          proAbortControllerRef.current = null;
+          setTimeout(() => handleSendForPro(actualMessage, true), 50);
+          return;
+        }
         try {
           const response = await fetch('/api/pro-chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             signal: abortController.signal,
             body: JSON.stringify({
-              message: isConfirmBuild ? `User confirmed build. Now build this: ${actualMessage}` : messageToSend,
+              message: messageToSend,
               history: proHistoryForAPI.slice(-40).map((m: any) => ({ sender: m.sender, text: String(m.text || '').replace(/__CONFIRM_AUTO_BUILD__|__AUTO_PLAN__|__AUTO_BUILD__/g, '').slice(0, 1500) })),
               memorySummary: proMemorySummary,
-              mode: intent === 'plan_build' ? 'auto_plan' : 'auto_build',
+              mode: 'auto_plan',
               ...(fileAttachments.length > 0 ? { fileData: fileAttachments[0].base64, fileType: fileAttachments[0].type, fileName: fileAttachments[0].name } : {}),
             }),
           });
           if (!response.ok) throw new Error(`API Error: ${response.status}`);
           const data = await response.json();
-          const reply: string = data.reply || '';
-
-          if (reply.includes('__AUTO_BUILD__') || isConfirmBuild) {
-            // Show brief confirmation message (clean), then trigger actual build
-            const cleanReply = reply.replace('__AUTO_BUILD__', '').trim();
-            if (cleanReply) {
-              setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: cleanReply, sender: 'ai', timestamp: new Date() }]);
-            }
-            setIsProLoading(false);
-            proAbortControllerRef.current = null;
-            // forceBuild=true bypasses auto routing → goes straight to /api/pro-build
-            setTimeout(() => handleSendForPro(actualMessage, true), 400);
-            return;
-          } else {
-            // __AUTO_PLAN__ or no marker — show plan with "Build" button
-            setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: reply, sender: 'ai', timestamp: new Date() }]);
-          }
+          // Strip any auto-build marker; always surface the explicit Build button.
+          let reply: string = String(data.reply || '').replace(/__AUTO_BUILD__/g, '').trim();
+          if (!reply.includes('__AUTO_PLAN__')) reply = `${reply}\n\n__AUTO_PLAN__`;
+          setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: reply, sender: 'ai', timestamp: new Date() }]);
         } catch (e: any) {
           if (e.name !== 'AbortError') {
             setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: 'Something went wrong. Try again!', sender: 'ai', timestamp: new Date() }]);

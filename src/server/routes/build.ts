@@ -75,10 +75,13 @@ export function registerBuildRoutes(app: Express): void {
         fix,
       });
 
+      // Preview is a privilege: only start it when the critical gates pass.
       let previewInfo: unknown = undefined;
-      if (preview) {
+      if (preview && result.previewAllowed) {
         const vfs = VirtualFileSystem.fromRecord(result.files);
         previewInfo = await previewService.startPreview('build', vfs);
+      } else if (preview && !result.previewAllowed) {
+        previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
       }
 
       return res.json({
@@ -90,6 +93,8 @@ export function registerBuildRoutes(app: Express): void {
         verify: result.verify,
         repairAttempts: result.repairAttempts,
         baselineSnapshotId: result.baselineSnapshotId,
+        validation: result.validation,
+        previewAllowed: result.previewAllowed,
         preview: previewInfo,
       });
     } catch (err: any) {

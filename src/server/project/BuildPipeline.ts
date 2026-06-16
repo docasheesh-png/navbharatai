@@ -17,6 +17,8 @@ import { applyEdits, type FileEdit } from './EditEngine';
 import { verifyProject, type VerifyResult } from './ProjectVerifier';
 import { autoRepair, type FixGenerator } from './RepairLoop';
 import { detectFramework, scaffold, type Framework } from './Scaffold';
+import { runValidation, type ValidationReport } from './ValidationPipeline';
+import { selectArchitecture } from './ArchitectureManifest';
 
 export type EditGenerator = (prompt: string, vfs: VirtualFileSystem) => Promise<FileEdit[]>;
 
@@ -45,6 +47,10 @@ export interface BuildPipelineResult {
   fileCount: number;
   /** Framework skeleton seeded for a fresh build, if any. */
   scaffolded?: Framework;
+  /** Structured validation report — gates, quality score, preview decision. */
+  validation: ValidationReport;
+  /** Preview is a privilege: only true when critical gates pass (no fake success). */
+  previewAllowed: boolean;
 }
 
 export async function runBuild(input: BuildPipelineInput): Promise<BuildPipelineResult> {
@@ -71,6 +77,9 @@ export async function runBuild(input: BuildPipelineInput): Promise<BuildPipeline
     maxAttempts: input.maxRepairAttempts ?? 3,
   });
 
+  // Final validation gates → structured report + preview decision (no fake success).
+  const validation = runValidation(vfs, selectArchitecture(input.prompt));
+
   return {
     ok: repair.finalVerify.ok,
     files: vfs.toRecord(),
@@ -81,5 +90,7 @@ export async function runBuild(input: BuildPipelineInput): Promise<BuildPipeline
     baselineSnapshotId,
     fileCount: vfs.count,
     scaffolded,
+    validation,
+    previewAllowed: validation.previewAllowed,
   };
 }

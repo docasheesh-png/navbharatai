@@ -2175,7 +2175,16 @@ ${buildLanguageRule(preferredLanguage)}`;
     return base;
   }
   function injectCss(src){var s=document.createElement('style');s.textContent=src;document.head.appendChild(s);}
-  function interop(ns){var m={};for(var k in ns){m[k]=ns[k];}m.__esModule=true;if(m.default===undefined)m.default=ns;return m;}
+  function interop(ns){
+    if(!ns)return{__esModule:true,default:ns};
+    var m={__esModule:true};
+    // Object.assign copies enumerable own props (works for most modules)
+    try{Object.assign(m,ns);}catch(e){}
+    // getOwnPropertyNames also catches non-enumerable own props on ES module namespace objects
+    try{Object.getOwnPropertyNames(ns).forEach(function(k){if(k==='__esModule')return;try{if(m[k]==null)m[k]=ns[k];}catch(e){}});}catch(e){}
+    if(m.default===undefined)m.default=ns;
+    return m;
+  }
   var bareCache={},cache={};
   function requireMod(path){
     if(cache[path])return cache[path].exports;
@@ -2209,7 +2218,8 @@ ${buildLanguageRule(preferredLanguage)}`;
   }
   // Resolve a bare import spec to CDN URL: importmap first, then esm.sh
   function specUrl(spec){
-    if(spec.indexOf('://')>0)return spec;
+    // Already a full URL (https://) or protocol-relative (//) — use as-is
+    if(spec.indexOf('://')>0||spec.slice(0,2)==='//')return spec;
     if(IMAP[spec])return IMAP[spec];
     var root=spec.charAt(0)==='@'?spec.split('/').slice(0,2).join('/'):spec.split('/')[0];
     if(IMAP[root])return IMAP[root]+spec.slice(root.length);
@@ -2220,10 +2230,17 @@ ${buildLanguageRule(preferredLanguage)}`;
   (async function(){
     try{
       var bare=collectBare();forced.forEach(function(s){if(bare.indexOf(s)<0)bare.push(s);});
+      var failedDeps=[];
       await Promise.all(bare.map(async function(spec){
         try{bareCache[spec]=interop(await import(specUrl(spec)));}
-        catch(e){console.warn('[preview] failed to load',spec,e&&e.message);}
+        catch(e){failedDeps.push(spec);console.warn('[preview] failed to load',spec,e&&e.message);}
       }));
+      // Critical: React itself must load or nothing can render
+      if(!bareCache['react']||!bareCache['react-dom/client']){
+        window.__nbLoading=false;
+        fail('Failed to load React from CDN'+(failedDeps.length?' (blocked: '+failedDeps.slice(0,3).join(', ')+')':'')+'. Check internet connection.');
+        return;
+      }
       if(!ENTRY){window.__nbLoading=false;fail('No runnable entry file found in this app.');return;}
       var mod=requireMod(ENTRY);
       // Auto-mount: if the entry only exports a React component (no ReactDOM.render call),
@@ -2522,7 +2539,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
 
   // Inject the never-blank harness into a static HTML document
   const injectHarness = (doc: string): string => {
-    if (doc.includes('__nb_overlay')) return doc;
+    if (doc.includes('id="__nb_err"') || doc.includes("id='__nb_err'") || doc.includes('__nbShowError')) return doc;
     if (/<\/head>/i.test(doc)) return doc.replace(/<\/head>/i, PREVIEW_HARNESS + '</head>');
     if (/<body[^>]*>/i.test(doc)) return doc.replace(/(<body[^>]*>)/i, '$1' + PREVIEW_HARNESS);
     return PREVIEW_HARNESS + doc;
@@ -2601,7 +2618,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
 
       // Inject any remaining CSS not already inlined
       if (allCss) {
-        const styleTag = `<style id="nb-injected-css">${allCss}</style>`;
+        const styleTag = `<style id="nb-injected-css">${allCss.replace(/<\/style>/gi, '<\\/style>')}</style>`;
         if (finalHtml.includes('</head>')) {
           finalHtml = finalHtml.replace('</head>', `${styleTag}</head>`);
         } else if (finalHtml.includes('<body>')) {

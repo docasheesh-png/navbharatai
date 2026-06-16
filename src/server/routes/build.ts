@@ -66,13 +66,14 @@ export function registerBuildRoutes(app: Express): void {
 
       // Model call backed by the shared aiCalls layer — multi-provider with fallback.
       const callModel: ModelCall = makeResilientModelCall(userKey);
-      const { generate, fix } = makeAiEditGenerator(callModel);
+      const { generate, fix, completeFeatures } = makeAiEditGenerator(callModel);
 
       const result = await runBuild({
         prompt,
         files: files && typeof files === 'object' ? files : undefined,
         generate,
         fix,
+        completeFeatures,
       });
 
       // Preview is a privilege: only start it when the critical gates pass.

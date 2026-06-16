@@ -210,5 +210,16 @@ export function makeAiEditGenerator(callModel: ModelCall) {
     const user = `Current project files (with contents):\n\n${fileContext(vfs)}\n\nFix exactly these issues without breaking anything else:\n${issues.map(i => `- [${i.severity}] ${i.file}: ${i.message}`).join('\n')}`;
     return parseFileEdits(await callModel(sys, user));
   };
-  return { generate, fix };
+  // Agentic feature completion: implement the requested features that are still
+  // missing, editing the EXISTING project (so a shell becomes a working app).
+  const completeFeatures = async (prompt: string, missing: string[], vfs: VirtualFileSystem): Promise<FileEdit[]> => {
+    if (!missing.length) return [];
+    const contract = manifestContract(selectArchitecture(prompt));
+    const sys = `You are a world-class engineer ADDING missing features to an existing app — keep the SAME architecture, never mix frameworks.\n\n${contract}\n\n${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
+    const user = `Current project files (with contents):\n\n${fileContext(vfs)}\n\nApp request:\n${prompt}\n\n`
+      + `These requested features are MISSING — implement them with real, working code, wiring them into the existing app (routes/components/state as needed):\n`
+      + missing.map((m) => `- ${m}`).join('\n');
+    return parseFileEdits(await callModel(sys, user));
+  };
+  return { generate, fix, completeFeatures };
 }

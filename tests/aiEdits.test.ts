@@ -38,29 +38,41 @@ describe('parseFileEdits', () => {
 });
 
 describe('makeAiEditGenerator', () => {
-  it('generate calls the model and parses edits', async () => {
-    const callModel = vi.fn(async () => '[{"op":"write","path":"index.html","content":"<h1>hi</h1>"}]');
+  it('fresh build plans the file tree then generates files in batches', async () => {
+    // 1st call = plan (returns a multi-file plan); subsequent = batch write ops.
+    const callModel = vi.fn()
+      .mockResolvedValueOnce('{"entry":"index.html","files":[{"path":"index.html","purpose":"entry"},{"path":"src/App.jsx","purpose":"root"}]}')
+      .mockResolvedValue('[{"op":"write","path":"index.html","content":"<div id=root></div>"},{"op":"write","path":"src/App.jsx","content":"export default ()=>null"}]');
+    const { generate } = makeAiEditGenerator(callModel);
+    const edits = await generate('a kanban board', VirtualFileSystem.fromRecord({}));
+    // planning call happened first, with the request
+    expect(callModel.mock.calls[0][1]).toContain('a kanban board');
+    expect(callModel.mock.calls[0][0]).toContain('architect');
+    // produced multiple files
+    expect(edits.filter(e => e.op === 'write').length).toBeGreaterThanOrEqual(2);
+    expect(edits.some(e => e.path === 'src/App.jsx')).toBe(true);
+  });
+
+  it('falls back to single-shot when the plan is not multi-file', async () => {
+    // plan returns junk → no usable plan → single-shot fresh build path
+    const callModel = vi.fn()
+      .mockResolvedValueOnce('no json here')
+      .mockResolvedValue('[{"op":"write","path":"index.html","content":"<h1>hi</h1>"}]');
     const { generate } = makeAiEditGenerator(callModel);
     const edits = await generate('make a page', VirtualFileSystem.fromRecord({}));
     expect(edits).toEqual([{ op: 'write', path: 'index.html', content: '<h1>hi</h1>' }]);
-    expect(callModel).toHaveBeenCalledOnce();
-    // the user prompt includes the request
-    expect(callModel.mock.calls[0][1]).toContain('make a page');
+    // the single-shot call uses the from-scratch wording
+    const lastUser = callModel.mock.calls[callModel.mock.calls.length - 1][1];
+    expect(lastUser).toContain('from scratch');
   });
 
   it('generate includes existing file CONTENTS (not just paths) for edits', async () => {
     const callModel = vi.fn(async () => '[]');
     const { generate } = makeAiEditGenerator(callModel);
+    // real (non-scaffold) project → surgical edit path, single call with contents
     const vfs = VirtualFileSystem.fromRecord({ 'index.html': '<h1>SENTINEL_CONTENT</h1>' });
     await generate('change the heading', vfs);
     expect(callModel.mock.calls[0][1]).toContain('SENTINEL_CONTENT');
-  });
-
-  it('generate treats an empty project as a fresh from-scratch build', async () => {
-    const callModel = vi.fn(async () => '[]');
-    const { generate } = makeAiEditGenerator(callModel);
-    await generate('a todo app', VirtualFileSystem.fromRecord({}));
-    expect(callModel.mock.calls[0][1]).toContain('from scratch');
   });
 
   it('fix returns [] when there are no issues (no model call)', async () => {

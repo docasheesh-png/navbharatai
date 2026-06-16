@@ -2141,17 +2141,18 @@ ${buildLanguageRule(preferredLanguage)}`;
   window.addEventListener('error',function(e){show('Preview Error',(e&&e.message)||(e&&e.error&&e.error.message)||'Script error');});
   window.addEventListener('unhandledrejection',function(e){show('Preview Error',(e&&e.reason&&e.reason.message)||(e&&e.reason)||'Promise rejected');});
   function isEmpty(){
+    if(window.__nbLoading)return false;
     var t=(document.body&&document.body.innerText||'').trim();
     var v=document.querySelector('canvas,svg,img,video,input,button,#root *,#app *,[data-reactroot] *');
     return !t&&!v;
   }
-  // Double-check (2s then 3.5s) so apps that render slightly late don't trigger a false overlay.
+  // Check at 4s then 7s — React+CDN can take 4-6s on slow connections; don't show false "empty" while loading.
   setTimeout(function(){
     if(document.getElementById('__nb_err')||!isEmpty())return;
     setTimeout(function(){
       if(!document.getElementById('__nb_err')&&isEmpty())show('Preview is empty','The app rendered nothing — it may need a build step, or hit a runtime error.');
-    },1500);
-  },2000);
+    },3000);
+  },4000);
 })();
 </script>`;
 
@@ -2215,6 +2216,7 @@ ${buildLanguageRule(preferredLanguage)}`;
     return ESM+spec;
   }
   var forced=['react','react-dom','react-dom/client','react/jsx-runtime','react/jsx-dev-runtime'];
+  window.__nbLoading=true;
   (async function(){
     try{
       var bare=collectBare();forced.forEach(function(s){if(bare.indexOf(s)<0)bare.push(s);});
@@ -2222,9 +2224,25 @@ ${buildLanguageRule(preferredLanguage)}`;
         try{bareCache[spec]=interop(await import(specUrl(spec)));}
         catch(e){console.warn('[preview] failed to load',spec,e&&e.message);}
       }));
-      if(!ENTRY){fail('No runnable entry file found in this app.');return;}
-      requireMod(ENTRY);
+      if(!ENTRY){window.__nbLoading=false;fail('No runnable entry file found in this app.');return;}
+      var mod=requireMod(ENTRY);
+      // Auto-mount: if the entry only exports a React component (no ReactDOM.render call),
+      // mount it automatically so component-only entry files work without a separate main.jsx.
+      if(mod&&!document.getElementById('__nb_err')){
+        var rootEl=document.getElementById('root')||document.getElementById('app');
+        if(rootEl&&rootEl.childElementCount===0){
+          var Comp=mod.default||(typeof mod==='function'?mod:null);
+          if(Comp&&typeof Comp==='function'){
+            var rdc=bareCache['react-dom/client'],jsx=bareCache['react/jsx-runtime'],rc=bareCache['react'];
+            try{
+              var el=(jsx&&jsx.jsx)?jsx.jsx(Comp,{}):(rc&&rc.createElement)?rc.createElement(Comp,null):null;
+              if(el){if(rdc&&rdc.createRoot)rdc.createRoot(rootEl).render(el);else if(rdc&&rdc.render)rdc.render(el,rootEl);}
+            }catch(ae){}
+          }
+        }
+      }
     }catch(e){fail((e&&e.message)||String(e));}
+    finally{window.__nbLoading=false;}
   })();
 })();`;
 

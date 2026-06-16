@@ -28,14 +28,20 @@ export function registerZipRoutes(app: Express): void {
       '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.avif': 'image/avif',
       '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
       '.otf': 'font/otf', '.eot': 'application/vnd.ms-fontobject',
+      // Media + documents the universal preview viewer can render natively (within size caps).
+      '.pdf': 'application/pdf',
+      '.mp4': 'video/mp4', '.webm': 'video/webm', '.ogv': 'video/ogg',
+      '.mov': 'video/quicktime', '.m4v': 'video/x-m4v', '.mkv': 'video/x-matroska',
+      '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+      '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac',
     };
-    // True binaries that are NOT editable and NOT useful in a web preview — skipped entirely.
+    // True binaries that are NOT editable and NOT renderable in a browser preview — skipped.
+    // (PDF/audio/video are handled as renderable assets above, not skipped.)
     const BINARY_SKIP = new Set([
       '.exe', '.dll', '.so', '.dylib', '.bin', '.o', '.a', '.class', '.wasm', '.node', '.pyc',
       '.zip', '.tar', '.gz', '.tgz', '.rar', '.7z', '.bz2', '.xz', '.jar', '.war',
-      '.mp4', '.webm', '.mov', '.avi', '.mkv', '.flv', '.wmv', '.m4v',
-      '.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma',
-      '.pdf', '.psd', '.ai', '.sketch', '.fig', '.xd', '.blend',
+      '.avi', '.flv', '.wmv', '.wma',
+      '.psd', '.ai', '.sketch', '.fig', '.xd', '.blend',
       '.db', '.sqlite', '.sqlite3', '.mdb', '.dat',
       '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
     ]);
@@ -116,8 +122,9 @@ export function registerZipRoutes(app: Express): void {
               // Skip only true binaries — EVERYTHING else is treated as editable text
               if (!isAsset && BINARY_SKIP.has(ext)) { send({ type: 'skipped', path: entryPath, reason: 'binary' }); next(); return; }
 
-              // Per-file size limits: 8 MB assets, 5 MB text
-              const maxBytes = isAsset ? 8 * 1024 * 1024 : 5 * 1024 * 1024;
+              // Per-file size limits: 16 MB assets (images/media/pdf), 5 MB text. Caps keep the
+              // browser preview safe — a single inlined data-URL beyond this would risk a crash.
+              const maxBytes = isAsset ? 16 * 1024 * 1024 : 5 * 1024 * 1024;
               if (typeof entry.uncompressedSize === 'number' && entry.uncompressedSize > maxBytes) {
                 send({ type: 'skipped', path: entryPath, reason: 'too large' });
                 next();

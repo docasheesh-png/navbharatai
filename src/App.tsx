@@ -2227,7 +2227,8 @@ ${buildLanguageRule(preferredLanguage)}`;
   window.__nbLoading=true;
   (async function(){
     try{
-      var bare=collectBare();forced.forEach(function(s){if(bare.indexOf(s)<0)bare.push(s);});
+      var bare;try{bare=collectBare();}catch(ce){bare=[];}
+      forced.forEach(function(s){if(bare.indexOf(s)<0)bare.push(s);});
       var failedDeps=[];
       await Promise.all(bare.map(async function(spec){
         try{bareCache[spec]=interop(await import(specUrl(spec)));}
@@ -2287,12 +2288,21 @@ ${buildLanguageRule(preferredLanguage)}`;
     if (m) entry = m[1].replace(/^\//, '').replace(/^\.\//, '');
     if (!entry || !srcFiles[entry]) {
       const cands = ['src/main.tsx','src/main.jsx','src/main.ts','src/index.tsx','src/index.jsx','src/index.ts','main.tsx','main.jsx','index.tsx','index.jsx','src/App.tsx','src/App.jsx','App.tsx','App.jsx'];
-      entry = cands.find(c => srcFiles[c]) || Object.keys(srcFiles).find(k => /\.(tsx|jsx)$/i.test(k)) || '';
+      // Prefer candidates that contain actual JSX/rendering code (not just re-exports)
+      const hasRendering = (k: string) => {
+        const v = srcFiles[k] || '';
+        return /createRoot|ReactDOM|render\s*\(|ReactMount|hydrateRoot/.test(v) || /<[A-Z][A-Za-z]*[\s/>]/.test(v);
+      };
+      entry = cands.find(c => srcFiles[c] && hasRendering(c))
+        || cands.find(c => srcFiles[c])
+        || Object.keys(srcFiles).find(k => /\.(tsx|jsx)$/i.test(k) && hasRendering(k))
+        || Object.keys(srcFiles).find(k => /\.(tsx|jsx)$/i.test(k))
+        || '';
     }
 
     // Reuse the app's <body> markup (minus module/external scripts) so #root etc. survive
     let bodyInner = '<div id="root"></div>';
-    const bm = rawHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    const bm = rawHtml.match(/<body[^>]*>([\s\S]*?)<\/body\s*>/i);
     if (bm) {
       bodyInner = bm[1]
         .replace(/<script[^>]*type=["']module["'][^>]*>[\s\S]*?<\/script>/gi, '')
@@ -2350,11 +2360,21 @@ ${buildLanguageRule(preferredLanguage)}`;
   };
 
   const updatePreview = (currentFiles: FileSystem) => {
-    // Strip markdown code fences from any file the AI accidentally wrapped in ```lang ... ``` markers
-    const stripFences = (s: string) =>
-      s.trimStart().startsWith('```')
-        ? s.replace(/^[\s\S]*?```[a-zA-Z]*\r?\n/, '').replace(/\r?\n?```\s*$/, '')
-        : s;
+    // Strip markdown code fences the AI accidentally wraps file content in (```lang\n...\n```)
+    // Line-by-line: strip only the first and last fence lines, never touching inner content.
+    const stripFences = (s: string): string => {
+      const trimmed = s.trimStart();
+      if (!trimmed.startsWith('```')) return s;
+      const lines = s.split(/\r?\n/);
+      // Find first fence line (```lang) and last fence line (```)
+      const first = lines.findIndex(l => /^```/.test(l.trim()));
+      if (first === -1) return s;
+      // Find matching closing fence after the opening line (scan from end for safety)
+      let last = -1;
+      for (let i = lines.length - 1; i > first; i--) { if (/^```\s*$/.test(lines[i].trim())) { last = i; break; } }
+      if (last === -1) return lines.slice(first + 1).join('\n'); // no closing fence — strip opener only
+      return lines.slice(first + 1, last).join('\n');
+    };
     currentFiles = Object.fromEntries(
       Object.entries(currentFiles).map(([k, v]) => [k, typeof v === 'string' ? stripFences(v) : v])
     ) as FileSystem;
@@ -2407,11 +2427,13 @@ ${buildLanguageRule(preferredLanguage)}`;
       });
 
       // Inline external script src — preserve type attribute (e.g. type="text/babel" for React/JSX)
-      finalHtml = finalHtml.replace(/<script([^>]+)src=["']([^"']+)["'][^>]*><\/script>/gi, (match, attrs, src) => {
+      // Handles: single-quoted src, unquoted src, self-closing, missing </script>
+      finalHtml = finalHtml.replace(/<script([^>]*?)\bsrc\s*=\s*["']?([^"'>\s]+)["']?([^>]*)>\s*<\/script>/gi, (match, pre, src, post) => {
         const filename = src.replace(/^\.\//, '').replace(/^\//, '');
         const content = currentFiles[filename];
         if (!content) return match;
-        const typeMatch = attrs.match(/type=["']([^"']+)["']/);
+        const allAttrs = pre + post;
+        const typeMatch = allAttrs.match(/type=["']([^"']+)["']/);
         const typeAttr = typeMatch ? ` type="${typeMatch[1]}"` : '';
         return `<script${typeAttr} data-src="${filename}">${content.replace(/<\//g, '<\\/')}<\/script>`;
       });

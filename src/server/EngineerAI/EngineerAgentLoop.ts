@@ -1,15 +1,7 @@
-import { exec } from 'child_process';
-import path from 'path';
-import util from 'util';
 import { AIRouter } from '../AI/Router/AIRouter';
-import { WorkspaceManager } from '../AppMakerLab/WorkspaceManager';
-import { ScaffoldGenerator } from '../AppMakerLab/generator/ScaffoldGenerator';
+import { IEngineerActuator } from './actuators/IEngineerActuator';
 import { EngineerAgentEvent, EngineerPlan, EngineerTask } from './EngineerAITypes';
 
-const execPromise = util.promisify(exec);
-
-const NAMESPACE = 'engineer';
-const WORKSPACES_ROOT = `/workspaces/${NAMESPACE}`;
 const MAX_ITERATIONS = 8;
 const DEADLINE_MS = 6 * 60 * 1000;
 const MAX_FILES_SHOWN = 25;
@@ -58,15 +50,13 @@ function parsePlan(raw: string): EngineerPlan {
 }
 
 export class EngineerAgentLoop {
-  private workspaceManager = new WorkspaceManager(NAMESPACE);
-
-  constructor(private router: AIRouter) {}
+  constructor(private router: AIRouter, private actuator: IEngineerActuator) {}
 
   async *run(task: EngineerTask): AsyncGenerator<EngineerAgentEvent> {
     const { workspaceId, instruction } = task;
     const deadline = Date.now() + DEADLINE_MS;
 
-    await this.ensureWorkspace(workspaceId);
+    await this.actuator.ensureWorkspace(workspaceId);
 
     let lastBuildLogs = '';
 
@@ -93,11 +83,11 @@ export class EngineerAgentLoop {
 
       if (plan.edits.length > 0) {
         for (const edit of plan.edits) {
-          await this.workspaceManager.writeFile(workspaceId, edit.path, edit.content);
+          await this.actuator.writeFile(workspaceId, edit.path, edit.content);
         }
         yield { type: 'files_changed', paths: plan.edits.map(e => e.path) };
 
-        const buildResult = await this.runBuild(workspaceId);
+        const buildResult = await this.actuator.build(workspaceId);
         lastBuildLogs = buildResult.logs.slice(-MAX_LOG_CHARS);
         yield { type: 'build_result', success: buildResult.success, logs: lastBuildLogs };
       }
@@ -111,34 +101,14 @@ export class EngineerAgentLoop {
     yield { type: 'max_iterations_reached', iterations: MAX_ITERATIONS };
   }
 
-  private async runBuild(workspaceId: string): Promise<{ success: boolean; logs: string }> {
-    const workspacePath = path.join(WORKSPACES_ROOT, workspaceId);
-    try {
-      const install = await execPromise('npm install', { cwd: workspacePath });
-      const build = await execPromise('npm run build', { cwd: workspacePath });
-      return { success: true, logs: install.stdout + install.stderr + build.stdout + build.stderr };
-    } catch (err: any) {
-      return { success: false, logs: `${err.stdout || ''}${err.stderr || ''}${err.message || String(err)}` };
-    }
-  }
-
-  private async ensureWorkspace(workspaceId: string): Promise<void> {
-    const info = await this.workspaceManager.getWorkspaceInfo(workspaceId).catch(() => null);
-    if (info && info.files.length > 0) return;
-
-    await this.workspaceManager.createWorkspace(workspaceId);
-    const scaffolder = new ScaffoldGenerator(this.workspaceManager);
-    await scaffolder.generate({ framework: 'vite-react', language: 'typescript', features: [], workspaceId });
-  }
-
   private async buildPrompt(workspaceId: string, instruction: string, lastBuildLogs: string): Promise<string> {
-    const fileList = await this.workspaceManager.listFiles(workspaceId);
+    const fileList = await this.actuator.listFiles(workspaceId);
     const shown = fileList.slice(0, MAX_FILES_SHOWN);
 
     const sections: string[] = [];
     for (const filePath of shown) {
       try {
-        const content = await this.workspaceManager.readFile(workspaceId, filePath);
+        const content = await this.actuator.readFile(workspaceId, filePath);
         sections.push(`--- ${filePath} ---\n${content.slice(0, MAX_CHARS_PER_FILE)}`);
       } catch {
         sections.push(`--- ${filePath} --- (unreadable)`);

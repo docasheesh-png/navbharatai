@@ -522,3 +522,37 @@ Strategy: extract self-contained route groups into `src/server/routes/*.ts` as
   Maps the engine's verify report → the existing Quality-Check UI. Verified frontend tsc 0 + 114
   tests + **vite build ✅**. NEXT: final clean production merge of PR #2; then retire legacy path
   once parity confirmed; Cloud Run / WebContainer; Phase 5 rest; final re-audit.
+
+---
+## 🏛️ ARCHITECTURE ENGINE + ROADMAP UPDATE (2026-06-16)
+
+- **Milestone 6.0 — DONE — Architecture Manifest + Validator (kills React #299 / mixed-arch class)**:
+  Root cause of broken generated apps was MIXED ARCHITECTURE (React `src/main.jsx`→`#root` shipped
+  with vanilla `js/router.js`/`pages/*` + `#app` + legacy `<script>` → React #299). Fix:
+  `ArchitectureManifest.ts` (`selectArchitecture` locks ONE architecture: react+vite | vanilla,
+  with entry+mountId+forbidden paths; `manifestContract()` injected into plan+batch+single-shot
+  generation prompts) + `ArchitectureValidator.ts` (deterministic guards: DOM mount match, single
+  module entry, no legacy `<script>`, no `js/` mixing, entry resolves). Wired into ProjectVerifier
+  → verify+repair loop auto-fixes, build = FAILED until clean. Honest reporting in Pro UI
+  (no fake "App is live" on failure). False-positive hardening (relative `./` entry, benign
+  pages/*.jsx + helper .js, external CDN scripts all pass). 10 regression tests. 124 tests green.
+
+### ✅ SUPPORTED ARCHITECTURES (one per build, never mixed)
+- **React + Vite** — full generation + in-browser preview (esm.sh + Babel).
+- **Vanilla JS/HTML/CSS** — full generation + self-contained static preview.
+- CURRENT FOCUS: make these two ROCK-SOLID in prod (test/polish) before expanding.
+
+### 📋 PHASE 6 — UNIVERSAL ARCHITECTURE SUPPORT (planned, after React+Vanilla are rock-solid)
+Goal: support EVERY mainstream web architecture (one locked per build) — the "world #1" breadth.
+Each needs: (a) manifest entry in `selectArchitecture`, (b) immutable starter template/scaffold,
+(c) architecture-specific validator rules, (d) a preview runtime, (e) regression tests.
+- 6.1 **Vue (+ Vite)** — in-browser preview (like React).
+- 6.2 **Svelte / SvelteKit** — bundler preview.
+- 6.3 **Next.js** — SSR/React framework → needs server-container runtime.
+- 6.4 **Angular** — full build pipeline.
+- 6.5 **Node/Express backend + full-stack** (React/Vue + API + DB) → server-container runtime
+      (npm install + dev server + proxy). HIGHEST value for "complex high apps".
+- 6.6 **Static site generators** (Astro, Eleventy), **Solid**, **Preact**, **Lit**, etc.
+- 6.7 **Stages 6–8 of the validation pipeline** (real npm build/lint/typecheck + headless-browser
+      render + screenshot + console-error scan) — depends on the server-container/chromium infra.
+DEFERRED by user ("ye baad me karenge"); React+Vanilla rock-solid first.

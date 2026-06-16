@@ -65,6 +65,17 @@
 >
 > **⚠️ User action still pending:** rotate the legacy Google API key (now in
 > `LEGACY_EMBEDDED_API_KEY`, git history) and set it via env.
+>
+> **⚠️ NOTE (2026-06-16, added by a different session — not wiped, just flagging):**
+> the "RESUME HERE" block above describes mid-Phase-1 state and is STALE — the
+> rest of this file (below) shows Phase 1 as CORE COMPLETE and Phases 2–6 well
+> underway, with `main` actually at commit `32609a9` (PRs #10 and #16 merged).
+> Per the new safeguards (see **CROSS-SESSION COLLABORATION PROTOCOL** at the
+> bottom of this file, and `/CLAUDE.md`), do NOT trust this block blindly —
+> run `git fetch origin main && git log --oneline -10` first, then find the
+> actual latest milestone further down this file as your real resume point.
+> This note is left in place rather than deleting the original block, since
+> existing content here must be preserved, not wiped.
 
 Roadmap: 6 phases (0–5), then a full re-audit loop. Working branch: `claude/kind-lovelace-chcxp6`.
 Rules: real (no hacks) • app never breaks • zero bugs before push • resume from here next cycle.
@@ -615,3 +626,68 @@ runtime** (Phase 3 finish / Phase 6.5). Build that FIRST; then these gates flip 
 - **Streaming build progress** for the new engine (currently single "generate with new engine"
   line) — better UX while gates run.
 - **Result cache / dedupe** for identical prompts (cost).
+
+---
+## 🤝 CROSS-SESSION COLLABORATION PROTOCOL (added 2026-06-16)
+
+### Why this exists
+Two separate Claude Code accounts/sessions work on this repo, **sequentially,
+never simultaneously** (one's credits run out before the other starts).
+There is no live-sync channel between sessions — the only shared state is
+this git repository (commits, branches, PRs) plus this file. Without a
+protocol, sessions drift: a new session can start from a stale picture of
+`main` and redo work another session already finished. This happened for
+real today — **PR #1** and **PR #4** were each fully redundant with work
+already merged into `main` by the other session, built blind because neither
+session re-verified real `main` state before starting. Both were closed
+without merging once discovered. This section documents the fix so it
+doesn't happen again. The rules themselves (kept short, rarely changing)
+live in **`/CLAUDE.md`** at the repo root, auto-loaded every session — this
+section is the longer explanation + the living checklist.
+
+### The 7 safeguards (full rules in `/CLAUDE.md`; summary here)
+1. **Fresh-state check** — `git fetch origin main` + `git log --oneline -10`
+   + check open PRs, BEFORE trusting this file's claims. This file can go
+   stale the instant another session pushes after it was last edited.
+2. **Phase-level lock + exact resume point** — don't start/redo a phase
+   another session owns or finished; resume from the true next un-done item.
+   Lock releases only when a phase is marked DONE, or by explicit admin
+   (user) override.
+3. **0.01% doubt → stop and ask the admin** — any doubt about breakage risk
+   or cross-session conflict → halt, don't push/commit, ask the user with
+   the exact risk + options. Never guess on anything with breakage risk.
+4. **Commit small, commit often** — after every meaningful sub-step, not
+   just at phase end. Credit cutoffs are often abrupt, not graceful — don't
+   bet on a single "save before credits run out" moment.
+5. **Mandatory verification gate before every push** — `tsc --noEmit` (+
+   `tsc -p tsconfig.server.json` if server touched) + `vitest run` (read the
+   actual result line) + boot/manual smoke check for server changes. Never
+   skipped, even under time/credit pressure.
+6. **Redundant-work check** — grep/search `main` for existing implementations
+   before building anything new. Would have prevented PR #1 and PR #4.
+7. **Audit, don't restart, after lost/uncommitted work** — if a session finds
+   work was lost (e.g. uncommitted at a credit cutoff), first audit the real
+   committed+verified state (git log, tsc, tests, boot check), then redo
+   ONLY the genuine gap vs. what's claimed done. Never wholesale-restart a
+   phase that's already partly committed and verified — that wastes credit
+   and risks reintroducing bugs into code that already worked.
+
+### Current verified ground truth (don't trust the top "RESUME HERE" block — it's stale)
+- `main` @ `32609a9` (as of 2026-06-16). PR #16 (SDA Gemini leading-turn fix)
+  and PR #10 (preview Fix-Bug/Coding-Bug classification) both merged. PR #1
+  and PR #4 closed as redundant (see above). Open PRs: 0 at last check.
+- Real resume point for engine work = end of the **🏛️ ARCHITECTURE ENGINE +
+  ROADMAP UPDATE** section above (Milestone 6.0 done) → next is hardening
+  React+Vanilla in prod per "CURRENT FOCUS", then Phase 6 (universal
+  architecture support) and Phase 7 (validation factory), both explicitly
+  deferred by the user until React+Vanilla are rock-solid.
+- Less than 60% of the overall roadmap is complete (per user, 2026-06-16) —
+  do not treat any phase below Phase 5/6.0 as more "finished" than its own
+  milestone entries state.
+
+### How to use this section
+Every session should, in order: (1) run the fresh-state check, (2) scan this
+file bottom-up for the latest dated milestone to find the true resume point,
+(3) cross-check against any currently-open PR before starting new work,
+(4) follow safeguards 2–7 for the duration of the session, (5) append new
+milestones here (never delete/rewrite existing ones) as work completes.

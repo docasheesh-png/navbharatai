@@ -28,6 +28,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 // SDAChat kept eager — used immediately on tab open
 import { SDAChat } from './components/sda/SDAChat';
 import { ProfessionalsView } from './components/professionals/ProfessionalsView';
+import { EngineerAIChat } from './components/engineer/EngineerAIChat';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
@@ -1360,9 +1361,9 @@ export default function App() {
       return;
     }
 
-    if ((view === 'nbi_pro_chat' || view === 'sda_chat') && !user) {
+    if ((view === 'nbi_pro_chat' || view === 'sda_chat' || view === 'engineer_ai') && !user) {
       setShowAuth(true);
-      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI Pro' : 'Doctor AI'} is available for logged-in users only. Please sign in.`, 'warn');
+      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI Pro' : view === 'sda_chat' ? 'Doctor AI' : 'Engineer AI'} is available for logged-in users only. Please sign in.`, 'warn');
       return;
     }
 
@@ -6837,7 +6838,15 @@ ${pending.map(p => `  - ${p}`).join('\n')}
 
           {/* ── Professionals hub ── */}
           {activeView === 'professionals' && (
-            <ProfessionalsView onSelect={(id) => { if (id === 'sda_chat') toggleTab('sda_chat'); }} />
+            <ProfessionalsView onSelect={(id) => {
+              if (id === 'sda_chat') toggleTab('sda_chat');
+              else if (id === 'engineer_ai') toggleTab('engineer_ai');
+            }} />
+          )}
+
+          {/* ── Engineer AI ── */}
+          {activeView === 'engineer_ai' && (
+            <EngineerAIChat userId={user?.uid} />
           )}
 
                     {activeView === 'about' && (

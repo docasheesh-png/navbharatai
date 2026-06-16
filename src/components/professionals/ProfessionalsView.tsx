@@ -10,7 +10,7 @@ interface ProfessionalCard {
 
 const CARDS: ProfessionalCard[] = [
   { id: 'sda_chat', label: 'Doctor AI', description: 'Senior Doctor Assistant — clinical Q&A, case notes, red-flag detection.', icon: Stethoscope, active: true },
-  { id: 'engineer_ai', label: 'Engineer AI', description: 'Autonomous coding agent — writes, builds and fixes code.', icon: HardHat, active: false },
+  { id: 'engineer_ai', label: 'Engineer AI', description: 'Autonomous coding agent — writes, builds and fixes code.', icon: HardHat, active: true },
   { id: 'lawyer_ai', label: 'Lawyer AI', description: 'Legal research and drafting assistant.', icon: Scale, active: false },
   { id: 'teacher_ai', label: 'Teacher AI', description: 'Lesson planning and tutoring assistant.', icon: GraduationCap, active: false },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },

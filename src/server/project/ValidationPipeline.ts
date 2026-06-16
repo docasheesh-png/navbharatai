@@ -16,6 +16,7 @@ import { VirtualFileSystem } from './ProjectModel';
 import { verifyProject } from './ProjectVerifier';
 import { validateArchitecture } from './ArchitectureValidator';
 import { selectArchitecture, type ArchitectureManifest } from './ArchitectureManifest';
+import { computeFeatureCoverage, type CoverageReport } from './FeatureCoverage';
 
 export type GateStatus = 'pass' | 'fail' | 'pending';
 export type GateSeverity = 'critical' | 'major' | 'minor';
@@ -38,7 +39,12 @@ export interface ValidationReport {
   blockingReasons: string[];
   /** Human-readable status line. */
   status: 'PASSED' | 'FAILED' | 'PARTIAL';
+  /** Requirement → feature coverage (when a prompt's features were detected). */
+  featureCoverage?: CoverageReport;
 }
+
+/** Minimum requested-feature coverage required to allow a preview. */
+export const MIN_FEATURE_COVERAGE = 80;
 
 /** Infra-gated stages that need a real Node+browser sandbox (reported, not faked). */
 const PENDING_GATES: Array<{ id: string; name: string; severity: GateSeverity }> = [
@@ -54,9 +60,27 @@ const PENDING_GATES: Array<{ id: string; name: string; severity: GateSeverity }>
  * Run the validation gates we can truly execute, plus an honest accounting of
  * the infra-pending ones. Pure (no side effects) → unit-testable.
  */
-export function runValidation(vfs: VirtualFileSystem, manifest?: ArchitectureManifest): ValidationReport {
+export function runValidation(vfs: VirtualFileSystem, manifest?: ArchitectureManifest, prompt?: string): ValidationReport {
   const m = manifest ?? selectArchitecture('app');
   const gates: GateResult[] = [];
+
+  // ── Gate: Feature coverage (requested features must actually exist) ──
+  // The MVP definition of success: a prompt's features are implemented, not just
+  // a React shell. Blocks preview when coverage < MIN_FEATURE_COVERAGE.
+  let featureCoverage: CoverageReport | undefined;
+  if (prompt && prompt.trim()) {
+    featureCoverage = computeFeatureCoverage(prompt, vfs);
+    if (featureCoverage.requested > 0) {
+      const pass = featureCoverage.coverage >= MIN_FEATURE_COVERAGE;
+      gates.push({
+        id: 'features',
+        name: `Feature Coverage (${featureCoverage.implemented}/${featureCoverage.requested} = ${featureCoverage.coverage}%)`,
+        status: pass ? 'pass' : 'fail',
+        severity: 'critical',
+        messages: featureCoverage.items.filter((i) => i.status === 'fail').map((i) => `Requested but not implemented: ${i.label}`),
+      });
+    }
+  }
 
   // ── Gate: Architecture integrity (single framework, DOM mount, no mixing) ──
   const archIssues = validateArchitecture(vfs, m);
@@ -106,6 +130,7 @@ export function runValidation(vfs: VirtualFileSystem, manifest?: ArchitectureMan
     gates,
     blockingReasons,
     status: criticalFails.length ? 'FAILED' : gates.some((g) => g.status === 'pending' || g.status === 'fail') ? 'PARTIAL' : 'PASSED',
+    featureCoverage,
   };
 }
 
@@ -134,6 +159,12 @@ export function renderReportCard(report: ValidationReport, manifest?: Architectu
   lines.push(`Build Status: ${report.status}`);
   if (manifest) lines.push(`Architecture: ${manifest.framework}${manifest.bundler !== 'none' ? ' + ' + manifest.bundler : ''}`);
   lines.push(`Quality Score: ${report.qualityScore}/100`);
+  if (report.featureCoverage && report.featureCoverage.requested > 0) {
+    const fc = report.featureCoverage;
+    lines.push('');
+    lines.push(`Requirements Implemented (${fc.coverage}%):`);
+    for (const it of fc.items) lines.push(`  ${it.status === 'pass' ? '✓' : '✗'} ${it.label}`);
+  }
   lines.push('');
   for (const g of report.gates) {
     lines.push(`${icon(g.status)} ${g.name}${g.status === 'pending' ? ' — PENDING (infra)' : ''}`);

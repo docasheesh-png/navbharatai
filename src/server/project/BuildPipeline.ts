@@ -78,7 +78,7 @@ export async function runBuild(input: BuildPipelineInput): Promise<BuildPipeline
   });
 
   // Final validation gates → structured report + preview decision (no fake success).
-  const validation = runValidation(vfs, selectArchitecture(input.prompt));
+  const validation = runValidation(vfs, selectArchitecture(input.prompt), input.prompt);
 
   return {
     ok: repair.finalVerify.ok,

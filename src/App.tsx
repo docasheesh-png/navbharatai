@@ -20,12 +20,14 @@ import {
   Globe as GlobeIcon, Users2, Figma,
   Bell, Minimize2, Moon, IndianRupee as RupeeIcon,
   Wand2, Package,
-  Kanban, CloudUpload, LayoutTemplate, HeartPulse
+  Kanban, CloudUpload, LayoutTemplate, HeartPulse,
+  Briefcase
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { AdminDashboard } from './components/AdminDashboard';
 // SDAChat kept eager — used immediately on tab open
 import { SDAChat } from './components/sda/SDAChat';
+import { ProfessionalsView } from './components/professionals/ProfessionalsView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
@@ -4438,7 +4440,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     { id: 'history',      label: 'History',           icon: History },
     { id: 'studio',       label: 'Code Studio',       icon: Smartphone },
     { id: 'billing',      label: 'Wallet & Billing',  icon: Wallet },
-    { id: 'sda_chat',     label: 'Doctor AI',         icon: Activity, status: 'New' },
+    { id: 'professionals', label: 'Professionals',    icon: Briefcase, status: 'New' },
     { id: 'donation',     label: 'Donate',            icon: Heart },
     { id: 'settings',     label: 'Settings',          icon: Settings },
   ], []);
@@ -6828,6 +6830,11 @@ ${pending.map(p => `  - ${p}`).join('\n')}
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <SDAChat key={sdaResetKey} userId={user?.uid} />
             </div>
+          )}
+
+          {/* ── Professionals hub ── */}
+          {activeView === 'professionals' && (
+            <ProfessionalsView onSelect={(id) => { if (id === 'sda_chat') toggleTab('sda_chat'); }} />
           )}
 
                     {activeView === 'about' && (

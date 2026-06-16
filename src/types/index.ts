@@ -75,7 +75,8 @@ export type ViewType =
   | 'darkmode' | 'monetize' | 'imagegen' | 'versioning' | 'apimarket'
   | 'appstore' | 'collab' | 'aitesting' | 'localization' | 'codereview'
   | 'dbstudio' | 'cicd' | 'plugins' | 'whitelabel' | 'projectmgr'
-  | 'cloudeploy' | 'designsys' | 'healthmon' | 'engine_builder' | 'professionals';
+  | 'cloudeploy' | 'designsys' | 'healthmon' | 'engine_builder' | 'professionals'
+  | 'engineer_ai';
 
 export type SettingsScreen =
   | 'root' | 'general' | 'modules' | 'secrets' | 'connections'

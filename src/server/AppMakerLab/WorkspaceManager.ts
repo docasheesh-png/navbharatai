@@ -9,7 +9,7 @@ import { GeneratedFile } from './types/files';
 export class WorkspaceManager implements IWorkspaceManager {
     private workspacesRoot: string;
 
-    constructor(namespace: 'free' | 'pro' = 'free') {
+    constructor(namespace: string = 'free') {
         const base = process.env.WORKSPACES_ROOT || '/workspaces';
         this.workspacesRoot = `${base}/${namespace}`;
     }

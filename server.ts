@@ -29,6 +29,7 @@ import { registerAuditRoutes } from './src/server/routes/audit';
 import { registerChatRoutes } from './src/server/routes/chat';
 import { registerProRoutes } from './src/server/routes/pro';
 import { registerSdaRoutes } from './src/server/routes/sda';
+import { registerEngineerRoutes } from './src/server/routes/engineer';
 import { registerZipRoutes } from './src/server/routes/zip';
 import { registerPreviewRoutes } from './src/server/routes/preview';
 import { registerBuildRoutes } from './src/server/routes/build';
@@ -348,6 +349,8 @@ setInterval(() => {
   registerProRoutes(app);
   // Senior Doctor Assistant (SDA) chat route — extracted to src/server/routes/sda.ts (Phase 1, AI-core step e).
   registerSdaRoutes(app);
+  // Engineer AI — autonomous coding agent (Phase 1: process-level sandbox, Claude + Grok).
+  registerEngineerRoutes(app);
 
   // Wallet / sync / payment / admin / secrets / anthropic / zip routes (Phase 1 extractions).
   registerWalletRoutes(app);

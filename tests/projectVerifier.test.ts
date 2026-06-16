@@ -40,7 +40,7 @@ describe('verifyProject', () => {
   });
 
   it('does not flag missing entry when package.json present (build project)', () => {
-    const r = verifyProject(vfsFrom({ 'package.json': JSON.stringify({ name: 'x' }), 'src/main.tsx': 'x' }));
+    const r = verifyProject(vfsFrom({ 'package.json': JSON.stringify({ name: 'x' }), 'src/index.js': 'const a = 1;' }));
     expect(r.issues.some(i => /No entry point/.test(i.message))).toBe(false);
     expect(r.ok).toBe(true);
   });

@@ -2263,6 +2263,7 @@ ${buildLanguageRule(preferredLanguage)}`;
     const srcFiles: Record<string, string> = {};
     Object.keys(f).forEach(k => { if (srcExtRe.test(k) && !k.includes('node_modules')) srcFiles[k] = f[k]; });
 
+
     // Resolve the entry module
     let entry = '';
     const m = rawHtml.match(/<script[^>]+type=["']module["'][^>]+src=["']([^"']+)["']/i);
@@ -2332,6 +2333,15 @@ ${buildLanguageRule(preferredLanguage)}`;
   };
 
   const updatePreview = (currentFiles: FileSystem) => {
+    // Strip markdown code fences from any file the AI accidentally wrapped in ```lang ... ``` markers
+    const stripFences = (s: string) =>
+      s.trimStart().startsWith('```')
+        ? s.replace(/^[\s\S]*?```[a-zA-Z]*\r?\n/, '').replace(/\r?\n?```\s*$/, '')
+        : s;
+    currentFiles = Object.fromEntries(
+      Object.entries(currentFiles).map(([k, v]) => [k, typeof v === 'string' ? stripFences(v) : v])
+    ) as FileSystem;
+
     let finalHtml: string;
 
     // Source/framework apps (React, Vite, TS) need transpilation — run them via the mini-bundler

@@ -120,12 +120,77 @@ function fileContext(vfs: VirtualFileSystem): string {
   return blocks.join('\n\n');
 }
 
+/** A planned file in a multi-file build. */
+interface PlannedFile { path: string; purpose: string }
+
+const PLAN_FORMAT = `Reply with ONLY JSON, no prose, no markdown fences:
+{"entry":"index.html","files":[{"path":"relative/path","purpose":"what this file contains"}]}
+Plan a COMPLETE multi-file app: a working entry point plus every component, page/view, hook/store, and stylesheet it needs. For a non-trivial app, break the UI into SEPARATE files — one per page/view and one per major component — and include a navigation/router file so the app has MULTIPLE pages, not one giant file. List 4–14 files. Paths must be consistent (imports will reference them).`;
+
+/** True when the VFS holds only the freshly-seeded scaffold (so this is a from-scratch build). */
+function isScaffoldState(vfs: VirtualFileSystem): boolean {
+  if (vfs.paths().length === 0) return true;
+  const app = vfs.readText('src/App.jsx');
+  if (app && app.includes('Hello from App')) return true;
+  const js = vfs.readText('app.js');
+  if (js && js.includes("getElementById('app').innerHTML")) return true;
+  return false;
+}
+
+/** Ask the model for a complete file plan (architecture) for a fresh app build. */
+async function planFiles(callModel: ModelCall, prompt: string): Promise<PlannedFile[]> {
+  const sys = `You are a senior software architect planning a real, runnable multi-file web app. ${ENGINEERING_RULES}\n\n${PLAN_FORMAT}`;
+  const raw = await callModel(sys, `App request:\n${prompt}\n\nPlan the full file tree now.`);
+  const json: any = extractJson(raw);
+  const arr: any[] = Array.isArray(json) ? json : Array.isArray(json?.files) ? json.files : [];
+  const seen = new Set<string>();
+  const files: PlannedFile[] = [];
+  for (const f of arr) {
+    if (f && typeof f.path === 'string' && f.path.trim() && !seen.has(f.path)) {
+      seen.add(f.path);
+      files.push({ path: f.path.trim(), purpose: typeof f.purpose === 'string' ? f.purpose : '' });
+    }
+  }
+  return files.slice(0, 14);
+}
+
+/** Generate the planned files in small batches so no single call truncates a large app. */
+async function generateBatched(callModel: ModelCall, prompt: string, plan: PlannedFile[]): Promise<FileEdit[]> {
+  const BATCH = 3;
+  const planStr = plan.map(f => `- ${f.path}: ${f.purpose}`).join('\n');
+  const edits: FileEdit[] = [];
+  const done = new Set<string>();
+  for (let i = 0; i < plan.length; i += BATCH) {
+    const batch = plan.slice(i, i + BATCH);
+    const sys = `You are a world-class engineer writing complete files of a real multi-file app. ${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
+    const user = `App request:\n${prompt}\n\nFull file plan (for cross-file imports):\n${planStr}\n\n`
+      + `Write COMPLETE, fully-functional content for ONLY these files (one write op each):\n${batch.map(f => `- ${f.path}: ${f.purpose}`).join('\n')}\n`
+      + `Make imports/paths match the plan exactly. No TODOs, no placeholders.`;
+    const part = parseFileEdits(await callModel(sys, user));
+    for (const e of part) {
+      if (e.op === 'write' && !done.has(e.path)) { done.add(e.path); edits.push(e); }
+    }
+  }
+  return edits;
+}
+
 /** Build generate+fix functions for the BuildPipeline backed by an injected model. */
 export function makeAiEditGenerator(callModel: ModelCall) {
   const generate = async (prompt: string, vfs: VirtualFileSystem): Promise<FileEdit[]> => {
-    const fresh = vfs.paths().length === 0;
+    // Fresh/scaffold-only build → plan the architecture, then generate files in
+    // batches so complex, multi-page apps come out complete instead of truncated.
+    if (isScaffoldState(vfs)) {
+      try {
+        const plan = await planFiles(callModel, prompt);
+        if (plan.length >= 2) {
+          const edits = await generateBatched(callModel, prompt, plan);
+          if (edits.length >= 2) return edits;
+        }
+      } catch { /* fall through to single-shot below */ }
+    }
+
     const sys = `You are a world-class full-stack engineer building a real, multi-file web application that must actually build and run. ${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
-    const user = fresh
+    const user = isScaffoldState(vfs)
       ? `Build this application from scratch as a complete, runnable multi-file project.\n\nUser request:\n${prompt}\n\nReturn the full set of files needed to run it.`
       : `Current project files (with contents — use exact text for "patch" finds):\n\n${fileContext(vfs)}\n\nUser request:\n${prompt}\n\nApply the minimal correct set of edits. Keep all existing references valid.`;
     return parseFileEdits(await callModel(sys, user));

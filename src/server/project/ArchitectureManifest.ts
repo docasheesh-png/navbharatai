@@ -67,8 +67,10 @@ export function selectArchitecture(prompt: string): ArchitectureManifest {
 /** Paths that MUST NOT exist under the chosen architecture (anti-mixing). */
 export function forbiddenPathPatterns(m: ArchitectureManifest): RegExp[] {
   if (m.framework === 'react') {
-    // No vanilla legacy entry layers in a React app.
-    return [/^js\//i, /^pages\/.*\.js$/i, /^router\.js$/i, /^dashboard\.js$/i];
+    // No vanilla legacy entry layers in a React app. (pages/*.js is intentionally
+    // NOT banned — React projects legitimately have .js helpers; a genuinely mixed
+    // vanilla page is caught by the legacy <script src> check instead.)
+    return [/^js\//i, /^router\.js$/i, /^dashboard\.js$/i];
   }
   // Vanilla app: no React/bundler source tree.
   return [/^src\//i, /\.(jsx|tsx)$/i, /^vite\.config\./i];

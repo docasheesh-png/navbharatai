@@ -16,10 +16,45 @@ describe('selectArchitecture', () => {
     expect(m.entry).toBe('src/main.jsx');
     expect(manifestContract(m)).toMatch(/do not mix/i);
   });
-  it('forbids vanilla layers in a React manifest', () => {
+  it('forbids the vanilla js/ layer in a React manifest', () => {
     const pats = forbiddenPathPatterns(selectArchitecture('react app'));
     expect(pats.some((p) => p.test('js/router.js'))).toBe(true);
-    expect(pats.some((p) => p.test('pages/home.js'))).toBe(true);
+    // pages/*.js is NOT blanket-forbidden (React projects may have .js helpers)
+    expect(pats.some((p) => p.test('pages/Home.jsx'))).toBe(false);
+  });
+});
+
+describe('no false positives (rock-solid for legitimate apps)', () => {
+  it('accepts a relative "./src/main.jsx" entry reference', () => {
+    const vfs = vfsFrom({
+      'package.json': PKG,
+      'index.html': '<div id="root"></div>\n<script type="module" src="./src/main.jsx"></script>',
+      'src/main.jsx': "createRoot(document.getElementById('root')).render(<App/>);",
+      'src/App.jsx': 'export default ()=>null',
+    });
+    expect(validateArchitecture(vfs)).toEqual([]);
+  });
+
+  it('accepts a React app that has benign pages/*.jsx and helper .js files', () => {
+    const vfs = vfsFrom({
+      'package.json': PKG,
+      'index.html': '<div id="root"></div>\n<script type="module" src="/src/main.jsx"></script>',
+      'src/main.jsx': "createRoot(document.getElementById('root')).render(<App/>);",
+      'src/App.jsx': 'export default ()=>null',
+      'src/pages/Home.jsx': 'export default ()=>null',
+      'src/utils/format.js': 'export const f = () => 1;',
+    });
+    expect(validateArchitecture(vfs)).toEqual([]);
+  });
+
+  it('accepts a React app loading external CDN scripts (not flagged as legacy)', () => {
+    const vfs = vfsFrom({
+      'package.json': PKG,
+      'index.html': '<script src="https://cdn.example.com/x.js"></script>\n<div id="root"></div>\n<script type="module" src="/src/main.jsx"></script>',
+      'src/main.jsx': "createRoot(document.querySelector('#root')).render(<App/>);",
+      'src/App.jsx': 'export default ()=>null',
+    });
+    expect(validateArchitecture(vfs)).toEqual([]);
   });
 });
 

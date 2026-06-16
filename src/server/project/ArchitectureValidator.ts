@@ -69,7 +69,9 @@ function mountIdFromEntry(code: string): string | null {
 const SOURCE_EXTS = ['', '.jsx', '.tsx', '.js', '.ts', '.mjs'];
 
 function resolveEntry(vfs: VirtualFileSystem, ref: string): string | null {
-  const base = ref.replace(/^\//, '').split(/[?#]/)[0];
+  // Normalize leading "/" and "./" so "/src/main.jsx", "./src/main.jsx" and
+  // "src/main.jsx" all resolve against the VFS.
+  const base = ref.replace(/^\.?\//, '').split(/[?#]/)[0];
   for (const e of SOURCE_EXTS) if (vfs.has(base + e)) return base + e;
   return null;
 }

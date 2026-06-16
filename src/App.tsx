@@ -2208,6 +2208,7 @@ ${buildLanguageRule(preferredLanguage)}`;
   }
   // Resolve a bare import spec to CDN URL: importmap first, then esm.sh
   function specUrl(spec){
+    if(spec.indexOf('://')>0)return spec;
     if(IMAP[spec])return IMAP[spec];
     var root=spec.charAt(0)==='@'?spec.split('/').slice(0,2).join('/'):spec.split('/')[0];
     if(IMAP[root])return IMAP[root]+spec.slice(root.length);

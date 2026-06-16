@@ -2244,6 +2244,16 @@ ${buildLanguageRule(preferredLanguage)}`;
     return 'static';
   };
 
+  // A "classic vanilla web app" has no index.html but is meant to RUN (only .js/.css/.json
+  // files, with at least one script). These keep the legacy auto-shell so they don't regress.
+  // Any other file set (docs, data, media, code) with no index.html → universal viewer.
+  const isClassicVanillaWeb = (f: FileSystem): boolean => {
+    const ks = Object.keys(f).filter(k => f[k] != null && !k.includes('node_modules'));
+    const allWeb = ks.length > 0 && ks.every(k => /\.(js|mjs|cjs|css|json)$/i.test(k));
+    const hasJs = ks.some(k => /\.(js|mjs|cjs)$/i.test(k));
+    return allWeb && hasJs;
+  };
+
   // Build a runnable in-iframe document for source/framework apps.
   const buildSourceAppPreview = (f: FileSystem): string => {
     const rawHtml = f['index.html'] || '';
@@ -2337,6 +2347,190 @@ ${buildLanguageRule(preferredLanguage)}`;
       + '</body></html>';
   };
 
+  // ── Universal multi-format file viewer ───────────────────────────────────────
+  // Renders ANY file type when a workspace has no index.html: markdown, source code
+  // (syntax-highlighted), JSON, CSV/TSV tables, images, SVG, PDF, audio, video, HTML
+  // and plain text. Self-contained doc with a file sidebar; CDN libs degrade gracefully.
+  const UNIVERSAL_VIEWER_CSS = `
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9}
+.nbv-app{display:flex;height:100vh;width:100vw;overflow:hidden}
+.nbv-side{width:248px;min-width:248px;background:#161b22;border-right:1px solid #21262d;display:flex;flex-direction:column;overflow:hidden}
+.nbv-brand{padding:13px 14px;font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#8b949e;border-bottom:1px solid #21262d;display:flex;align-items:center;gap:6px}
+.nbv-cnt{margin-left:auto;font-weight:600;color:#6e7681;font-size:10px}
+.nbv-list{overflow:auto;flex:1;padding:6px}
+.nbv-fileitem{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;color:#adbac7;text-align:left;padding:7px 9px;border-radius:8px;cursor:pointer;font-size:12.5px;font-family:inherit}
+.nbv-fileitem:hover{background:#1c2330}
+.nbv-fileitem.active{background:rgba(31,111,235,.22);color:#fff}
+.nbv-ico{flex:0 0 auto;font-size:13px;width:16px;text-align:center}
+.nbv-ftxt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nbv-main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.nbv-topbar{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid #21262d;background:#0d1117;flex:0 0 auto}
+.nbv-mobilesel{display:none;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:8px;padding:6px 10px;font-size:12px;max-width:60%}
+.nbv-head{display:flex;align-items:center;gap:10px;min-width:0}
+.nbv-fname{font-weight:700;font-size:13px;color:#e6edf3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nbv-badge{font-size:9px;font-weight:800;letter-spacing:.08em;background:rgba(31,111,235,.13);color:#58a6ff;border:1px solid rgba(31,111,235,.27);padding:2px 6px;border-radius:6px;flex:0 0 auto}
+.nbv-size{font-size:10px;color:#6e7681;flex:0 0 auto}
+.nbv-content{flex:1;overflow:auto;position:relative;min-height:0}
+.nbv-md{max-width:880px;margin:0 auto;padding:28px 36px;line-height:1.65;font-size:15px}
+.nbv-md h1,.nbv-md h2{border-bottom:1px solid #21262d;padding-bottom:.3em}
+.nbv-md h1,.nbv-md h2,.nbv-md h3,.nbv-md h4{color:#e6edf3;margin-top:1.4em}
+.nbv-md a{color:#58a6ff;text-decoration:none}.nbv-md a:hover{text-decoration:underline}
+.nbv-md code{background:#161b22;border:1px solid #21262d;border-radius:5px;padding:.15em .4em;font-size:.88em}
+.nbv-md pre{background:#161b22;border:1px solid #21262d;border-radius:10px;padding:14px;overflow:auto}
+.nbv-md pre code{background:transparent;border:0;padding:0}
+.nbv-md table{border-collapse:collapse;width:100%;margin:1em 0}
+.nbv-md th,.nbv-md td{border:1px solid #30363d;padding:6px 12px}
+.nbv-md img{max-width:100%}
+.nbv-md blockquote{border-left:3px solid #30363d;margin:1em 0;padding:0 1em;color:#8b949e}
+.nbv-codewrap{display:flex;min-height:100%}
+.nbv-gutter{user-select:none;text-align:right;padding:16px 10px;color:#484f58;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0d1117;border-right:1px solid #21262d;white-space:pre;flex:0 0 auto}
+.nbv-code{margin:0;flex:1;padding:16px;overflow:auto;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0d1117!important}
+.nbv-code code{font:inherit;background:transparent;white-space:pre}
+.nbv-pre{margin:0;padding:18px;white-space:pre-wrap;word-break:break-word;font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#c9d1d9}
+.nbv-tablewrap{padding:16px;overflow:auto}
+.nbv-tablemeta{font-size:11px;color:#6e7681;margin-bottom:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.nbv-table{border-collapse:collapse;font-size:12.5px}
+.nbv-table th{position:sticky;top:0;background:#1b2433;color:#58a6ff;font-weight:700}
+.nbv-table th,.nbv-table td{border:1px solid #21262d;padding:6px 12px;text-align:left;white-space:nowrap}
+.nbv-table tbody tr:nth-child(even){background:#0f141b}
+.nbv-media{display:flex;align-items:center;justify-content:center;min-height:100%;padding:24px}
+.nbv-checker{background-image:linear-gradient(45deg,#161b22 25%,transparent 25%),linear-gradient(-45deg,#161b22 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#161b22 75%),linear-gradient(-45deg,transparent 75%,#161b22 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}
+.nbv-img{max-width:100%;max-height:88vh;object-fit:contain;box-shadow:0 8px 40px rgba(0,0,0,.5);border-radius:4px}
+.nbv-svg{max-width:90%;max-height:80vh}
+.nbv-pdf{width:100%;height:100%;border:0;position:absolute;inset:0}
+.nbv-htmlframe{width:100%;height:100%;border:0;background:#fff;position:absolute;inset:0}
+.nbv-audio{width:80%;max-width:520px}
+.nbv-video{max-width:100%;max-height:85vh;border-radius:6px}
+.nbv-note{padding:18px;margin:24px;background:#161b22;border:1px solid rgba(245,158,11,.27);border-radius:10px;color:#d29922;font-size:13px;max-width:600px}
+.nbv-single .nbv-side{display:none}
+@media(max-width:680px){.nbv-side{display:none}.nbv-mobilesel{display:block}}`;
+
+  const UNIVERSAL_VIEWER_JS = `
+(function(){
+  var V=window.__NBV||{};var FILES=V.files||{};
+  var paths=Object.keys(FILES).filter(function(p){return FILES[p]!=null;});
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  function base(p){return p.split('/').pop();}
+  function extOf(p){var b=base(p),i=b.lastIndexOf('.');return i>0?b.slice(i+1).toLowerCase():'';}
+  function bytes(s){try{return new Blob([s]).size;}catch(e){return (s||'').length;}}
+  function human(n){return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(2)+' MB';}
+  function mimeFor(e){var m={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',bmp:'image/bmp',ico:'image/x-icon',avif:'image/avif',svg:'image/svg+xml',pdf:'application/pdf',mp3:'audio/mpeg',wav:'audio/wav',ogg:'audio/ogg',m4a:'audio/mp4',aac:'audio/aac',flac:'audio/flac',mp4:'video/mp4',webm:'video/webm',mov:'video/quicktime',mkv:'video/x-matroska'};return m[e]||'application/octet-stream';}
+  function typeOf(p){var e=extOf(p);
+    if(/^(md|markdown|mdx)$/.test(e))return 'md';
+    if(/^(png|jpg|jpeg|gif|webp|bmp|ico|avif|apng)$/.test(e))return 'img';
+    if(e==='svg')return 'svg';
+    if(e==='pdf')return 'pdf';
+    if(/^(mp3|wav|ogg|m4a|aac|flac)$/.test(e))return 'audio';
+    if(/^(mp4|webm|mov|mkv|avi|m4v)$/.test(e))return 'video';
+    if(/^(csv|tsv)$/.test(e))return 'csv';
+    if(/^(json|jsonc|geojson|map|json5)$/.test(e))return 'json';
+    if(/^(html|htm)$/.test(e))return 'html';
+    if(/^(txt|text|log)$/.test(e)||e==='')return 'text';
+    return 'code';}
+  var ICON={md:'📝',img:'🖼️',svg:'🖼️',pdf:'📕',audio:'🎵',video:'🎬',csv:'📊',json:'🔧',html:'🌐',text:'📄',code:'❮❯'};
+  var LANG={js:'javascript',mjs:'javascript',cjs:'javascript',jsx:'javascript',ts:'typescript',tsx:'typescript',py:'python',rb:'ruby',go:'go',rs:'rust',java:'java',c:'c',h:'c',cpp:'cpp',cc:'cpp',hpp:'cpp',cs:'csharp',php:'php',swift:'swift',kt:'kotlin',kts:'kotlin',scala:'scala',sh:'bash',bash:'bash',zsh:'bash',sql:'sql',yaml:'yaml',yml:'yaml',toml:'ini',ini:'ini',cfg:'ini',conf:'ini',xml:'xml',vue:'xml',svelte:'xml',css:'css',scss:'scss',less:'less',dart:'dart',lua:'lua',r:'r',pl:'perl',ex:'elixir',exs:'elixir',clj:'clojure',hs:'haskell',gradle:'gradle',dockerfile:'dockerfile',makefile:'makefile',json:'json'};
+  function srcFor(p,c,t){c=c||'';var s=c.trim();
+    if(/^(data:|https?:\\/\\/|blob:)/.test(s))return s;
+    if(t==='svg')return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(c);
+    var b=c.replace(/\\s+/g,'');
+    if(/^[A-Za-z0-9+/=]+$/.test(b)&&b.length>16)return 'data:'+mimeFor(extOf(p))+';base64,'+b;
+    return s;}
+  function parseDelim(c,d){var rows=[],row=[],cur='',q=false,i=0,ch;
+    for(;i<c.length;i++){ch=c[i];
+      if(q){if(ch==='"'){if(c[i+1]==='"'){cur+='"';i++;}else q=false;}else cur+=ch;}
+      else{if(ch==='"')q=true;else if(ch===d){row.push(cur);cur='';}else if(ch==='\\n'){row.push(cur);rows.push(row);row=[];cur='';}else if(ch==='\\r'){}else cur+=ch;}}
+    if(cur!==''||row.length){row.push(cur);rows.push(row);}
+    return rows;}
+  function rMd(c){var d=document.createElement('article');d.className='nbv-md';
+    try{if(window.marked&&window.DOMPurify){var mk=window.marked.parse(c,{breaks:true,gfm:true});d.innerHTML=window.DOMPurify.sanitize(mk);if(window.hljs)d.querySelectorAll('pre code').forEach(function(b){try{window.hljs.highlightElement(b);}catch(e){}});return d;}}catch(e){}
+    var pre=document.createElement('pre');pre.className='nbv-pre';pre.textContent=c;d.appendChild(pre);return d;}
+  function rCode(c,lang){var wrap=document.createElement('div');wrap.className='nbv-codewrap';
+    var gut=document.createElement('div');gut.className='nbv-gutter';var n=c.split('\\n').length;var g='';for(var k=1;k<=n;k++)g+=k+'\\n';gut.textContent=g;
+    var pre=document.createElement('pre');pre.className='nbv-code hljs';var code=document.createElement('code');
+    try{if(window.hljs){var r=(lang&&window.hljs.getLanguage(lang))?window.hljs.highlight(c,{language:lang}):window.hljs.highlightAuto(c);code.innerHTML=r.value;}else code.textContent=c;}catch(e){code.textContent=c;}
+    pre.appendChild(code);wrap.appendChild(gut);wrap.appendChild(pre);return wrap;}
+  function rJson(c){var t=c;try{t=JSON.stringify(JSON.parse(c),null,2);}catch(e){}return rCode(t,'json');}
+  function rCsv(c,d){var rows=parseDelim(c,d);var wrap=document.createElement('div');wrap.className='nbv-tablewrap';
+    if(!rows.length){wrap.textContent='(empty)';return wrap;}
+    var meta=document.createElement('div');meta.className='nbv-tablemeta';meta.textContent=rows.length+' rows × '+(rows[0]?rows[0].length:0)+' cols';wrap.appendChild(meta);
+    var t=document.createElement('table');t.className='nbv-table';var thead=document.createElement('thead');var htr=document.createElement('tr');
+    rows[0].forEach(function(h){var th=document.createElement('th');th.textContent=h;htr.appendChild(th);});thead.appendChild(htr);t.appendChild(thead);
+    var tb=document.createElement('tbody');for(var r=1;r<rows.length;r++){var tr=document.createElement('tr');rows[r].forEach(function(cell){var td=document.createElement('td');td.textContent=cell;tr.appendChild(td);});tb.appendChild(tr);}
+    t.appendChild(tb);wrap.appendChild(t);return wrap;}
+  function rImg(p,c,t){var d=document.createElement('div');d.className='nbv-media nbv-checker';var img=document.createElement('img');img.className='nbv-img';img.alt=base(p);
+    img.onerror=function(){d.innerHTML='';var note=document.createElement('div');note.className='nbv-note';note.textContent='Cannot display this image. Showing raw content:';d.appendChild(note);d.appendChild(rCode(c,'xml'));};
+    img.src=srcFor(p,c,t);d.appendChild(img);return d;}
+  function rSvg(p,c){var d=document.createElement('div');d.className='nbv-media nbv-checker';
+    try{if(window.DOMPurify){d.innerHTML=window.DOMPurify.sanitize(c,{USE_PROFILES:{svg:true,svgFilters:true}});var s=d.querySelector('svg');if(s)s.classList.add('nbv-svg');return d;}}catch(e){}
+    var img=document.createElement('img');img.className='nbv-img';img.src=srcFor(p,c,'svg');d.appendChild(img);return d;}
+  function rPdf(p,c){var s=srcFor(p,c,'pdf');if(!/^(data:|https?:|blob:)/.test(s)){var note=document.createElement('div');note.className='nbv-note';note.textContent='PDF preview needs a data: URL or http(s) link; this file has no renderable PDF data.';return note;}var o=document.createElement('iframe');o.className='nbv-pdf';o.src=s;return o;}
+  function rMedia(p,c,t){var d=document.createElement('div');d.className='nbv-media';var el=document.createElement(t==='audio'?'audio':'video');el.className='nbv-'+t;el.controls=true;el.src=srcFor(p,c,t);d.appendChild(el);return d;}
+  function rHtml(c){var f=document.createElement('iframe');f.className='nbv-htmlframe';f.setAttribute('sandbox','allow-scripts allow-forms allow-popups allow-modals');f.srcdoc=c;return f;}
+  function rText(c){var pre=document.createElement('pre');pre.className='nbv-pre';pre.textContent=c;return pre;}
+  function render(p){var c=FILES[p]||'';var t=typeOf(p);
+    if(t==='md')return rMd(c);
+    if(t==='img')return rImg(p,c,t);
+    if(t==='svg')return rSvg(p,c);
+    if(t==='pdf')return rPdf(p,c);
+    if(t==='audio'||t==='video')return rMedia(p,c,t);
+    if(t==='csv')return rCsv(c,extOf(p)==='tsv'?'\\t':',');
+    if(t==='json')return rJson(c);
+    if(t==='html')return rHtml(c);
+    if(t==='text')return rText(c);
+    return rCode(c,LANG[extOf(p)]||null);}
+  function select(p){
+    var items=document.querySelectorAll('.nbv-fileitem');for(var i=0;i<items.length;i++)items[i].classList.toggle('active',items[i].getAttribute('data-p')===p);
+    var sel=document.getElementById('nbv-select');if(sel)sel.value=p;
+    var c=FILES[p]||'',t=typeOf(p);
+    var head=document.getElementById('nbv-head');head.innerHTML='';
+    var name=document.createElement('span');name.className='nbv-fname';name.textContent=ICON[t]+' '+p;
+    var badge=document.createElement('span');badge.className='nbv-badge';badge.textContent=t.toUpperCase();
+    var size=document.createElement('span');size.className='nbv-size';size.textContent=human(bytes(c));
+    head.appendChild(name);head.appendChild(badge);head.appendChild(size);
+    var body=document.getElementById('nbv-body');body.innerHTML='';
+    try{body.appendChild(render(p));}catch(e){var er=document.createElement('pre');er.className='nbv-pre';er.textContent='Render error: '+((e&&e.message)||e);body.appendChild(er);}}
+  function pickPrimary(){
+    if(V.primary&&FILES[V.primary]!=null)return V.primary;
+    var pri=['README.md','readme.md','Readme.md','index.md','index.html','index.htm'];
+    for(var i=0;i<pri.length;i++)if(FILES[pri[i]]!=null)return pri[i];
+    var md=paths.filter(function(p){return typeOf(p)==='md';});if(md.length)return md[0];
+    var docs=paths.filter(function(p){return typeOf(p)!=='code';});if(docs.length)return docs[0];
+    return paths[0];}
+  if(paths.length===0){document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#6e7681;font-family:system-ui;text-align:center"><div><div style="font-size:42px">📂</div><div style="margin-top:10px;font-size:14px">No files to preview yet.</div></div></div>';return;}
+  paths.sort();
+  var sb=document.getElementById('nbv-files');var selEl=document.getElementById('nbv-select');
+  paths.forEach(function(p){var t=typeOf(p);
+    var it=document.createElement('button');it.className='nbv-fileitem';it.setAttribute('data-p',p);
+    it.innerHTML='<span class="nbv-ico">'+ICON[t]+'</span><span class="nbv-ftxt">'+esc(p)+'</span>';
+    it.onclick=function(){select(p);};sb.appendChild(it);
+    var op=document.createElement('option');op.value=p;op.textContent=p;selEl.appendChild(op);});
+  document.getElementById('nbv-count').textContent=paths.length+(paths.length===1?' file':' files');
+  selEl.onchange=function(e){select(e.target.value);};
+  if(paths.length<=1)document.body.classList.add('nbv-single');
+  select(pickPrimary());
+})();`;
+
+  const buildUniversalPreview = (f: FileSystem): string => {
+    const sj = (v: unknown) => JSON.stringify(v).replace(/<\//g, '<\\/');
+    const viewFiles: Record<string, string> = {};
+    Object.keys(f).forEach(k => { if (f[k] != null && !k.includes('node_modules')) viewFiles[k] = f[k]; });
+    return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+      + PREVIEW_HARNESS
+      + '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">'
+      + '<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></' + 'script>'
+      + '<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></' + 'script>'
+      + '<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></' + 'script>'
+      + '<style>' + UNIVERSAL_VIEWER_CSS + '</style></head><body>'
+      + '<div class="nbv-app">'
+      + '<aside class="nbv-side"><div class="nbv-brand">📁 Files <span id="nbv-count" class="nbv-cnt"></span></div><div id="nbv-files" class="nbv-list"></div></aside>'
+      + '<main class="nbv-main"><div class="nbv-topbar"><select id="nbv-select" class="nbv-mobilesel"></select><div id="nbv-head" class="nbv-head"></div></div><div id="nbv-body" class="nbv-content"></div></main>'
+      + '</div>'
+      + '<script>window.__NBV=' + sj({ files: viewFiles, primary: '' }) + ';</' + 'script>'
+      + '<script>' + UNIVERSAL_VIEWER_JS + '</' + 'script>'
+      + '</body></html>';
+  };
+
   // Inject the never-blank harness into a static HTML document
   const injectHarness = (doc: string): string => {
     if (doc.includes('__nb_overlay')) return doc;
@@ -2351,6 +2545,10 @@ ${buildLanguageRule(preferredLanguage)}`;
     // Source/framework apps (React, Vite, TS) need transpilation — run them via the mini-bundler
     if (detectAppType(currentFiles) === 'react') {
       finalHtml = buildSourceAppPreview(currentFiles);
+    } else if (!currentFiles['index.html'] && !isClassicVanillaWeb(currentFiles)) {
+      // No index.html and not a runnable vanilla web app → universal multi-format viewer
+      // (markdown, code, JSON, CSV, images, SVG, PDF, audio, video, HTML, text).
+      finalHtml = buildUniversalPreview(currentFiles);
     } else {
       let html = currentFiles['index.html'] || '';
 

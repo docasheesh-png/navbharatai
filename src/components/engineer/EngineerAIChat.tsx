@@ -35,6 +35,12 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
       case 'plan':
         append('agent', event.summary || `Planned ${event.editCount} file edit(s).`);
         break;
+      case 'command_result':
+        append(
+          'system',
+          `$ ${event.command}\n${(event.output || '').slice(-800)}${event.exitCode !== 0 ? `\n(exit ${event.exitCode})` : ''}`
+        );
+        break;
       case 'files_changed':
         append('system', `Edited: ${event.paths.join(', ')}`);
         break;

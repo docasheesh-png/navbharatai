@@ -11,12 +11,14 @@ export interface EngineerPlanEdit {
 export interface EngineerPlan {
   done: boolean;
   summary?: string;
+  commands: string[];
   edits: EngineerPlanEdit[];
 }
 
 export type EngineerAgentEvent =
   | { type: 'iteration_start'; iteration: number }
   | { type: 'plan'; summary: string; editCount: number }
+  | { type: 'command_result'; command: string; exitCode: number; output: string }
   | { type: 'files_changed'; paths: string[] }
   | { type: 'build_result'; success: boolean; logs: string }
   | { type: 'complete'; summary: string; iterations: number }

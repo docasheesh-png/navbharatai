@@ -73,4 +73,17 @@ export class E2BActuator implements IEngineerActuator {
       return { success: false, logs: `${err.stdout || ''}${err.stderr || ''}${err.message || String(err)}` };
     }
   }
+
+  async runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    const sandbox = await this.getSandbox(workspaceId);
+    try {
+      const result = await sandbox.commands.run(command, {
+        cwd: WORKSPACE_ROOT,
+        timeoutMs: COMMAND_TIMEOUT_MS,
+      });
+      return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+    } catch (err: any) {
+      return { exitCode: -1, stdout: err.stdout || '', stderr: err.stderr || err.message || String(err) };
+    }
+  }
 }

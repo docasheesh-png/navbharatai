@@ -3782,15 +3782,21 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             const replyText = meta.reply || 'App successfully generated!';
             const replyPrefix = replyText.startsWith('⚠️') || replyText.startsWith('Could not') ? '' : '✅ ';
             const isFileEdit = meta.isEdit || replyText.startsWith('Updated ');
+            // Honest reporting: if the verifier found unresolved errors, show
+            // structured diagnostics instead of a fake "App is live".
+            const buildFailed = meta.validationReport && meta.validationReport.passed === false;
+            const statusLine = buildFailed
+              ? `\n**⚠️ Build Status: NEEDS ATTENTION** — the preview may be partial. Issues above; ask me to fix them.`
+              : `**App is live in Preview** →`;
             const processLog = [
-              `${replyPrefix}${replyText}`,
+              buildFailed ? `⚠️ Build completed with issues — see diagnostics below.` : `${replyPrefix}${replyText}`,
               ``,
               `**Build Summary**`,
               fileList.map((f: string) => `> \`${f}\` — ${isFileEdit ? 'updated' : 'created'}`).join('\n'),
               validationSection,
               ``,
-              `**App is live in Preview** →`,
-              deploySection,
+              statusLine,
+              buildFailed ? '' : deploySection,
             ].join('\n');
             setProMessages(prev => [...prev, {
               id: (Date.now() + 1).toString(),

@@ -12,6 +12,7 @@
  * never flagged.
  */
 import { VirtualFileSystem, normalizePath } from './ProjectModel';
+import { validateArchitecture } from './ArchitectureValidator';
 
 export type IssueSeverity = 'error' | 'warning';
 
@@ -103,6 +104,10 @@ export function verifyProject(vfs: VirtualFileSystem): VerifyResult {
       }
     }
   }
+
+  // 5. Architecture integrity (blocks the React #299 / mixed-architecture class):
+  //    single architecture, DOM mount match, single module entry, no legacy layers.
+  for (const issue of validateArchitecture(vfs)) issues.push(issue);
 
   const errors = issues.filter(i => i.severity === 'error').length;
   const warnings = issues.length - errors;

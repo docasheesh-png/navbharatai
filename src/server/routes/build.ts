@@ -2,7 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { runBuild } from '../project/BuildPipeline';
 import { makeAiEditGenerator, type ModelCall } from '../project/aiEdits';
 import { VirtualFileSystem } from '../project/ProjectModel';
-import { callClaude } from '../lib/aiCalls';
+import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
 import { PreviewService } from '../runtime/PreviewService';
 
 /**
@@ -18,6 +18,38 @@ import { PreviewService } from '../runtime/PreviewService';
  */
 const previewService = new PreviewService();
 
+/**
+ * Resilient model call: try providers in order and return the first non-empty
+ * reply. The engine must run even when one provider's key is absent — relying on
+ * Claude alone made the new engine silently fall back to the legacy path in
+ * production (where only Gemini/Groq keys were set). Providers without a native
+ * system-prompt slot get the system text prepended to the user message.
+ */
+function makeResilientModelCall(userKey?: string): ModelCall {
+  const key = typeof userKey === 'string' && userKey.trim() ? userKey : undefined;
+  return async (system, user) => {
+    const attempts: Array<{ name: string; run: () => Promise<string> }> = [
+      { name: 'claude', run: () => callClaude(user, key, [], system) },
+      { name: 'gemini', run: () => callGemini(user, key, [], system) },
+      { name: 'groq', run: () => callGroq(`${system}\n\n${user}`, key, []) },
+      { name: 'openai', run: () => callOpenAI(`${system}\n\n${user}`, key, []) },
+      { name: 'deepseek', run: () => callDeepSeek(`${system}\n\n${user}`, key, []) },
+      { name: 'openrouter', run: () => callOpenRouter(`${system}\n\n${user}`, key, []) },
+    ];
+    let lastErr: unknown;
+    for (const a of attempts) {
+      try {
+        const out = await a.run();
+        if (out && out.trim()) return out;
+      } catch (e: any) {
+        lastErr = e;
+        console.warn(`[BUILD] provider ${a.name} failed: ${e?.message || e}`);
+      }
+    }
+    throw new Error(`All AI providers failed for build${lastErr ? `: ${(lastErr as any)?.message || lastErr}` : ''}`);
+  };
+}
+
 export function registerBuildRoutes(app: Express): void {
   app.post('/api/build', async (req: Request, res: Response) => {
     try {
@@ -26,9 +58,8 @@ export function registerBuildRoutes(app: Express): void {
         return res.status(400).json({ error: 'prompt (string) is required' });
       }
 
-      // Model call backed by the shared aiCalls layer (Claude via proxy/SDK).
-      const callModel: ModelCall = (system, user) =>
-        callClaude(user, typeof userKey === 'string' ? userKey : undefined, [], system);
+      // Model call backed by the shared aiCalls layer — multi-provider with fallback.
+      const callModel: ModelCall = makeResilientModelCall(userKey);
       const { generate, fix } = makeAiEditGenerator(callModel);
 
       const result = await runBuild({

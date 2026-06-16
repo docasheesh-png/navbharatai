@@ -1,7 +1,16 @@
 import type { Express, Request, Response } from 'express';
 import { buildEngineerRouter } from '../EngineerAI/EngineerRouterFactory';
 import { EngineerAgentLoop } from '../EngineerAI/EngineerAgentLoop';
+import { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
+import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
+
+// Real e2b.dev cloud sandbox when configured, otherwise the process-level
+// LocalActuator (same isolation guarantees as Phase 1).
+function buildActuator(): IEngineerActuator {
+  if (process.env.E2B_API_KEY) return new E2BActuator();
+  return new LocalActuator();
+}
 
 /**
  * Engineer AI route — Phase 1 (process-level sandbox, no Docker yet).
@@ -12,7 +21,7 @@ import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
  */
 export function registerEngineerRoutes(app: Express): void {
   const router = buildEngineerRouter();
-  const agentLoop = new EngineerAgentLoop(router, new LocalActuator());
+  const agentLoop = new EngineerAgentLoop(router, buildActuator());
 
   app.post('/api/engineer-chat', async (req: Request, res: Response) => {
     const { workspaceId, instruction } = req.body || {};

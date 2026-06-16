@@ -150,6 +150,20 @@ function safeLS(key: string, value: string): void {
   }
 }
 
+// Recursively replaces `undefined` with `null` (Firestore rejects `undefined`).
+// Shared by every chat surface (Free / Pro / SDA) that syncs sessions to `chat_sessions`.
+export function sanitizeFirestoreData(data: any): any {
+  const sanitized = { ...data };
+  Object.keys(sanitized).forEach(key => {
+    if (sanitized[key] === undefined) {
+      sanitized[key] = null;
+    } else if (typeof sanitized[key] === 'object' && sanitized[key] !== null) {
+      sanitized[key] = sanitizeFirestoreData(sanitized[key]);
+    }
+  });
+  return sanitized;
+}
+
 export default function App() {
   // ── Phase 1 hooks ──────────────────────────────────────────────────────
   const { logs, setLogs, addLog } = useDevLogs();
@@ -442,6 +456,9 @@ export default function App() {
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>(() => Date.now().toString());
+  // Pro App Builder chat needs its own session id — it must never share/overwrite
+  // the Free (NBI) chat's session document.
+  const [currentProSessionId, setCurrentProSessionId] = useState<string>(() => `pro-${Date.now()}`);
 
   // Tracks whether the initial cloud load finished — guards the auto-save effect
   // so we never overwrite cloud data before we've pulled it in.
@@ -1444,6 +1461,8 @@ export default function App() {
       setProMessages([]);
       setProInput('');
       try { localStorage.removeItem('navbharat_pro_messages'); } catch {}
+      // Fresh session id so the next conversation doesn't inherit this one's memory/UCI
+      setCurrentProSessionId(`pro-${Date.now()}`);
       // Wipe workspace so next open starts with a blank canvas
       setFiles({});
       clearWorkspace().catch(() => {});
@@ -1458,7 +1477,7 @@ export default function App() {
       try { localStorage.removeItem('sda_messages'); } catch {}
       setSdaResetKey(k => k + 1);
     }
-  }, [activeView, toggleTab, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt, setFiles, setBuildVersionStack, setProBuildProgress, setCurrentSessionId, setSdaResetKey]);
+  }, [activeView, toggleTab, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt, setFiles, setBuildVersionStack, setProBuildProgress, setCurrentSessionId, setCurrentProSessionId, setSdaResetKey]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const mainContentRef = useRef<HTMLDivElement>(null);
@@ -1536,18 +1555,6 @@ export default function App() {
       safeLS('navbharat_sessions', JSON.stringify(next));
 
       // Sync with Firestore collection: chat_sessions under authenticated user contexts
-      // Helper to sanitize data for Firestore
-  const sanitizeFirestoreData = (data: any): any => {
-    const sanitized = { ...data };
-    Object.keys(sanitized).forEach(key => {
-      if (sanitized[key] === undefined) {
-        sanitized[key] = null;
-      } else if (typeof sanitized[key] === 'object' && sanitized[key] !== null) {
-        sanitized[key] = sanitizeFirestoreData(sanitized[key]);
-      }
-    });
-    return sanitized;
-  };
       if (user) {
         const sessionRef = doc(db, 'chat_sessions', currentSessionId);
         setDoc(sessionRef, sanitizeFirestoreData({
@@ -1598,6 +1605,91 @@ export default function App() {
       return next;
     });
   }, [messages, currentSessionId, files, activeAgent, mode, user]);
+
+  // Synchronized Auto-Save for Pro App Builder chat — mirrors the Free-chat
+  // effect above but uses its own session id so the two never overwrite each
+  // other. Without this, Pro Builder conversations were never persisted, so
+  // they could never appear in History or be resumed.
+  useEffect(() => {
+    if (!user) return; // ONLY save sessions if logged-in!
+    const activeMsgs = proMessages;
+
+    if (activeMsgs.length === 0) return;
+    if (activeMsgs.length <= 1 && activeMsgs[0]?.id?.includes('welcome')) return;
+
+    setSessions(prev => {
+      const existingIdx = prev.findIndex(s => s.id === currentProSessionId);
+      let existingSession = existingIdx > -1 ? prev[existingIdx] : null;
+
+      const firstRealMsg = activeMsgs.find(m => m.sender === 'user' || !m.id?.includes('welcome'));
+      const rawTitle = firstRealMsg?.text || 'New App Build';
+      const title = rawTitle.slice(0, 40) + (rawTitle.length > 40 ? '...' : '');
+
+      const sessionUci = existingSession?.uci || generateUCI();
+
+      const updatedSession: ChatSession = {
+        id: currentProSessionId,
+        title: existingSession?.title && existingSession?.title !== 'New App Build' ? existingSession.title : title,
+        messages: activeMsgs,
+        files,
+        lastUpdated: new Date().toISOString(),
+        mode: 'build',
+        agent: 'navbharatai-pro',
+        isPinned: existingSession?.isPinned || false,
+        uci: sessionUci,
+        originalAgent: existingSession?.originalAgent || 'navbharatai-pro',
+        currentAgent: 'navbharatai-pro',
+        memorySummary: existingSession?.memorySummary || '',
+        continuationChain: existingSession?.continuationChain || ['navbharatai-pro'],
+        restoredMessages: existingSession?.restoredMessages || []
+      };
+
+      let next;
+      if (existingIdx > -1) {
+        next = [...prev];
+        next[existingIdx] = updatedSession;
+      } else {
+        next = [updatedSession, ...prev];
+      }
+
+      safeLS('navbharat_sessions', JSON.stringify(next));
+
+      if (user) {
+        const sessionRef = doc(db, 'chat_sessions', currentProSessionId);
+        setDoc(sessionRef, sanitizeFirestoreData({
+          id: currentProSessionId || 'unknown',
+          uci: sessionUci || '',
+          userId: user?.uid || 'anonymous',
+          tab: 'nbi_pro_chat',
+          original_agent: updatedSession.originalAgent || null,
+          current_agent: updatedSession.currentAgent || null,
+          title: updatedSession.title || 'Untitled',
+          memory_summary: updatedSession.memorySummary || '',
+          restoredMessages: (updatedSession.restoredMessages || []).map(m => ({
+            id: m.id || Date.now().toString(),
+            text: m.text || '',
+            sender: m.sender || 'ai',
+            timestamp: m.timestamp || new Date().toISOString()
+          })),
+          messages: (updatedSession.messages || []).map(m => ({
+            id: m.id || Date.now().toString(),
+            text: m.text || '',
+            sender: m.sender || 'ai',
+            timestamp: m.timestamp || new Date().toISOString()
+          })),
+          files: Object.entries(updatedSession.files || {}).reduce((acc: Record<string, string>, [key, val]) => {
+            acc[key] = val || '';
+            return acc;
+          }, {}),
+          lastUpdated: updatedSession.lastUpdated || new Date().toISOString(),
+          isPinned: !!updatedSession.isPinned,
+          mode: 'build'
+        })).catch(err => console.error('Firestore chat_sessions (pro) sync error:', err));
+      }
+
+      return next;
+    });
+  }, [proMessages, currentProSessionId, files, user]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -2127,15 +2219,62 @@ ${buildLanguageRule(preferredLanguage)}`;
 .__nb_h{font-weight:800;color:#f59e0b;font-size:13px;margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em}
 .__nb_card pre{white-space:pre-wrap;word-break:break-word;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px;font-size:11px;line-height:1.5;color:#ff7b72;max-height:180px;overflow:auto;margin:0}
 .__nb_s{margin-top:12px;font-size:12px;color:#8b949e;line-height:1.5}
+.__nb_btn{margin-top:14px;display:inline-block;padding:9px 16px;border-radius:8px;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit}
+.__nb_btn_ai{background:#2ea043;color:#fff}
+.__nb_btn_ai:hover{background:#3fb950}
+.__nb_btn_code{background:#30363d;color:#c9d1d9;border:1px solid #484f58}
+.__nb_btn_code:hover{background:#3a414b}
 </style>
 <script>
 (function(){
   function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");}
+  function classifyBug(kind,msg){
+    var m=String(msg||'');
+    var sysPatterns=[/Could not load the preview compiler/i,/Failed to load React from CDN/i,/network blocked/i,/CORS/i,/Failed to fetch dynamically imported module/i,/ChunkLoadError/i,/Loading chunk/i,/NetworkError/i,/ERR_INTERNET_DISCONNECTED/i,/ERR_CONNECTION/i,/insecure/i];
+    for(var i=0;i<sysPatterns.length;i++){if(sysPatterns[i].test(m))return 'coding';}
+    return 'ai';
+  }
+  function buildAiPrompt(kind,msg){
+    return 'Preview me ek bug aaya hai. Root-cause audit karo aur SIRF is specific bug ko fix karo — kisi bhi dusri working feature ya unrelated file ko mat todna/change karna.\\n\\nError type: '+kind+'\\nError message: '+msg+'\\n\\nInstructions:\\n1. Exact file aur line dhundo jo is error ki wajah hai.\\n2. Root cause identify karo (sirf symptom nahi).\\n3. Minimal fix apply karo jo zaroori hai.\\n4. App ke kisi aur part ko modify/remove/refactor mat karo.\\n5. Fix ke baad preview bina error ke render hona chahiye.';
+  }
+  function buildCodeReport(kind,msg){
+    return '=== NavBharatAI Preview Bug Report ===\\nType: Coding/System issue (manual fix needed)\\nKind: '+kind+'\\nMessage: '+msg+'\\nURL: '+location.href+'\\nUserAgent: '+navigator.userAgent+'\\nTime: '+new Date().toISOString();
+  }
+  function copyText(text){
+    var ok=false;
+    try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text);ok=true;}}catch(e){}
+    if(!ok){
+      try{
+        var ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.left='-9999px';
+        document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);ok=true;
+      }catch(e){}
+    }
+    return ok;
+  }
   function show(kind,msg){
     if(document.getElementById('__nb_err'))return;
+    var cls=classifyBug(kind,msg);
+    var btnHtml=cls==='ai'
+      ? '<button id="__nb_fixbtn" class="__nb_btn __nb_btn_ai">Fix Bug</button>'
+      : '<button id="__nb_fixbtn" class="__nb_btn __nb_btn_code">Coding Bug</button>';
     var o=document.createElement('div');o.id='__nb_err';o.className='__nb_overlay';
-    o.innerHTML='<div class="__nb_card"><div class="__nb_h">'+esc(kind)+'</div>'+(msg?('<pre>'+esc(msg)+'</pre>'):'')+'<div class="__nb_s">All files are loaded in Code Studio. Ask the AI to fix or convert this app and the preview will update.</div></div>';
+    o.innerHTML='<div class="__nb_card"><div class="__nb_h">'+esc(kind)+'</div>'+(msg?('<pre>'+esc(msg)+'</pre>'):'')+'<div class="__nb_s">All files are loaded in Code Studio. Ask the AI to fix or convert this app and the preview will update.</div>'+btnHtml+'<div id="__nb_fixmsg" class="__nb_s" style="display:none"></div></div>';
     (document.body||document.documentElement).appendChild(o);
+    var btn=document.getElementById('__nb_fixbtn');
+    if(!btn)return;
+    btn.addEventListener('click',function(){
+      var fm=document.getElementById('__nb_fixmsg');
+      if(cls==='ai'){
+        var prompt=buildAiPrompt(kind,msg);
+        try{window.parent.postMessage({type:'nb-ai-fix',prompt:prompt},'*');}catch(e){}
+        if(fm){fm.style.display='block';fm.textContent='Prompt chat box me bhar diya gaya — Send dabao fix karne ke liye.';}
+      }else{
+        var report=buildCodeReport(kind,msg);
+        var copied=copyText(report);
+        try{window.parent.postMessage({type:'nb-code-bug',report:report},'*');}catch(e){}
+        if(fm){fm.style.display='block';fm.textContent=copied?'Bug report clipboard me copy ho gaya.':'Auto-copy nahi hua — manually copy karein.';}
+      }
+    });
   }
   window.__nbShowError=function(m){show('Preview Error',m);};
   window.addEventListener('error',function(e){show('Preview Error',(e&&e.message)||(e&&e.error&&e.error.message)||'Script error');});
@@ -2229,7 +2368,8 @@ ${buildLanguageRule(preferredLanguage)}`;
   window.__nbLoading=true;
   (async function(){
     try{
-      var bare=collectBare();forced.forEach(function(s){if(bare.indexOf(s)<0)bare.push(s);});
+      var bare;try{bare=collectBare();}catch(ce){bare=[];}
+      forced.forEach(function(s){if(bare.indexOf(s)<0)bare.push(s);});
       var failedDeps=[];
       await Promise.all(bare.map(async function(spec){
         try{bareCache[spec]=interop(await import(specUrl(spec)));}
@@ -2299,12 +2439,21 @@ ${buildLanguageRule(preferredLanguage)}`;
     if (m) entry = m[1].replace(/^\//, '').replace(/^\.\//, '');
     if (!entry || !srcFiles[entry]) {
       const cands = ['src/main.tsx','src/main.jsx','src/main.ts','src/index.tsx','src/index.jsx','src/index.ts','main.tsx','main.jsx','index.tsx','index.jsx','src/App.tsx','src/App.jsx','App.tsx','App.jsx'];
-      entry = cands.find(c => srcFiles[c]) || Object.keys(srcFiles).find(k => /\.(tsx|jsx)$/i.test(k)) || '';
+      // Prefer candidates that contain actual JSX/rendering code (not just re-exports)
+      const hasRendering = (k: string) => {
+        const v = srcFiles[k] || '';
+        return /createRoot|ReactDOM|render\s*\(|ReactMount|hydrateRoot/.test(v) || /<[A-Z][A-Za-z]*[\s/>]/.test(v);
+      };
+      entry = cands.find(c => srcFiles[c] && hasRendering(c))
+        || cands.find(c => srcFiles[c])
+        || Object.keys(srcFiles).find(k => /\.(tsx|jsx)$/i.test(k) && hasRendering(k))
+        || Object.keys(srcFiles).find(k => /\.(tsx|jsx)$/i.test(k))
+        || '';
     }
 
     // Reuse the app's <body> markup (minus module/external scripts) so #root etc. survive
     let bodyInner = '<div id="root"></div>';
-    const bm = rawHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    const bm = rawHtml.match(/<body[^>]*>([\s\S]*?)<\/body\s*>/i);
     if (bm) {
       bodyInner = bm[1]
         .replace(/<script[^>]*type=["']module["'][^>]*>[\s\S]*?<\/script>/gi, '')
@@ -2546,11 +2695,21 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
   };
 
   const updatePreview = (currentFiles: FileSystem) => {
-    // Strip markdown code fences from any file the AI accidentally wrapped in ```lang ... ``` markers
-    const stripFences = (s: string) =>
-      s.trimStart().startsWith('```')
-        ? s.replace(/^[\s\S]*?```[a-zA-Z]*\r?\n/, '').replace(/\r?\n?```\s*$/, '')
-        : s;
+    // Strip markdown code fences the AI accidentally wraps file content in (```lang\n...\n```)
+    // Line-by-line: strip only the first and last fence lines, never touching inner content.
+    const stripFences = (s: string): string => {
+      const trimmed = s.trimStart();
+      if (!trimmed.startsWith('```')) return s;
+      const lines = s.split(/\r?\n/);
+      // Find first fence line (```lang) and last fence line (```)
+      const first = lines.findIndex(l => /^```/.test(l.trim()));
+      if (first === -1) return s;
+      // Find matching closing fence after the opening line (scan from end for safety)
+      let last = -1;
+      for (let i = lines.length - 1; i > first; i--) { if (/^```\s*$/.test(lines[i].trim())) { last = i; break; } }
+      if (last === -1) return lines.slice(first + 1).join('\n'); // no closing fence — strip opener only
+      return lines.slice(first + 1, last).join('\n');
+    };
     currentFiles = Object.fromEntries(
       Object.entries(currentFiles).map(([k, v]) => [k, typeof v === 'string' ? stripFences(v) : v])
     ) as FileSystem;
@@ -2607,11 +2766,13 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
       });
 
       // Inline external script src — preserve type attribute (e.g. type="text/babel" for React/JSX)
-      finalHtml = finalHtml.replace(/<script([^>]+)src=["']([^"']+)["'][^>]*><\/script>/gi, (match, attrs, src) => {
+      // Handles: single-quoted src, unquoted src, self-closing, missing </script>
+      finalHtml = finalHtml.replace(/<script([^>]*?)\bsrc\s*=\s*["']?([^"'>\s]+)["']?([^>]*)>\s*<\/script>/gi, (match, pre, src, post) => {
         const filename = src.replace(/^\.\//, '').replace(/^\//, '');
         const content = currentFiles[filename];
         if (!content) return match;
-        const typeMatch = attrs.match(/type=["']([^"']+)["']/);
+        const allAttrs = pre + post;
+        const typeMatch = allAttrs.match(/type=["']([^"']+)["']/);
         const typeAttr = typeMatch ? ` type="${typeMatch[1]}"` : '';
         return `<script${typeAttr} data-src="${filename}">${content.replace(/<\//g, '<\\/')}<\/script>`;
       });
@@ -3556,6 +3717,14 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     const abortController = new AbortController();
     proAbortControllerRef.current = abortController;
 
+    // Same "compact memory + bounded recent window" pattern as Free chat: full
+    // history would never fit/scale token-wise, so we send a short memorySummary
+    // (the AI keeps this fact-dense) plus the restored + live messages, capped.
+    const proActiveSession = sessions.find(s => s.id === currentProSessionId);
+    const proRestoredMessages = proActiveSession?.restoredMessages || [];
+    const proMemorySummary = proActiveSession?.memorySummary || undefined;
+    const proHistoryForAPI = [...proRestoredMessages, ...proMessages];
+
     // ── Mode is the single source of truth — forceBuild skips auto routing ──
     const isBuildMode = mode === 'build' || forceBuild;
     const isAutoMode  = mode === 'auto' && !forceBuild;
@@ -3587,7 +3756,8 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             signal: abortController.signal,
             body: JSON.stringify({
               message: messageToSend,
-              history: proMessages.slice(-20).map((m: any) => ({ sender: m.sender, text: String(m.text || '').replace(/__CONFIRM_AUTO_BUILD__|__AUTO_PLAN__|__AUTO_BUILD__/g, '').slice(0, 1500) })),
+              history: proHistoryForAPI.slice(-40).map((m: any) => ({ sender: m.sender, text: String(m.text || '').replace(/__CONFIRM_AUTO_BUILD__|__AUTO_PLAN__|__AUTO_BUILD__/g, '').slice(0, 1500) })),
+              memorySummary: proMemorySummary,
               mode: 'auto_plan',
               ...(fileAttachments.length > 0 ? { fileData: fileAttachments[0].base64, fileType: fileAttachments[0].type, fileName: fileAttachments[0].name } : {}),
             }),
@@ -3617,7 +3787,8 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
           signal: abortController.signal,
           body: JSON.stringify({
             message: messageToSend,
-            history: proMessages.slice(-20).map((m: any) => ({ sender: m.sender, text: String(m.text || '').replace(/__CONFIRM_AUTO_BUILD__|__AUTO_PLAN__|__AUTO_BUILD__/g, '').slice(0, 1500) })),
+            history: proHistoryForAPI.slice(-40).map((m: any) => ({ sender: m.sender, text: String(m.text || '').replace(/__CONFIRM_AUTO_BUILD__|__AUTO_PLAN__|__AUTO_BUILD__/g, '').slice(0, 1500) })),
+            memorySummary: proMemorySummary,
             mode: 'auto',
             ...(fileAttachments.length > 0 ? { fileData: fileAttachments[0].base64, fileType: fileAttachments[0].type, fileName: fileAttachments[0].name } : {}),
           }),
@@ -3645,8 +3816,8 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
           signal: abortController.signal,
           body: JSON.stringify({
             message: messageToSend,
-            history: proMessages.slice(-30).map((m: any) => ({ sender: m.sender, text: String(m.text || '').slice(0, 2000) })),
-            memorySummary: sessions.find(s => s.id === currentSessionId)?.memorySummary || undefined,
+            history: proHistoryForAPI.slice(-40).map((m: any) => ({ sender: m.sender, text: String(m.text || '').slice(0, 2000) })),
+            memorySummary: proMemorySummary,
             mode: 'conversation',
             ...(fileAttachments.length > 0 ? {
               fileData: fileAttachments[0].base64,
@@ -4485,18 +4656,32 @@ ${pending.map(p => `  - ${p}`).join('\n')}
       return next;
     });
     
-    setCurrentSessionId(targetSession.id);
-    // Show the last 40 messages from previous conversation so user can scroll up and see context,
-    // then append the continuation greeting at the bottom.
-    const visibleHistory = uniqueHistory.slice(-40);
-    setMessages([...visibleHistory, continuationGreeting]);
-
     // Detect target tab — use saved tab field first, then broad agent/mode detection
     const savedTab = (targetSession as any).meta?.tab as ViewType | undefined;
     const isProAgent = targetAgent === 'navbharatai-pro' || targetAgent.includes('pro');
     const isVishwakarmaAgent = targetAgent.startsWith('vishwakarma');
     const isProSession = savedTab === 'nbi_pro_chat' || isProAgent;
     const isAscSession = savedTab === 'asc_chat' || isVishwakarmaAgent;
+    const isSdaSession = savedTab === 'sda_chat' || targetAgent === 'sda';
+
+    // Show the last 40 messages from previous conversation so user can scroll up and see context,
+    // then append the continuation greeting at the bottom.
+    const visibleHistory = uniqueHistory.slice(-40);
+
+    // Route restored content into the state belonging to the session's actual
+    // surface — Free/Pro/SDA each own a separate message state, so dumping
+    // everything into the Free-chat state regardless of origin was the bug.
+    if (isSdaSession) {
+      // SDA persists itself via a userId-keyed Firestore doc (see SDAChat.tsx);
+      // remounting makes it re-fetch its own latest content.
+      setSdaResetKey(k => k + 1);
+    } else if (isProSession) {
+      setCurrentProSessionId(targetSession.id);
+      setProMessages([...visibleHistory, continuationGreeting]);
+    } else {
+      setCurrentSessionId(targetSession.id);
+      setMessages([...visibleHistory, continuationGreeting]);
+    }
 
     // Restore generated code from session files if available
     if (targetSession.files && Object.keys(targetSession.files).length > 0) {
@@ -4511,7 +4696,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     // Navigate to the correct chat tab — never open preview
     const targetTab: ViewType = savedTab && ['nbi_chat', 'nbi_pro_chat', 'asc_chat', 'sda_chat'].includes(savedTab)
       ? savedTab
-      : isAscSession ? 'asc_chat' : isProSession ? 'nbi_pro_chat' : 'nbi_chat';
+      : isAscSession ? 'asc_chat' : isProSession ? 'nbi_pro_chat' : isSdaSession ? 'sda_chat' : 'nbi_chat';
     toggleTab(targetTab);
 
     // Restore activeAgent to match the session
@@ -6588,7 +6773,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                            ⬇ Export PRD
                          </button>
                        )}
-                       <span className="font-mono text-indigo-400">{sessions.find(s => s.id === currentSessionId)?.uci || ''}</span>
+                       <span className="font-mono text-indigo-400">{sessions.find(s => s.id === currentProSessionId)?.uci || ''}</span>
                      </div>
                   </div>
                   <AIChat
@@ -6598,8 +6783,8 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     onSend={(files) => { handleSendForPro(files); }}
                     isLoading={isProLoading}
                     activeIntent={activeIntent}
-                    isPinned={false}
-                    onTogglePin={() => {}}
+                    isPinned={sessions.find(s => s.id === currentProSessionId)?.isPinned || false}
+                    onTogglePin={() => togglePin(currentProSessionId)}
                     isLoggedIn={!!user}
                     onShowLogin={() => setShowAuth(true)}
                     mode={mode}
@@ -6615,10 +6800,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                         setIsMenuOpen(false);
                     }}
                     userId={user?.uid}
-                    activeUci={user ? (sessions.find(s => s.id === currentSessionId)?.uci || '') : ''}
+                    activeUci={user ? (sessions.find(s => s.id === currentProSessionId)?.uci || '') : ''}
                     onRestoreUci={user ? handleRestoreUci : undefined}
-                    restoredMessages={[]}
-                    memorySummary={''}
+                    restoredMessages={sessions.find(s => s.id === currentProSessionId)?.restoredMessages || []}
+                    memorySummary={sessions.find(s => s.id === currentProSessionId)?.memorySummary || ''}
                     wallet={wallet}
                     buildProgress={proBuildProgress}
                     onBuildStepToggle={(i) => setProBuildProgress(prev => ({

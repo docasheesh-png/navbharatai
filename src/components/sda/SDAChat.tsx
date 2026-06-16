@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import ReactMarkdown from 'react-markdown';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db, sanitizeFirestoreData } from '../../App';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -249,6 +251,9 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
+  // Gates the Firestore autosave effect until the cross-device fetch (below) has
+  // finished — otherwise a stale local case could overwrite a newer one mid-fetch.
+  const hydratedRef = useRef(false);
 
   // Restore messages from localStorage on mount (handles 1-2 hour gaps without reload)
   useEffect(() => {
@@ -261,6 +266,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
         }
       }
     } catch { /* ignore corrupt storage */ }
+    if (!userId) hydratedRef.current = true;
   }, []);
 
   // Persist messages to localStorage on every change (skip if only welcome msg)
@@ -271,6 +277,79 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
       } catch { /* quota */ }
     }
   }, [messages]);
+
+  // Cross-device resume: fetch the user's deterministic SDA case doc and use it
+  // if it's newer than whatever localStorage restored above.
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'chat_sessions', `sda_${userId}`));
+        if (snap.exists()) {
+          const data = snap.data();
+          const remoteMessages: SDAMessage[] = Array.isArray(data.messages)
+            ? data.messages.map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }))
+            : [];
+          if (remoteMessages.length > 1) {
+            const remoteUpdated = data.lastUpdated ? new Date(data.lastUpdated).getTime() : 0;
+            let localUpdated = 0;
+            try {
+              const saved = localStorage.getItem('sda_messages');
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                const last = parsed[parsed.length - 1];
+                if (last?.timestamp) localUpdated = new Date(last.timestamp).getTime();
+              }
+            } catch { /* ignore */ }
+            if (remoteUpdated > localUpdated) {
+              setMessages(remoteMessages);
+              if (data.patientSnapshot) setPatient(data.patientSnapshot);
+              if (Array.isArray(data.redFlags)) setActiveRedFlags(data.redFlags);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('SDA Firestore restore error:', err);
+      } finally {
+        hydratedRef.current = true;
+      }
+    })();
+  }, [userId]);
+
+  // Debounced Firestore autosave — mirrors Free/Pro chat persistence so SDA cases
+  // show up in History and resume correctly across devices.
+  useEffect(() => {
+    if (!userId || !hydratedRef.current || messages.length < 2) return;
+    const t = setTimeout(() => {
+      const docId = `sda_${userId}`;
+      setDoc(doc(db, 'chat_sessions', docId), sanitizeFirestoreData({
+        id: docId,
+        uci: docId,
+        userId,
+        tab: 'sda_chat',
+        original_agent: 'sda',
+        current_agent: 'sda',
+        title: patient.chiefComplaint || patient.age ? `SDA Case: ${patient.age || ''} ${patient.sex || ''} — ${patient.chiefComplaint || 'Ongoing'}`.trim() : 'SDA Case',
+        memory_summary: '',
+        restoredMessages: [],
+        messages: messages.slice(-150).map(m => ({
+          id: m.id,
+          text: m.text,
+          sender: m.sender,
+          timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : m.timestamp,
+          isRedFlag: m.isRedFlag || false,
+          attachedFile: m.attachedFile || null,
+        })),
+        files: {},
+        lastUpdated: new Date().toISOString(),
+        isPinned: false,
+        mode: 'sda',
+        patientSnapshot: patient,
+        redFlags: activeRedFlags,
+      })).catch(err => console.error('SDA Firestore autosave error:', err));
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [messages, patient, activeRedFlags, userId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });

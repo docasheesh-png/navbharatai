@@ -3,6 +3,7 @@ import { runBuild } from '../project/BuildPipeline';
 import { makeAiEditGenerator, type ModelCall } from '../project/aiEdits';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
+import { aiRouter } from '../lib/aiRouter';
 import { PreviewService } from '../runtime/PreviewService';
 
 /**
@@ -29,6 +30,9 @@ function makeResilientModelCall(userKey?: string): ModelCall {
   const key = typeof userKey === 'string' && userKey.trim() ? userKey : undefined;
   return async (system, user) => {
     const attempts: Array<{ name: string; run: () => Promise<string> }> = [
+      // aiRouter is the same provider-selection path the legacy build uses in
+      // production, so it is the most reliable first choice.
+      { name: 'aiRouter', run: () => aiRouter.route(user, [], 'free' as any, undefined, system) },
       { name: 'claude', run: () => callClaude(user, key, [], system) },
       { name: 'gemini', run: () => callGemini(user, key, [], system) },
       { name: 'groq', run: () => callGroq(`${system}\n\n${user}`, key, []) },

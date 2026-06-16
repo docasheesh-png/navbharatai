@@ -129,14 +129,30 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
   // Listen for tag badge clicks from iframe
   useEffect(() => {
     const handleMsg = (e: MessageEvent) => {
-      if (e.data?.type !== 'nbtag-select') return;
-      const { tag, el, txt, id, cls } = e.data;
-      const parts: string[] = [el];
-      if (id) parts.push('#' + id);
-      if (cls) parts.push('.' + cls.split(' ').filter(Boolean).join('.'));
-      if (txt) parts.push(`"${txt}"`);
-      const hint = `[${tag} — ${parts.join(' ')}] `;
-      onEditWithAI?.(hint);
+      if (e.data?.type === 'nbtag-select') {
+        const { tag, el, txt, id, cls } = e.data;
+        const parts: string[] = [el];
+        if (id) parts.push('#' + id);
+        if (cls) parts.push('.' + cls.split(' ').filter(Boolean).join('.'));
+        if (txt) parts.push(`"${txt}"`);
+        const hint = `[${tag} — ${parts.join(' ')}] `;
+        onEditWithAI?.(hint);
+        return;
+      }
+      if (e.data?.type === 'nb-ai-fix') {
+        // Error overlay's "Fix Bug" button — auto-fill the AI-generated fix prompt into chat
+        onEditWithAI?.(e.data.prompt as string);
+        return;
+      }
+      if (e.data?.type === 'nb-code-bug') {
+        // Error overlay's "Coding Bug" button — already copied to clipboard inside the iframe;
+        // re-copy from the parent context too since some sandboxed iframes block clipboard access.
+        const report = e.data.report as string;
+        if (report && navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(report).catch(() => {});
+        }
+        return;
+      }
     };
     window.addEventListener('message', handleMsg);
     return () => window.removeEventListener('message', handleMsg);

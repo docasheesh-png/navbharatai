@@ -2125,15 +2125,62 @@ ${buildLanguageRule(preferredLanguage)}`;
 .__nb_h{font-weight:800;color:#f59e0b;font-size:13px;margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em}
 .__nb_card pre{white-space:pre-wrap;word-break:break-word;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px;font-size:11px;line-height:1.5;color:#ff7b72;max-height:180px;overflow:auto;margin:0}
 .__nb_s{margin-top:12px;font-size:12px;color:#8b949e;line-height:1.5}
+.__nb_btn{margin-top:14px;display:inline-block;padding:9px 16px;border-radius:8px;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit}
+.__nb_btn_ai{background:#2ea043;color:#fff}
+.__nb_btn_ai:hover{background:#3fb950}
+.__nb_btn_code{background:#30363d;color:#c9d1d9;border:1px solid #484f58}
+.__nb_btn_code:hover{background:#3a414b}
 </style>
 <script>
 (function(){
   function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");}
+  function classifyBug(kind,msg){
+    var m=String(msg||'');
+    var sysPatterns=[/Could not load the preview compiler/i,/Failed to load React from CDN/i,/network blocked/i,/CORS/i,/Failed to fetch dynamically imported module/i,/ChunkLoadError/i,/Loading chunk/i,/NetworkError/i,/ERR_INTERNET_DISCONNECTED/i,/ERR_CONNECTION/i,/insecure/i];
+    for(var i=0;i<sysPatterns.length;i++){if(sysPatterns[i].test(m))return 'coding';}
+    return 'ai';
+  }
+  function buildAiPrompt(kind,msg){
+    return 'Preview me ek bug aaya hai. Root-cause audit karo aur SIRF is specific bug ko fix karo — kisi bhi dusri working feature ya unrelated file ko mat todna/change karna.\\n\\nError type: '+kind+'\\nError message: '+msg+'\\n\\nInstructions:\\n1. Exact file aur line dhundo jo is error ki wajah hai.\\n2. Root cause identify karo (sirf symptom nahi).\\n3. Minimal fix apply karo jo zaroori hai.\\n4. App ke kisi aur part ko modify/remove/refactor mat karo.\\n5. Fix ke baad preview bina error ke render hona chahiye.';
+  }
+  function buildCodeReport(kind,msg){
+    return '=== NavBharatAI Preview Bug Report ===\\nType: Coding/System issue (manual fix needed)\\nKind: '+kind+'\\nMessage: '+msg+'\\nURL: '+location.href+'\\nUserAgent: '+navigator.userAgent+'\\nTime: '+new Date().toISOString();
+  }
+  function copyText(text){
+    var ok=false;
+    try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text);ok=true;}}catch(e){}
+    if(!ok){
+      try{
+        var ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.left='-9999px';
+        document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);ok=true;
+      }catch(e){}
+    }
+    return ok;
+  }
   function show(kind,msg){
     if(document.getElementById('__nb_err'))return;
+    var cls=classifyBug(kind,msg);
+    var btnHtml=cls==='ai'
+      ? '<button id="__nb_fixbtn" class="__nb_btn __nb_btn_ai">Fix Bug</button>'
+      : '<button id="__nb_fixbtn" class="__nb_btn __nb_btn_code">Coding Bug</button>';
     var o=document.createElement('div');o.id='__nb_err';o.className='__nb_overlay';
-    o.innerHTML='<div class="__nb_card"><div class="__nb_h">'+esc(kind)+'</div>'+(msg?('<pre>'+esc(msg)+'</pre>'):'')+'<div class="__nb_s">All files are loaded in Code Studio. Ask the AI to fix or convert this app and the preview will update.</div></div>';
+    o.innerHTML='<div class="__nb_card"><div class="__nb_h">'+esc(kind)+'</div>'+(msg?('<pre>'+esc(msg)+'</pre>'):'')+'<div class="__nb_s">All files are loaded in Code Studio. Ask the AI to fix or convert this app and the preview will update.</div>'+btnHtml+'<div id="__nb_fixmsg" class="__nb_s" style="display:none"></div></div>';
     (document.body||document.documentElement).appendChild(o);
+    var btn=document.getElementById('__nb_fixbtn');
+    if(!btn)return;
+    btn.addEventListener('click',function(){
+      var fm=document.getElementById('__nb_fixmsg');
+      if(cls==='ai'){
+        var prompt=buildAiPrompt(kind,msg);
+        try{window.parent.postMessage({type:'nb-ai-fix',prompt:prompt},'*');}catch(e){}
+        if(fm){fm.style.display='block';fm.textContent='Prompt chat box me bhar diya gaya — Send dabao fix karne ke liye.';}
+      }else{
+        var report=buildCodeReport(kind,msg);
+        var copied=copyText(report);
+        try{window.parent.postMessage({type:'nb-code-bug',report:report},'*');}catch(e){}
+        if(fm){fm.style.display='block';fm.textContent=copied?'Bug report clipboard me copy ho gaya.':'Auto-copy nahi hua — manually copy karein.';}
+      }
+    });
   }
   window.__nbShowError=function(m){show('Preview Error',m);};
   window.addEventListener('error',function(e){show('Preview Error',(e&&e.message)||(e&&e.error&&e.error.message)||'Script error');});

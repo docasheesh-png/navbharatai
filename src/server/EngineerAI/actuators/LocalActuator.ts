@@ -49,4 +49,11 @@ export class LocalActuator implements IEngineerActuator {
       return { success: false, logs: `${err.stdout || ''}${err.stderr || ''}${err.message || String(err)}` };
     }
   }
+
+  async runCommand(): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    throw new Error(
+      'Shell command execution requires a real sandbox (set E2B_API_KEY) — not available in the ' +
+      'process-level LocalActuator, since it runs in the same OS process/user as the server.'
+    );
+  }
 }

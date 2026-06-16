@@ -30,10 +30,12 @@ function makeResilientModelCall(userKey?: string): ModelCall {
   const key = typeof userKey === 'string' && userKey.trim() ? userKey : undefined;
   return async (system, user) => {
     const attempts: Array<{ name: string; run: () => Promise<string> }> = [
-      // aiRouter is the same provider-selection path the legacy build uses in
-      // production, so it is the most reliable first choice.
-      { name: 'aiRouter', run: () => aiRouter.route(user, [], 'free' as any, undefined, system) },
+      // Claude first — when ANTHROPIC_BASE_URL points at the user's paid proxy
+      // (e.g. aicredit.ai) this is the highest-quality coder; it cleanly throws
+      // and falls through if the proxy/key is unavailable.
       { name: 'claude', run: () => callClaude(user, key, [], system) },
+      // aiRouter is the same provider-selection path the legacy build uses in prod.
+      { name: 'aiRouter', run: () => aiRouter.route(user, [], 'free' as any, undefined, system) },
       { name: 'gemini', run: () => callGemini(user, key, [], system) },
       { name: 'groq', run: () => callGroq(`${system}\n\n${user}`, key, []) },
       { name: 'openai', run: () => callOpenAI(`${system}\n\n${user}`, key, []) },

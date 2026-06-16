@@ -132,6 +132,7 @@ export async function callClaude(message: string, key?: string, history: any[] =
         console.log(`[AUTH] Calling Claude proxy model: ${modelName}`);
         const completion = await client.chat.completions.create({
           model: modelName,
+          max_tokens: 8000,   // generous cap so code generation isn't truncated to a tiny app
           messages: [
             ...(systemInstruction ? [{ role: 'system' as const, content: systemInstruction }] : [{ role: 'system' as const, content: getBharatContext() }]),
             ...history.map(m => ({

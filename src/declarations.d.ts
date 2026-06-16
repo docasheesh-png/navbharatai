@@ -350,6 +350,11 @@ declare module 'lucide-react' {
   export const Calculator: Icon;
   export const Webhook: Icon;
   export const Clipboard: Icon;
+  export const Briefcase: Icon;
+  export const HardHat: Icon;
+  export const Scale: Icon;
+  export const GraduationCap: Icon;
+  export const Building2: Icon;
   export const GripVertical: Icon;
   export const Pencil: Icon;
   export const Lightbulb: Icon;

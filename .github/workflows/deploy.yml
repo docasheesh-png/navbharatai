@@ -1,0 +1,53 @@
+name: Deploy to Cloud Run
+
+# Auto-deploys the app to Google Cloud Run whenever main is updated, so a merge
+# to main goes live without a manual `gcloud builds submit`. Uses the existing
+# cloudbuild.yaml pipeline (build → push → deploy to service navbharat-ai-prod).
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   GCP_PROJECT_ID  — your Google Cloud project id
+#   GCP_SA_KEY      — JSON key of a service account with roles:
+#                       Cloud Build Editor, Cloud Run Admin, Service Account User,
+#                       Artifact Registry Writer (or Storage Admin for gcr.io)
+#
+# If these secrets are absent the job is skipped (no failed runs), so it is safe
+# to merge before the secrets are configured.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for deploy credentials
+        id: guard
+        run: |
+          if [ -n "${{ secrets.GCP_SA_KEY }}" ] && [ -n "${{ secrets.GCP_PROJECT_ID }}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GCP_SA_KEY / GCP_PROJECT_ID not set — skipping deploy. Add them to enable auto-deploy."
+          fi
+
+      - name: Checkout
+        if: steps.guard.outputs.ready == 'true'
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        if: steps.guard.outputs.ready == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        if: steps.guard.outputs.ready == 'true'
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Build & deploy via Cloud Build
+        if: steps.guard.outputs.ready == 'true'
+        run: gcloud builds submit --config=cloudbuild.yaml --substitutions=_NOOP=1 .

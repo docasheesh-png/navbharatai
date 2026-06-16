@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { buildEngineerRouter } from '../EngineerAI/EngineerRouterFactory';
 import { EngineerAgentLoop } from '../EngineerAI/EngineerAgentLoop';
+import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 
 /**
  * Engineer AI route — Phase 1 (process-level sandbox, no Docker yet).
@@ -11,7 +12,7 @@ import { EngineerAgentLoop } from '../EngineerAI/EngineerAgentLoop';
  */
 export function registerEngineerRoutes(app: Express): void {
   const router = buildEngineerRouter();
-  const agentLoop = new EngineerAgentLoop(router);
+  const agentLoop = new EngineerAgentLoop(router, new LocalActuator());
 
   app.post('/api/engineer-chat', async (req: Request, res: Response) => {
     const { workspaceId, instruction } = req.body || {};

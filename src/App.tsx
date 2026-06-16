@@ -3976,19 +3976,16 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
           }, 1200);
         };
 
-        // ── PRIMARY: real engine (VFS + EditEngine + Verifier + RepairLoop). ──
-        // The legacy streaming /api/pro-build path below is the automatic fallback,
-        // so a transient engine issue can never leave the build broken.
+        // ── REAL ENGINE ONLY (VFS + EditEngine + Verifier + RepairLoop + gates). ──
+        // The old vanilla AppEngine is RETIRED — we never silently fall back to it.
         try {
-          setProBuildProgress(prev => ({ ...prev, percent: 30, stage: '⚙️ Building with the new engine…' }));
+          setProBuildProgress(prev => ({ ...prev, percent: 30, stage: '⚙️ Building your app…' }));
           const engineRes = await buildApp({
             prompt: messageToSend,
             files: Object.keys(allTextFiles).length ? allTextFiles : undefined,
             preview: false,
           });
           if (engineRes && engineRes.fileCount > 0 && Object.keys(engineRes.files).length > 0) {
-            // Prefer the structured validation report (real gates + quality score +
-            // preview decision); fall back to the raw verify result.
             const val = engineRes.validation;
             const v = engineRes.verify;
             const passed = val ? !!engineRes.previewAllowed : v.ok;
@@ -3999,25 +3996,36 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
               : v.issues.map((i: any) => `${i.file}: ${i.message}`);
             const replyText = val
               ? `Build Status: ${val.status} · Quality ${score}/100${passed ? '' : ' — preview blocked, see diagnostics'}`
-              : (v.ok ? 'Built with the new engine — verified clean.' : 'Built with the new engine (with warnings).');
+              : (v.ok ? 'Built — verified clean.' : 'Built (with warnings).');
             finishBuild(engineRes.files, {
               reply: replyText,
-              validationReport: {
-                score,
-                passed,
-                repairsApplied: engineRes.repairAttempts,
-                syntaxIssues: issues,
-              },
+              validationReport: { score, passed, repairsApplied: engineRes.repairAttempts, syntaxIssues: issues },
               isEdit: isEditRequest,
             });
             return;
           }
-          console.warn('[pro-build] new engine returned no files — falling back to legacy');
+          throw new Error('The engine returned no files.');
         } catch (engineErr: any) {
-          if (engineErr?.name === 'AbortError') throw engineErr;
-          console.warn('[pro-build] new engine failed — falling back to legacy:', engineErr?.message || engineErr);
+          if (engineErr?.name === 'AbortError') {
+            setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+            setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: '🛑 Generation stopped.', sender: 'ai', timestamp: new Date() }]);
+            setIsProLoading(false);
+            proAbortControllerRef.current = null;
+            return;
+          }
+          // Honest failure — never fall back to the old vanilla generator.
+          setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+          setProMessages(prev => [...prev, {
+            id: (Date.now() + 1).toString(),
+            text: `⚠️ Build failed: ${engineErr?.message || 'engine error'}. Please try again, or rephrase your request with a bit more detail.`,
+            sender: 'ai', timestamp: new Date(),
+          }]);
+          setIsProLoading(false);
+          proAbortControllerRef.current = null;
+          return;
         }
 
+        // ── (RETIRED) legacy /api/pro-build vanilla generator — kept dead, never reached ──
         const response = await fetch('/api/pro-build', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

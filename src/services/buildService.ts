@@ -31,6 +31,22 @@ export interface PreviewInfo {
   reason?: string;
 }
 
+export interface GateResult {
+  id: string;
+  name: string;
+  status: 'pass' | 'fail' | 'pending';
+  severity: 'critical' | 'major' | 'minor';
+  messages: string[];
+}
+
+export interface ValidationReport {
+  previewAllowed: boolean;
+  qualityScore: number;
+  gates: GateResult[];
+  blockingReasons: string[];
+  status: 'PASSED' | 'FAILED' | 'PARTIAL';
+}
+
 export interface BuildResponse {
   ok: boolean;
   files: Record<string, string>;
@@ -40,6 +56,10 @@ export interface BuildResponse {
   verify: VerifyReport;
   repairAttempts: number;
   baselineSnapshotId: string;
+  /** Structured validation report (gates + quality score + preview decision). */
+  validation?: ValidationReport;
+  /** Preview is a privilege — only true when critical gates pass. */
+  previewAllowed?: boolean;
   preview?: PreviewInfo;
 }
 

@@ -3821,15 +3821,26 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             preview: false,
           });
           if (engineRes && engineRes.fileCount > 0 && Object.keys(engineRes.files).length > 0) {
+            // Prefer the structured validation report (real gates + quality score +
+            // preview decision); fall back to the raw verify result.
+            const val = engineRes.validation;
             const v = engineRes.verify;
-            const score = v.ok ? 100 : Math.max(0, 100 - v.errors * 20 - v.warnings * 5);
+            const passed = val ? !!engineRes.previewAllowed : v.ok;
+            const score = val ? val.qualityScore : (v.ok ? 100 : Math.max(0, 100 - v.errors * 20 - v.warnings * 5));
+            const issues = val
+              ? (val.gates.filter(g => g.status === 'fail').flatMap(g => g.messages).concat(
+                  val.gates.filter(g => g.status === 'pending').map(g => `${g.name} — pending (infra)`)))
+              : v.issues.map((i: any) => `${i.file}: ${i.message}`);
+            const replyText = val
+              ? `Build Status: ${val.status} · Quality ${score}/100${passed ? '' : ' — preview blocked, see diagnostics'}`
+              : (v.ok ? 'Built with the new engine — verified clean.' : 'Built with the new engine (with warnings).');
             finishBuild(engineRes.files, {
-              reply: engineRes.ok ? 'Built with the new engine — verified clean.' : 'Built with the new engine (with warnings).',
+              reply: replyText,
               validationReport: {
                 score,
-                passed: v.ok,
+                passed,
                 repairsApplied: engineRes.repairAttempts,
-                syntaxIssues: v.issues.map((i: any) => `${i.file}: ${i.message}`),
+                syntaxIssues: issues,
               },
               isEdit: isEditRequest,
             });

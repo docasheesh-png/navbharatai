@@ -556,3 +556,62 @@ Each needs: (a) manifest entry in `selectArchitecture`, (b) immutable starter te
 - 6.7 **Stages 6–8 of the validation pipeline** (real npm build/lint/typecheck + headless-browser
       render + screenshot + console-error scan) — depends on the server-container/chromium infra.
 DEFERRED by user ("ye baad me karenge"); React+Vanilla rock-solid first.
+
+---
+## 🤖 PHASE 7 — AUTONOMOUS VALIDATION & TESTING FACTORY (planned; implement AFTER core phases)
+
+Vision (user spec, 2026-06-16): turn NavBharatAI into a self-improving software factory —
+mandatory workflow: Generate → Build → Test → Fix → Re-test → Optimize → Observe → Learn → Preview.
+Preview is EARNED; generation alone is not success; NO fake success messages ever.
+
+> **Status:** SLICE 1 DONE (infra-independent foundation): `ValidationPipeline` (architecture +
+> static gates real; build/runtime/tests/a11y/perf/security reported as PENDING, never faked) +
+> Quality Score + earned-preview (`previewAllowed`) + honest report card in Pro UI. Everything
+> below needs the server-container/chromium sandbox and is DEFERRED until core phases are done.
+
+### Hard dependency
+Most stages need a real execution sandbox per build: **Node + npm + headless Chromium**, with
+resource/time limits, network policy, and per-build isolation. This = the **server-container
+runtime** (Phase 3 finish / Phase 6.5). Build that FIRST; then these gates flip PENDING→REAL.
+
+### The 25 stages → grouped for implementation
+- 7.1 **Stage 1 Requirement Understanding** — structured spec + Requirement Confidence Score +
+      clarify-loop (ask questions when <90%, detect contradictions/impossible reqs). Needs a UI
+      clarify flow.
+- 7.2 **Stage 3 ADRs** — generate + store Architecture Decision Records per project.
+- 7.3 **Stage 6 Build Verification** — npm install + build, asset/bundle/env checks (sandbox).
+- 7.4 **Stage 7 Runtime Validation** — headless launch, smoke render, console/network/exception
+      capture, console.error=0 gate (sandbox + chromium).
+- 7.5 **Stage 8–11 Automated tests** — generate unit/component/integration/e2e from requirements;
+      route, storage, API (mocked) testing; coverage targets as SCORE (not hard preview-block).
+- 7.6 **Stage 12 Visual testing** — screenshots across mobile/tablet/desktop + baseline diff.
+- 7.7 **Stage 13 Accessibility** — axe-core, WCAG AA.
+- 7.8 **Stage 14 Performance** — Lighthouse (perf/a11y/best-practices/SEO), bundle/LCP/CLS/TTI.
+- 7.9 **Stage 15 Security** — npm audit, XSS/CSRF/injection/secret scans, route/authz checks.
+- 7.10 **Stage 16 Cost awareness** — token/db/storage/bandwidth/API cost estimate + per-user cost.
+- 7.11 **Stage 17 Observability** — inject structured logging, error tracking, analytics,
+       OpenTelemetry/Sentry-compatible hooks into generated apps.
+- 7.12 **Stage 18 DB migration safety** — versioned migrations, rollback, destructive-change warnings.
+- 7.13 **Stage 19 AI repair loop (real)** — fed by real build/test/console/screenshot failures;
+       minimal patch → rebuild → re-test; max 3 retries (extends current verify-repair loop).
+- 7.14 **Stage 20 Regression engine** — every bug → a permanent test (current: architecture
+       regression tests; generalize to a stored, growing suite).
+- 7.15 **Stage 21 Learning system** — store {prompt, manifest, files, results, failures, fixes,
+       outcome}; improve templates/repair/architecture-selection over time. (privacy + retention.)
+- 7.16 **Stage 22 Production readiness review** — env/secrets/monitoring/backups/CDN/cache/
+       indexing/rate-limit checklist before deploy.
+- 7.17 **Stage 23 Quality scoring (full)** — extend slice-1 scorer with real build/runtime/test/
+       lighthouse inputs; 100 requires all; preview disabled < 85 (tunable).
+- 7.18 **Stage 24 Platform metrics** — first-pass success, avg repair attempts, build/test pass
+       rates, time-to-preview, runtime-error rate, regression frequency → internal dashboard.
+- 7.19 **Stage 25 Reporting (full)** — structured PASS/FAIL report card wired to real gate results
+       (slice 1 done for the gates we can run).
+
+### Extra additions I recommend (beyond the spec)
+- **Tiered gates:** fast gates (static+build+smoke, console=0) BLOCK preview; deep gates
+  (e2e/lighthouse/visual/a11y) feed the SCORE / "Ship to production", so quick iteration stays fast.
+- **Per-build sandbox isolation** + CPU/mem/time caps + egress allowlist (security + cost control).
+- **Generation/cost budget guardrail** per build (token + compute) with a hard ceiling.
+- **Streaming build progress** for the new engine (currently single "generate with new engine"
+  line) — better UX while gates run.
+- **Result cache / dedupe** for identical prompts (cost).

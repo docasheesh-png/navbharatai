@@ -1,10 +1,12 @@
+import { exec } from 'child_process';
+import path from 'path';
+import util from 'util';
 import { AIRouter } from '../AI/Router/AIRouter';
 import { WorkspaceManager } from '../AppMakerLab/WorkspaceManager';
-import { BuildManager } from '../AppMakerLab/BuildManager';
 import { ScaffoldGenerator } from '../AppMakerLab/generator/ScaffoldGenerator';
-import { InProcessEventBus } from '../AppMakerLab/eventbus/InProcessEventBus';
-import { EventHistoryStore } from '../AppMakerLab/eventbus/EventHistoryStore';
 import { EngineerAgentEvent, EngineerPlan, EngineerTask } from './EngineerAITypes';
+
+const execPromise = util.promisify(exec);
 
 const NAMESPACE = 'engineer';
 const WORKSPACES_ROOT = `/workspaces/${NAMESPACE}`;
@@ -57,12 +59,8 @@ function parsePlan(raw: string): EngineerPlan {
 
 export class EngineerAgentLoop {
   private workspaceManager = new WorkspaceManager(NAMESPACE);
-  private buildManager: BuildManager;
 
-  constructor(private router: AIRouter) {
-    const eventBus = new InProcessEventBus(new EventHistoryStore(NAMESPACE));
-    this.buildManager = new BuildManager(eventBus, WORKSPACES_ROOT);
-  }
+  constructor(private router: AIRouter) {}
 
   async *run(task: EngineerTask): AsyncGenerator<EngineerAgentEvent> {
     const { workspaceId, instruction } = task;
@@ -99,7 +97,7 @@ export class EngineerAgentLoop {
         }
         yield { type: 'files_changed', paths: plan.edits.map(e => e.path) };
 
-        const buildResult = await this.buildManager.build(workspaceId);
+        const buildResult = await this.runBuild(workspaceId);
         lastBuildLogs = buildResult.logs.slice(-MAX_LOG_CHARS);
         yield { type: 'build_result', success: buildResult.success, logs: lastBuildLogs };
       }
@@ -111,6 +109,17 @@ export class EngineerAgentLoop {
     }
 
     yield { type: 'max_iterations_reached', iterations: MAX_ITERATIONS };
+  }
+
+  private async runBuild(workspaceId: string): Promise<{ success: boolean; logs: string }> {
+    const workspacePath = path.join(WORKSPACES_ROOT, workspaceId);
+    try {
+      const install = await execPromise('npm install', { cwd: workspacePath });
+      const build = await execPromise('npm run build', { cwd: workspacePath });
+      return { success: true, logs: install.stdout + install.stderr + build.stdout + build.stderr };
+    } catch (err: any) {
+      return { success: false, logs: `${err.stdout || ''}${err.stderr || ''}${err.message || String(err)}` };
+    }
   }
 
   private async ensureWorkspace(workspaceId: string): Promise<void> {

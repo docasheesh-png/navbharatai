@@ -74,4 +74,24 @@ describe('runBuild', () => {
     expect(r.ok).toBe(false);
     expect(r.verify.errors).toBeGreaterThan(0);
   });
+
+  it('agentically completes missing features until coverage passes', async () => {
+    const prompt = 'a react app with authentication, a dashboard, and dark mode';
+    // Initial generation = a shell (no features) → coverage 0 → preview blocked.
+    const generate = async (): Promise<FileEdit[]> => [
+      { op: 'write', path: 'index.html', content: '<div id="root"></div><script type="module" src="/src/main.jsx"></script>' },
+      { op: 'write', path: 'src/main.jsx', content: "import {createRoot} from 'react-dom/client';\nimport App from './App.jsx';\ncreateRoot(document.getElementById('root')).render(<App/>)" },
+      { op: 'write', path: 'src/App.jsx', content: 'export default function App(){ return null; }' },
+    ];
+    // completeFeatures implements the missing features when asked.
+    const completeFeatures = async (): Promise<FileEdit[]> => [
+      { op: 'write', path: 'src/App.jsx', content: "// auth login password session, dashboard, theme darkMode toggleTheme\nexport default function App(){ return null; }" },
+    ];
+    const r = await runBuild({
+      prompt, scaffold: false, generate, fix: async () => [], completeFeatures,
+      files: { 'package.json': JSON.stringify({ dependencies: { react: '^18', 'react-dom': '^18' } }) },
+    });
+    expect(r.validation.featureCoverage!.coverage).toBeGreaterThanOrEqual(80);
+    expect(r.previewAllowed).toBe(true);
+  });
 });

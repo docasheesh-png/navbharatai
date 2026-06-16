@@ -17,17 +17,24 @@ import { applyEdits, type FileEdit } from './EditEngine';
 import { verifyProject, type VerifyResult } from './ProjectVerifier';
 import { autoRepair, type FixGenerator } from './RepairLoop';
 import { detectFramework, scaffold, type Framework } from './Scaffold';
-import { runValidation, type ValidationReport } from './ValidationPipeline';
+import { runValidation, type ValidationReport, MIN_FEATURE_COVERAGE } from './ValidationPipeline';
 import { selectArchitecture } from './ArchitectureManifest';
+import { computeFeatureCoverage } from './FeatureCoverage';
 
 export type EditGenerator = (prompt: string, vfs: VirtualFileSystem) => Promise<FileEdit[]>;
+/** Implement still-missing requested features into the existing project (agentic). */
+export type FeatureCompleter = (prompt: string, missing: string[], vfs: VirtualFileSystem) => Promise<FileEdit[]>;
 
 export interface BuildPipelineInput {
   prompt: string;
   files?: Record<string, string>;
   generate: EditGenerator;
   fix: FixGenerator;
+  /** Optional: drives feature-coverage to >= 80% by re-generating missing features. */
+  completeFeatures?: FeatureCompleter;
   maxRepairAttempts?: number;
+  /** Max feature-completion passes (default 2). */
+  maxFeatureAttempts?: number;
   /**
    * Seed a runnable framework skeleton for FRESH builds (no existing files).
    * Defaults to true; pass false to let the generator produce every file.
@@ -76,6 +83,21 @@ export async function runBuild(input: BuildPipelineInput): Promise<BuildPipeline
     versions,
     maxAttempts: input.maxRepairAttempts ?? 3,
   });
+
+  // Agentic feature completion: while requested features are missing (<80%),
+  // ask the generator to implement them into the existing project, then repair.
+  if (input.completeFeatures && input.prompt.trim()) {
+    const maxFeatureAttempts = input.maxFeatureAttempts ?? 2;
+    for (let attempt = 0; attempt < maxFeatureAttempts; attempt++) {
+      const cov = computeFeatureCoverage(input.prompt, vfs);
+      if (cov.requested === 0 || cov.coverage >= MIN_FEATURE_COVERAGE) break;
+      const missing = cov.items.filter((i) => i.status === 'fail').map((i) => i.label);
+      const edits = await input.completeFeatures(input.prompt, missing, vfs);
+      if (!edits.length) break;
+      applyEdits(vfs, edits, versions, `feature completion: ${missing.join(', ')}`);
+      await autoRepair(vfs, { generateFixes: input.fix, versions, maxAttempts: 1 });
+    }
+  }
 
   // Final validation gates → structured report + preview decision (no fake success).
   const validation = runValidation(vfs, selectArchitecture(input.prompt), input.prompt);

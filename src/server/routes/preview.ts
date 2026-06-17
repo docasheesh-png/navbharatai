@@ -68,7 +68,7 @@ function collectBarePackages(files: Record<string, string>): Set<string> {
   return found;
 }
 
-async function bundleForPreview(files: Record<string, string>): Promise<string> {
+export async function bundleForPreview(files: Record<string, string>): Promise<string> {
   const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'nb-preview-'));
   try {
     // Write source files to temp dir (with BrowserRouter→HashRouter rewrite)
@@ -99,9 +99,11 @@ async function bundleForPreview(files: Record<string, string>): Promise<string> 
       return v ? '@' + v.replace(/^[\^~>=<\s]*/,'').split(/\s/)[0] : '';
     };
 
-    // All bare imports → external (importmap resolves them via esm.sh)
-    const barePackages = collectBarePackages(files);
-    const external = [...barePackages];
+    // All bare imports → external (importmap resolves them via esm.sh). Include the
+    // `pkg/*` wildcard so subpath imports (firebase/app, firebase/auth) are externalized
+    // too, not bundled — across all esbuild versions.
+    const barePackages = [...collectBarePackages(files)];
+    const external = barePackages.flatMap(p => [p, `${p}/*`]);
 
     const result = await esbuild({
       entryPoints: [path.join(tmpDir, entry)],
@@ -144,12 +146,19 @@ async function bundleForPreview(files: Record<string, string>): Promise<string> 
     const css = result.outputFiles?.find(f => f.path.endsWith('.css'))?.text || '';
     if (!js) throw new Error('esbuild produced no JS output');
 
-    // Importmap for npm packages → esm.sh
+    // Importmap for npm packages → esm.sh.
+    // CRITICAL: each package needs BOTH an exact entry (bare import `firebase`) AND a
+    // trailing-slash entry (subpath imports `firebase/app`, `firebase/auth`). Native
+    // importmaps do NOT auto-resolve subpaths from the bare entry — without the
+    // `"firebase/"` mapping the browser throws "Failed to resolve module specifier
+    // firebase/app". This is the #1 cause of preview failures for Firebase/MUI/etc.
     const reactVer = ver('react') || '@18.3.1';
     const rdVer = ver('react-dom') || '@18.3.1';
     const imapEntries: Record<string, string> = {
       react: ESM + 'react' + reactVer,
+      'react/': ESM + 'react' + reactVer + '/',
       'react-dom': ESM + 'react-dom' + rdVer,
+      'react-dom/': ESM + 'react-dom' + rdVer + '/',
       'react-dom/client': ESM + 'react-dom' + rdVer + '/client',
       'react/jsx-runtime': ESM + 'react' + reactVer + '/jsx-runtime',
       'react/jsx-dev-runtime': ESM + 'react' + reactVer + '/jsx-dev-runtime',
@@ -157,6 +166,11 @@ async function bundleForPreview(files: Record<string, string>): Promise<string> 
     for (const pkg of barePackages) {
       if (!imapEntries[pkg]) {
         imapEntries[pkg] = ESM + pkg + ver(pkg) + '?external=react,react-dom';
+      }
+      // Trailing-slash mapping so subpath imports (pkg/sub) resolve via esm.sh.
+      const prefix = pkg + '/';
+      if (!imapEntries[prefix]) {
+        imapEntries[prefix] = ESM + pkg + ver(pkg) + '/';
       }
     }
 

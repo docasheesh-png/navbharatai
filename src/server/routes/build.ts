@@ -26,6 +26,18 @@ const previewService = getPreviewService();
  * production (where only Gemini/Groq keys were set). Providers without a native
  * system-prompt slot get the system text prepended to the user message.
  */
+/** Canned "no real answer" replies that must NOT count as a usable generation. */
+function isUsableResponse(out: string | undefined | null): boolean {
+  if (!out || !out.trim()) return false;
+  const t = out.trim();
+  if (t.length < 12) return false;
+  // aiRouter / offline / provider canned fallbacks — treat as failure so the
+  // chain tries the NEXT provider instead of poisoning generation with prose
+  // that parses to zero file edits.
+  if (/temporarily busy|try again in|service is (temporarily )?unavailable|could not (process|generate)|i (cannot|can't) (help|assist)|api key/i.test(t)) return false;
+  return true;
+}
+
 function makeResilientModelCall(userKey?: string): ModelCall {
   const key = typeof userKey === 'string' && userKey.trim() ? userKey : undefined;
   return async (system, user) => {
@@ -43,15 +55,20 @@ function makeResilientModelCall(userKey?: string): ModelCall {
       { name: 'openrouter', run: () => callOpenRouter(`${system}\n\n${user}`, key, []) },
     ];
     let lastErr: unknown;
+    let lastOut = '';
     for (const a of attempts) {
       try {
         const out = await a.run();
-        if (out && out.trim()) return out;
+        if (isUsableResponse(out)) return out;
+        if (out && out.trim()) { lastOut = out; console.warn(`[BUILD] provider ${a.name} returned a canned/empty reply — trying next`); }
       } catch (e: any) {
         lastErr = e;
         console.warn(`[BUILD] provider ${a.name} failed: ${e?.message || e}`);
       }
     }
+    // Nothing usable from any provider — return the last non-empty reply (if any)
+    // so the caller at least sees the real message instead of throwing blindly.
+    if (lastOut) return lastOut;
     throw new Error(`All AI providers failed for build${lastErr ? `: ${(lastErr as any)?.message || lastErr}` : ''}`);
   };
 }

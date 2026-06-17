@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { VirtualFileSystem } from '../project/ProjectModel';
-import { PreviewService } from '../runtime/PreviewService';
+import { getPreviewService } from '../runtime/PreviewService';
 import { buildProxyUrl } from '../runtime/proxyUrl';
 
 /**
@@ -11,7 +11,7 @@ import { buildProxyUrl } from '../runtime/proxyUrl';
  * - POST /api/preview        — body { projectId?, files: {path: content} } → start preview
  * - GET  /preview/:sessionId — serve the built static HTML (static target)
  */
-const previewService = new PreviewService();
+const previewService = getPreviewService();
 
 export function registerPreviewRoutes(app: Express): void {
   app.post('/api/preview', async (req: Request, res: Response) => {
@@ -44,10 +44,19 @@ export function registerPreviewRoutes(app: Express): void {
         if (typeof v === 'string' && k.toLowerCase() !== 'host') headers[k] = v;
       }
       const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
+      // Forward the request body. Prefer the captured raw bytes (set by the
+      // express.json `verify` hook in server.ts); fall back to re-serialising the
+      // already-parsed JSON body so POSTs from the previewed app aren't dropped.
+      let body: any = undefined;
+      if (hasBody) {
+        const raw = (req as any).rawBody;
+        if (raw && raw.length) body = raw;
+        else if (req.body && Object.keys(req.body).length) body = JSON.stringify(req.body);
+      }
       const upstream = await fetch(url, {
         method: req.method,
         headers,
-        body: hasBody ? (req as any).rawBody ?? undefined : undefined,
+        body,
         redirect: 'manual',
       });
       res.status(upstream.status);

@@ -4,7 +4,7 @@ import { makeAiEditGenerator, type ModelCall } from '../project/aiEdits';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
 import { aiRouter } from '../lib/aiRouter';
-import { PreviewService } from '../runtime/PreviewService';
+import { getPreviewService } from '../runtime/PreviewService';
 
 /**
  * Phase 4 integration — the real, engine-backed build endpoint.
@@ -17,7 +17,7 @@ import { PreviewService } from '../runtime/PreviewService';
  * This is the modern replacement for the old fire-and-forget full-rewrite /api/pro-build.
  * The Pro frontend can migrate to it incrementally; the legacy route is untouched.
  */
-const previewService = new PreviewService();
+const previewService = getPreviewService();
 
 /**
  * Resilient model call: try providers in order and return the first non-empty

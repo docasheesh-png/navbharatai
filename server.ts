@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import crypto from 'crypto';
+import net from 'net';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { LEGACY_EMBEDDED_API_KEY, isPlaceholder, resolveApiKey, hasKey, getGemini, getGroq, getDeepSeek, getOpenAI, getOpenRouter, getClaude } from './src/server/lib/aiClients';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
@@ -33,6 +34,7 @@ import { registerEngineerRoutes } from './src/server/routes/engineer';
 import { registerZipRoutes } from './src/server/routes/zip';
 import { registerPreviewRoutes } from './src/server/routes/preview';
 import { registerBuildRoutes } from './src/server/routes/build';
+import { getPreviewService } from './src/server/runtime/PreviewService';
 import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
 import { registerSyncRoutes } from './src/server/routes/sync';
@@ -241,7 +243,13 @@ setInterval(() => {
   // Trust proxy for correct req.protocol and req.get('host') behind reverse proxies
   app.set('trust proxy', true);
 
-    app.use(express.json({ limit: '30mb' }));  // room for vision attachments (images/PDFs as base64)
+    app.use(express.json({
+      limit: '30mb',  // room for vision attachments (images/PDFs as base64)
+      // Stash the raw bytes so the /preview-app reverse proxy can forward POST
+      // bodies verbatim to the previewed dev server (Bug: rawBody was read but
+      // never populated → all proxied POSTs sent an empty body).
+      verify: (req: any, _res, buf) => { req.rawBody = buf; },
+    }));
 
   // Hit counter middleware
   app.use((req: any, _res: any, next: any) => {
@@ -286,7 +294,20 @@ setInterval(() => {
           }
         }
       }));
-      app.get('*', (req, res) => {
+      app.get('*', (req, res, next) => {
+        // The SPA fallback is registered (inside initializeServer) BEFORE the API
+        // and preview routes below. Because app.get('*') matches every GET, it
+        // would otherwise swallow GET routes registered afterwards (live preview,
+        // GET APIs) and return index.html with a 200 — which is exactly why the
+        // preview silently "worked" in audits but showed the main app. Let those
+        // paths fall through to their real handlers.
+        if (
+          req.path.startsWith('/api/') ||
+          req.path.startsWith('/preview-app/') ||
+          req.path.startsWith('/preview/')
+        ) {
+          return next();
+        }
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.sendFile(path.join(distPath, 'index.html'));
       });
@@ -377,8 +398,38 @@ setInterval(() => {
   // Final diagnostic and server start
 
   try {
-    app.listen(PORT, '0.0.0.0', () => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
+    });
+
+    // WebSocket / HMR reverse proxy for live previews. The HTTP side is handled
+    // by routes/preview.ts, but WebSocket upgrades never reach Express route
+    // handlers — they must be forwarded at the raw-socket level here. Without
+    // this, a previewed Vite/Next dev server's HMR client fails in the browser
+    // with "WebSocket connection error" and hot reload never connects.
+    server.on('upgrade', (req, clientSocket, head) => {
+      const url = req.url || '';
+      const m = url.match(/^\/preview-app\/([^/?]+)(\/[^?]*)?(\?.*)?$/);
+      if (!m) { clientSocket.destroy(); return; }
+      const target = getPreviewService().serverTarget(m[1]);
+      if (!target) { clientSocket.destroy(); return; }
+
+      const rest = (m[2] || '/') + (m[3] || '');
+      const upstream = net.connect(target.port, target.host, () => {
+        // Replay the upgrade handshake to the dev server with the
+        // /preview-app/:sessionId prefix stripped, then pipe both ways.
+        const lines = [`${req.method} ${rest} HTTP/1.1`];
+        for (const [key, val] of Object.entries(req.headers)) {
+          if (Array.isArray(val)) for (const v of val) lines.push(`${key}: ${v}`);
+          else if (val !== undefined) lines.push(`${key}: ${val}`);
+        }
+        upstream.write(lines.join('\r\n') + '\r\n\r\n');
+        if (head && head.length) upstream.write(head);
+        upstream.pipe(clientSocket);
+        clientSocket.pipe(upstream);
+      });
+      upstream.on('error', () => clientSocket.destroy());
+      clientSocket.on('error', () => upstream.destroy());
     });
   } catch (startupError: any) {
     console.error('❌ FATAL: Server failed to start:', startupError);

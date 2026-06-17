@@ -269,11 +269,28 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe || previewSrc === writtenSrcRef.current) return;
-    writtenSrcRef.current = previewSrc || '';
-    try {
-      const doc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (doc) { doc.open(); doc.write(previewSrc || ''); doc.close(); }
-    } catch { /* cross-origin guard */ }
+    // Write into the iframe's document. CRITICAL: mark `writtenSrcRef` only AFTER
+    // a real write succeeds — marking it up front (the old bug) meant that if the
+    // doc wasn't ready yet (freshly-mounted iframe via the `key`/conditional-mount),
+    // we recorded it as written but never actually wrote → permanently blank preview.
+    const write = () => {
+      try {
+        const doc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (doc) {
+          doc.open();
+          doc.write(previewSrc || '');
+          doc.close();
+          writtenSrcRef.current = previewSrc || '';
+        }
+      } catch { /* cross-origin guard */ }
+    };
+    write();
+    // If the doc wasn't ready (write didn't take), retry once when the fresh
+    // iframe fires its load event.
+    if (writtenSrcRef.current !== (previewSrc || '')) {
+      iframe.addEventListener('load', write, { once: true });
+      return () => iframe.removeEventListener('load', write);
+    }
   }, [previewSrc]);
 
   return (

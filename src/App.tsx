@@ -2468,6 +2468,10 @@ ${buildLanguageRule(preferredLanguage)}`;
         || cands.find(c => srcFiles[c])
         || Object.keys(srcFiles).find(k => /\.(tsx|jsx)$/i.test(k) && hasRendering(k))
         || Object.keys(srcFiles).find(k => /\.(tsx|jsx)$/i.test(k))
+        // Additive fallback: a React app authored entirely in plain .js/.ts/.mjs
+        // (no .tsx/.jsx files) would otherwise resolve to no entry and render the
+        // "No runnable entry file found" error. Only reached when nothing above matched.
+        || Object.keys(srcFiles).find(k => /\.(js|mjs|ts)$/i.test(k) && hasRendering(k))
         || '';
     }
 
@@ -3940,10 +3944,19 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             generatedFiles: Object.fromEntries(Object.entries(builtFiles).map(([k, v]) => [k, { content: v, expanded: false }])),
           }));
           setTimeout(() => {
-            setFiles((prev: any) => ({ ...prev, ...builtFiles }));
-            updatePreview({ ...files, ...builtFiles });
+            // Merge + preview from the LATEST files (via the functional updater),
+            // not the stale `files` captured when this handler started — otherwise
+            // the preview can render an old/empty workspace. Mirrors handleFileChange.
+            setFiles((prev: any) => {
+              const merged = { ...prev, ...builtFiles };
+              updatePreview(merged);
+              return merged;
+            });
             setIsAppBuilt(true);
             setHasGeneratedCode(true);
+            // Take the user to the now-ready live preview (the build message says
+            // "App is live in Preview →" but nothing navigated there before).
+            toggleTab('preview');
             saveVersionSnapshot(messageToSend, builtFiles);
 
             const fileList = Object.keys(builtFiles);

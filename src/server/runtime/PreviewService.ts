@@ -75,3 +75,16 @@ export class PreviewService {
     };
   }
 }
+
+/**
+ * Process-wide shared PreviewService. The build route STARTS previews and the
+ * preview route (+ the WebSocket upgrade proxy in server.ts) RESOLVES them — they
+ * must share ONE ServerContainerRuntime, otherwise each holds its own session
+ * map and the proxy 404s on every session the builder created. Always use this
+ * accessor instead of `new PreviewService()` in route/server code.
+ */
+let _sharedPreviewService: PreviewService | null = null;
+export function getPreviewService(): PreviewService {
+  if (!_sharedPreviewService) _sharedPreviewService = new PreviewService();
+  return _sharedPreviewService;
+}

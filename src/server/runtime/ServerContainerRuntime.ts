@@ -81,8 +81,10 @@ export class ServerContainerRuntime implements PreviewRuntime {
       const [installCmd, installArgs] = this.launcher.installDependencies(dir, pm);
       await this.installer(dir, installCmd, installArgs);
 
-      const [startCmd, startArgs] = this.launcher.getStartCommand(dir, pm);
-      this.sandbox.launch(dir, startCmd, startArgs, { PORT: String(port) }, 1024);
+      const [startCmd, startArgs] = this.launcher.getStartCommand(dir, pm, port);
+      // PORT env stays for frameworks that honour it (CRA); HOST=0.0.0.0 covers
+      // those that read an env var rather than a flag.
+      this.sandbox.launch(dir, startCmd, startArgs, { PORT: String(port), HOST: '0.0.0.0' }, 1024);
 
       const url = `http://${this.host}:${port}`;
       const health = await this.healthChecker.check(url);
@@ -119,7 +121,10 @@ export class ServerContainerRuntime implements PreviewRuntime {
    */
   getTarget(sessionId: string): { host: string; port: number; origin: string } | null {
     const s = this.sessions.get(sessionId);
-    if (!s) return null;
+    // Only hand back a target for a session that is actually up. Returning one
+    // for an 'error'/'stopped' session makes the proxy forward to a port nothing
+    // is listening on → ECONNREFUSED surfaced as a confusing 502.
+    if (!s || s.status === 'error' || s.status === 'stopped') return null;
     return { host: this.host, port: s.port, origin: `http://${this.host}:${s.port}` };
   }
 }

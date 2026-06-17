@@ -41,6 +41,12 @@ export function registerEngineerRoutes(app: Express): void {
 
     const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
+    // SSE keep-alive: send a comment line every 20 s so proxies and mobile
+    // networks don't close the silent connection during long E2B operations.
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded) res.write(': keep-alive\n\n');
+    }, 20_000);
+
     try {
       for await (const event of agentLoop.run({ workspaceId, instruction, projectType }, abort.signal)) {
         send(event);
@@ -49,6 +55,7 @@ export function registerEngineerRoutes(app: Express): void {
     } catch (err: any) {
       send({ type: 'error', message: err?.message || 'Engineer AI failed unexpectedly.' });
     } finally {
+      clearInterval(heartbeat);
       res.end();
     }
   });

@@ -82,6 +82,7 @@ export class EngineerAgentLoop {
     const { workspaceId, instruction, projectType } = task;
     const deadline = Date.now() + DEADLINE_MS;
 
+    yield { type: 'status', message: 'Initializing workspace…' };
     await this.actuator.ensureWorkspace(workspaceId, projectType);
 
     const history: { step: number; actionJson: string; observation: string }[] = [];
@@ -91,7 +92,9 @@ export class EngineerAgentLoop {
       if (signal?.aborted) { yield { type: 'aborted' }; return; }
       if (Date.now() > deadline) { yield { type: 'max_steps_reached', steps: step - 1 }; return; }
 
+      yield { type: 'status', message: `Step ${step}: reading workspace…` };
       const prompt = await this.buildPrompt(workspaceId, instruction, history);
+      yield { type: 'status', message: `Step ${step}: thinking…` };
 
       // Router/provider failure is a real infra error — abort. Malformed model
       // output is recoverable — feed the parse error back and let it retry.

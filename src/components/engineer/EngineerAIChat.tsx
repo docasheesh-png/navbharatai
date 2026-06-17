@@ -86,6 +86,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
 
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('terminal');
   const [terminalEntries, setTerminalEntries] = useState<TerminalEntry[]>([]);
   const [fileMap, setFileMap] = useState<Record<string, FilePair>>({});
@@ -128,7 +129,11 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
 
   const handleEvent = (event: any) => {
     switch (event.type) {
+      case 'status':
+        setStatusMsg(event.message || '');
+        break;
       case 'action_start':
+        setStatusMsg('');
         if (event.thought) appendChat('agent', `💭 ${event.thought}`);
         break;
       case 'command_result':
@@ -171,15 +176,19 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         appendChat('agent', `🚀 Dev server running on port ${event.port} — live preview ready`);
         break;
       case 'complete':
+        setStatusMsg('');
         appendChat('agent', `✅ Done in ${event.steps} step${event.steps === 1 ? '' : 's'}: ${event.summary}`);
         break;
       case 'max_steps_reached':
+        setStatusMsg('');
         appendChat('system', `Reached ${event.steps}-step limit without finishing. Try a more specific instruction.`);
         break;
       case 'aborted':
+        setStatusMsg('');
         appendChat('system', 'Stopped.');
         break;
       case 'error':
+        setStatusMsg('');
         appendChat('system', `Error: ${event.message}`);
         break;
     }
@@ -195,6 +204,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setInput('');
     appendChat('user', instruction);
     setLoading(true);
+    setStatusMsg('');
     setFileMap({});
     setEditOrder([]);
     setSelectedFile(null);
@@ -232,6 +242,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     } finally {
       readerRef.current = null;
       setLoading(false);
+      setStatusMsg('');
     }
   };
 
@@ -282,7 +293,8 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
           ))}
           {loading && (
             <div className="flex items-center gap-1.5 text-[#8b949e] text-xs">
-              <Loader2 className="w-3 h-3 animate-spin" /> Working…
+              <Loader2 className="w-3 h-3 animate-spin" />
+              <span>{statusMsg || 'Working…'}</span>
             </div>
           )}
           <div ref={chatEndRef} />

@@ -9,11 +9,21 @@ const execPromise = util.promisify(exec);
 const NAMESPACE = 'engineer';
 const WORKSPACES_ROOT = `/workspaces/${NAMESPACE}`;
 
+// Max time for a single bash command (60 s) and for build (3 min)
+const CMD_TIMEOUT_MS = 60_000;
+const BUILD_TIMEOUT_MS = 3 * 60_000;
+const MAX_BUFFER = 10 * 1024 * 1024;
+
+// Directories never included in file listings so node_modules/dist don't
+// flood the AI prompt or make listFiles unbearably slow.
+const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', '.next', 'build', '__pycache__', '.venv']);
+
 /**
- * Process-level actuator — no real sandbox isolation.
- * Shell execution (runCommand / browseUrl) is intentionally rejected here:
- * it would run as the same OS user as the server. Swap to E2BActuator for
- * those capabilities.
+ * Process-level actuator (Cloud Run / local dev).
+ * bash commands are run inside the workspace dir with a hard timeout.
+ * PATH traversal outside the workspace is not explicitly blocked at the
+ * OS level, but the AI is instructed to stay inside its workspace root.
+ * For stricter isolation upgrade to E2BActuator (set E2B_API_KEY).
  */
 export class LocalActuator implements IEngineerActuator {
   private workspaceManager = new WorkspaceManager(NAMESPACE);
@@ -23,9 +33,6 @@ export class LocalActuator implements IEngineerActuator {
     if (info && info.files.length > 0) return;
 
     await this.workspaceManager.createWorkspace(workspaceId);
-    // Stack detection: if 'node' or 'python' are requested we still fall back to
-    // vite-react since those scaffolders aren't implemented yet — the model can
-    // reshape via bash once a real sandbox is available.
     const framework: 'vite-react' = 'vite-react';
     const scaffolder = new ScaffoldGenerator(this.workspaceManager);
     await scaffolder.generate({ framework, language: 'typescript', features: [], workspaceId });
@@ -39,31 +46,49 @@ export class LocalActuator implements IEngineerActuator {
     return this.workspaceManager.readFile(workspaceId, filePath);
   }
 
-  listFiles(workspaceId: string): Promise<string[]> {
-    return this.workspaceManager.listFiles(workspaceId);
+  async listFiles(workspaceId: string): Promise<string[]> {
+    const all = await this.workspaceManager.listFiles(workspaceId);
+    // Strip node_modules, dist, etc. so they never appear in the AI prompt.
+    return all.filter(f => {
+      const firstSegment = f.split('/')[0];
+      return !IGNORED_DIRS.has(firstSegment);
+    });
   }
 
   async build(workspaceId: string): Promise<{ success: boolean; logs: string }> {
     const workspacePath = path.join(WORKSPACES_ROOT, workspaceId);
+    const opts = { cwd: workspacePath, timeout: BUILD_TIMEOUT_MS, maxBuffer: MAX_BUFFER };
     try {
-      const install = await execPromise('npm install', { cwd: workspacePath });
-      const build = await execPromise('npm run build', { cwd: workspacePath });
+      const install = await execPromise('npm install', opts);
+      const build = await execPromise('npm run build', opts);
       return { success: true, logs: install.stdout + install.stderr + build.stdout + build.stderr };
     } catch (err: any) {
       return { success: false, logs: `${err.stdout || ''}${err.stderr || ''}${err.message || String(err)}` };
     }
   }
 
-  async runCommand(): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-    throw new Error(
-      'Shell command execution requires a real sandbox (set E2B_API_KEY) — not available in the ' +
-      'process-level LocalActuator, since it runs in the same OS process/user as the server.'
-    );
+  async runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    const workspacePath = path.join(WORKSPACES_ROOT, workspaceId);
+    try {
+      const { stdout, stderr } = await execPromise(command, {
+        cwd: workspacePath,
+        timeout: CMD_TIMEOUT_MS,
+        maxBuffer: MAX_BUFFER,
+      });
+      return { exitCode: 0, stdout, stderr };
+    } catch (err: any) {
+      // exec rejects on non-zero exit OR timeout; normalise to a result object
+      return {
+        exitCode: typeof err.code === 'number' ? err.code : 1,
+        stdout: err.stdout || '',
+        stderr: err.stderr || err.message || String(err),
+      };
+    }
   }
 
   async browseUrl(): Promise<{ html: string }> {
     throw new Error(
-      'URL browsing requires a real sandbox (set E2B_API_KEY) — not available in LocalActuator.'
+      'URL browsing requires a real sandbox (set E2B_API_KEY). LocalActuator cannot run Playwright.'
     );
   }
 

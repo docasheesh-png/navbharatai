@@ -27,7 +27,7 @@ Each response, output exactly ONE action as a JSON object — no prose, no markd
 
 {
   "thought": "your reasoning (one sentence)",
-  "action": "bash" | "edit_file" | "patch_file" | "browse" | "done",
+  "action": "bash" | "edit_file" | "patch_file" | "done",
   "args": { ... }
 }
 
@@ -35,19 +35,17 @@ Action args:
   bash:       { "command": "shell command to run in the workspace" }
   edit_file:  { "path": "relative/path.tsx", "content": "FULL new file content" }
   patch_file: { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
-  browse:     { "url": "https://..." }
   done:       { "summary": "one sentence describing what was accomplished" }
 
 Rules:
 - One action per response. Wait for the observation before the next action.
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
-- Use bash to install packages, run scripts, inspect files, or build the project.
-- Use browse to fetch documentation or verify a running URL.
-- Output done only when the task is fully complete and the project builds cleanly (run the build first via bash if unsure).
+- Use bash to install packages, run scripts, inspect files, check versions, or build the project.
+- Output done only when the task is complete. Before done, always run bash { "command": "npm run build" } to verify the build is clean.
 - Paths are relative to workspace root, no leading "/" or "..".
-- bash and browse require a real sandboxed environment — if you see an error saying they are unavailable, solve the task with edit_file/patch_file only.
-- When starting a dev server, always use port 3000 and bind to 0.0.0.0 (e.g. --host 0.0.0.0 --port 3000) so the live preview URL can be generated.
-- To enable JS-rendered page browsing, install Playwright first: bash { "command": "npm install playwright && npx playwright install chromium --with-deps" }`;
+- When starting a dev server, always use port 3000 and bind to 0.0.0.0 (e.g. --host 0.0.0.0 --port 3000).
+- Commands run with a 60-second timeout. For slow operations (npm install), they will finish within that limit.
+- All file paths and bash commands stay inside the workspace root.`;
 
 function stripFences(text: string): string {
   const t = text.trim();
@@ -81,6 +79,19 @@ export class EngineerAgentLoop {
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
     const { workspaceId, instruction, projectType } = task;
     const deadline = Date.now() + DEADLINE_MS;
+
+    // Fail fast with a helpful message if no AI provider is reachable.
+    yield { type: 'status', message: 'Checking AI provider…' };
+    const providerOk = await this.router.hasHealthyProvider().catch(() => false);
+    if (!providerOk) {
+      yield {
+        type: 'error',
+        message:
+          'No AI provider is configured. Set AICREDITS_API_KEY (recommended), ' +
+          'ANTHROPIC_API_KEY, or GROK_API_KEY in Cloud Run → Edit & Deploy → Variables & Secrets.',
+      };
+      return;
+    }
 
     yield { type: 'status', message: 'Initializing workspace…' };
     await this.actuator.ensureWorkspace(workspaceId, projectType);

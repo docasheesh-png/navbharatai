@@ -66,13 +66,10 @@ export class PreviewService {
       return { ok: true, target, url, sessionId };
     }
 
-    // 'webcontainer' — no adapter provisioned yet (StackBlitz SDK / license pending).
-    return {
-      ok: false,
-      target,
-      reason: 'WebContainer runtime not provisioned yet (frontend StackBlitz adapter pending). '
-        + 'Tip: server-container handles full-stack/Node apps today.',
-    };
+    // BUG A5 FIX: 'webcontainer' — WebContainer adapter pending, fallback to static rendering
+    // instead of returning ok: false which leaves users with no preview.
+    const { url, sessionId } = await this.staticRuntime.start(projectId, vfs);
+    return { ok: true, target: 'static', url, sessionId };
   }
 }
 

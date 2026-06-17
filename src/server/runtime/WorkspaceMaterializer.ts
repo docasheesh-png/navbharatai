@@ -42,15 +42,21 @@ export function materializeWorkspace(vfs: VirtualFileSystem, targetDir?: string)
   fs.mkdirSync(dir, { recursive: true });
 
   let count = 0;
-  for (const file of vfs.list()) {
-    const dest = safeJoin(dir, file.path);
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    if (file.encoding === 'base64') {
-      fs.writeFileSync(dest, Buffer.from(file.content, 'base64'));
-    } else {
-      fs.writeFileSync(dest, file.content, 'utf8');
+  // BUG H1 FIX: Wrap file writes in try-catch and clean up partial directory on failure
+  try {
+    for (const file of vfs.list()) {
+      const dest = safeJoin(dir, file.path);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      if (file.encoding === 'base64') {
+        fs.writeFileSync(dest, Buffer.from(file.content, 'base64'));
+      } else {
+        fs.writeFileSync(dest, file.content, 'utf8');
+      }
+      count++;
     }
-    count++;
+  } catch (err) {
+    cleanupWorkspace(dir);
+    throw err;
   }
   return { dir, fileCount: count };
 }

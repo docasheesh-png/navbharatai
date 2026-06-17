@@ -113,6 +113,12 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
   const [hotReloadFlash, setHotReloadFlash] = useState(false);
   const prevCodeRef = useRef<string | undefined>(undefined);
 
+  // BUG G1 FIX: Reset prevCodeRef on mount/remount to prevent false "content changed"
+  // that would incorrectly trigger the hot reload flash on the first render after remount.
+  useEffect(() => {
+    prevCodeRef.current = generatedCode;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Hot reload indicator
   useEffect(() => {
     if (prevCodeRef.current !== undefined && prevCodeRef.current !== generatedCode) {

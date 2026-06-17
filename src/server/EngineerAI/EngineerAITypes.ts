@@ -18,6 +18,7 @@ export type EngineerAgentEvent =
   | { type: 'files_changed'; kind: 'edit' | 'patch'; files: { path: string; content: string }[] }
   | { type: 'build_result'; success: boolean; logs: string }
   | { type: 'browse_result'; url: string; content: string }
+  | { type: 'server_ready'; url: string; port: number }
   | { type: 'complete'; summary: string; steps: number }
   | { type: 'max_steps_reached'; steps: number }
   | { type: 'aborted' }

@@ -8,10 +8,18 @@ const MAX_FILES_SHOWN = 20;
 const MAX_CHARS_PER_FILE = 1000;
 const MAX_OBS_CHARS = 3000;
 const MAX_HISTORY_STEPS = 20;
-// How many times in a row the model may emit unparseable output before we give
-// up — bounded so a malformed-JSON model can't burn the whole step budget, but
-// forgiving enough to recover from the occasional bad turn.
 const MAX_PARSE_RETRIES = 3;
+// Steps kept verbatim; older steps are condensed into a one-line summary each.
+const HISTORY_VERBATIM_TAIL = 12;
+// Regex patterns that indicate a dev server started and is listening on a port.
+const PORT_PATTERNS = [
+  /Local(?:host)?[:\s]+(?:http:\/\/[^:]+:)?(\d{4,5})/i,
+  /listening on (?:port\s+)?(\d{4,5})/i,
+  /running(?:\s+at)?\s+(?:http:\/\/[^:]+:)?(\d{4,5})/i,
+  /started(?:\s+server)?\s+on\s+(?:port\s+)?(\d{4,5})/i,
+  /server\s+is\s+running\s+on\s+(?:port\s+)?(\d{4,5})/i,
+  /:\s*(\d{4,5})\b.*(?:ready|started|running)/i,
+];
 
 const SYSTEM_PROMPT = `You are Engineer AI, an autonomous coding agent running inside a sandboxed workspace.
 
@@ -37,7 +45,9 @@ Rules:
 - Use browse to fetch documentation or verify a running URL.
 - Output done only when the task is fully complete and the project builds cleanly (run the build first via bash if unsure).
 - Paths are relative to workspace root, no leading "/" or "..".
-- bash and browse require a real sandboxed environment — if you see an error saying they are unavailable, solve the task with edit_file/patch_file only.`;
+- bash and browse require a real sandboxed environment — if you see an error saying they are unavailable, solve the task with edit_file/patch_file only.
+- When starting a dev server, always use port 3000 and bind to 0.0.0.0 (e.g. --host 0.0.0.0 --port 3000) so the live preview URL can be generated.
+- To enable JS-rendered page browsing, install Playwright first: bash { "command": "npm install playwright && npx playwright install chromium --with-deps" }`;
 
 function stripFences(text: string): string {
   const t = text.trim();
@@ -128,6 +138,22 @@ export class EngineerAgentLoop {
         }
         const output = (result.stdout + result.stderr).slice(-MAX_OBS_CHARS);
         yield { type: 'command_result', command, exitCode: result.exitCode, output };
+
+        // Detect a dev server starting — emit a live-preview URL
+        for (const pattern of PORT_PATTERNS) {
+          const m = output.match(pattern);
+          if (m) {
+            const port = parseInt(m[1], 10);
+            if (port > 1000 && port < 65536) {
+              try {
+                const url = await this.actuator.getPortUrl(workspaceId, port);
+                yield { type: 'server_ready', url, port };
+              } catch { /* non-fatal */ }
+              break;
+            }
+          }
+        }
+
         observation = `exit ${result.exitCode}:\n${output}`;
       } else if (parsed.action === 'edit_file') {
         const filePath = parsed.args.path || '';
@@ -216,11 +242,27 @@ export class EngineerAgentLoop {
     ];
 
     if (history.length > 0) {
-      const recent = history.slice(-MAX_HISTORY_STEPS);
-      const historyText = recent
+      const verbatim = history.slice(-HISTORY_VERBATIM_TAIL);
+      const condensed = history.slice(0, history.length - HISTORY_VERBATIM_TAIL);
+      const sections: string[] = [];
+
+      if (condensed.length > 0) {
+        // Summarise older steps into one compact line each to save context window
+        const summary = condensed
+          .map(h => {
+            const action = (() => { try { return JSON.parse(h.actionJson).action; } catch { return '?'; } })();
+            return `Step ${h.step}: ${action} → ${h.observation.slice(0, 120).replace(/\n/g, ' ')}`;
+          })
+          .join('\n');
+        sections.push(`[EARLIER STEPS — condensed]\n${summary}`);
+      }
+
+      const verbatimText = verbatim
         .map(h => `Step ${h.step} — ${h.actionJson}\nObservation: ${h.observation}`)
         .join('\n\n');
-      parts.push(`[HISTORY]\n${historyText}`);
+      sections.push(`[RECENT STEPS]\n${verbatimText}`);
+
+      parts.push(sections.join('\n\n'));
     }
 
     parts.push('[OUTPUT the next single action JSON]');

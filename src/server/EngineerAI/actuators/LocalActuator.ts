@@ -66,4 +66,8 @@ export class LocalActuator implements IEngineerActuator {
       'URL browsing requires a real sandbox (set E2B_API_KEY) — not available in LocalActuator.'
     );
   }
+
+  async getPortUrl(_workspaceId: string, port: number): Promise<string> {
+    return `http://localhost:${port}`;
+  }
 }

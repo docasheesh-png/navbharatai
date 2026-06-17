@@ -10,21 +10,25 @@ const NAMESPACE = 'engineer';
 const WORKSPACES_ROOT = `/workspaces/${NAMESPACE}`;
 
 /**
- * Phase 1 actuator: same OS process/user as the server, no real isolation
- * beyond WorkspaceManager's per-workspaceId directory + FileSanitizer's
- * path-traversal checks. Swap for a real sandbox-backed IEngineerActuator
- * (e.g. e2b.dev) before adding shell/browser tools.
+ * Process-level actuator — no real sandbox isolation.
+ * Shell execution (runCommand / browseUrl) is intentionally rejected here:
+ * it would run as the same OS user as the server. Swap to E2BActuator for
+ * those capabilities.
  */
 export class LocalActuator implements IEngineerActuator {
   private workspaceManager = new WorkspaceManager(NAMESPACE);
 
-  async ensureWorkspace(workspaceId: string): Promise<void> {
+  async ensureWorkspace(workspaceId: string, projectType?: string): Promise<void> {
     const info = await this.workspaceManager.getWorkspaceInfo(workspaceId).catch(() => null);
     if (info && info.files.length > 0) return;
 
     await this.workspaceManager.createWorkspace(workspaceId);
+    // Stack detection: if 'node' or 'python' are requested we still fall back to
+    // vite-react since those scaffolders aren't implemented yet — the model can
+    // reshape via bash once a real sandbox is available.
+    const framework: 'vite-react' = 'vite-react';
     const scaffolder = new ScaffoldGenerator(this.workspaceManager);
-    await scaffolder.generate({ framework: 'vite-react', language: 'typescript', features: [], workspaceId });
+    await scaffolder.generate({ framework, language: 'typescript', features: [], workspaceId });
   }
 
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void> {
@@ -54,6 +58,12 @@ export class LocalActuator implements IEngineerActuator {
     throw new Error(
       'Shell command execution requires a real sandbox (set E2B_API_KEY) — not available in the ' +
       'process-level LocalActuator, since it runs in the same OS process/user as the server.'
+    );
+  }
+
+  async browseUrl(): Promise<{ html: string }> {
+    throw new Error(
+      'URL browsing requires a real sandbox (set E2B_API_KEY) — not available in LocalActuator.'
     );
   }
 }

@@ -8,8 +8,7 @@ const COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * Phase 2 actuator: each workspaceId gets its own real e2b.dev cloud sandbox
- * (separate VM, real OS-level isolation) instead of sharing the server's own
- * process/filesystem like LocalActuator does. Requires E2B_API_KEY.
+ * (separate VM, real OS-level isolation). Requires E2B_API_KEY.
  */
 export class E2BActuator implements IEngineerActuator {
   private sandboxes = new Map<string, Sandbox>();
@@ -24,16 +23,22 @@ export class E2BActuator implements IEngineerActuator {
     return sandbox;
   }
 
-  async ensureWorkspace(workspaceId: string): Promise<void> {
+  async ensureWorkspace(workspaceId: string, projectType?: string): Promise<void> {
     const sandbox = await this.getSandbox(workspaceId);
     const exists = await sandbox.files.exists(WORKSPACE_ROOT);
     if (exists) return;
 
     await sandbox.files.makeDir(WORKSPACE_ROOT);
-    const files = this.templateRegistry.getProvider('vite-react').getFiles([]);
-    await sandbox.files.writeFiles(
-      Object.entries(files).map(([path, content]) => ({ path: `${WORKSPACE_ROOT}/${path}`, data: content }))
-    );
+
+    // Stack detection: if workspace has specific markers, skip vite-react scaffold.
+    // For now only vite-react is available — other types can be set up via bash commands.
+    if (!projectType || projectType === 'vite-react' || projectType === 'auto') {
+      const files = this.templateRegistry.getProvider('vite-react').getFiles([]);
+      await sandbox.files.writeFiles(
+        Object.entries(files).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${p}`, data: content }))
+      );
+    }
+    // 'node' / 'python': leave workspace empty — the model scaffolds via bash
   }
 
   async writeFile(workspaceId: string, filePath: string, content: string): Promise<void> {
@@ -85,5 +90,14 @@ export class E2BActuator implements IEngineerActuator {
     } catch (err: any) {
       return { exitCode: -1, stdout: err.stdout || '', stderr: err.stderr || err.message || String(err) };
     }
+  }
+
+  async browseUrl(workspaceId: string, url: string): Promise<{ html: string }> {
+    const sandbox = await this.getSandbox(workspaceId);
+    const result = await sandbox.commands.run(
+      `curl -s -L --max-time 20 -A "Mozilla/5.0" "${url}" 2>/dev/null | head -c 30000`,
+      { cwd: WORKSPACE_ROOT, timeoutMs: 30_000 }
+    );
+    return { html: result.stdout || result.stderr };
   }
 }

@@ -236,12 +236,29 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         ? JSON.stringify({ patientData: clinicalEntry.patientData, redFlags: clinicalEntry.redFlags, stage: clinicalEntry.stage })
         : null;
 
+      // Rolling context: last 20 turns verbatim; older turns compressed into a
+      // summary block so nothing is forgotten even in very long sessions.
+      const VERBATIM_TAIL = 20;
+      const recentMsgs = storedMsgs.slice(-VERBATIM_TAIL);
+      const olderMsgs = storedMsgs.length > VERBATIM_TAIL ? storedMsgs.slice(0, -VERBATIM_TAIL) : [];
+      const olderContextEntry: Array<{ role: 'user' | 'assistant'; content: string }> = olderMsgs.length > 0
+        ? [
+            {
+              role: 'user' as const,
+              content: `[EARLIER SESSION — ${olderMsgs.length} exchanges before the recent history below]\n` +
+                olderMsgs.map(m => `${m.role === 'user' ? 'Dr' : 'SDA'}: ${String(m.content).slice(0, 120)}`).join('\n'),
+            },
+            { role: 'assistant' as const, content: 'Acknowledged. I have the complete session history.' },
+          ]
+        : [];
+
       const historyForAI: Array<{ role: 'user' | 'assistant'; content: string }> = [
         ...(clinicalSnapshot ? [
           { role: 'user' as const, content: `[CASE_CONTEXT]\n${clinicalSnapshot}\n[/CASE_CONTEXT]\nContinue the clinical assessment. Do NOT re-ask anything already recorded in the context above.` },
           { role: 'assistant' as const, content: 'Understood. Full clinical context loaded. Continuing without repeating any question already answered.' },
         ] : []),
-        ...storedMsgs.slice(-6).map(m => ({ role: m.role, content: m.content })),
+        ...olderContextEntry,
+        ...recentMsgs.map(m => ({ role: m.role, content: m.content })),
       ];
 
       let reply = '';

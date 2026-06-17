@@ -14,12 +14,17 @@
  */
 import type { VirtualFileSystem } from './ProjectModel';
 
-export type Framework = 'vite-react' | 'static';
+export type Framework = 'vite-react' | 'vite-react-ts' | 'static';
 
 const REACT_HINTS = [
   'react', 'vite', 'jsx', 'tsx', 'component', 'spa', 'single page',
   'dashboard', 'router', 'usestate', 'hook',
 ];
+
+/** Does the prompt explicitly ask for TypeScript? */
+function wantsTypeScript(p: string): boolean {
+  return /\btypescript\b|\bts\b|\.tsx?\b|\btsx\b/i.test(p);
+}
 
 /** Heuristically choose a starting framework from the user's prompt. */
 export function detectFramework(prompt: string): Framework {
@@ -29,7 +34,9 @@ export function detectFramework(prompt: string): Framework {
     // ...unless they also explicitly asked for react.
     if (!/\breact\b/.test(p)) return 'static';
   }
-  return REACT_HINTS.some((h) => p.includes(h)) ? 'vite-react' : 'static';
+  const isReact = REACT_HINTS.some((h) => p.includes(h));
+  if (!isReact) return 'static';
+  return wantsTypeScript(prompt) ? 'vite-react-ts' : 'vite-react';
 }
 
 const VITE_REACT_FILES: Record<string, string> = {
@@ -74,6 +81,64 @@ const VITE_REACT_FILES: Record<string, string> = {
     `body { margin: 0; }\n`,
 };
 
+const VITE_REACT_TS_FILES: Record<string, string> = {
+  'package.json': JSON.stringify(
+    {
+      name: 'app',
+      private: true,
+      version: '0.0.0',
+      type: 'module',
+      scripts: { dev: 'vite', build: 'tsc -b && vite build', preview: 'vite preview' },
+      dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' },
+      devDependencies: {
+        '@types/react': '^18.3.3',
+        '@types/react-dom': '^18.3.0',
+        '@vitejs/plugin-react': '^4.3.1',
+        typescript: '^5.5.3',
+        vite: '^5.4.0',
+      },
+    },
+    null,
+    2,
+  ) + '\n',
+  'vite.config.ts':
+    `import { defineConfig } from 'vite';\n` +
+    `import react from '@vitejs/plugin-react';\n\n` +
+    `export default defineConfig({ plugins: [react()] });\n`,
+  'tsconfig.json': JSON.stringify(
+    {
+      compilerOptions: {
+        target: 'ES2020', useDefineForClassFields: true, lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+        module: 'ESNext', skipLibCheck: true, moduleResolution: 'bundler',
+        allowImportingTsExtensions: true, resolveJsonModule: true, isolatedModules: true,
+        noEmit: true, jsx: 'react-jsx', strict: true,
+      },
+      include: ['src'],
+    },
+    null,
+    2,
+  ) + '\n',
+  'index.html':
+    `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
+    `    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n` +
+    `    <title>App</title>\n  </head>\n  <body>\n    <div id="root"></div>\n` +
+    `    <script type="module" src="/src/main.tsx"></script>\n  </body>\n</html>\n`,
+  'src/main.tsx':
+    `import React from 'react';\n` +
+    `import { createRoot } from 'react-dom/client';\n` +
+    `import App from './App';\n` +
+    `import './index.css';\n\n` +
+    `createRoot(document.getElementById('root')!).render(\n` +
+    `  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n);\n`,
+  'src/App.tsx':
+    `export default function App() {\n` +
+    `  return <h1>Hello from App</h1>;\n` +
+    `}\n`,
+  'src/index.css':
+    `:root { font-family: system-ui, sans-serif; }\n` +
+    `body { margin: 0; }\n`,
+};
+
 const STATIC_FILES: Record<string, string> = {
   'index.html':
     `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
@@ -90,6 +155,7 @@ const STATIC_FILES: Record<string, string> = {
 
 const SKELETONS: Record<Framework, Record<string, string>> = {
   'vite-react': VITE_REACT_FILES,
+  'vite-react-ts': VITE_REACT_TS_FILES,
   static: STATIC_FILES,
 };
 
@@ -108,7 +174,9 @@ export function scaffold(vfs: VirtualFileSystem, framework: Framework): Framewor
 
 /** One-line description of the seeded foundation, for the generator prompt. */
 export function scaffoldSummary(framework: Framework): string {
-  return framework === 'vite-react'
-    ? 'a Vite + React (JSX) project: index.html → src/main.jsx → src/App.jsx, styles in src/index.css, deps in package.json'
-    : 'a plain static project: index.html + styles.css + app.js';
+  if (framework === 'vite-react-ts')
+    return 'a Vite + React + TypeScript project: index.html → src/main.tsx → src/App.tsx, tsconfig.json, styles in src/index.css';
+  if (framework === 'vite-react')
+    return 'a Vite + React (JSX) project: index.html → src/main.jsx → src/App.jsx, styles in src/index.css, deps in package.json';
+  return 'a plain static project: index.html + styles.css + app.js';
 }

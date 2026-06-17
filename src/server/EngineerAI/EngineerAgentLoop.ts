@@ -111,7 +111,19 @@ export class EngineerAgentLoop {
       // output is recoverable — feed the parse error back and let it retry.
       let rawResponse: string;
       try {
-        const { response } = await this.router.route(prompt, SYSTEM_PROMPT);
+        const { response, telemetry } = await this.router.route(prompt, SYSTEM_PROMPT);
+        if (!telemetry.success) {
+          // All providers failed (budget exhausted, wrong key, rate-limit, etc.)
+          yield {
+            type: 'error',
+            message:
+              'AI provider call failed. Possible causes: ' +
+              '① AICREDITS_API_KEY is wrong or budget exhausted (top up at aicredit.in), ' +
+              '② Model name mismatch — set AICREDITS_MODEL env var to the correct model string, ' +
+              '③ aicredit.in is temporarily down.',
+          };
+          return;
+        }
         rawResponse = response.content;
       } catch (err: any) {
         yield { type: 'error', message: `AI planning failed: ${err?.message || String(err)}` };

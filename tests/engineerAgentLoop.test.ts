@@ -11,7 +11,7 @@ function fakeRouter(responses: string[]): AIRouter {
     route: async () => {
       const content = responses[Math.min(i, responses.length - 1)];
       i++;
-      return { response: { content, latencyMs: 0, provider: 'TEST', model: 'test' }, telemetry: {} as any };
+      return { response: { content, latencyMs: 0, provider: 'TEST', model: 'test' }, telemetry: { success: true } as any };
     },
     hasHealthyProvider: async () => true,
   } as unknown as AIRouter;

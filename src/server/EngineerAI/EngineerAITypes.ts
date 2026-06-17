@@ -15,7 +15,7 @@ export interface ReActAction {
 export type EngineerAgentEvent =
   | { type: 'action_start'; step: number; action: string; thought: string }
   | { type: 'command_result'; command: string; exitCode: number; output: string }
-  | { type: 'files_changed'; paths: string[]; kind: 'edit' | 'patch' }
+  | { type: 'files_changed'; kind: 'edit' | 'patch'; files: { path: string; content: string }[] }
   | { type: 'build_result'; success: boolean; logs: string }
   | { type: 'browse_result'; url: string; content: string }
   | { type: 'complete'; summary: string; steps: number }

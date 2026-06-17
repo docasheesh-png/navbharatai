@@ -8,6 +8,10 @@ const MAX_FILES_SHOWN = 20;
 const MAX_CHARS_PER_FILE = 1000;
 const MAX_OBS_CHARS = 3000;
 const MAX_HISTORY_STEPS = 20;
+// How many times in a row the model may emit unparseable output before we give
+// up — bounded so a malformed-JSON model can't burn the whole step budget, but
+// forgiving enough to recover from the occasional bad turn.
+const MAX_PARSE_RETRIES = 3;
 
 const SYSTEM_PROMPT = `You are Engineer AI, an autonomous coding agent running inside a sandboxed workspace.
 
@@ -71,6 +75,7 @@ export class EngineerAgentLoop {
     await this.actuator.ensureWorkspace(workspaceId, projectType);
 
     const history: { step: number; actionJson: string; observation: string }[] = [];
+    let consecutiveParseFailures = 0;
 
     for (let step = 1; step <= MAX_STEPS; step++) {
       if (signal?.aborted) { yield { type: 'aborted' }; return; }
@@ -78,16 +83,36 @@ export class EngineerAgentLoop {
 
       const prompt = await this.buildPrompt(workspaceId, instruction, history);
 
-      let parsed: ReActAction;
+      // Router/provider failure is a real infra error — abort. Malformed model
+      // output is recoverable — feed the parse error back and let it retry.
+      let rawResponse: string;
       try {
         const { response } = await this.router.route(prompt, SYSTEM_PROMPT);
-        parsed = parseAction(response.content);
+        rawResponse = response.content;
       } catch (err: any) {
         yield { type: 'error', message: `AI planning failed: ${err?.message || String(err)}` };
         return;
       }
 
       if (signal?.aborted) { yield { type: 'aborted' }; return; }
+
+      let parsed: ReActAction;
+      try {
+        parsed = parseAction(rawResponse);
+      } catch {
+        consecutiveParseFailures++;
+        if (consecutiveParseFailures >= MAX_PARSE_RETRIES) {
+          yield { type: 'error', message: 'Model repeatedly returned output that was not a valid single-action JSON object.' };
+          return;
+        }
+        history.push({
+          step,
+          actionJson: '(unparseable model output)',
+          observation: 'Your last response was not a valid single-action JSON object. Respond with EXACTLY one JSON object {"thought","action","args"} and nothing else — no prose, no markdown fences.',
+        });
+        continue;
+      }
+      consecutiveParseFailures = 0;
 
       yield { type: 'action_start', step, action: parsed.action, thought: parsed.thought || '' };
 
@@ -109,7 +134,7 @@ export class EngineerAgentLoop {
         const content = parsed.args.content || '';
         try {
           await this.actuator.writeFile(workspaceId, filePath, content);
-          yield { type: 'files_changed', paths: [filePath], kind: 'edit' };
+          yield { type: 'files_changed', kind: 'edit', files: [{ path: filePath, content }] };
           observation = `File "${filePath}" written (${content.split('\n').length} lines).`;
         } catch (err: any) {
           observation = `Error writing "${filePath}": ${err?.message}`;
@@ -125,7 +150,7 @@ export class EngineerAgentLoop {
           } else {
             const after = before.replace(oldStr, newStr);
             await this.actuator.writeFile(workspaceId, filePath, after);
-            yield { type: 'files_changed', paths: [filePath], kind: 'patch' };
+            yield { type: 'files_changed', kind: 'patch', files: [{ path: filePath, content: after }] };
             observation = `Patched "${filePath}" successfully.`;
           }
         } catch (err: any) {

@@ -94,7 +94,12 @@ export class EngineerAgentLoop {
     }
 
     yield { type: 'status', message: 'Initializing workspace…' };
-    await this.actuator.ensureWorkspace(workspaceId, projectType);
+    try {
+      await this.actuator.ensureWorkspace(workspaceId, projectType);
+    } catch (err: any) {
+      yield { type: 'error', message: `Workspace init failed: ${err?.message || 'Cannot create workspace directory.'}` };
+      return;
+    }
 
     const history: { step: number; actionJson: string; observation: string }[] = [];
     let consecutiveParseFailures = 0;

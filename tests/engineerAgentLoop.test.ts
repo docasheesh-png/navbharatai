@@ -79,6 +79,10 @@ describe('EngineerAgentLoop', () => {
     const ctrl = new AbortController();
     ctrl.abort();
     const events = await collect(new EngineerAgentLoop(fakeRouter(['{}']), fakeActuator()), ctrl.signal);
-    expect(events).toEqual([{ type: 'aborted' }]);
+    // status event is yielded before ensureWorkspace; aborted follows on the first loop check
+    expect(events).toEqual([
+      { type: 'status', message: 'Initializing workspace…' },
+      { type: 'aborted' },
+    ]);
   });
 });

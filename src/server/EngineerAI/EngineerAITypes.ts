@@ -19,6 +19,7 @@ export type EngineerAgentEvent =
   | { type: 'build_result'; success: boolean; logs: string }
   | { type: 'browse_result'; url: string; content: string }
   | { type: 'server_ready'; url: string; port: number }
+  | { type: 'status'; message: string }
   | { type: 'complete'; summary: string; steps: number }
   | { type: 'max_steps_reached'; steps: number }
   | { type: 'aborted' }

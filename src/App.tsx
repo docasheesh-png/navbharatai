@@ -2364,7 +2364,14 @@ ${buildLanguageRule(preferredLanguage)}`;
     if(spec.indexOf('://')>0||spec.slice(0,2)==='//')return spec;
     if(IMAP[spec])return IMAP[spec];
     var root=spec.charAt(0)==='@'?spec.split('/').slice(0,2).join('/'):spec.split('/')[0];
-    if(IMAP[root])return IMAP[root]+spec.slice(root.length);
+    if(IMAP[root]){
+      // Insert the subpath BEFORE any query string, else "zustand/middleware"
+      // becomes ".../zustand@4?external=react,react-dom/middleware" (subpath
+      // swallowed into the query) → wrong module → "persist is not a function".
+      var b=IMAP[root],q='',qi=b.indexOf('?');
+      if(qi>=0){q=b.slice(qi);b=b.slice(0,qi);}
+      return b+spec.slice(root.length)+q;
+    }
     return ESM+spec;
   }
   var forced=['react','react-dom','react-dom/client','react/jsx-runtime','react/jsx-dev-runtime'];

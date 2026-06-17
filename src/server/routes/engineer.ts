@@ -13,10 +13,10 @@ function buildActuator(): IEngineerActuator {
 }
 
 /**
- * Engineer AI route — POST /api/engineer-chat (SSE).
+ * Engineer AI route — POST /api/engineer-chat (NDJSON stream).
  * Body: { workspaceId: string, instruction: string, projectType?: string }
  * Events: action_start, command_result, files_changed, build_result,
- *         browse_result, complete, max_steps_reached, aborted, error.
+ *         browse_result, complete, max_steps_reached, aborted, error, ping.
  */
 export function registerEngineerRoutes(app: Express): void {
   const router = buildEngineerRouter();
@@ -29,9 +29,13 @@ export function registerEngineerRoutes(app: Express): void {
       return;
     }
 
-    res.setHeader('Content-Type', 'text/event-stream');
+    // NDJSON streaming — avoids iOS Safari SSE buffering quirks.
+    // Each event is a single JSON object followed by a newline character.
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('X-Accel-Buffering', 'no');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.flushHeaders();
 
@@ -39,13 +43,14 @@ export function registerEngineerRoutes(app: Express): void {
     const abort = new AbortController();
     req.on('close', () => abort.abort());
 
-    const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+    const send = (data: object) => {
+      if (!res.writableEnded) res.write(JSON.stringify(data) + '\n');
+    };
 
-    // SSE keep-alive: send a comment line every 20 s so proxies and mobile
-    // networks don't close the silent connection during long E2B operations.
+    // Keep-alive: send a no-op ping line every 15 s to prevent proxy/mobile idle timeouts.
     const heartbeat = setInterval(() => {
-      if (!res.writableEnded) res.write(': keep-alive\n\n');
-    }, 20_000);
+      if (!res.writableEnded) res.write(JSON.stringify({ type: 'ping' }) + '\n');
+    }, 15_000);
 
     try {
       for await (const event of agentLoop.run({ workspaceId, instruction, projectType }, abort.signal)) {

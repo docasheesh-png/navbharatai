@@ -50,6 +50,14 @@ export class AIRouter {
     return this.execute(prompt, undefined, systemPrompt);
   }
 
+  /** Returns true if at least one registered provider passes its health check. */
+  async hasHealthyProvider(): Promise<boolean> {
+    for (const p of this.providers) {
+      if (await p.healthCheck().catch(() => false)) return true;
+    }
+    return false;
+  }
+
   async generate(prompt: string, schema: any): Promise<any> {
     const { response } = await this.execute(prompt, schema);
     return JSON.parse(response.content);

@@ -13,6 +13,7 @@ function fakeRouter(responses: string[]): AIRouter {
       i++;
       return { response: { content, latencyMs: 0, provider: 'TEST', model: 'test' }, telemetry: {} as any };
     },
+    hasHealthyProvider: async () => true,
   } as unknown as AIRouter;
 }
 
@@ -79,8 +80,9 @@ describe('EngineerAgentLoop', () => {
     const ctrl = new AbortController();
     ctrl.abort();
     const events = await collect(new EngineerAgentLoop(fakeRouter(['{}']), fakeActuator()), ctrl.signal);
-    // status event is yielded before ensureWorkspace; aborted follows on the first loop check
+    // provider-check status → workspace-init status → aborted on first loop check
     expect(events).toEqual([
+      { type: 'status', message: 'Checking AI provider…' },
       { type: 'status', message: 'Initializing workspace…' },
       { type: 'aborted' },
     ]);

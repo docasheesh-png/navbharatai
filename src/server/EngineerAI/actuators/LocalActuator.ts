@@ -1,8 +1,8 @@
 import { exec } from 'child_process';
+import { promises as fsPromises } from 'fs';
 import path from 'path';
 import util from 'util';
 import { WorkspaceManager } from '../../AppMakerLab/WorkspaceManager';
-import { ScaffoldGenerator } from '../../AppMakerLab/generator/ScaffoldGenerator';
 import { IEngineerActuator } from './IEngineerActuator';
 
 const execPromise = util.promisify(exec);
@@ -28,14 +28,13 @@ const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', '.next', 'build', 
 export class LocalActuator implements IEngineerActuator {
   private workspaceManager = new WorkspaceManager(NAMESPACE);
 
-  async ensureWorkspace(workspaceId: string, projectType?: string): Promise<void> {
-    const info = await this.workspaceManager.getWorkspaceInfo(workspaceId).catch(() => null);
-    if (info && info.files.length > 0) return;
-
-    await this.workspaceManager.createWorkspace(workspaceId);
-    const framework: 'vite-react' = 'vite-react';
-    const scaffolder = new ScaffoldGenerator(this.workspaceManager);
-    await scaffolder.generate({ framework, language: 'typescript', features: [], workspaceId });
+  async ensureWorkspace(workspaceId: string): Promise<void> {
+    // Just create the directory — fast and reliable in Cloud Run.
+    // The AI scaffolds itself via bash actions rather than us running npm here,
+    // which was the root cause of the "does not respond" hang: ScaffoldGenerator
+    // runs npm create vite@latest and can take minutes or fail silently.
+    const workspacePath = path.join(WORKSPACES_ROOT, workspaceId);
+    await fsPromises.mkdir(workspacePath, { recursive: true });
   }
 
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void> {
@@ -86,7 +85,7 @@ export class LocalActuator implements IEngineerActuator {
     }
   }
 
-  async browseUrl(): Promise<{ html: string }> {
+  async browseUrl(_workspaceId: string, _url: string): Promise<{ html: string }> {
     throw new Error(
       'URL browsing requires a real sandbox (set E2B_API_KEY). LocalActuator cannot run Playwright.'
     );

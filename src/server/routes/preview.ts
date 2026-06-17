@@ -68,7 +68,7 @@ function collectBarePackages(files: Record<string, string>): Set<string> {
   return found;
 }
 
-async function bundleForPreview(files: Record<string, string>): Promise<string> {
+export async function bundleForPreview(files: Record<string, string>): Promise<string> {
   const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'nb-preview-'));
   try {
     // Write source files to temp dir (with BrowserRouter→HashRouter rewrite)

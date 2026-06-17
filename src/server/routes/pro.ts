@@ -98,6 +98,30 @@ export function registerProRoutes(app: Express): void {
         ? `\n\n### CURRENT APP ON CANVAS (${currentApp.length} chars):\n\`\`\`html\n${currentApp.slice(0, 3000)}\n\`\`\`\nUser is discussing modifications/additions to THIS app.`
         : '';
 
+      /**
+       * Build a history array for provider calls with a graduated token budget.
+       * Recent messages get full content; older ones are abbreviated so the total
+       * stays around 20K chars (~5K tokens) — safe for Claude 200K, Groq 32K,
+       * Gemini 1M alike. The frontend already sends up to 40 messages; we just
+       * stop throwing most of them away.
+       *
+       *  recentCount  — last N messages kept at full recentChars length
+       *  recentChars  — char limit per recent message   (default 2000)
+       *  olderChars   — char limit per older message    (default 400)
+       *  maxTotal     — total messages to consider      (default 30)
+       */
+      const buildHistoryMsgs = (
+        hist: any[],
+        { recentCount = 12, recentChars = 2000, olderChars = 400, maxTotal = 30 } = {}
+      ): { role: 'user' | 'assistant'; content: string }[] => {
+        const msgs = (hist || []).slice(-maxTotal);
+        const recentStart = Math.max(0, msgs.length - recentCount);
+        return msgs.map((m: any, i: number) => ({
+          role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+          content: String(m.text || m.content || '').slice(0, i >= recentStart ? recentChars : olderChars),
+        }));
+      };
+
       // ══ BUILDING MODE — Use AppEngine to generate real app ══
       if (mode === 'building') {
         console.log('[PRO] Building mode — AppEngine starting');
@@ -157,10 +181,7 @@ Your role:
         try {
           const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
           const msgs = [
-            ...(history || []).slice(-6).map((m: any) => ({
-              role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
-              content: String(m.text || m.content || '').slice(0, 400),
-            })),
+            ...buildHistoryMsgs(history),
             { role: 'user' as const, content: message },
           ];
           const reply = await callClaudePro(key, CONV_SYS, msgs, 300);
@@ -205,10 +226,7 @@ NEVER write any code or HTML in your response.`;
         try {
           const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
           const msgs = [
-            ...(history || []).slice(-10).map((m: any) => ({
-              role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
-              content: String(m.text || m.content || '').slice(0, 800),
-            })),
+            ...buildHistoryMsgs(history, { maxTotal: 30, recentCount: 15, recentChars: 2000, olderChars: 500 }),
             { role: 'user' as const, content: message },
           ];
           const maxTokens = isAutoBuild ? 200 : isAutoPlan ? 500 : 400;
@@ -311,10 +329,7 @@ Response Format:
         return `[PDF attached: ${fileName}]\n${message}`;
       };
 
-      const planHistoryMsgs = (history || []).slice(-8).map((m: any) => ({
-        role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
-        content: String(m.text || m.content || '').slice(0, 400),
-      }));
+      const planHistoryMsgs = buildHistoryMsgs(history, { maxTotal: 25, recentChars: 1500, olderChars: 400 });
 
       const planMsgsText = [
         { role: 'system' as const, content: PLAN_PROMPT },
@@ -498,10 +513,24 @@ Response Format:
 
     const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
-    // Build conversation context string from history array
-    const historyContext = Array.isArray(history) && history.length > 0
-      ? history.map((m: any) => `${m.role === 'user' ? 'User' : 'AI'}: ${String(m.content || '').slice(0, 600)}`).join('\n')
-      : '';
+    // Build conversation context from history using OpenAI messages array
+    const buildHistoryMsgsBuild = (
+      hist: any[],
+      { recentCount = 12, recentChars = 2000, olderChars = 400, maxTotal = 30 } = {}
+    ): { role: 'user' | 'assistant'; content: string }[] => {
+      const msgs = (hist || []).slice(-maxTotal);
+      const recentStart = Math.max(0, msgs.length - recentCount);
+      return msgs.map((m: any, i: number) => ({
+        role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: String(m.text || m.content || '').slice(0, i >= recentStart ? recentChars : olderChars),
+      }));
+    };
+    const historyMsgs = Array.isArray(history) && history.length > 0
+      ? buildHistoryMsgsBuild(history, { maxTotal: 20, recentCount: 10, recentChars: 1500, olderChars: 400 })
+      : [];
+    const historyContext = historyMsgs
+      .map(m => `${m.role === 'user' ? 'User' : 'AI'}: ${m.content}`)
+      .join('\n');
 
     // Detect edit mode: explicit flag OR has currentFiles with substantial content
     const hasCurrentFiles = currentFiles &&

@@ -2317,7 +2317,7 @@ ${buildLanguageRule(preferredLanguage)}`;
   if(typeof process==='undefined')window.process={env:{NODE_ENV:'production'}};
   window.__importMetaEnv__=window.__importMetaEnv__||{};
   function fail(m){if(window.__nbShowError)window.__nbShowError(m);}
-  if(typeof Babel==='undefined'){fail('Could not load the preview compiler (network blocked?).');return;}
+  function loadScript(url){return new Promise(function(res){var s=document.createElement('script');s.src=url;s.onload=res;s.onerror=res;document.head.appendChild(s);});}
   function dirname(p){var i=p.lastIndexOf('/');return i<0?'':p.slice(0,i);}
   function normalize(p){var a=p.split('/'),o=[];for(var i=0;i<a.length;i++){var s=a[i];if(s===''||s==='.')continue;if(s==='..')o.pop();else o.push(s);}return o.join('/');}
   function resolve(importer,spec){
@@ -2356,6 +2356,8 @@ ${buildLanguageRule(preferredLanguage)}`;
     catch(e){throw new Error('Compile '+path+': '+e.message);}
     var module={exports:{}};cache[path]=module;
     var req=function(spec){
+      // Vite/shadcn-style @/ alias (e.g. @/components/ui/button) → resolve under src/
+      if(spec.length>2&&spec.charAt(0)==='@'&&spec.charAt(1)==='/'){return requireMod(resolve(path,'/src/'+spec.slice(2)));}
       if(spec.charAt(0)!=='.'&&spec.charAt(0)!=='/'){if(bareCache[spec])return bareCache[spec];throw new Error('Missing dependency: '+spec);}
       return requireMod(resolve(path,spec));
     };
@@ -2365,7 +2367,7 @@ ${buildLanguageRule(preferredLanguage)}`;
   }
   function collectBare(){
     var found={},re=/(?:from|import|require\\(|import\\()\\s*['"]([^'"]+)['"]/g;
-    Object.keys(FILES).forEach(function(p){var src=FILES[p]||'',m;re.lastIndex=0;while((m=re.exec(src))){var s=m[1];if(s&&s.charAt(0)!=='.'&&s.charAt(0)!=='/')found[s]=true;}});
+    Object.keys(FILES).forEach(function(p){var src=FILES[p]||'',m;re.lastIndex=0;while((m=re.exec(src))){var s=m[1];if(s&&s.charAt(0)!=='.'&&s.charAt(0)!=='/'&&!(s.charAt(0)==='@'&&s.charAt(1)==='/'))found[s]=true;}});
     return Object.keys(found);
   }
   // Resolve a bare import spec to CDN URL: importmap first, then esm.sh
@@ -2388,6 +2390,9 @@ ${buildLanguageRule(preferredLanguage)}`;
   window.__nbLoading=true;
   (async function(){
     try{
+      // Load Babel if primary CDN (<script src>) failed — try unpkg fallback
+      if(typeof Babel==='undefined'){await loadScript('https://unpkg.com/@babel/standalone@7.26.4/babel.min.js');}
+      if(typeof Babel==='undefined'){window.__nbLoading=false;fail('Could not load the preview compiler (network blocked?). Check internet connection.');return;}
       var bare;try{bare=collectBare();}catch(ce){bare=[];}
       forced.forEach(function(s){if(bare.indexOf(s)<0)bare.push(s);});
       var failedDeps=[];
@@ -2540,7 +2545,7 @@ ${buildLanguageRule(preferredLanguage)}`;
     return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
       + PREVIEW_HARNESS
       + '<script type="importmap">' + importmap + '</' + 'script>'
-      + '<script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></' + 'script>'
+      + '<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js"></' + 'script>'
       + '</head><body>' + bodyInner
       + '<script>window.__FILES=' + sj(srcFiles) + ';window.__ENTRY=' + sj(entry) + ';window.__IMAP=' + sj(imapEntries) + ';</' + 'script>'
       + '<script>' + PREVIEW_BOOTSTRAP + '</' + 'script>'
@@ -3979,14 +3984,12 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             generatedFiles: Object.fromEntries(Object.entries(builtFiles).map(([k, v]) => [k, { content: v, expanded: false }])),
           }));
           setTimeout(() => {
-            // Merge + preview from the LATEST files (via the functional updater),
-            // not the stale `files` captured when this handler started — otherwise
-            // the preview can render an old/empty workspace. Mirrors handleFileChange.
-            setFiles((prev: any) => {
-              const merged = { ...prev, ...builtFiles };
-              updatePreview(merged);
-              return merged;
-            });
+            // Preview with the fresh build first (outside setFiles updater — calling
+            // setState side-effects inside a functional updater is a React anti-pattern
+            // that can double-invoke in concurrent/strict mode).
+            updatePreview(builtFiles);
+            // Merge with any pre-existing workspace files in the files state.
+            setFiles((prev: any) => ({ ...prev, ...builtFiles }));
             setIsAppBuilt(true);
             setHasGeneratedCode(true);
             // Take the user to the now-ready live preview (the build message says

@@ -125,9 +125,19 @@ function fileContext(vfs: VirtualFileSystem): string {
 /** A planned file in a multi-file build. */
 interface PlannedFile { path: string; purpose: string }
 
+/** Upper bound on planned files — large enough for real multi-module apps. */
+const MAX_PLAN_FILES = 48;
+
 const PLAN_FORMAT = `Reply with ONLY JSON, no prose, no markdown fences:
 {"entry":"index.html","files":[{"path":"relative/path","purpose":"what this file contains"}]}
-Plan a COMPLETE multi-file app: a working entry point plus every component, page/view, hook/store, and stylesheet it needs. For a non-trivial app, break the UI into SEPARATE files — one per page/view and one per major component — and include a navigation/router file so the app has MULTIPLE pages, not one giant file. List 4–14 files. Paths must be consistent (imports will reference them).`;
+Plan a COMPLETE multi-file app — do NOT simplify or drop requested modules:
+- A working entry point + the App shell + a router/navigation file.
+- For EVERY module/feature the user asked for, include ITS pages, ITS major
+  components, and the shared store/service/types/hooks/layouts it needs — as
+  SEPARATE files (one responsibility per file). A 10-module app needs dozens of files.
+- Map every requested feature/module to concrete files; leave nothing out.
+- Scale the file count to the request: small app ~6 files, large multi-module
+  app 30–48 files. Paths must be consistent (imports will reference them).`;
 
 /** True when the VFS holds only the freshly-seeded scaffold (so this is a from-scratch build). */
 function isScaffoldState(vfs: VirtualFileSystem): boolean {
@@ -155,12 +165,12 @@ async function planFiles(callModel: ModelCall, prompt: string): Promise<PlannedF
       files.push({ path: f.path.trim(), purpose: typeof f.purpose === 'string' ? f.purpose : '' });
     }
   }
-  return files.slice(0, 14);
+  return files.slice(0, MAX_PLAN_FILES);
 }
 
 /** Generate the planned files in small batches so no single call truncates a large app. */
 async function generateBatched(callModel: ModelCall, prompt: string, plan: PlannedFile[]): Promise<FileEdit[]> {
-  const BATCH = 3;
+  const BATCH = 4;
   const contract = manifestContract(selectArchitecture(prompt));
   const checklist = featureChecklist(prompt);
   const planStr = plan.map(f => `- ${f.path}: ${f.purpose}`).join('\n');

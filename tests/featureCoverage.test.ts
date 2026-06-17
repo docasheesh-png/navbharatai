@@ -14,6 +14,10 @@ describe('extractRequestedFeatures', () => {
   it('returns nothing for a featureless prompt', () => {
     expect(extractRequestedFeatures('a nice landing page').length).toBeLessThanOrEqual(1);
   });
+  it('detects common domain modules (ops apps)', () => {
+    const ids = extractRequestedFeatures('app with inventory, incidents, notifications and settings').map((f) => f.id);
+    expect(ids).toEqual(expect.arrayContaining(['inventory', 'incidents', 'notifications', 'settings']));
+  });
   it('featureChecklist lists every requested feature', () => {
     const c = featureChecklist(KANBAN);
     expect(c).toMatch(/Authentication/);

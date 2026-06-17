@@ -71,7 +71,8 @@ export class ServerContainerRuntime implements PreviewRuntime {
   }
 
   async start(projectId: string, vfs: VirtualFileSystem): Promise<{ url: string; sessionId: string }> {
-    const sessionId = `${projectId}-${Date.now().toString(36)}`;
+    // BUG F1 FIX: Add random suffix to prevent collision on rapid rebuilds
+    const sessionId = `${projectId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const { dir } = this.materialize(vfs);
     const port = await this.portManager.allocatePort();
     this.sessions.set(sessionId, { dir, port, status: 'starting' });
@@ -102,7 +103,7 @@ export class ServerContainerRuntime implements PreviewRuntime {
   async stop(sessionId: string): Promise<void> {
     const s = this.sessions.get(sessionId);
     if (!s) return;
-    try { this.sandbox.terminate(s.dir); } catch { /* ignore */ }
+    try { this.sandbox.terminate(s.dir); } catch (e: any) { console.warn('[preview] terminate failed:', e?.message); } // BUG H2 FIX
     this.portManager.releasePort(s.port);
     cleanupWorkspace(s.dir);
     s.status = 'stopped';

@@ -2395,8 +2395,10 @@ ${buildLanguageRule(preferredLanguage)}`;
         try{bareCache[spec]=interop(await import(specUrl(spec)));}
         catch(e){failedDeps.push(spec);console.warn('[preview] failed to load',spec,e&&e.message);}
       }));
-      // Critical: React itself must load or nothing can render
-      if(!bareCache['react']||!bareCache['react-dom/client']){
+      // BUG A2 FIX: Only hard-fail on React load error if the app actually imports React.
+      // Vanilla ES module apps don't need React — killing them here was wrong.
+      var needsReact=bare.indexOf('react')>=0||bare.indexOf('react-dom')>=0;
+      if(needsReact&&(!bareCache['react']||!bareCache['react-dom/client'])){
         window.__nbLoading=false;
         fail('Failed to load React from CDN'+(failedDeps.length?' (blocked: '+failedDeps.slice(0,3).join(', ')+')':'')+'. Check internet connection.');
         return;
@@ -2432,6 +2434,11 @@ ${buildLanguageRule(preferredLanguage)}`;
     // Vite-style entry pointing at a TS/JS module under src/
     const html = f['index.html'] || '';
     if (/<script[^>]+type=["']module["'][^>]+src=["']\/?(src\/)?[^"']+\.(ts|jsx|tsx)["']/i.test(html)) return 'react';
+    // BUG A1 FIX: Vanilla ES module apps (multi-file with import/export) must go through
+    // buildSourceAppPreview which has a full Babel + require() bundler. Without this,
+    // their import statements can't resolve in a standalone HTML doc.
+    const jsFiles = keys.filter(k => /\.(js|mjs|ts)$/i.test(k) && !k.includes('node_modules'));
+    if (jsFiles.some(k => /^\s*(import\s+[\w{*"'`]|export\s+(default|class|function|const|let|var)\b)/m.test(f[k] || ''))) return 'react';
     return 'static';
   };
 
@@ -2733,6 +2740,8 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
   };
 
   const updatePreview = (currentFiles: FileSystem) => {
+    // BUG A4 FIX: Wrap entire function in try-catch so any exception doesn't crash silently.
+    try {
     // Strip markdown code fences the AI accidentally wraps file content in (```lang\n...\n```)
     // Line-by-line: strip only the first and last fence lines, never touching inner content.
     const stripFences = (s: string): string => {
@@ -2786,13 +2795,15 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
       ].filter(Boolean).join('\n');
 
       // Collect all JS files (script.js, app.js, main.js, index.js, etc.)
+      // BUG A3 FIX: Skip ES module files (files with import/export) from allJs injection.
+      // Those files use import/export which breaks when concatenated into a non-module <script>.
       const JS_NAMES = ['script.js', 'app.js', 'main.js', 'index.js'];
-      const allJs = [
-        ...JS_NAMES.map(n => currentFiles[n] || ''),
-        ...Object.entries(currentFiles)
-          .filter(([k]) => k.endsWith('.js') && !JS_NAMES.includes(k) && !k.includes('node_modules') && !k.includes('.min.js'))
-          .map(([, v]) => v as string),
-      ].filter(Boolean).join('\n');
+      const isEsModule = (src: string) => /^\s*(import\s+[\w{*"'`]|export\s+(default|class|function|const|let|var)\b)/m.test(src);
+      const allJsEntries = [
+        ...JS_NAMES.map(n => currentFiles[n] ? [n, currentFiles[n]] as [string, string] : null),
+        ...Object.entries(currentFiles).filter(([k]) => k.endsWith('.js') && !JS_NAMES.includes(k) && !k.includes('node_modules') && !k.includes('.min.js')),
+      ].filter(Boolean) as [string, string][];
+      const allJs = allJsEntries.filter(([, v]) => !isEsModule(v)).map(([, v]) => v).filter(Boolean).join('\n');
 
       finalHtml = html;
 
@@ -2815,9 +2826,16 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
         return `<script${typeAttr} data-src="${filename}">${content.replace(/<\//g, '<\\/')}<\/script>`;
       });
 
+      // BUG D1 FIX: Resolve @import url() in collected CSS before injecting
+      const resolveImports = (css: string): string => css.replace(
+        /@import\s+(?:url\(["']?([^"')]+)["']?\)|["']([^"']+)["'])/gi,
+        (_imp, u1, u2) => { const ref = (u1 || u2 || '').replace(/^\.\//, ''); const c = currentFiles[ref]; return c ? c : _imp; }
+      );
+      const resolvedCss = resolveImports(allCss);
+
       // Inject any remaining CSS not already inlined
-      if (allCss) {
-        const styleTag = `<style id="nb-injected-css">${allCss.replace(/<\/style>/gi, '<\\/style>')}</style>`;
+      if (resolvedCss) {
+        const styleTag = `<style id="nb-injected-css">${resolvedCss.replace(/<\/style>/gi, '<\\/style>')}</style>`;
         if (finalHtml.includes('</head>')) {
           finalHtml = finalHtml.replace('</head>', `${styleTag}</head>`);
         } else if (finalHtml.includes('<body>')) {
@@ -2848,9 +2866,16 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     if (finalHtml.length < 2_000_000) {
       setPreviewHistory(prev => {
         const title = (finalHtml.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || 'App Preview').trim();
+        // BUG J1 FIX: Skip duplicate entries (same HTML as last entry)
+        if (prev.length > 0 && prev[prev.length - 1].html === finalHtml) return prev;
         const entry = { id: Date.now().toString(), label: title, ts: new Date(), html: finalHtml };
         return [entry, ...prev.filter(h => h.id !== entry.id)].slice(0, 5);
       });
+    }
+    } catch (err: any) {
+      // BUG A4 FIX: Catch any exception and show an error preview instead of crashing silently
+      console.error('[preview] updatePreview failed:', err?.message || err);
+      setGeneratedCode(`<!DOCTYPE html><html><body style="font-family:system-ui;padding:24px;color:#b00"><h3>Preview Error</h3><pre>${String(err?.message || err).replace(/</g, '&lt;')}</pre></body></html>`);
     }
   };
 

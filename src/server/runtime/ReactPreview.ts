@@ -32,7 +32,7 @@ export function isReactProject(vfs: VirtualFileSystem): boolean {
       const pkg = JSON.parse(pkgText);
       const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
       if (deps.react) return true;
-    } catch { /* ignore */ }
+    } catch (e) { console.warn('[preview] package.json parse failed:', e); } // BUG C2 FIX
   }
   // fallback: any JSX/TSX source present
   return vfs.paths().some((p) => p.endsWith('.jsx') || p.endsWith('.tsx'));

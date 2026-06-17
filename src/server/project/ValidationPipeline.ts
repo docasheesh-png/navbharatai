@@ -61,6 +61,17 @@ const PENDING_GATES: Array<{ id: string; name: string; severity: GateSeverity }>
  * the infra-pending ones. Pure (no side effects) → unit-testable.
  */
 export function runValidation(vfs: VirtualFileSystem, manifest?: ArchitectureManifest, prompt?: string): ValidationReport {
+  // BUG I1 FIX: Empty VFS cannot preview — short-circuit before any other gates.
+  if (vfs.count === 0) {
+    return {
+      previewAllowed: false,
+      qualityScore: 0,
+      gates: [{ id: 'files', name: 'Has Files', status: 'fail', severity: 'critical', messages: ['No files generated — workspace is empty.'] }],
+      blockingReasons: ['No files generated — workspace is empty.'],
+      status: 'FAILED',
+    };
+  }
+
   const m = manifest ?? selectArchitecture('app');
   const gates: GateResult[] = [];
 

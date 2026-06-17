@@ -24,7 +24,9 @@ export class StaticRuntime implements PreviewRuntime {
 
   async start(projectId: string, vfs: VirtualFileSystem): Promise<{ url: string; sessionId: string }> {
     this.sweep();
-    const sessionId = crypto.randomBytes(8).toString('hex');
+    // BUG F3 FIX: Retry on collision (extremely rare but possible)
+    let sessionId: string;
+    do { sessionId = crypto.randomBytes(8).toString('hex'); } while (this.sessions.has(sessionId));
     const html = renderPreview(vfs);
     this.sessions.set(sessionId, { html, projectId, createdAt: Date.now() });
     return { url: `/preview/${sessionId}`, sessionId };
@@ -40,6 +42,9 @@ export class StaticRuntime implements PreviewRuntime {
 
   /** Serve the built HTML for a session (used by the /preview/:id route). */
   getHtml(sessionId: string): string | undefined {
+    // BUG F2 FIX: Sweep on read too, not just on write — prevents serving a session
+    // that expired between the user clicking a link and the page actually loading.
+    this.sweep();
     const s = this.sessions.get(sessionId);
     return s?.html;
   }

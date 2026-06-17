@@ -72,14 +72,16 @@ describe('PreviewService', () => {
     expect(r.target).toBe('static');
   });
 
-  it('returns an honest not-ready result for a non-vite package.json frontend', async () => {
+  it('falls back to static preview for a non-vite package.json frontend (BUG A5 fix)', async () => {
+    // Previously returned ok: false for webcontainer target. Now falls back to static so
+    // users always get a preview rather than a hard failure.
     const svc = new PreviewService();
     const vfs = VirtualFileSystem.fromRecord({
       'package.json': JSON.stringify({ dependencies: { svelte: '^4' } }), 'index.html': 'x',
     });
     const r = await svc.startPreview('p3', vfs);
-    expect(r.ok).toBe(false);
-    expect(r.target).toBe('webcontainer');
-    expect(r.reason).toMatch(/not provisioned/i);
+    expect(r.ok).toBe(true);
+    expect(r.target).toBe('static');
+    expect(r.url).toMatch(/^\/preview\//);
   });
 });

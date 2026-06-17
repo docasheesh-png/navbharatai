@@ -19,6 +19,9 @@ const ASSET_MIME: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
   '.webp': 'image/webp', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.avif': 'image/avif',
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf',
+  // BUG B3 FIX: Add media and data MIME types
+  '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.json': 'application/json',
 };
 
 function extOf(p: string): string {
@@ -58,20 +61,36 @@ export function buildStaticPreview(vfs: VirtualFileSystem, entry?: string): stri
 
   let html = entryPath ? (vfs.readText(entryPath) || '') : '';
   if (!html) {
-    // Synthesize a minimal shell that loads any style.css / script.js if present.
+    // BUG B1 FIX: Synthesize a minimal shell by scanning VFS for any CSS/JS files,
+    // not just the hardcoded style.css / script.js names. Also preserve type="module"
+    // for ES module JS files.
+    const cssFile = vfs.paths().find(p => p.endsWith('.css'));
+    const jsFile = vfs.paths().find(p => p.endsWith('.js') || p.endsWith('.mjs'));
+    const hasEsModule = jsFile
+      ? /^\s*(import\s+[\w{*"'`]|export\s+(default|class|function|const|let|var)\b)/m.test(vfs.readText(jsFile) || '')
+      : false;
     html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
-      (vfs.has('style.css') ? `<link rel="stylesheet" href="style.css">` : '') +
+      (cssFile ? `<link rel="stylesheet" href="${cssFile}">` : '') +
       `</head><body>` +
-      (vfs.has('script.js') ? `<script src="script.js"></script>` : '') +
+      (jsFile ? `<script ${hasEsModule ? 'type="module" ' : ''}src="${jsFile}"></script>` : '') +
       `</body></html>`;
   }
 
   // Inline local <link rel="stylesheet" href="...">
+  // BUG B2 FIX: After inlining a CSS file, also resolve its @import url() references.
   html = html.replace(/<link\b[^>]*rel=["']?stylesheet["']?[^>]*>/gi, (tag) => {
     const m = tag.match(/href=["']([^"']+)["']/i);
     if (!m || isExternal(m[1])) return tag;
-    const css = vfs.readText(resolveRef(entryPath, m[1]));
-    return css != null ? `<style>\n${css}\n</style>` : tag;
+    let css = vfs.readText(resolveRef(entryPath, m[1]));
+    if (css == null) return tag;
+    // Resolve @import url() or @import "..." inside the inlined CSS
+    css = css.replace(/@import\s+(?:url\(["']?([^"')]+)["']?\)|["']([^"']+)["'])/gi, (imp, u1, u2) => {
+      const ref = u1 || u2;
+      if (!ref || isExternal(ref)) return imp;
+      const imported = vfs.readText(resolveRef(entryPath, ref));
+      return imported != null ? imported : imp;
+    });
+    return `<style>\n${css}\n</style>`;
   });
 
   // Inline local <script src="...">

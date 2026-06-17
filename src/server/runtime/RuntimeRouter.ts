@@ -77,6 +77,9 @@ export function analyzeProject(vfs: VirtualFileSystem): ProjectProfile {
 /** Pick the runtime backend for a profiled project. */
 export function chooseRuntime(profile: ProjectProfile): RuntimeTarget {
   if (profile.isStatic || (!profile.hasPackageJson && profile.framework === 'static')) return 'static';
+  // BUG C1 FIX: Projects with no package.json (data files, plain HTML, CSV/JSON) should be
+  // 'static' — previously they fell through to 'webcontainer' with no benefit.
+  if (!profile.hasPackageJson) return 'static';
   if (profile.needsNodeServer) return 'server-container';
   // Frontend build (Vite/CRA) with no persistent server → bundle in-browser as a
   // self-contained static preview (React via Babel-standalone). No external infra.

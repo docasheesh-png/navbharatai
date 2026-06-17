@@ -117,7 +117,9 @@ export function registerBuildRoutes(app: Express): void {
       });
     } catch (err: any) {
       console.error('[BUILD] error:', err?.message || err);
-      return res.status(500).json({ error: err?.message || 'Build failed' });
+      // BUG E2 FIX: Sanitize raw error messages before sending to client (no file paths / stack traces)
+      const safeMsg = (err?.message || 'Build failed').replace(/\/[^\s:]+\/[^\s:]+/g, '[path]').slice(0, 200);
+      return res.status(500).json({ error: safeMsg });
     }
   });
 }

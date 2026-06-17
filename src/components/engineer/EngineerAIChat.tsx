@@ -110,10 +110,13 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     return fresh;
   })());
 
-  // Persist messages whenever they change
+  // Persist messages (last 60) whenever they change
   useEffect(() => {
     if (!userId) return;
-    localStorage.setItem(`engineer_msgs_${userId}`, JSON.stringify(messages));
+    try {
+      const toSave = messages.slice(-60);
+      localStorage.setItem(`engineer_msgs_${userId}`, JSON.stringify(toSave));
+    } catch { /* quota exceeded or private mode — silently skip */ }
   }, [messages, userId]);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -238,7 +241,9 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         }
       }
     } catch (err: any) {
-      if (err?.name !== 'AbortError') appendChat('system', `Error: ${err?.message || 'Engineer AI failed.'}`);
+      // Show ALL errors including AbortError — helps diagnose silent failures on mobile.
+      // AbortError from the Stop button is rare here since that cancels via the reader.
+      appendChat('system', `Error: ${err?.message || 'Engineer AI failed.'}`);
     } finally {
       readerRef.current = null;
       setLoading(false);

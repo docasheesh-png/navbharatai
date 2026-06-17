@@ -48,6 +48,10 @@ export function registerEngineerRoutes(app: Express): void {
     }, 20_000);
 
     try {
+      // Immediate probe — verifies the SSE pipe reaches the client before any
+      // long-running E2B or AI operation begins.
+      send({ type: 'status', message: 'Connecting…' });
+
       for await (const event of agentLoop.run({ workspaceId, instruction, projectType }, abort.signal)) {
         send(event);
         if (abort.signal.aborted) break;

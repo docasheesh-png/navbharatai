@@ -72,11 +72,12 @@ export interface BuildRequest {
   preview?: boolean;
 }
 
-async function postJson<T>(url: string, body: unknown): Promise<T> {
+async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -86,8 +87,8 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 }
 
 /** Build or edit a multi-file app from a prompt via the real engine. */
-export function buildApp(req: BuildRequest): Promise<BuildResponse> {
-  return postJson<BuildResponse>('/api/build', req);
+export function buildApp(req: BuildRequest, signal?: AbortSignal): Promise<BuildResponse> {
+  return postJson<BuildResponse>('/api/build', req, signal);
 }
 
 /** Start a live preview for a set of files (routes to static / server-container). */

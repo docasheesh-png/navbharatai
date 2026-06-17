@@ -1356,6 +1356,7 @@ export default function App() {
     }
 
     if (view === 'history' && !user) {
+      pendingViewAfterLoginRef.current = view;
       setShowAuth(true);
       addLog('Chat history requires an active session. Please login.', 'warn');
       return;
@@ -1381,6 +1382,14 @@ export default function App() {
     setActiveView(view);
   }, [user, openTabs, activeView, addLog, setShowAuth]);
 
+  // After login, navigate to any view that was gated behind auth (e.g. History)
+  useEffect(() => {
+    if (user && pendingViewAfterLoginRef.current) {
+      const view = pendingViewAfterLoginRef.current;
+      pendingViewAfterLoginRef.current = null;
+      toggleTab(view);
+    }
+  }, [user, toggleTab]);
 
   const handleGHConfirmPush = async () => {
     if (!pendingGHEdit || !githubRepoContext) return;
@@ -1485,6 +1494,7 @@ export default function App() {
   const shellRef = useRef<HTMLDivElement>(null);
   const mainContentRef = useRef<HTMLDivElement>(null);
   const proAbortControllerRef = useRef<AbortController | null>(null);
+  const pendingViewAfterLoginRef = useRef<ViewType | null>(null);
 
   // 8.5 — touch swipe to switch tabs (left = next tab, right = previous tab)
   useSwipe(mainContentRef, {
@@ -3889,14 +3899,14 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
 
         // Detect React framework intent — only when workspace is truly empty
         const reactKeywords = /\breact\b|\bjsx\b|\busestate\b|\bhooks?\b|\bcomponent\b/i;
-        const workspaceHasFiles = hasGeneratedCode || Object.keys(files).filter(k => !k.startsWith('.')).length > 2;
+        const workspaceHasFiles = Object.keys(files).filter(k => !k.startsWith('.')).length > 2;
         const isReactRequest = !workspaceHasFiles && reactKeywords.test(messageToSend);
 
         // Detect "fresh build" requests — user wants a BRAND NEW app even when workspace has old files.
         // Signals: starts with build verb + has app noun + long (detailed requirements) + no edit references.
         const hasBuildVerb = /^(build|create|make|generate|develop|design)\s+\w/i.test(messageToSend.trim());
         const hasAppNoun = /\b(app|application|game|website|tool|dashboard|calculator|quiz|generator|system|platform|portal)\b/i.test(messageToSend);
-        const hasEditRef = /\b(the existing|my app|this app|above app|current app|already built|add to|update the|change the|fix the|fix this)\b/i.test(messageToSend.slice(0, 80));
+        const hasEditRef = /\b(the existing|my app|this app|above app|current app|already built|add to|update the|change the|fix the|fix this|improve the|make it|make this|add a|add an|remove the|remove this|edit the|modify the|adjust the|tweak the|rename the|style the|color the)\b/i.test(messageToSend.slice(0, 120));
         const hasMultipleRequirements = (messageToSend.match(/^\d+\.\s+/gm) || []).length >= 3; // numbered list with 3+ items
         const isFreshBuildRequest = workspaceHasFiles &&
           (hasBuildVerb || hasMultipleRequirements) && hasAppNoun && !hasEditRef &&
@@ -4021,7 +4031,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             prompt: messageToSend,
             files: Object.keys(allTextFiles).length ? allTextFiles : undefined,
             preview: false,
-          });
+          }, abortController.signal);
           if (engineRes && engineRes.fileCount > 0 && Object.keys(engineRes.files).length > 0) {
             const val = engineRes.validation;
             const v = engineRes.verify;
@@ -9705,7 +9715,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
         >
           {[
             { id: 'home' as ViewType,      icon: menuItems.find(m => m.id === 'home')?.icon      ?? Bot,         label: 'Home' },
-            { id: 'nbi_chat' as ViewType,  icon: menuItems.find(m => m.id === 'nbi_chat')?.icon  ?? MessageSquare, label: 'AI' },
+            { id: (activeAgent === 'navbharatai-pro' ? 'nbi_pro_chat' : 'nbi_chat') as ViewType, icon: activeAgent === 'navbharatai-pro' ? (menuItems.find(m => m.id === 'nbi_pro_chat')?.icon ?? Zap) : (menuItems.find(m => m.id === 'nbi_chat')?.icon ?? MessageSquare), label: 'AI' },
             { id: 'preview' as ViewType,   icon: menuItems.find(m => m.id === 'preview')?.icon   ?? Monitor,     label: 'Preview' },
             { id: 'files' as ViewType,     icon: menuItems.find(m => m.id === 'files')?.icon     ?? FolderOpen,  label: 'Files' },
             { id: 'settings' as ViewType,  icon: menuItems.find(m => m.id === 'settings')?.icon  ?? Settings,    label: 'More' },

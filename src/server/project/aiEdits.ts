@@ -83,6 +83,7 @@ const ENGINEERING_RULES = `Rules for production-quality output:
 - Separate concerns: split UI into components, keep state/logic/data in dedicated modules, put styles in their own files. Avoid one giant file.
 - EVERY file you reference (imports, <script src>, <link href>, asset paths) MUST also exist — either already in the project or written in THIS reply. Never leave a dangling reference.
 - Provide a working entry point (e.g. index.html, or src/main.tsx + index.html for a bundled app). Wire everything together so it runs.
+- ES MODULES (CRITICAL): If ANY .js file uses "import" or "export" statements, the HTML MUST load the entry script with <script type="module" src="app.js"> — NEVER a plain <script src="app.js">. A missing type="module" causes SyntaxError: Unexpected token '{' in every browser.
 - Write real, complete code. No TODO/placeholder/"...rest of code" stubs, no empty handlers. Implement the behavior the user asked for.
 - Keep JSON valid: escape newlines/quotes inside "content". Output the FULL content of every file you write.`;
 

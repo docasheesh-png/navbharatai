@@ -7,32 +7,33 @@ import { IEngineerActuator } from './IEngineerActuator';
 
 const execPromise = util.promisify(exec);
 const NAMESPACE = 'engineer';
-const WORKSPACES_ROOT = `/workspaces/${NAMESPACE}`;
+const WORKSPACES_ROOT = process.env.WORKSPACES_ROOT
+  ? path.join(process.env.WORKSPACES_ROOT, NAMESPACE)
+  : `/workspaces/${NAMESPACE}`;
 
 // Max time for a single bash command (60 s) and for build (3 min)
 const CMD_TIMEOUT_MS = 60_000;
 const BUILD_TIMEOUT_MS = 3 * 60_000;
 const MAX_BUFFER = 10 * 1024 * 1024;
+// Safety cap — never send more than this many file paths to the AI prompt
+const MAX_LIST_FILES = 500;
 
-// Directories never included in file listings so node_modules/dist don't
-// flood the AI prompt or make listFiles unbearably slow.
-const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', '.next', 'build', '__pycache__', '.venv']);
+// Directories skipped at the walk level — never entered, so node_modules with
+// 50 k+ files cannot cause a multi-minute hang on every agent step.
+const IGNORED_DIRS = new Set([
+  'node_modules', '.git', 'dist', '.next', 'build',
+  '__pycache__', '.venv', '.cache', 'coverage', 'out',
+]);
 
 /**
  * Process-level actuator (Cloud Run / local dev).
  * bash commands are run inside the workspace dir with a hard timeout.
- * PATH traversal outside the workspace is not explicitly blocked at the
- * OS level, but the AI is instructed to stay inside its workspace root.
  * For stricter isolation upgrade to E2BActuator (set E2B_API_KEY).
  */
 export class LocalActuator implements IEngineerActuator {
   private workspaceManager = new WorkspaceManager(NAMESPACE);
 
   async ensureWorkspace(workspaceId: string): Promise<void> {
-    // Just create the directory — fast and reliable in Cloud Run.
-    // The AI scaffolds itself via bash actions rather than us running npm here,
-    // which was the root cause of the "does not respond" hang: ScaffoldGenerator
-    // runs npm create vite@latest and can take minutes or fail silently.
     const workspacePath = path.join(WORKSPACES_ROOT, workspaceId);
     await fsPromises.mkdir(workspacePath, { recursive: true });
   }
@@ -45,22 +46,59 @@ export class LocalActuator implements IEngineerActuator {
     return this.workspaceManager.readFile(workspaceId, filePath);
   }
 
+  /**
+   * BUG FIX (E1 — critical): The old implementation called WorkspaceManager.listFiles()
+   * which recursively walks EVERYTHING including node_modules BEFORE filtering.
+   * A workspace with node_modules has 50 k+ files — that walk took minutes and
+   * caused the "no reply" symptom. Now we filter AT the walk level so ignored
+   * directories are never entered.
+   */
   async listFiles(workspaceId: string): Promise<string[]> {
-    const all = await this.workspaceManager.listFiles(workspaceId);
-    // Strip node_modules, dist, etc. so they never appear in the AI prompt.
-    return all.filter(f => {
-      const firstSegment = f.split('/')[0];
-      return !IGNORED_DIRS.has(firstSegment);
-    });
+    const workspacePath = path.join(WORKSPACES_ROOT, workspaceId);
+    const files: string[] = [];
+
+    const walk = async (dir: string, prefix: string): Promise<void> => {
+      if (files.length >= MAX_LIST_FILES) return;
+      let names: string[];
+      try {
+        names = await fsPromises.readdir(dir);
+      } catch {
+        return;
+      }
+      for (const name of names) {
+        if (files.length >= MAX_LIST_FILES) break;
+        if (IGNORED_DIRS.has(name)) continue;
+        const rel = prefix ? `${prefix}/${name}` : name;
+        const full = path.join(dir, name);
+        let stat;
+        try { stat = await fsPromises.stat(full); } catch { continue; }
+        if (stat.isDirectory()) {
+          await walk(full, rel);
+        } else {
+          files.push(rel);
+        }
+      }
+    };
+
+    await walk(workspacePath, '');
+    return files;
   }
 
   async build(workspaceId: string): Promise<{ success: boolean; logs: string }> {
     const workspacePath = path.join(WORKSPACES_ROOT, workspaceId);
     const opts = { cwd: workspacePath, timeout: BUILD_TIMEOUT_MS, maxBuffer: MAX_BUFFER };
     try {
-      const install = await execPromise('npm install', opts);
+      // BUG FIX (E2): Skip npm install when node_modules already exists — saves 30-60s
+      // per build() call and prevents the done handler from hanging on reinstall.
+      let installLog = '';
+      try {
+        await fsPromises.access(path.join(workspacePath, 'node_modules'));
+      } catch {
+        const install = await execPromise('npm install', opts);
+        installLog = install.stdout + install.stderr;
+      }
       const build = await execPromise('npm run build', opts);
-      return { success: true, logs: install.stdout + install.stderr + build.stdout + build.stderr };
+      return { success: true, logs: installLog + build.stdout + build.stderr };
     } catch (err: any) {
       return { success: false, logs: `${err.stdout || ''}${err.stderr || ''}${err.message || String(err)}` };
     }
@@ -76,7 +114,6 @@ export class LocalActuator implements IEngineerActuator {
       });
       return { exitCode: 0, stdout, stderr };
     } catch (err: any) {
-      // exec rejects on non-zero exit OR timeout; normalise to a result object
       return {
         exitCode: typeof err.code === 'number' ? err.code : 1,
         stdout: err.stdout || '',

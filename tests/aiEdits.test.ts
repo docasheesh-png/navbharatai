@@ -38,25 +38,28 @@ describe('parseFileEdits', () => {
 });
 
 describe('makeAiEditGenerator', () => {
-  it('fresh build plans the file tree then generates files in batches', async () => {
-    // 1st call = plan (returns a multi-file plan); subsequent = batch write ops.
+  it('fresh build extracts a spec, plans the file tree, then generates in batches', async () => {
+    // 1st call = requirement spec; 2nd = file plan; subsequent = batch write ops.
     const callModel = vi.fn()
+      .mockResolvedValueOnce('{"appType":"board","modules":["tasks"],"pages":["Board"],"entities":["Task"]}')
       .mockResolvedValueOnce('{"entry":"index.html","files":[{"path":"index.html","purpose":"entry"},{"path":"src/App.jsx","purpose":"root"}]}')
       .mockResolvedValue('[{"op":"write","path":"index.html","content":"<div id=root></div>"},{"op":"write","path":"src/App.jsx","content":"export default ()=>null"}]');
     const { generate } = makeAiEditGenerator(callModel);
     const edits = await generate('a kanban board', VirtualFileSystem.fromRecord({}));
-    // planning call happened first, with the request
-    expect(callModel.mock.calls[0][1]).toContain('a kanban board');
-    expect(callModel.mock.calls[0][0]).toContain('architect');
+    // spec call first (analyst), then the architect plan call — both see the request
+    expect(callModel.mock.calls[0][0]).toContain('analyst');
+    expect(callModel.mock.calls[1][0]).toContain('architect');
+    expect(callModel.mock.calls.some(c => String(c[1]).includes('a kanban board'))).toBe(true);
     // produced multiple files
     expect(edits.filter(e => e.op === 'write').length).toBeGreaterThanOrEqual(2);
     expect(edits.some(e => e.path === 'src/App.jsx')).toBe(true);
   });
 
   it('falls back to single-shot when the plan is not multi-file', async () => {
-    // plan returns junk → no usable plan → single-shot fresh build path
+    // spec junk + plan junk → no usable plan → single-shot fresh build path
     const callModel = vi.fn()
-      .mockResolvedValueOnce('no json here')
+      .mockResolvedValueOnce('no json here')   // spec
+      .mockResolvedValueOnce('no json here')   // plan
       .mockResolvedValue('[{"op":"write","path":"index.html","content":"<h1>hi</h1>"}]');
     const { generate } = makeAiEditGenerator(callModel);
     const edits = await generate('make a page', VirtualFileSystem.fromRecord({}));

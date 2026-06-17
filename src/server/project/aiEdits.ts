@@ -14,6 +14,7 @@ import type { VirtualFileSystem } from './ProjectModel';
 import type { ProjectIssue } from './ProjectVerifier';
 import { selectArchitecture, manifestContract } from './ArchitectureManifest';
 import { featureChecklist } from './FeatureCoverage';
+import { extractRequirementSpec, specSummary, hasUsefulSpec } from './RequirementSpec';
 
 /** Extract the first JSON value (array or object) from arbitrary model text. */
 function extractJson(raw: string): unknown {
@@ -153,8 +154,12 @@ function isScaffoldState(vfs: VirtualFileSystem): boolean {
 async function planFiles(callModel: ModelCall, prompt: string): Promise<PlannedFile[]> {
   const contract = manifestContract(selectArchitecture(prompt));
   const checklist = featureChecklist(prompt);
+  // Understand ANY app domain: distill the prompt into a structured spec so the
+  // plan covers every module/page/entity, not just keyword-catalog features.
+  const spec = await extractRequirementSpec(callModel, prompt);
+  const specBlock = hasUsefulSpec(spec) ? specSummary(spec) + '\n\n' : '';
   const sys = `You are a senior software architect planning a real, runnable multi-file web app.\n\n${contract}\n\n${ENGINEERING_RULES}\n\n${PLAN_FORMAT}`;
-  const raw = await callModel(sys, `App request:\n${prompt}\n\n${checklist ? checklist + '\n\n' : ''}Plan the full file tree now. Conform strictly to the ARCHITECTURE above — one framework only. Ensure EVERY checklist feature maps to concrete files.`);
+  const raw = await callModel(sys, `App request:\n${prompt}\n\n${specBlock}${checklist ? checklist + '\n\n' : ''}Plan the full file tree now. Conform strictly to the ARCHITECTURE above — one framework only. Ensure EVERY module, page, entity, and checklist feature maps to concrete files.`);
   const json: any = extractJson(raw);
   const arr: any[] = Array.isArray(json) ? json : Array.isArray(json?.files) ? json.files : [];
   const seen = new Set<string>();

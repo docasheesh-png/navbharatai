@@ -358,7 +358,22 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
               } catch (grokVisionErr: any) { console.warn('[CHAT/VISION] Grok vision failed:', grokVisionErr.message); }
             }
           }
-          // All vision providers failed — fall through to text router
+          // All dedicated vision providers failed — return a clear error (do NOT fall
+          // through to the text-only race router which would silently drop the image).
+          console.error('[CHAT/VISION] All vision providers failed — returning error to client');
+          if (req.body.stream === true) {
+            if (!res.headersSent) {
+              res.setHeader('Content-Type', 'text/event-stream');
+              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('Connection', 'keep-alive');
+              res.flushHeaders();
+            }
+            if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: 'Sorry, I could not process your image/file right now. Please try again or send a text-only message.' })}\n\n`);
+            if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+          } else {
+            res.json({ reply: 'Sorry, I could not process your image/file right now. Please try again or send a text-only message.' });
+          }
+          return;
         }
       }
     }

@@ -16,6 +16,8 @@ export type FrameworkId = 'react' | 'vanilla';
 export interface ArchitectureManifest {
   framework: FrameworkId;
   bundler: 'vite' | 'none';
+  /** Honor an explicit TypeScript request. */
+  language: 'typescript' | 'javascript';
   routing: 'react-router' | 'state' | 'none';
   state: 'context' | 'none';
   storage: 'localStorage';
@@ -40,20 +42,22 @@ export function selectArchitecture(prompt: string): ArchitectureManifest {
   const isReact = !wantsStatic && REACT_HINTS.some((h) => p.includes(h));
 
   if (isReact) {
-    const wantsRouter = /\b(route|router|routing|multi-?page|pages|navigation|navbar)\b/.test(p);
+    const ts = /\btypescript\b|\bts\b|\.tsx?\b|\btsx\b/i.test(p);
     return {
       framework: 'react',
       bundler: 'vite',
-      routing: wantsRouter ? 'state' : 'state', // state-based view switching (no extra dep)
+      language: ts ? 'typescript' : 'javascript',
+      routing: 'state', // state-based view switching (or react-router if the model adds it)
       state: 'context',
       storage: 'localStorage',
-      entry: 'src/main.jsx',
+      entry: ts ? 'src/main.tsx' : 'src/main.jsx',
       html: 'index.html',
       mountId: 'root',
     };
   }
   return {
     framework: 'vanilla',
+    language: 'javascript',
     bundler: 'none',
     routing: 'none',
     state: 'none',
@@ -79,12 +83,16 @@ export function forbiddenPathPatterns(m: ArchitectureManifest): RegExp[] {
 /** Human-readable contract injected into generation prompts so the model conforms. */
 export function manifestContract(m: ArchitectureManifest): string {
   if (m.framework === 'react') {
+    const ts = m.language === 'typescript';
     return [
-      `ARCHITECTURE (MANDATORY — do not mix): React + Vite, JSX, ${m.routing === 'state' ? 'state-based view switching' : m.routing}, ${m.state} state, ${m.storage}.`,
+      `ARCHITECTURE (MANDATORY — do not mix): React 18 + Vite, ${ts ? 'TypeScript (.tsx/.ts)' : 'JSX (.jsx)'}, ${m.state} state, ${m.storage}.`,
+      ts
+        ? `- LANGUAGE IS TYPESCRIPT: every component file MUST be .tsx (or .ts), include a tsconfig.json, and use real types — NEVER plain .jsx/.js.`
+        : `- LANGUAGE IS JAVASCRIPT: component files are .jsx.`,
       `- The HTML entry is "${m.html}" and MUST contain exactly ONE mount node: <div id="${m.mountId}"></div>.`,
       `- "${m.html}" MUST load ONLY: <script type="module" src="/${m.entry}"></script>. No other <script src> tags.`,
-      `- "${m.entry}" MUST mount with createRoot(document.getElementById('${m.mountId}')). The id MUST be "${m.mountId}".`,
-      `- Build the UI as React components/pages under src/. Use state for navigation between pages (no full reload).`,
+      `- "${m.entry}" MUST mount with createRoot(document.getElementById('${m.mountId}')${ts ? '!' : ''}). The id MUST be "${m.mountId}".`,
+      `- Build the UI as React components/pages under src/. If the user asked for routing/state libs (react-router-dom, zustand), USE them and add them to package.json dependencies.`,
       `- FORBIDDEN: any js/ folder, pages/*.js vanilla files, router.js/dashboard.js, or extra legacy <script> tags. NO vanilla DOM apps.`,
     ].join('\n');
   }

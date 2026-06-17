@@ -5,13 +5,18 @@ export class GrokProvider implements AIProvider {
   name: 'GROK' = 'GROK';
   priority = 3; // After Gemini and Vertex, before Anthropic
 
-  private client: OpenAI;
-
-  constructor() {
-    this.client = new OpenAI({
-      apiKey: process.env.GROK_API_KEY || process.env.XAI_API_KEY || '',
-      baseURL: 'https://api.x.ai/v1',
-    });
+  // Lazily constructed: `new OpenAI({ apiKey: '' })` throws, which would crash
+  // server boot whenever the Grok/XAI key is absent (e.g. CI). Build the client
+  // only when actually used (the router skips GROK via healthCheck when no key).
+  private _client?: OpenAI;
+  private get client(): OpenAI {
+    if (!this._client) {
+      this._client = new OpenAI({
+        apiKey: process.env.GROK_API_KEY || process.env.XAI_API_KEY || 'missing-key',
+        baseURL: 'https://api.x.ai/v1',
+      });
+    }
+    return this._client;
   }
 
   async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string): Promise<AIProviderResponse> {

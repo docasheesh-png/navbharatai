@@ -2435,6 +2435,16 @@ ${buildLanguageRule(preferredLanguage)}`;
     const srcFiles: Record<string, string> = {};
     Object.keys(f).forEach(k => { if (srcExtRe.test(k) && !k.includes('node_modules')) srcFiles[k] = f[k]; });
 
+    // Preview-only: react-router's BrowserRouter needs real History/URL which the
+    // sandboxed iframe doesn't have → blank screen. Rewrite to HashRouter so routed
+    // apps actually render in the preview. (The saved project files are untouched.)
+    for (const k of Object.keys(srcFiles)) {
+      if (/\.(jsx|tsx|js|ts|mjs)$/i.test(k) && typeof srcFiles[k] === 'string' && srcFiles[k].includes('BrowserRouter')) {
+        srcFiles[k] = srcFiles[k]
+          .replace(/createBrowserRouter/g, 'createHashRouter')
+          .replace(/\bBrowserRouter\b/g, 'HashRouter');
+      }
+    }
 
     // Resolve the entry module
     let entry = '';

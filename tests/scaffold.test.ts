@@ -46,4 +46,19 @@ describe('scaffold', () => {
     expect(scaffoldSummary('vite-react')).toContain('React');
     expect(scaffoldSummary('static')).toContain('static');
   });
+
+  it('detects TypeScript and seeds a .tsx skeleton with tsconfig', () => {
+    expect(detectFramework('a react dashboard in TypeScript')).toBe('vite-react-ts');
+    expect(detectFramework('build a react app with typescript and routing')).toBe('vite-react-ts');
+    const vfs = VirtualFileSystem.fromRecord({});
+    expect(scaffold(vfs, 'vite-react-ts')).toBe('vite-react-ts');
+    expect(vfs.paths()).toContain('src/main.tsx');
+    expect(vfs.paths()).toContain('tsconfig.json');
+    expect(vfs.readText('index.html')).toContain('/src/main.tsx');
+    expect(() => JSON.parse(vfs.readText('tsconfig.json')!)).not.toThrow();
+  });
+
+  it('plain react (no TS) still scaffolds .jsx', () => {
+    expect(detectFramework('a react todo app')).toBe('vite-react');
+  });
 });

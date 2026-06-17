@@ -691,3 +691,41 @@ file bottom-up for the latest dated milestone to find the true resume point,
 (3) cross-check against any currently-open PR before starting new work,
 (4) follow safeguards 2–7 for the duration of the session, (5) append new
 milestones here (never delete/rewrite existing ones) as work completes.
+
+---
+
+## 🖥️ Milestone — Preview engine: server-side esbuild bundler (2026-06-17)
+
+**Problem (user, 3rd report):** "preview abhi bhi nahi chal raha hai." A screenshot
+of a **324-file** generated React app showed the preview rendering only the word
+**"App"** (a minimal/partial mount) — no amber error, no spinner, no blank. Earlier
+the user also reported an amber error box for other apps.
+
+**Root cause (diagnosed, not guessed):** The browser-side `PREVIEW_BOOTSTRAP`
+mini-bundler loads ~9MB Babel from a CDN, transpiles every file in-browser via
+`new Function()`, and resolves the whole module graph client-side. For large
+multi-file apps this only partially renders (root shell → "App"); any CDN/transpile
+hiccup → amber error. The resolution logic itself was verified correct for
+well-formed apps (deterministic Node trace), so the failure is the *client-side
+runtime*, not the path logic.
+
+**Fix (PR #59, merged → deploying):**
+- New `POST /api/preview-bundle` (in `src/server/routes/preview.ts`): runs **esbuild
+  server-side** (already a devDep, present in the Docker `npm install`). Follows the
+  ENTIRE import graph from the entry, transpiles TSX/JSX natively, resolves `@/`
+  aliases at build time, rewrites BrowserRouter→HashRouter, inlines CSS, polyfills
+  `import.meta.env`. Returns self-contained native-ESM HTML + an importmap pointing
+  npm deps at esm.sh. NO Babel CDN, NO custom require() chain.
+- `updatePreview` (App.tsx): for React apps, renders the existing client-side
+  preview IMMEDIATELY (zero-regression fallback), then async-fetches the server
+  bundle (20s timeout) and swaps it in when ready. Server down/slow/error → user
+  sees exactly today's behavior. So the change can only help or stay neutral.
+- 4 new tests (`tests/previewBundle.test.ts`) prove esbuild inlines a deep 7-level
+  import graph (the 324-file scenario) + `@/` aliases. Suite: 194/194 green.
+
+**Verification gate:** `tsc --noEmit` (front) ✓, `tsc -p tsconfig.server.json` ✓,
+`vitest run` 194/194 ✓.
+
+**Next:** user to test on prod after deploy (~5 min). If their specific app still
+fails, the new MINI_HARNESS now surfaces the REAL esbuild/runtime error (instead of
+a silent "App"), which pinpoints the next fix.

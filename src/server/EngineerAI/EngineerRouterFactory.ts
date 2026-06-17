@@ -10,13 +10,19 @@ import { GrokProvider } from '../AI/Router/providers/GrokProvider';
 export function buildEngineerRouter(): AIRouter {
   const router = new AIRouter();
 
-  const claude = new AnthropicProvider();
-  claude.priority = 1;
-  router.registerProvider(claude);
+  try {
+    const claude = new AnthropicProvider();
+    claude.priority = 1;
+    router.registerProvider(claude);
+  } catch {}
 
-  const grok = new GrokProvider();
-  grok.priority = 2;
-  router.registerProvider(grok);
+  // GrokProvider's underlying OpenAI client throws synchronously when no
+  // GROK_API_KEY/XAI_API_KEY is set (e.g. in CI) — guard like AIRouterManager does.
+  try {
+    const grok = new GrokProvider();
+    grok.priority = 2;
+    router.registerProvider(grok);
+  } catch {}
 
   return router;
 }

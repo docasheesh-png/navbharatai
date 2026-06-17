@@ -94,10 +94,32 @@ export class E2BActuator implements IEngineerActuator {
 
   async browseUrl(workspaceId: string, url: string): Promise<{ html: string }> {
     const sandbox = await this.getSandbox(workspaceId);
+    // Try Playwright if installed (for JS-rendered pages), fall back to curl.
+    const playwrightScript = `node -e "
+const {chromium}=require('playwright');
+(async()=>{
+  const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
+  const p=await b.newPage();
+  await p.goto(${JSON.stringify(url)},{waitUntil:'networkidle',timeout:15000}).catch(()=>{});
+  console.log((await p.content()).slice(0,30000));
+  await b.close();
+})().catch(e=>{process.stderr.write(e.message);process.exit(1)});
+" 2>/dev/null`;
+    const pw = await sandbox.commands.run(playwrightScript, {
+      cwd: WORKSPACE_ROOT, timeoutMs: 25_000,
+    });
+    if (pw.exitCode === 0 && pw.stdout.trim()) return { html: pw.stdout };
+
+    // Playwright not available — fall back to curl
     const result = await sandbox.commands.run(
       `curl -s -L --max-time 20 -A "Mozilla/5.0" "${url}" 2>/dev/null | head -c 30000`,
       { cwd: WORKSPACE_ROOT, timeoutMs: 30_000 }
     );
     return { html: result.stdout || result.stderr };
+  }
+
+  async getPortUrl(workspaceId: string, port: number): Promise<string> {
+    const sandbox = await this.getSandbox(workspaceId);
+    return `https://${sandbox.getHost(port)}`;
   }
 }

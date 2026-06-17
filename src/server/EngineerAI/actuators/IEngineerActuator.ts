@@ -16,4 +16,9 @@ export interface IEngineerActuator {
    * Requires a real sandbox; LocalActuator rejects for the same reason as runCommand.
    */
   browseUrl(workspaceId: string, url: string): Promise<{ html: string }>;
+  /**
+   * Return the public HTTPS URL for a port running inside the sandbox.
+   * Used for live-preview when the agent starts a dev server.
+   */
+  getPortUrl(workspaceId: string, port: number): Promise<string>;
 }

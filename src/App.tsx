@@ -2768,9 +2768,25 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
 
     let finalHtml: string;
 
-    // Source/framework apps (React, Vite, TS) need transpilation — run them via the mini-bundler
+    // Source/framework apps: try server-side esbuild bundle first (eliminates Babel CDN).
+    // Falls back to client-side PREVIEW_BOOTSTRAP if the server endpoint fails or is slow.
     if (detectAppType(currentFiles) === 'react') {
-      finalHtml = buildSourceAppPreview(currentFiles);
+      const clientFallback = buildSourceAppPreview(currentFiles);
+      // Kick off server-side bundle (async, replaces preview when ready)
+      const ctl = new AbortController();
+      const timeout = setTimeout(() => ctl.abort(), 20_000);
+      fetch('/api/preview-bundle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: currentFiles }),
+        signal: ctl.signal,
+      })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error(`Bundle failed: ${r.status}`)))
+        .then(({ html }: { html: string }) => { if (html) setGeneratedCode(html); })
+        .catch(() => { /* server bundling failed — client-side fallback already set */ })
+        .finally(() => clearTimeout(timeout));
+      // Show client-side fallback immediately so the user isn't stuck on a blank/old preview.
+      finalHtml = clientFallback;
     } else if (!currentFiles['index.html'] && !isClassicVanillaWeb(currentFiles)) {
       // No index.html and not a runnable vanilla web app → universal multi-format viewer
       // (markdown, code, JSON, CSV, images, SVG, PDF, audio, video, HTML, text).

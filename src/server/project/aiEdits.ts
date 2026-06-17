@@ -143,8 +143,13 @@ Plan a COMPLETE multi-file app — do NOT simplify or drop requested modules:
 /** True when the VFS holds only the freshly-seeded scaffold (so this is a from-scratch build). */
 function isScaffoldState(vfs: VirtualFileSystem): boolean {
   if (vfs.paths().length === 0) return true;
-  const app = vfs.readText('src/App.jsx');
-  if (app && app.includes('Hello from App')) return true;
+  // Recognize BOTH the JS (.jsx) and TypeScript (.tsx) scaffolds — missing the
+  // .tsx case made every TypeScript build skip the from-scratch plan→batch path
+  // and fall into the weak "minimal edit" path → intermittently scaffold-only.
+  for (const p of ['src/App.tsx', 'src/App.jsx']) {
+    const app = vfs.readText(p);
+    if (app && app.includes('Hello from App')) return true;
+  }
   const js = vfs.readText('app.js');
   if (js && js.includes("getElementById('app').innerHTML")) return true;
   return false;

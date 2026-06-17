@@ -74,3 +74,34 @@ to protect that one rule.
   state first.
 - Never push directly to `main`. Every change goes: branch → commit → push →
   PR. Even documentation-only changes follow this.
+
+## Deployment — how the live site updates (Cloud Run auto-deploy)
+
+The live app runs on **Google Cloud Run** and deploys **automatically on every
+merge to `main`** — no manual command needed.
+
+**How it works (simple):** GitHub and Google Cloud Build are connected. When
+`main` gets a new commit (e.g. a PR merge), GitHub sends a push webhook to
+Cloud Build; the trigger then runs `cloudbuild.yaml` (Docker build → push →
+`gcloud run deploy`) and the new code goes live. Expect a **1–2 min delay**
+before the build appears in Cloud Build history, then ~3–5 min to finish.
+
+**Deploy facts (for reference):**
+- GCP project: `gen-lang-client-0866594388`
+- Cloud Build trigger: `75443609-def7-4c9a-92e7-805931f5bf8f` (location `global`),
+  fires on **push to `main`**.
+- Cloud Run service: `navbharat-ai-prod`, region `asia-southeast1`.
+- Pipeline config: `cloudbuild.yaml`. Hosting config: `firebase.json` (Firebase
+  project `navbharatai-3395f`).
+
+**So to ship: get the change merged to `main` (branch → PR → green CI → merge).**
+The trigger handles the deploy. No `gcloud` access from the Claude session.
+
+**If a merge does NOT deploy (trigger didn't fire):**
+1. It's usually just the 1–2 min webhook delay — wait and re-check Cloud Build history.
+2. Manual run (from a gcloud-authenticated terminal):
+   `gcloud builds triggers run 75443609-def7-4c9a-92e7-805931f5bf8f --branch=main --region=global --project=gen-lang-client-0866594388`
+3. Or in console: Cloud Build → Triggers → that trigger → **Run** (branch `main`).
+4. If it stopped firing entirely: check the trigger is **Enabled**, event = **Push to a branch** `^main$`, and the **GitHub connection** is live (may need Reconnect).
+- A backup `.github/workflows/deploy.yml` exists; it only deploys if repo secrets
+  `GCP_PROJECT_ID` + `GCP_SA_KEY` are set (currently NOT set → it skips cleanly).

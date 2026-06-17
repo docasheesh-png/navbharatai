@@ -155,7 +155,17 @@ export class EngineerAgentLoop {
       }
       consecutiveParseFailures = 0;
 
-      yield { type: 'action_start', step, action: parsed.action, thought: parsed.thought || '' };
+      // BUG FIX (B1): always emit a non-empty thought so the chat shows progress even
+      // when the model omits its reasoning. Fallback describes the action type.
+      const thoughtFallback: Record<string, string> = {
+        bash: 'Running a shell command…',
+        edit_file: 'Writing a file…',
+        patch_file: 'Patching a file…',
+        browse: 'Fetching a URL…',
+        done: 'Verifying the build…',
+      };
+      const thought = parsed.thought || thoughtFallback[parsed.action] || 'Thinking…';
+      yield { type: 'action_start', step, action: parsed.action, thought };
 
       let observation: string;
 

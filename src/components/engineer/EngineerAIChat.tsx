@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   HardHat, Loader2, Send, Square, Terminal, FolderOpen, Globe,
-  CheckCircle2, AlertCircle, ChevronRight, Play, FileDiff,
+  CheckCircle2, AlertCircle, ChevronRight, Play, FileDiff, RotateCcw,
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -87,6 +87,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
+  const [currentStep, setCurrentStep] = useState(0);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('terminal');
   const [terminalEntries, setTerminalEntries] = useState<TerminalEntry[]>([]);
   const [fileMap, setFileMap] = useState<Record<string, FilePair>>({});
@@ -136,8 +137,10 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         setStatusMsg(event.message || '');
         break;
       case 'action_start':
-        setStatusMsg('');
-        if (event.thought) appendChat('agent', `💭 ${event.thought}`);
+        setCurrentStep(event.step || 0);
+        setStatusMsg(`Step ${event.step}: ${event.action}`);
+        // BUG FIX (B1): thought is now always non-empty (fallback in AgentLoop)
+        appendChat('agent', `[Step ${event.step}] 💭 ${event.thought}`);
         break;
       case 'command_result':
         addTerminalEntry(event.command, event.output || '', event.exitCode ?? 0);
@@ -166,7 +169,17 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
       }
       case 'build_result':
         addTerminalEntry('npm run build', event.logs || '', event.success ? 0 : 1);
-        if (!event.success) appendChat('system', 'Build failed — fixing errors…');
+        if (event.success) {
+          appendChat('system', '🔨 Build passed');
+        } else {
+          // Show first meaningful error line in chat; full log is in terminal
+          const firstErr = (event.logs || '')
+            .split('\n')
+            .find((l: string) => /error|failed|cannot/i.test(l))
+            ?.trim()
+            .slice(0, 120);
+          appendChat('system', `❌ Build failed${firstErr ? ` — ${firstErr}` : ''} (see Terminal tab)`);
+        }
         break;
       case 'browse_result':
         setBrowseHistory(prev => [...prev, { url: event.url, content: event.content }]);
@@ -180,11 +193,13 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         break;
       case 'complete':
         setStatusMsg('');
+        setCurrentStep(0);
         appendChat('agent', `✅ Done in ${event.steps} step${event.steps === 1 ? '' : 's'}: ${event.summary}`);
         break;
       case 'max_steps_reached':
         setStatusMsg('');
-        appendChat('system', `Reached ${event.steps}-step limit without finishing. Try a more specific instruction.`);
+        setCurrentStep(0);
+        appendChat('system', `⚠️ Reached ${event.steps}-step limit. Task incomplete — try breaking it into smaller steps or tap ↺ to start a fresh workspace.`);
         break;
       case 'aborted':
         setStatusMsg('');
@@ -201,6 +216,30 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     readerRef.current?.cancel().catch(() => {});
   };
 
+  // BUG FIX (C3): allow starting a fresh workspace — clears the persisted workspace ID
+  // so the next send creates a new empty directory and avoids inheriting a broken state.
+  const handleNewWorkspace = () => {
+    if (loading) return;
+    if (userId) {
+      try { localStorage.removeItem(`engineer_ws_${userId}`); } catch {}
+      try { localStorage.removeItem(`engineer_msgs_${userId}`); } catch {}
+    }
+    const fresh = userId ? `ws_${userId}_${Date.now()}` : `ws_anon_${Date.now()}`;
+    if (userId) {
+      try { localStorage.setItem(`engineer_ws_${userId}`, fresh); } catch {}
+    }
+    workspaceIdRef.current = fresh;
+    setMessages([WELCOME]);
+    setTerminalEntries([]);
+    setFileMap({});
+    setEditOrder([]);
+    setSelectedFile(null);
+    setPreviewUrl(null);
+    setBrowseHistory([]);
+    setCurrentStep(0);
+    setStatusMsg('');
+  };
+
   const handleSend = async () => {
     const instruction = input.trim();
     if (!instruction || loading) return;
@@ -208,6 +247,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     appendChat('user', instruction);
     setLoading(true);
     setStatusMsg('');
+    setCurrentStep(0);
     setFileMap({});
     setEditOrder([]);
     setSelectedFile(null);
@@ -280,6 +320,15 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
             <h2 className="text-sm font-bold text-white leading-tight">Engineer AI</h2>
             <p className="text-[10px] text-[#8b949e]">Workspace: {workspaceIdRef.current.slice(-10)}</p>
           </div>
+          {/* BUG FIX (C3): New Workspace button — clears broken/stale workspace state */}
+          <button
+            onClick={handleNewWorkspace}
+            disabled={loading}
+            title="Start new workspace"
+            className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 text-[#8b949e] hover:text-white flex items-center justify-center transition-colors disabled:opacity-30"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
         </div>
 
         {/* Messages */}
@@ -301,7 +350,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
           {loading && (
             <div className="flex items-center gap-1.5 text-[#8b949e] text-xs">
               <Loader2 className="w-3 h-3 animate-spin" />
-              <span>{statusMsg || 'Working…'}</span>
+              <span>{statusMsg || 'Working…'}{currentStep > 0 ? ` (${currentStep}/24)` : ''}</span>
             </div>
           )}
           <div ref={chatEndRef} />

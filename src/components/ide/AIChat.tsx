@@ -624,6 +624,23 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
         )}
 
             
+        {/* View Preview — the __VIEW_PREVIEW__ marker finally renders its button
+            (previously the flag was parsed but never used, so a successful build
+            offered no way to open the preview). */}
+        {hasViewPreview && onPreviewClick && (
+          <div className="mt-3 pt-3 border-t border-white/10">
+            <button
+              onClick={onPreviewClick}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-bold text-[12px] uppercase tracking-wider transition-all active:scale-95 hover:brightness-110 border border-indigo-500/30"
+              style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: 'white' }}
+            >
+              <span>👁️</span>
+              View Live Preview
+              <span style={{ fontSize: 14 }}>→</span>
+            </button>
+          </div>
+        )}
+
         {/* Deploy Actions — shown after successful build */}
         {hasDeployActions && deployFiles && onDownloadZip && (
           <div className="mt-3 pt-3 border-t border-white/10">

@@ -13,6 +13,8 @@ export class AiCreditsProvider implements AIProvider {
       this._client = new OpenAI({
         apiKey: process.env.AICREDITS_API_KEY || 'missing-key',
         baseURL: 'https://aicredit.in/v1',
+        timeout: 90_000,  // 90s — prevents silent hang when aicredit.in is slow
+        maxRetries: 0,    // AIRouter handles retries via its own circuit-breaker
       });
     }
     return this._client;

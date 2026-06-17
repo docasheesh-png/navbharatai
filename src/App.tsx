@@ -2495,9 +2495,13 @@ ${buildLanguageRule(preferredLanguage)}`;
       'react/jsx-runtime': ESM + 'react' + reactVer + '/jsx-runtime',
       'react/jsx-dev-runtime': ESM + 'react' + reactVer + '/jsx-dev-runtime',
     };
-    // Add all package.json deps to importmap with version pins
+    // Add all package.json deps to importmap with version pins.
+    // `?external=react,react-dom` makes esm.sh import (not bundle) React, so every
+    // dep (react-router-dom, zustand, etc.) shares the ONE React instance from the
+    // importmap. Without this, libs bundle their own React → "Invalid hook call" /
+    // duplicate-React "Script error" in the preview.
     Object.keys(pkgDeps).forEach(pkg => {
-      if (!imapEntries[pkg]) imapEntries[pkg] = ESM + pkg + ver(pkg);
+      if (!imapEntries[pkg]) imapEntries[pkg] = ESM + pkg + ver(pkg) + '?external=react,react-dom';
     });
 
     const importmap = JSON.stringify({ imports: imapEntries });

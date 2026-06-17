@@ -230,14 +230,16 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() || '';
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith('data:')) continue;
-          const json = line.slice(5).trim();
-          if (!json) continue;
-          try { handleEvent(JSON.parse(json)); } catch { /* ignore malformed frame */ }
+        // NDJSON: one JSON object per line; keep the incomplete trailing chunk in buffer
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const event = JSON.parse(trimmed);
+            if (event.type !== 'ping') handleEvent(event);
+          } catch { /* ignore malformed frame */ }
         }
       }
     } catch (err: any) {

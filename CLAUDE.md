@@ -105,3 +105,28 @@ The trigger handles the deploy. No `gcloud` access from the Claude session.
 4. If it stopped firing entirely: check the trigger is **Enabled**, event = **Push to a branch** `^main$`, and the **GitHub connection** is live (may need Reconnect).
 - A backup `.github/workflows/deploy.yml` exists; it only deploys if repo secrets
   `GCP_PROJECT_ID` + `GCP_SA_KEY` are set (currently NOT set → it skips cleanly).
+
+## Core engineering rules (copied up from PROGRESS.md so they're never missed)
+
+These were previously only stated inside `PROGRESS.md`. Because that file is
+not auto-loaded, they were easy to miss — they are mirrored here so every
+session sees them. They reinforce the one absolute rule (the app must never
+break):
+
+- **Real, no hacks.** Build the real thing — no fake success, no stubbed
+  "it works" when it doesn't, no placeholder/TODO shortcuts shipped as done.
+- **Zero bugs before push.** The verification gate (safeguard #5) is the
+  floor, not a nicety: `tsc --noEmit` + `tsc -p tsconfig.server.json` (if
+  server touched) + `vitest run` (read the real pass/fail line) + boot/smoke
+  check for server changes. Green or it doesn't get pushed.
+- **NO fake success messages, ever.** Never tell the user something is live,
+  built, deployed, or passing unless it verifiably is. "Preview is EARNED" —
+  generation alone is not success; report honest PASS/FAIL.
+- **Commit + push every green milestone.** Don't batch a day of work into one
+  risky push (see safeguard #4).
+- **Keep `PROGRESS.md` updated, append-only.** After each meaningful unit of
+  work, add a new dated milestone entry — **never delete or rewrite existing
+  entries** (they're the cross-session audit trail). Correct a stale claim by
+  adding a new note, not by erasing the old one.
+- **Every change goes branch → commit → push → PR → green CI → merge.** Merge
+  is what deploys (see Deployment above), so never merge red or unverified.

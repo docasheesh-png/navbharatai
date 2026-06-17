@@ -99,6 +99,7 @@ export function manifestContract(m: ArchitectureManifest): string {
   return [
     `ARCHITECTURE (MANDATORY — do not mix): Vanilla JavaScript, no bundler, ${m.storage}.`,
     `- The HTML entry is "${m.html}" with a single mount node <main id="${m.mountId}"></main>.`,
-    `- Load ONLY "${m.entry}" via <script src="${m.entry}"></script>. No React, no JSX, no src/ tree, no vite.config.`,
+    `- Load ONLY "${m.entry}" via <script type="module" src="${m.entry}"></script>. ALWAYS use type="module" — without it, import/export statements throw SyntaxError in the browser.`,
+    `- No React, no JSX, no src/ tree, no vite.config.`,
   ].join('\n');
 }

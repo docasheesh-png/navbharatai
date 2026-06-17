@@ -60,6 +60,32 @@ export interface BuildPipelineResult {
   previewAllowed: boolean;
 }
 
+/**
+ * If any JS file in the VFS uses ES6 static import/export, upgrade every
+ * bare <script src="*.js"> in index.html to <script type="module" src="*.js">.
+ * This is a deterministic safety net — it runs even when the AI ignores the
+ * manifest instruction to use type="module".
+ */
+function fixEsModuleScriptTag(vfs: VirtualFileSystem): void {
+  const html = vfs.readText('index.html');
+  if (!html) return;
+  const jsFiles = vfs.paths().filter(p => /\.(js|mjs)$/.test(p));
+  if (!jsFiles.length) return;
+  const hasEsModuleSyntax = jsFiles.some(p => {
+    const c = vfs.readText(p) || '';
+    return /^\s*(import\s+[\w{*"'`]|export\s+(default|class|function|const|let|var)\b)/m.test(c);
+  });
+  if (!hasEsModuleSyntax) return;
+  const fixed = html.replace(
+    /<script(\s[^>]*)?\bsrc=["'][^"']*\.(?:js|mjs)["'][^>]*>/gi,
+    (match) => {
+      if (/\btype\s*=\s*["']module["']/i.test(match)) return match;
+      return match.replace(/^<script/i, '<script type="module"');
+    },
+  );
+  if (fixed !== html) vfs.write('index.html', fixed);
+}
+
 export async function runBuild(input: BuildPipelineInput): Promise<BuildPipelineResult> {
   const vfs = VirtualFileSystem.fromRecord(input.files);
   const versions = new ProjectVersionStore();
@@ -98,6 +124,10 @@ export async function runBuild(input: BuildPipelineInput): Promise<BuildPipeline
       await autoRepair(vfs, { generateFixes: input.fix, versions, maxAttempts: 1 });
     }
   }
+
+  // Auto-fix: if any JS file uses ES6 import/export, ensure index.html has type="module"
+  // Belt-and-suspenders guard for when the AI ignores the manifest instruction.
+  fixEsModuleScriptTag(vfs);
 
   // Final validation gates → structured report + preview decision (no fake success).
   const validation = runValidation(vfs, selectArchitecture(input.prompt), input.prompt);

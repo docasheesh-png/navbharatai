@@ -26,6 +26,8 @@ interface CodeStudioProps {
   files: Record<string, string>;
   onFilesChange: (files: Record<string, string>) => void;
   onRun: (files: Record<string, string>) => void;
+  /** The built preview HTML (same best-engine output the Pro preview uses). */
+  generatedCode?: string;
   messages: any[];
   chatInput: string;
   onChatInputChange: (val: string) => void;
@@ -72,6 +74,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   files,
   onFilesChange,
   onRun,
+  generatedCode,
   messages,
   chatInput,
   onChatInputChange,
@@ -595,7 +598,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         {/* Dynamic Main Workspace */}
         <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e] relative">
           {activeScreen === 'preview' ? (
-             <PreviewPanel files={files} onRun={() => onRun(files)} />
+             <PreviewPanel files={files} generatedCode={generatedCode} onRun={() => onRun(files)} />
           ) : activeScreen === 'security' ? (
              <SecurityScan files={files} />
           ) : (

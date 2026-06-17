@@ -8410,6 +8410,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 files={files}
                 onFilesChange={(newFiles) => setFiles(newFiles as any)}
                 onRun={() => updatePreview(files)}
+                generatedCode={generatedCode}
                 messages={messages}
                 chatInput={input}
                 onChatInputChange={setInput}

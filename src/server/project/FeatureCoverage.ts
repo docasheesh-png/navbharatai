@@ -59,6 +59,15 @@ const CATALOG: FeatureSpec[] = [
     signatures: [/\b(add|create|edit|update|delete|remove|onSubmit|handleAdd|handleDelete|handleSave)\b/i] },
   { id: 'form', label: 'Form + validation', requested: /\b(form|validate|validation|required field|input)\b/i,
     signatures: [/\b(form|<input|onSubmit|onChange|required|validate)\b/i] },
+  // Common domain modules in ops/business apps — measured so a partial build is caught.
+  { id: 'inventory', label: 'Inventory / Stock', requested: /\b(inventory|stock|supplies|consumables)\b/i,
+    signatures: [/\b(inventory|stock|quantity|supplier|reorder)\b/i] },
+  { id: 'incidents', label: 'Incident tracking', requested: /\bincidents?\b/i,
+    signatures: [/\b(incident|severity|reporter|resolution)\b/i] },
+  { id: 'notifications', label: 'Notification center', requested: /\bnotifications?\b/i,
+    signatures: [/\b(notification|notif|markAsRead|unread|toast)\b/i] },
+  { id: 'settings', label: 'Settings / Preferences', requested: /\bsettings\b|\bpreferences\b/i,
+    signatures: [/\b(settings|preferences|profile)\b/i] },
 ];
 
 /** Features the prompt explicitly asks for (a checklist to implement + verify). */

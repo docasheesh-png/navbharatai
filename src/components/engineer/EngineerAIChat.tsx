@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   HardHat, Loader2, Send, Square, Terminal, FolderOpen, Globe,
   CheckCircle2, AlertCircle, ChevronRight, Play, FileDiff, RotateCcw,
-  ExternalLink, RefreshCw,
+  ExternalLink, RefreshCw, History,
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -36,6 +36,12 @@ interface FilePair {
   previous?: string;
 }
 
+interface CheckpointEntry {
+  id: string;
+  createdAt: number;
+  triggeredBy: string;
+}
+
 interface EngineerAIChatProps {
   userId?: string;
 }
@@ -48,7 +54,7 @@ const WELCOME: ChatMessage = {
 
 function uid() { return `${Date.now()}_${Math.random().toString(36).slice(2)}`; }
 
-type WorkspaceTab = 'terminal' | 'files' | 'browser';
+type WorkspaceTab = 'terminal' | 'files' | 'browser' | 'checkpoints';
 
 // Simple LCS-based diff (capped at 300 lines each side to stay fast)
 function computeDiff(oldText: string, newText: string): Array<{ line: string; type: 'add' | 'remove' | 'same' }> {
@@ -111,6 +117,9 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   const [isDriving, setIsDriving] = useState(false);
   // Live frame during a drive action (replaces the screenshot array for instant streaming)
   const [liveFrame, setLiveFrame] = useState<ScreenshotEntry | null>(null);
+  // Phase 8 — Checkpoints + Rollback
+  const [checkpoints, setCheckpoints] = useState<CheckpointEntry[]>([]);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -293,6 +302,9 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         appendChat('system', `🔍 Searched "${event.query}":\n${lines}`);
         break;
       }
+      case 'checkpoint_created':
+        setCheckpoints(prev => [...prev, { id: event.checkpointId, createdAt: event.createdAt, triggeredBy: event.triggeredBy }]);
+        break;
       case 'workspace_saved':
         // Remember the sandbox so the next session resumes this exact workspace.
         if (event.sandboxId) setSandboxId(event.sandboxId);
@@ -379,6 +391,29 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setStatusMsg('');
     setIsDriving(false);
     setLiveFrame(null);
+    setCheckpoints([]);
+    setRestoringId(null);
+  };
+
+  const handleRestore = async (checkpointId: string) => {
+    if (loading || restoringId) return;
+    setRestoringId(checkpointId);
+    try {
+      const res = await fetch('/api/engineer-restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspaceIdRef.current, checkpointId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `${res.status}`);
+      }
+      appendChat('system', `↩️ Restored to checkpoint ${checkpointId.slice(-13)}`);
+    } catch (err: any) {
+      appendChat('system', `❌ Restore failed: ${err?.message}`);
+    } finally {
+      setRestoringId(null);
+    }
   };
 
   const handleSend = async () => {
@@ -397,6 +432,8 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setScreenshots([]);
     setIsDriving(false);
     setLiveFrame(null);
+    setCheckpoints([]);
+    setRestoringId(null);
 
     try {
       const res = await fetch('/api/engineer-chat', {
@@ -562,6 +599,14 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
                 <span className="bg-green-500/30 text-green-300 text-[10px] px-1.5 rounded-full">
                   {iframeSrc ? '▶' : screenshots.length > 0 ? `${screenshots.length}📸` : browseHistory.length}
                 </span>
+              )}
+            </span>
+          </button>
+          <button className={tabClass('checkpoints')} onClick={() => setActiveTab('checkpoints')}>
+            <span className="flex items-center gap-1.5">
+              <History className="w-3 h-3" />History
+              {checkpoints.length > 0 && (
+                <span className="bg-amber-500/30 text-amber-300 text-[10px] px-1.5 rounded-full">{checkpoints.length}</span>
               )}
             </span>
           </button>
@@ -834,6 +879,46 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
                     </pre>
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Checkpoints tab */}
+        {activeTab === 'checkpoints' && (
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
+            {checkpoints.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-[#586069]">
+                <History className="w-8 h-8 opacity-30" />
+                <p className="text-xs text-center">No checkpoints yet.<br />A snapshot is created automatically before every file edit.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-[10px] text-[#586069] mb-3">
+                  {checkpoints.length} checkpoint{checkpoints.length === 1 ? '' : 's'} — click Restore to revert the workspace to that state.
+                </p>
+                {[...checkpoints].reverse().map((ckpt, i) => (
+                  <div key={ckpt.id} className="flex items-start gap-3 p-3 rounded-xl bg-[#161b22] border border-white/5 hover:border-white/10 transition-colors">
+                    <div className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] text-white truncate" title={ckpt.triggeredBy}>{ckpt.triggeredBy}</p>
+                      <p className="text-[10px] text-[#586069] mt-0.5">
+                        {new Date(ckpt.createdAt).toLocaleTimeString()} · #{checkpoints.length - i}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleRestore(ckpt.id)}
+                      disabled={!!restoringId || loading}
+                      title={`Restore workspace to this checkpoint`}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border border-amber-500/20 transition-colors disabled:opacity-40 shrink-0"
+                    >
+                      {restoringId === ckpt.id
+                        ? <Loader2 className="w-3 h-3 animate-spin" />
+                        : <RotateCcw className="w-3 h-3" />}
+                      Restore
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>

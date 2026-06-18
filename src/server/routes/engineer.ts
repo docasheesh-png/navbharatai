@@ -75,6 +75,21 @@ export function registerEngineerRoutes(app: Express): void {
     }
   });
 
+  // Restore the workspace to a checkpoint — called by the frontend "Restore" button.
+  app.post('/api/engineer-restore', async (req: Request, res: Response) => {
+    const { workspaceId, checkpointId } = req.body || {};
+    if (typeof workspaceId !== 'string' || !workspaceId || typeof checkpointId !== 'string' || !checkpointId) {
+      res.status(400).json({ error: 'workspaceId and checkpointId are required.' });
+      return;
+    }
+    try {
+      await actuator.restore(workspaceId, checkpointId);
+      res.json({ restored: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to restore checkpoint.' });
+    }
+  });
+
   // Pause a sandbox to stop compute billing while preserving full state for a
   // later resume. Called by the client when it leaves the Engineer AI surface.
   // Accepts sendBeacon (text/plain body) as well as JSON.

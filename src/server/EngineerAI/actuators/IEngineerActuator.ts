@@ -73,4 +73,17 @@ export interface IEngineerActuator {
    * LocalActuator returns [] (no subprocess available in sandboxed deploys).
    */
   searchFiles(workspaceId: string, terms: string[]): Promise<string[]>;
+  /**
+   * Create a lightweight snapshot of the workspace source files (excludes
+   * node_modules/dist/.git) and return a unique checkpoint ID. Called
+   * automatically before every mutating action (edit_file, patch_file) so
+   * the user can restore to any prior state with a single click.
+   */
+  checkpoint(workspaceId: string, triggeredBy?: string): Promise<string>;
+  /**
+   * Restore the workspace to a previously created checkpoint. The workspace
+   * source files are overwritten with the snapshot; node_modules/dist are
+   * left untouched so the next build doesn't need a full reinstall.
+   */
+  restore(workspaceId: string, checkpointId: string): Promise<void>;
 }

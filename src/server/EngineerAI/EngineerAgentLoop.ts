@@ -42,7 +42,7 @@ Examples that trigger reply (in ANY language):
   "app banana hai — kya plan hoga?" (planning, not yet building)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / drive / web_search / done
+MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / drive / web_search / restore / done
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Use this when the user clearly wants you to BUILD, CREATE, MODIFY, or FIX code/files right now.
 
@@ -58,17 +58,19 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"done", "args": { ... } }
+{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"done", "args": { ... } }
 
 Action args:
   reply:          { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
   bash:           { "command": "shell command to run in the workspace" }
   edit_file:      { "path": "relative/path.tsx", "content": "FULL new file content" }
   patch_file:     { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
+  restore:        { "checkpointId": "ckpt_1234567890" }
   screenshot:     { "url": "http://localhost:3000" }
   browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait", "selector": "CSS selector", "text": "text to type / key to press", "url": "url to navigate to", "direction": "up"|"down" }
   drive:          { "steps": "[{\"action\":\"navigate\",\"url\":\"http://localhost:3000\"},{\"action\":\"click\",\"selector\":\"#btn\"}]" }
   web_search:     { "query": "what to look up — docs, error messages, package names/versions" }
+  restore:        { "checkpointId": "ckpt_1234567890" }
   done:           { "summary": "one sentence describing what was accomplished" }
 
 You can both SEE and INTERACT with the running app:
@@ -104,7 +106,8 @@ Coding rules (when in MODE 2):
 - Output done only AFTER you have visually confirmed the app looks AND works correctly. No confirmation = not done.
 - Paths are relative to workspace root, no leading "/" or "..".
 - When starting a dev server, use port 3000 and bind to 0.0.0.0 (--host 0.0.0.0 --port 3000).
-- Commands run with a 60-second timeout.`;
+- Commands run with a 60-second timeout.
+- Checkpoints are created automatically before every edit_file and patch_file action. If a change makes things worse, use restore to go back: { "action": "restore", "args": { "checkpointId": "<id from checkpoint_created event>" } }.`;
 
 function stripFences(text: string): string {
   const t = text.trim();
@@ -244,6 +247,7 @@ export class EngineerAgentLoop {
         browser_action: 'Interacting with the app in the browser…',
         drive: 'Driving the browser through a multi-step flow…',
         web_search: 'Searching the web…',
+        restore: 'Restoring workspace to a prior checkpoint…',
         done: 'Verifying the build…',
       };
       const thought = parsed.thought || thoughtFallback[parsed.action] || 'Thinking…';
@@ -282,6 +286,11 @@ export class EngineerAgentLoop {
       } else if (parsed.action === 'edit_file') {
         const filePath = parsed.args.path || '';
         const content = parsed.args.content || '';
+        // Auto-checkpoint before every write so the user can restore if needed.
+        try {
+          const ckptId = await this.actuator.checkpoint(workspaceId, `before edit: ${filePath}`);
+          yield { type: 'checkpoint_created', checkpointId: ckptId, createdAt: Date.now(), triggeredBy: `before edit: ${filePath}` };
+        } catch { /* non-fatal — proceed even if checkpoint fails */ }
         try {
           await this.actuator.writeFile(workspaceId, filePath, content);
           yield { type: 'files_changed', kind: 'edit', files: [{ path: filePath, content }] };
@@ -293,6 +302,11 @@ export class EngineerAgentLoop {
         const filePath = parsed.args.path || '';
         const oldStr = parsed.args.old_str || '';
         const newStr = parsed.args.new_str ?? '';
+        // Auto-checkpoint before every patch so the user can restore if needed.
+        try {
+          const ckptId = await this.actuator.checkpoint(workspaceId, `before patch: ${filePath}`);
+          yield { type: 'checkpoint_created', checkpointId: ckptId, createdAt: Date.now(), triggeredBy: `before patch: ${filePath}` };
+        } catch { /* non-fatal */ }
         try {
           const before = await this.actuator.readFile(workspaceId, filePath);
           if (!before.includes(oldStr)) {
@@ -305,6 +319,18 @@ export class EngineerAgentLoop {
           }
         } catch (err: any) {
           observation = `Error patching "${filePath}": ${err?.message}`;
+        }
+      } else if (parsed.action === 'restore') {
+        const checkpointId = parsed.args.checkpointId || '';
+        if (!checkpointId) {
+          observation = 'restore error: "args.checkpointId" is required. Check the checkpoint timeline for available IDs.';
+        } else {
+          try {
+            await this.actuator.restore(workspaceId, checkpointId);
+            observation = `Workspace restored to checkpoint ${checkpointId}. Source files are back to that state — re-run the build to verify.`;
+          } catch (err: any) {
+            observation = `restore error: ${err?.message}`;
+          }
         }
       } else if (parsed.action === 'browse') {
         const url = parsed.args.url || '';
@@ -463,7 +489,7 @@ export class EngineerAgentLoop {
         }
         observation = `Build failed — cannot mark done yet. Fix the errors:\n${buildResult.logs.slice(-2000)}`;
       } else {
-        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, done.`;
+        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, done.`;
       }
 
       // Phase 4 — Live Sync: after any browser interaction, surface runtime

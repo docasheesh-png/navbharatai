@@ -10,7 +10,7 @@ export interface EngineerTask {
 /** One ReAct action the model outputs per turn. */
 export interface ReActAction {
   thought?: string;
-  action: 'reply' | 'bash' | 'edit_file' | 'patch_file' | 'browse' | 'screenshot' | 'browser_action' | 'web_search' | 'drive' | 'done';
+  action: 'reply' | 'bash' | 'edit_file' | 'patch_file' | 'browse' | 'screenshot' | 'browser_action' | 'web_search' | 'drive' | 'restore' | 'done';
   args: Record<string, string>;
 }
 
@@ -27,6 +27,7 @@ export type EngineerAgentEvent =
   | { type: 'drive_frame'; screenshot: string; cursorX?: number; cursorY?: number; url: string; step: number; stepDetail: string }
   | { type: 'console_error'; errors: { kind: string; text: string }[] }
   | { type: 'search_result'; query: string; results: { title: string; url: string; snippet: string }[] }
+  | { type: 'checkpoint_created'; checkpointId: string; createdAt: number; triggeredBy: string }
   | { type: 'workspace_saved'; sandboxId: string }
   | { type: 'server_ready'; url: string; port: number }
   | { type: 'status'; message: string }

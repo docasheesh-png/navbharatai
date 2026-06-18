@@ -76,6 +76,9 @@ function rec(kind,text){ try{ fs.appendFileSync(LOG, JSON.stringify({t:Date.now(
 
 // Connects to the persistent browser via CDP, performs ONE action, screenshots,
 // then exits WITHOUT closing the browser (so state survives for the next action).
+// Also emits cursorX/cursorY: the pixel coordinates of the element interacted with
+// (bounding-box center for click/type; sensible defaults for other actions).
+// The frontend uses these to render an animated cursor overlay on the screenshot.
 const BROWSER_ACTION_SCRIPT = `
 const {chromium}=require('playwright');
 (async()=>{
@@ -85,11 +88,15 @@ const {chromium}=require('playwright');
   let page=ctx.pages()[0]||await ctx.newPage();
   await page.setViewportSize({width:1280,height:720}).catch(()=>{});
   let result='';
+  let cursorX=640,cursorY=360;
+  async function elCenter(sel){
+    try{const el=await page.$(sel);if(el){const b=await el.boundingBox();if(b){return{x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)};}}return null;}catch(e){return null;}
+  }
   try{
     if(a.action==='navigate'){await page.goto(a.url,{waitUntil:'networkidle',timeout:15000});result='Navigated to '+a.url;}
-    else if(a.action==='click'){await page.click(a.selector,{timeout:8000});result='Clicked '+a.selector;}
-    else if(a.action==='type'){await page.fill(a.selector,a.text||'',{timeout:8000});result='Typed into '+a.selector;}
-    else if(a.action==='scroll'){await page.evaluate(d=>window.scrollBy(0,d==='up'?-700:700),a.direction||'down');result='Scrolled '+(a.direction||'down');}
+    else if(a.action==='click'){const c=await elCenter(a.selector);if(c){cursorX=c.x;cursorY=c.y;}await page.click(a.selector,{timeout:8000});result='Clicked '+a.selector;}
+    else if(a.action==='type'){const c=await elCenter(a.selector);if(c){cursorX=c.x;cursorY=c.y;}await page.fill(a.selector,a.text||'',{timeout:8000});result='Typed into '+a.selector;}
+    else if(a.action==='scroll'){cursorX=640;cursorY=a.direction==='up'?200:520;await page.evaluate(d=>window.scrollBy(0,d==='up'?-700:700),a.direction||'down');result='Scrolled '+(a.direction||'down');}
     else if(a.action==='press'){await page.keyboard.press(a.text||'Enter');result='Pressed '+(a.text||'Enter');}
     else if(a.action==='wait'){await page.waitForTimeout(2500);result='Waited';}
     else{result='Unknown browser action: '+a.action;}
@@ -97,7 +104,7 @@ const {chromium}=require('playwright');
   }catch(e){result='ERROR: '+String(e&&e.message||e);}
   const url=page.url();
   const buf=await page.screenshot({type:'png'});
-  process.stdout.write(JSON.stringify({result,url,screenshot:buf.toString('base64')}));
+  process.stdout.write(JSON.stringify({result,url,screenshot:buf.toString('base64'),cursorX,cursorY}));
   process.exit(0);
 })().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1);});
 `.trim();
@@ -397,7 +404,7 @@ const {chromium}=require('playwright');
     workspaceId: string,
     action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait',
     args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
-  ): Promise<{ screenshot: string; result: string }> {
+  ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }> {
     const sandbox = await this.getSandbox(workspaceId);
 
     if (!this._playwrightReady.has(workspaceId)) this._kickoffPlaywright(sandbox, workspaceId);
@@ -423,7 +430,12 @@ const {chromium}=require('playwright');
 
     const parsed = JSON.parse(result.stdout.trim());
     const detail = parsed.url ? `${parsed.result} (now at ${parsed.url})` : parsed.result;
-    return { screenshot: parsed.screenshot, result: detail };
+    return {
+      screenshot: parsed.screenshot,
+      result: detail,
+      cursorX: typeof parsed.cursorX === 'number' ? parsed.cursorX : undefined,
+      cursorY: typeof parsed.cursorY === 'number' ? parsed.cursorY : undefined,
+    };
   }
 
   async getConsoleErrors(

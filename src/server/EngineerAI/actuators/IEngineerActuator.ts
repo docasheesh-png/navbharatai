@@ -43,7 +43,7 @@ export interface IEngineerActuator {
     workspaceId: string,
     action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait',
     args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
-  ): Promise<{ screenshot: string; result: string }>;
+  ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }>;
   /**
    * Return runtime browser errors (console.error, uncaught exceptions, failed
    * requests) captured since `sinceMs`. Lets the agent — and the user — see

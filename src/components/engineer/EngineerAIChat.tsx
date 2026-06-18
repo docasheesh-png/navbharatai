@@ -27,6 +27,8 @@ interface ScreenshotEntry {
   url: string;
   base64: string;
   timestamp: number;
+  cursorX?: number;
+  cursorY?: number;
 }
 
 interface FilePair {
@@ -105,6 +107,10 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   const [screenshots, setScreenshots] = useState<ScreenshotEntry[]>([]);
   const [iframeSrc, setIframeSrc] = useState<string | null>(null);
   const [browserUrlInput, setBrowserUrlInput] = useState('');
+  // Phase 6.5 — Visible AI Cursor
+  const [isDriving, setIsDriving] = useState(false);
+  // Live frame during a drive action (replaces the screenshot array for instant streaming)
+  const [liveFrame, setLiveFrame] = useState<ScreenshotEntry | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -243,9 +249,33 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         appendChat('system', `📸 Screenshot: ${event.url}`);
         break;
       case 'browser_action_result':
-        setScreenshots(prev => [...prev, { url: event.detail || event.action, base64: event.base64, timestamp: Date.now() }]);
+        // drive_complete sub-type is emitted at end of a drive sequence — don't add a duplicate
+        // chat message (the drive_frame events already showed the activity).
+        if (event.action !== 'drive_complete') {
+          appendChat('system', `🖱️ ${event.detail || event.action}`);
+        }
+        setScreenshots(prev => [...prev, {
+          url: event.detail || event.action,
+          base64: event.base64,
+          timestamp: Date.now(),
+          cursorX: event.cursorX,
+          cursorY: event.cursorY,
+        }]);
         setActiveTab('browser');
-        appendChat('system', `🖱️ ${event.detail || event.action}`);
+        // Clear live frame once the final browser_action_result lands
+        if (event.action === 'drive_complete') setLiveFrame(null);
+        break;
+      case 'drive_frame':
+        // Live cursor frame — update in place (don't accumulate), switch to browser tab
+        setLiveFrame({
+          url: event.url,
+          base64: event.screenshot,
+          timestamp: Date.now(),
+          cursorX: event.cursorX,
+          cursorY: event.cursorY,
+        });
+        setIsDriving(true);
+        setActiveTab('browser');
         break;
       case 'console_error': {
         const errs: { kind: string; text: string }[] = event.errors || [];
@@ -276,6 +306,8 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
       case 'complete':
         setStatusMsg('');
         setCurrentStep(0);
+        setIsDriving(false);
+        setLiveFrame(null);
         // Conversational reply already showed the message — don't double-up with a "Done" line.
         if (event.summary !== 'Replied.') {
           appendChat('agent', `✅ Done in ${event.steps} step${event.steps === 1 ? '' : 's'}: ${event.summary}`);
@@ -284,14 +316,20 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
       case 'max_steps_reached':
         setStatusMsg('');
         setCurrentStep(0);
+        setIsDriving(false);
+        setLiveFrame(null);
         appendChat('system', `⚠️ Reached ${event.steps}-step limit. Task incomplete — try breaking it into smaller steps or tap ↺ to start a fresh workspace.`);
         break;
       case 'aborted':
         setStatusMsg('');
+        setIsDriving(false);
+        setLiveFrame(null);
         appendChat('system', 'Stopped.');
         break;
       case 'error':
         setStatusMsg('');
+        setIsDriving(false);
+        setLiveFrame(null);
         appendChat('system', `Error: ${event.message}`);
         break;
     }
@@ -339,6 +377,8 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setScreenshots([]);
     setCurrentStep(0);
     setStatusMsg('');
+    setIsDriving(false);
+    setLiveFrame(null);
   };
 
   const handleSend = async () => {
@@ -355,6 +395,8 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setIframeSrc(null);
     setBrowserUrlInput('');
     setScreenshots([]);
+    setIsDriving(false);
+    setLiveFrame(null);
 
     try {
       const res = await fetch('/api/engineer-chat', {
@@ -407,8 +449,11 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         : 'text-[#8b949e] hover:text-white border-b-2 border-transparent'
     }`;
 
-  const latestBrowse = (!iframeSrc && screenshots.length === 0) ? browseHistory[browseHistory.length - 1] : null;
-  const latestScreenshot = !iframeSrc ? screenshots[screenshots.length - 1] : null;
+  // During a drive action, show the live frame (cursor moving in real-time).
+  // Outside a drive action, show the latest screenshot from the array.
+  const displayShot = !iframeSrc ? (liveFrame || (screenshots.length > 0 ? screenshots[screenshots.length - 1] : null)) : null;
+  const latestBrowse = (!iframeSrc && !displayShot) ? browseHistory[browseHistory.length - 1] : null;
+  const latestScreenshot = displayShot;
   const selectedPair = selectedFile ? fileMap[selectedFile] : null;
   const hasDiff = !!(selectedPair?.previous && selectedPair.previous !== selectedPair.current);
   const diffLines = hasDiff && showDiff
@@ -710,10 +755,10 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
               />
             )}
 
-            {/* Screenshot viewer (agent took a screenshot) */}
+            {/* Screenshot viewer (agent took a screenshot or is driving) */}
             {!iframeSrc && latestScreenshot && (
               <div className="flex-1 overflow-y-auto custom-scrollbar">
-                {/* Screenshot strip — latest on top, thumbnails below */}
+                {/* Main screenshot with cursor overlay */}
                 <div className="relative">
                   <img
                     src={`data:image/png;base64,${latestScreenshot.base64}`}
@@ -721,13 +766,37 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
                     className="w-full block"
                     style={{ imageRendering: 'auto' }}
                   />
-                  <div className="absolute bottom-2 right-2 flex gap-1">
+                  {/* Animated AI cursor — shown when the agent drove to this position */}
+                  {latestScreenshot.cursorX != null && latestScreenshot.cursorY != null && (
+                    <div
+                      className="absolute pointer-events-none"
+                      style={{
+                        left: `${(latestScreenshot.cursorX / 1280) * 100}%`,
+                        top: `${(latestScreenshot.cursorY / 720) * 100}%`,
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: 20,
+                      }}
+                    >
+                      {/* Ripple ring */}
+                      <div className="absolute w-7 h-7 rounded-full border-2 border-indigo-400/70 animate-ping"
+                        style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }} />
+                      {/* Solid dot */}
+                      <div className="w-3 h-3 rounded-full bg-indigo-500 border-2 border-white shadow-lg shadow-indigo-500/50" />
+                    </div>
+                  )}
+                  <div className="absolute bottom-2 right-2 flex gap-1.5 items-center">
+                    {isDriving && (
+                      <span className="bg-indigo-600/90 text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse inline-block" />
+                        AI driving…
+                      </span>
+                    )}
                     <span className="bg-black/70 text-white text-[10px] px-2 py-0.5 rounded-full">
                       Agent view · {new Date(latestScreenshot.timestamp).toLocaleTimeString()}
                     </span>
                   </div>
                 </div>
-                {screenshots.length > 1 && (
+                {screenshots.length > 1 && !liveFrame && (
                   <div className="flex gap-1.5 overflow-x-auto p-2 bg-[#0a0e13] border-t border-white/5">
                     {[...screenshots].reverse().map((s, i) => (
                       <img

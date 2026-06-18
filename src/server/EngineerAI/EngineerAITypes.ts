@@ -3,6 +3,8 @@ export interface EngineerTask {
   instruction: string;
   /** Optional hint about the project stack — defaults to auto-detection. */
   projectType?: 'vite-react' | 'node' | 'python' | 'auto';
+  /** Persisted sandbox ID to resume — restores files/node_modules/running server. */
+  resumeSandboxId?: string;
 }
 
 /** One ReAct action the model outputs per turn. */
@@ -23,6 +25,7 @@ export type EngineerAgentEvent =
   | { type: 'browser_action_result'; action: string; detail: string; base64: string }
   | { type: 'console_error'; errors: { kind: string; text: string }[] }
   | { type: 'search_result'; query: string; results: { title: string; url: string; snippet: string }[] }
+  | { type: 'workspace_saved'; sandboxId: string }
   | { type: 'server_ready'; url: string; port: number }
   | { type: 'status'; message: string }
   | { type: 'complete'; summary: string; steps: number }

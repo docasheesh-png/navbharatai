@@ -33,7 +33,8 @@ const IGNORED_DIRS = new Set([
 export class LocalActuator implements IEngineerActuator {
   private workspaceManager = new WorkspaceManager(NAMESPACE);
 
-  async ensureWorkspace(workspaceId: string): Promise<void> {
+  async ensureWorkspace(workspaceId: string, _projectType?: string, _resumeSandboxId?: string): Promise<void> {
+    // No remote sandbox to resume — the local directory IS the persistent state.
     const workspacePath = path.join(WORKSPACES_ROOT, workspaceId);
     await fsPromises.mkdir(workspacePath, { recursive: true });
   }
@@ -154,5 +155,15 @@ export class LocalActuator implements IEngineerActuator {
   ): Promise<{ errors: { t: number; kind: string; text: string }[] }> {
     // No browser session in LocalActuator — nothing to report.
     return { errors: [] };
+  }
+
+  async getSandboxId(_workspaceId: string): Promise<string | null> {
+    // The on-disk directory persists across sessions; there is no sandbox ID.
+    return null;
+  }
+
+  async pauseSandbox(_sandboxId: string): Promise<boolean> {
+    // Nothing to pause — local processes/directories aren't billed per-second.
+    return false;
   }
 }

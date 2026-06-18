@@ -120,6 +120,19 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     return fresh;
   })());
 
+  // Persistent E2B sandbox ID — lets the next session resume the same workspace
+  // (files, node_modules, running dev server). Stored per-workspace in localStorage.
+  const sandboxIdRef = useRef<string | null>((() => {
+    try { return localStorage.getItem(`engineer_sandbox_${workspaceIdRef.current}`); } catch { return null; }
+  })());
+  const setSandboxId = (id: string | null) => {
+    sandboxIdRef.current = id;
+    try {
+      const key = `engineer_sandbox_${workspaceIdRef.current}`;
+      if (id) localStorage.setItem(key, id); else localStorage.removeItem(key);
+    } catch { /* private mode — keep in-memory only */ }
+  };
+
   // Persist messages (last 60) whenever they change
   useEffect(() => {
     if (!userId) return;
@@ -131,6 +144,28 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
   useEffect(() => { terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [terminalEntries]);
+
+  // Pause the sandbox when the user leaves Engineer AI (unmount or tab close) so
+  // it stops billing compute while preserving full state for the next resume.
+  useEffect(() => {
+    const pause = () => {
+      const id = sandboxIdRef.current;
+      if (!id) return;
+      try {
+        fetch('/api/engineer-pause', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sandboxId: id }),
+          keepalive: true, // survives page unload
+        }).catch(() => {});
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('pagehide', pause);
+    return () => {
+      window.removeEventListener('pagehide', pause);
+      pause(); // component unmount (navigated away within the SPA)
+    };
+  }, []);
 
   const appendChat = (role: ChatMessage['role'], text: string) =>
     setMessages(prev => [...prev, { id: uid(), role, text }]);
@@ -224,6 +259,10 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         appendChat('system', `🔍 Searched "${event.query}":\n${lines}`);
         break;
       }
+      case 'workspace_saved':
+        // Remember the sandbox so the next session resumes this exact workspace.
+        if (event.sandboxId) setSandboxId(event.sandboxId);
+        break;
       case 'server_ready':
         setIframeSrc(event.url);
         setBrowserUrlInput(event.url);
@@ -262,6 +301,20 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   // so the next send creates a new empty directory and avoids inheriting a broken state.
   const handleNewWorkspace = () => {
     if (loading) return;
+    // Pause + forget the old sandbox so we don't keep paying for an orphaned VM.
+    const oldSandbox = sandboxIdRef.current;
+    if (oldSandbox) {
+      try {
+        fetch('/api/engineer-pause', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sandboxId: oldSandbox }),
+          keepalive: true,
+        }).catch(() => {});
+      } catch { /* ignore */ }
+    }
+    try { localStorage.removeItem(`engineer_sandbox_${workspaceIdRef.current}`); } catch {}
+    sandboxIdRef.current = null;
     if (userId) {
       try { localStorage.removeItem(`engineer_ws_${userId}`); } catch {}
       try { localStorage.removeItem(`engineer_msgs_${userId}`); } catch {}
@@ -303,7 +356,11 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
       const res = await fetch('/api/engineer-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId: workspaceIdRef.current, instruction }),
+        body: JSON.stringify({
+          workspaceId: workspaceIdRef.current,
+          instruction,
+          resumeSandboxId: sandboxIdRef.current || undefined,
+        }),
       });
       if (!res.ok || !res.body) throw new Error(`API error: ${res.status}`);
 

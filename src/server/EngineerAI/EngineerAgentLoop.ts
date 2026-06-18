@@ -132,7 +132,7 @@ export class EngineerAgentLoop {
   constructor(private router: AIRouter, private actuator: IEngineerActuator) {}
 
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
-    const { workspaceId, instruction, projectType } = task;
+    const { workspaceId, instruction, projectType, resumeSandboxId } = task;
     const deadline = Date.now() + DEADLINE_MS;
 
     // Fail fast with a helpful message if no AI provider is reachable.
@@ -148,13 +148,19 @@ export class EngineerAgentLoop {
       return;
     }
 
-    yield { type: 'status', message: 'Initializing workspace…' };
+    yield { type: 'status', message: resumeSandboxId ? 'Resuming workspace…' : 'Initializing workspace…' };
     try {
-      await this.actuator.ensureWorkspace(workspaceId, projectType);
+      await this.actuator.ensureWorkspace(workspaceId, projectType, resumeSandboxId);
     } catch (err: any) {
       yield { type: 'error', message: `Workspace init failed: ${err?.message || 'Cannot create workspace directory.'}` };
       return;
     }
+
+    // Surface the persistent sandbox ID so the client can store it and resume later.
+    try {
+      const sandboxId = await this.actuator.getSandboxId(workspaceId);
+      if (sandboxId) yield { type: 'workspace_saved', sandboxId };
+    } catch { /* non-fatal */ }
 
     const history: { step: number; actionJson: string; observation: string }[] = [];
     let consecutiveParseFailures = 0;

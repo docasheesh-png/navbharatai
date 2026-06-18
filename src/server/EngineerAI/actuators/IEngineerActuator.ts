@@ -1,5 +1,11 @@
 export interface IEngineerActuator {
-  ensureWorkspace(workspaceId: string, projectType?: string): Promise<void>;
+  /**
+   * Prepare the workspace. If `resumeSandboxId` is provided, reconnect to that
+   * (possibly paused) sandbox — restoring its files, node_modules, and any
+   * running dev server — instead of creating a fresh one. Falls back to a new
+   * sandbox if the resume target no longer exists.
+   */
+  ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void>;
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
   readFile(workspaceId: string, filePath: string): Promise<string>;
   listFiles(workspaceId: string): Promise<string[]>;
@@ -48,4 +54,16 @@ export interface IEngineerActuator {
     workspaceId: string,
     sinceMs: number,
   ): Promise<{ errors: { t: number; kind: string; text: string }[] }>;
+  /**
+   * Return the persistent sandbox ID backing this workspace, or null when there
+   * is no real sandbox (LocalActuator). The client stores this and sends it back
+   * as `resumeSandboxId` next session to continue the same workspace.
+   */
+  getSandboxId(workspaceId: string): Promise<string | null>;
+  /**
+   * Pause a sandbox by ID to stop compute billing while preserving full state
+   * for a later resume. Works across server instances (operates on the cloud
+   * resource by ID). LocalActuator is a no-op. Returns true if paused.
+   */
+  pauseSandbox(sandboxId: string): Promise<boolean>;
 }

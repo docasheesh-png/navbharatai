@@ -96,19 +96,35 @@ export class E2BActuator implements IEngineerActuator {
   // Tracks per-sandbox persistent-browser daemon launch
   private _browserDaemon = new Map<string, Promise<boolean>>();
 
-  private async getSandbox(workspaceId: string): Promise<Sandbox> {
+  private async getSandbox(workspaceId: string, resumeSandboxId?: string): Promise<Sandbox> {
     const existing = this.sandboxes.get(workspaceId);
     if (existing) return existing;
 
-    const sandbox = await Sandbox.create({ timeoutMs: SANDBOX_TIMEOUT_MS });
+    let sandbox: Sandbox;
+    if (resumeSandboxId) {
+      // Reconnect to the persisted sandbox — auto-resumes it if paused, restoring
+      // all files, node_modules, and any running dev server. Fall back to a fresh
+      // sandbox if the resume target was killed/expired.
+      try {
+        sandbox = await Sandbox.connect(resumeSandboxId, { timeoutMs: SANDBOX_TIMEOUT_MS });
+      } catch {
+        sandbox = await Sandbox.create({ timeoutMs: SANDBOX_TIMEOUT_MS });
+      }
+    } else {
+      sandbox = await Sandbox.create({ timeoutMs: SANDBOX_TIMEOUT_MS });
+    }
     this.sandboxes.set(workspaceId, sandbox);
     return sandbox;
   }
 
-  async ensureWorkspace(workspaceId: string, projectType?: string): Promise<void> {
-    const sandbox = await this.getSandbox(workspaceId);
+  async ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
+    const sandbox = await this.getSandbox(workspaceId, resumeSandboxId);
     const exists = await sandbox.files.exists(WORKSPACE_ROOT);
-    if (exists) return;
+    if (exists) {
+      // Resumed sandbox already has the workspace — just ensure browser tooling is warming up.
+      this._kickoffPlaywright(sandbox, workspaceId);
+      return;
+    }
 
     await sandbox.files.makeDir(WORKSPACE_ROOT);
 
@@ -389,5 +405,25 @@ const {chromium}=require('playwright');
     }
     // Cap to the most recent 20 to keep the AI prompt bounded
     return { errors: errors.slice(-20) };
+  }
+
+  async getSandboxId(workspaceId: string): Promise<string | null> {
+    const sandbox = this.sandboxes.get(workspaceId);
+    return sandbox ? sandbox.sandboxId : null;
+  }
+
+  async pauseSandbox(sandboxId: string): Promise<boolean> {
+    try {
+      // Static pause works across server instances — operates on the cloud
+      // resource directly, even if this instance never held the live object.
+      const ok = await Sandbox.pause(sandboxId);
+      // Drop any live reference so the next run reconnects (and auto-resumes).
+      for (const [wid, sb] of this.sandboxes) {
+        if (sb.sandboxId === sandboxId) this.sandboxes.delete(wid);
+      }
+      return ok;
+    } catch {
+      return false;
+    }
   }
 }

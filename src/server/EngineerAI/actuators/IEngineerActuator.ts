@@ -38,4 +38,14 @@ export interface IEngineerActuator {
     action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait',
     args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
   ): Promise<{ screenshot: string; result: string }>;
+  /**
+   * Return runtime browser errors (console.error, uncaught exceptions, failed
+   * requests) captured since `sinceMs`. Lets the agent — and the user — see
+   * runtime failures that a successful build would never reveal. Returns an
+   * empty list when no browser session/errors exist.
+   */
+  getConsoleErrors(
+    workspaceId: string,
+    sinceMs: number,
+  ): Promise<{ errors: { t: number; kind: string; text: string }[] }>;
 }

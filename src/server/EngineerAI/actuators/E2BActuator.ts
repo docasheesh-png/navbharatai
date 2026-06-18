@@ -9,6 +9,7 @@ const SANDBOX_TIMEOUT_MS = 10 * 60 * 1000;
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 
 const CDP_PORT = 9222;
+const CONSOLE_LOG = `${TOOLS_DIR}/console.log`;
 
 const SCREENSHOT_SCRIPT = `
 const {chromium}=require('playwright');
@@ -28,11 +29,26 @@ const {chromium}=require('playwright');
 // Long-lived browser the agent drives across multiple interaction steps.
 // Launched once in the background; exposes a CDP port that action scripts
 // connect to. The DOM/cookies/current-URL persist between actions.
+// It also attaches console/pageerror/requestfailed listeners to every page
+// (existing and future) and appends runtime errors to CONSOLE_LOG as NDJSON —
+// this is how the agent SEES runtime errors, not just compile/build errors.
 const BROWSER_DAEMON_SCRIPT = `
 const {chromium}=require('playwright');
-chromium.launch({headless:true,args:['--no-sandbox','--disable-setuid-sandbox','--remote-debugging-port=${CDP_PORT}']})
-  .then(()=>{ setInterval(()=>{}, 1<<30); })
-  .catch(e=>{ process.stderr.write(String(e)); process.exit(1); });
+const fs=require('fs');
+const LOG=${JSON.stringify(CONSOLE_LOG)};
+function rec(kind,text){ try{ fs.appendFileSync(LOG, JSON.stringify({t:Date.now(),kind,text:String(text).slice(0,500)})+'\\n'); }catch(e){} }
+(async()=>{
+  const browser=await chromium.launch({headless:true,args:['--no-sandbox','--disable-setuid-sandbox','--remote-debugging-port=${CDP_PORT}']});
+  const seen=new WeakSet();
+  function attach(page){
+    if(seen.has(page))return; seen.add(page);
+    page.on('console',m=>{ if(m.type()==='error') rec('console',m.text()); });
+    page.on('pageerror',e=>rec('pageerror',e&&e.message||e));
+    page.on('requestfailed',r=>{ const f=r.failure(); rec('requestfailed',r.url()+' — '+(f&&f.errorText||'failed')); });
+  }
+  setInterval(()=>{ try{ for(const ctx of browser.contexts()){ for(const p of ctx.pages()){ attach(p); } } }catch(e){} }, 1000);
+  setInterval(()=>{}, 1<<30);
+})().catch(e=>{ process.stderr.write(String(e)); process.exit(1); });
 `.trim();
 
 // Connects to the persistent browser via CDP, performs ONE action, screenshots,
@@ -343,5 +359,31 @@ const {chromium}=require('playwright');
     const parsed = JSON.parse(result.stdout.trim());
     const detail = parsed.url ? `${parsed.result} (now at ${parsed.url})` : parsed.result;
     return { screenshot: parsed.screenshot, result: detail };
+  }
+
+  async getConsoleErrors(
+    workspaceId: string,
+    sinceMs: number,
+  ): Promise<{ errors: { t: number; kind: string; text: string }[] }> {
+    const sandbox = await this.getSandbox(workspaceId);
+    let raw = '';
+    try {
+      raw = await sandbox.files.read(CONSOLE_LOG);
+    } catch {
+      return { errors: [] }; // no browser session yet / no errors logged
+    }
+    const errors: { t: number; kind: string; text: string }[] = [];
+    for (const line of raw.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const e = JSON.parse(trimmed);
+        if (typeof e.t === 'number' && e.t > sinceMs) {
+          errors.push({ t: e.t, kind: String(e.kind || 'console'), text: String(e.text || '') });
+        }
+      } catch { /* skip malformed line */ }
+    }
+    // Cap to the most recent 20 to keep the AI prompt bounded
+    return { errors: errors.slice(-20) };
   }
 }

@@ -91,6 +91,7 @@ Coding rules (when in MODE 2):
 - For anything interactive (forms, buttons, navigation, login): actually TEST it with browser_action —
   click the buttons, fill the forms, and confirm from the returned screenshot that it works.
 - If a screenshot reveals problems (wrong layout, missing elements, broken styles, errors): fix them, then re-verify.
+- After a screenshot or browser_action, any RUNTIME browser errors (console.error, uncaught exceptions, failed network requests) are reported back to you automatically. Treat them as real bugs and fix them — a clean build does NOT mean the app works at runtime.
 - Output done only AFTER you have visually confirmed the app looks AND works correctly. No confirmation = not done.
 - Paths are relative to workspace root, no leading "/" or "..".
 - When starting a dev server, use port 3000 and bind to 0.0.0.0 (--host 0.0.0.0 --port 3000).
@@ -154,6 +155,7 @@ export class EngineerAgentLoop {
     let consecutiveParseFailures = 0;
     let lastPreviewUrl: string | null = null;  // updated when server_ready fires
     let lastScreenshot: string | null = null;  // base64 PNG — injected into next Grok call
+    let lastConsoleCheck = Date.now();          // Phase 4 — runtime error watermark
 
     for (let step = 1; step <= MAX_STEPS; step++) {
       if (signal?.aborted) { yield { type: 'aborted' }; return; }
@@ -338,6 +340,22 @@ export class EngineerAgentLoop {
         observation = `Build failed — cannot mark done yet. Fix the errors:\n${buildResult.logs.slice(-2000)}`;
       } else {
         observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, done.`;
+      }
+
+      // Phase 4 — Live Sync: after any browser interaction, surface runtime
+      // errors (console.error, uncaught exceptions, failed requests) to BOTH
+      // the user (console_error event) and the agent (appended to observation,
+      // so it self-corrects on runtime bugs a clean build would never reveal).
+      if (parsed.action === 'screenshot' || parsed.action === 'browser_action') {
+        try {
+          const { errors } = await this.actuator.getConsoleErrors(workspaceId, lastConsoleCheck);
+          lastConsoleCheck = Date.now();
+          if (errors.length > 0) {
+            yield { type: 'console_error', errors: errors.map(e => ({ kind: e.kind, text: e.text })) };
+            observation += `\n\n[RUNTIME BROWSER ERRORS — these happened in the live app, fix them]\n` +
+              errors.map(e => `• [${e.kind}] ${e.text}`).join('\n');
+          }
+        } catch { /* non-fatal — console capture is best-effort */ }
       }
 
       history.push({

@@ -208,6 +208,14 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         setActiveTab('browser');
         appendChat('system', `🖱️ ${event.detail || event.action}`);
         break;
+      case 'console_error': {
+        const errs: { kind: string; text: string }[] = event.errors || [];
+        if (errs.length > 0) {
+          const lines = errs.map(e => `⚠️ [${e.kind}] ${e.text}`).join('\n');
+          appendChat('system', `Runtime errors in live app:\n${lines}`);
+        }
+        break;
+      }
       case 'server_ready':
         setIframeSrc(event.url);
         setBrowserUrlInput(event.url);

@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* Disable the browser's left/right swipe back/forward navigation — it was
+   triggering accidental history navigation. Custom swipe (open/close the
+   sidebar) is handled in JS. */
+html, body {
+  overscroll-behavior-x: none;
+  overscroll-behavior-y: auto;
+}
+
 @layer base {
   :root {
     --theme-bg: #0d1117;

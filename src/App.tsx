@@ -559,6 +559,33 @@ export default function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [openTabs, setOpenTabs] = useState<ViewType[]>([]);
 
+  // Touch swipe → sidebar control (replaces the accidental browser back/forward).
+  // Left→right swipe opens the sidebar; right→left closes it (no-op if already closed).
+  useEffect(() => {
+    let startX = 0, startY = 0, tracking = false;
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) { tracking = false; return; }
+      startX = e.touches[0].clientX; startY = e.touches[0].clientY; tracking = true;
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (!tracking) return;
+      tracking = false;
+      const t = e.changedTouches[0];
+      if (!t) return;
+      const dx = t.clientX - startX, dy = t.clientY - startY;
+      // Mostly-horizontal, decisive swipe only.
+      if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+      if (dx > 0) setIsMenuOpen(true);                 // left→right: open
+      else setIsMenuOpen(prev => (prev ? false : prev)); // right→left: close if open, else nothing
+    };
+    document.addEventListener('touchstart', onStart, { passive: true });
+    document.addEventListener('touchend', onEnd, { passive: true });
+    return () => {
+      document.removeEventListener('touchstart', onStart);
+      document.removeEventListener('touchend', onEnd);
+    };
+  }, []);
+
   const [errorContext, setErrorContext] = useState<ErrorContext | null>(null);
   const [githubToken, setGithubToken] = useState<string | null>(() => localStorage.getItem('gh_token'));
   const [firebaseToken, setFirebaseToken] = useState<string | null>(() => localStorage.getItem('fb_token'));

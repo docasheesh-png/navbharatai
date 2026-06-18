@@ -39,9 +39,13 @@ export function registerEngineerRoutes(app: Express): void {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.flushHeaders();
 
-    // Kill switch — abort the agent loop if the client disconnects
+    // Kill switch — abort the agent loop if the client disconnects.
+    // CRITICAL: use res.on('close') NOT req.on('close').
+    // req.on('close') fires when the request BODY is consumed by express.json() —
+    // i.e. almost immediately, aborting the generator before it sends any events.
+    // res.on('close') fires only when the response connection is dropped abnormally.
     const abort = new AbortController();
-    req.on('close', () => abort.abort());
+    res.on('close', () => { if (!res.writableEnded) abort.abort(); });
 
     const send = (data: object) => {
       if (!res.writableEnded) res.write(JSON.stringify(data) + '\n');

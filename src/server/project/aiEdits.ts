@@ -14,7 +14,6 @@ import type { VirtualFileSystem } from './ProjectModel';
 import type { ProjectIssue } from './ProjectVerifier';
 import { selectArchitecture, manifestContract } from './ArchitectureManifest';
 import { featureChecklist } from './FeatureCoverage';
-import { extractRequirementSpec, specSummary, hasUsefulSpec } from './RequirementSpec';
 
 /** Extract the first JSON value (array or object) from arbitrary model text. */
 function extractJson(raw: string): unknown {
@@ -159,12 +158,8 @@ function isScaffoldState(vfs: VirtualFileSystem): boolean {
 async function planFiles(callModel: ModelCall, prompt: string): Promise<PlannedFile[]> {
   const contract = manifestContract(selectArchitecture(prompt));
   const checklist = featureChecklist(prompt);
-  // Understand ANY app domain: distill the prompt into a structured spec so the
-  // plan covers every module/page/entity, not just keyword-catalog features.
-  const spec = await extractRequirementSpec(callModel, prompt);
-  const specBlock = hasUsefulSpec(spec) ? specSummary(spec) + '\n\n' : '';
   const sys = `You are a senior software architect planning a real, runnable multi-file web app.\n\n${contract}\n\n${ENGINEERING_RULES}\n\n${PLAN_FORMAT}`;
-  const raw = await callModel(sys, `App request:\n${prompt}\n\n${specBlock}${checklist ? checklist + '\n\n' : ''}Plan the full file tree now. Conform strictly to the ARCHITECTURE above — one framework only. Ensure EVERY module, page, entity, and checklist feature maps to concrete files.`);
+  const raw = await callModel(sys, `App request:\n${prompt}\n\n${checklist ? checklist + '\n\n' : ''}Plan the full file tree now. Conform strictly to the ARCHITECTURE above — one framework only. Ensure EVERY module, page, entity, and checklist feature maps to concrete files.`);
   const json: any = extractJson(raw);
   const arr: any[] = Array.isArray(json) ? json : Array.isArray(json?.files) ? json.files : [];
   const seen = new Set<string>();
@@ -203,25 +198,34 @@ async function generateBatched(callModel: ModelCall, prompt: string, plan: Plann
 /** Build generate+fix functions for the BuildPipeline backed by an injected model. */
 export function makeAiEditGenerator(callModel: ModelCall) {
   const generate = async (prompt: string, vfs: VirtualFileSystem): Promise<FileEdit[]> => {
-    // Fresh/scaffold-only build → plan the architecture, then generate files in
-    // batches so complex, multi-page apps come out complete instead of truncated.
-    if (isScaffoldState(vfs)) {
+    const fresh = isScaffoldState(vfs);
+
+    if (fresh) {
+      // FAST PATH: one strong from-scratch call. The multi-call plan→batch path
+      // made synchronous builds do 10+ sequential model calls → gateway 504
+      // timeout. Do a single high-budget generation first; only fall back to
+      // plan→batch if that genuinely under-delivers (rare).
+      const contract = manifestContract(selectArchitecture(prompt)) + '\n\n';
+      const checklist = featureChecklist(prompt);
+      const sys = `You are a world-class full-stack engineer building a real, multi-file web application that must actually build and run.\n\n${contract}${checklist ? checklist + '\n\n' : ''}${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
+      const user = `Build this application from scratch as a complete, runnable multi-file project.\n\nUser request:\n${prompt}\n\nReturn the full set of files needed to run it — implement EVERY requested feature in separate component/page files, not just a shell.`;
+      const edits = parseFileEdits(await callModel(sys, user));
+      if (edits.length >= 2) return edits;
+
+      // Single shot under-delivered → plan→batch fallback (more calls, slower).
       try {
         const plan = await planFiles(callModel, prompt);
         if (plan.length >= 2) {
-          const edits = await generateBatched(callModel, prompt, plan);
-          if (edits.length >= 2) return edits;
+          const batched = await generateBatched(callModel, prompt, plan);
+          if (batched.length >= 2) return batched;
         }
-      } catch { /* fall through to single-shot below */ }
+      } catch { /* keep whatever the single shot produced */ }
+      return edits;
     }
 
-    const fresh = isScaffoldState(vfs);
-    const contract = fresh ? manifestContract(selectArchitecture(prompt)) + '\n\n' : '';
-    const checklist = fresh ? featureChecklist(prompt) : '';
-    const sys = `You are a world-class full-stack engineer building a real, multi-file web application that must actually build and run.\n\n${contract}${checklist ? checklist + '\n\n' : ''}${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
-    const user = fresh
-      ? `Build this application from scratch as a complete, runnable multi-file project.\n\nUser request:\n${prompt}\n\nReturn the full set of files needed to run it — implement EVERY requested feature, not just a shell.`
-      : `Current project files (with contents — use exact text for "patch" finds):\n\n${fileContext(vfs)}\n\nUser request:\n${prompt}\n\nApply the minimal correct set of edits. Keep all existing references valid.`;
+    // Edit path (existing project) — single surgical-edit call.
+    const sys = `You are a world-class full-stack engineer editing a real, multi-file web application.\n\n${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
+    const user = `Current project files (with contents — use exact text for "patch" finds):\n\n${fileContext(vfs)}\n\nUser request:\n${prompt}\n\nApply the minimal correct set of edits. Keep all existing references valid.`;
     return parseFileEdits(await callModel(sys, user));
   };
   const fix = async (issues: ProjectIssue[], vfs: VirtualFileSystem): Promise<FileEdit[]> => {

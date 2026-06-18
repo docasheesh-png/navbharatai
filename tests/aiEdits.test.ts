@@ -38,13 +38,20 @@ describe('parseFileEdits', () => {
 });
 
 describe('makeAiEditGenerator', () => {
+  it('fresh build uses ONE from-scratch call when it delivers (no 504 call-storm)', async () => {
+    // Single strong call returns multi-file edits → returned directly, no plan/batch.
+    const callModel = vi.fn(async () => '[{"op":"write","path":"index.html","content":"<div id=root></div>"},{"op":"write","path":"src/App.jsx","content":"export default ()=>null"}]');
+    const { generate } = makeAiEditGenerator(callModel);
+    const edits = await generate('a kanban board', VirtualFileSystem.fromRecord({}));
+    expect(callModel).toHaveBeenCalledTimes(1);                 // fast path = ONE call
+    expect(callModel.mock.calls[0][1]).toContain('from scratch');
+    expect(edits.filter(e => e.op === 'write').length).toBeGreaterThanOrEqual(2);
+  });
+
   it('treats the TypeScript scaffold (src/App.tsx) as a fresh build, not an edit', async () => {
-    // Regression: a vite-react-ts scaffold must take the plan→batch from-scratch
-    // path (spec/architect calls), NOT the single-shot "minimal edit" path.
-    const callModel = vi.fn()
-      .mockResolvedValueOnce('{"appType":"app","modules":["auth"],"pages":["Login"],"entities":["User"]}')
-      .mockResolvedValueOnce('{"entry":"index.html","files":[{"path":"src/App.tsx","purpose":"root"},{"path":"src/pages/Login.tsx","purpose":"login"}]}')
-      .mockResolvedValue('[{"op":"write","path":"src/App.tsx","content":"export default ()=>null"},{"op":"write","path":"src/pages/Login.tsx","content":"export default ()=>null"}]');
+    // Regression: a vite-react-ts scaffold must take the from-scratch path
+    // ("from scratch" wording), NOT the surgical "minimal edit" path.
+    const callModel = vi.fn(async () => '[{"op":"write","path":"src/App.tsx","content":"export default ()=>null"},{"op":"write","path":"src/pages/Login.tsx","content":"export default ()=>null"}]');
     const { generate } = makeAiEditGenerator(callModel);
     const tsScaffold = VirtualFileSystem.fromRecord({
       'index.html': '<div id="root"></div><script type="module" src="/src/main.tsx"></script>',
@@ -53,40 +60,20 @@ describe('makeAiEditGenerator', () => {
       'tsconfig.json': '{}',
     });
     await generate('a typescript react app with auth', tsScaffold);
-    // Took the from-scratch path: first call is the requirements analyst (spec).
-    expect(callModel.mock.calls[0][0]).toContain('analyst');
-    expect(callModel.mock.calls[1][0]).toContain('architect');
+    expect(callModel.mock.calls[0][1]).toContain('from scratch');   // fresh path, not edit
+    expect(callModel.mock.calls[0][1]).not.toContain('minimal correct set of edits');
   });
 
-  it('fresh build extracts a spec, plans the file tree, then generates in batches', async () => {
-    // 1st call = requirement spec; 2nd = file plan; subsequent = batch write ops.
+  it('falls back to plan→batch only when the single shot under-delivers', async () => {
     const callModel = vi.fn()
-      .mockResolvedValueOnce('{"appType":"board","modules":["tasks"],"pages":["Board"],"entities":["Task"]}')
-      .mockResolvedValueOnce('{"entry":"index.html","files":[{"path":"index.html","purpose":"entry"},{"path":"src/App.jsx","purpose":"root"}]}')
+      .mockResolvedValueOnce('no json here')   // single shot → 0 edits
+      .mockResolvedValueOnce('{"entry":"index.html","files":[{"path":"index.html","purpose":"e"},{"path":"src/App.jsx","purpose":"r"}]}') // plan (architect)
       .mockResolvedValue('[{"op":"write","path":"index.html","content":"<div id=root></div>"},{"op":"write","path":"src/App.jsx","content":"export default ()=>null"}]');
     const { generate } = makeAiEditGenerator(callModel);
     const edits = await generate('a kanban board', VirtualFileSystem.fromRecord({}));
-    // spec call first (analyst), then the architect plan call — both see the request
-    expect(callModel.mock.calls[0][0]).toContain('analyst');
-    expect(callModel.mock.calls[1][0]).toContain('architect');
-    expect(callModel.mock.calls.some(c => String(c[1]).includes('a kanban board'))).toBe(true);
-    // produced multiple files
+    expect(callModel.mock.calls[0][1]).toContain('from scratch'); // tried single shot first
+    expect(callModel.mock.calls[1][0]).toContain('architect');    // then plan fallback
     expect(edits.filter(e => e.op === 'write').length).toBeGreaterThanOrEqual(2);
-    expect(edits.some(e => e.path === 'src/App.jsx')).toBe(true);
-  });
-
-  it('falls back to single-shot when the plan is not multi-file', async () => {
-    // spec junk + plan junk → no usable plan → single-shot fresh build path
-    const callModel = vi.fn()
-      .mockResolvedValueOnce('no json here')   // spec
-      .mockResolvedValueOnce('no json here')   // plan
-      .mockResolvedValue('[{"op":"write","path":"index.html","content":"<h1>hi</h1>"}]');
-    const { generate } = makeAiEditGenerator(callModel);
-    const edits = await generate('make a page', VirtualFileSystem.fromRecord({}));
-    expect(edits).toEqual([{ op: 'write', path: 'index.html', content: '<h1>hi</h1>' }]);
-    // the single-shot call uses the from-scratch wording
-    const lastUser = callModel.mock.calls[callModel.mock.calls.length - 1][1];
-    expect(lastUser).toContain('from scratch');
   });
 
   it('generate includes existing file CONTENTS (not just paths) for edits', async () => {

@@ -86,10 +86,20 @@ const ENGINEERING_RULES = `Rules for production-quality output:
 - Write real, complete code. No TODO/placeholder/"...rest of code" stubs, no empty handlers. Implement the behavior the user asked for.
 - Keep JSON valid: escape newlines/quotes inside "content". Output the FULL content of every file you write.`;
 
+/** Visual design directive — make generated UIs genuinely beautiful, not plain. */
+const DESIGN_RULES = `VISUAL DESIGN (make it genuinely beautiful — never plain/unstyled):
+- Premium, modern look: a cohesive palette with an accent color, generous spacing, rounded corners, subtle shadows, clear visual hierarchy. Default to a polished dark theme unless asked otherwise.
+- Use CSS variables for colors/spacing/radius (a small design system) and STYLE EVERY element — no bare browser defaults.
+- Buttons: padded, rounded, accent/gradient background, white text, hover + active states, pointer cursor, smooth transition. Never ship unstyled <button>.
+- Cards/sections: padding, border or soft shadow, rounded. Inputs: styled with focus states. Readable typography (system-ui), strong contrast.
+- Responsive layout (mobile + desktop), tasteful header/nav, and nice empty/loading states. Aim for a UI a designer would approve.`;
+
 /** How much of each existing file's content to inline for edit context. */
-const MAX_FILE_CHARS = 4000;
-const MAX_CONTEXT_FILES = 40;
-const MAX_TOTAL_CONTEXT = 120_000;
+// Raised so the files being edited are shown in FULL — truncated content made
+// `patch find` snippets miss (RC2), so edits silently no-op (RC3) and apps broke.
+const MAX_FILE_CHARS = 12_000;
+const MAX_CONTEXT_FILES = 60;
+const MAX_TOTAL_CONTEXT = 200_000;
 
 function fileList(vfs: VirtualFileSystem): string {
   const paths = vfs.paths();
@@ -159,7 +169,7 @@ function isScaffoldState(vfs: VirtualFileSystem): boolean {
 async function planFiles(callModel: ModelCall, prompt: string): Promise<PlannedFile[]> {
   const contract = manifestContract(selectArchitecture(prompt));
   const checklist = featureChecklist(prompt);
-  const sys = `You are a senior software architect planning a real, runnable multi-file web app.\n\n${contract}\n\n${ENGINEERING_RULES}\n\n${PLAN_FORMAT}`;
+  const sys = `You are a senior software architect planning a real, runnable multi-file web app.\n\n${contract}\n\n${ENGINEERING_RULES}\n\n${DESIGN_RULES}\n\n${PLAN_FORMAT}`;
   const raw = await callModel(sys, `App request:\n${prompt}\n\n${checklist ? checklist + '\n\n' : ''}Plan the full file tree now. Conform strictly to the ARCHITECTURE above — one framework only. Ensure EVERY module, page, entity, and checklist feature maps to concrete files.`);
   const json: any = extractJson(raw);
   const arr: any[] = Array.isArray(json) ? json : Array.isArray(json?.files) ? json.files : [];
@@ -184,7 +194,7 @@ async function generateBatched(callModel: ModelCall, prompt: string, plan: Plann
   const done = new Set<string>();
   for (let i = 0; i < plan.length; i += BATCH) {
     const batch = plan.slice(i, i + BATCH);
-    const sys = `You are a world-class engineer writing complete files of a real multi-file app.\n\n${contract}\n\n${checklist ? checklist + '\n\n' : ''}${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
+    const sys = `You are a world-class engineer writing complete files of a real multi-file app.\n\n${contract}\n\n${checklist ? checklist + '\n\n' : ''}${ENGINEERING_RULES}\n\n${DESIGN_RULES}\n\n${EDIT_FORMAT}`;
     const user = `App request:\n${prompt}\n\nFull file plan (for cross-file imports):\n${planStr}\n\n`
       + `Write COMPLETE, fully-functional content for ONLY these files (one write op each):\n${batch.map(f => `- ${f.path}: ${f.purpose}`).join('\n')}\n`
       + `Make imports/paths match the plan exactly. No TODOs, no placeholders.`;
@@ -208,8 +218,8 @@ export function makeAiEditGenerator(callModel: ModelCall) {
       // plan→batch if that genuinely under-delivers (rare).
       const contract = manifestContract(selectArchitecture(prompt)) + '\n\n';
       const checklist = featureChecklist(prompt);
-      const sys = `You are a world-class full-stack engineer building a real, multi-file web application that must actually build and run.\n\n${contract}${checklist ? checklist + '\n\n' : ''}${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
-      const user = `Build this application from scratch as a complete, runnable multi-file project.\n\nUser request:\n${prompt}\n\nReturn the full set of files needed to run it — implement EVERY requested feature in separate component/page files, not just a shell.`;
+      const sys = `You are a world-class full-stack engineer building a real, multi-file web application that must actually build and run.\n\n${contract}${checklist ? checklist + '\n\n' : ''}${ENGINEERING_RULES}\n\n${DESIGN_RULES}\n\n${EDIT_FORMAT}`;
+      const user = `Build this application from scratch as a complete, runnable multi-file project.\n\nUser request:\n${prompt}\n\nReturn the full set of files needed to run it — implement EVERY requested feature in separate component/page files, not just a shell. Make the UI genuinely beautiful per the VISUAL DESIGN rules.`;
       const edits = parseFileEdits(await callModel(sys, user));
       if (edits.length >= 2) return edits;
 
@@ -225,8 +235,9 @@ export function makeAiEditGenerator(callModel: ModelCall) {
     }
 
     // Edit path (existing project) — single surgical-edit call.
-    const sys = `You are a world-class full-stack engineer editing a real, multi-file web application.\n\n${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
-    const user = `Current project files (with contents — use exact text for "patch" finds):\n\n${fileContext(vfs)}\n\nUser request:\n${prompt}\n\nApply the minimal correct set of edits. Keep all existing references valid.`;
+    const sys = `You are a world-class full-stack engineer editing a real, multi-file web application.\n\n${ENGINEERING_RULES}\n\n${DESIGN_RULES}\n\n${EDIT_FORMAT}`;
+    const user = `Current project files (with FULL contents below):\n\n${fileContext(vfs)}\n\nUser request:\n${prompt}\n\n`
+      + `Apply the correct set of edits and keep all existing references valid. CRITICAL for reliability: a "patch" find string MUST be copied EXACTLY (character-for-character) from the file content shown above — if you are unsure it matches exactly, use a full "write" of that file instead. Preserve everything you are not changing.`;
     return parseFileEdits(await callModel(sys, user));
   };
   const fix = async (issues: ProjectIssue[], vfs: VirtualFileSystem): Promise<FileEdit[]> => {
@@ -240,7 +251,7 @@ export function makeAiEditGenerator(callModel: ModelCall) {
   const completeFeatures = async (prompt: string, missing: string[], vfs: VirtualFileSystem): Promise<FileEdit[]> => {
     if (!missing.length) return [];
     const contract = manifestContract(selectArchitecture(prompt));
-    const sys = `You are a world-class engineer ADDING missing features to an existing app — keep the SAME architecture, never mix frameworks.\n\n${contract}\n\n${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
+    const sys = `You are a world-class engineer ADDING missing features to an existing app — keep the SAME architecture, never mix frameworks.\n\n${contract}\n\n${ENGINEERING_RULES}\n\n${DESIGN_RULES}\n\n${EDIT_FORMAT}`;
     const user = `Current project files (with contents):\n\n${fileContext(vfs)}\n\nApp request:\n${prompt}\n\n`
       + `These requested features are MISSING — implement them with real, working code, wiring them into the existing app (routes/components/state as needed):\n`
       + missing.map((m) => `- ${m}`).join('\n');

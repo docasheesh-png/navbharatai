@@ -91,6 +91,66 @@ export function buildApp(req: BuildRequest, signal?: AbortSignal): Promise<Build
   return postJson<BuildResponse>('/api/build', req, signal);
 }
 
+/** A live progress event streamed from /api/build-stream. */
+export interface BuildStreamEvent {
+  type: 'status' | 'module' | 'files' | 'complete' | 'error';
+  message?: string;
+  name?: string;
+  state?: 'start' | 'done' | 'failed';
+  coverage?: number;
+  paths?: string[];
+  // present on the final 'complete' event:
+  ok?: boolean;
+  files?: Record<string, string>;
+  fileCount?: number;
+  verify?: VerifyReport;
+  validation?: ValidationReport;
+  previewAllowed?: boolean;
+  preview?: PreviewInfo;
+}
+
+/**
+ * Streaming build: module-by-module generation with LIVE progress. Calls
+ * `onEvent` for every progress event and resolves with the final 'complete'
+ * event. The open SSE connection means large multi-module builds don't hit the
+ * gateway 504.
+ */
+export async function buildAppStream(
+  req: BuildRequest,
+  onEvent: (ev: BuildStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<BuildStreamEvent> {
+  const res = await fetch('/api/build-stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+    signal,
+  });
+  if (!res.ok || !res.body) throw new Error(`Build stream failed (${res.status})`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let complete: BuildStreamEvent | null = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() || '';
+    for (const part of parts) {
+      const line = part.split('\n').find((l) => l.startsWith('data: '));
+      if (!line) continue;
+      let ev: BuildStreamEvent;
+      try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+      if (ev.type === 'error') throw new Error(ev.message || 'Build failed');
+      if (ev.type === 'complete') complete = ev;
+      onEvent(ev);
+    }
+  }
+  if (!complete) throw new Error('Build stream ended without a result.');
+  return complete;
+}
+
 /** Start a live preview for a set of files (routes to static / server-container). */
 export function startPreview(files: Record<string, string>, projectId = 'project'): Promise<PreviewInfo> {
   return postJson<PreviewInfo>('/api/preview', { projectId, files });

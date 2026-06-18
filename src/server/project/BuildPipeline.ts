@@ -20,6 +20,7 @@ import { detectFramework, scaffold, type Framework } from './Scaffold';
 import { runValidation, type ValidationReport, MIN_FEATURE_COVERAGE } from './ValidationPipeline';
 import { selectArchitecture } from './ArchitectureManifest';
 import { computeFeatureCoverage } from './FeatureCoverage';
+import { checkSyntax } from './SyntaxCheck';
 
 export type EditGenerator = (prompt: string, vfs: VirtualFileSystem) => Promise<FileEdit[]>;
 /** Implement still-missing requested features into the existing project (agentic). */
@@ -129,8 +130,39 @@ export async function runBuild(input: BuildPipelineInput): Promise<BuildPipeline
   // Belt-and-suspenders guard for when the AI ignores the manifest instruction.
   fixEsModuleScriptTag(vfs);
 
+  // Syntax/compile gate: parse every source file (esbuild). The model sometimes
+  // emits malformed JSX (e.g. an unclosed <Router>) that passes every other gate
+  // and then crashes the preview at compile time. Catch it, try ONE targeted
+  // repair, and fold the result into the preview decision (no fake "live").
+  let syntaxIssues = await checkSyntax(vfs);
+  if (syntaxIssues.length && input.fix) {
+    try {
+      const fixes = await input.fix(syntaxIssues, vfs);
+      if (fixes.length) {
+        applyEdits(vfs, fixes, versions, 'syntax repair');
+        syntaxIssues = await checkSyntax(vfs);
+      }
+    } catch { /* keep original syntax issues */ }
+  }
+
   // Final validation gates → structured report + preview decision (no fake success).
   const validation = runValidation(vfs, selectArchitecture(input.prompt), input.prompt);
+
+  // Merge the syntax gate into the report — a file that won't compile must BLOCK
+  // preview and be reported honestly.
+  if (syntaxIssues.length) {
+    validation.gates.push({
+      id: 'syntax',
+      name: `Syntax / Compile (${syntaxIssues.length} file(s) fail to parse)`,
+      status: 'fail',
+      severity: 'critical',
+      messages: syntaxIssues.map((i) => `${i.file}: ${i.message}`),
+    });
+    validation.previewAllowed = false;
+    validation.status = 'FAILED';
+    validation.blockingReasons = [...validation.blockingReasons, ...syntaxIssues.map((i) => `${i.file}: ${i.message}`)];
+    validation.qualityScore = Math.max(0, validation.qualityScore - 45);
+  }
 
   return {
     ok: repair.finalVerify.ok,

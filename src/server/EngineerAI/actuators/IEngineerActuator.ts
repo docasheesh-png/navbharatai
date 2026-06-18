@@ -26,4 +26,16 @@ export interface IEngineerActuator {
    * Returns a base64-encoded PNG. Requires a real sandbox with a browser available.
    */
   screenshot(workspaceId: string, url: string): Promise<{ base64: string; mimeType: 'image/png' }>;
+  /**
+   * Perform a real browser interaction (click, type, navigate, scroll, press, wait)
+   * against a persistent headless browser session inside the sandbox, then return
+   * a screenshot of the resulting page. State (cookies, DOM, current URL) persists
+   * across calls so the agent can drive a multi-step flow (e.g. fill a form, submit,
+   * verify). Requires a real sandbox; LocalActuator rejects.
+   */
+  browserAction(
+    workspaceId: string,
+    action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait',
+    args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
+  ): Promise<{ screenshot: string; result: string }>;
 }

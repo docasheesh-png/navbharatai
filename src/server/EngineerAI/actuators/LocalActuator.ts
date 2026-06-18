@@ -137,4 +137,14 @@ export class LocalActuator implements IEngineerActuator {
       'Screenshots require a real sandbox (set E2B_API_KEY). LocalActuator cannot run a headless browser.'
     );
   }
+
+  async browserAction(
+    _workspaceId: string,
+    _action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait',
+    _args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
+  ): Promise<{ screenshot: string; result: string }> {
+    throw new Error(
+      'Browser interaction requires a real sandbox (set E2B_API_KEY). LocalActuator cannot run a headless browser.'
+    );
+  }
 }

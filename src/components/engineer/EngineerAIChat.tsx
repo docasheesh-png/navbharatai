@@ -203,6 +203,11 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         setActiveTab('browser');
         appendChat('system', `📸 Screenshot: ${event.url}`);
         break;
+      case 'browser_action_result':
+        setScreenshots(prev => [...prev, { url: event.detail || event.action, base64: event.base64, timestamp: Date.now() }]);
+        setActiveTab('browser');
+        appendChat('system', `🖱️ ${event.detail || event.action}`);
+        break;
       case 'server_ready':
         setIframeSrc(event.url);
         setBrowserUrlInput(event.url);

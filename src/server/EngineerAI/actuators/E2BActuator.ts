@@ -8,6 +8,8 @@ const TOOLS_DIR = '/home/user/.e-tools';
 const SANDBOX_TIMEOUT_MS = 10 * 60 * 1000;
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 
+const CDP_PORT = 9222;
+
 const SCREENSHOT_SCRIPT = `
 const {chromium}=require('playwright');
 (async()=>{
@@ -23,6 +25,49 @@ const {chromium}=require('playwright');
 })().catch(e=>{process.stderr.write(String(e));process.exit(1)});
 `.trim();
 
+// Long-lived browser the agent drives across multiple interaction steps.
+// Launched once in the background; exposes a CDP port that action scripts
+// connect to. The DOM/cookies/current-URL persist between actions.
+const BROWSER_DAEMON_SCRIPT = `
+const {chromium}=require('playwright');
+chromium.launch({headless:true,args:['--no-sandbox','--disable-setuid-sandbox','--remote-debugging-port=${CDP_PORT}']})
+  .then(()=>{ setInterval(()=>{}, 1<<30); })
+  .catch(e=>{ process.stderr.write(String(e)); process.exit(1); });
+`.trim();
+
+// Connects to the persistent browser via CDP, performs ONE action, screenshots,
+// then exits WITHOUT closing the browser (so state survives for the next action).
+const BROWSER_ACTION_SCRIPT = `
+const {chromium}=require('playwright');
+(async()=>{
+  const a=JSON.parse(process.argv[2]||'{}');
+  const browser=await chromium.connectOverCDP('http://localhost:${CDP_PORT}');
+  const ctx=browser.contexts()[0]||await browser.newContext({viewport:{width:1280,height:720}});
+  let page=ctx.pages()[0]||await ctx.newPage();
+  await page.setViewportSize({width:1280,height:720}).catch(()=>{});
+  let result='';
+  try{
+    if(a.action==='navigate'){await page.goto(a.url,{waitUntil:'networkidle',timeout:15000});result='Navigated to '+a.url;}
+    else if(a.action==='click'){await page.click(a.selector,{timeout:8000});result='Clicked '+a.selector;}
+    else if(a.action==='type'){await page.fill(a.selector,a.text||'',{timeout:8000});result='Typed into '+a.selector;}
+    else if(a.action==='scroll'){await page.evaluate(d=>window.scrollBy(0,d==='up'?-700:700),a.direction||'down');result='Scrolled '+(a.direction||'down');}
+    else if(a.action==='press'){await page.keyboard.press(a.text||'Enter');result='Pressed '+(a.text||'Enter');}
+    else if(a.action==='wait'){await page.waitForTimeout(2500);result='Waited';}
+    else{result='Unknown browser action: '+a.action;}
+    await page.waitForTimeout(600);
+  }catch(e){result='ERROR: '+String(e&&e.message||e);}
+  const url=page.url();
+  const buf=await page.screenshot({type:'png'});
+  process.stdout.write(JSON.stringify({result,url,screenshot:buf.toString('base64')}));
+  process.exit(0);
+})().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1);});
+`.trim();
+
+/** Wrap a string as a single shell argument (safe for arbitrary JSON payloads). */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
 /**
  * Phase 2 actuator: each workspaceId gets its own real e2b.dev cloud sandbox
  * (separate VM, real OS-level isolation). Requires E2B_API_KEY.
@@ -32,6 +77,8 @@ export class E2BActuator implements IEngineerActuator {
   private templateRegistry = new TemplateRegistry();
   // Tracks per-sandbox playwright install progress
   private _playwrightReady = new Map<string, Promise<boolean>>();
+  // Tracks per-sandbox persistent-browser daemon launch
+  private _browserDaemon = new Map<string, Promise<boolean>>();
 
   private async getSandbox(workspaceId: string): Promise<Sandbox> {
     const existing = this.sandboxes.get(workspaceId);
@@ -85,8 +132,10 @@ export class E2BActuator implements IEngineerActuator {
           );
           if (pw.exitCode !== 0) return false;
         }
-        // Write the reusable screenshot script once
+        // Write the reusable browser scripts once
         await sandbox.files.write(`${TOOLS_DIR}/screenshot.js`, SCREENSHOT_SCRIPT);
+        await sandbox.files.write(`${TOOLS_DIR}/daemon.js`, BROWSER_DAEMON_SCRIPT);
+        await sandbox.files.write(`${TOOLS_DIR}/browser-action.js`, BROWSER_ACTION_SCRIPT);
         return true;
       } catch {
         return false;
@@ -230,5 +279,69 @@ const {chromium}=require('playwright');
     }
 
     return { base64: result.stdout.trim(), mimeType: 'image/png' };
+  }
+
+  /** Launch the persistent browser daemon once and wait for its CDP port to open. */
+  private async _ensureBrowserDaemon(sandbox: Sandbox, workspaceId: string): Promise<boolean> {
+    const existing = this._browserDaemon.get(workspaceId);
+    if (existing) return existing;
+
+    const promise: Promise<boolean> = (async () => {
+      // daemon.js is written during playwright install; rewrite defensively in case.
+      await sandbox.files.write(`${TOOLS_DIR}/daemon.js`, BROWSER_DAEMON_SCRIPT).catch(() => {});
+      await sandbox.commands
+        .run(`PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/daemon.js`, {
+          cwd: TOOLS_DIR,
+          background: true,
+        })
+        .catch(() => {});
+
+      // Poll the CDP version endpoint until the browser is reachable (up to ~20 s)
+      for (let i = 0; i < 20; i++) {
+        const c = await sandbox.commands
+          .run(`curl -s http://localhost:${CDP_PORT}/json/version || true`, { timeoutMs: 5000 })
+          .catch(() => ({ stdout: '' } as any));
+        if (c.stdout && c.stdout.includes('webSocketDebuggerUrl')) return true;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      // Proceed anyway — the action script also waits/retries the connection.
+      return true;
+    })();
+
+    this._browserDaemon.set(workspaceId, promise);
+    return promise;
+  }
+
+  async browserAction(
+    workspaceId: string,
+    action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait',
+    args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
+  ): Promise<{ screenshot: string; result: string }> {
+    const sandbox = await this.getSandbox(workspaceId);
+
+    if (!this._playwrightReady.has(workspaceId)) this._kickoffPlaywright(sandbox, workspaceId);
+    const ready = await Promise.race([
+      this._playwrightReady.get(workspaceId)!,
+      new Promise<boolean>(resolve => setTimeout(() => resolve(false), 120_000)),
+    ]);
+    if (!ready) {
+      throw new Error('Playwright not ready yet (still installing or failed).');
+    }
+
+    await this._ensureBrowserDaemon(sandbox, workspaceId);
+
+    const payload = JSON.stringify({ action, ...args });
+    const result = await sandbox.commands.run(
+      `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/browser-action.js ${shellQuote(payload)}`,
+      { cwd: TOOLS_DIR, timeoutMs: 30_000 },
+    );
+
+    if (!result.stdout || result.exitCode !== 0) {
+      throw new Error(`Browser action failed: ${result.stderr.slice(0, 300)}`);
+    }
+
+    const parsed = JSON.parse(result.stdout.trim());
+    const detail = parsed.url ? `${parsed.result} (now at ${parsed.url})` : parsed.result;
+    return { screenshot: parsed.screenshot, result: detail };
   }
 }

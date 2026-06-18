@@ -42,7 +42,7 @@ Examples that trigger reply (in ANY language):
   "app banana hai — kya plan hoga?" (planning, not yet building)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / done
+MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / done
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Use this when the user clearly wants you to BUILD, CREATE, MODIFY, or FIX code/files right now.
 
@@ -58,23 +58,40 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"screenshot"|"done", "args": { ... } }
+{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"screenshot"|"browser_action"|"done", "args": { ... } }
 
 Action args:
-  reply:      { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
-  bash:       { "command": "shell command to run in the workspace" }
-  edit_file:  { "path": "relative/path.tsx", "content": "FULL new file content" }
-  patch_file: { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
-  screenshot: { "url": "http://localhost:3000" }
-  done:       { "summary": "one sentence describing what was accomplished" }
+  reply:          { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
+  bash:           { "command": "shell command to run in the workspace" }
+  edit_file:      { "path": "relative/path.tsx", "content": "FULL new file content" }
+  patch_file:     { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
+  screenshot:     { "url": "http://localhost:3000" }
+  browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait", "selector": "CSS selector", "text": "text to type / key to press", "url": "url to navigate to", "direction": "up"|"down" }
+  done:           { "summary": "one sentence describing what was accomplished" }
+
+You can both SEE and INTERACT with the running app:
+- screenshot = take a picture and look at the UI (passive).
+- browser_action = actually drive the app like a user (active). The browser session is persistent —
+  cookies, form input, and the current page survive between browser_action calls, so you can do a
+  multi-step flow: navigate → type into a field → click submit → see the result. EVERY browser_action
+  returns a fresh screenshot automatically, so you don't need a separate screenshot after it.
+
+browser_action examples:
+  Open the app:        { "action": "navigate", "url": "http://localhost:3000" }
+  Fill a field:        { "action": "type", "selector": "#email", "text": "test@example.com" }
+  Click a button:      { "action": "click", "selector": "button[type=submit]" }
+  Press a key:         { "action": "press", "text": "Enter" }
+  Scroll down:         { "action": "scroll", "direction": "down" }
 
 Coding rules (when in MODE 2):
 - One action per response. Wait for the observation before the next action.
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
-- After starting a dev server: ALWAYS take a screenshot to visually verify the UI looks correct.
-- If the screenshot reveals problems (wrong layout, missing elements, broken styles): fix them, then screenshot again.
-- Output done only AFTER a screenshot confirms the UI looks good. No visual confirmation = not done.
+- After starting a dev server: take a screenshot (or navigate via browser_action) to visually verify the UI.
+- For anything interactive (forms, buttons, navigation, login): actually TEST it with browser_action —
+  click the buttons, fill the forms, and confirm from the returned screenshot that it works.
+- If a screenshot reveals problems (wrong layout, missing elements, broken styles, errors): fix them, then re-verify.
+- Output done only AFTER you have visually confirmed the app looks AND works correctly. No confirmation = not done.
 - Paths are relative to workspace root, no leading "/" or "..".
 - When starting a dev server, use port 3000 and bind to 0.0.0.0 (--host 0.0.0.0 --port 3000).
 - Commands run with a 60-second timeout.`;
@@ -205,6 +222,7 @@ export class EngineerAgentLoop {
         patch_file: 'Patching a file…',
         browse: 'Fetching a URL…',
         screenshot: 'Taking a screenshot to visually verify the UI…',
+        browser_action: 'Interacting with the app in the browser…',
         done: 'Verifying the build…',
       };
       const thought = parsed.thought || thoughtFallback[parsed.action] || 'Thinking…';
@@ -288,6 +306,27 @@ export class EngineerAgentLoop {
         } catch (err: any) {
           observation = `screenshot error: ${err?.message}. If playwright is not installed, run: bash { "command": "npm install playwright && npx playwright install chromium" }`;
         }
+      } else if (parsed.action === 'browser_action') {
+        const subAction = parsed.args.action as 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait';
+        const validActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait'];
+        if (!validActions.includes(subAction)) {
+          observation = `browser_action error: "args.action" must be one of ${validActions.join(', ')}. Got "${subAction}".`;
+        } else {
+          yield { type: 'status', message: `Step ${step}: browser ${subAction}…` };
+          try {
+            const res = await this.actuator.browserAction(workspaceId, subAction, {
+              selector: parsed.args.selector,
+              text: parsed.args.text,
+              url: parsed.args.url || lastPreviewUrl || undefined,
+              direction: parsed.args.direction === 'up' ? 'up' : 'down',
+            });
+            lastScreenshot = res.screenshot; // attached to next router call as a vision image
+            yield { type: 'browser_action_result', action: subAction, detail: res.result, base64: res.screenshot };
+            observation = `${res.result}. A screenshot of the resulting page is attached to your next thinking step — look at it and decide the next action.`;
+          } catch (err: any) {
+            observation = `browser_action error: ${err?.message}`;
+          }
+        }
       } else if (parsed.action === 'done') {
         // Verify the build is actually clean before declaring success
         const buildResult = await this.actuator.build(workspaceId);
@@ -298,7 +337,7 @@ export class EngineerAgentLoop {
         }
         observation = `Build failed — cannot mark done yet. Fix the errors:\n${buildResult.logs.slice(-2000)}`;
       } else {
-        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, done.`;
+        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, done.`;
       }
 
       history.push({

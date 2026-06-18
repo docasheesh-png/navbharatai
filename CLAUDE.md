@@ -128,5 +128,13 @@ break):
   work, add a new dated milestone entry — **never delete or rewrite existing
   entries** (they're the cross-session audit trail). Correct a stale claim by
   adding a new note, not by erasing the old one.
-- **Every change goes branch → commit → push → PR → green CI → merge.** Merge
+- **Every change goes branch → commit → push → CI green → merge.** Merge
   is what deploys (see Deployment above), so never merge red or unverified.
+  **CRITICAL — CI must be green BEFORE merging, no exceptions:**
+  Even when `git push origin main` direct-merge permission is granted, the
+  correct flow is ALWAYS: push the feature branch → wait for CI to pass on
+  that branch → THEN merge to main. "Direct push permission" means you may
+  use `git push origin main` for the merge step, NOT that the CI gate is
+  skipped. Never merge a branch to main until you have confirmed
+  `.github/workflows/ci.yml` is green on that branch. Merging red CI to
+  main breaks the live app for all users.

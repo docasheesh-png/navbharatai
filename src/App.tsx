@@ -3969,12 +3969,16 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
         // Edit if workspace has files AND it's not a fresh-build request
         const isEditRequest = !isReactRequest && workspaceHasFiles && !isFreshBuildRequest;
 
-        // Collect ALL text/code files from workspace to send as context (cap 200 KB total)
+        // Collect ALL text/code files from workspace to send to the engine.
+        // RC7: a 200 KB cap dropped files of larger multi-module apps, so edits
+        // ran against a PARTIAL workspace → the engine broke imports/lost context
+        // → apps crashed after a few edits. Raised to ~2 MB so the full project
+        // reaches the engine (the server bounds its own prompt context separately).
         const TEXT_EXTS = /\.(html|htm|css|scss|sass|js|ts|jsx|tsx|json|md|txt|py|php|yaml|yml|xml|svg|vue|svelte)$/i;
         const allTextFiles: Record<string, string> = {};
         let wsBytes = 0;
         for (const [k, v] of Object.entries(files)) {
-          if (TEXT_EXTS.test(k) && typeof v === 'string' && wsBytes + v.length < 200_000) {
+          if (TEXT_EXTS.test(k) && typeof v === 'string' && wsBytes + v.length < 2_000_000) {
             allTextFiles[k] = v;
             wsBytes += v.length;
           }

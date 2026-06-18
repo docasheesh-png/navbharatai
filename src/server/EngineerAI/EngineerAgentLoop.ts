@@ -1,6 +1,7 @@
 import { AIRouter } from '../AI/Router/AIRouter';
 import { IEngineerActuator } from './actuators/IEngineerActuator';
 import { ReActAction, EngineerAgentEvent, EngineerTask } from './EngineerAITypes';
+import { WebSearchClient } from './WebSearchClient';
 
 const MAX_STEPS = 24;
 const DEADLINE_MS = 8 * 60 * 1000;
@@ -21,7 +22,7 @@ const PORT_PATTERNS = [
   /:\s*(\d{4,5})\b.*(?:ready|started|running)/i,
 ];
 
-const SYSTEM_PROMPT = `You are Engineer AI — a sharp, friendly senior engineer who can both converse intelligently AND build real software autonomously.
+const SYSTEM_PROMPT = `You are Engineer AI — a sharp, friendly senior engineer who can both converse intelligently AND build real software autonomously. You have EYES: you can take screenshots of running apps and see exactly what the UI looks like.
 
 You handle TWO very different kinds of requests. Read the user's message carefully and pick the right mode:
 
@@ -42,7 +43,7 @@ Examples that trigger reply (in ANY language):
   "app banana hai — kya plan hoga?" (planning, not yet building)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / done
+MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / web_search / done
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Use this when the user clearly wants you to BUILD, CREATE, MODIFY, or FIX code/files right now.
 
@@ -58,20 +59,43 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"done", "args": { ... } }
+{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"screenshot"|"browser_action"|"done", "args": { ... } }
 
 Action args:
-  reply:      { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
-  bash:       { "command": "shell command to run in the workspace" }
-  edit_file:  { "path": "relative/path.tsx", "content": "FULL new file content" }
-  patch_file: { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
-  done:       { "summary": "one sentence describing what was accomplished" }
+  reply:          { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
+  bash:           { "command": "shell command to run in the workspace" }
+  edit_file:      { "path": "relative/path.tsx", "content": "FULL new file content" }
+  patch_file:     { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
+  screenshot:     { "url": "http://localhost:3000" }
+  browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait", "selector": "CSS selector", "text": "text to type / key to press", "url": "url to navigate to", "direction": "up"|"down" }
+  web_search:     { "query": "what to look up — docs, error messages, package names/versions" }
+  done:           { "summary": "one sentence describing what was accomplished" }
+
+You can both SEE and INTERACT with the running app:
+- screenshot = take a picture and look at the UI (passive).
+- browser_action = actually drive the app like a user (active). The browser session is persistent —
+  cookies, form input, and the current page survive between browser_action calls, so you can do a
+  multi-step flow: navigate → type into a field → click submit → see the result. EVERY browser_action
+  returns a fresh screenshot automatically, so you don't need a separate screenshot after it.
+
+browser_action examples:
+  Open the app:        { "action": "navigate", "url": "http://localhost:3000" }
+  Fill a field:        { "action": "type", "selector": "#email", "text": "test@example.com" }
+  Click a button:      { "action": "click", "selector": "button[type=submit]" }
+  Press a key:         { "action": "press", "text": "Enter" }
+  Scroll down:         { "action": "scroll", "direction": "down" }
 
 Coding rules (when in MODE 2):
 - One action per response. Wait for the observation before the next action.
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
-- Output done only when the task is complete. Before done, run bash { "command": "npm run build" } to verify.
+- Use web_search when you're unsure: to confirm the correct/latest package version before installing, to read API/docs for an unfamiliar library, or to look up the fix for an error you don't recognize. Don't guess a version — search it.
+- After starting a dev server: take a screenshot (or navigate via browser_action) to visually verify the UI.
+- For anything interactive (forms, buttons, navigation, login): actually TEST it with browser_action —
+  click the buttons, fill the forms, and confirm from the returned screenshot that it works.
+- If a screenshot reveals problems (wrong layout, missing elements, broken styles, errors): fix them, then re-verify.
+- After a screenshot or browser_action, any RUNTIME browser errors (console.error, uncaught exceptions, failed network requests) are reported back to you automatically. Treat them as real bugs and fix them — a clean build does NOT mean the app works at runtime.
+- Output done only AFTER you have visually confirmed the app looks AND works correctly. No confirmation = not done.
 - Paths are relative to workspace root, no leading "/" or "..".
 - When starting a dev server, use port 3000 and bind to 0.0.0.0 (--host 0.0.0.0 --port 3000).
 - Commands run with a 60-second timeout.`;
@@ -103,6 +127,8 @@ function parseAction(raw: string): ReActAction {
 }
 
 export class EngineerAgentLoop {
+  private search = new WebSearchClient();
+
   constructor(private router: AIRouter, private actuator: IEngineerActuator) {}
 
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
@@ -132,6 +158,9 @@ export class EngineerAgentLoop {
 
     const history: { step: number; actionJson: string; observation: string }[] = [];
     let consecutiveParseFailures = 0;
+    let lastPreviewUrl: string | null = null;  // updated when server_ready fires
+    let lastScreenshot: string | null = null;  // base64 PNG — injected into next Grok call
+    let lastConsoleCheck = Date.now();          // Phase 4 — runtime error watermark
 
     for (let step = 1; step <= MAX_STEPS; step++) {
       if (signal?.aborted) { yield { type: 'aborted' }; return; }
@@ -144,8 +173,10 @@ export class EngineerAgentLoop {
       // Router/provider failure is a real infra error — abort. Malformed model
       // output is recoverable — feed the parse error back and let it retry.
       let rawResponse: string;
+      const images = lastScreenshot ? [lastScreenshot] : undefined;
+      lastScreenshot = null; // consume: each screenshot is used exactly once
       try {
-        const { response, telemetry } = await this.router.route(prompt, SYSTEM_PROMPT);
+        const { response, telemetry } = await this.router.route(prompt, SYSTEM_PROMPT, images);
         if (!telemetry.success) {
           // All providers failed (budget exhausted, wrong key, rate-limit, etc.)
           yield {
@@ -197,6 +228,9 @@ export class EngineerAgentLoop {
         edit_file: 'Writing a file…',
         patch_file: 'Patching a file…',
         browse: 'Fetching a URL…',
+        screenshot: 'Taking a screenshot to visually verify the UI…',
+        browser_action: 'Interacting with the app in the browser…',
+        web_search: 'Searching the web…',
         done: 'Verifying the build…',
       };
       const thought = parsed.thought || thoughtFallback[parsed.action] || 'Thinking…';
@@ -223,6 +257,7 @@ export class EngineerAgentLoop {
             if (port > 1000 && port < 65536) {
               try {
                 const url = await this.actuator.getPortUrl(workspaceId, port);
+                lastPreviewUrl = url;
                 yield { type: 'server_ready', url, port };
               } catch { /* non-fatal */ }
               break;
@@ -268,6 +303,66 @@ export class EngineerAgentLoop {
         } catch (err: any) {
           observation = `browse error: ${err?.message}`;
         }
+      } else if (parsed.action === 'screenshot') {
+        const targetUrl = parsed.args.url || lastPreviewUrl || 'http://localhost:3000';
+        yield { type: 'status', message: `Step ${step}: taking screenshot of ${targetUrl}…` };
+        try {
+          const shot = await this.actuator.screenshot(workspaceId, targetUrl);
+          lastScreenshot = shot.base64; // injected into the NEXT router call as a vision image
+          yield { type: 'screenshot_result', url: targetUrl, base64: shot.base64 };
+          observation = `Screenshot captured of ${targetUrl}. The image has been attached to your next thinking step — look at it carefully and describe what you see, then decide what to fix.`;
+        } catch (err: any) {
+          observation = `screenshot error: ${err?.message}. If playwright is not installed, run: bash { "command": "npm install playwright && npx playwright install chromium" }`;
+        }
+      } else if (parsed.action === 'browser_action') {
+        const subAction = parsed.args.action as 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait';
+        const validActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait'];
+        if (!validActions.includes(subAction)) {
+          observation = `browser_action error: "args.action" must be one of ${validActions.join(', ')}. Got "${subAction}".`;
+        } else {
+          yield { type: 'status', message: `Step ${step}: browser ${subAction}…` };
+          try {
+            const res = await this.actuator.browserAction(workspaceId, subAction, {
+              selector: parsed.args.selector,
+              text: parsed.args.text,
+              url: parsed.args.url || lastPreviewUrl || undefined,
+              direction: parsed.args.direction === 'up' ? 'up' : 'down',
+            });
+            lastScreenshot = res.screenshot; // attached to next router call as a vision image
+            yield { type: 'browser_action_result', action: subAction, detail: res.result, base64: res.screenshot };
+            observation = `${res.result}. A screenshot of the resulting page is attached to your next thinking step — look at it and decide the next action.`;
+          } catch (err: any) {
+            observation = `browser_action error: ${err?.message}`;
+          }
+        }
+      } else if (parsed.action === 'web_search') {
+        const query = parsed.args.query || parsed.args.q || '';
+        if (!query.trim()) {
+          observation = 'web_search error: "args.query" is required.';
+        } else {
+          yield { type: 'status', message: `Step ${step}: searching the web for "${query}"…` };
+          try {
+            // Fetch the SERP from INSIDE the sandbox (open internet) rather than the
+            // egress-restricted server. Falls back to server-side fetch if it errors.
+            const htmlFetcher = async (url: string): Promise<string> => {
+              const r = await this.actuator.runCommand(
+                workspaceId,
+                `curl -s -L --max-time 12 -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36" ${JSON.stringify(url)}`,
+              );
+              return r.stdout || '';
+            };
+            const results = await this.search.search(query, 5, htmlFetcher);
+            yield { type: 'search_result', query, results };
+            if (results.length === 0) {
+              observation = `Web search for "${query}" returned no results. Try a more specific query, or proceed with what you know.`;
+            } else {
+              observation = `Web search results for "${query}":\n` +
+                results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join('\n');
+            }
+          } catch (err: any) {
+            observation = `web_search error: ${err?.message}. Proceed with your existing knowledge.`;
+          }
+        }
       } else if (parsed.action === 'done') {
         // Verify the build is actually clean before declaring success
         const buildResult = await this.actuator.build(workspaceId);
@@ -278,7 +373,23 @@ export class EngineerAgentLoop {
         }
         observation = `Build failed — cannot mark done yet. Fix the errors:\n${buildResult.logs.slice(-2000)}`;
       } else {
-        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, done.`;
+        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, web_search, done.`;
+      }
+
+      // Phase 4 — Live Sync: after any browser interaction, surface runtime
+      // errors (console.error, uncaught exceptions, failed requests) to BOTH
+      // the user (console_error event) and the agent (appended to observation,
+      // so it self-corrects on runtime bugs a clean build would never reveal).
+      if (parsed.action === 'screenshot' || parsed.action === 'browser_action') {
+        try {
+          const { errors } = await this.actuator.getConsoleErrors(workspaceId, lastConsoleCheck);
+          lastConsoleCheck = Date.now();
+          if (errors.length > 0) {
+            yield { type: 'console_error', errors: errors.map(e => ({ kind: e.kind, text: e.text })) };
+            observation += `\n\n[RUNTIME BROWSER ERRORS — these happened in the live app, fix them]\n` +
+              errors.map(e => `• [${e.kind}] ${e.text}`).join('\n');
+          }
+        } catch { /* non-fatal — console capture is best-effort */ }
       }
 
       history.push({

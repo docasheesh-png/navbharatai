@@ -8,7 +8,7 @@ export interface EngineerTask {
 /** One ReAct action the model outputs per turn. */
 export interface ReActAction {
   thought?: string;
-  action: 'reply' | 'bash' | 'edit_file' | 'patch_file' | 'browse' | 'done';
+  action: 'reply' | 'bash' | 'edit_file' | 'patch_file' | 'browse' | 'screenshot' | 'browser_action' | 'web_search' | 'done';
   args: Record<string, string>;
 }
 
@@ -19,6 +19,10 @@ export type EngineerAgentEvent =
   | { type: 'files_changed'; kind: 'edit' | 'patch'; files: { path: string; content: string }[] }
   | { type: 'build_result'; success: boolean; logs: string }
   | { type: 'browse_result'; url: string; content: string }
+  | { type: 'screenshot_result'; url: string; base64: string }
+  | { type: 'browser_action_result'; action: string; detail: string; base64: string }
+  | { type: 'console_error'; errors: { kind: string; text: string }[] }
+  | { type: 'search_result'; query: string; results: { title: string; url: string; snippet: string }[] }
   | { type: 'server_ready'; url: string; port: number }
   | { type: 'status'; message: string }
   | { type: 'complete'; summary: string; steps: number }

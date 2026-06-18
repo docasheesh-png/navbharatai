@@ -46,8 +46,8 @@ export class AIRouter {
     this.providers.sort((a, b) => a.priority - b.priority);
   }
 
-  async route(prompt: string, systemPrompt?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
-    return this.execute(prompt, undefined, systemPrompt);
+  async route(prompt: string, systemPrompt?: string, images?: string[]): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+    return this.execute(prompt, undefined, systemPrompt, images);
   }
 
   /** Returns true if at least one registered provider passes its health check. */
@@ -161,7 +161,7 @@ export class AIRouter {
     else await s2.catch(() => {});
   }
 
-  private async execute(prompt: string, schema?: any, systemPrompt?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+  private async execute(prompt: string, schema?: any, systemPrompt?: string, images?: string[]): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
     const targetSchema = schema?.type === 'OBJECT' ? schema : undefined;
     const errors: string[] = [];
 
@@ -190,7 +190,7 @@ export class AIRouter {
         try {
           const startTime = Date.now();
           console.log(`[ROUTER] Trying ${provider.name} (pass ${pass}, in-flight ${concurrent + 1})...`);
-          const response = await provider.execute(prompt, targetSchema, undefined, systemPrompt);
+          const response = await provider.execute(prompt, targetSchema, undefined, systemPrompt, images);
           const latency = Date.now() - startTime;
           console.log(`[ROUTER] ${provider.name} SUCCESS in ${latency}ms`);
           recordProviderLatency(provider.name, latency, false);

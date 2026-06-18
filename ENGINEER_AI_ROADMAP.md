@@ -17,7 +17,9 @@
 | 4 | Live Sync | 🟡 PARTIAL — runtime error capture shipped; full bidirectional sync pending → folded into **Phase 9** |
 | 5 | Web Search (key-free) | ✅ DONE — merged (PR #72) |
 | 6 | Memory + Workspace Persistence (E2B pause/resume) | ✅ DONE — merged (PR #72) |
-| **7** | **Whole-project context (smart retrieval)** | 🔜 NEXT |
+| 0–6 | **Audit hardening** (true Grok-only, build-skip-install, shared browser, etc.) | 🔜 PR open (`fix/engineer-ai-audit-hardening`) |
+| **6.5** | **Visible AI Cursor — live preview driving** 🖱️👀 | 🔜 NEXT (before Phase 7) |
+| **7** | **Whole-project context (smart retrieval)** | 🔜 After 6.5 |
 | **8** | **Checkpoints + Rollback (safety)** | 🔜 Planned |
 | **9** | **Live bidirectional sync + deploy** | 🔜 Planned |
 | **10** | **Database + Auth + Storage provisioning** | 🔜 Planned |
@@ -236,11 +238,64 @@ Screenshot → "Login successful dikhta hai" → Done ✅
 > Phases 1–6 ne Engineer AI ko "dekhne + chalane wala agent" bana diya — woh sab DONE + LIVE hai.
 > Ab yeh phases use "duniya ka best AI app maker" banayenge. Source: Mythos-class comparison.
 > **Rule wahi:** Grok ONLY, E2B-native, pure additive, app kabhi na toote.
-> **Build order:** 7 → 8 → 9 → 10 → 11 → 12 (impact + safety order). Ek-ek karke, har phase apni PR.
+> **Build order:** **6.5** → 7 → 8 → 9 → 10 → 11 → 12 (impact + safety order). Ek-ek karke, har phase apni PR.
 
 ---
 
-## PHASE 7 — Whole-Project Context (Smart Retrieval) 🧠 🔜 NEXT
+## PHASE 6.5 — Visible AI Cursor: Live Preview Driving 🖱️👀 🔜 NEXT
+
+> **User ka vision:** "Jaise Engineer AI ko aankhein (eyes 👀) di — ab use ek HAATH do: ek
+> cursor jo AI control kare, live preview chala ke khud dekhe, jo kaha jaaye woh kare, aur
+> koi problem aaye to apni hi banayi eyes se dekh ke theek kare."
+>
+> **Note:** Phase 3 ne "hands" (browser_action: click/type/navigate/scroll/press/wait) aur
+> Phase 2 ne "eyes" (Grok vision screenshots) already de diye — par woh sab **headless**
+> hai (E2B ke andar, user dekh nahi paata). Phase 6.5 unko **VISIBLE + LIVE + autonomous**
+> banata hai: user apni aankhon se dekhe ki AI ka cursor live preview pe kya kar raha hai.
+
+### Kya hoga end-to-end:
+1. **Visible cursor overlay** — har browser_action/screenshot ke saath cursor ki (x,y)
+   position aaye; frontend live screenshot ke upar ek animated cursor 🖱️ render kare —
+   user dekhe AI kahaan click/type kar raha hai (Mythos/Devin jaisa "agent driving" feel).
+2. **Live drive stream** — drive session ke dauraan har action ke baad fresh screenshot
+   turant frontend pe (browser tab live update) — ruk-ruk ke nahi, continuous.
+3. **"Drive preview" mode** — user bole "preview chala ke test kar" / "login try kar" →
+   agent autonomously: navigate → click → type → submit → screenshot → vision se verify →
+   problem dikhe to khud fix/retry. Yeh Phase 2 (eyes) + Phase 3 (hands) ka tight loop hai.
+4. **Self-heal via eyes** — koi bhi step pe screenshot + runtime errors (Phase 4) dekh ke
+   agent khud decide kare agla kadam — "button nahi mila / page blank / error aaya" → fix.
+
+### Files (additive, Grok-only, E2B-native):
+- **`E2BActuator.ts`** — `browserAction()`/`screenshot-cdp` me cursor position bhi return karo:
+  click/type se pehle `page.mouse.move(x,y)` + element ka bounding-box center nikaalo;
+  result me `{ cursorX, cursorY }` add. (CDP shared-browser already hai — hardening PR se.)
+- **`EngineerAITypes.ts`** — `browser_action_result`/`screenshot_result` me optional
+  `cursorX?/cursorY?`; naya `drive_frame` event (live screenshot + cursor + url).
+- **`EngineerAgentLoop.ts`** — naya high-level `drive` action (ya browser_action ko extend):
+  "drive this preview / test this flow" — internal mini-loop (navigate→act→see→fix),
+  har frame `drive_frame` yield. SYSTEM_PROMPT update.
+- **`EngineerAIChat.tsx`** — browser tab pe live screenshot ke upar absolute-positioned
+  cursor 🖱️ (CSS transition se smooth move); `drive_frame` pe image + cursor update;
+  "AI is driving…" indicator.
+
+### Loop:
+```
+User: "preview chala ke login test kar"
+ → navigate(localhost:3000) → [cursor 🖱️ user ko dikhe] → screenshot → eyes: "login form hai"
+ → type(#email) → type(#password) → click(submit) [cursor har step pe move karta dikhe]
+ → screenshot → eyes: "dashboard aaya ✅" ya "error aaya ❌ → fix → retry"
+ → Done (user ne LIVE dekha)
+```
+
+### Done when: user apni aankhon se dekhe AI ka cursor live preview pe click/type karke
+app drive kar raha hai, aur problem aane pe khud (vision se) theek kar raha hai.
+
+> **Depends on:** hardening PR (`fix/engineer-ai-audit-hardening`) — kyunki shared-CDP-browser
+> screenshot wahaan se aata hai. Pehle woh merge, fir 6.5.
+
+---
+
+## PHASE 7 — Whole-Project Context (Smart Retrieval) 🧠
 
 > **Problem:** Abhi agent sirf 20 files × 1000 chars dekhta hai (`EngineerAgentLoop.ts`:
 > `MAX_FILES_SHOWN = 20`, `MAX_CHARS_PER_FILE = 1000`). Bada app = agent andha. Yeh sabse
@@ -369,6 +424,7 @@ types/frontend (commit timeline).
 
 | Phase | Theme | Priority | New files | Modified |
 |-------|-------|----------|-----------|----------|
+| 6.5 | Visible AI cursor — live preview driving | 🔴 NEXT (user-requested) | 0 | 4 |
 | 7 | Whole-project context | 🔴 Critical | 1 | 4 |
 | 8 | Checkpoints + rollback | 🔴 Critical (safety) | 0 | 5 |
 | 9 | Live sync + deploy | 🔴 Critical | 0 | 4 |
@@ -403,7 +459,9 @@ Phase 1 → 2 → 3 → 5 → 6   ✅ all shipped
 Phase 4                    🟡 error-capture shipped; sync-half → Phase 9
 
 PART 2 (gap-closing, one-by-one, each its own PR):
-Phase 7  ← NEXT  (whole-project context)
+Audit hardening  ← PR open (fix/engineer-ai-audit-hardening): true Grok-only + correctness
+Phase 6.5 ← NEXT (visible AI cursor — live preview driving, user-requested)
+Phase 7          (whole-project context)
 Phase 8          (checkpoints + rollback)
 Phase 9          (live sync + deploy)
 Phase 10         (DB + auth + storage)

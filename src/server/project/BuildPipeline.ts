@@ -26,6 +26,12 @@ export type EditGenerator = (prompt: string, vfs: VirtualFileSystem) => Promise<
 /** Implement still-missing requested features into the existing project (agentic). */
 export type FeatureCompleter = (prompt: string, missing: string[], vfs: VirtualFileSystem) => Promise<FileEdit[]>;
 
+/** Live progress events emitted during a build (for SSE → real chat progress). */
+export type BuildProgressEvent =
+  | { type: 'status'; message: string }
+  | { type: 'module'; name: string; state: 'start' | 'done' | 'failed'; coverage?: number }
+  | { type: 'files'; paths: string[] };
+
 export interface BuildPipelineInput {
   prompt: string;
   files?: Record<string, string>;
@@ -36,6 +42,14 @@ export interface BuildPipelineInput {
   maxRepairAttempts?: number;
   /** Max feature-completion passes (default 2). */
   maxFeatureAttempts?: number;
+  /**
+   * Modular mode: implement ONE missing module per model call, verifying between
+   * each, until coverage is reached. Used by the streaming build (SSE keeps the
+   * connection open, so the many small calls don't hit the gateway 504).
+   */
+  modular?: boolean;
+  /** Live progress callback (drives the SSE stream / chat progress). */
+  onProgress?: (ev: BuildProgressEvent) => void;
   /**
    * Seed a runnable framework skeleton for FRESH builds (no existing files).
    * Defaults to true; pass false to let the generator produce every file.
@@ -99,10 +113,13 @@ export async function runBuild(input: BuildPipelineInput): Promise<BuildPipeline
   }
 
   const baselineSnapshotId = versions.takeSnapshot(vfs, 'before build').id;
+  const progress = input.onProgress ?? (() => {});
 
-  // 1. Generate + apply the requested change.
+  // 1. Generate + apply the core of the app (shell + a few modules).
+  progress({ type: 'status', message: 'Generating the app foundation…' });
   const edits = await input.generate(input.prompt, vfs);
   const applyRes = applyEdits(vfs, edits, versions, 'build: generated edits');
+  progress({ type: 'files', paths: vfs.paths() });
 
   // 2. Verify + iteratively self-repair real errors.
   const repair = await autoRepair(vfs, {
@@ -111,20 +128,31 @@ export async function runBuild(input: BuildPipelineInput): Promise<BuildPipeline
     maxAttempts: input.maxRepairAttempts ?? 3,
   });
 
-  // Agentic feature completion: while requested features are missing (<80%),
-  // ask the generator to implement them into the existing project, then repair.
+  // Agentic feature completion. MODULAR mode: implement ONE missing module per
+  // call, verifying (syntax) between each, until coverage is reached — this is
+  // what makes a 10-module app come out ~complete instead of truncated. Bounded,
+  // but high (modular runs under SSE, so the many small calls can't 504).
   if (input.completeFeatures && input.prompt.trim()) {
-    const maxFeatureAttempts = input.maxFeatureAttempts ?? 2;
-    for (let attempt = 0; attempt < maxFeatureAttempts; attempt++) {
+    const modular = input.modular === true;
+    const maxAttempts = modular ? 14 : (input.maxFeatureAttempts ?? 2);
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const cov = computeFeatureCoverage(input.prompt, vfs);
+      progress({ type: 'status', message: `Coverage ${cov.coverage}% (${cov.implemented}/${cov.requested})` });
       if (cov.requested === 0 || cov.coverage >= MIN_FEATURE_COVERAGE) break;
-      const missing = cov.items.filter((i) => i.status === 'fail').map((i) => i.label);
-      const edits = await input.completeFeatures(input.prompt, missing, vfs);
-      if (!edits.length) break;
-      applyEdits(vfs, edits, versions, `feature completion: ${missing.join(', ')}`);
+      const missingItems = cov.items.filter((i) => i.status === 'fail');
+      if (!missingItems.length) break;
+      // Modular → one module at a time; batch mode → all missing at once.
+      const target = modular ? [missingItems[0].label] : missingItems.map((i) => i.label);
+      const label = target.join(', ');
+      progress({ type: 'module', name: label, state: 'start', coverage: cov.coverage });
+      const fEdits = await input.completeFeatures(input.prompt, target, vfs);
+      if (!fEdits.length) { progress({ type: 'module', name: label, state: 'failed' }); if (modular) continue; else break; }
+      applyEdits(vfs, fEdits, versions, `feature completion: ${label}`);
       await autoRepair(vfs, { generateFixes: input.fix, versions, maxAttempts: 1 });
+      progress({ type: 'module', name: label, state: 'done', coverage: computeFeatureCoverage(input.prompt, vfs).coverage });
     }
   }
+  progress({ type: 'status', message: 'Verifying the build…' });
 
   // Auto-fix: if any JS file uses ES6 import/export, ensure index.html has type="module"
   // Belt-and-suspenders guard for when the AI ignores the manifest instruction.

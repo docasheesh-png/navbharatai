@@ -167,6 +167,40 @@ export class LocalActuator implements IEngineerActuator {
     return false;
   }
 
+  // Checkpoints root — sibling dir to individual workspace dirs.
+  private static readonly CKPT_ROOT = path.join(WORKSPACES_ROOT, '.e-checkpoints');
+
+  async checkpoint(workspaceId: string, triggeredBy = 'manual'): Promise<string> {
+    const wsPath = path.join(WORKSPACES_ROOT, workspaceId);
+    const id = `ckpt_${Date.now()}`;
+    const dir = path.join(LocalActuator.CKPT_ROOT, workspaceId);
+    await fsPromises.mkdir(dir, { recursive: true });
+    const tarPath = path.join(dir, `${id}.tar.gz`);
+    await execPromise(
+      `tar --exclude=./node_modules --exclude=./dist --exclude=./.git --exclude=./.next --exclude=./.e-checkpoints -czf "${tarPath}" -C "${wsPath}" .`,
+      { timeout: 30_000, maxBuffer: MAX_BUFFER },
+    ).catch(() => { /* non-fatal — best-effort checkpoint */ });
+    await fsPromises.writeFile(
+      path.join(dir, `${id}.json`),
+      JSON.stringify({ id, createdAt: Date.now(), triggeredBy: triggeredBy.slice(0, 80) }),
+    ).catch(() => {});
+    return id;
+  }
+
+  async restore(workspaceId: string, checkpointId: string): Promise<void> {
+    const wsPath = path.join(WORKSPACES_ROOT, workspaceId);
+    const tarPath = path.join(LocalActuator.CKPT_ROOT, workspaceId, `${checkpointId}.tar.gz`);
+    try { await fsPromises.access(tarPath); } catch {
+      throw new Error(`Checkpoint ${checkpointId} not found.`);
+    }
+    const result = await execPromise(
+      `tar -xzf "${tarPath}" -C "${wsPath}" --overwrite`,
+      { timeout: 30_000, maxBuffer: MAX_BUFFER },
+    );
+    // execPromise throws on non-zero exit — if we reach here the restore succeeded.
+    void result;
+  }
+
   async searchFiles(workspaceId: string, terms: string[]): Promise<string[]> {
     if (terms.length === 0) return [];
     const wsPath = path.join(WORKSPACES_ROOT, workspaceId);

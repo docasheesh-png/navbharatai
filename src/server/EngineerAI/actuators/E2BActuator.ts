@@ -503,4 +503,31 @@ const {chromium}=require('playwright');
       return false;
     }
   }
+
+  // Checkpoints directory lives outside WORKSPACE_ROOT so it survives a restore.
+  private static readonly CKPT_DIR = '/home/user/.e-checkpoints';
+
+  async checkpoint(workspaceId: string, triggeredBy = 'manual'): Promise<string> {
+    const sandbox = await this.getSandbox(workspaceId);
+    const id = `ckpt_${Date.now()}`;
+    const dir = `${E2BActuator.CKPT_DIR}/${workspaceId}`;
+    const meta = JSON.stringify({ id, createdAt: Date.now(), triggeredBy: triggeredBy.slice(0, 80) });
+    await sandbox.commands.run(
+      `mkdir -p ${dir} && tar --exclude=./node_modules --exclude=./dist --exclude=./.git --exclude=./.next --exclude=./.e-checkpoints -czf ${dir}/${id}.tar.gz -C ${WORKSPACE_ROOT} . && printf %s ${shellQuote(meta)} > ${dir}/${id}.json`,
+      { timeoutMs: 30_000 },
+    ).catch(() => ({ stdout: '', stderr: '', exitCode: -1 }));
+    return id;
+  }
+
+  async restore(workspaceId: string, checkpointId: string): Promise<void> {
+    const sandbox = await this.getSandbox(workspaceId);
+    const tarPath = `${E2BActuator.CKPT_DIR}/${workspaceId}/${checkpointId}.tar.gz`;
+    const result = await sandbox.commands.run(
+      `test -f ${tarPath} && tar -xzf ${tarPath} -C ${WORKSPACE_ROOT} --overwrite`,
+      { timeoutMs: 30_000 },
+    );
+    if (result.exitCode !== 0) {
+      throw new Error(`Restore failed: ${result.stderr.slice(0, 300)}`);
+    }
+  }
 }

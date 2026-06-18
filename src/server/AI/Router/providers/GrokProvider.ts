@@ -14,6 +14,8 @@ export class GrokProvider implements AIProvider {
       this._client = new OpenAI({
         apiKey: process.env.GROK_API_KEY || process.env.XAI_API_KEY || 'missing-key',
         baseURL: 'https://api.x.ai/v1',
+        timeout: 60_000,  // 60s — fail fast so AIRouter can report an error quickly
+        maxRetries: 0,
       });
     }
     return this._client;

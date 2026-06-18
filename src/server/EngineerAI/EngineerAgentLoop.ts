@@ -87,8 +87,8 @@ export class EngineerAgentLoop {
       yield {
         type: 'error',
         message:
-          'No AI provider is configured. Set AICREDITS_API_KEY (recommended), ' +
-          'ANTHROPIC_API_KEY, or GROK_API_KEY in Cloud Run → Edit & Deploy → Variables & Secrets.',
+          'Engineer AI requires GROK_API_KEY (or XAI_API_KEY) in Cloud Run → ' +
+          'Edit & Deploy → Variables & Secrets. Get your key at console.x.ai',
       };
       return;
     }
@@ -122,10 +122,10 @@ export class EngineerAgentLoop {
           yield {
             type: 'error',
             message:
-              'AI provider call failed. Possible causes: ' +
-              '① AICREDITS_API_KEY is wrong or budget exhausted (top up at aicredit.in), ' +
-              '② Model name mismatch — set AICREDITS_MODEL env var to the correct model string, ' +
-              '③ aicredit.in is temporarily down.',
+              'Grok API call failed. Check: ' +
+              '① GROK_API_KEY (or XAI_API_KEY) is set correctly in Cloud Run env vars — get it at console.x.ai, ' +
+              '② xAI API rate limit — wait a minute and retry, ' +
+              '③ xAI API is temporarily down — check status.x.ai',
           };
           return;
         }

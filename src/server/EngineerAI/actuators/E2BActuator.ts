@@ -204,10 +204,14 @@ export class E2BActuator implements IEngineerActuator {
     // Long-running commands (dev servers, watchers) never exit — run in background,
     // collect startup output for 20 s (enough for Vite/Next to print the port),
     // then disconnect and leave the process alive.
-    const isLongRunning =
+    // Guard: a one-shot fetch (curl/wget) is never long-running even if its URL
+    // happens to contain words like "serve" or "dev".
+    const isFetch = /^\s*(?:curl|wget)\b/.test(command);
+    const isLongRunning = !isFetch && (
       /\b(?:dev|serve|watch|livereload)\b/i.test(command) ||
       /npm\s+run\s+(?:dev|start|serve)\b/i.test(command) ||
-      /python.*http\.server|http-server|live-server/i.test(command);
+      /python.*http\.server|http-server|live-server/i.test(command)
+    );
 
     if (isLongRunning) {
       let stdout = '';

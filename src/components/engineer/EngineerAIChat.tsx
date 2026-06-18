@@ -216,6 +216,14 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         }
         break;
       }
+      case 'search_result': {
+        const results: { title: string; url: string }[] = event.results || [];
+        const lines = results.length
+          ? results.map(r => `• ${r.title}\n  ${r.url}`).join('\n')
+          : '(no results)';
+        appendChat('system', `🔍 Searched "${event.query}":\n${lines}`);
+        break;
+      }
       case 'server_ready':
         setIframeSrc(event.url);
         setBrowserUrlInput(event.url);

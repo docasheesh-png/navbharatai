@@ -1,6 +1,7 @@
 import { AIRouter } from '../AI/Router/AIRouter';
 import { IEngineerActuator } from './actuators/IEngineerActuator';
 import { ReActAction, EngineerAgentEvent, EngineerTask } from './EngineerAITypes';
+import { WebSearchClient } from './WebSearchClient';
 
 const MAX_STEPS = 24;
 const DEADLINE_MS = 8 * 60 * 1000;
@@ -42,7 +43,7 @@ Examples that trigger reply (in ANY language):
   "app banana hai — kya plan hoga?" (planning, not yet building)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / done
+MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / web_search / done
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Use this when the user clearly wants you to BUILD, CREATE, MODIFY, or FIX code/files right now.
 
@@ -67,6 +68,7 @@ Action args:
   patch_file:     { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
   screenshot:     { "url": "http://localhost:3000" }
   browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait", "selector": "CSS selector", "text": "text to type / key to press", "url": "url to navigate to", "direction": "up"|"down" }
+  web_search:     { "query": "what to look up — docs, error messages, package names/versions" }
   done:           { "summary": "one sentence describing what was accomplished" }
 
 You can both SEE and INTERACT with the running app:
@@ -87,6 +89,7 @@ Coding rules (when in MODE 2):
 - One action per response. Wait for the observation before the next action.
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
+- Use web_search when you're unsure: to confirm the correct/latest package version before installing, to read API/docs for an unfamiliar library, or to look up the fix for an error you don't recognize. Don't guess a version — search it.
 - After starting a dev server: take a screenshot (or navigate via browser_action) to visually verify the UI.
 - For anything interactive (forms, buttons, navigation, login): actually TEST it with browser_action —
   click the buttons, fill the forms, and confirm from the returned screenshot that it works.
@@ -124,6 +127,8 @@ function parseAction(raw: string): ReActAction {
 }
 
 export class EngineerAgentLoop {
+  private search = new WebSearchClient();
+
   constructor(private router: AIRouter, private actuator: IEngineerActuator) {}
 
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
@@ -225,6 +230,7 @@ export class EngineerAgentLoop {
         browse: 'Fetching a URL…',
         screenshot: 'Taking a screenshot to visually verify the UI…',
         browser_action: 'Interacting with the app in the browser…',
+        web_search: 'Searching the web…',
         done: 'Verifying the build…',
       };
       const thought = parsed.thought || thoughtFallback[parsed.action] || 'Thinking…';
@@ -329,6 +335,34 @@ export class EngineerAgentLoop {
             observation = `browser_action error: ${err?.message}`;
           }
         }
+      } else if (parsed.action === 'web_search') {
+        const query = parsed.args.query || parsed.args.q || '';
+        if (!query.trim()) {
+          observation = 'web_search error: "args.query" is required.';
+        } else {
+          yield { type: 'status', message: `Step ${step}: searching the web for "${query}"…` };
+          try {
+            // Fetch the SERP from INSIDE the sandbox (open internet) rather than the
+            // egress-restricted server. Falls back to server-side fetch if it errors.
+            const htmlFetcher = async (url: string): Promise<string> => {
+              const r = await this.actuator.runCommand(
+                workspaceId,
+                `curl -s -L --max-time 12 -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36" ${JSON.stringify(url)}`,
+              );
+              return r.stdout || '';
+            };
+            const results = await this.search.search(query, 5, htmlFetcher);
+            yield { type: 'search_result', query, results };
+            if (results.length === 0) {
+              observation = `Web search for "${query}" returned no results. Try a more specific query, or proceed with what you know.`;
+            } else {
+              observation = `Web search results for "${query}":\n` +
+                results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join('\n');
+            }
+          } catch (err: any) {
+            observation = `web_search error: ${err?.message}. Proceed with your existing knowledge.`;
+          }
+        }
       } else if (parsed.action === 'done') {
         // Verify the build is actually clean before declaring success
         const buildResult = await this.actuator.build(workspaceId);
@@ -339,7 +373,7 @@ export class EngineerAgentLoop {
         }
         observation = `Build failed — cannot mark done yet. Fix the errors:\n${buildResult.logs.slice(-2000)}`;
       } else {
-        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, done.`;
+        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, web_search, done.`;
       }
 
       // Phase 4 — Live Sync: after any browser interaction, surface runtime

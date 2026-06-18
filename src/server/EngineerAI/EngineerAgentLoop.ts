@@ -22,7 +22,7 @@ const PORT_PATTERNS = [
   /:\s*(\d{4,5})\b.*(?:ready|started|running)/i,
 ];
 
-const SYSTEM_PROMPT = `You are Engineer AI — a sharp, friendly senior engineer who can both converse intelligently AND build real software autonomously. You have EYES: you can take screenshots of running apps and see exactly what the UI looks like.
+const SYSTEM_PROMPT = `You are Engineer AI — a sharp, friendly senior engineer who can both converse intelligently AND build real software autonomously. You have EYES and HANDS: you can take screenshots of running apps and SEE what the UI looks like, AND you can drive a real browser cursor to interact with any page.
 
 You handle TWO very different kinds of requests. Read the user's message carefully and pick the right mode:
 
@@ -43,7 +43,7 @@ Examples that trigger reply (in ANY language):
   "app banana hai — kya plan hoga?" (planning, not yet building)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / web_search / done
+MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / drive / web_search / done
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Use this when the user clearly wants you to BUILD, CREATE, MODIFY, or FIX code/files right now.
 
@@ -59,7 +59,7 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"web_search"|"done", "args": { ... } }
+{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"done", "args": { ... } }
 
 Action args:
   reply:          { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
@@ -68,17 +68,24 @@ Action args:
   patch_file:     { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
   screenshot:     { "url": "http://localhost:3000" }
   browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait", "selector": "CSS selector", "text": "text to type / key to press", "url": "url to navigate to", "direction": "up"|"down" }
+  drive:          { "steps": "[{\"action\":\"navigate\",\"url\":\"http://localhost:3000\"},{\"action\":\"click\",\"selector\":\"#btn\"}]" }
   web_search:     { "query": "what to look up — docs, error messages, package names/versions" }
   done:           { "summary": "one sentence describing what was accomplished" }
 
 You can both SEE and INTERACT with the running app:
-- screenshot = take a picture and look at the UI (passive).
-- browser_action = actually drive the app like a user (active). The browser session is persistent —
-  cookies, form input, and the current page survive between browser_action calls, so you can do a
-  multi-step flow: navigate → type into a field → click submit → see the result. EVERY browser_action
-  returns a fresh screenshot automatically, so you don't need a separate screenshot after it.
+- screenshot = take a picture and look at the UI (passive — no cursor).
+- browser_action = perform ONE browser interaction (active — moves the cursor). The browser session is
+  persistent — cookies, form input, and the current page survive between calls. EVERY browser_action
+  returns a fresh screenshot automatically with the cursor position marked.
+- drive = perform MULTIPLE browser interactions in one action, streaming each step live to the user.
+  The user will see your cursor moving on screen in real-time. Use drive when you want to do a complete
+  multi-step verification flow (e.g. navigate → fill form → click submit → see result) without pausing
+  between steps. After all drive steps complete, the final screenshot is attached to your next thinking step.
 
-browser_action examples:
+drive example — test a login form in one action:
+  { "action": "drive", "args": { "steps": "[{\"action\":\"navigate\",\"url\":\"http://localhost:3000\"},{\"action\":\"type\",\"selector\":\"#email\",\"text\":\"test@example.com\"},{\"action\":\"type\",\"selector\":\"#password\",\"text\":\"secret\"},{\"action\":\"click\",\"selector\":\"button[type=submit]\"},{\"action\":\"wait\"}]" } }
+
+browser_action examples (single step):
   Open the app:        { "action": "navigate", "url": "http://localhost:3000" }
   Fill a field:        { "action": "type", "selector": "#email", "text": "test@example.com" }
   Click a button:      { "action": "click", "selector": "button[type=submit]" }
@@ -90,11 +97,11 @@ Coding rules (when in MODE 2):
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
 - Use web_search when you're unsure: to confirm the correct/latest package version before installing, to read API/docs for an unfamiliar library, or to look up the fix for an error you don't recognize. Don't guess a version — search it.
-- After starting a dev server: take a screenshot (or navigate via browser_action) to visually verify the UI.
-- For anything interactive (forms, buttons, navigation, login): actually TEST it with browser_action —
+- After starting a dev server: take a screenshot (or navigate via browser_action/drive) to visually verify the UI.
+- For anything interactive (forms, buttons, navigation, login): actually TEST it with browser_action or drive —
   click the buttons, fill the forms, and confirm from the returned screenshot that it works.
 - If a screenshot reveals problems (wrong layout, missing elements, broken styles, errors): fix them, then re-verify.
-- After a screenshot or browser_action, any RUNTIME browser errors (console.error, uncaught exceptions, failed network requests) are reported back to you automatically. Treat them as real bugs and fix them — a clean build does NOT mean the app works at runtime.
+- After a screenshot, browser_action, or drive, any RUNTIME browser errors (console.error, uncaught exceptions, failed network requests) are reported back to you automatically. Treat them as real bugs and fix them — a clean build does NOT mean the app works at runtime.
 - Output done only AFTER you have visually confirmed the app looks AND works correctly. No confirmation = not done.
 - Paths are relative to workspace root, no leading "/" or "..".
 - When starting a dev server, use port 3000 and bind to 0.0.0.0 (--host 0.0.0.0 --port 3000).
@@ -236,13 +243,14 @@ export class EngineerAgentLoop {
         browse: 'Fetching a URL…',
         screenshot: 'Taking a screenshot to visually verify the UI…',
         browser_action: 'Interacting with the app in the browser…',
+        drive: 'Driving the browser through a multi-step flow…',
         web_search: 'Searching the web…',
         done: 'Verifying the build…',
       };
       const thought = parsed.thought || thoughtFallback[parsed.action] || 'Thinking…';
       yield { type: 'action_start', step, action: parsed.action, thought };
 
-      let observation: string;
+      let observation = '';
 
       if (parsed.action === 'bash') {
         const command = parsed.args.command || '';
@@ -335,11 +343,88 @@ export class EngineerAgentLoop {
               direction: parsed.args.direction === 'up' ? 'up' : 'down',
             });
             lastScreenshot = res.screenshot; // attached to next router call as a vision image
-            yield { type: 'browser_action_result', action: subAction, detail: res.result, base64: res.screenshot };
+            yield { type: 'browser_action_result', action: subAction, detail: res.result, base64: res.screenshot, cursorX: res.cursorX, cursorY: res.cursorY };
             observation = `${res.result}. A screenshot of the resulting page is attached to your next thinking step — look at it and decide the next action.`;
           } catch (err: any) {
             observation = `browser_action error: ${err?.message}`;
           }
+        }
+      } else if (parsed.action === 'drive') {
+        // Multi-step browser driving — executes each step and streams a drive_frame event
+        // per step so the user sees the cursor moving in real-time on the live preview.
+        let driveSteps: { action: string; selector?: string; text?: string; url?: string; direction?: string }[] = [];
+        try {
+          driveSteps = JSON.parse(parsed.args.steps || '[]');
+        } catch {
+          observation = 'drive error: "args.steps" must be a valid JSON array of browser action objects.';
+        }
+        if (driveSteps.length > 0) {
+          const validActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait'];
+          let driveObservations: string[] = [];
+          let driveScreenshot: string | null = null;
+          let driveCursorX: number | undefined;
+          let driveCursorY: number | undefined;
+          const driveUrl = lastPreviewUrl || 'http://localhost:3000';
+
+          for (let di = 0; di < driveSteps.length; di++) {
+            if (signal?.aborted) break;
+            const ds = driveSteps[di];
+            const subAction = ds.action as 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait';
+            if (!validActions.includes(subAction)) {
+              driveObservations.push(`Step ${di + 1}: unknown action "${ds.action}" — skipped.`);
+              continue;
+            }
+            yield { type: 'status', message: `Driving step ${di + 1}/${driveSteps.length}: ${subAction}…` };
+            try {
+              const res = await this.actuator.browserAction(workspaceId, subAction, {
+                selector: ds.selector,
+                text: ds.text,
+                url: ds.url || (subAction === 'navigate' ? driveUrl : undefined),
+                direction: ds.direction === 'up' ? 'up' : 'down',
+              });
+              driveScreenshot = res.screenshot;
+              driveCursorX = res.cursorX;
+              driveCursorY = res.cursorY;
+              const stepDetail = res.result;
+              driveObservations.push(`Step ${di + 1}: ${stepDetail}`);
+              // Stream a drive_frame so the frontend can show the cursor moving live
+              yield {
+                type: 'drive_frame',
+                screenshot: res.screenshot,
+                cursorX: res.cursorX,
+                cursorY: res.cursorY,
+                url: res.result.includes('now at ') ? res.result.replace(/.*now at /, '') : driveUrl,
+                step: di + 1,
+                stepDetail,
+              };
+            } catch (err: any) {
+              driveObservations.push(`Step ${di + 1}: ERROR — ${err?.message}`);
+            }
+          }
+          // After all steps: attach the final screenshot for the next AI think step
+          if (driveScreenshot) {
+            lastScreenshot = driveScreenshot;
+            yield {
+              type: 'browser_action_result',
+              action: 'drive_complete',
+              detail: driveObservations[driveObservations.length - 1] || 'Drive complete.',
+              base64: driveScreenshot,
+              cursorX: driveCursorX,
+              cursorY: driveCursorY,
+            };
+          }
+          observation = `Drive completed ${driveSteps.length} step(s):\n${driveObservations.join('\n')}\nFinal screenshot attached to your next thinking step.`;
+
+          // Collect runtime errors after the drive sequence
+          try {
+            const checkStart = Date.now();
+            const { errors } = await this.actuator.getConsoleErrors(workspaceId, lastConsoleCheck);
+            lastConsoleCheck = checkStart;
+            if (errors.length > 0) {
+              yield { type: 'console_error', errors: errors.map(e => ({ kind: e.kind, text: e.text })) };
+              observation += `\n\n[RUNTIME BROWSER ERRORS]\n` + errors.map(e => `• [${e.kind}] ${e.text}`).join('\n');
+            }
+          } catch { /* non-fatal */ }
         }
       } else if (parsed.action === 'web_search') {
         const query = parsed.args.query || parsed.args.q || '';
@@ -379,7 +464,7 @@ export class EngineerAgentLoop {
         }
         observation = `Build failed — cannot mark done yet. Fix the errors:\n${buildResult.logs.slice(-2000)}`;
       } else {
-        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, web_search, done.`;
+        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, done.`;
       }
 
       // Phase 4 — Live Sync: after any browser interaction, surface runtime
@@ -387,6 +472,7 @@ export class EngineerAgentLoop {
       // the user (console_error event) and the agent (appended to observation,
       // so it self-corrects on runtime bugs a clean build would never reveal).
       if (parsed.action === 'screenshot' || parsed.action === 'browser_action') {
+        // Note: 'drive' handles console errors inside its own loop above, so it's excluded here.
         try {
           // Capture the watermark BEFORE the read so an error logged during the
           // read isn't skipped next time (no-miss; at worst a sub-second re-report).

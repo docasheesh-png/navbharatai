@@ -23,6 +23,12 @@ interface BrowseEntry {
   content: string;
 }
 
+interface ScreenshotEntry {
+  url: string;
+  base64: string;
+  timestamp: number;
+}
+
 interface FilePair {
   current: string;
   previous?: string;
@@ -96,6 +102,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
   const [browseHistory, setBrowseHistory] = useState<BrowseEntry[]>([]);
+  const [screenshots, setScreenshots] = useState<ScreenshotEntry[]>([]);
   const [iframeSrc, setIframeSrc] = useState<string | null>(null);
   const [browserUrlInput, setBrowserUrlInput] = useState('');
 
@@ -191,6 +198,11 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         setActiveTab('browser');
         appendChat('system', `Browsed: ${event.url}`);
         break;
+      case 'screenshot_result':
+        setScreenshots(prev => [...prev, { url: event.url, base64: event.base64, timestamp: Date.now() }]);
+        setActiveTab('browser');
+        appendChat('system', `📸 Screenshot: ${event.url}`);
+        break;
       case 'server_ready':
         setIframeSrc(event.url);
         setBrowserUrlInput(event.url);
@@ -246,6 +258,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setIframeSrc(null);
     setBrowserUrlInput('');
     setBrowseHistory([]);
+    setScreenshots([]);
     setCurrentStep(0);
     setStatusMsg('');
   };
@@ -263,6 +276,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setSelectedFile(null);
     setIframeSrc(null);
     setBrowserUrlInput('');
+    setScreenshots([]);
 
     try {
       const res = await fetch('/api/engineer-chat', {
@@ -311,7 +325,8 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         : 'text-[#8b949e] hover:text-white border-b-2 border-transparent'
     }`;
 
-  const latestBrowse = !iframeSrc ? browseHistory[browseHistory.length - 1] : null;
+  const latestBrowse = (!iframeSrc && screenshots.length === 0) ? browseHistory[browseHistory.length - 1] : null;
+  const latestScreenshot = !iframeSrc ? screenshots[screenshots.length - 1] : null;
   const selectedPair = selectedFile ? fileMap[selectedFile] : null;
   const hasDiff = !!(selectedPair?.previous && selectedPair.previous !== selectedPair.current);
   const diffLines = hasDiff && showDiff
@@ -416,9 +431,9 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
           <button className={tabClass('browser')} onClick={() => setActiveTab('browser')}>
             <span className="flex items-center gap-1.5">
               <Globe className="w-3 h-3" />Browser
-              {(iframeSrc || browseHistory.length > 0) && (
+              {(iframeSrc || screenshots.length > 0 || browseHistory.length > 0) && (
                 <span className="bg-green-500/30 text-green-300 text-[10px] px-1.5 rounded-full">
-                  {iframeSrc ? '▶' : browseHistory.length}
+                  {iframeSrc ? '▶' : screenshots.length > 0 ? `${screenshots.length}📸` : browseHistory.length}
                 </span>
               )}
             </span>
@@ -613,13 +628,46 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
               />
             )}
 
-            {/* Text browse results (agent curl/playwright output) */}
-            {!iframeSrc && (
+            {/* Screenshot viewer (agent took a screenshot) */}
+            {!iframeSrc && latestScreenshot && (
+              <div className="flex-1 overflow-y-auto custom-scrollbar">
+                {/* Screenshot strip — latest on top, thumbnails below */}
+                <div className="relative">
+                  <img
+                    src={`data:image/png;base64,${latestScreenshot.base64}`}
+                    alt={`Screenshot: ${latestScreenshot.url}`}
+                    className="w-full block"
+                    style={{ imageRendering: 'auto' }}
+                  />
+                  <div className="absolute bottom-2 right-2 flex gap-1">
+                    <span className="bg-black/70 text-white text-[10px] px-2 py-0.5 rounded-full">
+                      Agent view · {new Date(latestScreenshot.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                </div>
+                {screenshots.length > 1 && (
+                  <div className="flex gap-1.5 overflow-x-auto p-2 bg-[#0a0e13] border-t border-white/5">
+                    {[...screenshots].reverse().map((s, i) => (
+                      <img
+                        key={s.timestamp}
+                        src={`data:image/png;base64,${s.base64}`}
+                        alt={`Screenshot ${screenshots.length - i}`}
+                        className="h-16 w-auto rounded border border-white/10 shrink-0 cursor-pointer hover:border-indigo-500/60 transition-colors"
+                        title={`Step screenshot: ${s.url}`}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Text browse results (agent curl output) */}
+            {!iframeSrc && !latestScreenshot && (
               <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
                 {!latestBrowse ? (
                   <div className="flex flex-col items-center justify-center h-full gap-3 text-[#586069]">
                     <Globe className="w-8 h-8 opacity-30" />
-                    <p className="text-xs">Type a URL above to navigate, or ask Engineer AI to build & start a preview.</p>
+                    <p className="text-xs">Type a URL above to navigate, or ask Engineer AI to build &amp; start a preview.</p>
                   </div>
                 ) : (
                   <div className="space-y-3">

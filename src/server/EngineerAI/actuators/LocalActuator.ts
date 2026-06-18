@@ -131,4 +131,10 @@ export class LocalActuator implements IEngineerActuator {
   async getPortUrl(_workspaceId: string, port: number): Promise<string> {
     return `http://localhost:${port}`;
   }
+
+  async screenshot(_workspaceId: string, _url: string): Promise<{ base64: string; mimeType: 'image/png' }> {
+    throw new Error(
+      'Screenshots require a real sandbox (set E2B_API_KEY). LocalActuator cannot run a headless browser.'
+    );
+  }
 }

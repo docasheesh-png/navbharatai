@@ -21,7 +21,7 @@ const PORT_PATTERNS = [
   /:\s*(\d{4,5})\b.*(?:ready|started|running)/i,
 ];
 
-const SYSTEM_PROMPT = `You are Engineer AI — a sharp, friendly senior engineer who can both converse intelligently AND build real software autonomously.
+const SYSTEM_PROMPT = `You are Engineer AI — a sharp, friendly senior engineer who can both converse intelligently AND build real software autonomously. You have EYES: you can take screenshots of running apps and see exactly what the UI looks like.
 
 You handle TWO very different kinds of requests. Read the user's message carefully and pick the right mode:
 
@@ -42,7 +42,7 @@ Examples that trigger reply (in ANY language):
   "app banana hai — kya plan hoga?" (planning, not yet building)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / done
+MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / done
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Use this when the user clearly wants you to BUILD, CREATE, MODIFY, or FIX code/files right now.
 
@@ -58,20 +58,23 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"done", "args": { ... } }
+{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"screenshot"|"done", "args": { ... } }
 
 Action args:
   reply:      { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
   bash:       { "command": "shell command to run in the workspace" }
   edit_file:  { "path": "relative/path.tsx", "content": "FULL new file content" }
   patch_file: { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
+  screenshot: { "url": "http://localhost:3000" }
   done:       { "summary": "one sentence describing what was accomplished" }
 
 Coding rules (when in MODE 2):
 - One action per response. Wait for the observation before the next action.
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
-- Output done only when the task is complete. Before done, run bash { "command": "npm run build" } to verify.
+- After starting a dev server: ALWAYS take a screenshot to visually verify the UI looks correct.
+- If the screenshot reveals problems (wrong layout, missing elements, broken styles): fix them, then screenshot again.
+- Output done only AFTER a screenshot confirms the UI looks good. No visual confirmation = not done.
 - Paths are relative to workspace root, no leading "/" or "..".
 - When starting a dev server, use port 3000 and bind to 0.0.0.0 (--host 0.0.0.0 --port 3000).
 - Commands run with a 60-second timeout.`;
@@ -132,6 +135,8 @@ export class EngineerAgentLoop {
 
     const history: { step: number; actionJson: string; observation: string }[] = [];
     let consecutiveParseFailures = 0;
+    let lastPreviewUrl: string | null = null;  // updated when server_ready fires
+    let lastScreenshot: string | null = null;  // base64 PNG — injected into next Grok call
 
     for (let step = 1; step <= MAX_STEPS; step++) {
       if (signal?.aborted) { yield { type: 'aborted' }; return; }
@@ -144,8 +149,10 @@ export class EngineerAgentLoop {
       // Router/provider failure is a real infra error — abort. Malformed model
       // output is recoverable — feed the parse error back and let it retry.
       let rawResponse: string;
+      const images = lastScreenshot ? [lastScreenshot] : undefined;
+      lastScreenshot = null; // consume: each screenshot is used exactly once
       try {
-        const { response, telemetry } = await this.router.route(prompt, SYSTEM_PROMPT);
+        const { response, telemetry } = await this.router.route(prompt, SYSTEM_PROMPT, images);
         if (!telemetry.success) {
           // All providers failed (budget exhausted, wrong key, rate-limit, etc.)
           yield {
@@ -197,6 +204,7 @@ export class EngineerAgentLoop {
         edit_file: 'Writing a file…',
         patch_file: 'Patching a file…',
         browse: 'Fetching a URL…',
+        screenshot: 'Taking a screenshot to visually verify the UI…',
         done: 'Verifying the build…',
       };
       const thought = parsed.thought || thoughtFallback[parsed.action] || 'Thinking…';
@@ -223,6 +231,7 @@ export class EngineerAgentLoop {
             if (port > 1000 && port < 65536) {
               try {
                 const url = await this.actuator.getPortUrl(workspaceId, port);
+                lastPreviewUrl = url;
                 yield { type: 'server_ready', url, port };
               } catch { /* non-fatal */ }
               break;
@@ -268,6 +277,17 @@ export class EngineerAgentLoop {
         } catch (err: any) {
           observation = `browse error: ${err?.message}`;
         }
+      } else if (parsed.action === 'screenshot') {
+        const targetUrl = parsed.args.url || lastPreviewUrl || 'http://localhost:3000';
+        yield { type: 'status', message: `Step ${step}: taking screenshot of ${targetUrl}…` };
+        try {
+          const shot = await this.actuator.screenshot(workspaceId, targetUrl);
+          lastScreenshot = shot.base64; // injected into the NEXT router call as a vision image
+          yield { type: 'screenshot_result', url: targetUrl, base64: shot.base64 };
+          observation = `Screenshot captured of ${targetUrl}. The image has been attached to your next thinking step — look at it carefully and describe what you see, then decide what to fix.`;
+        } catch (err: any) {
+          observation = `screenshot error: ${err?.message}. If playwright is not installed, run: bash { "command": "npm install playwright && npx playwright install chromium" }`;
+        }
       } else if (parsed.action === 'done') {
         // Verify the build is actually clean before declaring success
         const buildResult = await this.actuator.build(workspaceId);
@@ -278,7 +298,7 @@ export class EngineerAgentLoop {
         }
         observation = `Build failed — cannot mark done yet. Fix the errors:\n${buildResult.logs.slice(-2000)}`;
       } else {
-        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, done.`;
+        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, done.`;
       }
 
       history.push({

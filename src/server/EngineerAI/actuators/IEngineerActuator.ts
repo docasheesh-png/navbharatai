@@ -21,4 +21,9 @@ export interface IEngineerActuator {
    * Used for live-preview when the agent starts a dev server.
    */
   getPortUrl(workspaceId: string, port: number): Promise<string>;
+  /**
+   * Capture a screenshot of the given URL from inside the sandbox.
+   * Returns a base64-encoded PNG. Requires a real sandbox with a browser available.
+   */
+  screenshot(workspaceId: string, url: string): Promise<{ base64: string; mimeType: 'image/png' }>;
 }

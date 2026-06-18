@@ -33,7 +33,8 @@ const IGNORED_DIRS = new Set([
 export class LocalActuator implements IEngineerActuator {
   private workspaceManager = new WorkspaceManager(NAMESPACE);
 
-  async ensureWorkspace(workspaceId: string): Promise<void> {
+  async ensureWorkspace(workspaceId: string, _projectType?: string, _resumeSandboxId?: string): Promise<void> {
+    // No remote sandbox to resume — the local directory IS the persistent state.
     const workspacePath = path.join(WORKSPACES_ROOT, workspaceId);
     await fsPromises.mkdir(workspacePath, { recursive: true });
   }
@@ -130,5 +131,39 @@ export class LocalActuator implements IEngineerActuator {
 
   async getPortUrl(_workspaceId: string, port: number): Promise<string> {
     return `http://localhost:${port}`;
+  }
+
+  async screenshot(_workspaceId: string, _url: string): Promise<{ base64: string; mimeType: 'image/png' }> {
+    throw new Error(
+      'Screenshots require a real sandbox (set E2B_API_KEY). LocalActuator cannot run a headless browser.'
+    );
+  }
+
+  async browserAction(
+    _workspaceId: string,
+    _action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait',
+    _args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
+  ): Promise<{ screenshot: string; result: string }> {
+    throw new Error(
+      'Browser interaction requires a real sandbox (set E2B_API_KEY). LocalActuator cannot run a headless browser.'
+    );
+  }
+
+  async getConsoleErrors(
+    _workspaceId: string,
+    _sinceMs: number,
+  ): Promise<{ errors: { t: number; kind: string; text: string }[] }> {
+    // No browser session in LocalActuator — nothing to report.
+    return { errors: [] };
+  }
+
+  async getSandboxId(_workspaceId: string): Promise<string | null> {
+    // The on-disk directory persists across sessions; there is no sandbox ID.
+    return null;
+  }
+
+  async pauseSandbox(_sandboxId: string): Promise<boolean> {
+    // Nothing to pause — local processes/directories aren't billed per-second.
+    return false;
   }
 }

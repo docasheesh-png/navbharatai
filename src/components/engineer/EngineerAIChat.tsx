@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   HardHat, Loader2, Send, Square, Terminal, FolderOpen, Globe,
   CheckCircle2, AlertCircle, ChevronRight, Play, FileDiff, RotateCcw,
+  ExternalLink, RefreshCw,
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -20,6 +21,12 @@ interface TerminalEntry {
 interface BrowseEntry {
   url: string;
   content: string;
+}
+
+interface ScreenshotEntry {
+  url: string;
+  base64: string;
+  timestamp: number;
 }
 
 interface FilePair {
@@ -95,7 +102,9 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
   const [browseHistory, setBrowseHistory] = useState<BrowseEntry[]>([]);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [screenshots, setScreenshots] = useState<ScreenshotEntry[]>([]);
+  const [iframeSrc, setIframeSrc] = useState<string | null>(null);
+  const [browserUrlInput, setBrowserUrlInput] = useState('');
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -111,6 +120,19 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     return fresh;
   })());
 
+  // Persistent E2B sandbox ID — lets the next session resume the same workspace
+  // (files, node_modules, running dev server). Stored per-workspace in localStorage.
+  const sandboxIdRef = useRef<string | null>((() => {
+    try { return localStorage.getItem(`engineer_sandbox_${workspaceIdRef.current}`); } catch { return null; }
+  })());
+  const setSandboxId = (id: string | null) => {
+    sandboxIdRef.current = id;
+    try {
+      const key = `engineer_sandbox_${workspaceIdRef.current}`;
+      if (id) localStorage.setItem(key, id); else localStorage.removeItem(key);
+    } catch { /* private mode — keep in-memory only */ }
+  };
+
   // Persist messages (last 60) whenever they change
   useEffect(() => {
     if (!userId) return;
@@ -122,6 +144,28 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
   useEffect(() => { terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [terminalEntries]);
+
+  // Pause the sandbox when the user leaves Engineer AI (unmount or tab close) so
+  // it stops billing compute while preserving full state for the next resume.
+  useEffect(() => {
+    const pause = () => {
+      const id = sandboxIdRef.current;
+      if (!id) return;
+      try {
+        fetch('/api/engineer-pause', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sandboxId: id }),
+          keepalive: true, // survives page unload
+        }).catch(() => {});
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('pagehide', pause);
+    return () => {
+      window.removeEventListener('pagehide', pause);
+      pause(); // component unmount (navigated away within the SPA)
+    };
+  }, []);
 
   const appendChat = (role: ChatMessage['role'], text: string) =>
     setMessages(prev => [...prev, { id: uid(), role, text }]);
@@ -189,8 +233,39 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         setActiveTab('browser');
         appendChat('system', `Browsed: ${event.url}`);
         break;
+      case 'screenshot_result':
+        setScreenshots(prev => [...prev, { url: event.url, base64: event.base64, timestamp: Date.now() }]);
+        setActiveTab('browser');
+        appendChat('system', `📸 Screenshot: ${event.url}`);
+        break;
+      case 'browser_action_result':
+        setScreenshots(prev => [...prev, { url: event.detail || event.action, base64: event.base64, timestamp: Date.now() }]);
+        setActiveTab('browser');
+        appendChat('system', `🖱️ ${event.detail || event.action}`);
+        break;
+      case 'console_error': {
+        const errs: { kind: string; text: string }[] = event.errors || [];
+        if (errs.length > 0) {
+          const lines = errs.map(e => `⚠️ [${e.kind}] ${e.text}`).join('\n');
+          appendChat('system', `Runtime errors in live app:\n${lines}`);
+        }
+        break;
+      }
+      case 'search_result': {
+        const results: { title: string; url: string }[] = event.results || [];
+        const lines = results.length
+          ? results.map(r => `• ${r.title}\n  ${r.url}`).join('\n')
+          : '(no results)';
+        appendChat('system', `🔍 Searched "${event.query}":\n${lines}`);
+        break;
+      }
+      case 'workspace_saved':
+        // Remember the sandbox so the next session resumes this exact workspace.
+        if (event.sandboxId) setSandboxId(event.sandboxId);
+        break;
       case 'server_ready':
-        setPreviewUrl(event.url);
+        setIframeSrc(event.url);
+        setBrowserUrlInput(event.url);
         setActiveTab('browser');
         appendChat('agent', `🚀 Dev server running on port ${event.port} — live preview ready`);
         break;
@@ -226,6 +301,20 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   // so the next send creates a new empty directory and avoids inheriting a broken state.
   const handleNewWorkspace = () => {
     if (loading) return;
+    // Pause + forget the old sandbox so we don't keep paying for an orphaned VM.
+    const oldSandbox = sandboxIdRef.current;
+    if (oldSandbox) {
+      try {
+        fetch('/api/engineer-pause', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sandboxId: oldSandbox }),
+          keepalive: true,
+        }).catch(() => {});
+      } catch { /* ignore */ }
+    }
+    try { localStorage.removeItem(`engineer_sandbox_${workspaceIdRef.current}`); } catch {}
+    sandboxIdRef.current = null;
     if (userId) {
       try { localStorage.removeItem(`engineer_ws_${userId}`); } catch {}
       try { localStorage.removeItem(`engineer_msgs_${userId}`); } catch {}
@@ -240,8 +329,10 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setFileMap({});
     setEditOrder([]);
     setSelectedFile(null);
-    setPreviewUrl(null);
+    setIframeSrc(null);
+    setBrowserUrlInput('');
     setBrowseHistory([]);
+    setScreenshots([]);
     setCurrentStep(0);
     setStatusMsg('');
   };
@@ -257,13 +348,19 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setFileMap({});
     setEditOrder([]);
     setSelectedFile(null);
-    setPreviewUrl(null);
+    setIframeSrc(null);
+    setBrowserUrlInput('');
+    setScreenshots([]);
 
     try {
       const res = await fetch('/api/engineer-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId: workspaceIdRef.current, instruction }),
+        body: JSON.stringify({
+          workspaceId: workspaceIdRef.current,
+          instruction,
+          resumeSandboxId: sandboxIdRef.current || undefined,
+        }),
       });
       if (!res.ok || !res.body) throw new Error(`API error: ${res.status}`);
 
@@ -306,7 +403,8 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         : 'text-[#8b949e] hover:text-white border-b-2 border-transparent'
     }`;
 
-  const latestBrowse = browseHistory[browseHistory.length - 1];
+  const latestBrowse = (!iframeSrc && screenshots.length === 0) ? browseHistory[browseHistory.length - 1] : null;
+  const latestScreenshot = !iframeSrc ? screenshots[screenshots.length - 1] : null;
   const selectedPair = selectedFile ? fileMap[selectedFile] : null;
   const hasDiff = !!(selectedPair?.previous && selectedPair.previous !== selectedPair.current);
   const diffLines = hasDiff && showDiff
@@ -411,9 +509,9 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
           <button className={tabClass('browser')} onClick={() => setActiveTab('browser')}>
             <span className="flex items-center gap-1.5">
               <Globe className="w-3 h-3" />Browser
-              {(previewUrl || browseHistory.length > 0) && (
+              {(iframeSrc || screenshots.length > 0 || browseHistory.length > 0) && (
                 <span className="bg-green-500/30 text-green-300 text-[10px] px-1.5 rounded-full">
-                  {previewUrl ? '▶' : browseHistory.length}
+                  {iframeSrc ? '▶' : screenshots.length > 0 ? `${screenshots.length}📸` : browseHistory.length}
                 </span>
               )}
             </span>
@@ -536,35 +634,119 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         {/* Browser tab */}
         {activeTab === 'browser' && (
           <div className="flex-1 flex flex-col min-h-0">
-            {/* Live preview iframe (from server_ready) */}
-            {previewUrl && (
-              <div className="flex flex-col flex-1 min-h-0">
-                <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 shrink-0">
-                  <Play className="w-3 h-3 text-green-400 shrink-0" />
-                  <span className="text-xs text-green-300 font-medium flex-1 truncate">Live Preview</span>
+            {/* URL address bar */}
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#0d1117] shrink-0">
+              {iframeSrc
+                ? <Play className="w-3 h-3 text-green-400 shrink-0" />
+                : <Globe className="w-3 h-3 text-[#586069] shrink-0" />}
+              <input
+                type="text"
+                value={browserUrlInput}
+                onChange={e => setBrowserUrlInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    const url = browserUrlInput.trim();
+                    if (!url) return;
+                    const normalized = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+                    setIframeSrc(normalized);
+                    setBrowserUrlInput(normalized);
+                  }
+                }}
+                placeholder="Enter URL or wait for live preview…"
+                className="flex-1 min-w-0 bg-[#161b22] border border-white/10 rounded-lg px-3 py-1 text-xs text-white placeholder:text-[#586069] focus:outline-none focus:border-indigo-500/50"
+              />
+              <button
+                onClick={() => {
+                  const url = browserUrlInput.trim();
+                  if (!url) return;
+                  const normalized = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+                  setIframeSrc(normalized);
+                  setBrowserUrlInput(normalized);
+                }}
+                disabled={!browserUrlInput.trim()}
+                className="px-2.5 py-1 bg-indigo-600/70 hover:bg-indigo-600 disabled:opacity-30 text-white text-xs rounded-lg transition-colors shrink-0"
+              >
+                Go
+              </button>
+              {iframeSrc && (
+                <>
+                  <button
+                    onClick={() => {
+                      // Force iframe reload by briefly clearing and restoring src
+                      const src = iframeSrc;
+                      setIframeSrc(null);
+                      setTimeout(() => setIframeSrc(src), 50);
+                    }}
+                    title="Reload"
+                    className="w-6 h-6 flex items-center justify-center text-[#8b949e] hover:text-white transition-colors shrink-0"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
                   <a
-                    href={previewUrl}
+                    href={iframeSrc}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[10px] text-[#8b949e] hover:text-white transition-colors"
+                    title="Open in new tab"
+                    className="w-6 h-6 flex items-center justify-center text-[#8b949e] hover:text-white transition-colors shrink-0"
                   >
-                    Open ↗
+                    <ExternalLink className="w-3.5 h-3.5" />
                   </a>
+                </>
+              )}
+            </div>
+
+            {/* Iframe */}
+            {iframeSrc && (
+              <iframe
+                key={iframeSrc}
+                src={iframeSrc}
+                className="flex-1 w-full border-0 bg-white"
+                title="Browser"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+              />
+            )}
+
+            {/* Screenshot viewer (agent took a screenshot) */}
+            {!iframeSrc && latestScreenshot && (
+              <div className="flex-1 overflow-y-auto custom-scrollbar">
+                {/* Screenshot strip — latest on top, thumbnails below */}
+                <div className="relative">
+                  <img
+                    src={`data:image/png;base64,${latestScreenshot.base64}`}
+                    alt={`Screenshot: ${latestScreenshot.url}`}
+                    className="w-full block"
+                    style={{ imageRendering: 'auto' }}
+                  />
+                  <div className="absolute bottom-2 right-2 flex gap-1">
+                    <span className="bg-black/70 text-white text-[10px] px-2 py-0.5 rounded-full">
+                      Agent view · {new Date(latestScreenshot.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
                 </div>
-                <iframe
-                  src={previewUrl}
-                  className="flex-1 w-full border-0 bg-white"
-                  title="Live preview"
-                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                />
+                {screenshots.length > 1 && (
+                  <div className="flex gap-1.5 overflow-x-auto p-2 bg-[#0a0e13] border-t border-white/5">
+                    {[...screenshots].reverse().map((s, i) => (
+                      <img
+                        key={s.timestamp}
+                        src={`data:image/png;base64,${s.base64}`}
+                        alt={`Screenshot ${screenshots.length - i}`}
+                        className="h-16 w-auto rounded border border-white/10 shrink-0 cursor-pointer hover:border-indigo-500/60 transition-colors"
+                        title={`Step screenshot: ${s.url}`}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Browse results (curl/playwright) */}
-            {!previewUrl && (
+            {/* Text browse results (agent curl output) */}
+            {!iframeSrc && !latestScreenshot && (
               <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
                 {!latestBrowse ? (
-                  <p className="text-[#586069] text-xs mt-4">No URLs browsed yet.</p>
+                  <div className="flex flex-col items-center justify-center h-full gap-3 text-[#586069]">
+                    <Globe className="w-8 h-8 opacity-30" />
+                    <p className="text-xs">Type a URL above to navigate, or ask Engineer AI to build &amp; start a preview.</p>
+                  </div>
                 ) : (
                   <div className="space-y-3">
                     <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/3 border border-white/5">

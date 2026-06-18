@@ -136,10 +136,13 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
       case 'status':
         setStatusMsg(event.message || '');
         break;
+      case 'chat_reply':
+        // Pure conversational reply — show as a normal agent message, no coding started.
+        appendChat('agent', event.message || '');
+        break;
       case 'action_start':
         setCurrentStep(event.step || 0);
         setStatusMsg(`Step ${event.step}: ${event.action}`);
-        // BUG FIX (B1): thought is now always non-empty (fallback in AgentLoop)
         appendChat('agent', `[Step ${event.step}] 💭 ${event.thought}`);
         break;
       case 'command_result':
@@ -194,7 +197,10 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
       case 'complete':
         setStatusMsg('');
         setCurrentStep(0);
-        appendChat('agent', `✅ Done in ${event.steps} step${event.steps === 1 ? '' : 's'}: ${event.summary}`);
+        // Conversational reply already showed the message — don't double-up with a "Done" line.
+        if (event.summary !== 'Replied.') {
+          appendChat('agent', `✅ Done in ${event.steps} step${event.steps === 1 ? '' : 's'}: ${event.summary}`);
+        }
         break;
       case 'max_steps_reached':
         setStatusMsg('');

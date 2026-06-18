@@ -59,7 +59,7 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"screenshot"|"browser_action"|"done", "args": { ... } }
+{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"web_search"|"done", "args": { ... } }
 
 Action args:
   reply:          { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
@@ -388,8 +388,11 @@ export class EngineerAgentLoop {
       // so it self-corrects on runtime bugs a clean build would never reveal).
       if (parsed.action === 'screenshot' || parsed.action === 'browser_action') {
         try {
+          // Capture the watermark BEFORE the read so an error logged during the
+          // read isn't skipped next time (no-miss; at worst a sub-second re-report).
+          const checkStart = Date.now();
           const { errors } = await this.actuator.getConsoleErrors(workspaceId, lastConsoleCheck);
-          lastConsoleCheck = Date.now();
+          lastConsoleCheck = checkStart;
           if (errors.length > 0) {
             yield { type: 'console_error', errors: errors.map(e => ({ kind: e.kind, text: e.text })) };
             observation += `\n\n[RUNTIME BROWSER ERRORS — these happened in the live app, fix them]\n` +

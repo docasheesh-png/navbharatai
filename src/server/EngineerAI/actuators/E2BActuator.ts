@@ -26,6 +26,29 @@ const {chromium}=require('playwright');
 })().catch(e=>{process.stderr.write(String(e));process.exit(1)});
 `.trim();
 
+// Screenshot via the SAME persistent CDP browser the agent drives (Phase 3),
+// so a screenshot taken after a browser_action flow (login, navigation) reflects
+// the real session/cookies/current-page — not a clean fresh browser. If a target
+// URL is given and differs from the current page, navigate there first; otherwise
+// just capture the live page. Exits WITHOUT closing the browser (state persists).
+const SCREENSHOT_CDP_SCRIPT = `
+const {chromium}=require('playwright');
+(async()=>{
+  const target=process.argv[2]||'';
+  const browser=await chromium.connectOverCDP('http://localhost:${CDP_PORT}');
+  const ctx=browser.contexts()[0]||await browser.newContext({viewport:{width:1280,height:720}});
+  let page=ctx.pages()[0]||await ctx.newPage();
+  await page.setViewportSize({width:1280,height:720}).catch(()=>{});
+  if(target && page.url()!==target){
+    await page.goto(target,{waitUntil:'networkidle',timeout:15000}).catch(()=>{});
+  }
+  await new Promise(r=>setTimeout(r,600));
+  const buf=await page.screenshot({type:'png',fullPage:false});
+  process.stdout.write(buf.toString('base64'));
+  process.exit(0);
+})().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1);});
+`.trim();
+
 // Long-lived browser the agent drives across multiple interaction steps.
 // Launched once in the background; exposes a CDP port that action scripts
 // connect to. The DOM/cookies/current-URL persist between actions.
@@ -166,6 +189,7 @@ export class E2BActuator implements IEngineerActuator {
         }
         // Write the reusable browser scripts once
         await sandbox.files.write(`${TOOLS_DIR}/screenshot.js`, SCREENSHOT_SCRIPT);
+        await sandbox.files.write(`${TOOLS_DIR}/screenshot-cdp.js`, SCREENSHOT_CDP_SCRIPT);
         await sandbox.files.write(`${TOOLS_DIR}/daemon.js`, BROWSER_DAEMON_SCRIPT);
         await sandbox.files.write(`${TOOLS_DIR}/browser-action.js`, BROWSER_ACTION_SCRIPT);
         return true;
@@ -197,17 +221,25 @@ export class E2BActuator implements IEngineerActuator {
   async build(workspaceId: string): Promise<{ success: boolean; logs: string }> {
     const sandbox = await this.getSandbox(workspaceId);
     try {
-      const install = await sandbox.commands.run('npm install', {
-        cwd: WORKSPACE_ROOT,
-        timeoutMs: COMMAND_TIMEOUT_MS,
-      });
+      // Skip npm install when node_modules already exists — saves 30-60s on every
+      // build/done verification (the agent may hit `done` several times). Mirrors
+      // LocalActuator. Only the first build pays the install cost.
+      let installLog = '';
+      const hasModules = await sandbox.files.exists(`${WORKSPACE_ROOT}/node_modules`).catch(() => false);
+      if (!hasModules) {
+        const install = await sandbox.commands.run('npm install', {
+          cwd: WORKSPACE_ROOT,
+          timeoutMs: COMMAND_TIMEOUT_MS,
+        });
+        installLog = install.stdout + install.stderr;
+      }
       const build = await sandbox.commands.run('npm run build', {
         cwd: WORKSPACE_ROOT,
         timeoutMs: COMMAND_TIMEOUT_MS,
       });
       return {
         success: build.exitCode === 0,
-        logs: install.stdout + install.stderr + build.stdout + build.stderr,
+        logs: installLog + build.stdout + build.stderr,
       };
     } catch (err: any) {
       return { success: false, logs: `${err.stdout || ''}${err.stderr || ''}${err.message || String(err)}` };
@@ -305,6 +337,19 @@ const {chromium}=require('playwright');
       );
     }
 
+    // Prefer the SHARED persistent browser (CDP) so the screenshot reflects the
+    // same session the agent's browser_action hands have been driving. Falls back
+    // to a fresh standalone browser if the daemon/CDP isn't reachable.
+    await this._ensureBrowserDaemon(sandbox, workspaceId).catch(() => {});
+    const cdp = await sandbox.commands.run(
+      `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/screenshot-cdp.js ${JSON.stringify(url)}`,
+      { cwd: TOOLS_DIR, timeoutMs: 30_000 }
+    ).catch(() => null);
+    if (cdp && cdp.exitCode === 0 && cdp.stdout) {
+      return { base64: cdp.stdout.trim(), mimeType: 'image/png' };
+    }
+
+    // Fallback: fresh standalone browser (clean session, but always works).
     const result = await sandbox.commands.run(
       `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/screenshot.js ${JSON.stringify(url)}`,
       { cwd: TOOLS_DIR, timeoutMs: 30_000 }

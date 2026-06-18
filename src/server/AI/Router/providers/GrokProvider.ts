@@ -43,11 +43,13 @@ export class GrokProvider implements AIProvider {
       messages.push({ role: 'user', content: prompt });
     }
 
-    const response = await this.client.chat.completions.create({
-      model,
-      messages,
-      max_tokens: 8000,
-    });
+    // Vision calls carry large base64 images and reason over them — give them a
+    // longer per-request timeout (overrides the 60s client default) so a slow but
+    // valid analysis doesn't spuriously fail. Text calls keep the fast default.
+    const response = await this.client.chat.completions.create(
+      { model, messages, max_tokens: 8000 },
+      hasImages ? { timeout: 120_000 } : undefined,
+    );
 
     return {
       content: response.choices[0]?.message?.content || '',

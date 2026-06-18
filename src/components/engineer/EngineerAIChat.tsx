@@ -151,6 +151,10 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     const pause = () => {
       const id = sandboxIdRef.current;
       if (!id) return;
+      // Don't freeze the sandbox while a build/stream is in-flight — pausing
+      // mid-operation can corrupt an in-progress install/build. readerRef is set
+      // only while a request is actively streaming.
+      if (readerRef.current) return;
       try {
         fetch('/api/engineer-pause', {
           method: 'POST',

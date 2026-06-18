@@ -3,7 +3,7 @@
 > **Goal:** Engineer AI jo khud banaye, khud dekhe, khud test kare, khud fix kare — bina user ke haath lagaye.
 > **AI Model:** Grok ONLY (xAI) — no Claude, no AiCredits proxy.
 > **Sandbox:** E2B (real cloud VM, full OS isolation).
-> **Updated:** 2026-06-18
+> **Updated:** 2026-06-18 (v2 — Phases 1–6 shipped, gap-closing Phases 7–12 added)
 
 ---
 
@@ -11,18 +11,33 @@
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | Foundation (core fixes + browser bar) | ⏳ PRs merged pending |
-| 2 | Agent Eyes — Screenshots | 🔜 Next |
-| 3 | Agent Hands — Browser Actions | 🔜 After Phase 2 |
-| 4 | User + Agent Ek Browser | 🔜 After Phase 3 |
-| 5 | Web Search | 🔜 Parallel |
-| 6 | Memory + Workspace Persistence | 🔜 Last |
+| 1 | Foundation (core fixes + browser bar) | ✅ DONE — merged (PR #72) |
+| 2 | Agent Eyes — Screenshots (Grok vision) | ✅ DONE — merged (PR #72) |
+| 3 | Agent Hands — Browser Actions (Playwright) | ✅ DONE — merged (PR #72) |
+| 4 | Live Sync | 🟡 PARTIAL — runtime error capture shipped; full bidirectional sync pending → folded into **Phase 9** |
+| 5 | Web Search (key-free) | ✅ DONE — merged (PR #72) |
+| 6 | Memory + Workspace Persistence (E2B pause/resume) | ✅ DONE — merged (PR #72) |
+| **7** | **Whole-project context (smart retrieval)** | 🔜 NEXT |
+| **8** | **Checkpoints + Rollback (safety)** | 🔜 Planned |
+| **9** | **Live bidirectional sync + deploy** | 🔜 Planned |
+| **10** | **Database + Auth + Storage provisioning** | 🔜 Planned |
+| **11** | **Git + real auto-repair + multi-framework** | 🔜 Planned |
+| **12** | **Differentiators (design-to-code, tests, polish)** | 🔜 Planned |
+
+> **What's live now (PR #72, deployed):** Engineer AI can SEE apps (Grok vision), DRIVE them
+> (Playwright click/type/navigate/scroll/press/wait), CATCH runtime errors, SEARCH the web
+> key-free, and PERSIST/RESUME workspaces (E2B pause/resume) — all Grok-only.
+>
+> **Phase 4 honesty note:** the original Phase 4 scoped *full live bidirectional sync*
+> (3 s background screenshot streaming + user-click-on-preview → agent). Only the runtime
+> **error-capture** half shipped. The remaining interactive-sync half is now **Phase 9** below,
+> so nothing is lost.
 
 ---
 
-## PHASE 1 — Foundation ✅ (code done, merge pending)
+## PHASE 1 — Foundation ✅ DONE (merged, deployed)
 
-> PRs #65 + #66 — user karo merge. Fir E2B_API_KEY + GROK_API_KEY Cloud Run me daalo.
+> Merged via PR #72. E2B_API_KEY + GROK_API_KEY Cloud Run me added ✅.
 
 **Kya bana:**
 - `req.on('close')` → `res.on('close')` — chatbox dead fix (root cause)
@@ -214,6 +229,158 @@ Screenshot → "Login successful dikhta hai" → Done ✅
 
 ---
 
+## ════════════════════════════════════════════════
+## PART 2 — GAP-CLOSING ROADMAP (Mythos parity → Mythos beat)
+## ════════════════════════════════════════════════
+
+> Phases 1–6 ne Engineer AI ko "dekhne + chalane wala agent" bana diya — woh sab DONE + LIVE hai.
+> Ab yeh phases use "duniya ka best AI app maker" banayenge. Source: Mythos-class comparison.
+> **Rule wahi:** Grok ONLY, E2B-native, pure additive, app kabhi na toote.
+> **Build order:** 7 → 8 → 9 → 10 → 11 → 12 (impact + safety order). Ek-ek karke, har phase apni PR.
+
+---
+
+## PHASE 7 — Whole-Project Context (Smart Retrieval) 🧠 🔜 NEXT
+
+> **Problem:** Abhi agent sirf 20 files × 1000 chars dekhta hai (`EngineerAgentLoop.ts`:
+> `MAX_FILES_SHOWN = 20`, `MAX_CHARS_PER_FILE = 1000`). Bada app = agent andha. Yeh sabse
+> bada correctness gap hai.
+
+### Kya hoga:
+- Har step pe poori workspace dump karne ke bajaye — **task ke relevant** files retrieve karo.
+- Keyword/grep-based retrieval first (no embeddings, no extra key): instruction + recent
+  errors se search terms nikaalo, sandbox me `grep -rl` chala ke matching files laao.
+- File tree summary (sirf paths) hamesha do, content sirf relevant files ka.
+- Bade file ke liye: symbol outline (imports/exports/function signatures) bhejo, poora body nahi.
+
+### Files:
+- **`EngineerAgentLoop.ts`** — `buildPrompt()` rewrite: relevance-ranked file selection;
+  `MAX_FILES_SHOWN`/`MAX_CHARS_PER_FILE` ko dynamic budget se replace karo (~12k char budget).
+- **`IEngineerActuator.ts`** + **`E2BActuator.ts`** + **`LocalActuator.ts`** — naya
+  `searchFiles(workspaceId, terms): Promise<string[]>` (sandbox `grep -rl`, node_modules skip).
+- **(naya)** `src/server/EngineerAI/ContextRetriever.ts` — relevance ranking + budget packing.
+
+### Done when: 60+ file project me agent sahi file edit kare bina "file not found / blind guess".
+
+---
+
+## PHASE 8 — Checkpoints + Rollback (Safety) ⏪
+
+> **Problem:** Edits seedhe write hote hain, koi undo nahi. Ek galat step workspace corrupt
+> kar sakta hai — yeh "app kabhi na toote" rule ke against hai. Safety pehle.
+
+### Kya hoga:
+- Har mutating action (edit_file / patch_file / bash-jo-files-badle) se PEHLE ek checkpoint.
+- Checkpoint = lightweight: workspace ka git stash-style snapshot (Phase 11 git aane se pehle:
+  E2B filesystem snapshot ya `cp -r` to `.checkpoints/<n>`).
+- Frontend me har checkpoint ke saath "Restore" button — ek click me us point pe wapas.
+- Agent khud bhi rollback kar sake agar koi change cheezein toad de (build red ho jaye).
+
+### Files:
+- **`IEngineerActuator.ts`/`E2BActuator.ts`/`LocalActuator.ts`** — `checkpoint(workspaceId): id`,
+  `restore(workspaceId, id)`.
+- **`EngineerAgentLoop.ts`** — mutating action se pehle auto-checkpoint; build-fail pe
+  agent ko restore option.
+- **`EngineerAITypes.ts`** — `checkpoint_created` event.
+- **`EngineerAIChat.tsx`** — checkpoint timeline + Restore button.
+
+### Done when: koi bhi step ke baad ek click se us se pehle ki exact state wapas aaye.
+
+---
+
+## PHASE 9 — Live Bidirectional Sync + One-Click Deploy 🔄🚀
+
+> Original Phase 4 ka bacha hua hissa + deploy. Do cheezein jo "agent" ko "product" banati hain.
+
+### 9A — Live bidirectional sync (Phase 4 remainder):
+- Dev server chalu hone pe har ~3 s background screenshot → `browser_sync` event → user live dekhe.
+- User preview pe click kare → coordinates server ko jaayein → agent ko "user yahan click kar raha hai" pata chale.
+- Naya `POST /api/engineer-browser-event` (user → agent), ya NDJSON ke saath light polling.
+
+### 9B — One-click Deploy:
+- Agent ka banaya app E2B dev-server URL pe chalta hai (temporary). "Publish" button:
+  app ko build kar ke ek persistent public URL pe host karo.
+- v1: E2B sandbox ko alive rakh ke stable public host URL (already `getHost(port)` hai).
+- v2: static build ko hamare existing Cloud Run/Firebase hosting pipeline pe push (CLAUDE.md
+  deploy infra reuse) + optional custom domain.
+
+### Files: `EngineerAgentLoop.ts` (bg screenshot loop), `routes/engineer.ts` (browser-event +
+`/api/engineer-deploy`), `E2BActuator.ts` (`deploy()`), `EngineerAITypes.ts` (`browser_sync`,
+`deployed`), `EngineerAIChat.tsx` (live image + click capture + Publish button).
+
+### Done when: user agent ko build karte hue LIVE dekhe, click kar ke guide kare, aur ek button se app public ho.
+
+---
+
+## PHASE 10 — Database + Auth + Storage Provisioning 🗄️
+
+> **Problem:** Real apps (login, todo-with-account, SaaS) backend ke bina nahi bante.
+
+### Kya hoga:
+- Agent `provision_db` action le sake: ek Postgres/Supabase-style backend auto-wire ho.
+- Auth (email/password + session) + file storage ka boilerplate auto-generate.
+- Connection string/secrets sandbox env me inject ho (built app ke liye), UI me na leak ho.
+- v1: E2B ke andar local Postgres + ek thin auth/storage helper lib scaffold.
+- v2: managed backend provider over HTTP (jab user key de).
+
+### Files: naya `BackendProvisioner.ts`, actuator me `provisionBackend()`, loop me action +
+prompt, types me events, frontend me "Backend ready" badge.
+
+### Done when: "login wala todo app banao" → agent DB + auth khud bana ke working app de.
+
+---
+
+## PHASE 11 — Git + Real Auto-Repair + Multi-Framework 🔧
+
+### 11A — Git inside workspace:
+- `git init`, har milestone pe commit, branch, diff-history, purane version pe restore.
+- Phase 8 checkpoints ko git commits se back karo (proper history).
+
+### 11B — Real auto-repair loop:
+- Build/runtime fail → agent auto-diagnose → fix → re-verify (2–3 pass) — sirf report nahi.
+- Web_search + error text + relevant file (Phase 7) combine kar ke targeted fix.
+
+### 11C — Multi-framework scaffolds:
+- Abhi sirf vite-react (`E2BActuator.ensureWorkspace`). Add: Next.js, Vue, Svelte, Node/Express
+  API, Python/FastAPI, static site — `TemplateRegistry` extend karke.
+
+### Files: actuator (`gitCommit`/`gitLog`/`gitRestore`, new templates), loop (auto-repair),
+types/frontend (commit timeline).
+
+### Done when: agent versioned commits banaye, fail hone pe khud fix kare, aur React ke alawa stacks bhi scaffold kare.
+
+---
+
+## PHASE 12 — Differentiators (Design-to-Code, Tests, Polish) ✨
+
+- **Design-to-code:** user screenshot/Figma image upload kare → Grok vision se matching UI bane.
+- **Test gen + run:** agent tests likhe, loop me chalaye, red test ko build-fail jaise treat kare.
+- **Multi-viewport verify:** mobile + desktop width pe screenshot, layout fix.
+- **Asset upload:** logos/images workspace me drop.
+- **Cross-session project memory:** decisions/architecture summary persist (kyun, sirf files nahi).
+- **Cost control:** per-user E2B+Grok usage tracking, idle sandbox auto-cleanup.
+- **Shareable preview links** (optional password), better mobile UX for 4-panel layout.
+
+### Done when: Engineer AI sirf parity nahi — Mythos se aage (design-in, tested-out, remembered).
+
+---
+
+## Gap-Closing Phase Order + Effort
+
+| Phase | Theme | Priority | New files | Modified |
+|-------|-------|----------|-----------|----------|
+| 7 | Whole-project context | 🔴 Critical | 1 | 4 |
+| 8 | Checkpoints + rollback | 🔴 Critical (safety) | 0 | 5 |
+| 9 | Live sync + deploy | 🔴 Critical | 0 | 4 |
+| 10 | DB + auth + storage | 🔴 Critical | 1 | 4 |
+| 11 | Git + auto-repair + frameworks | 🟠 High | 0 | 4 |
+| 12 | Differentiators | 🟡 Medium | 2–3 | several |
+
+> Har phase: branch → build → `tsc` (frontend + server) + `vitest` green → PR → merge → deploy.
+> Ek phase merge hone ke baad hi agla shuru (cross-session safe, CLAUDE.md safeguard #2).
+
+---
+
 ## Technical Decisions (Final)
 
 | Decision | Choice | Reason |
@@ -228,18 +395,23 @@ Screenshot → "Login successful dikhta hai" → Done ✅
 
 ---
 
-## Order of Execution (Main Order)
+## Order of Execution
 
 ```
-Phase 1 ← USER: merge PRs + add keys  [TODAY]
-Phase 2 ← Main karunga               [Next session]
-Phase 3 ← Phase 2 ke turant baad     [~same session]
-Phase 5 ← Phase 3 ke baad (quick)    [~same session]
-Phase 4 ← Full sync (biggest UX win) [Next major session]
-Phase 6 ← Last                       [Final session]
+PART 1 (DONE ✅ — merged PR #72, deployed):
+Phase 1 → 2 → 3 → 5 → 6   ✅ all shipped
+Phase 4                    🟡 error-capture shipped; sync-half → Phase 9
+
+PART 2 (gap-closing, one-by-one, each its own PR):
+Phase 7  ← NEXT  (whole-project context)
+Phase 8          (checkpoints + rollback)
+Phase 9          (live sync + deploy)
+Phase 10         (DB + auth + storage)
+Phase 11         (git + auto-repair + frameworks)
+Phase 12         (differentiators)
 ```
 
-**Phase 2 + 3 saath me ek hi session me kar sakta hoon** — woh tightly coupled hain (screenshot → action → screenshot).
+**Discipline:** ek phase merge + deploy verify hone ke baad hi agla. No batching.
 
 ---
 

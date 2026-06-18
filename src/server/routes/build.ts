@@ -92,10 +92,11 @@ export function registerBuildRoutes(app: Express): void {
         fix,
         completeFeatures,
         // Bound total model calls so a synchronous build can't hit the gateway
-        // timeout (504): fast single-shot generate + at most 1 repair + 1
-        // feature-completion pass.
+        // timeout (504): fast single-shot generate + 1 repair + up to 2
+        // feature-completion passes (2 passes meaningfully raise coverage on big
+        // multi-module apps while staying well under the call-count that caused 504).
         maxRepairAttempts: 1,
-        maxFeatureAttempts: 1,
+        maxFeatureAttempts: 2,
       });
 
       // Preview is a privilege: only start it when the critical gates pass.

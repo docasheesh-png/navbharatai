@@ -81,6 +81,29 @@ export class E2BActuator implements IEngineerActuator {
 
   async runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     const sandbox = await this.getSandbox(workspaceId);
+
+    // Long-running commands (dev servers, watchers) never exit — run in background,
+    // collect startup output for 20 s (enough for Vite/Next to print the port),
+    // then disconnect from the event stream and leave the process alive in the sandbox.
+    const isLongRunning =
+      /\b(?:dev|serve|watch|livereload)\b/i.test(command) ||
+      /npm\s+run\s+(?:dev|start|serve)\b/i.test(command) ||
+      /python.*http\.server|http-server|live-server/i.test(command);
+
+    if (isLongRunning) {
+      let stdout = '';
+      let stderr = '';
+      const handle = await sandbox.commands.run(command, {
+        cwd: WORKSPACE_ROOT,
+        background: true,
+        onStdout: s => { stdout += s; },
+        onStderr: s => { stderr += s; },
+      });
+      await new Promise(resolve => setTimeout(resolve, 20_000));
+      await handle.disconnect().catch(() => {});
+      return { exitCode: 0, stdout, stderr };
+    }
+
     try {
       const result = await sandbox.commands.run(command, {
         cwd: WORKSPACE_ROOT,

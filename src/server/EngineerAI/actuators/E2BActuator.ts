@@ -469,6 +469,26 @@ const {chromium}=require('playwright');
     return sandbox ? sandbox.sandboxId : null;
   }
 
+  async searchFiles(workspaceId: string, terms: string[]): Promise<string[]> {
+    if (terms.length === 0) return [];
+    const sandbox = await this.getSandbox(workspaceId);
+    const termArgs = terms.slice(0, 8).map(t => `-e ${shellQuote(t)}`).join(' ');
+    const result = await sandbox.commands.run(
+      `grep -rl ${termArgs} \
+        --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" \
+        --include="*.py" --include="*.css" --include="*.json" --include="*.html" \
+        --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist \
+        --exclude-dir=.next --exclude-dir=build --exclude-dir=__pycache__ \
+        ${WORKSPACE_ROOT} 2>/dev/null | head -40`,
+      { cwd: WORKSPACE_ROOT, timeoutMs: 10_000 }
+    ).catch(() => ({ stdout: '', stderr: '', exitCode: -1 }));
+    return result.stdout
+      .split('\n')
+      .map(p => p.trim())
+      .filter(Boolean)
+      .map(p => p.startsWith(`${WORKSPACE_ROOT}/`) ? p.slice(`${WORKSPACE_ROOT}/`.length) : p);
+  }
+
   async pauseSandbox(sandboxId: string): Promise<boolean> {
     try {
       // Static pause works across server instances — operates on the cloud

@@ -2,11 +2,10 @@ import { AIRouter } from '../AI/Router/AIRouter';
 import { IEngineerActuator } from './actuators/IEngineerActuator';
 import { ReActAction, EngineerAgentEvent, EngineerTask } from './EngineerAITypes';
 import { WebSearchClient } from './WebSearchClient';
+import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from './ContextRetriever';
 
 const MAX_STEPS = 24;
 const DEADLINE_MS = 8 * 60 * 1000;
-const MAX_FILES_SHOWN = 20;
-const MAX_CHARS_PER_FILE = 1000;
 const MAX_OBS_CHARS = 3000;
 const MAX_HISTORY_STEPS = 20;
 const MAX_PARSE_RETRIES = 3;
@@ -497,30 +496,66 @@ export class EngineerAgentLoop {
     yield { type: 'max_steps_reached', steps: MAX_STEPS };
   }
 
+  /** Extract file paths that the agent edited/patched in recent history steps. */
+  private extractEditedFiles(history: { step: number; actionJson: string; observation: string }[]): string[] {
+    const files: string[] = [];
+    const seen = new Set<string>();
+    for (const h of history.slice(-10)) {
+      try {
+        const a = JSON.parse(h.actionJson);
+        if ((a.action === 'edit_file' || a.action === 'patch_file') && typeof a.args?.path === 'string') {
+          if (!seen.has(a.args.path)) { seen.add(a.args.path); files.push(a.args.path); }
+        }
+      } catch { /* skip malformed */ }
+    }
+    return files;
+  }
+
   private async buildPrompt(
     workspaceId: string,
     instruction: string,
     history: { step: number; actionJson: string; observation: string }[]
   ): Promise<string> {
+    // ── Phase 7: smart context retrieval ──────────────────────────────────
+    // 1. Get full file list (paths only — always fast)
     const fileList = await this.actuator.listFiles(workspaceId);
-    const shown = fileList.slice(0, MAX_FILES_SHOWN);
 
-    const fileSections: string[] = [];
-    for (const filePath of shown) {
+    // 2. Extract search terms from instruction + recent observations
+    const recentObs = history.slice(-5).map(h => h.observation);
+    const terms = extractSearchTerms(instruction, recentObs);
+
+    // 3. grep-based relevance: find files containing the search terms
+    let matchedFiles: string[] = [];
+    if (terms.length > 0) {
       try {
-        const content = await this.actuator.readFile(workspaceId, filePath);
-        fileSections.push(`--- ${filePath} ---\n${content.slice(0, MAX_CHARS_PER_FILE)}`);
+        matchedFiles = await this.actuator.searchFiles(workspaceId, terms);
+      } catch { /* non-fatal — degrade to rank-only */ }
+    }
+
+    // 4. Rank: recently-edited > grep-matched > config/entry > rest
+    const recentlyEdited = this.extractEditedFiles(history);
+    const ranked = rankFiles(fileList, matchedFiles, recentlyEdited);
+
+    // 5. Read top-ranked files and pack within the context budget
+    const contentMap = new Map<string, string>();
+    const MAX_TO_READ = 30;
+    for (const filePath of ranked.slice(0, MAX_TO_READ)) {
+      try {
+        contentMap.set(filePath, await this.actuator.readFile(workspaceId, filePath));
       } catch {
-        fileSections.push(`--- ${filePath} --- (unreadable)`);
+        contentMap.set(filePath, ''); // mark as unreadable
       }
     }
-    if (fileList.length > MAX_FILES_SHOWN) {
-      fileSections.push(`... ${fileList.length - MAX_FILES_SHOWN} more files not shown`);
-    }
+    const fileSections = packFileSections(ranked, contentMap);
 
+    // 6. Full file tree (paths only) — gives the model the overall shape
+    const fileTree = buildFileTree(fileList);
+
+    // ── Assemble prompt ───────────────────────────────────────────────────
     const parts: string[] = [
       `[TASK]\n${instruction}`,
-      `[WORKSPACE FILES]\n${fileSections.join('\n\n')}`,
+      `[WORKSPACE — FILE TREE (${fileList.length} files)]\n${fileTree}`,
+      `[WORKSPACE — FILE CONTENTS (top ${fileSections.length} by relevance)]\n${fileSections.join('\n\n')}`,
     ];
 
     if (history.length > 0) {
@@ -529,7 +564,6 @@ export class EngineerAgentLoop {
       const sections: string[] = [];
 
       if (condensed.length > 0) {
-        // Summarise older steps into one compact line each to save context window
         const summary = condensed
           .map(h => {
             const action = (() => { try { return JSON.parse(h.actionJson).action; } catch { return '?'; } })();

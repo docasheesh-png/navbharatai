@@ -66,4 +66,11 @@ export interface IEngineerActuator {
    * resource by ID). LocalActuator is a no-op. Returns true if paused.
    */
   pauseSandbox(sandboxId: string): Promise<boolean>;
+  /**
+   * Search for workspace files whose content matches ANY of the given terms
+   * (grep -rl style). Used by ContextRetriever to rank files by relevance to
+   * the current task. Skips node_modules/.git/dist. Returns relative paths.
+   * LocalActuator returns [] (no subprocess available in sandboxed deploys).
+   */
+  searchFiles(workspaceId: string, terms: string[]): Promise<string[]>;
 }

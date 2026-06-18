@@ -75,6 +75,33 @@ describe('runBuild', () => {
     expect(r.verify.errors).toBeGreaterThan(0);
   });
 
+  it('modular mode implements ONE module per call with live progress events', async () => {
+    const prompt = 'app with authentication, a dashboard, and dark mode';
+    const generate = async (): Promise<FileEdit[]> => [
+      { op: 'write', path: 'index.html', content: '<div id="root"></div><script type="module" src="/src/main.jsx"></script>' },
+      { op: 'write', path: 'src/main.jsx', content: "import {createRoot} from 'react-dom/client';\nimport App from './App.jsx';\ncreateRoot(document.getElementById('root')).render(<App/>)" },
+      { op: 'write', path: 'src/App.jsx', content: 'export default function App(){ return null; }' },
+    ];
+    const sig: Record<string, string> = { 'Authentication': 'login auth password session', 'Dashboard': 'dashboard', 'Dark / Light theme': 'theme darkMode toggleTheme' };
+    let calls = 0;
+    const completeFeatures = async (_p: string, missing: string[]): Promise<FileEdit[]> => {
+      calls++;
+      const m = missing[0]; // modular → exactly one
+      return [{ op: 'write', path: `src/feat${calls}.jsx`, content: `// ${sig[m] || m}\nexport default ()=>null;` }];
+    };
+    const events: any[] = [];
+    const r = await runBuild({
+      prompt, scaffold: false, generate, fix: async () => [], completeFeatures,
+      modular: true, onProgress: (e) => events.push(e),
+      files: { 'package.json': JSON.stringify({ dependencies: { react: '^18', 'react-dom': '^18' } }) },
+    });
+    // one module per call (not all-at-once)
+    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(r.validation.featureCoverage!.coverage).toBeGreaterThanOrEqual(80);
+    expect(events.some((e) => e.type === 'module' && e.state === 'done')).toBe(true);
+    expect(events.some((e) => e.type === 'status')).toBe(true);
+  });
+
   it('agentically completes missing features until coverage passes', async () => {
     const prompt = 'a react app with authentication, a dashboard, and dark mode';
     // Initial generation = a shell (no features) → coverage 0 → preview blocked.

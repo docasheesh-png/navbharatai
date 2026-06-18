@@ -92,10 +92,11 @@ export function registerBuildRoutes(app: Express): void {
         fix,
         completeFeatures,
         // Bound total model calls so a synchronous build can't hit the gateway
-        // timeout (504): fast single-shot generate + at most 1 repair + 1
-        // feature-completion pass.
+        // timeout (504): fast single-shot generate + 1 repair + up to 2
+        // feature-completion passes (2 passes meaningfully raise coverage on big
+        // multi-module apps while staying well under the call-count that caused 504).
         maxRepairAttempts: 1,
-        maxFeatureAttempts: 1,
+        maxFeatureAttempts: 2,
       });
 
       // Preview is a privilege: only start it when the critical gates pass.
@@ -125,6 +126,60 @@ export function registerBuildRoutes(app: Express): void {
       // BUG E2 FIX: Sanitize raw error messages before sending to client (no file paths / stack traces)
       const safeMsg = (err?.message || 'Build failed').replace(/\/[^\s:]+\/[^\s:]+/g, '[path]').slice(0, 200);
       return res.status(500).json({ error: safeMsg });
+    }
+  });
+
+  // Streaming build (SSE): module-by-module generation with LIVE real progress.
+  // The open connection means the many small per-module calls never hit the
+  // gateway 504, so large multi-module apps build to ~100% coverage.
+  app.post('/api/build-stream', async (req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    const send = (event: unknown) => { try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch { /* client gone */ } };
+    // Heartbeat so proxies don't idle-timeout the stream during long model calls.
+    const heartbeat = setInterval(() => { try { res.write(': keep-alive\n\n'); } catch { /* ignore */ } }, 15_000);
+    try {
+      const { prompt, files, userKey, preview } = req.body || {};
+      if (!prompt || typeof prompt !== 'string') { send({ type: 'error', message: 'prompt (string) is required' }); clearInterval(heartbeat); return res.end(); }
+
+      const callModel: ModelCall = makeResilientModelCall(userKey);
+      const { generate, fix, completeFeatures } = makeAiEditGenerator(callModel);
+
+      const result = await runBuild({
+        prompt,
+        files: files && typeof files === 'object' ? files : undefined,
+        generate, fix, completeFeatures,
+        modular: true,            // one module per call, verified between each
+        maxRepairAttempts: 1,
+        onProgress: (ev) => send(ev),
+      });
+
+      let previewInfo: unknown = undefined;
+      if (preview && result.previewAllowed) {
+        const vfs = VirtualFileSystem.fromRecord(result.files);
+        previewInfo = await previewService.startPreview('build', vfs);
+      } else if (preview && !result.previewAllowed) {
+        previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
+      }
+
+      send({
+        type: 'complete',
+        ok: result.ok,
+        files: result.files,
+        fileCount: result.fileCount,
+        verify: result.verify,
+        validation: result.validation,
+        previewAllowed: result.previewAllowed,
+        preview: previewInfo,
+      });
+    } catch (err: any) {
+      const safeMsg = (err?.message || 'Build failed').replace(/\/[^\s:]+\/[^\s:]+/g, '[path]').slice(0, 200);
+      send({ type: 'error', message: safeMsg });
+    } finally {
+      clearInterval(heartbeat);
+      res.end();
     }
   });
 }

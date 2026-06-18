@@ -3,7 +3,7 @@ import { useSwipe } from './hooks/useSwipe';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { EngineBuilder } from './components/EngineBuilder';
-import { buildApp } from './services/buildService';
+import { buildApp, buildAppStream } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
@@ -3969,12 +3969,16 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
         // Edit if workspace has files AND it's not a fresh-build request
         const isEditRequest = !isReactRequest && workspaceHasFiles && !isFreshBuildRequest;
 
-        // Collect ALL text/code files from workspace to send as context (cap 200 KB total)
+        // Collect ALL text/code files from workspace to send to the engine.
+        // RC7: a 200 KB cap dropped files of larger multi-module apps, so edits
+        // ran against a PARTIAL workspace → the engine broke imports/lost context
+        // → apps crashed after a few edits. Raised to ~2 MB so the full project
+        // reaches the engine (the server bounds its own prompt context separately).
         const TEXT_EXTS = /\.(html|htm|css|scss|sass|js|ts|jsx|tsx|json|md|txt|py|php|yaml|yml|xml|svg|vue|svelte)$/i;
         const allTextFiles: Record<string, string> = {};
         let wsBytes = 0;
         for (const [k, v] of Object.entries(files)) {
-          if (TEXT_EXTS.test(k) && typeof v === 'string' && wsBytes + v.length < 200_000) {
+          if (TEXT_EXTS.test(k) && typeof v === 'string' && wsBytes + v.length < 2_000_000) {
             allTextFiles[k] = v;
             wsBytes += v.length;
           }
@@ -4070,13 +4074,29 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
         // ── REAL ENGINE ONLY (VFS + EditEngine + Verifier + RepairLoop + gates). ──
         // The old vanilla AppEngine is RETIRED — we never silently fall back to it.
         try {
-          setProBuildProgress(prev => ({ ...prev, percent: 30, stage: '⚙️ Building your app…' }));
-          const engineRes = await buildApp({
+          setProBuildProgress(prev => ({ ...prev, percent: 20, stage: '⚙️ Building your app…' }));
+          // Streaming build: live per-module progress in the chat (real, not fake).
+          const engineRes: any = await buildAppStream({
             prompt: messageToSend,
             files: Object.keys(allTextFiles).length ? allTextFiles : undefined,
             preview: false,
+          }, (ev) => {
+            if (ev.type === 'status' && ev.message) {
+              setProBuildProgress(prev => ({ ...prev, active: true, stage: `⚙️ ${ev.message}`, percent: Math.min(92, Math.max(prev.percent, (ev.coverage ?? 0))) }));
+            } else if (ev.type === 'module' && ev.name) {
+              const icon = ev.state === 'done' ? '✓' : ev.state === 'failed' ? '⚠️' : '⏳';
+              setProBuildProgress(prev => ({
+                ...prev, active: true,
+                stage: `${icon} ${ev.name}`,
+                percent: Math.min(95, Math.max(prev.percent, ev.coverage ?? prev.percent)),
+                steps: [
+                  ...prev.steps.filter(s => s.label !== ev.name),
+                  { label: ev.name!, sub: ev.state === 'done' ? 'done' : ev.state === 'failed' ? 'retrying' : 'building…', status: (ev.state === 'done' ? 'done' : ev.state === 'failed' ? 'error' : 'running') as 'done' | 'error' | 'running' },
+                ],
+              }));
+            }
           }, abortController.signal);
-          if (engineRes && engineRes.fileCount > 0 && Object.keys(engineRes.files).length > 0) {
+          if (engineRes && engineRes.fileCount > 0 && engineRes.files && Object.keys(engineRes.files).length > 0) {
             const val = engineRes.validation;
             const v = engineRes.verify;
             const passed = val ? !!engineRes.previewAllowed : v.ok;

@@ -1,5 +1,15 @@
 # NavBharatAI Pro → Real App Maker — Execution Progress
 
+> ## 📁 SCOPE OF THIS FILE — read first
+> This file tracks **ONLY the NavBharatAI Pro** workstream (the prompt → build →
+> preview → edit app-maker engine: Phases 0–7, VFS/EditEngine/BuildPipeline/
+> preview runtime, etc.).
+>
+> The **Engineer AI** workstream (the autonomous Grok+E2B agent that sees/drives/
+> tests/fixes apps) is a **separate project** — its entire roadmap and edit plan
+> live in **`ENGINEER_AI_ROADMAP.md`**. Do NOT add Engineer-AI plan/progress here,
+> and do NOT add NavBharatAI-Pro plan/progress to that file. Keep the two separate.
+
 > ## ▶ RESUME HERE (read this first, every new session)
 > **Goal:** world-best AI app maker. **Rules:** real (no hacks) • app NEVER breaks •
 > zero bugs before push • commit+push every green milestone • keep this file updated.

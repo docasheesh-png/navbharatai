@@ -3,7 +3,7 @@ import {
   HardHat, Loader2, Send, Square, Terminal, FolderOpen, Globe,
   CheckCircle2, AlertCircle, ChevronRight, Play, FileDiff, RotateCcw,
   ExternalLink, RefreshCw, History, Rocket, Copy, Check, Database,
-  ImagePlus, X,
+  ImagePlus, X, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -105,6 +105,9 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   const [statusMsg, setStatusMsg] = useState('');
   const [currentStep, setCurrentStep] = useState(0);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('terminal');
+  // Mobile-only: collapse the workspace panel (Terminal/Files/Browser/History) down
+  // to just its tab bar so the chat gets the full screen. Toggle lives in the tab bar.
+  const [workspaceCollapsed, setWorkspaceCollapsed] = useState(false);
   const [terminalEntries, setTerminalEntries] = useState<TerminalEntry[]>([]);
   const [fileMap, setFileMap] = useState<Record<string, FilePair>>({});
   const [editOrder, setEditOrder] = useState<string[]>([]);
@@ -634,7 +637,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     // Desktop behavior is preserved exactly by the md: overrides.
     <div className="flex flex-col md:flex-row h-full min-h-0 bg-[#0d1117]">
       {/* ── Left panel: Chat ── */}
-      <div className="w-full h-1/2 md:w-2/5 md:h-full flex flex-col border-b md:border-b-0 md:border-r border-white/5 min-w-0 min-h-0">
+      <div className={`w-full ${workspaceCollapsed ? 'flex-1' : 'h-1/2'} md:w-2/5 md:h-full flex flex-col border-b md:border-b-0 md:border-r border-white/5 min-w-0 min-h-0`}>
         {/* Header */}
         <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
           <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
@@ -753,7 +756,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
       </div>
 
       {/* ── Right panel: Workspace ── */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      <div className={`${workspaceCollapsed ? 'shrink-0' : 'flex-1'} md:flex-1 flex flex-col min-w-0 min-h-0`}>
         {/* Tabs */}
         <div className="flex items-center border-b border-white/5 bg-[#0d1117] shrink-0">
           <button className={tabClass('terminal')} onClick={() => setActiveTab('terminal')}>
@@ -783,8 +786,18 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
               )}
             </span>
           </button>
+          {/* Mobile-only minimize/expand toggle for the workspace panel. */}
+          <button
+            onClick={() => setWorkspaceCollapsed(c => !c)}
+            title={workspaceCollapsed ? 'Expand panel' : 'Minimize panel'}
+            className="md:hidden ml-auto mr-1 w-8 h-8 rounded-lg text-[#8b949e] hover:text-white hover:bg-white/5 flex items-center justify-center shrink-0 transition-colors"
+          >
+            {workspaceCollapsed ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
         </div>
 
+        {/* Content area — hidden on mobile when the panel is minimized (desktop always shows). */}
+        <div className={`${workspaceCollapsed ? 'hidden md:flex' : 'flex'} flex-col flex-1 min-h-0`}>
         {/* Terminal tab */}
         {activeTab === 'terminal' && (
           <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0a0e13] p-4 space-y-4 font-mono text-[12px]">
@@ -1157,6 +1170,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
             )}
           </div>
         )}
+        </div>
       </div>
     </div>
   );

@@ -247,7 +247,7 @@ function isScaffoldState(vfs: VirtualFileSystem): boolean {
   // Recognize BOTH the JS (.jsx) and TypeScript (.tsx) scaffolds — missing the
   // .tsx case made every TypeScript build skip the from-scratch plan→batch path
   // and fall into the weak "minimal edit" path → intermittently scaffold-only.
-  for (const p of ['src/App.tsx', 'src/App.jsx']) {
+  for (const p of ['src/App.tsx', 'src/App.jsx', 'src/App.vue']) {
     const app = vfs.readText(p);
     if (app && app.includes('Hello from App')) return true;
   }

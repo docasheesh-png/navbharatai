@@ -131,8 +131,8 @@ export function verifyProject(vfs: VirtualFileSystem): VerifyResult {
   return { ok: errors === 0, errors, warnings, issues };
 }
 
-const MODULE_EXTS = ['', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.cjs', '.json', '.css',
-  '/index.tsx', '/index.ts', '/index.jsx', '/index.js'];
+const MODULE_EXTS = ['', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.cjs', '.vue', '.json', '.css',
+  '/index.tsx', '/index.ts', '/index.jsx', '/index.js', '/index.vue'];
 
 /** Resolve a relative/absolute local import to a real VFS path, trying extensions. */
 function resolveModuleRef(vfs: VirtualFileSystem, fromPath: string, spec: string): string | null {

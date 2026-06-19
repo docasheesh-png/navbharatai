@@ -4,6 +4,7 @@ import { EngineerAgentLoop } from '../EngineerAI/EngineerAgentLoop';
 import { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
+import { usageTracker } from '../EngineerAI/UsageTracker';
 
 // Real e2b.dev cloud sandbox when configured, otherwise the process-level
 // LocalActuator (same isolation guarantees as Phase 1).
@@ -144,6 +145,14 @@ export function registerEngineerRoutes(app: Express): void {
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Deploy failed.' });
     }
+  });
+
+  // Phase 12E — cost control: return per-workspace usage counters (sandbox
+  // creations, commands, builds, screenshots) so the client can surface usage.
+  app.get('/api/engineer-usage/:workspaceId', (req: Request, res: Response) => {
+    const { workspaceId } = req.params;
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId required.' }); return; }
+    res.json({ usage: usageTracker.get(workspaceId) });
   });
 
   // Pause a sandbox to stop compute billing while preserving full state for a

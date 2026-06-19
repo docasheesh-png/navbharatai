@@ -3,6 +3,7 @@ import { IEngineerActuator } from './actuators/IEngineerActuator';
 import { ReActAction, EngineerAgentEvent, EngineerTask } from './EngineerAITypes';
 import { WebSearchClient } from './WebSearchClient';
 import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from './ContextRetriever';
+import { usageTracker } from './UsageTracker';
 
 const MAX_STEPS = 24;
 const DEADLINE_MS = 8 * 60 * 1000;
@@ -265,6 +266,7 @@ export class EngineerAgentLoop {
       lastScreenshot = null; // consume: each screenshot is used exactly once
       try {
         const { response, telemetry } = await this.router.route(prompt, SYSTEM_PROMPT, images);
+        usageTracker.record(workspaceId, 'aiCall'); // Phase 12E — track Grok call count
         if (!telemetry.success) {
           // All providers failed (budget exhausted, wrong key, rate-limit, etc.)
           yield {

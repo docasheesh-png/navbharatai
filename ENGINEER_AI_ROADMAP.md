@@ -841,3 +841,18 @@ confidently, and with the exact path/steps. Zero "I don't know where that is."
 
 **The test:** 10 navigation/feature questions asked to each AI surface. All 10 correct
 = Phase 21 done. The app knows itself completely — like a brain knows its own body.
+
+---
+
+### ⚠️ After Phase 21 completes — add this rule to CLAUDE.md:
+
+> **`AppKnowledgeBase.ts` must stay in sync with the app (mandatory for every session).**
+> Whenever any new feature, screen, button, setting, or navigation path is added to
+> NavBharatAI — in the same PR, in the same commit — add the corresponding entry to
+> `src/server/AppContext/AppKnowledgeBase.ts`. This is not optional housekeeping.
+> A feature that exists in the app but not in `AppKnowledgeBase.ts` is invisible to
+> every AI in NavBharatAI. No PR that adds a user-facing feature may be merged without
+> its `AppKnowledgeBase.ts` entry.
+
+> **Do NOT add this rule to CLAUDE.md before Phase 21 is built and merged** —
+> the file does not exist yet and the rule would be meaningless until it does.

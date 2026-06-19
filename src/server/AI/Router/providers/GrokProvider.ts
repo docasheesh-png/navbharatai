@@ -21,19 +21,35 @@ export class GrokProvider implements AIProvider {
     return this._client;
   }
 
-  async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string): Promise<AIProviderResponse> {
+  async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[]): Promise<AIProviderResponse> {
     const startTime = Date.now();
-    const model = modelOverride || 'grok-3-fast';
+    const hasImages = Array.isArray(images) && images.length > 0;
+    // Use vision model when images are supplied; fast text model otherwise
+    const model = modelOverride || (hasImages ? 'grok-2-vision-1212' : 'grok-3-fast');
 
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
-    messages.push({ role: 'user', content: prompt });
 
-    const response = await this.client.chat.completions.create({
-      model,
-      messages,
-      max_tokens: 8000,
-    });
+    if (hasImages) {
+      const content: OpenAI.Chat.ChatCompletionContentPart[] = [
+        { type: 'text', text: prompt },
+        ...images!.map(b64 => ({
+          type: 'image_url' as const,
+          image_url: { url: `data:image/png;base64,${b64}` },
+        })),
+      ];
+      messages.push({ role: 'user', content });
+    } else {
+      messages.push({ role: 'user', content: prompt });
+    }
+
+    // Vision calls carry large base64 images and reason over them — give them a
+    // longer per-request timeout (overrides the 60s client default) so a slow but
+    // valid analysis doesn't spuriously fail. Text calls keep the fast default.
+    const response = await this.client.chat.completions.create(
+      { model, messages, max_tokens: 8000 },
+      hasImages ? { timeout: 120_000 } : undefined,
+    );
 
     return {
       content: response.choices[0]?.message?.content || '',

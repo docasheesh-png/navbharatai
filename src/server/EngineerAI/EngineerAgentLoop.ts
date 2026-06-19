@@ -1,11 +1,11 @@
 import { AIRouter } from '../AI/Router/AIRouter';
 import { IEngineerActuator } from './actuators/IEngineerActuator';
 import { ReActAction, EngineerAgentEvent, EngineerTask } from './EngineerAITypes';
+import { WebSearchClient } from './WebSearchClient';
+import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from './ContextRetriever';
 
 const MAX_STEPS = 24;
 const DEADLINE_MS = 8 * 60 * 1000;
-const MAX_FILES_SHOWN = 20;
-const MAX_CHARS_PER_FILE = 1000;
 const MAX_OBS_CHARS = 3000;
 const MAX_HISTORY_STEPS = 20;
 const MAX_PARSE_RETRIES = 3;
@@ -21,7 +21,7 @@ const PORT_PATTERNS = [
   /:\s*(\d{4,5})\b.*(?:ready|started|running)/i,
 ];
 
-const SYSTEM_PROMPT = `You are Engineer AI — a sharp, friendly senior engineer who can both converse intelligently AND build real software autonomously.
+const SYSTEM_PROMPT = `You are Engineer AI — a sharp, friendly senior engineer who can both converse intelligently AND build real software autonomously. You have EYES and HANDS: you can take screenshots of running apps and SEE what the UI looks like, AND you can drive a real browser cursor to interact with any page.
 
 You handle TWO very different kinds of requests. Read the user's message carefully and pick the right mode:
 
@@ -42,7 +42,7 @@ Examples that trigger reply (in ANY language):
   "app banana hai — kya plan hoga?" (planning, not yet building)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / done
+MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / drive / web_search / restore / done
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Use this when the user clearly wants you to BUILD, CREATE, MODIFY, or FIX code/files right now.
 
@@ -58,23 +58,56 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"done", "args": { ... } }
+{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"done", "args": { ... } }
 
 Action args:
-  reply:      { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
-  bash:       { "command": "shell command to run in the workspace" }
-  edit_file:  { "path": "relative/path.tsx", "content": "FULL new file content" }
-  patch_file: { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
-  done:       { "summary": "one sentence describing what was accomplished" }
+  reply:          { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
+  bash:           { "command": "shell command to run in the workspace" }
+  edit_file:      { "path": "relative/path.tsx", "content": "FULL new file content" }
+  patch_file:     { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
+  restore:        { "checkpointId": "ckpt_1234567890" }
+  screenshot:     { "url": "http://localhost:3000" }
+  browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait", "selector": "CSS selector", "text": "text to type / key to press", "url": "url to navigate to", "direction": "up"|"down" }
+  drive:          { "steps": "[{\"action\":\"navigate\",\"url\":\"http://localhost:3000\"},{\"action\":\"click\",\"selector\":\"#btn\"}]" }
+  web_search:     { "query": "what to look up — docs, error messages, package names/versions" }
+  restore:        { "checkpointId": "ckpt_1234567890" }
+  done:           { "summary": "one sentence describing what was accomplished" }
+
+You can both SEE and INTERACT with the running app:
+- screenshot = take a picture and look at the UI (passive — no cursor).
+- browser_action = perform ONE browser interaction (active — moves the cursor). The browser session is
+  persistent — cookies, form input, and the current page survive between calls. EVERY browser_action
+  returns a fresh screenshot automatically with the cursor position marked.
+- drive = perform MULTIPLE browser interactions in one action, streaming each step live to the user.
+  The user will see your cursor moving on screen in real-time. Use drive when you want to do a complete
+  multi-step verification flow (e.g. navigate → fill form → click submit → see result) without pausing
+  between steps. After all drive steps complete, the final screenshot is attached to your next thinking step.
+
+drive example — test a login form in one action:
+  { "action": "drive", "args": { "steps": "[{\"action\":\"navigate\",\"url\":\"http://localhost:3000\"},{\"action\":\"type\",\"selector\":\"#email\",\"text\":\"test@example.com\"},{\"action\":\"type\",\"selector\":\"#password\",\"text\":\"secret\"},{\"action\":\"click\",\"selector\":\"button[type=submit]\"},{\"action\":\"wait\"}]" } }
+
+browser_action examples (single step):
+  Open the app:        { "action": "navigate", "url": "http://localhost:3000" }
+  Fill a field:        { "action": "type", "selector": "#email", "text": "test@example.com" }
+  Click a button:      { "action": "click", "selector": "button[type=submit]" }
+  Press a key:         { "action": "press", "text": "Enter" }
+  Scroll down:         { "action": "scroll", "direction": "down" }
 
 Coding rules (when in MODE 2):
 - One action per response. Wait for the observation before the next action.
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
-- Output done only when the task is complete. Before done, run bash { "command": "npm run build" } to verify.
+- Use web_search when you're unsure: to confirm the correct/latest package version before installing, to read API/docs for an unfamiliar library, or to look up the fix for an error you don't recognize. Don't guess a version — search it.
+- After starting a dev server: take a screenshot (or navigate via browser_action/drive) to visually verify the UI.
+- For anything interactive (forms, buttons, navigation, login): actually TEST it with browser_action or drive —
+  click the buttons, fill the forms, and confirm from the returned screenshot that it works.
+- If a screenshot reveals problems (wrong layout, missing elements, broken styles, errors): fix them, then re-verify.
+- After a screenshot, browser_action, or drive, any RUNTIME browser errors (console.error, uncaught exceptions, failed network requests) are reported back to you automatically. Treat them as real bugs and fix them — a clean build does NOT mean the app works at runtime.
+- Output done only AFTER you have visually confirmed the app looks AND works correctly. No confirmation = not done.
 - Paths are relative to workspace root, no leading "/" or "..".
 - When starting a dev server, use port 3000 and bind to 0.0.0.0 (--host 0.0.0.0 --port 3000).
-- Commands run with a 60-second timeout.`;
+- Commands run with a 60-second timeout.
+- Checkpoints are created automatically before every edit_file and patch_file action. If a change makes things worse, use restore to go back: { "action": "restore", "args": { "checkpointId": "<id from checkpoint_created event>" } }.`;
 
 function stripFences(text: string): string {
   const t = text.trim();
@@ -103,10 +136,12 @@ function parseAction(raw: string): ReActAction {
 }
 
 export class EngineerAgentLoop {
+  private search = new WebSearchClient();
+
   constructor(private router: AIRouter, private actuator: IEngineerActuator) {}
 
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
-    const { workspaceId, instruction, projectType } = task;
+    const { workspaceId, instruction, projectType, resumeSandboxId } = task;
     const deadline = Date.now() + DEADLINE_MS;
 
     // Fail fast with a helpful message if no AI provider is reachable.
@@ -122,16 +157,25 @@ export class EngineerAgentLoop {
       return;
     }
 
-    yield { type: 'status', message: 'Initializing workspace…' };
+    yield { type: 'status', message: resumeSandboxId ? 'Resuming workspace…' : 'Initializing workspace…' };
     try {
-      await this.actuator.ensureWorkspace(workspaceId, projectType);
+      await this.actuator.ensureWorkspace(workspaceId, projectType, resumeSandboxId);
     } catch (err: any) {
       yield { type: 'error', message: `Workspace init failed: ${err?.message || 'Cannot create workspace directory.'}` };
       return;
     }
 
+    // Surface the persistent sandbox ID so the client can store it and resume later.
+    try {
+      const sandboxId = await this.actuator.getSandboxId(workspaceId);
+      if (sandboxId) yield { type: 'workspace_saved', sandboxId };
+    } catch { /* non-fatal */ }
+
     const history: { step: number; actionJson: string; observation: string }[] = [];
     let consecutiveParseFailures = 0;
+    let lastPreviewUrl: string | null = null;  // updated when server_ready fires
+    let lastScreenshot: string | null = null;  // base64 PNG — injected into next Grok call
+    let lastConsoleCheck = Date.now();          // Phase 4 — runtime error watermark
 
     for (let step = 1; step <= MAX_STEPS; step++) {
       if (signal?.aborted) { yield { type: 'aborted' }; return; }
@@ -144,8 +188,10 @@ export class EngineerAgentLoop {
       // Router/provider failure is a real infra error — abort. Malformed model
       // output is recoverable — feed the parse error back and let it retry.
       let rawResponse: string;
+      const images = lastScreenshot ? [lastScreenshot] : undefined;
+      lastScreenshot = null; // consume: each screenshot is used exactly once
       try {
-        const { response, telemetry } = await this.router.route(prompt, SYSTEM_PROMPT);
+        const { response, telemetry } = await this.router.route(prompt, SYSTEM_PROMPT, images);
         if (!telemetry.success) {
           // All providers failed (budget exhausted, wrong key, rate-limit, etc.)
           yield {
@@ -197,12 +243,17 @@ export class EngineerAgentLoop {
         edit_file: 'Writing a file…',
         patch_file: 'Patching a file…',
         browse: 'Fetching a URL…',
+        screenshot: 'Taking a screenshot to visually verify the UI…',
+        browser_action: 'Interacting with the app in the browser…',
+        drive: 'Driving the browser through a multi-step flow…',
+        web_search: 'Searching the web…',
+        restore: 'Restoring workspace to a prior checkpoint…',
         done: 'Verifying the build…',
       };
       const thought = parsed.thought || thoughtFallback[parsed.action] || 'Thinking…';
       yield { type: 'action_start', step, action: parsed.action, thought };
 
-      let observation: string;
+      let observation = '';
 
       if (parsed.action === 'bash') {
         const command = parsed.args.command || '';
@@ -223,6 +274,7 @@ export class EngineerAgentLoop {
             if (port > 1000 && port < 65536) {
               try {
                 const url = await this.actuator.getPortUrl(workspaceId, port);
+                lastPreviewUrl = url;
                 yield { type: 'server_ready', url, port };
               } catch { /* non-fatal */ }
               break;
@@ -234,6 +286,11 @@ export class EngineerAgentLoop {
       } else if (parsed.action === 'edit_file') {
         const filePath = parsed.args.path || '';
         const content = parsed.args.content || '';
+        // Auto-checkpoint before every write so the user can restore if needed.
+        try {
+          const ckptId = await this.actuator.checkpoint(workspaceId, `before edit: ${filePath}`);
+          yield { type: 'checkpoint_created', checkpointId: ckptId, createdAt: Date.now(), triggeredBy: `before edit: ${filePath}` };
+        } catch { /* non-fatal — proceed even if checkpoint fails */ }
         try {
           await this.actuator.writeFile(workspaceId, filePath, content);
           yield { type: 'files_changed', kind: 'edit', files: [{ path: filePath, content }] };
@@ -245,6 +302,11 @@ export class EngineerAgentLoop {
         const filePath = parsed.args.path || '';
         const oldStr = parsed.args.old_str || '';
         const newStr = parsed.args.new_str ?? '';
+        // Auto-checkpoint before every patch so the user can restore if needed.
+        try {
+          const ckptId = await this.actuator.checkpoint(workspaceId, `before patch: ${filePath}`);
+          yield { type: 'checkpoint_created', checkpointId: ckptId, createdAt: Date.now(), triggeredBy: `before patch: ${filePath}` };
+        } catch { /* non-fatal */ }
         try {
           const before = await this.actuator.readFile(workspaceId, filePath);
           if (!before.includes(oldStr)) {
@@ -258,6 +320,18 @@ export class EngineerAgentLoop {
         } catch (err: any) {
           observation = `Error patching "${filePath}": ${err?.message}`;
         }
+      } else if (parsed.action === 'restore') {
+        const checkpointId = parsed.args.checkpointId || '';
+        if (!checkpointId) {
+          observation = 'restore error: "args.checkpointId" is required. Check the checkpoint timeline for available IDs.';
+        } else {
+          try {
+            await this.actuator.restore(workspaceId, checkpointId);
+            observation = `Workspace restored to checkpoint ${checkpointId}. Source files are back to that state — re-run the build to verify.`;
+          } catch (err: any) {
+            observation = `restore error: ${err?.message}`;
+          }
+        }
       } else if (parsed.action === 'browse') {
         const url = parsed.args.url || '';
         try {
@@ -267,6 +341,143 @@ export class EngineerAgentLoop {
           observation = `Fetched ${url}. HTML (truncated):\n${content}`;
         } catch (err: any) {
           observation = `browse error: ${err?.message}`;
+        }
+      } else if (parsed.action === 'screenshot') {
+        const targetUrl = parsed.args.url || lastPreviewUrl || 'http://localhost:3000';
+        yield { type: 'status', message: `Step ${step}: taking screenshot of ${targetUrl}…` };
+        try {
+          const shot = await this.actuator.screenshot(workspaceId, targetUrl);
+          lastScreenshot = shot.base64; // injected into the NEXT router call as a vision image
+          yield { type: 'screenshot_result', url: targetUrl, base64: shot.base64 };
+          observation = `Screenshot captured of ${targetUrl}. The image has been attached to your next thinking step — look at it carefully and describe what you see, then decide what to fix.`;
+        } catch (err: any) {
+          observation = `screenshot error: ${err?.message}. If playwright is not installed, run: bash { "command": "npm install playwright && npx playwright install chromium" }`;
+        }
+      } else if (parsed.action === 'browser_action') {
+        const subAction = parsed.args.action as 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait';
+        const validActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait'];
+        if (!validActions.includes(subAction)) {
+          observation = `browser_action error: "args.action" must be one of ${validActions.join(', ')}. Got "${subAction}".`;
+        } else {
+          yield { type: 'status', message: `Step ${step}: browser ${subAction}…` };
+          try {
+            const res = await this.actuator.browserAction(workspaceId, subAction, {
+              selector: parsed.args.selector,
+              text: parsed.args.text,
+              url: parsed.args.url || lastPreviewUrl || undefined,
+              direction: parsed.args.direction === 'up' ? 'up' : 'down',
+            });
+            lastScreenshot = res.screenshot; // attached to next router call as a vision image
+            yield { type: 'browser_action_result', action: subAction, detail: res.result, base64: res.screenshot, cursorX: res.cursorX, cursorY: res.cursorY };
+            observation = `${res.result}. A screenshot of the resulting page is attached to your next thinking step — look at it and decide the next action.`;
+          } catch (err: any) {
+            observation = `browser_action error: ${err?.message}`;
+          }
+        }
+      } else if (parsed.action === 'drive') {
+        // Multi-step browser driving — executes each step and streams a drive_frame event
+        // per step so the user sees the cursor moving in real-time on the live preview.
+        let driveSteps: { action: string; selector?: string; text?: string; url?: string; direction?: string }[] = [];
+        try {
+          driveSteps = JSON.parse(parsed.args.steps || '[]');
+        } catch {
+          observation = 'drive error: "args.steps" must be a valid JSON array of browser action objects.';
+        }
+        if (driveSteps.length > 0) {
+          const validActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait'];
+          let driveObservations: string[] = [];
+          let driveScreenshot: string | null = null;
+          let driveCursorX: number | undefined;
+          let driveCursorY: number | undefined;
+          const driveUrl = lastPreviewUrl || 'http://localhost:3000';
+
+          for (let di = 0; di < driveSteps.length; di++) {
+            if (signal?.aborted) break;
+            const ds = driveSteps[di];
+            const subAction = ds.action as 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait';
+            if (!validActions.includes(subAction)) {
+              driveObservations.push(`Step ${di + 1}: unknown action "${ds.action}" — skipped.`);
+              continue;
+            }
+            yield { type: 'status', message: `Driving step ${di + 1}/${driveSteps.length}: ${subAction}…` };
+            try {
+              const res = await this.actuator.browserAction(workspaceId, subAction, {
+                selector: ds.selector,
+                text: ds.text,
+                url: ds.url || (subAction === 'navigate' ? driveUrl : undefined),
+                direction: ds.direction === 'up' ? 'up' : 'down',
+              });
+              driveScreenshot = res.screenshot;
+              driveCursorX = res.cursorX;
+              driveCursorY = res.cursorY;
+              const stepDetail = res.result;
+              driveObservations.push(`Step ${di + 1}: ${stepDetail}`);
+              // Stream a drive_frame so the frontend can show the cursor moving live
+              yield {
+                type: 'drive_frame',
+                screenshot: res.screenshot,
+                cursorX: res.cursorX,
+                cursorY: res.cursorY,
+                url: res.result.includes('now at ') ? res.result.replace(/.*now at /, '') : driveUrl,
+                step: di + 1,
+                stepDetail,
+              };
+            } catch (err: any) {
+              driveObservations.push(`Step ${di + 1}: ERROR — ${err?.message}`);
+            }
+          }
+          // After all steps: attach the final screenshot for the next AI think step
+          if (driveScreenshot) {
+            lastScreenshot = driveScreenshot;
+            yield {
+              type: 'browser_action_result',
+              action: 'drive_complete',
+              detail: driveObservations[driveObservations.length - 1] || 'Drive complete.',
+              base64: driveScreenshot,
+              cursorX: driveCursorX,
+              cursorY: driveCursorY,
+            };
+          }
+          observation = `Drive completed ${driveSteps.length} step(s):\n${driveObservations.join('\n')}\nFinal screenshot attached to your next thinking step.`;
+
+          // Collect runtime errors after the drive sequence
+          try {
+            const checkStart = Date.now();
+            const { errors } = await this.actuator.getConsoleErrors(workspaceId, lastConsoleCheck);
+            lastConsoleCheck = checkStart;
+            if (errors.length > 0) {
+              yield { type: 'console_error', errors: errors.map(e => ({ kind: e.kind, text: e.text })) };
+              observation += `\n\n[RUNTIME BROWSER ERRORS]\n` + errors.map(e => `• [${e.kind}] ${e.text}`).join('\n');
+            }
+          } catch { /* non-fatal */ }
+        }
+      } else if (parsed.action === 'web_search') {
+        const query = parsed.args.query || parsed.args.q || '';
+        if (!query.trim()) {
+          observation = 'web_search error: "args.query" is required.';
+        } else {
+          yield { type: 'status', message: `Step ${step}: searching the web for "${query}"…` };
+          try {
+            // Fetch the SERP from INSIDE the sandbox (open internet) rather than the
+            // egress-restricted server. Falls back to server-side fetch if it errors.
+            const htmlFetcher = async (url: string): Promise<string> => {
+              const r = await this.actuator.runCommand(
+                workspaceId,
+                `curl -s -L --max-time 12 -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36" ${JSON.stringify(url)}`,
+              );
+              return r.stdout || '';
+            };
+            const results = await this.search.search(query, 5, htmlFetcher);
+            yield { type: 'search_result', query, results };
+            if (results.length === 0) {
+              observation = `Web search for "${query}" returned no results. Try a more specific query, or proceed with what you know.`;
+            } else {
+              observation = `Web search results for "${query}":\n` +
+                results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join('\n');
+            }
+          } catch (err: any) {
+            observation = `web_search error: ${err?.message}. Proceed with your existing knowledge.`;
+          }
         }
       } else if (parsed.action === 'done') {
         // Verify the build is actually clean before declaring success
@@ -278,7 +489,27 @@ export class EngineerAgentLoop {
         }
         observation = `Build failed — cannot mark done yet. Fix the errors:\n${buildResult.logs.slice(-2000)}`;
       } else {
-        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, done.`;
+        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, done.`;
+      }
+
+      // Phase 4 — Live Sync: after any browser interaction, surface runtime
+      // errors (console.error, uncaught exceptions, failed requests) to BOTH
+      // the user (console_error event) and the agent (appended to observation,
+      // so it self-corrects on runtime bugs a clean build would never reveal).
+      if (parsed.action === 'screenshot' || parsed.action === 'browser_action') {
+        // Note: 'drive' handles console errors inside its own loop above, so it's excluded here.
+        try {
+          // Capture the watermark BEFORE the read so an error logged during the
+          // read isn't skipped next time (no-miss; at worst a sub-second re-report).
+          const checkStart = Date.now();
+          const { errors } = await this.actuator.getConsoleErrors(workspaceId, lastConsoleCheck);
+          lastConsoleCheck = checkStart;
+          if (errors.length > 0) {
+            yield { type: 'console_error', errors: errors.map(e => ({ kind: e.kind, text: e.text })) };
+            observation += `\n\n[RUNTIME BROWSER ERRORS — these happened in the live app, fix them]\n` +
+              errors.map(e => `• [${e.kind}] ${e.text}`).join('\n');
+          }
+        } catch { /* non-fatal — console capture is best-effort */ }
       }
 
       history.push({
@@ -291,30 +522,66 @@ export class EngineerAgentLoop {
     yield { type: 'max_steps_reached', steps: MAX_STEPS };
   }
 
+  /** Extract file paths that the agent edited/patched in recent history steps. */
+  private extractEditedFiles(history: { step: number; actionJson: string; observation: string }[]): string[] {
+    const files: string[] = [];
+    const seen = new Set<string>();
+    for (const h of history.slice(-10)) {
+      try {
+        const a = JSON.parse(h.actionJson);
+        if ((a.action === 'edit_file' || a.action === 'patch_file') && typeof a.args?.path === 'string') {
+          if (!seen.has(a.args.path)) { seen.add(a.args.path); files.push(a.args.path); }
+        }
+      } catch { /* skip malformed */ }
+    }
+    return files;
+  }
+
   private async buildPrompt(
     workspaceId: string,
     instruction: string,
     history: { step: number; actionJson: string; observation: string }[]
   ): Promise<string> {
+    // ── Phase 7: smart context retrieval ──────────────────────────────────
+    // 1. Get full file list (paths only — always fast)
     const fileList = await this.actuator.listFiles(workspaceId);
-    const shown = fileList.slice(0, MAX_FILES_SHOWN);
 
-    const fileSections: string[] = [];
-    for (const filePath of shown) {
+    // 2. Extract search terms from instruction + recent observations
+    const recentObs = history.slice(-5).map(h => h.observation);
+    const terms = extractSearchTerms(instruction, recentObs);
+
+    // 3. grep-based relevance: find files containing the search terms
+    let matchedFiles: string[] = [];
+    if (terms.length > 0) {
       try {
-        const content = await this.actuator.readFile(workspaceId, filePath);
-        fileSections.push(`--- ${filePath} ---\n${content.slice(0, MAX_CHARS_PER_FILE)}`);
+        matchedFiles = await this.actuator.searchFiles(workspaceId, terms);
+      } catch { /* non-fatal — degrade to rank-only */ }
+    }
+
+    // 4. Rank: recently-edited > grep-matched > config/entry > rest
+    const recentlyEdited = this.extractEditedFiles(history);
+    const ranked = rankFiles(fileList, matchedFiles, recentlyEdited);
+
+    // 5. Read top-ranked files and pack within the context budget
+    const contentMap = new Map<string, string>();
+    const MAX_TO_READ = 30;
+    for (const filePath of ranked.slice(0, MAX_TO_READ)) {
+      try {
+        contentMap.set(filePath, await this.actuator.readFile(workspaceId, filePath));
       } catch {
-        fileSections.push(`--- ${filePath} --- (unreadable)`);
+        contentMap.set(filePath, ''); // mark as unreadable
       }
     }
-    if (fileList.length > MAX_FILES_SHOWN) {
-      fileSections.push(`... ${fileList.length - MAX_FILES_SHOWN} more files not shown`);
-    }
+    const fileSections = packFileSections(ranked, contentMap);
 
+    // 6. Full file tree (paths only) — gives the model the overall shape
+    const fileTree = buildFileTree(fileList);
+
+    // ── Assemble prompt ───────────────────────────────────────────────────
     const parts: string[] = [
       `[TASK]\n${instruction}`,
-      `[WORKSPACE FILES]\n${fileSections.join('\n\n')}`,
+      `[WORKSPACE — FILE TREE (${fileList.length} files)]\n${fileTree}`,
+      `[WORKSPACE — FILE CONTENTS (top ${fileSections.length} by relevance)]\n${fileSections.join('\n\n')}`,
     ];
 
     if (history.length > 0) {
@@ -323,7 +590,6 @@ export class EngineerAgentLoop {
       const sections: string[] = [];
 
       if (condensed.length > 0) {
-        // Summarise older steps into one compact line each to save context window
         const summary = condensed
           .map(h => {
             const action = (() => { try { return JSON.parse(h.actionJson).action; } catch { return '?'; } })();

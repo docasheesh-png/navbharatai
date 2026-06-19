@@ -18,11 +18,20 @@ export function buildEngineerRouter(): AIRouter {
   grok.priority = 1;
   router.registerProvider(grok);
 
-  try {
-    const aicredits = new AiCreditsProvider();
-    aicredits.priority = 2;
-    router.registerProvider(aicredits);
-  } catch {}
+  // GROK ONLY (hard product rule). AiCreditsProvider defaults to a Claude model,
+  // so registering it as a *live* fallback would silently route Engineer AI to
+  // Claude on ANY transient Grok failure/cooldown (429, timeout, 503) — exactly
+  // what's forbidden. Register it ONLY when no Grok key exists, purely so the
+  // feature isn't dead in dev/CI. In production (Grok key set) Claude is never
+  // even registered, so it can never be reached.
+  const hasGrok = !!(process.env.GROK_API_KEY || process.env.XAI_API_KEY);
+  if (!hasGrok) {
+    try {
+      const aicredits = new AiCreditsProvider();
+      aicredits.priority = 2;
+      router.registerProvider(aicredits);
+    } catch {}
+  }
 
   return router;
 }

@@ -20,14 +20,16 @@ function buildActuator(): IEngineerActuator {
  */
 export function registerEngineerRoutes(app: Express): void {
   const router = buildEngineerRouter();
-  const agentLoop = new EngineerAgentLoop(router, buildActuator());
+  const actuator = buildActuator();
+  const agentLoop = new EngineerAgentLoop(router, actuator);
 
   app.post('/api/engineer-chat', async (req: Request, res: Response) => {
-    const { workspaceId, instruction, projectType } = req.body || {};
+    const { workspaceId, instruction, projectType, resumeSandboxId } = req.body || {};
     if (typeof workspaceId !== 'string' || !workspaceId || typeof instruction !== 'string' || !instruction) {
       res.status(400).json({ error: 'workspaceId and instruction are required.' });
       return;
     }
+    const resumeId = typeof resumeSandboxId === 'string' && resumeSandboxId ? resumeSandboxId : undefined;
 
     // NDJSON streaming — avoids iOS Safari SSE buffering quirks.
     // Each event is a single JSON object followed by a newline character.
@@ -61,7 +63,7 @@ export function registerEngineerRoutes(app: Express): void {
       // long-running E2B or AI operation begins.
       send({ type: 'status', message: 'Connecting…' });
 
-      for await (const event of agentLoop.run({ workspaceId, instruction, projectType }, abort.signal)) {
+      for await (const event of agentLoop.run({ workspaceId, instruction, projectType, resumeSandboxId: resumeId }, abort.signal)) {
         send(event);
         if (abort.signal.aborted) break;
       }
@@ -70,6 +72,40 @@ export function registerEngineerRoutes(app: Express): void {
     } finally {
       clearInterval(heartbeat);
       res.end();
+    }
+  });
+
+  // Restore the workspace to a checkpoint — called by the frontend "Restore" button.
+  app.post('/api/engineer-restore', async (req: Request, res: Response) => {
+    const { workspaceId, checkpointId } = req.body || {};
+    if (typeof workspaceId !== 'string' || !workspaceId || typeof checkpointId !== 'string' || !checkpointId) {
+      res.status(400).json({ error: 'workspaceId and checkpointId are required.' });
+      return;
+    }
+    try {
+      await actuator.restore(workspaceId, checkpointId);
+      res.json({ restored: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to restore checkpoint.' });
+    }
+  });
+
+  // Pause a sandbox to stop compute billing while preserving full state for a
+  // later resume. Called by the client when it leaves the Engineer AI surface.
+  // Accepts sendBeacon (text/plain body) as well as JSON.
+  app.post('/api/engineer-pause', async (req: Request, res: Response) => {
+    let body = req.body;
+    if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
+    const sandboxId = body?.sandboxId;
+    if (typeof sandboxId !== 'string' || !sandboxId) {
+      res.status(400).json({ error: 'sandboxId is required.' });
+      return;
+    }
+    try {
+      const paused = await actuator.pauseSandbox(sandboxId);
+      res.json({ paused });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to pause sandbox.' });
     }
   });
 }

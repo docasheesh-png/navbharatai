@@ -9,10 +9,11 @@
 > progress live in **`PROGRESS.md`**. Do NOT mix the two: no NavBharatAI-Pro plan in
 > this file, no Engineer-AI plan in `PROGRESS.md`.
 
-> **Goal:** Engineer AI jo khud banaye, khud dekhe, khud test kare, khud fix kare — bina user ke haath lagaye.
-> **AI Model:** Grok ONLY (xAI) — no Claude, no AiCredits proxy.
+> **Goal:** Engineer AI that builds real apps, deploys them to permanent URLs, and wires
+> in real databases — matching Bolt.new / Lovable.dev quality under the Engineer AI brand.
+> **AI Model:** Grok ONLY (xAI api.x.ai) — no Claude, no AiCredits proxy.
 > **Sandbox:** E2B (real cloud VM, full OS isolation).
-> **Updated:** 2026-06-19 (v3 — Phases 1–12 all DONE + merged; Phase 13 in progress)
+> **Updated:** 2026-06-19 (v3 — Phases 1–13 shipped; Phase 14 redesigned as Bring Your Own Database)
 
 ---
 
@@ -50,8 +51,8 @@ Same ADC mechanism powers Phase 13 Firebase Hosting REST API calls. No new secre
 | 11 | Git + real auto-repair + multi-framework | ✅ DONE — merged PR #78 |
 | 12A | Multi-viewport verify + cross-session memory | ✅ DONE — merged PR #79 |
 | 12B–F | Tests, design-to-code, cost control, mobile UX | ✅ DONE — merged PR #80 |
-| **13** | **Real Persistent Deploy (Firebase Hosting)** | 🔵 IN PROGRESS — this branch |
-| 14 | Supabase Integration (hosted DB + Auth) | 🔜 Next |
+| **13** | **Real Persistent Deploy (Firebase Hosting)** | ✅ DONE — merged PR #84 |
+| **14** | **Bring Your Own Database (user-controlled DB/Auth)** | 🔵 IN PROGRESS — next |
 | 15 | Brave Search API (replace DuckDuckGo) | 🔜 Planned |
 | 16 | Production Build Pipelines (esbuild Node/Next) | 🔜 Planned |
 | 17 | Real Test Generation (proactive Vitest) | 🔜 Planned |
@@ -59,14 +60,12 @@ Same ADC mechanism powers Phase 13 Firebase Hosting REST API calls. No new secre
 | 19 | Persistent Memory (Firestore-backed) | 🔜 Planned |
 | 20 | UX Polish + Mobile-First Redesign | 🔜 Planned |
 
-> **What's live now (PR #72, deployed):** Engineer AI can SEE apps (Grok vision), DRIVE them
-> (Playwright click/type/navigate/scroll/press/wait), CATCH runtime errors, SEARCH the web
-> key-free, and PERSIST/RESUME workspaces (E2B pause/resume) — all Grok-only.
+> **What's live now (Phases 1–13, all merged):** Engineer AI can SEE apps (Grok vision),
+> DRIVE them (Playwright), CATCH runtime errors, SEARCH the web, PERSIST/RESUME workspaces
+> (E2B pause/resume), and DEPLOY to a permanent Firebase Hosting URL — all Grok-only.
 >
-> **Phase 4 honesty note:** the original Phase 4 scoped *full live bidirectional sync*
-> (3 s background screenshot streaming + user-click-on-preview → agent). Only the runtime
-> **error-capture** half shipped. The remaining interactive-sync half is now **Phase 9** below,
-> so nothing is lost.
+> **Phase 14 (next):** Users bring their own database credentials (Supabase / Firebase /
+> Other). NavBharatAI's Firebase project is NEVER used for user app data.
 
 ---
 
@@ -520,10 +519,10 @@ Koi bada refactor nahi — pure additive changes. Existing code safe rahega.
 
 ---
 
-## PHASE 13 — Real Persistent Deployment (Firebase Hosting) 🚀
+## PHASE 13 — Real Persistent Deployment (Firebase Hosting) ✅ DONE (merged PR #84)
 
-> **Why #1 priority:** E2B sandbox URL dies when sandbox pauses — biggest Mythos gap.
-> After Phase 13, every built app gets a permanent HTTPS URL that lives forever.
+> Phase 13 is complete. Every app built by Engineer AI now gets a permanent Firebase
+> Hosting URL that survives sandbox pause/resume/recreation.
 
 ### What shipped:
 - `DeploymentService.ts` (new) — Firebase Hosting REST API v1beta1 client
@@ -549,3 +548,109 @@ Agent auto-runs the build, uploads dist/ to Firebase, returns permanent URL in `
 Grant Cloud Run service account → Firebase Hosting Admin role on project `gen-lang-client-0866594388`.
 
 ### Files changed: 8 files (1 new)
+
+---
+
+## PHASE 14 — Bring Your Own Database (User-Controlled DB/Auth) 🗄️
+
+> **Critical design principle:** NavBharatAI's own Firebase project
+> (`gen-lang-client-0866594388`) is NEVER used for user app data — that would
+> charge NavBharatAI's billing. Every user brings their own credentials from
+> their own account. NavBharatAI just scaffolds the code.
+
+### What we'll build:
+
+**Provider selection UI (inside EngineerAIChat workspace panel):**
+- Dropdown: **Firebase** / **Supabase** / **Other**
+- After selection, a direct link appears pointing to that provider's API key /
+  credentials page so the user can generate keys without searching:
+  - Firebase → `console.firebase.google.com` (Project Settings → Service Accounts / Web App)
+  - Supabase → `app.supabase.com` (Project → Settings → API)
+  - Other → free-form text field: "Platform name" + "Connection string / API key"
+- User pastes their credentials once; they are stored in workspace memory
+  (never in NavBharatAI's Firestore — stored inside the E2B sandbox's
+  `.engineer/db-config.json` only, scoped to that workspace).
+
+**Agent scaffolding (triggered automatically when DB credentials are present):**
+
+For **Supabase**:
+```typescript
+// agent generates: src/lib/supabase.ts
+import { createClient } from '@supabase/supabase-js';
+export const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY,
+);
+```
+Agent writes `.env` placeholders (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`)
+and fills them from stored credentials. Also scaffolds auth flows
+(email/password, Google OAuth) and RLS-aware SQL schemas via a Grok call.
+
+For **Firebase**:
+```typescript
+// agent generates: src/lib/firebase.ts
+import { initializeApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
+const app = initializeApp({ /* user's own Firebase config */ });
+export const db = getFirestore(app);
+export const auth = getAuth(app);
+```
+
+For **Other** (any platform):
+Agent receives the platform name + connection string. A Grok call determines
+the correct SDK and generates the setup file. Fallback: a generic `.env` file
+with the connection string and comments explaining how to use it.
+
+### Files to create/modify:
+
+**`src/server/EngineerAI/BackendScaffolder.ts`** (NEW)
+```typescript
+export interface DbProviderConfig {
+  provider: 'supabase' | 'firebase' | 'other';
+  credentials: Record<string, string>;
+  platformName?: string; // for 'other'
+}
+
+export class BackendScaffolder {
+  async generateSetup(config: DbProviderConfig, framework: string): Promise<ScaffoldResult>
+  private generateSupabase(config: DbProviderConfig): ScaffoldResult
+  private generateFirebase(config: DbProviderConfig): ScaffoldResult
+  private generateOther(config: DbProviderConfig): ScaffoldResult
+}
+```
+
+**`src/server/routes/engineer.ts`**
+- New endpoint: `POST /api/engineer-db-config` — stores credentials to workspace
+  `.engineer/db-config.json` inside the sandbox (never to NavBharatAI Firestore)
+- Returns: scaffold files generated for the chosen provider
+
+**`src/server/EngineerAI/EngineerAITypes.ts`**
+- New event: `backend_provisioned` — `{ provider: string; filesWritten: string[] }`
+
+**`src/server/EngineerAI/EngineerAgentLoop.ts`**
+- On session start: check `.engineer/db-config.json` — if present, include DB
+  context in system prompt so agent knows which SDK is available
+- System prompt note: if user asks for auth/DB features and no config exists,
+  instruct them to configure their database provider first
+
+**`src/components/engineer/EngineerAIChat.tsx`**
+- New "Database" settings section in the workspace panel:
+  - Provider dropdown (Firebase / Supabase / Other)
+  - On selection: show direct key-generation link for that provider
+  - "Other": text input for platform name + connection string
+  - Save button → POST to `/api/engineer-db-config`
+  - Confirmation badge: "Supabase connected" / "Firebase connected"
+- `backend_provisioned` event: show scaffold summary in chat
+
+### Key invariant:
+NavBharatAI's Firebase project is NEVER referenced in any scaffolded code.
+The only Firebase project that ever appears in user app code is the user's own.
+
+### Done when:
+1. User opens Engineer AI, clicks "Database", selects "Supabase"
+2. A direct link to `app.supabase.com` appears
+3. User pastes their URL + anon key, clicks Save
+4. Agent automatically generates `src/lib/supabase.ts` with the user's credentials
+5. User says "add user login" → agent scaffolds Supabase Auth flow
+6. App authenticates and stores data in the **user's own** Supabase project

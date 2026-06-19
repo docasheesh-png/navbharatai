@@ -6,7 +6,8 @@
  * issues a repair step can act on:
  *   - invalid JSON (package.json / *.json)
  *   - missing entry (no index.html for a static project)
- *   - broken LOCAL references in HTML (<link>/<script>/<img> src/href → missing file)
+ *   - broken LOCAL refs in HTML: a missing classic <script src> or stylesheet
+ *     <link href> is an ERROR (hard break); other missing local refs are warnings
  *
  * Pure + dependency-free → fully unit-testable. External (http/CDN/data:) refs are
  * never flagged.
@@ -57,19 +58,35 @@ export function verifyProject(vfs: VirtualFileSystem): VerifyResult {
     issues.push({ severity: 'error', file: '(project)', message: 'No entry point: missing index.html for a static project.' });
   }
 
-  // 3. Broken LOCAL references in HTML files
-  const refRe = /\b(?:src|href)=["']([^"']+)["']/gi;
+  // 3. Broken LOCAL references in HTML files. A missing classic <script src>
+  //    (non-module) or stylesheet <link href> HARD-BREAKS a static app, so those
+  //    are ERRORS (block preview + drive repair); other missing local refs
+  //    (images, anchors, and type="module" scripts the bundler resolves itself)
+  //    stay WARNINGS to avoid false positives on React/bundled apps.
+  const tagRe = /<(script|link|img|a|source|iframe)\b([^>]*?)\/?>/gi;
+  const attrRe = /\b(?:src|href)=["']([^"']+)["']/i;
   for (const f of vfs.list()) {
     if (!f.path.endsWith('.html') && !f.path.endsWith('.htm')) continue;
     const html = vfs.readText(f.path) || '';
     let m: RegExpExecArray | null;
-    while ((m = refRe.exec(html))) {
-      const ref = m[1];
+    tagRe.lastIndex = 0;
+    while ((m = tagRe.exec(html))) {
+      const tag = m[1].toLowerCase();
+      const attrs = m[2] || '';
+      const a = attrRe.exec(attrs);
+      if (!a) continue;
+      const ref = a[1];
       if (isExternal(ref) || ref.trim() === '') continue;
       const target = resolveRef(f.path, ref.split(/[?#]/)[0]);
-      if (target && !vfs.has(target)) {
-        issues.push({ severity: 'warning', file: f.path, message: `Broken local reference: "${ref}" → ${target} (not found)` });
-      }
+      if (!target || vfs.has(target)) continue;
+      const isModule = /\btype\s*=\s*["']module["']/i.test(attrs);
+      const isStylesheet = tag === 'link' && /\brel\s*=\s*["'][^"']*stylesheet/i.test(attrs);
+      const hardBreak = (tag === 'script' && !isModule) || isStylesheet;
+      issues.push({
+        severity: hardBreak ? 'error' : 'warning',
+        file: f.path,
+        message: `Broken local reference: "${ref}" → ${target} (not found)`,
+      });
     }
   }
 

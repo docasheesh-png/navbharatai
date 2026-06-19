@@ -97,22 +97,88 @@ const DESIGN_RULES = `VISUAL DESIGN (make it genuinely beautiful — never plain
 /** How much of each existing file's content to inline for edit context. */
 // Raised so the files being edited are shown in FULL — truncated content made
 // `patch find` snippets miss (RC2), so edits silently no-op (RC3) and apps broke.
-const MAX_FILE_CHARS = 12_000;
-const MAX_CONTEXT_FILES = 60;
-const MAX_TOTAL_CONTEXT = 200_000;
+// Budgets raised + RELEVANCE-ORDERED so the files the request actually touches
+// are shown first (in full), before the budget can run out on an unrelated file.
+const MAX_FILE_CHARS = 24_000;
+const MAX_CONTEXT_FILES = 80;
+const MAX_TOTAL_CONTEXT = 500_000;
+
+/** Project memory passed into generation (Claude-Code-style persistent context). */
+export interface BuildMemory {
+  /** Rolling, fact-dense summary of earlier turns (kept short, treated as truth). */
+  summary?: string;
+  /** Recent conversation turns (most recent last). */
+  history?: { role: 'user' | 'assistant'; content: string }[];
+  /** What was built/changed earlier in this session (newest last). */
+  editLog?: string[];
+}
+
+/** Render the memory as a prompt block (empty string when there's nothing). */
+function memoryBlock(mem?: BuildMemory): string {
+  if (!mem) return '';
+  const parts: string[] = [];
+  if (mem.summary && mem.summary.trim()) {
+    parts.push(`PROJECT MEMORY (summary of earlier work — treat as ground truth):\n${mem.summary.trim()}`);
+  }
+  if (mem.editLog && mem.editLog.length) {
+    parts.push(`CHANGES ALREADY MADE THIS SESSION (do not undo these):\n${mem.editLog.slice(-12).map((e) => `- ${e}`).join('\n')}`);
+  }
+  if (mem.history && mem.history.length) {
+    const recent = mem.history.slice(-8).map((h) => `${h.role.toUpperCase()}: ${String(h.content).slice(0, 1200)}`).join('\n');
+    parts.push(`RECENT CONVERSATION:\n${recent}`);
+  }
+  return parts.length ? parts.join('\n\n') + '\n\n' : '';
+}
 
 function fileList(vfs: VirtualFileSystem): string {
   const paths = vfs.paths();
   return paths.length ? paths.join('\n') : '(empty project)';
 }
 
-/** Inline current file contents (bounded) so edits/patches can target exact text. */
-function fileContext(vfs: VirtualFileSystem): string {
+/** Lowercase word tokens (length ≥ 3) from a request, for relevance scoring. */
+function requestTerms(prompt: string): string[] {
+  const stop = new Set(['the', 'and', 'for', 'with', 'add', 'make', 'use', 'this', 'that', 'into', 'from', 'app', 'page', 'change', 'update', 'fix', 'new', 'create']);
+  return Array.from(new Set(
+    (prompt.toLowerCase().match(/[a-z][a-z0-9]{2,}/g) || []).filter((t) => !stop.has(t)),
+  ));
+}
+
+/** Score a file's relevance to the request (entry points always rank high). */
+function relevanceScore(path: string, content: string, terms: string[]): number {
+  const lowPath = path.toLowerCase();
+  let s = 0;
+  if (/(^|\/)(app\.(t|j)sx?|index\.html|main\.(t|j)sx?|router|routes|store|index\.(t|j)sx?)$/i.test(path)) s += 6;
+  const hay = (lowPath + '\n' + content.slice(0, 4000).toLowerCase());
+  for (const t of terms) {
+    if (lowPath.includes(t)) s += 4;       // a filename match is a strong signal
+    else if (hay.includes(t)) s += 1;
+  }
+  return s;
+}
+
+/**
+ * Inline current file contents (bounded) so edits/patches can target exact text.
+ * Files are ordered by RELEVANCE to the request so the ones being edited are
+ * shown first, in full — this prevents the budget from being spent on unrelated
+ * files and leaving the target file truncated/omitted (a top cause of no-op edits).
+ */
+function fileContext(vfs: VirtualFileSystem, prompt = ''): string {
   const paths = vfs.paths();
   if (!paths.length) return '(empty project — this is a fresh build)';
+  const terms = requestTerms(prompt);
+  const ranked = paths
+    .map((path) => {
+      const file = vfs.read(path);
+      const text = file && file.encoding !== 'base64' ? file.content : '';
+      return { path, score: terms.length ? relevanceScore(path, text, terms) : 0 };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_CONTEXT_FILES);
+
   let total = 0;
   const blocks: string[] = [];
-  for (const path of paths.slice(0, MAX_CONTEXT_FILES)) {
+  const omitted: string[] = [];
+  for (const { path } of ranked) {
     const file = vfs.read(path);
     if (!file) continue;
     if (file.encoding === 'base64') {
@@ -121,16 +187,41 @@ function fileContext(vfs: VirtualFileSystem): string {
     }
     let body = file.content;
     if (body.length > MAX_FILE_CHARS) {
-      body = body.slice(0, MAX_FILE_CHARS) + `\n… (truncated, ${file.content.length - MAX_FILE_CHARS} more chars)`;
+      body = body.slice(0, MAX_FILE_CHARS) + `\n… (truncated, ${file.content.length - MAX_FILE_CHARS} more chars — ask to see the rest before patching past here)`;
     }
     if (total + body.length > MAX_TOTAL_CONTEXT) {
-      blocks.push(`--- ${path} (omitted: context budget reached) ---`);
+      omitted.push(path);
       continue;
     }
     total += body.length;
     blocks.push(`--- ${path} ---\n${body}`);
   }
+  if (omitted.length) {
+    blocks.push(`--- (${omitted.length} more file(s) not shown to fit context; ask to see one before editing it): ${omitted.join(', ')} ---`);
+  }
   return blocks.join('\n\n');
+}
+
+/**
+ * Compress earlier conversation + the previous summary into a short, fact-dense
+ * memory the next turn can rely on (Claude-Code-style rolling summary). Returns
+ * the previous summary unchanged on any failure (never throws).
+ */
+export async function summarizeForMemory(
+  callModel: ModelCall,
+  prevSummary: string | undefined,
+  history: { role: 'user' | 'assistant'; content: string }[],
+): Promise<string> {
+  try {
+    if (!history.length) return prevSummary || '';
+    const convo = history.slice(-24).map((h) => `${h.role.toUpperCase()}: ${String(h.content).slice(0, 1500)}`).join('\n');
+    const sys = 'You maintain a fact-dense memory of an app-building session. Output ONLY the updated summary (no preamble), max ~200 words. Capture: what app is being built, the tech/architecture chosen, key features/decisions, the user\'s preferences, and what has been done so far. Keep stable facts; drop chit-chat.';
+    const user = `${prevSummary ? `Existing memory:\n${prevSummary}\n\n` : ''}New conversation since then:\n${convo}\n\nReturn the updated memory.`;
+    const out = (await callModel(sys, user)).trim();
+    return out && out.length > 8 ? out.slice(0, 2000) : (prevSummary || '');
+  } catch {
+    return prevSummary || '';
+  }
 }
 
 /** A planned file in a multi-file build. */
@@ -206,8 +297,13 @@ async function generateBatched(callModel: ModelCall, prompt: string, plan: Plann
   return edits;
 }
 
-/** Build generate+fix functions for the BuildPipeline backed by an injected model. */
-export function makeAiEditGenerator(callModel: ModelCall) {
+/**
+ * Build generate+fix functions for the BuildPipeline backed by an injected model.
+ * `memory` carries Claude-Code-style persistent context (rolling summary + recent
+ * conversation + prior-change log) so edits stay coherent across many turns.
+ */
+export function makeAiEditGenerator(callModel: ModelCall, memory?: BuildMemory) {
+  const mem = memoryBlock(memory);
   const generate = async (prompt: string, vfs: VirtualFileSystem): Promise<FileEdit[]> => {
     const fresh = isScaffoldState(vfs);
 
@@ -219,7 +315,7 @@ export function makeAiEditGenerator(callModel: ModelCall) {
       const contract = manifestContract(selectArchitecture(prompt)) + '\n\n';
       const checklist = featureChecklist(prompt);
       const sys = `You are a world-class full-stack engineer building a real, multi-file web application that must actually build and run.\n\n${contract}${checklist ? checklist + '\n\n' : ''}${ENGINEERING_RULES}\n\n${DESIGN_RULES}\n\n${EDIT_FORMAT}`;
-      const user = `Build this application from scratch as a complete, runnable multi-file project.\n\nUser request:\n${prompt}\n\nReturn the full set of files needed to run it — implement EVERY requested feature in separate component/page files, not just a shell. Make the UI genuinely beautiful per the VISUAL DESIGN rules.`;
+      const user = `${mem}Build this application from scratch as a complete, runnable multi-file project.\n\nUser request:\n${prompt}\n\nReturn the full set of files needed to run it — implement EVERY requested feature in separate component/page files, not just a shell. Make the UI genuinely beautiful per the VISUAL DESIGN rules.`;
       const edits = parseFileEdits(await callModel(sys, user));
       if (edits.length >= 2) return edits;
 
@@ -236,14 +332,14 @@ export function makeAiEditGenerator(callModel: ModelCall) {
 
     // Edit path (existing project) — single surgical-edit call.
     const sys = `You are a world-class full-stack engineer editing a real, multi-file web application.\n\n${ENGINEERING_RULES}\n\n${DESIGN_RULES}\n\n${EDIT_FORMAT}`;
-    const user = `Current project files (with FULL contents below):\n\n${fileContext(vfs)}\n\nUser request:\n${prompt}\n\n`
-      + `Apply the correct set of edits and keep all existing references valid. CRITICAL for reliability: a "patch" find string MUST be copied EXACTLY (character-for-character) from the file content shown above — if you are unsure it matches exactly, use a full "write" of that file instead. Preserve everything you are not changing.`;
+    const user = `${mem}Current project files (most relevant first, with FULL contents below):\n\n${fileContext(vfs, prompt)}\n\nUser request:\n${prompt}\n\n`
+      + `Apply the correct set of edits and keep all existing references valid. CRITICAL for reliability: a "patch" find string MUST be copied EXACTLY (character-for-character) from the file content shown above — if you are unsure it matches exactly, or the target file was truncated, use a full "write" of that file instead. Preserve everything you are not changing.`;
     return parseFileEdits(await callModel(sys, user));
   };
   const fix = async (issues: ProjectIssue[], vfs: VirtualFileSystem): Promise<FileEdit[]> => {
     if (issues.length === 0) return [];
     const sys = `You are fixing real build/verification errors in a web app so it builds and runs cleanly. ${ENGINEERING_RULES}\n\n${EDIT_FORMAT}`;
-    const user = `Current project files (with contents):\n\n${fileContext(vfs)}\n\nFix exactly these issues without breaking anything else:\n${issues.map(i => `- [${i.severity}] ${i.file}: ${i.message}`).join('\n')}`;
+    const user = `Current project files (with contents):\n\n${fileContext(vfs, issues.map(i => i.file).join(' '))}\n\nFix exactly these issues without breaking anything else:\n${issues.map(i => `- [${i.severity}] ${i.file}: ${i.message}`).join('\n')}`;
     return parseFileEdits(await callModel(sys, user));
   };
   // Agentic feature completion: implement the requested features that are still
@@ -252,7 +348,7 @@ export function makeAiEditGenerator(callModel: ModelCall) {
     if (!missing.length) return [];
     const contract = manifestContract(selectArchitecture(prompt));
     const sys = `You are a world-class engineer ADDING missing features to an existing app — keep the SAME architecture, never mix frameworks.\n\n${contract}\n\n${ENGINEERING_RULES}\n\n${DESIGN_RULES}\n\n${EDIT_FORMAT}`;
-    const user = `Current project files (with contents):\n\n${fileContext(vfs)}\n\nApp request:\n${prompt}\n\n`
+    const user = `${mem}Current project files (with contents):\n\n${fileContext(vfs, prompt + ' ' + missing.join(' '))}\n\nApp request:\n${prompt}\n\n`
       + `These requested features are MISSING — implement them with real, working code, wiring them into the existing app (routes/components/state as needed):\n`
       + missing.map((m) => `- ${m}`).join('\n');
     return parseFileEdits(await callModel(sys, user));

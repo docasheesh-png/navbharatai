@@ -70,6 +70,14 @@ export interface BuildRequest {
   userKey?: string;
   /** Also start a live preview of the result. */
   preview?: boolean;
+  /** This is an edit of an existing app (skips the fresh-build feature loop). */
+  isEdit?: boolean;
+  /** Claude-Code-style memory: recent conversation turns. */
+  history?: { role: 'user' | 'assistant'; content: string }[];
+  /** Rolling fact-dense summary of earlier turns. */
+  memorySummary?: string;
+  /** Log of changes already made this session. */
+  editLog?: string[];
 }
 
 async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
@@ -107,6 +115,9 @@ export interface BuildStreamEvent {
   validation?: ValidationReport;
   previewAllowed?: boolean;
   preview?: PreviewInfo;
+  // Refreshed memory to persist for the next turn (Claude-Code-style):
+  memorySummary?: string;
+  editLog?: string[];
 }
 
 /**

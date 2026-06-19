@@ -30,7 +30,11 @@ export async function callGemini(message: string, key?: string, history: any[] =
       contents: contents,
       config: {
         systemInstruction: systemInstruction || getBharatContext(),
-        tools: [{ googleSearch: {} }]
+        tools: [{ googleSearch: {} }],
+        // Generous output budget so multi-file code edits aren't truncated
+        // mid-JSON (a truncated reply parses to ZERO file edits → the edit
+        // silently no-ops, which is why editing died after a few rounds).
+        maxOutputTokens: 16000,
       }
     });
 
@@ -57,6 +61,7 @@ export async function callGroq(message: string, key?: string, history: any[] = [
   const completion = await client.chat.completions.create({
     messages,
     model: 'mixtral-8x7b-32768',
+    max_tokens: 8000,   // avoid truncating multi-file code edits mid-JSON
   });
   return completion.choices[0]?.message?.content ?? 'Groq error';
 }
@@ -75,6 +80,7 @@ export async function callDeepSeek(message: string, key?: string, history: any[]
   const completion = await client.chat.completions.create({
     messages,
     model,
+    max_tokens: 8000,   // avoid truncating multi-file code edits mid-JSON
   });
   return completion.choices[0]?.message?.content ?? 'DeepSeek error';
 }
@@ -92,6 +98,7 @@ export async function callOpenAI(message: string, key?: string, history: any[] =
   const completion = await client.chat.completions.create({
     messages,
     model: 'gpt-4o-mini',
+    max_tokens: 8000,   // avoid truncating multi-file code edits mid-JSON
   });
   return completion.choices[0]?.message?.content ?? 'OpenAI error';
 }
@@ -132,7 +139,7 @@ export async function callClaude(message: string, key?: string, history: any[] =
         console.log(`[AUTH] Calling Claude proxy model: ${modelName}`);
         const completion = await client.chat.completions.create({
           model: modelName,
-          max_tokens: 8000,   // generous cap so code generation isn't truncated to a tiny app
+          max_tokens: 16000,   // generous cap so code generation isn't truncated to a tiny app
           messages: [
             ...(systemInstruction ? [{ role: 'system' as const, content: systemInstruction }] : [{ role: 'system' as const, content: getBharatContext() }]),
             ...history.map(m => ({
@@ -164,7 +171,7 @@ export async function callClaude(message: string, key?: string, history: any[] =
 
   const response = await client.messages.create({
     model: "claude-3-5-sonnet-20241022",
-    max_tokens: 4096,
+    max_tokens: 8192,
     system: systemInstruction || getBharatContext(),
     messages,
   });
@@ -184,6 +191,7 @@ export async function callOpenRouter(message: string, key?: string, history: any
   const completion = await client.chat.completions.create({
     messages,
     model: 'deepseek/deepseek-chat',
+    max_tokens: 8000,   // avoid truncating multi-file code edits mid-JSON
   });
   return completion.choices[0]?.message?.content ?? 'OpenRouter error';
 }

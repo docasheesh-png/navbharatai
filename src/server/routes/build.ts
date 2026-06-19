@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { runBuild } from '../project/BuildPipeline';
-import { makeAiEditGenerator, type ModelCall } from '../project/aiEdits';
+import { makeAiEditGenerator, summarizeForMemory, type ModelCall, type BuildMemory } from '../project/aiEdits';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
 import { aiRouter } from '../lib/aiRouter';
@@ -73,17 +73,39 @@ function makeResilientModelCall(userKey?: string): ModelCall {
   };
 }
 
+/** Parse the Claude-Code-style memory payload from a request body (defensive). */
+function parseMemory(body: any): BuildMemory {
+  const history = Array.isArray(body?.history)
+    ? body.history
+        .filter((m: any) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+        .map((m: any) => ({ role: m.role as 'user' | 'assistant', content: String(m.content).slice(0, 4000) }))
+        .slice(-20)
+    : [];
+  const summary = typeof body?.memorySummary === 'string' ? body.memorySummary.slice(0, 2000) : '';
+  const editLog = Array.isArray(body?.editLog)
+    ? body.editLog.filter((e: any) => typeof e === 'string').slice(-30)
+    : [];
+  return { history, summary, editLog };
+}
+
+/** A one-line record of what this build/edit changed, for the session edit log. */
+function editLogEntry(prompt: string, files: Record<string, string>, isEdit: boolean): string {
+  const names = Object.keys(files).slice(0, 8).join(', ');
+  return `${isEdit ? 'Edit' : 'Build'}: "${prompt.slice(0, 80)}" → ${Object.keys(files).length} file(s)${names ? ` (${names})` : ''}`;
+}
+
 export function registerBuildRoutes(app: Express): void {
   app.post('/api/build', async (req: Request, res: Response) => {
     try {
-      const { prompt, files, userKey, preview } = req.body || {};
+      const { prompt, files, userKey, preview, isEdit } = req.body || {};
       if (!prompt || typeof prompt !== 'string') {
         return res.status(400).json({ error: 'prompt (string) is required' });
       }
 
       // Model call backed by the shared aiCalls layer — multi-provider with fallback.
+      const memory = parseMemory(req.body);
       const callModel: ModelCall = makeResilientModelCall(userKey);
-      const { generate, fix, completeFeatures } = makeAiEditGenerator(callModel);
+      const { generate, fix, completeFeatures } = makeAiEditGenerator(callModel, memory);
 
       const result = await runBuild({
         prompt,
@@ -91,6 +113,7 @@ export function registerBuildRoutes(app: Express): void {
         generate,
         fix,
         completeFeatures,
+        isEdit: isEdit === true,
         // Bound total model calls so a synchronous build can't hit the gateway
         // timeout (504): fast single-shot generate + 1 repair + up to 2
         // feature-completion passes (2 passes meaningfully raise coverage on big
@@ -108,6 +131,14 @@ export function registerBuildRoutes(app: Express): void {
         previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
       }
 
+      const thisEntry = editLogEntry(prompt, result.files, isEdit === true);
+      const updatedSummary = await summarizeForMemory(callModel, memory.summary, [
+        ...(memory.history || []),
+        { role: 'user' as const, content: prompt },
+        { role: 'assistant' as const, content: thisEntry },
+      ]);
+      const updatedEditLog = [...(memory.editLog || []), thisEntry].slice(-30);
+
       return res.json({
         ok: result.ok,
         files: result.files,
@@ -120,6 +151,8 @@ export function registerBuildRoutes(app: Express): void {
         validation: result.validation,
         previewAllowed: result.previewAllowed,
         preview: previewInfo,
+        memorySummary: updatedSummary,
+        editLog: updatedEditLog,
       });
     } catch (err: any) {
       console.error('[BUILD] error:', err?.message || err);
@@ -141,20 +174,34 @@ export function registerBuildRoutes(app: Express): void {
     // Heartbeat so proxies don't idle-timeout the stream during long model calls.
     const heartbeat = setInterval(() => { try { res.write(': keep-alive\n\n'); } catch { /* ignore */ } }, 15_000);
     try {
-      const { prompt, files, userKey, preview } = req.body || {};
+      const { prompt, files, userKey, preview, isEdit } = req.body || {};
       if (!prompt || typeof prompt !== 'string') { send({ type: 'error', message: 'prompt (string) is required' }); clearInterval(heartbeat); return res.end(); }
 
+      const memory = parseMemory(req.body);
       const callModel: ModelCall = makeResilientModelCall(userKey);
-      const { generate, fix, completeFeatures } = makeAiEditGenerator(callModel);
+      const { generate, fix, completeFeatures } = makeAiEditGenerator(callModel, memory);
 
       const result = await runBuild({
         prompt,
         files: files && typeof files === 'object' ? files : undefined,
         generate, fix, completeFeatures,
         modular: true,            // one module per call, verified between each
+        isEdit: isEdit === true,  // edits skip the feature-completion loop
         maxRepairAttempts: 1,
         onProgress: (ev) => send(ev),
       });
+
+      // Refresh the rolling memory so the NEXT turn stays coherent (Claude-Code
+      // style): append this turn, re-summarize, extend the edit log. Best-effort.
+      send({ type: 'status', message: 'Updating project memory…' });
+      const thisEntry = editLogEntry(prompt, result.files, isEdit === true);
+      const turnHistory = [
+        ...(memory.history || []),
+        { role: 'user' as const, content: prompt },
+        { role: 'assistant' as const, content: thisEntry },
+      ];
+      const updatedSummary = await summarizeForMemory(callModel, memory.summary, turnHistory);
+      const updatedEditLog = [...(memory.editLog || []), thisEntry].slice(-30);
 
       let previewInfo: unknown = undefined;
       if (preview && result.previewAllowed) {
@@ -173,6 +220,8 @@ export function registerBuildRoutes(app: Express): void {
         validation: result.validation,
         previewAllowed: result.previewAllowed,
         preview: previewInfo,
+        memorySummary: updatedSummary,
+        editLog: updatedEditLog,
       });
     } catch (err: any) {
       const safeMsg = (err?.message || 'Build failed').replace(/\/[^\s:]+\/[^\s:]+/g, '[path]').slice(0, 200);

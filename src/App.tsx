@@ -1606,6 +1606,7 @@ export default function App() {
           current_agent: updatedSession.currentAgent || null,
           title: updatedSession.title || 'Untitled',
           memory_summary: updatedSession.memorySummary || '',
+          edit_log: updatedSession.editLog || [],
           restoredMessages: (updatedSession.restoredMessages || []).map(m => ({
             id: m.id || Date.now().toString(),
             text: m.text || '',
@@ -1680,6 +1681,7 @@ export default function App() {
         originalAgent: existingSession?.originalAgent || 'navbharatai-pro',
         currentAgent: 'navbharatai-pro',
         memorySummary: existingSession?.memorySummary || '',
+        editLog: existingSession?.editLog || [],
         continuationChain: existingSession?.continuationChain || ['navbharatai-pro'],
         restoredMessages: existingSession?.restoredMessages || []
       };
@@ -1705,6 +1707,7 @@ export default function App() {
           current_agent: updatedSession.currentAgent || null,
           title: updatedSession.title || 'Untitled',
           memory_summary: updatedSession.memorySummary || '',
+          edit_log: updatedSession.editLog || [],
           restoredMessages: (updatedSession.restoredMessages || []).map(m => ({
             id: m.id || Date.now().toString(),
             text: m.text || '',
@@ -4013,7 +4016,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
 
         // Full conversation history as structured messages (last 20, up to 800 chars each)
         const conversationHistory = proMessages.slice(-20).map((m: any) => ({
-          role: m.sender === 'user' ? 'user' : 'assistant',
+          role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
           content: String(m.text || '').slice(0, 800),
         }));
 
@@ -4107,6 +4110,13 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             prompt: messageToSend,
             files: Object.keys(allTextFiles).length ? allTextFiles : undefined,
             preview: false,
+            // Claude-Code-style memory: tell the engine this is an edit (skips the
+            // fresh-build feature loop) and pass conversation + rolling summary +
+            // prior-change log so edits stay coherent across many turns.
+            isEdit: isEditRequest,
+            history: conversationHistory,
+            memorySummary: proMemorySummary,
+            editLog: proActiveSession?.editLog || [],
           }, (ev) => {
             if (ev.type === 'status' && ev.message) {
               setProBuildProgress(prev => ({ ...prev, active: true, stage: `⚙️ ${ev.message}`, percent: Math.min(92, Math.max(prev.percent, (ev.coverage ?? 0))) }));
@@ -4123,6 +4133,18 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
               }));
             }
           }, abortController.signal);
+          // Persist the refreshed Claude-Code-style memory onto the active session
+          // so the NEXT edit gets the rolling summary + change log (kept across
+          // turns; auto-saved to Firestore by the session effect).
+          if (engineRes && (typeof engineRes.memorySummary === 'string' || Array.isArray(engineRes.editLog))) {
+            setSessions(prev => prev.map(s => s.id === currentProSessionId
+              ? {
+                  ...s,
+                  ...(typeof engineRes.memorySummary === 'string' ? { memorySummary: engineRes.memorySummary } : {}),
+                  ...(Array.isArray(engineRes.editLog) ? { editLog: engineRes.editLog } : {}),
+                }
+              : s));
+          }
           if (engineRes && engineRes.fileCount > 0 && engineRes.files && Object.keys(engineRes.files).length > 0) {
             const val = engineRes.validation;
             const v = engineRes.verify;
@@ -4730,6 +4752,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
             originalAgent: docData.original_agent,
             currentAgent: docData.current_agent,
             memorySummary: docData.memory_summary || '',
+            editLog: docData.edit_log || [],
             restoredMessages: docData.restoredMessages || [],
             meta: { tab: docData.tab }
           } as any;

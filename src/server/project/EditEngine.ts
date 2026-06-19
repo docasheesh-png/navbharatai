@@ -34,6 +34,30 @@ export interface ApplyEditsResult {
   snapshotId?: string;
 }
 
+/** Escape a string for safe use as a literal inside a RegExp. */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Whitespace-tolerant find→replace. Models routinely reproduce a `find` snippet
+ * with slightly different indentation/newlines than the real file, so an exact
+ * `String.includes` check fails and the patch is silently dropped — a top cause
+ * of "the edit did nothing". This fallback matches the snippet treating any run
+ * of whitespace as flexible, so trivial spacing drift no longer breaks the edit.
+ * Returns the updated text, or null if even the flexible pattern doesn't match.
+ */
+function flexibleReplace(current: string, find: string, replace: string, all: boolean): string | null {
+  const trimmed = find.trim();
+  if (!trimmed) return null;
+  const pattern = trimmed.split(/\s+/).map(escapeRegex).join('\\s+');
+  let re: RegExp;
+  try { re = new RegExp(pattern, all ? 'g' : ''); } catch { return null; }
+  if (!re.test(current)) return null;
+  // Function replacer so `$` sequences in `replace` are inserted literally.
+  return current.replace(re, () => replace);
+}
+
 function applyOne(vfs: VirtualFileSystem, edit: FileEdit): EditOpResult {
   try {
     switch (edit.op) {
@@ -51,7 +75,16 @@ function applyOne(vfs: VirtualFileSystem, edit: FileEdit): EditOpResult {
       case 'patch': {
         const current = vfs.readText(edit.path);
         if (current == null) return { op: 'patch', path: edit.path, ok: false, error: 'file not found' };
-        if (!current.includes(edit.find)) return { op: 'patch', path: edit.path, ok: false, error: 'find string not present' };
+        if (!current.includes(edit.find)) {
+          // Exact match failed — try a whitespace-tolerant match before giving up
+          // (saves edits where the model's snippet only differs in spacing).
+          const flexed = flexibleReplace(current, edit.find, edit.replace, edit.count === 'all');
+          if (flexed != null && flexed !== current) {
+            vfs.write(edit.path, flexed);
+            return { op: 'patch', path: edit.path, ok: true };
+          }
+          return { op: 'patch', path: edit.path, ok: false, error: 'find string not present' };
+        }
         let updated: string;
         if (edit.count === 'all') {
           updated = current.split(edit.find).join(edit.replace);

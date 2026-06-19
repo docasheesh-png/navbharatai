@@ -115,4 +115,11 @@ export interface IEngineerActuator {
    * LocalActuator throws — provisioning requires a real sandbox (set E2B_API_KEY).
    */
   provisionBackend(workspaceId: string, features: ('db' | 'auth' | 'storage')[]): Promise<BackendProvisionResult>;
+  /**
+   * Phase 13 — Download the built dist/ directory from the workspace as a
+   * Map<relativePath, fileBuffer>. Used by DeploymentService to upload files
+   * to Firebase Hosting for a permanent public URL.
+   * LocalActuator throws — Firebase deploy requires a real E2B sandbox.
+   */
+  downloadDistFiles(workspaceId: string): Promise<Map<string, Buffer>>;
 }

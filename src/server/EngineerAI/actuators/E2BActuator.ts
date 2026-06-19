@@ -598,6 +598,46 @@ const {chromium}=require('playwright');
     return id;
   }
 
+  async downloadDistFiles(workspaceId: string): Promise<Map<string, Buffer>> {
+    const sandbox = await this.getSandbox(workspaceId);
+    const distPath = `${WORKSPACE_ROOT}/dist`;
+
+    // Use a Node.js one-liner inside the sandbox to recursively read all files
+    // in dist/ as base64, output as JSON {relativePath: base64string}.
+    // Node.js is always available (it's the E2B base template runtime).
+    const script = [
+      `node -e "`,
+      `const fs=require('fs'),path=require('path');`,
+      `function walk(d,b,o){`,
+      `  try{for(const f of fs.readdirSync(d)){`,
+      `    const a=path.join(d,f),r=(b?b+'/':'')+f;`,
+      `    if(fs.statSync(a).isDirectory()) walk(a,r,o);`,
+      `    else o[r]=fs.readFileSync(a).toString('base64');`,
+      `  }}catch(e){}`,
+      `  return o;`,
+      `}`,
+      `const out=walk(${JSON.stringify(distPath)},'',{});`,
+      `if(!Object.keys(out).length) throw new Error('dist/ is empty or does not exist');`,
+      `console.log(JSON.stringify(out));`,
+      `"`,
+    ].join('');
+
+    const result = await sandbox.commands.run(script, { timeoutMs: 30_000 });
+    if (result.exitCode !== 0 || !result.stdout.trim()) {
+      throw new Error(
+        `dist/ directory not found or empty. Run "npm run build" first.\n` +
+        (result.stderr || result.stdout).slice(0, 300),
+      );
+    }
+
+    const data: Record<string, string> = JSON.parse(result.stdout.trim());
+    const files = new Map<string, Buffer>();
+    for (const [relPath, base64] of Object.entries(data)) {
+      files.set(relPath, Buffer.from(base64, 'base64'));
+    }
+    return files;
+  }
+
   async provisionBackend(workspaceId: string, features: ('db' | 'auth' | 'storage')[]): Promise<BackendProvisionResult> {
     const sandbox = await this.getSandbox(workspaceId);
 

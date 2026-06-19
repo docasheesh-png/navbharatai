@@ -28,6 +28,7 @@ export type EngineerAgentEvent =
   | { type: 'console_error'; errors: { kind: string; text: string }[] }
   | { type: 'search_result'; query: string; results: { title: string; url: string; snippet: string }[] }
   | { type: 'checkpoint_created'; checkpointId: string; createdAt: number; triggeredBy: string }
+  | { type: 'deployed'; url: string; port: number }
   | { type: 'workspace_saved'; sandboxId: string }
   | { type: 'server_ready'; url: string; port: number }
   | { type: 'status'; message: string }

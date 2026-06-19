@@ -135,21 +135,30 @@ export async function runBuild(input: BuildPipelineInput): Promise<BuildPipeline
   if (input.completeFeatures && input.prompt.trim()) {
     const modular = input.modular === true;
     const maxAttempts = modular ? 14 : (input.maxFeatureAttempts ?? 2);
+    // Track modules that didn't improve so we move on instead of retrying a
+    // stuck one forever (which would starve the remaining modules).
+    const stuck = new Set<string>();
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const cov = computeFeatureCoverage(input.prompt, vfs);
       progress({ type: 'status', message: `Coverage ${cov.coverage}% (${cov.implemented}/${cov.requested})` });
       if (cov.requested === 0 || cov.coverage >= MIN_FEATURE_COVERAGE) break;
-      const missingItems = cov.items.filter((i) => i.status === 'fail');
+      const missingItems = cov.items.filter((i) => i.status === 'fail' && !stuck.has(i.label));
       if (!missingItems.length) break;
       // Modular → one module at a time; batch mode → all missing at once.
       const target = modular ? [missingItems[0].label] : missingItems.map((i) => i.label);
       const label = target.join(', ');
       progress({ type: 'module', name: label, state: 'start', coverage: cov.coverage });
       const fEdits = await input.completeFeatures(input.prompt, target, vfs);
-      if (!fEdits.length) { progress({ type: 'module', name: label, state: 'failed' }); if (modular) continue; else break; }
+      if (!fEdits.length) {
+        progress({ type: 'module', name: label, state: 'failed' });
+        if (modular) { stuck.add(target[0]); continue; } else break;
+      }
       applyEdits(vfs, fEdits, versions, `feature completion: ${label}`);
       await autoRepair(vfs, { generateFixes: input.fix, versions, maxAttempts: 1 });
-      progress({ type: 'module', name: label, state: 'done', coverage: computeFeatureCoverage(input.prompt, vfs).coverage });
+      const after = computeFeatureCoverage(input.prompt, vfs);
+      // If a modular module still isn't implemented, mark it stuck so we advance.
+      if (modular && after.items.find((i) => i.label === target[0])?.status === 'fail') stuck.add(target[0]);
+      progress({ type: 'module', name: label, state: 'done', coverage: after.coverage });
     }
   }
   progress({ type: 'status', message: 'Verifying the build…' });

@@ -5,16 +5,17 @@ import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
-// billing on abandoned sessions. Comfortably longer than the max single command
-// timeout (5 min), so an in-flight operation (whose start refreshes activity) is
-// never paused mid-run — only genuinely idle sandboxes get reclaimed.
-const IDLE_LIMIT_MS = 15 * 60 * 1000;
+// billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
+// idle sweep fires before E2B kills the sandbox on its own.
+const IDLE_LIMIT_MS = 45 * 60 * 1000;
 const IDLE_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 // Dedicated tools dir outside the user's workspace — persists across workspace resets
 const TOOLS_DIR = '/home/user/.e-tools';
-const SANDBOX_TIMEOUT_MS = 10 * 60 * 1000;
+// 1-hour sandbox lifetime. Refreshed on every activity via sandbox.setTimeout() so
+// a long build (npm install + AI steps) never gets killed mid-run.
+const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 
 const CDP_PORT = 9222;
@@ -165,7 +166,12 @@ export class E2BActuator implements IEngineerActuator {
     this._lastActivity.set(workspaceId, Date.now());
 
     const existing = this.sandboxes.get(workspaceId);
-    if (existing) return existing;
+    if (existing) {
+      // Reset the E2B cloud-side countdown on every activity so a long build never
+      // gets killed mid-run. Fire-and-forget — failure is non-fatal.
+      existing.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
+      return existing;
+    }
 
     let sandbox: Sandbox;
     if (resumeSandboxId) {
@@ -174,6 +180,7 @@ export class E2BActuator implements IEngineerActuator {
       // sandbox if the resume target was killed/expired.
       try {
         sandbox = await Sandbox.connect(resumeSandboxId, { timeoutMs: SANDBOX_TIMEOUT_MS });
+        await sandbox.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
       } catch {
         sandbox = await Sandbox.create({ timeoutMs: SANDBOX_TIMEOUT_MS });
       }

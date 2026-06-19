@@ -7,8 +7,8 @@ import { backendScaffolder } from './BackendScaffolder';
 import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from './ContextRetriever';
 import { usageTracker } from './UsageTracker';
 
-const MAX_STEPS = 24;
-const DEADLINE_MS = 8 * 60 * 1000;
+const MAX_STEPS = 60;
+const DEADLINE_MS = 45 * 60 * 1000;
 const MAX_OBS_CHARS = 3000;
 // Phase 12A — named viewports so the agent can verify responsive layouts.
 const VIEWPORTS: Record<string, { width: number; height: number }> = {

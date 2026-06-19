@@ -2,6 +2,14 @@ import { Sandbox } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
+import { usageTracker } from '../UsageTracker';
+
+// Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
+// billing on abandoned sessions. Comfortably longer than the max single command
+// timeout (5 min), so an in-flight operation (whose start refreshes activity) is
+// never paused mid-run — only genuinely idle sandboxes get reclaimed.
+const IDLE_LIMIT_MS = 15 * 60 * 1000;
+const IDLE_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 // Dedicated tools dir outside the user's workspace — persists across workspace resets
@@ -130,8 +138,32 @@ export class E2BActuator implements IEngineerActuator {
   private _playwrightReady = new Map<string, Promise<boolean>>();
   // Tracks per-sandbox persistent-browser daemon launch
   private _browserDaemon = new Map<string, Promise<boolean>>();
+  // Phase 12E — last activity timestamp per workspace, drives idle auto-pause.
+  private _lastActivity = new Map<string, number>();
+
+  constructor() {
+    // Phase 12E — periodic idle sweep. unref() so it never keeps the process alive.
+    const timer = setInterval(() => { void this._sweepIdleSandboxes(); }, IDLE_SWEEP_INTERVAL_MS);
+    if (typeof timer.unref === 'function') timer.unref();
+  }
+
+  /** Pause sandboxes with no activity for IDLE_LIMIT_MS (abandoned sessions). */
+  private async _sweepIdleSandboxes(): Promise<void> {
+    const now = Date.now();
+    for (const [workspaceId, sandbox] of [...this.sandboxes]) {
+      const last = this._lastActivity.get(workspaceId) ?? now;
+      if (now - last > IDLE_LIMIT_MS) {
+        await this.pauseSandbox(sandbox.sandboxId).catch(() => {});
+        this._lastActivity.delete(workspaceId);
+      }
+    }
+  }
 
   private async getSandbox(workspaceId: string, resumeSandboxId?: string): Promise<Sandbox> {
+    // Refresh activity FIRST so any in-flight operation protects its sandbox from
+    // the idle sweep for the full IDLE_LIMIT_MS window.
+    this._lastActivity.set(workspaceId, Date.now());
+
     const existing = this.sandboxes.get(workspaceId);
     if (existing) return existing;
 
@@ -149,6 +181,7 @@ export class E2BActuator implements IEngineerActuator {
       sandbox = await Sandbox.create({ timeoutMs: SANDBOX_TIMEOUT_MS });
     }
     this.sandboxes.set(workspaceId, sandbox);
+    usageTracker.record(workspaceId, 'sandbox');
     return sandbox;
   }
 
@@ -224,6 +257,12 @@ export class E2BActuator implements IEngineerActuator {
     await sandbox.files.write(`${WORKSPACE_ROOT}/${filePath}`, content);
   }
 
+  async writeBinaryFile(workspaceId: string, filePath: string, base64: string): Promise<void> {
+    const sandbox = await this.getSandbox(workspaceId);
+    const bytes = new Uint8Array(Buffer.from(base64, 'base64'));
+    await sandbox.files.write(`${WORKSPACE_ROOT}/${filePath}`, bytes);
+  }
+
   async readFile(workspaceId: string, filePath: string): Promise<string> {
     const sandbox = await this.getSandbox(workspaceId);
     return sandbox.files.read(`${WORKSPACE_ROOT}/${filePath}`);
@@ -239,6 +278,7 @@ export class E2BActuator implements IEngineerActuator {
 
   async build(workspaceId: string): Promise<{ success: boolean; logs: string }> {
     const sandbox = await this.getSandbox(workspaceId);
+    usageTracker.record(workspaceId, 'build');
     try {
       // Python project: install deps via pip, then do a syntax check (no compile step).
       const hasPyMain = await sandbox.files.exists(`${WORKSPACE_ROOT}/main.py`).catch(() => false);
@@ -289,6 +329,7 @@ export class E2BActuator implements IEngineerActuator {
 
   async runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     const sandbox = await this.getSandbox(workspaceId);
+    usageTracker.record(workspaceId, 'command');
 
     // Long-running commands (dev servers, watchers) never exit — run in background,
     // collect startup output for 20 s (enough for Vite/Next to print the port),
@@ -360,6 +401,7 @@ const {chromium}=require('playwright');
 
   async screenshot(workspaceId: string, url: string, viewport?: { width: number; height: number }): Promise<{ base64: string; mimeType: 'image/png' }> {
     const sandbox = await this.getSandbox(workspaceId);
+    usageTracker.record(workspaceId, 'screenshot');
     const vw = viewport?.width ?? 1280;
     const vh = viewport?.height ?? 720;
 

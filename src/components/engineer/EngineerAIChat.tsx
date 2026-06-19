@@ -3,6 +3,7 @@ import {
   HardHat, Loader2, Send, Square, Terminal, FolderOpen, Globe,
   CheckCircle2, AlertCircle, ChevronRight, Play, FileDiff, RotateCcw,
   ExternalLink, RefreshCw, History, Rocket, Copy, Check, Database,
+  ImagePlus, X,
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -133,9 +134,13 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   // Phase 10 — Backend ready indicator
   const [backendReady, setBackendReady] = useState<{ features: string[]; dbUrl: string } | null>(null);
 
+  // Phase 12C/12D — image the user attached to the next message (design-to-code / asset).
+  const [attachedImage, setAttachedImage] = useState<{ base64: string; mimeType: string; filename: string } | null>(null);
+
   const chatEndRef = useRef<HTMLDivElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const workspaceIdRef = useRef<string>((() => {
     if (!userId) return `ws_anon_${Date.now()}`;
@@ -445,6 +450,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setPublishedUrl(null);
     setPublishing(false);
     setBackendReady(null);
+    setAttachedImage(null);
   };
 
   const handleRestore = async (checkpointId: string) => {
@@ -509,11 +515,35 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     } catch { /* non-fatal */ }
   };
 
+  // Phase 12C/12D — read a picked image file into base64 (data-URL prefix stripped).
+  const handlePickImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      appendChat('system', 'Only image files can be attached.');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      appendChat('system', 'Image too large (max 8 MB).');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '');
+      const base64 = dataUrl.includes(',') ? dataUrl.slice(dataUrl.indexOf(',') + 1) : dataUrl;
+      setAttachedImage({ base64, mimeType: file.type, filename: file.name });
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSend = async () => {
     const instruction = input.trim();
     if (!instruction || loading) return;
+    const sendImage = attachedImage;
     setInput('');
-    appendChat('user', instruction);
+    setAttachedImage(null);
+    appendChat('user', sendImage ? `${instruction}\n🖼️ attached: ${sendImage.filename}` : instruction);
     setLoading(true);
     setStatusMsg('');
     setCurrentStep(0);
@@ -540,6 +570,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
           workspaceId: workspaceIdRef.current,
           instruction,
           resumeSandboxId: sandboxIdRef.current || undefined,
+          attachedImage: sendImage || undefined,
         }),
       });
       if (!res.ok || !res.body) throw new Error(`API error: ${res.status}`);
@@ -595,9 +626,11 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     : null;
 
   return (
-    <div className="flex h-full min-h-0 bg-[#0d1117]">
+    // Phase 12F — stack chat/workspace vertically on mobile, side-by-side on md+.
+    // Desktop behavior is preserved exactly by the md: overrides.
+    <div className="flex flex-col md:flex-row h-full min-h-0 bg-[#0d1117]">
       {/* ── Left panel: Chat ── */}
-      <div className="w-2/5 flex flex-col border-r border-white/5 min-w-0">
+      <div className="w-full h-1/2 md:w-2/5 md:h-full flex flex-col border-b md:border-b-0 md:border-r border-white/5 min-w-0 min-h-0">
         {/* Header */}
         <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
           <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
@@ -655,7 +688,34 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         </div>
 
         {/* Input */}
-        <div className="p-3 border-t border-white/5 flex items-end gap-2 shrink-0">
+        <div className="border-t border-white/5 shrink-0">
+          {attachedImage && (
+            <div className="px-3 pt-2 flex items-center gap-2">
+              <span className="flex items-center gap-1.5 text-[11px] text-indigo-200 bg-indigo-500/10 border border-indigo-500/20 px-2 py-1 rounded-lg max-w-[200px]">
+                <ImagePlus className="w-3 h-3 shrink-0" />
+                <span className="truncate">{attachedImage.filename}</span>
+                <button onClick={() => setAttachedImage(null)} title="Remove image" className="shrink-0 hover:text-white">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            </div>
+          )}
+          <div className="p-3 flex items-end gap-2">
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handlePickImage}
+            className="hidden"
+          />
+          <button
+            onClick={() => imageInputRef.current?.click()}
+            disabled={loading}
+            title="Attach an image (design to copy, or a logo/photo asset)"
+            className="w-9 h-9 rounded-xl bg-[#161b22] border border-white/10 text-[#8b949e] hover:text-white hover:border-indigo-500/40 flex items-center justify-center shrink-0 disabled:opacity-40 transition-colors"
+          >
+            <ImagePlus className="w-3.5 h-3.5" />
+          </button>
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -684,11 +744,12 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
               <Send className="w-3.5 h-3.5" />
             </button>
           )}
+          </div>
         </div>
       </div>
 
       {/* ── Right panel: Workspace ── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Tabs */}
         <div className="flex items-center border-b border-white/5 bg-[#0d1117] shrink-0">
           <button className={tabClass('terminal')} onClick={() => setActiveTab('terminal')}>

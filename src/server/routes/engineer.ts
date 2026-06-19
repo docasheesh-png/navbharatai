@@ -4,6 +4,7 @@ import { EngineerAgentLoop } from '../EngineerAI/EngineerAgentLoop';
 import { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
+import { usageTracker } from '../EngineerAI/UsageTracker';
 
 // Real e2b.dev cloud sandbox when configured, otherwise the process-level
 // LocalActuator (same isolation guarantees as Phase 1).
@@ -24,12 +25,24 @@ export function registerEngineerRoutes(app: Express): void {
   const agentLoop = new EngineerAgentLoop(router, actuator);
 
   app.post('/api/engineer-chat', async (req: Request, res: Response) => {
-    const { workspaceId, instruction, projectType, resumeSandboxId } = req.body || {};
+    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage } = req.body || {};
     if (typeof workspaceId !== 'string' || !workspaceId || typeof instruction !== 'string' || !instruction) {
       res.status(400).json({ error: 'workspaceId and instruction are required.' });
       return;
     }
     const resumeId = typeof resumeSandboxId === 'string' && resumeSandboxId ? resumeSandboxId : undefined;
+
+    // Phase 12C/12D — optional attached image (base64). Cap at ~8 MB decoded to
+    // keep request size sane; ignore malformed payloads rather than failing.
+    let image: { base64: string; mimeType: string; filename: string } | undefined;
+    if (attachedImage && typeof attachedImage.base64 === 'string' && attachedImage.base64.length > 0
+        && attachedImage.base64.length < 11_000_000) {
+      image = {
+        base64: attachedImage.base64,
+        mimeType: typeof attachedImage.mimeType === 'string' ? attachedImage.mimeType : 'image/png',
+        filename: typeof attachedImage.filename === 'string' ? attachedImage.filename : 'upload.png',
+      };
+    }
 
     // NDJSON streaming — avoids iOS Safari SSE buffering quirks.
     // Each event is a single JSON object followed by a newline character.
@@ -63,7 +76,7 @@ export function registerEngineerRoutes(app: Express): void {
       // long-running E2B or AI operation begins.
       send({ type: 'status', message: 'Connecting…' });
 
-      for await (const event of agentLoop.run({ workspaceId, instruction, projectType, resumeSandboxId: resumeId }, abort.signal)) {
+      for await (const event of agentLoop.run({ workspaceId, instruction, projectType, resumeSandboxId: resumeId, attachedImage: image }, abort.signal)) {
         send(event);
         if (abort.signal.aborted) break;
       }
@@ -132,6 +145,14 @@ export function registerEngineerRoutes(app: Express): void {
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Deploy failed.' });
     }
+  });
+
+  // Phase 12E — cost control: return per-workspace usage counters (sandbox
+  // creations, commands, builds, screenshots) so the client can surface usage.
+  app.get('/api/engineer-usage/:workspaceId', (req: Request, res: Response) => {
+    const { workspaceId } = req.params;
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId required.' }); return; }
+    res.json({ usage: usageTracker.get(workspaceId) });
   });
 
   // Pause a sandbox to stop compute billing while preserving full state for a

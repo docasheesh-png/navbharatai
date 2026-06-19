@@ -13,6 +13,12 @@ export interface IEngineerActuator {
    */
   ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void>;
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
+  /**
+   * Phase 12C/12D — write a binary file (e.g. an uploaded image/logo) from a
+   * base64 payload. Decodes to raw bytes so the asset is usable as-is (a UTF-8
+   * string write would corrupt binary data). Used by the asset-upload route.
+   */
+  writeBinaryFile(workspaceId: string, filePath: string, base64: string): Promise<void>;
   readFile(workspaceId: string, filePath: string): Promise<string>;
   listFiles(workspaceId: string): Promise<string[]>;
   build(workspaceId: string): Promise<{ success: boolean; logs: string }>;

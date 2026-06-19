@@ -3,6 +3,7 @@ import { IEngineerActuator } from './actuators/IEngineerActuator';
 import { ReActAction, EngineerAgentEvent, EngineerTask } from './EngineerAITypes';
 import { WebSearchClient } from './WebSearchClient';
 import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from './ContextRetriever';
+import { usageTracker } from './UsageTracker';
 
 const MAX_STEPS = 24;
 const DEADLINE_MS = 8 * 60 * 1000;
@@ -116,6 +117,7 @@ Coding rules (when in MODE 2):
   click the buttons, fill the forms, and confirm from the returned screenshot that it works.
 - If a screenshot reveals problems (wrong layout, missing elements, broken styles, errors): fix them, then re-verify.
 - After a screenshot, browser_action, or drive, any RUNTIME browser errors (console.error, uncaught exceptions, failed network requests) are reported back to you automatically. Treat them as real bugs and fix them — a clean build does NOT mean the app works at runtime.
+- Tests: for non-trivial logic, write tests and make sure they pass. When you mark done, if the project's package.json has a "test" script it is run automatically and a FAILING test blocks done exactly like a broken build — so fix red tests before declaring done. IMPORTANT: the test script MUST be single-run, never watch mode (use "vitest run", "jest --ci", or "node --test" — NOT bare "vitest"/"jest" which hang waiting for file changes).
 - Output done only AFTER you have visually confirmed the app looks AND works correctly. No confirmation = not done.
 - Paths are relative to workspace root, no leading "/" or "..".
 - When starting a dev server, use port 3000 and bind to 0.0.0.0 (--host 0.0.0.0 --port 3000).
@@ -124,6 +126,17 @@ Coding rules (when in MODE 2):
 - Use provision_db ONCE at the start of any task that needs a database, auth (login/signup), or file uploads. It installs and starts PostgreSQL inside the sandbox, generates a DATABASE_URL + JWT_SECRET in .env, and scaffolds src/lib/db.ts / auth.ts / storage.ts helpers. Features: "db" (PostgreSQL), "auth" (bcrypt + JWT), "storage" (local filesystem). After provision_db, install required packages with bash (npm install) if not already done, then create an Express server that uses the scaffolded helpers.
 - Supported project types: vite-react (default), nextjs, vue, svelte, node-express, python-fastapi, static. The workspace is scaffolded with the correct template on first use. For Python (python-fastapi) projects: start the server with "uvicorn main:app --host 0.0.0.0 --port 3000 --reload" and install deps with "pip install -r requirements.txt". For static sites: no build step; open index.html directly in the browser.
 - The workspace is a git repo (auto-initialized). You can use bash to run git commands: "git status", "git log --oneline", "git diff". After major milestones, commit with "git add -A && git commit -m 'message'". The final commit is created automatically when done succeeds.`;
+
+/**
+ * Phase 12C/12D — make an uploaded filename safe to write under public/uploads:
+ * strip any directory components and disallow characters, keep a sane extension.
+ * Falls back to a timestamped name when nothing usable remains.
+ */
+function sanitizeAssetName(filename: string | undefined): string {
+  const base = String(filename || '').split(/[\\/]/).pop() || '';
+  const cleaned = base.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, '').slice(0, 80);
+  return cleaned || `upload_${Date.now()}.png`;
+}
 
 function stripFences(text: string): string {
   const t = text.trim();
@@ -174,7 +187,8 @@ export class EngineerAgentLoop {
   constructor(private router: AIRouter, private actuator: IEngineerActuator) {}
 
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
-    const { workspaceId, instruction, projectType, resumeSandboxId } = task;
+    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage } = task;
+    let effectiveInstruction = instruction;
     const deadline = Date.now() + DEADLINE_MS;
 
     // Fail fast with a helpful message if no AI provider is reachable.
@@ -218,12 +232,31 @@ export class EngineerAgentLoop {
     let lastScreenshot: string | null = null;  // base64 PNG — injected into next Grok call
     let lastConsoleCheck = Date.now();          // Phase 4 — runtime error watermark
 
+    // Phase 12C/12D — if the user attached an image, save it as a usable workspace
+    // asset AND show it to the agent (vision) so it can replicate the design or use
+    // the asset. The agent decides intent from the user's text.
+    if (attachedImage?.base64) {
+      const assetPath = `public/uploads/${sanitizeAssetName(attachedImage.filename)}`;
+      try {
+        await this.actuator.writeBinaryFile(workspaceId, assetPath, attachedImage.base64);
+        lastScreenshot = attachedImage.base64; // injected into the FIRST router call as a vision image
+        effectiveInstruction =
+          `${instruction}\n\n[ATTACHED IMAGE] The user attached an image, saved in the workspace at "${assetPath}". ` +
+          `It is also shown to you visually. If the user wants this DESIGN built, replicate its layout/colors/components faithfully. ` +
+          `If it is an ASSET (logo, photo, icon), reference it in the app from that path (e.g. <img src="/uploads/${sanitizeAssetName(attachedImage.filename)}">).`;
+        yield { type: 'files_changed', kind: 'edit', files: [{ path: assetPath, content: `(binary image asset, ${Math.round(attachedImage.base64.length * 0.75 / 1024)} KB)` }] };
+        yield { type: 'status', message: `Saved attached image to ${assetPath}` };
+      } catch (err: any) {
+        yield { type: 'status', message: `Could not save attached image: ${err?.message || 'write failed'}` };
+      }
+    }
+
     for (let step = 1; step <= MAX_STEPS; step++) {
       if (signal?.aborted) { yield { type: 'aborted' }; return; }
       if (Date.now() > deadline) { yield { type: 'max_steps_reached', steps: step - 1 }; return; }
 
       yield { type: 'status', message: `Step ${step}: reading workspace…` };
-      const prompt = await this.buildPrompt(workspaceId, instruction, history);
+      const prompt = await this.buildPrompt(workspaceId, effectiveInstruction, history);
       yield { type: 'status', message: `Step ${step}: thinking…` };
 
       // Router/provider failure is a real infra error — abort. Malformed model
@@ -233,6 +266,7 @@ export class EngineerAgentLoop {
       lastScreenshot = null; // consume: each screenshot is used exactly once
       try {
         const { response, telemetry } = await this.router.route(prompt, SYSTEM_PROMPT, images);
+        usageTracker.record(workspaceId, 'aiCall'); // Phase 12E — track Grok call count
         if (!telemetry.success) {
           // All providers failed (budget exhausted, wrong key, rate-limit, etc.)
           yield {
@@ -588,21 +622,34 @@ export class EngineerAgentLoop {
         const buildResult = await this.actuator.build(workspaceId);
         yield { type: 'build_result', success: buildResult.success, logs: buildResult.logs.slice(-MAX_OBS_CHARS) };
         if (buildResult.success) {
-          // Phase 11A: auto-commit the finished work so git history reflects each session.
-          const summary = parsed.args.summary || 'Task complete.';
-          await this.actuator.runCommand(workspaceId,
-            `git add -A && git commit -m ${JSON.stringify(`feat: ${summary.slice(0, 72)}`)} 2>&1 | tail -3`
-          ).catch(() => {/* non-fatal */});
-          yield { type: 'complete', summary, steps: step };
-          return;
+          // Phase 12B: if the project defines a real test script, run it and treat
+          // a red test exactly like a failed build — done is NOT allowed until green.
+          yield { type: 'status', message: `Step ${step}: running tests…` };
+          const testResult = await this.runProjectTests(workspaceId);
+          if (testResult.ran) {
+            yield { type: 'build_result', success: testResult.success, logs: `[TESTS]\n${testResult.logs}`.slice(-MAX_OBS_CHARS) };
+          }
+          if (testResult.ran && !testResult.success) {
+            const testLogs = testResult.logs.slice(-2000);
+            observation = `Build passed but TESTS FAILED — cannot mark done yet. Fix the failing tests (a red test is treated like a broken build):\n${testLogs}`;
+          } else {
+            // Phase 11A: auto-commit the finished work so git history reflects each session.
+            const summary = parsed.args.summary || 'Task complete.';
+            await this.actuator.runCommand(workspaceId,
+              `git add -A && git commit -m ${JSON.stringify(`feat: ${summary.slice(0, 72)}`)} 2>&1 | tail -3`
+            ).catch(() => {/* non-fatal */});
+            yield { type: 'complete', summary, steps: step };
+            return;
+          }
+        } else {
+          // Phase 11B: extract TypeScript error codes and inject targeted hints.
+          const buildLogs = buildResult.logs.slice(-2000);
+          const tsCodes = [...new Set((buildLogs.match(/\bTS\d{4}\b/g) || []))];
+          const searchHint = tsCodes.length > 0
+            ? `\n\nTypeScript error codes found: ${tsCodes.join(', ')}. Consider using web_search to look up the fix (e.g. "${tsCodes[0]} fix typescript").`
+            : '';
+          observation = `Build failed — cannot mark done yet. Fix the errors:${searchHint}\n${buildLogs}`;
         }
-        // Phase 11B: extract TypeScript error codes and inject targeted hints.
-        const buildLogs = buildResult.logs.slice(-2000);
-        const tsCodes = [...new Set((buildLogs.match(/\bTS\d{4}\b/g) || []))];
-        const searchHint = tsCodes.length > 0
-          ? `\n\nTypeScript error codes found: ${tsCodes.join(', ')}. Consider using web_search to look up the fix (e.g. "${tsCodes[0]} fix typescript").`
-          : '';
-        observation = `Build failed — cannot mark done yet. Fix the errors:${searchHint}\n${buildLogs}`;
       } else {
         observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, provision_db, done.`;
       }
@@ -635,6 +682,38 @@ export class EngineerAgentLoop {
     }
 
     yield { type: 'max_steps_reached', steps: MAX_STEPS };
+  }
+
+  /**
+   * Phase 12B — run the project's test suite if it defines a real, non-watch test
+   * script. Returns ran:false when there's no intentional test script (so we never
+   * fabricate a failure for projects without tests). Uses the actuator's command
+   * timeout as a safety net against a mis-configured watch-mode script.
+   */
+  private async runProjectTests(workspaceId: string): Promise<{ ran: boolean; success: boolean; logs: string }> {
+    let pkgRaw: string;
+    try {
+      pkgRaw = await this.actuator.readFile(workspaceId, 'package.json');
+    } catch {
+      return { ran: false, success: true, logs: '' }; // no package.json (static/python) — skip
+    }
+    let testScript = '';
+    try {
+      testScript = String(JSON.parse(pkgRaw)?.scripts?.test ?? '');
+    } catch {
+      return { ran: false, success: true, logs: '' };
+    }
+    // Skip the npm default placeholder and empty scripts.
+    if (!testScript.trim() || /no test specified/i.test(testScript)) {
+      return { ran: false, success: true, logs: '' };
+    }
+    try {
+      const result = await this.actuator.runCommand(workspaceId, 'npm test');
+      const logs = (result.stdout + result.stderr).slice(-MAX_OBS_CHARS);
+      return { ran: true, success: result.exitCode === 0, logs };
+    } catch (err: any) {
+      return { ran: true, success: false, logs: err?.message || String(err) };
+    }
   }
 
   /** Extract file paths that the agent edited/patched in recent history steps. */

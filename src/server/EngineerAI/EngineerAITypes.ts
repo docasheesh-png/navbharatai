@@ -5,6 +5,12 @@ export interface EngineerTask {
   projectType?: 'vite-react' | 'nextjs' | 'vue' | 'svelte' | 'node-express' | 'python-fastapi' | 'static' | 'node' | 'python' | 'auto';
   /** Persisted sandbox ID to resume — restores files/node_modules/running server. */
   resumeSandboxId?: string;
+  /**
+   * Phase 12C/12D — an image the user attached to this message. It is saved into
+   * the workspace as a usable asset AND shown to the agent via Grok vision so it
+   * can replicate a design or use the asset (logo/photo) in the build.
+   */
+  attachedImage?: { base64: string; mimeType: string; filename: string };
 }
 
 /** One ReAct action the model outputs per turn. */

@@ -2448,11 +2448,13 @@ ${buildLanguageRule(preferredLanguage)}`;
 })();`;
 
   // Detect whether the app is a React/TS source app (needs transpilation) vs a static app.
-  const detectAppType = (f: FileSystem): 'react' | 'static' => {
+  const detectAppType = (f: FileSystem): 'react' | 'vue' | 'static' => {
     const keys = Object.keys(f);
     if (keys.some(k => /\.(tsx|jsx)$/i.test(k))) return 'react';
     const pkg = f['package.json'];
     if (pkg && /"react"\s*:/.test(pkg)) return 'react';
+    // Vue: .vue SFCs or a vue dep (and not React) → in-browser Vue compiler path.
+    if (keys.some(k => /\.vue$/i.test(k)) || (pkg && /"vue"\s*:/.test(pkg))) return 'vue';
     // Vite-style entry pointing at a TS/JS module under src/
     const html = f['index.html'] || '';
     if (/<script[^>]+type=["']module["'][^>]+src=["']\/?(src\/)?[^"']+\.(ts|jsx|tsx)["']/i.test(html)) return 'react';
@@ -2804,6 +2806,22 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
         .finally(() => clearTimeout(timeout));
       // Show client-side fallback immediately so the user isn't stuck on a blank/old preview.
       finalHtml = clientFallback;
+    } else if (detectAppType(currentFiles) === 'vue') {
+      // Vue SFC apps compile in-browser via the server-built vue3-sfc-loader doc.
+      const ctl = new AbortController();
+      const timeout = setTimeout(() => ctl.abort(), 20_000);
+      fetch('/api/preview-vue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: currentFiles }),
+        signal: ctl.signal,
+      })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error(`Vue preview failed: ${r.status}`)))
+        .then(({ html }: { html: string }) => { if (html) setGeneratedCode(html); })
+        .catch(() => setGeneratedCode('<!doctype html><html><body style="font-family:system-ui;padding:24px;color:#b00">Could not build the Vue preview (network blocked?).</body></html>'))
+        .finally(() => clearTimeout(timeout));
+      // Honest interim state (never a blank/old preview) until the compiled doc arrives.
+      finalHtml = '<!doctype html><html><body style="font-family:system-ui;padding:24px;color:#666">Compiling Vue preview…</body></html>';
     } else if (!currentFiles['index.html'] && !isClassicVanillaWeb(currentFiles)) {
       // No index.html and not a runnable vanilla web app → universal multi-format viewer
       // (markdown, code, JSON, CSV, images, SVG, PDF, audio, video, HTML, text).

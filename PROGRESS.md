@@ -826,6 +826,29 @@ files, never writes files back). App.tsx's CodeStudio `onRun` now uses the exact
 edited snapshot (`(f) => updatePreview(f || files)`) so the live preview reflects the
 freshest edit. Frontend tsc 0 · 208 tests · **vite build ✓**.
 
+## 🟢 PHASE 6.1 — Vue (+Vite) support — DONE (2026-06-19)
+
+Vue 3 is now a **second fully-supported architecture** (after React), end-to-end:
+generate → validate → in-browser preview → edit. Admin asked to start Phase 6 after
+the core-hardening pass.
+
+- **6.1a generation + validation** (commit 97a3c3a): manifest/scaffold/validator +
+  isScaffoldState + .vue import resolution. (See commit for detail.)
+- **6.1b in-browser preview**: `src/server/runtime/VuePreview.ts` builds ONE
+  self-contained HTML that compiles `.vue` SFCs in the browser via **vue3-sfc-loader**
+  + Vue 3 CDN — relative imports, `<style>`/CSS imports, and bare deps (vue-router/
+  pinia) loaded from esm.sh sharing the one Vue instance; unknown/failed deps surface
+  an HONEST in-preview error, never a blank screen. Wired in: `renderPreview` selects
+  React→Vue→static; `PreviewService.canStaticRender` now allows Vue (only Svelte/Astro
+  stay honest-blocked); new `POST /api/preview-vue` endpoint; `detectAppType` returns
+  'vue'; `updatePreview` fetches the compiled Vue doc (with an honest interim + error
+  state). 6 new tests (Vue preview + arch). server tsc 0 · frontend tsc 0 · **222
+  tests** · boot PASS · vite build ✓.
+
+### ✅ SUPPORTED ARCHITECTURES (updated): React+Vite · **Vue 3+Vite** · Vanilla JS/HTML/CSS
+Next: remaining Phase-6 frameworks (Svelte/Next/Angular/Node) stay planned; Svelte/
+Astro previews are honestly blocked until their loaders land.
+
 ## 🧱 CORE ROCK-SOLID hardening (2026-06-19, admin-prioritized over Phase 6/7)
 
 Ran a concrete code-level reliability audit of the React+Vanilla generate→build→

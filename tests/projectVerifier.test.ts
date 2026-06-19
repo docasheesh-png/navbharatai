@@ -28,15 +28,26 @@ describe('verifyProject', () => {
     expect(r.issues.some(i => /No entry point/.test(i.message))).toBe(true);
   });
 
-  it('warns on broken local references but does not flag CDN urls', () => {
+  it('warns on broken non-critical local refs (images) but does not flag CDN urls', () => {
     const r = verifyProject(vfsFrom({
-      'index.html': '<link rel="stylesheet" href="missing.css"><script src="https://cdn.x/y.js"></script><img src="logo.png">',
-      'logo.png': 'data:image/png;base64,AAA',
+      'index.html': '<img src="missing.png"><script src="https://cdn.x/y.js"></script>',
     }));
-    expect(r.warnings).toBe(1); // only missing.css
-    expect(r.issues.some(i => /missing\.css/.test(i.message))).toBe(true);
+    expect(r.warnings).toBe(1); // only missing.png (a broken image, not a hard break)
+    expect(r.issues.some(i => /missing\.png/.test(i.message))).toBe(true);
     expect(r.issues.some(i => /cdn\.x/.test(i.message))).toBe(false);
-    expect(r.ok).toBe(true); // warnings don't fail the project
+    expect(r.ok).toBe(true); // an image warning doesn't fail the project
+  });
+
+  it('flags a missing classic <script src> or stylesheet <link> as an ERROR (hard break)', () => {
+    const r = verifyProject(vfsFrom({
+      'index.html': '<link rel="stylesheet" href="missing.css"><script src="app.js"></script>',
+    }));
+    expect(r.ok).toBe(false); // a static app whose JS/CSS is missing IS broken
+    expect(r.issues.some(i => i.severity === 'error' && /missing\.css/.test(i.message))).toBe(true);
+    expect(r.issues.some(i => i.severity === 'error' && /app\.js/.test(i.message))).toBe(true);
+    // a type="module" script (bundler-resolved) stays a non-blocking warning
+    const r2 = verifyProject(vfsFrom({ 'index.html': '<script type="module" src="missing-entry.js"></script><div>x</div>' }));
+    expect(r2.errors).toBe(0);
   });
 
   it('does not flag missing entry when package.json present (build project)', () => {

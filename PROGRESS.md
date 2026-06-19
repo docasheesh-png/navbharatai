@@ -826,6 +826,25 @@ files, never writes files back). App.tsx's CodeStudio `onRun` now uses the exact
 edited snapshot (`(f) => updatePreview(f || files)`) so the live preview reflects the
 freshest edit. Frontend tsc 0 · 208 tests · **vite build ✓**.
 
+## 🧱 CORE ROCK-SOLID hardening (2026-06-19, admin-prioritized over Phase 6/7)
+
+Ran a concrete code-level reliability audit of the React+Vanilla generate→build→
+preview→edit pipeline. Vetted each finding against real code (rejected the false ones:
+EditEngine already reports patch-miss as ok:false; broken JS module imports are
+already ERRORS via ProjectVerifier; the modular loop already breaks when all missing
+features are stuck; flipping featureless-coverage 100→0 would over-penalize valid
+simple apps).
+
+### Milestone CORE.1 — DONE — vanilla apps: missing JS/CSS now BLOCKS preview
+Real gap found: a broken local **classic `<script src>`** or **stylesheet `<link href>`**
+in HTML was only a WARNING → a static app whose JS/CSS is missing was still marked
+`previewAllowed:true` (a broken app reported as working — violates "no fake success").
+Fix (`ProjectVerifier.ts`): tag-aware HTML ref scan — a missing classic script or
+stylesheet is now an ERROR (blocks preview + drives the repair loop); images/anchors
+and `type="module"` scripts (the esbuild bundler resolves those itself) stay
+non-blocking WARNINGS to avoid React false positives. 2 verifier tests added/updated
+(209 total). server tsc 0 · frontend tsc 0 · 209 tests · boot PASS.
+
 ### Admin decisions recorded (2026-06-19): Pro-gating = KEEP OPEN until app is 90%+
 (then limit); real Vercel/Netlify/Firebase deploy = LATER (NavBharat Hosting stays the
 only real deploy for now). So those Phase-5 items are intentionally deferred by admin.

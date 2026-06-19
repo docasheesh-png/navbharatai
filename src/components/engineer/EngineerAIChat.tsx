@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   HardHat, Loader2, Send, Square, Terminal, FolderOpen, Globe,
   CheckCircle2, AlertCircle, ChevronRight, Play, FileDiff, RotateCcw,
-  ExternalLink, RefreshCw, History,
+  ExternalLink, RefreshCw, History, Rocket, Copy, Check,
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -120,6 +120,16 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   // Phase 8 — Checkpoints + Rollback
   const [checkpoints, setCheckpoints] = useState<CheckpointEntry[]>([]);
   const [restoringId, setRestoringId] = useState<string | null>(null);
+  // Phase 9A — Live preview polling
+  const [livePreviewShot, setLivePreviewShot] = useState<string | null>(null);
+  const livePreviewUrlRef = useRef<string | null>(null);
+  const livePreviewTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Transient click flash (x%, y%) shown on the screenshot when user clicks it
+  const [clickFlash, setClickFlash] = useState<{ x: number; y: number } | null>(null);
+  // Phase 9B — One-click Deploy
+  const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -185,6 +195,33 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
       pause(); // component unmount (navigated away within the SPA)
     };
   }, []);
+
+  // Phase 9A — Live preview polling: every 3 s when a dev server is running,
+  // fetch a screenshot from the agent's Playwright viewport and update the
+  // browser tab so the user always sees the latest state even mid-build.
+  const startLivePreview = useCallback((url: string) => {
+    livePreviewUrlRef.current = url;
+    if (livePreviewTimerRef.current) clearInterval(livePreviewTimerRef.current);
+    livePreviewTimerRef.current = setInterval(async () => {
+      if (!livePreviewUrlRef.current) return;
+      try {
+        const res = await fetch(`/api/engineer-preview/${workspaceIdRef.current}?url=${encodeURIComponent(livePreviewUrlRef.current)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.base64) setLivePreviewShot(data.base64);
+        }
+      } catch { /* non-fatal */ }
+    }, 3000);
+  }, []);
+
+  const stopLivePreview = useCallback(() => {
+    livePreviewUrlRef.current = null;
+    setLivePreviewShot(null);
+    if (livePreviewTimerRef.current) { clearInterval(livePreviewTimerRef.current); livePreviewTimerRef.current = null; }
+  }, []);
+
+  // Stop polling on unmount
+  useEffect(() => () => stopLivePreview(), [stopLivePreview]);
 
   const appendChat = (role: ChatMessage['role'], text: string) =>
     setMessages(prev => [...prev, { id: uid(), role, text }]);
@@ -314,6 +351,11 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         setBrowserUrlInput(event.url);
         setActiveTab('browser');
         appendChat('agent', `🚀 Dev server running on port ${event.port} — live preview ready`);
+        startLivePreview(event.url);
+        break;
+      case 'deployed':
+        setPublishedUrl(event.url);
+        appendChat('agent', `🌐 Published! Public URL: ${event.url}`);
         break;
       case 'complete':
         setStatusMsg('');
@@ -393,6 +435,9 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setLiveFrame(null);
     setCheckpoints([]);
     setRestoringId(null);
+    stopLivePreview();
+    setPublishedUrl(null);
+    setPublishing(false);
   };
 
   const handleRestore = async (checkpointId: string) => {
@@ -416,6 +461,47 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     }
   };
 
+  // Phase 9B — One-click Publish
+  const handlePublish = async () => {
+    if (publishing) return;
+    setPublishing(true);
+    try {
+      const res = await fetch('/api/engineer-deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspaceIdRef.current }),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `${res.status}`); }
+      const { url } = await res.json();
+      setPublishedUrl(url);
+      appendChat('agent', `🌐 Published! Your app is live at: ${url}`);
+    } catch (err: any) {
+      appendChat('system', `❌ Publish failed: ${err?.message}`);
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  // Phase 9A — User click on live preview screenshot: relay coordinates to agent
+  const handlePreviewClick = async (e: React.MouseEvent<HTMLImageElement>) => {
+    const rect = (e.currentTarget as HTMLImageElement).getBoundingClientRect();
+    const x = Math.round(((e.clientX - rect.left) / rect.width) * 1280);
+    const y = Math.round(((e.clientY - rect.top) / rect.height) * 720);
+    // Flash indicator at click position (percentage of image)
+    const flashX = ((e.clientX - rect.left) / rect.width) * 100;
+    const flashY = ((e.clientY - rect.top) / rect.height) * 100;
+    setClickFlash({ x: flashX, y: flashY });
+    setTimeout(() => setClickFlash(null), 800);
+    // Relay to agent
+    try {
+      await fetch('/api/engineer-browser-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspaceIdRef.current, x, y }),
+      });
+    } catch { /* non-fatal */ }
+  };
+
   const handleSend = async () => {
     const instruction = input.trim();
     if (!instruction || loading) return;
@@ -434,6 +520,9 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setLiveFrame(null);
     setCheckpoints([]);
     setRestoringId(null);
+    stopLivePreview();
+    setPublishedUrl(null);
+    setPublishing(false);
 
     try {
       const res = await fetch('/api/engineer-chat', {
@@ -766,7 +855,6 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
                 <>
                   <button
                     onClick={() => {
-                      // Force iframe reload by briefly clearing and restoring src
                       const src = iframeSrc;
                       setIframeSrc(null);
                       setTimeout(() => setIframeSrc(src), 50);
@@ -785,9 +873,40 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
+                  {/* Phase 9B — Publish button */}
+                  <button
+                    onClick={handlePublish}
+                    disabled={publishing}
+                    title="Publish — get a public shareable URL"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium bg-green-500/10 text-green-300 hover:bg-green-500/20 border border-green-500/20 transition-colors disabled:opacity-40 shrink-0"
+                  >
+                    {publishing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Rocket className="w-3 h-3" />}
+                    Publish
+                  </button>
                 </>
               )}
             </div>
+
+            {/* Phase 9B — Published URL banner */}
+            {publishedUrl && (
+              <div className="px-3 py-2 bg-green-500/10 border-b border-green-500/20 flex items-center gap-2 shrink-0">
+                <Rocket className="w-3 h-3 text-green-400 shrink-0" />
+                <span className="text-[11px] text-green-300 font-medium">Published:</span>
+                <a href={publishedUrl} target="_blank" rel="noopener noreferrer"
+                  className="text-[11px] text-green-400 hover:text-green-300 underline truncate flex-1 min-w-0">
+                  {publishedUrl}
+                </a>
+                <button
+                  onClick={async () => {
+                    try { await navigator.clipboard.writeText(publishedUrl); setUrlCopied(true); setTimeout(() => setUrlCopied(false), 1500); } catch { /* ignore */ }
+                  }}
+                  className="shrink-0 text-green-400 hover:text-green-300 transition-colors"
+                  title="Copy URL"
+                >
+                  {urlCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            )}
 
             {/* Iframe */}
             {iframeSrc && (
@@ -800,17 +919,48 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
               />
             )}
 
+            {/* Phase 9A — Live agent-view thumbnail (Playwright polling) */}
+            {iframeSrc && livePreviewShot && (
+              <div className="border-t border-white/5 bg-[#0a0e13] shrink-0">
+                <div className="flex items-center gap-2 px-3 py-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse inline-block" />
+                  <span className="text-[10px] text-[#586069]">Agent's view (click to guide AI)</span>
+                </div>
+                <div className="relative cursor-crosshair" onClick={handlePreviewClick}>
+                  <img
+                    src={`data:image/png;base64,${livePreviewShot}`}
+                    alt="Live agent view"
+                    className="w-full block"
+                    style={{ maxHeight: '160px', objectFit: 'cover', objectPosition: 'top' }}
+                  />
+                  {clickFlash && (
+                    <div className="absolute pointer-events-none"
+                      style={{ left: `${clickFlash.x}%`, top: `${clickFlash.y}%`, transform: 'translate(-50%, -50%)', zIndex: 30 }}>
+                      <div className="w-5 h-5 rounded-full border-2 border-yellow-400 animate-ping" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Screenshot viewer (agent took a screenshot or is driving) */}
             {!iframeSrc && latestScreenshot && (
               <div className="flex-1 overflow-y-auto custom-scrollbar">
-                {/* Main screenshot with cursor overlay */}
-                <div className="relative">
+                {/* Main screenshot with cursor overlay + click-to-guide */}
+                <div className="relative cursor-crosshair" onClick={handlePreviewClick} title="Click to guide AI to this element">
                   <img
                     src={`data:image/png;base64,${latestScreenshot.base64}`}
                     alt={`Screenshot: ${latestScreenshot.url}`}
                     className="w-full block"
                     style={{ imageRendering: 'auto' }}
                   />
+                  {/* Click flash indicator */}
+                  {clickFlash && (
+                    <div className="absolute pointer-events-none"
+                      style={{ left: `${clickFlash.x}%`, top: `${clickFlash.y}%`, transform: 'translate(-50%, -50%)', zIndex: 30 }}>
+                      <div className="w-5 h-5 rounded-full border-2 border-yellow-400 animate-ping" />
+                    </div>
+                  )}
                   {/* Animated AI cursor — shown when the agent drove to this position */}
                   {latestScreenshot.cursorX != null && latestScreenshot.cursorY != null && (
                     <div

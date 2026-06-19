@@ -137,6 +137,23 @@ function parseAction(raw: string): ReActAction {
 
 export class EngineerAgentLoop {
   private search = new WebSearchClient();
+  // Phase 9A: per-workspace queue of user click events captured from the live preview.
+  // Consumed once per buildPrompt() call so the agent knows where the user clicked.
+  private userClickQueue = new Map<string, { x: number; y: number; t: number }[]>();
+
+  /** Called by the route handler when a user clicks the live preview image. */
+  addUserClick(workspaceId: string, x: number, y: number): void {
+    const q = this.userClickQueue.get(workspaceId) ?? [];
+    q.push({ x, y, t: Date.now() });
+    if (q.length > 10) q.splice(0, q.length - 10);
+    this.userClickQueue.set(workspaceId, q);
+  }
+
+  private consumeUserClicks(workspaceId: string): { x: number; y: number; t: number }[] {
+    const clicks = this.userClickQueue.get(workspaceId) ?? [];
+    this.userClickQueue.delete(workspaceId);
+    return clicks;
+  }
 
   constructor(private router: AIRouter, private actuator: IEngineerActuator) {}
 
@@ -605,6 +622,13 @@ export class EngineerAgentLoop {
       sections.push(`[RECENT STEPS]\n${verbatimText}`);
 
       parts.push(sections.join('\n\n'));
+    }
+
+    // Phase 9A: inject any user clicks from the live preview so the agent can act on them.
+    const pendingClicks = this.consumeUserClicks(workspaceId);
+    if (pendingClicks.length > 0) {
+      const lines = pendingClicks.map(c => `  • (${c.x}, ${c.y})`).join('\n');
+      parts.push(`[USER INTERACTIONS — the user clicked on the live preview (1280×720 viewport)]\n${lines}\nUse browser_action to interact with the element the user clicked on, or describe what's at that coordinate.`);
     }
 
     parts.push('[OUTPUT the next single action JSON]');

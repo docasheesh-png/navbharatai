@@ -90,6 +90,50 @@ export function registerEngineerRoutes(app: Express): void {
     }
   });
 
+  // Phase 9A — Live preview polling: return a fresh screenshot from the sandbox.
+  // The frontend polls this every 3 s while a dev server is running.
+  app.get('/api/engineer-preview/:workspaceId', async (req: Request, res: Response) => {
+    const { workspaceId } = req.params;
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId required.' }); return; }
+    const url = (req.query.url as string) || 'http://localhost:3000';
+    try {
+      const shot = await actuator.screenshot(workspaceId, url);
+      res.json({ base64: shot.base64, url });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Screenshot failed.' });
+    }
+  });
+
+  // Phase 9A — User click relay: store a click from the live preview so the agent
+  // sees it in its next buildPrompt() call and can interact with that element.
+  app.post('/api/engineer-browser-event', (req: Request, res: Response) => {
+    const { workspaceId, x, y } = req.body || {};
+    if (typeof workspaceId !== 'string' || typeof x !== 'number' || typeof y !== 'number') {
+      res.status(400).json({ error: 'workspaceId, x (number), y (number) are required.' });
+      return;
+    }
+    agentLoop.addUserClick(workspaceId, Math.round(x), Math.round(y));
+    res.json({ ok: true });
+  });
+
+  // Phase 9B — One-click deploy: return the public URL for the running dev server.
+  // In E2B this is a real internet-accessible HTTPS URL (sandbox.getHost(port)).
+  // In LocalActuator it's http://localhost:<port> (local-only).
+  app.post('/api/engineer-deploy', async (req: Request, res: Response) => {
+    const { workspaceId, port } = req.body || {};
+    if (typeof workspaceId !== 'string' || !workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    const targetPort = typeof port === 'number' ? port : 3000;
+    try {
+      const url = await actuator.getPortUrl(workspaceId, targetPort);
+      res.json({ url, port: targetPort });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Deploy failed.' });
+    }
+  });
+
   // Pause a sandbox to stop compute billing while preserving full state for a
   // later resume. Called by the client when it leaves the Engineer AI surface.
   // Accepts sendBeacon (text/plain body) as well as JSON.

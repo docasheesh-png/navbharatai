@@ -739,3 +739,55 @@ runtime*, not the path logic.
 **Next:** user to test on prod after deploy (~5 min). If their specific app still
 fails, the new MINI_HARNESS now surfaces the REAL esbuild/runtime error (instead of
 a silent "App"), which pinpoints the next fix.
+
+---
+
+## 🛠️ Milestone — Edit reliability + memory + Phase-3 close-out (2026-06-19)
+
+### Edit-stops-after-N-edits FIXED + Claude-Code-style memory (PR #82, merged)
+User report: app builds + preview works, but **after ~4–5 edits Pro stops editing**.
+Ground-truth trace of the live edit path (App.tsx → /api/build-stream → aiEdits)
+found the real, co-existing root causes — all fixed:
+- **Output token caps (the #1 killer):** the single edit call returns changed files
+  as JSON; once files grew past the provider `max_tokens` the reply truncated
+  mid-JSON → parsed to ZERO edits → silent no-op. Raised caps on every provider
+  (Claude proxy 8k→16k, Claude direct 4k→8k, Gemini `maxOutputTokens` 16k,
+  Groq/OpenAI/DeepSeek/OpenRouter +8k).
+- **Input context starvation:** edit context budget raised (24k/file · 80 files ·
+  500k total) AND files are now **relevance-ordered** so the file being edited is
+  shown first, in full, before the budget runs out (`aiEdits.fileContext`).
+- **Patch fragility:** `EditEngine` patch now has a **whitespace-tolerant** find→
+  replace fallback so trivial indentation/newline drift no longer silently drops it.
+- **Edit ran the fresh-build feature loop:** `BuildPipeline.isEdit` now SKIPS the
+  modular `completeFeatures` loop on edits (it was treating the edit instruction as
+  a feature spec and could undo the change).
+- **Claude-Code-style memory (full):** rolling fact-dense summary auto-generated
+  each turn (`summarizeForMemory`), recent conversation history + a per-session edit
+  log ("changes already made — do not undo") now reach the build engine, are
+  returned in the complete event, persisted on the session (state + Firestore
+  `memory_summary`/`edit_log`) and restored on load.
+- Verified: server tsc 0 · frontend tsc 0 · 202 tests · boot PASS.
+
+### PHASE 3 — hybrid build/preview runtime — **CODE-COMPLETE** (infra items flagged)
+Ground-truth audit (2026-06-19) of `src/server/runtime/*` + `routes/preview.ts`:
+**DONE in code (tested):** RuntimeRouter, StaticPreview, ReactPreview (in-browser
+React/Babel/esm.sh), renderPreview, StaticRuntime (24h TTL), server-side esbuild
+bundler `/api/preview-bundle` (LIVE in App.tsx updatePreview), ServerContainerRuntime
+(real materialize→install→launch→health-check→proxy spawn chain), WorkspaceMaterializer,
+`/preview-app/:id/*` HTTP proxy **+ WebSocket/HMR upgrade** (server.ts), all 3 preview
+routes.
+**Honesty fix done now (no fake success):** `PreviewService` 'webcontainer' branch
+used to ALWAYS fall back to static and report `{ok:true,target:'static'}` — for
+Vue/Svelte/Astro SFC apps that the in-browser renderer can't transpile, that served a
+blank page as "success". Now `canStaticRender(vfs)` gates it: React/static → real
+static fallback; genuine SFC apps → **honest `{ok:false,target:'webcontainer',reason}`**.
+1 new test (203 total). server tsc 0 · frontend tsc 0 · 203 tests · boot PASS.
+**Remaining Phase-3 items are INFRA/LICENSE-BLOCKED (need user decision, not code):**
+1. Real **StackBlitz WebContainer** adapter for Vue/Svelte/etc. (paid SDK/license).
+2. **Cloud Run prod verification** of child-process dev-server spawn + a **distributed
+   port allocator** (current PortManager is in-process → single-instance only).
+These are the only gaps; the runtime is otherwise complete and live.
+**▶ NEXT phase to work (code-doable): PHASE 5 product layer** — real Pro-gating
+(tier/usage limits, Cashfree exists), observability (structured logging / build-success
+metrics / cost tracking), QA. (Phase 6 universal architectures + Phase 7 validation
+factory remain user-deferred until React+Vanilla are rock-solid.)

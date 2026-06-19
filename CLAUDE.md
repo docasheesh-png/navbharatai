@@ -106,6 +106,36 @@ The trigger handles the deploy. No `gcloud` access from the Claude session.
 - A backup `.github/workflows/deploy.yml` exists; it only deploys if repo secrets
   `GCP_PROJECT_ID` + `GCP_SA_KEY` are set (currently NOT set → it skips cleanly).
 
+## Language standard (mandatory for all sessions)
+
+All NavBharatAI source code, UI text, code comments, variable names, function
+names, and configuration written by Claude sessions **MUST be in professional
+English**. This applies to:
+- All React/TypeScript component and hook files
+- All server-side code (routes, services, actuators, agent loops, utilities)
+- All UI labels, button text, error messages, placeholder text, and tooltips
+  that are part of NavBharatAI itself
+- All inline code comments and documentation strings
+
+**Single exception:** AI-generated response text displayed to end-users inside
+chat message bubbles (e.g. Doctor AI replies, Engineer AI agent progress
+messages). That content is generated at runtime by AI models and is outside
+the scope of this rule.
+
+Do not rewrite existing Hindi/mixed-language strings as part of unrelated work —
+that introduces unneeded diffs. All **new** code written in any session must
+follow this standard from the start.
+
+## Engineer AI — permanent constraints (never change without admin sign-off)
+
+- **AI Model:** Grok ONLY (`api.x.ai` via `GROK_API_KEY`/`XAI_API_KEY`).
+  Never use Claude or the AiCredits proxy for Engineer AI inference.
+- **User apps run on the user's own accounts.** NavBharatAI's Firebase project
+  (`gen-lang-client-0866594388`) is NEVER used for end-user app databases,
+  auth, or storage — that would charge NavBharatAI's billing account.
+  Users bring their own credentials (Supabase, Firebase, or other providers).
+- **Sandbox:** E2B real cloud VM. LocalActuator is for dev/CI only.
+
 ## Core engineering rules (copied up from PROGRESS.md so they're never missed)
 
 These were previously only stated inside `PROGRESS.md`. Because that file is

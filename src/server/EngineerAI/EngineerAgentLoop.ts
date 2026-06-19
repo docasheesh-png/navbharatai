@@ -42,7 +42,7 @@ Examples that trigger reply (in ANY language):
   "app banana hai — kya plan hoga?" (planning, not yet building)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / drive / web_search / restore / done
+MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / drive / web_search / restore / provision_db / done
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Use this when the user clearly wants you to BUILD, CREATE, MODIFY, or FIX code/files right now.
 
@@ -58,7 +58,7 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"done", "args": { ... } }
+{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"provision_db"|"done", "args": { ... } }
 
 Action args:
   reply:          { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
@@ -66,6 +66,7 @@ Action args:
   edit_file:      { "path": "relative/path.tsx", "content": "FULL new file content" }
   patch_file:     { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
   restore:        { "checkpointId": "ckpt_1234567890" }
+  provision_db:   { "features": "db,auth,storage" }
   screenshot:     { "url": "http://localhost:3000" }
   browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait", "selector": "CSS selector", "text": "text to type / key to press", "url": "url to navigate to", "direction": "up"|"down" }
   drive:          { "steps": "[{\"action\":\"navigate\",\"url\":\"http://localhost:3000\"},{\"action\":\"click\",\"selector\":\"#btn\"}]" }
@@ -107,7 +108,8 @@ Coding rules (when in MODE 2):
 - Paths are relative to workspace root, no leading "/" or "..".
 - When starting a dev server, use port 3000 and bind to 0.0.0.0 (--host 0.0.0.0 --port 3000).
 - Commands run with a 60-second timeout.
-- Checkpoints are created automatically before every edit_file and patch_file action. If a change makes things worse, use restore to go back: { "action": "restore", "args": { "checkpointId": "<id from checkpoint_created event>" } }.`;
+- Checkpoints are created automatically before every edit_file and patch_file action. If a change makes things worse, use restore to go back: { "action": "restore", "args": { "checkpointId": "<id from checkpoint_created event>" } }.
+- Use provision_db ONCE at the start of any task that needs a database, auth (login/signup), or file uploads. It installs and starts PostgreSQL inside the sandbox, generates a DATABASE_URL + JWT_SECRET in .env, and scaffolds src/lib/db.ts / auth.ts / storage.ts helpers. Features: "db" (PostgreSQL), "auth" (bcrypt + JWT), "storage" (local filesystem). After provision_db, install required packages with bash (npm install) if not already done, then create an Express server that uses the scaffolded helpers.`;
 
 function stripFences(text: string): string {
   const t = text.trim();
@@ -265,6 +267,7 @@ export class EngineerAgentLoop {
         drive: 'Driving the browser through a multi-step flow…',
         web_search: 'Searching the web…',
         restore: 'Restoring workspace to a prior checkpoint…',
+        provision_db: 'Provisioning database, auth, and storage…',
         done: 'Verifying the build…',
       };
       const thought = parsed.thought || thoughtFallback[parsed.action] || 'Thinking…';
@@ -496,6 +499,64 @@ export class EngineerAgentLoop {
             observation = `web_search error: ${err?.message}. Proceed with your existing knowledge.`;
           }
         }
+      } else if (parsed.action === 'provision_db') {
+        const featuresRaw = (parsed.args.features || 'db,auth,storage').split(',')
+          .map(f => f.trim())
+          .filter((f): f is 'db' | 'auth' | 'storage' => ['db', 'auth', 'storage'].includes(f));
+        const features: ('db' | 'auth' | 'storage')[] = featuresRaw.length > 0
+          ? featuresRaw
+          : ['db', 'auth', 'storage'];
+
+        yield { type: 'status', message: `Step ${step}: provisioning backend (${features.join(', ')})…` };
+        try {
+          const result = await this.actuator.provisionBackend(workspaceId, features);
+
+          // Write or append .env
+          const envLines = Object.entries(result.envVars).map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+          try {
+            const existing = await this.actuator.readFile(workspaceId, '.env');
+            await this.actuator.writeFile(workspaceId, '.env', existing.trimEnd() + '\n' + envLines);
+          } catch {
+            await this.actuator.writeFile(workspaceId, '.env', envLines);
+          }
+
+          // Write scaffold files
+          for (const f of result.scaffoldFiles) {
+            await this.actuator.writeFile(workspaceId, f.path, f.content);
+          }
+          if (result.scaffoldFiles.length > 0) {
+            yield { type: 'files_changed', kind: 'edit', files: result.scaffoldFiles };
+          }
+
+          // Install required npm packages
+          const { BackendProvisioner } = await import('./BackendProvisioner');
+          const pkgs = BackendProvisioner.getPackages(features);
+          if (pkgs.length > 0) {
+            yield { type: 'status', message: `Step ${step}: installing ${pkgs.join(', ')}…` };
+            const installResult = await this.actuator.runCommand(workspaceId, `npm install ${pkgs.join(' ')} 2>&1 | tail -8`);
+            yield { type: 'command_result', command: `npm install ${pkgs.join(' ')}`, exitCode: installResult.exitCode, output: installResult.stdout + installResult.stderr };
+          }
+
+          yield {
+            type: 'backend_ready',
+            features,
+            dbUrl: result.dbUrl,
+            scaffoldFiles: result.scaffoldFiles.map(f => f.path),
+          };
+
+          observation = `Backend provisioned successfully!\n` +
+            `DB URL: ${result.dbUrl || '(none)'}\n` +
+            `Env vars written to .env: ${Object.keys(result.envVars).join(', ')}\n` +
+            `Scaffold files: ${result.scaffoldFiles.map(f => f.path).join(', ')}\n` +
+            (pkgs.length > 0 ? `Packages installed: ${pkgs.join(', ')}\n` : '') +
+            `\nReady-to-use helpers:\n` +
+            (features.includes('db')      ? `  import { db } from './src/lib/db';       // Pool.query(sql, params)\n` : '') +
+            (features.includes('auth')    ? `  import { hashPw, checkPw, signJwt, verifyJwt } from './src/lib/auth';\n` : '') +
+            (features.includes('storage') ? `  import { saveFile, readFile } from './src/lib/storage';\n` : '') +
+            `\nNext step: create an Express API server (e.g. server.ts) that imports these helpers, then start it with bash (e.g. "npx ts-node server.ts &").`;
+        } catch (err: any) {
+          observation = `provision_db error: ${err?.message}. Requires E2B sandbox with apt-get access — ensure E2B_API_KEY is set.`;
+        }
       } else if (parsed.action === 'done') {
         // Verify the build is actually clean before declaring success
         const buildResult = await this.actuator.build(workspaceId);
@@ -506,7 +567,7 @@ export class EngineerAgentLoop {
         }
         observation = `Build failed — cannot mark done yet. Fix the errors:\n${buildResult.logs.slice(-2000)}`;
       } else {
-        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, done.`;
+        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, provision_db, done.`;
       }
 
       // Phase 4 — Live Sync: after any browser interaction, surface runtime

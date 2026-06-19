@@ -3,7 +3,7 @@ import { promises as fsPromises } from 'fs';
 import path from 'path';
 import util from 'util';
 import { WorkspaceManager } from '../../AppMakerLab/WorkspaceManager';
-import { IEngineerActuator } from './IEngineerActuator';
+import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 
 const execPromise = util.promisify(exec);
 const NAMESPACE = 'engineer';
@@ -185,6 +185,12 @@ export class LocalActuator implements IEngineerActuator {
       JSON.stringify({ id, createdAt: Date.now(), triggeredBy: triggeredBy.slice(0, 80) }),
     ).catch(() => {});
     return id;
+  }
+
+  async provisionBackend(_workspaceId: string, _features: ('db' | 'auth' | 'storage')[]): Promise<BackendProvisionResult> {
+    throw new Error(
+      'Backend provisioning requires a real sandbox (set E2B_API_KEY). LocalActuator cannot start database services.'
+    );
   }
 
   async restore(workspaceId: string, checkpointId: string): Promise<void> {

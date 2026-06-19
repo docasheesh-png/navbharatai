@@ -116,6 +116,7 @@ Coding rules (when in MODE 2):
   click the buttons, fill the forms, and confirm from the returned screenshot that it works.
 - If a screenshot reveals problems (wrong layout, missing elements, broken styles, errors): fix them, then re-verify.
 - After a screenshot, browser_action, or drive, any RUNTIME browser errors (console.error, uncaught exceptions, failed network requests) are reported back to you automatically. Treat them as real bugs and fix them — a clean build does NOT mean the app works at runtime.
+- Tests: for non-trivial logic, write tests and make sure they pass. When you mark done, if the project's package.json has a "test" script it is run automatically and a FAILING test blocks done exactly like a broken build — so fix red tests before declaring done. IMPORTANT: the test script MUST be single-run, never watch mode (use "vitest run", "jest --ci", or "node --test" — NOT bare "vitest"/"jest" which hang waiting for file changes).
 - Output done only AFTER you have visually confirmed the app looks AND works correctly. No confirmation = not done.
 - Paths are relative to workspace root, no leading "/" or "..".
 - When starting a dev server, use port 3000 and bind to 0.0.0.0 (--host 0.0.0.0 --port 3000).
@@ -588,21 +589,34 @@ export class EngineerAgentLoop {
         const buildResult = await this.actuator.build(workspaceId);
         yield { type: 'build_result', success: buildResult.success, logs: buildResult.logs.slice(-MAX_OBS_CHARS) };
         if (buildResult.success) {
-          // Phase 11A: auto-commit the finished work so git history reflects each session.
-          const summary = parsed.args.summary || 'Task complete.';
-          await this.actuator.runCommand(workspaceId,
-            `git add -A && git commit -m ${JSON.stringify(`feat: ${summary.slice(0, 72)}`)} 2>&1 | tail -3`
-          ).catch(() => {/* non-fatal */});
-          yield { type: 'complete', summary, steps: step };
-          return;
+          // Phase 12B: if the project defines a real test script, run it and treat
+          // a red test exactly like a failed build — done is NOT allowed until green.
+          yield { type: 'status', message: `Step ${step}: running tests…` };
+          const testResult = await this.runProjectTests(workspaceId);
+          if (testResult.ran) {
+            yield { type: 'build_result', success: testResult.success, logs: `[TESTS]\n${testResult.logs}`.slice(-MAX_OBS_CHARS) };
+          }
+          if (testResult.ran && !testResult.success) {
+            const testLogs = testResult.logs.slice(-2000);
+            observation = `Build passed but TESTS FAILED — cannot mark done yet. Fix the failing tests (a red test is treated like a broken build):\n${testLogs}`;
+          } else {
+            // Phase 11A: auto-commit the finished work so git history reflects each session.
+            const summary = parsed.args.summary || 'Task complete.';
+            await this.actuator.runCommand(workspaceId,
+              `git add -A && git commit -m ${JSON.stringify(`feat: ${summary.slice(0, 72)}`)} 2>&1 | tail -3`
+            ).catch(() => {/* non-fatal */});
+            yield { type: 'complete', summary, steps: step };
+            return;
+          }
+        } else {
+          // Phase 11B: extract TypeScript error codes and inject targeted hints.
+          const buildLogs = buildResult.logs.slice(-2000);
+          const tsCodes = [...new Set((buildLogs.match(/\bTS\d{4}\b/g) || []))];
+          const searchHint = tsCodes.length > 0
+            ? `\n\nTypeScript error codes found: ${tsCodes.join(', ')}. Consider using web_search to look up the fix (e.g. "${tsCodes[0]} fix typescript").`
+            : '';
+          observation = `Build failed — cannot mark done yet. Fix the errors:${searchHint}\n${buildLogs}`;
         }
-        // Phase 11B: extract TypeScript error codes and inject targeted hints.
-        const buildLogs = buildResult.logs.slice(-2000);
-        const tsCodes = [...new Set((buildLogs.match(/\bTS\d{4}\b/g) || []))];
-        const searchHint = tsCodes.length > 0
-          ? `\n\nTypeScript error codes found: ${tsCodes.join(', ')}. Consider using web_search to look up the fix (e.g. "${tsCodes[0]} fix typescript").`
-          : '';
-        observation = `Build failed — cannot mark done yet. Fix the errors:${searchHint}\n${buildLogs}`;
       } else {
         observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, provision_db, done.`;
       }
@@ -635,6 +649,38 @@ export class EngineerAgentLoop {
     }
 
     yield { type: 'max_steps_reached', steps: MAX_STEPS };
+  }
+
+  /**
+   * Phase 12B — run the project's test suite if it defines a real, non-watch test
+   * script. Returns ran:false when there's no intentional test script (so we never
+   * fabricate a failure for projects without tests). Uses the actuator's command
+   * timeout as a safety net against a mis-configured watch-mode script.
+   */
+  private async runProjectTests(workspaceId: string): Promise<{ ran: boolean; success: boolean; logs: string }> {
+    let pkgRaw: string;
+    try {
+      pkgRaw = await this.actuator.readFile(workspaceId, 'package.json');
+    } catch {
+      return { ran: false, success: true, logs: '' }; // no package.json (static/python) — skip
+    }
+    let testScript = '';
+    try {
+      testScript = String(JSON.parse(pkgRaw)?.scripts?.test ?? '');
+    } catch {
+      return { ran: false, success: true, logs: '' };
+    }
+    // Skip the npm default placeholder and empty scripts.
+    if (!testScript.trim() || /no test specified/i.test(testScript)) {
+      return { ran: false, success: true, logs: '' };
+    }
+    try {
+      const result = await this.actuator.runCommand(workspaceId, 'npm test');
+      const logs = (result.stdout + result.stderr).slice(-MAX_OBS_CHARS);
+      return { ran: true, success: result.exitCode === 0, logs };
+    } catch (err: any) {
+      return { ran: true, success: false, logs: err?.message || String(err) };
+    }
   }
 
   /** Extract file paths that the agent edited/patched in recent history steps. */

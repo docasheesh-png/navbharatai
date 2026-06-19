@@ -126,6 +126,17 @@ Coding rules (when in MODE 2):
 - Supported project types: vite-react (default), nextjs, vue, svelte, node-express, python-fastapi, static. The workspace is scaffolded with the correct template on first use. For Python (python-fastapi) projects: start the server with "uvicorn main:app --host 0.0.0.0 --port 3000 --reload" and install deps with "pip install -r requirements.txt". For static sites: no build step; open index.html directly in the browser.
 - The workspace is a git repo (auto-initialized). You can use bash to run git commands: "git status", "git log --oneline", "git diff". After major milestones, commit with "git add -A && git commit -m 'message'". The final commit is created automatically when done succeeds.`;
 
+/**
+ * Phase 12C/12D — make an uploaded filename safe to write under public/uploads:
+ * strip any directory components and disallow characters, keep a sane extension.
+ * Falls back to a timestamped name when nothing usable remains.
+ */
+function sanitizeAssetName(filename: string | undefined): string {
+  const base = String(filename || '').split(/[\\/]/).pop() || '';
+  const cleaned = base.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, '').slice(0, 80);
+  return cleaned || `upload_${Date.now()}.png`;
+}
+
 function stripFences(text: string): string {
   const t = text.trim();
   const m = t.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
@@ -175,7 +186,8 @@ export class EngineerAgentLoop {
   constructor(private router: AIRouter, private actuator: IEngineerActuator) {}
 
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
-    const { workspaceId, instruction, projectType, resumeSandboxId } = task;
+    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage } = task;
+    let effectiveInstruction = instruction;
     const deadline = Date.now() + DEADLINE_MS;
 
     // Fail fast with a helpful message if no AI provider is reachable.
@@ -219,12 +231,31 @@ export class EngineerAgentLoop {
     let lastScreenshot: string | null = null;  // base64 PNG — injected into next Grok call
     let lastConsoleCheck = Date.now();          // Phase 4 — runtime error watermark
 
+    // Phase 12C/12D — if the user attached an image, save it as a usable workspace
+    // asset AND show it to the agent (vision) so it can replicate the design or use
+    // the asset. The agent decides intent from the user's text.
+    if (attachedImage?.base64) {
+      const assetPath = `public/uploads/${sanitizeAssetName(attachedImage.filename)}`;
+      try {
+        await this.actuator.writeBinaryFile(workspaceId, assetPath, attachedImage.base64);
+        lastScreenshot = attachedImage.base64; // injected into the FIRST router call as a vision image
+        effectiveInstruction =
+          `${instruction}\n\n[ATTACHED IMAGE] The user attached an image, saved in the workspace at "${assetPath}". ` +
+          `It is also shown to you visually. If the user wants this DESIGN built, replicate its layout/colors/components faithfully. ` +
+          `If it is an ASSET (logo, photo, icon), reference it in the app from that path (e.g. <img src="/uploads/${sanitizeAssetName(attachedImage.filename)}">).`;
+        yield { type: 'files_changed', kind: 'edit', files: [{ path: assetPath, content: `(binary image asset, ${Math.round(attachedImage.base64.length * 0.75 / 1024)} KB)` }] };
+        yield { type: 'status', message: `Saved attached image to ${assetPath}` };
+      } catch (err: any) {
+        yield { type: 'status', message: `Could not save attached image: ${err?.message || 'write failed'}` };
+      }
+    }
+
     for (let step = 1; step <= MAX_STEPS; step++) {
       if (signal?.aborted) { yield { type: 'aborted' }; return; }
       if (Date.now() > deadline) { yield { type: 'max_steps_reached', steps: step - 1 }; return; }
 
       yield { type: 'status', message: `Step ${step}: reading workspace…` };
-      const prompt = await this.buildPrompt(workspaceId, instruction, history);
+      const prompt = await this.buildPrompt(workspaceId, effectiveInstruction, history);
       yield { type: 'status', message: `Step ${step}: thinking…` };
 
       // Router/provider failure is a real infra error — abort. Malformed model

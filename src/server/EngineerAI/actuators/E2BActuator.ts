@@ -224,6 +224,12 @@ export class E2BActuator implements IEngineerActuator {
     await sandbox.files.write(`${WORKSPACE_ROOT}/${filePath}`, content);
   }
 
+  async writeBinaryFile(workspaceId: string, filePath: string, base64: string): Promise<void> {
+    const sandbox = await this.getSandbox(workspaceId);
+    const bytes = new Uint8Array(Buffer.from(base64, 'base64'));
+    await sandbox.files.write(`${WORKSPACE_ROOT}/${filePath}`, bytes);
+  }
+
   async readFile(workspaceId: string, filePath: string): Promise<string> {
     const sandbox = await this.getSandbox(workspaceId);
     return sandbox.files.read(`${WORKSPACE_ROOT}/${filePath}`);

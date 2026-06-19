@@ -43,6 +43,12 @@ export class LocalActuator implements IEngineerActuator {
     return this.workspaceManager.writeFile(workspaceId, filePath, content);
   }
 
+  async writeBinaryFile(workspaceId: string, filePath: string, base64: string): Promise<void> {
+    const full = path.join(WORKSPACES_ROOT, workspaceId, filePath);
+    await fsPromises.mkdir(path.dirname(full), { recursive: true });
+    await fsPromises.writeFile(full, Buffer.from(base64, 'base64'));
+  }
+
   readFile(workspaceId: string, filePath: string): Promise<string> {
     return this.workspaceManager.readFile(workspaceId, filePath);
   }

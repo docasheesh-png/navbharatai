@@ -1,3 +1,17 @@
+/**
+ * Phase 14 — Bring Your Own Database.
+ * User's chosen provider + credentials, stored client-side and sent with every
+ * /api/engineer-chat request so the agent knows which SDK to use.
+ * NEVER stored in NavBharatAI's Firestore — lives in the user's localStorage only.
+ */
+export interface DbProviderConfig {
+  provider: 'supabase' | 'firebase' | 'mongodb' | 'neon' | 'appwrite' | 'other';
+  /** Human-readable platform name (used for 'other' and display). */
+  platformName?: string;
+  /** Key–value pairs that go into the workspace .env and scaffold files. */
+  credentials: Record<string, string>;
+}
+
 export interface EngineerTask {
   workspaceId: string;
   instruction: string;
@@ -11,6 +25,8 @@ export interface EngineerTask {
    * can replicate a design or use the asset (logo/photo) in the build.
    */
   attachedImage?: { base64: string; mimeType: string; filename: string };
+  /** Phase 14 — user's own database provider + credentials. */
+  dbConfig?: DbProviderConfig;
 }
 
 /** One ReAct action the model outputs per turn. */
@@ -38,6 +54,8 @@ export type EngineerAgentEvent =
   /** Phase 13 — permanent Firebase Hosting URL after a real deploy. */
   | { type: 'deploy_result'; url: string }
   | { type: 'backend_ready'; features: string[]; dbUrl: string; scaffoldFiles: string[] }
+  /** Phase 14 — BYOD scaffold complete: lib file + .env written for the chosen provider. */
+  | { type: 'backend_provisioned'; provider: string; filesWritten: string[] }
   | { type: 'workspace_saved'; sandboxId: string }
   | { type: 'server_ready'; url: string; port: number }
   | { type: 'status'; message: string }

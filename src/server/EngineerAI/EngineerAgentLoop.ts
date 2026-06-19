@@ -3,6 +3,7 @@ import { IEngineerActuator } from './actuators/IEngineerActuator';
 import { ReActAction, EngineerAgentEvent, EngineerTask } from './EngineerAITypes';
 import { WebSearchClient } from './WebSearchClient';
 import { deploymentService } from './DeploymentService';
+import { backendScaffolder } from './BackendScaffolder';
 import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from './ContextRetriever';
 import { usageTracker } from './UsageTracker';
 
@@ -189,7 +190,7 @@ export class EngineerAgentLoop {
   constructor(private router: AIRouter, private actuator: IEngineerActuator) {}
 
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
-    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage } = task;
+    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig } = task;
     let effectiveInstruction = instruction;
     const deadline = Date.now() + DEADLINE_MS;
 
@@ -227,6 +228,37 @@ export class EngineerAgentLoop {
       const sandboxId = await this.actuator.getSandboxId(workspaceId);
       if (sandboxId) yield { type: 'workspace_saved', sandboxId };
     } catch { /* non-fatal */ }
+
+    // Phase 14 — BYOD: auto-scaffold the DB lib file on first use if not yet written.
+    // Runs best-effort so a scaffold failure never blocks the main conversation.
+    let dbContextBlock = '';
+    if (dbConfig) {
+      const libPaths: Record<string, string> = {
+        supabase: 'src/lib/supabase.ts',
+        firebase: 'src/lib/firebase.ts',
+        mongodb:  'src/lib/mongodb.ts',
+        neon:     'src/lib/db.ts',
+        appwrite: 'src/lib/appwrite.ts',
+        other:    '.env',
+      };
+      const expectedFile = libPaths[dbConfig.provider];
+      let alreadyScaffolded = false;
+      try { await this.actuator.readFile(workspaceId, expectedFile); alreadyScaffolded = true; } catch { /* not yet written */ }
+      if (!alreadyScaffolded) {
+        try {
+          const result = await backendScaffolder.scaffold(workspaceId, dbConfig, this.actuator);
+          yield { type: 'backend_provisioned', provider: dbConfig.provider, filesWritten: result.filesWritten };
+          if (result.npmPackages.length > 0) {
+            await this.actuator.runCommand(workspaceId, `npm install ${result.npmPackages.join(' ')}`).catch(() => {});
+          }
+        } catch { /* non-fatal — agent can still attempt DB usage */ }
+      }
+      const providerLabel = dbConfig.platformName || dbConfig.provider;
+      dbContextBlock = `\n\n[DATABASE CONFIGURED — ${providerLabel.toUpperCase()}]\n` +
+        `The user has connected their own ${providerLabel} account. The SDK setup file is at "${expectedFile}".\n` +
+        `Use this file for all database/auth operations. Do NOT call provision_db (that creates a temporary local DB).\n` +
+        `The .env file already contains the user's credentials. Never ask the user for credentials again.`;
+    }
 
     const history: { step: number; actionJson: string; observation: string }[] = [];
     let consecutiveParseFailures = 0;
@@ -267,7 +299,8 @@ export class EngineerAgentLoop {
       const images = lastScreenshot ? [lastScreenshot] : undefined;
       lastScreenshot = null; // consume: each screenshot is used exactly once
       try {
-        const { response, telemetry } = await this.router.route(prompt, SYSTEM_PROMPT, images);
+        const effectiveSystemPrompt = dbContextBlock ? SYSTEM_PROMPT + dbContextBlock : SYSTEM_PROMPT;
+        const { response, telemetry } = await this.router.route(prompt, effectiveSystemPrompt, images);
         usageTracker.record(workspaceId, 'aiCall'); // Phase 12E — track Grok call count
         if (!telemetry.success) {
           // All providers failed (budget exhausted, wrong key, rate-limit, etc.)

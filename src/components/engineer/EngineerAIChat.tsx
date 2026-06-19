@@ -362,7 +362,11 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         break;
       case 'deployed':
         setPublishedUrl(event.url);
-        appendChat('agent', `🌐 Published! Public URL: ${event.url}`);
+        appendChat('agent', `🌐 Live preview URL: ${event.url}`);
+        break;
+      case 'deploy_result':
+        setPublishedUrl(event.url);
+        appendChat('agent', `🚀 Deployed! Permanent URL: ${event.url}`);
         break;
       case 'backend_ready':
         setBackendReady({ features: event.features || [], dbUrl: event.dbUrl || '' });

@@ -12,7 +12,23 @@
 > **Goal:** Engineer AI jo khud banaye, khud dekhe, khud test kare, khud fix kare — bina user ke haath lagaye.
 > **AI Model:** Grok ONLY (xAI) — no Claude, no AiCredits proxy.
 > **Sandbox:** E2B (real cloud VM, full OS isolation).
-> **Updated:** 2026-06-18 (v2 — Phases 1–6 shipped, gap-closing Phases 7–12 added)
+> **Updated:** 2026-06-19 (v3 — Phases 1–12 all DONE + merged; Phase 13 in progress)
+
+---
+
+## INFRASTRUCTURE NOTES (confirmed 2026-06-19)
+
+**Firebase project:** `gen-lang-client-0866594388` — this is the REAL project used by all code
+(`firebase-applet-config.json`, `src/config/firebase.ts`, `FirestoreJobStore`).
+`navbharatai-3395f` in `.firebaserc` is a stale CLI alias — ignore it.
+
+**Google credentials:** `GOOGLE_APPLICATION_CREDENTIALS` is NOT set as an env var.
+Firebase Admin SDK uses **Application Default Credentials (ADC)** via Cloud Run's service identity
+— proven by `FirestoreJobStore.initializeApp({})` which works in production with zero credential config.
+Same ADC mechanism powers Phase 13 Firebase Hosting REST API calls. No new secrets needed.
+
+**If Phase 13 deploy returns 403:** Grant the Cloud Run service account
+`Firebase Hosting Admin` IAM role on project `gen-lang-client-0866594388` in GCP Console.
 
 ---
 
@@ -20,20 +36,28 @@
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | Foundation (core fixes + browser bar) | ✅ DONE — merged (PR #72) |
-| 2 | Agent Eyes — Screenshots (Grok vision) | ✅ DONE — merged (PR #72) |
-| 3 | Agent Hands — Browser Actions (Playwright) | ✅ DONE — merged (PR #72) |
-| 4 | Live Sync | 🟡 PARTIAL — runtime error capture shipped; full bidirectional sync pending → folded into **Phase 9** |
-| 5 | Web Search (key-free) | ✅ DONE — merged (PR #72) |
-| 6 | Memory + Workspace Persistence (E2B pause/resume) | ✅ DONE — merged (PR #72) |
-| 0–6 | **Audit hardening** (true Grok-only, build-skip-install, shared browser, etc.) | 🔜 PR open (`fix/engineer-ai-audit-hardening`) |
-| **6.5** | **Visible AI Cursor — live preview driving** 🖱️👀 | 🔜 NEXT (before Phase 7) |
-| **7** | **Whole-project context (smart retrieval)** | 🔜 After 6.5 |
-| **8** | **Checkpoints + Rollback (safety)** | 🔜 Planned |
-| **9** | **Live bidirectional sync + deploy** | 🔜 Planned |
-| **10** | **Database + Auth + Storage provisioning** | 🔜 Planned |
-| **11** | **Git + real auto-repair + multi-framework** | 🔜 Planned |
-| **12** | **Differentiators (design-to-code, tests, polish)** | 🔜 Planned |
+| 1 | Foundation (core fixes + browser bar) | ✅ DONE — merged PR #72 |
+| 2 | Agent Eyes — Screenshots (Grok vision) | ✅ DONE — merged PR #72 |
+| 3 | Agent Hands — Browser Actions (Playwright) | ✅ DONE — merged PR #72 |
+| 4 | Live Sync (error capture) | ✅ DONE — merged PR #72 |
+| 5 | Web Search (DuckDuckGo key-free) | ✅ DONE — merged PR #72 |
+| 6 | Workspace Persistence (E2B pause/resume) | ✅ DONE — merged PR #72 |
+| 6.5 | Visible AI Cursor — live preview driving | ✅ DONE — merged |
+| 7 | Whole-project context (smart retrieval) | ✅ DONE — merged PR #74 |
+| 8 | Checkpoints + Rollback | ✅ DONE — merged PR #75 |
+| 9 | Live bidirectional sync + one-click deploy | ✅ DONE — merged PR #76 |
+| 10 | Database + Auth + Storage provisioning | ✅ DONE — merged PR #77 |
+| 11 | Git + real auto-repair + multi-framework | ✅ DONE — merged PR #78 |
+| 12A | Multi-viewport verify + cross-session memory | ✅ DONE — merged PR #79 |
+| 12B–F | Tests, design-to-code, cost control, mobile UX | ✅ DONE — merged PR #80 |
+| **13** | **Real Persistent Deploy (Firebase Hosting)** | 🔵 IN PROGRESS — this branch |
+| 14 | Supabase Integration (hosted DB + Auth) | 🔜 Next |
+| 15 | Brave Search API (replace DuckDuckGo) | 🔜 Planned |
+| 16 | Production Build Pipelines (esbuild Node/Next) | 🔜 Planned |
+| 17 | Real Test Generation (proactive Vitest) | 🔜 Planned |
+| 18 | Grok Quality (CoT + self-review pass) | 🔜 Planned |
+| 19 | Persistent Memory (Firestore-backed) | 🔜 Planned |
+| 20 | UX Polish + Mobile-First Redesign | 🔜 Planned |
 
 > **What's live now (PR #72, deployed):** Engineer AI can SEE apps (Grok vision), DRIVE them
 > (Playwright click/type/navigate/scroll/press/wait), CATCH runtime errors, SEARCH the web
@@ -493,3 +517,35 @@ Phase 12         (differentiators)
 | 6 (Memory) | 0 | 4 |
 
 Koi bada refactor nahi — pure additive changes. Existing code safe rahega.
+
+---
+
+## PHASE 13 — Real Persistent Deployment (Firebase Hosting) 🚀
+
+> **Why #1 priority:** E2B sandbox URL dies when sandbox pauses — biggest Mythos gap.
+> After Phase 13, every built app gets a permanent HTTPS URL that lives forever.
+
+### What shipped:
+- `DeploymentService.ts` (new) — Firebase Hosting REST API v1beta1 client
+  - ADC auth (GoogleAuth, no new env vars needed on Cloud Run)
+  - Per-workspace preview channel: `eng-{workspaceId}` → permanent URL
+  - Full file upload flow: hash → populateFiles → gzip upload → finalize → release
+  - URL: `https://gen-lang-client-0866594388--eng-{workspaceId}.web.app`
+- `IEngineerActuator.downloadDistFiles()` — downloads built dist/ from sandbox as Map<path, Buffer>
+- `E2BActuator.downloadDistFiles()` — Node.js script inside sandbox reads all files as base64 JSON
+- `LocalActuator.downloadDistFiles()` — throws (Firebase deploy requires real E2B sandbox)
+- `EngineerAITypes` — new `deploy` action + `deploy_result` event
+- `EngineerAgentLoop` — `deploy` action: build → download → Firebase upload → `deploy_result` event
+- `routes/engineer.ts` — `/api/engineer-deploy` now does real Firebase Hosting deploy
+- `EngineerAIChat.tsx` — `deploy_result` event handled; shows "Deployed!" with permanent URL
+
+### Agent usage:
+```json
+{ "action": "deploy", "args": {} }
+```
+Agent auto-runs the build, uploads dist/ to Firebase, returns permanent URL in `deploy_result`.
+
+### One-time IAM setup (if 403):
+Grant Cloud Run service account → Firebase Hosting Admin role on project `gen-lang-client-0866594388`.
+
+### Files changed: 8 files (1 new)

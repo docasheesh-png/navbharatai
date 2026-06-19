@@ -2,6 +2,7 @@ import { AIRouter } from '../AI/Router/AIRouter';
 import { IEngineerActuator } from './actuators/IEngineerActuator';
 import { ReActAction, EngineerAgentEvent, EngineerTask } from './EngineerAITypes';
 import { WebSearchClient } from './WebSearchClient';
+import { deploymentService } from './DeploymentService';
 import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from './ContextRetriever';
 import { usageTracker } from './UsageTracker';
 
@@ -53,7 +54,7 @@ Examples that trigger reply (in ANY language):
   "app banana hai — kya plan hoga?" (planning, not yet building)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / drive / web_search / restore / provision_db / done
+MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / drive / web_search / restore / provision_db / deploy / done
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Use this when the user clearly wants you to BUILD, CREATE, MODIFY, or FIX code/files right now.
 
@@ -69,7 +70,7 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"provision_db"|"done", "args": { ... } }
+{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"provision_db"|"deploy"|"done", "args": { ... } }
 
 Action args:
   reply:          { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
@@ -78,6 +79,7 @@ Action args:
   patch_file:     { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
   restore:        { "checkpointId": "ckpt_1234567890" }
   provision_db:   { "features": "db,auth,storage" }
+  deploy:         { } — builds the project then publishes dist/ to Firebase Hosting; returns a PERMANENT public URL that survives sandbox pause/restart. Use for static/SPA apps (React/Vite, Vue, Svelte, Next.js static export). Node/Python backends: use the live-preview URL instead (E2B already exposes a public HTTPS URL via server_ready).
   screenshot:     { "url": "http://localhost:3000", "viewport": "mobile"|"tablet"|"desktop" (optional — defaults to desktop) }
   browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait", "selector": "CSS selector", "text": "text to type / key to press", "url": "url to navigate to", "direction": "up"|"down" }
   drive:          { "steps": "[{\"action\":\"navigate\",\"url\":\"http://localhost:3000\"},{\"action\":\"click\",\"selector\":\"#btn\"}]" }
@@ -617,6 +619,36 @@ export class EngineerAgentLoop {
         } catch (err: any) {
           observation = `provision_db error: ${err?.message}. Requires E2B sandbox with apt-get access — ensure E2B_API_KEY is set.`;
         }
+      } else if (parsed.action === 'deploy') {
+        // Phase 13 — real persistent deploy to Firebase Hosting.
+        // Runs the build first (so dist/ is fresh), downloads the files from the
+        // E2B sandbox, uploads them to a per-workspace Firebase Hosting channel,
+        // and returns a permanent HTTPS URL that survives sandbox pause/restart.
+        yield { type: 'status', message: `Step ${step}: building for deploy…` };
+        try {
+          const buildResult = await this.actuator.build(workspaceId);
+          yield { type: 'build_result', success: buildResult.success, logs: buildResult.logs.slice(-MAX_OBS_CHARS) };
+          if (!buildResult.success) {
+            observation = `Deploy aborted — build failed. Fix the errors first:\n${buildResult.logs.slice(-1500)}`;
+          } else {
+            yield { type: 'status', message: `Step ${step}: uploading to Firebase Hosting…` };
+            const files = await this.actuator.downloadDistFiles(workspaceId);
+            const url = await deploymentService.deployStatic(workspaceId, files);
+            yield { type: 'deploy_result', url };
+            observation =
+              `App deployed successfully!\n` +
+              `Permanent URL: ${url}\n` +
+              `This URL stays live even when the sandbox is paused or deleted. ` +
+              `Share it with anyone — no sign-in required to view it.`;
+          }
+        } catch (err: any) {
+          const msg = err?.message || String(err);
+          observation =
+            `deploy error: ${msg}\n` +
+            (msg.includes('403') || msg.includes('Firebase Hosting Admin')
+              ? 'Fix: grant the Cloud Run service account the "Firebase Hosting Admin" IAM role in GCP Console.'
+              : 'Ensure E2B_API_KEY is set and the build produced a dist/ directory.');
+        }
       } else if (parsed.action === 'done') {
         // Verify the build is actually clean before declaring success
         const buildResult = await this.actuator.build(workspaceId);
@@ -651,7 +683,7 @@ export class EngineerAgentLoop {
           observation = `Build failed — cannot mark done yet. Fix the errors:${searchHint}\n${buildLogs}`;
         }
       } else {
-        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, provision_db, done.`;
+        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, provision_db, deploy, done.`;
       }
 
       // Phase 4 — Live Sync: after any browser interaction, surface runtime

@@ -4,6 +4,7 @@ import { EngineerAgentLoop } from '../EngineerAI/EngineerAgentLoop';
 import { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
+import { deploymentService } from '../EngineerAI/DeploymentService';
 import { usageTracker } from '../EngineerAI/UsageTracker';
 
 // Real e2b.dev cloud sandbox when configured, otherwise the process-level
@@ -129,21 +130,26 @@ export function registerEngineerRoutes(app: Express): void {
     res.json({ ok: true });
   });
 
-  // Phase 9B — One-click deploy: return the public URL for the running dev server.
-  // In E2B this is a real internet-accessible HTTPS URL (sandbox.getHost(port)).
-  // In LocalActuator it's http://localhost:<port> (local-only).
+  // Phase 13 — Real persistent deploy: download dist/ from the E2B sandbox and
+  // publish to Firebase Hosting. Returns a permanent HTTPS URL that survives
+  // sandbox pause/restart/deletion. Replaces the Phase 9B live-preview-URL shortcut.
   app.post('/api/engineer-deploy', async (req: Request, res: Response) => {
-    const { workspaceId, port } = req.body || {};
+    const { workspaceId } = req.body || {};
     if (typeof workspaceId !== 'string' || !workspaceId) {
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    const targetPort = typeof port === 'number' ? port : 3000;
     try {
-      const url = await actuator.getPortUrl(workspaceId, targetPort);
-      res.json({ url, port: targetPort });
+      const files = await actuator.downloadDistFiles(workspaceId);
+      const url = await deploymentService.deployStatic(workspaceId, files);
+      res.json({ url, deployed: true });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Deploy failed.' });
+      const msg = err?.message || 'Deploy failed.';
+      // Surface actionable IAM hint when Firebase returns 403.
+      const hint = msg.includes('403') || msg.includes('Firebase Hosting Admin')
+        ? ' Grant the Cloud Run service account the "Firebase Hosting Admin" IAM role in GCP Console.'
+        : '';
+      res.status(500).json({ error: msg + hint });
     }
   });
 

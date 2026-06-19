@@ -214,6 +214,12 @@ export class LocalActuator implements IEngineerActuator {
     return id;
   }
 
+  async downloadDistFiles(_workspaceId: string): Promise<Map<string, Buffer>> {
+    throw new Error(
+      'Firebase Hosting deploy requires an E2B sandbox (set E2B_API_KEY). LocalActuator cannot read sandbox files.'
+    );
+  }
+
   async provisionBackend(_workspaceId: string, _features: ('db' | 'auth' | 'storage')[]): Promise<BackendProvisionResult> {
     throw new Error(
       'Backend provisioning requires a real sandbox (set E2B_API_KEY). LocalActuator cannot start database services.'

@@ -1,3 +1,9 @@
+export interface BackendProvisionResult {
+  dbUrl: string;
+  envVars: Record<string, string>;
+  scaffoldFiles: { path: string; content: string }[];
+}
+
 export interface IEngineerActuator {
   /**
    * Prepare the workspace. If `resumeSandboxId` is provided, reconnect to that
@@ -86,4 +92,15 @@ export interface IEngineerActuator {
    * left untouched so the next build doesn't need a full reinstall.
    */
   restore(workspaceId: string, checkpointId: string): Promise<void>;
+  /**
+   * Phase 10 — Provision a local backend inside the sandbox:
+   * - 'db':      install + start PostgreSQL, create a 'myapp' database, return the
+   *              DATABASE_URL connection string.
+   * - 'auth':    generate a JWT_SECRET env var.
+   * - 'storage': set up a local STORAGE_DIR path.
+   * Also returns ready-to-use scaffold files (src/lib/db.ts, auth.ts, storage.ts)
+   * and the npm packages that should be installed for the requested features.
+   * LocalActuator throws — provisioning requires a real sandbox (set E2B_API_KEY).
+   */
+  provisionBackend(workspaceId: string, features: ('db' | 'auth' | 'storage')[]): Promise<BackendProvisionResult>;
 }

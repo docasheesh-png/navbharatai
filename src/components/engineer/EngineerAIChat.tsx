@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   HardHat, Loader2, Send, Square, Terminal, FolderOpen, Globe,
   CheckCircle2, AlertCircle, ChevronRight, Play, FileDiff, RotateCcw,
-  ExternalLink, RefreshCw, History, Rocket, Copy, Check,
+  ExternalLink, RefreshCw, History, Rocket, Copy, Check, Database,
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -130,6 +130,8 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [urlCopied, setUrlCopied] = useState(false);
+  // Phase 10 — Backend ready indicator
+  const [backendReady, setBackendReady] = useState<{ features: string[]; dbUrl: string } | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -357,6 +359,10 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         setPublishedUrl(event.url);
         appendChat('agent', `🌐 Published! Public URL: ${event.url}`);
         break;
+      case 'backend_ready':
+        setBackendReady({ features: event.features || [], dbUrl: event.dbUrl || '' });
+        appendChat('agent', `🗄️ Backend ready! DB + auth provisioned. Scaffold files: ${(event.scaffoldFiles || []).join(', ')}`);
+        break;
       case 'complete':
         setStatusMsg('');
         setCurrentStep(0);
@@ -438,6 +444,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     stopLivePreview();
     setPublishedUrl(null);
     setPublishing(false);
+    setBackendReady(null);
   };
 
   const handleRestore = async (checkpointId: string) => {
@@ -523,6 +530,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     stopLivePreview();
     setPublishedUrl(null);
     setPublishing(false);
+    setBackendReady(null);
 
     try {
       const res = await fetch('/api/engineer-chat', {
@@ -597,7 +605,18 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
           </div>
           <div className="flex-1 min-w-0">
             <h2 className="text-sm font-bold text-white leading-tight">Engineer AI</h2>
-            <p className="text-[10px] text-[#8b949e]">Workspace: {workspaceIdRef.current.slice(-10)}</p>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <p className="text-[10px] text-[#8b949e]">Workspace: {workspaceIdRef.current.slice(-10)}</p>
+              {backendReady && (
+                <span
+                  className="flex items-center gap-1 text-[9px] font-medium text-green-300 bg-green-500/10 border border-green-500/20 px-1.5 py-0.5 rounded-full"
+                  title={`DB: ${backendReady.dbUrl || 'local'} · Features: ${backendReady.features.join(', ')}`}
+                >
+                  <Database className="w-2.5 h-2.5" />
+                  DB ready
+                </span>
+              )}
+            </div>
           </div>
           {/* BUG FIX (C3): New Workspace button — clears broken/stale workspace state */}
           <button

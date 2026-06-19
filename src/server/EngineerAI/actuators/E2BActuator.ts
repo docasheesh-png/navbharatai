@@ -1,6 +1,7 @@
 import { Sandbox } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
-import { IEngineerActuator } from './IEngineerActuator';
+import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
+import { BackendProvisioner } from '../BackendProvisioner';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 // Dedicated tools dir outside the user's workspace — persists across workspace resets
@@ -517,6 +518,42 @@ const {chromium}=require('playwright');
       { timeoutMs: 30_000 },
     ).catch(() => ({ stdout: '', stderr: '', exitCode: -1 }));
     return id;
+  }
+
+  async provisionBackend(workspaceId: string, features: ('db' | 'auth' | 'storage')[]): Promise<BackendProvisionResult> {
+    const sandbox = await this.getSandbox(workspaceId);
+
+    let dbUrl = '';
+    if (features.includes('db')) {
+      // Install PostgreSQL if missing, then start it and create the app database.
+      // The output marker "DB_URL:<url>" is parsed below — avoids fragile log scraping.
+      const pgResult = await sandbox.commands.run(
+        `set -e
+if ! which psql > /dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq 2>&1 | tail -2
+  apt-get install -y -qq postgresql 2>&1 | tail -5
+fi
+PG_VER=$(ls /etc/postgresql/ 2>/dev/null | sort -V | tail -1)
+pg_ctlcluster "$PG_VER" main status 2>/dev/null || pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3
+sleep 2
+su postgres -c "createdb myapp 2>/dev/null || true"
+echo "DB_URL:postgresql://postgres@localhost:5432/myapp"`,
+        { timeoutMs: 120_000 },
+      ).catch(() => null);
+
+      const match = pgResult?.stdout?.match(/DB_URL:(postgresql:\/\/\S+)/);
+      dbUrl = match?.[1] ?? 'postgresql://postgres@localhost:5432/myapp';
+    }
+
+    const jwtSecret = `jwt_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+    const envVars: Record<string, string> = {};
+    if (features.includes('db'))      envVars.DATABASE_URL = dbUrl;
+    if (features.includes('auth'))    envVars.JWT_SECRET   = jwtSecret;
+    if (features.includes('storage')) envVars.STORAGE_DIR  = './uploads';
+
+    const scaffoldFiles = BackendProvisioner.getScaffoldFiles(features);
+    return { dbUrl, envVars, scaffoldFiles };
   }
 
   async restore(workspaceId: string, checkpointId: string): Promise<void> {

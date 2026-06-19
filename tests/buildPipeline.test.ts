@@ -39,6 +39,23 @@ describe('runBuild', () => {
     expect(r.fileCount).toBe(1);
   });
 
+  it('skips the feature-completion loop when isEdit is true', async () => {
+    // On an edit, completeFeatures must NOT run (it would treat the edit
+    // instruction as a feature spec and could undo the change).
+    const completeFeatures = vi.fn(async () => [] as FileEdit[]);
+    const generate = async (): Promise<FileEdit[]> => [
+      { op: 'patch', path: 'index.html', find: 'mine', replace: 'yours' },
+    ];
+    const r = await runBuild({
+      prompt: 'rename the heading',
+      files: { 'index.html': '<h1>mine</h1>' },
+      generate, fix: async () => [], completeFeatures,
+      isEdit: true, modular: true,
+    });
+    expect(completeFeatures).not.toHaveBeenCalled();
+    expect(r.files['index.html']).toContain('yours');
+  });
+
   it('auto-repairs a broken generation before returning', async () => {
     // generation writes invalid JSON; the fixer corrects it
     const generate = async (): Promise<FileEdit[]> => [

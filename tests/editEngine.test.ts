@@ -41,6 +41,18 @@ describe('EditEngine.applyEdits', () => {
     expect(vfs.has('new.ts')).toBe(true); // the good op still applied
   });
 
+  it('patches with whitespace-tolerant fallback when indentation drifts', () => {
+    // Real file has different indentation/newlines than the model's find snippet.
+    const vfs = vfsFrom({ 'App.tsx': 'function App() {\n      return <div>Hi</div>;\n}' });
+    // Model's find snippet differs in internal whitespace (newline vs spaces),
+    // so exact includes() fails but the flexible fallback still matches.
+    const r = applyEdits(vfs, [
+      { op: 'patch', path: 'App.tsx', find: 'App() {  return <div>Hi</div>;', replace: 'App() {\n  return <div>Hello</div>;' },
+    ]);
+    expect(r.applied).toBe(1);
+    expect(vfs.readText('App.tsx')).toContain('Hello');
+  });
+
   it('snapshots before editing so changes are reversible (rollback)', () => {
     const vfs = vfsFrom({ 'app.ts': 'v1', 'keep.ts': 'K' });
     const versions = new ProjectVersionStore();

@@ -48,6 +48,25 @@ describe('makeAiEditGenerator', () => {
     expect(edits.filter(e => e.op === 'write').length).toBeGreaterThanOrEqual(2);
   });
 
+  it('injects Claude-Code-style memory (summary + edit log) into the edit prompt', async () => {
+    const callModel = vi.fn(async () => '[{"op":"patch","path":"src/App.tsx","find":"old","replace":"new"}]');
+    const { generate } = makeAiEditGenerator(callModel, {
+      summary: 'Building a recipe app in React with a dark theme.',
+      editLog: ['Edit: "add search" → 2 file(s)'],
+      history: [{ role: 'user', content: 'add a favorites button' }],
+    });
+    const existing = VirtualFileSystem.fromRecord({
+      'index.html': '<div id="root"></div>',
+      'src/App.tsx': 'export default function App(){ return <div>old</div>; }',
+    });
+    await generate('make the favorites button red', existing);
+    const userPrompt = callModel.mock.calls[0][1];
+    expect(userPrompt).toContain('PROJECT MEMORY');
+    expect(userPrompt).toContain('recipe app');
+    expect(userPrompt).toContain('CHANGES ALREADY MADE');
+    expect(userPrompt).toContain('RECENT CONVERSATION');
+  });
+
   it('treats the TypeScript scaffold (src/App.tsx) as a fresh build, not an edit', async () => {
     // Regression: a vite-react-ts scaffold must take the from-scratch path
     // ("from scratch" wording), NOT the surgical "minimal edit" path.

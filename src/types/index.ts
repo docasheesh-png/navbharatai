@@ -37,6 +37,8 @@ export interface ChatSession {
   originalAgent?: string;
   currentAgent?: string;
   memorySummary?: string;
+  /** Claude-Code-style log of changes made in this build session (newest last). */
+  editLog?: string[];
   continuationChain?: string[];
   restoredMessages?: Message[];
 }

@@ -48,6 +48,13 @@ export interface BuildPipelineInput {
    * connection open, so the many small calls don't hit the gateway 504).
    */
   modular?: boolean;
+  /**
+   * This is an EDIT of an existing app (not a fresh build). When true, the
+   * agentic feature-completion loop is SKIPPED — the user's edit instruction is
+   * not a full feature spec, so running coverage against it would spuriously
+   * "add missing features" and could undo the very change just made.
+   */
+  isEdit?: boolean;
   /** Live progress callback (drives the SSE stream / chat progress). */
   onProgress?: (ev: BuildProgressEvent) => void;
   /**
@@ -132,7 +139,7 @@ export async function runBuild(input: BuildPipelineInput): Promise<BuildPipeline
   // call, verifying (syntax) between each, until coverage is reached — this is
   // what makes a 10-module app come out ~complete instead of truncated. Bounded,
   // but high (modular runs under SSE, so the many small calls can't 504).
-  if (input.completeFeatures && input.prompt.trim()) {
+  if (input.completeFeatures && input.prompt.trim() && !input.isEdit) {
     const modular = input.modular === true;
     const maxAttempts = modular ? 14 : (input.maxFeatureAttempts ?? 2);
     // Track modules that didn't improve so we move on instead of retrying a

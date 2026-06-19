@@ -8,6 +8,18 @@ html, body {
   overscroll-behavior-y: auto;
 }
 
+/* The html/body rule alone only stops the back/forward gesture when the page
+   itself overscrolls. Inside views with their own horizontally-scrollable
+   children (code blocks, tables, chat panels with overflow-x), a swipe at that
+   child's scroll boundary still chained up into the browser's back/forward.
+   Applying overscroll-behavior-x to EVERY element stops that chaining app-wide
+   so a left↔right finger swipe only ever opens/closes the sidebar (the JS
+   handler), never navigates history. It does not affect an element's own
+   horizontal scrolling — only the boundary overscroll that triggered nav. */
+* {
+  overscroll-behavior-x: none;
+}
+
 @layer base {
   :root {
     --theme-bg: #0d1117;

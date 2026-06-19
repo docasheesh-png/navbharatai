@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   HardHat, Loader2, Send, Square, Terminal, FolderOpen, Globe,
   CheckCircle2, AlertCircle, ChevronRight, Play, FileDiff, RotateCcw,
-  ExternalLink, RefreshCw, History,
+  ExternalLink, RefreshCw, History, Rocket, Copy, Check, Database,
+  ImagePlus, X, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -54,7 +55,68 @@ const WELCOME: ChatMessage = {
 
 function uid() { return `${Date.now()}_${Math.random().toString(36).slice(2)}`; }
 
-type WorkspaceTab = 'terminal' | 'files' | 'browser' | 'checkpoints';
+type WorkspaceTab = 'terminal' | 'files' | 'browser' | 'checkpoints' | 'database';
+
+type DbProvider = 'supabase' | 'firebase' | 'mongodb' | 'neon' | 'appwrite' | 'other';
+
+interface DbConfig {
+  provider: DbProvider;
+  platformName?: string;
+  credentials: Record<string, string>;
+}
+
+const DB_PROVIDERS: { id: DbProvider; label: string; keyLink: string; fields: { key: string; label: string; placeholder: string }[] }[] = [
+  {
+    id: 'supabase', label: 'Supabase',
+    keyLink: 'https://supabase.com/dashboard/project/_/settings/api',
+    fields: [
+      { key: 'url',     label: 'Project URL',  placeholder: 'https://xxxx.supabase.co' },
+      { key: 'anonKey', label: 'Anon Key',      placeholder: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…' },
+    ],
+  },
+  {
+    id: 'firebase', label: 'Firebase',
+    keyLink: 'https://console.firebase.google.com/',
+    fields: [
+      { key: 'apiKey',            label: 'API Key',            placeholder: 'AIzaSy…' },
+      { key: 'authDomain',        label: 'Auth Domain',        placeholder: 'your-project.firebaseapp.com' },
+      { key: 'projectId',         label: 'Project ID',         placeholder: 'your-project-id' },
+      { key: 'storageBucket',     label: 'Storage Bucket',     placeholder: 'your-project.appspot.com' },
+      { key: 'messagingSenderId', label: 'Messaging Sender ID', placeholder: '123456789' },
+      { key: 'appId',             label: 'App ID',             placeholder: '1:123:web:abc' },
+    ],
+  },
+  {
+    id: 'mongodb', label: 'MongoDB Atlas',
+    keyLink: 'https://cloud.mongodb.com/',
+    fields: [
+      { key: 'uri', label: 'Connection URI', placeholder: 'mongodb+srv://user:pass@cluster.mongodb.net/mydb' },
+    ],
+  },
+  {
+    id: 'neon', label: 'Neon (Postgres)',
+    keyLink: 'https://console.neon.tech/',
+    fields: [
+      { key: 'connectionString', label: 'Connection String', placeholder: 'postgresql://user:pass@ep-xxx.neon.tech/neondb' },
+    ],
+  },
+  {
+    id: 'appwrite', label: 'Appwrite',
+    keyLink: 'https://cloud.appwrite.io/',
+    fields: [
+      { key: 'endpoint',  label: 'API Endpoint', placeholder: 'https://cloud.appwrite.io/v1' },
+      { key: 'projectId', label: 'Project ID',   placeholder: 'your-project-id' },
+    ],
+  },
+  {
+    id: 'other', label: 'Other',
+    keyLink: '',
+    fields: [
+      { key: 'platformName',     label: 'Platform Name',      placeholder: 'e.g. PlanetScale, Turso…' },
+      { key: 'connectionString', label: 'Connection String / API Key', placeholder: 'mysql://… or your API key' },
+    ],
+  },
+];
 
 // Simple LCS-based diff (capped at 300 lines each side to stay fast)
 function computeDiff(oldText: string, newText: string): Array<{ line: string; type: 'add' | 'remove' | 'same' }> {
@@ -104,6 +166,9 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   const [statusMsg, setStatusMsg] = useState('');
   const [currentStep, setCurrentStep] = useState(0);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('terminal');
+  // Mobile-only: collapse the workspace panel (Terminal/Files/Browser/History) down
+  // to just its tab bar so the chat gets the full screen. Toggle lives in the tab bar.
+  const [workspaceCollapsed, setWorkspaceCollapsed] = useState(false);
   const [terminalEntries, setTerminalEntries] = useState<TerminalEntry[]>([]);
   const [fileMap, setFileMap] = useState<Record<string, FilePair>>({});
   const [editOrder, setEditOrder] = useState<string[]>([]);
@@ -120,10 +185,54 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   // Phase 8 — Checkpoints + Rollback
   const [checkpoints, setCheckpoints] = useState<CheckpointEntry[]>([]);
   const [restoringId, setRestoringId] = useState<string | null>(null);
+  // Phase 9A — Live preview polling
+  const [livePreviewShot, setLivePreviewShot] = useState<string | null>(null);
+  const livePreviewUrlRef = useRef<string | null>(null);
+  const livePreviewTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Transient click flash (x%, y%) shown on the screenshot when user clicks it
+  const [clickFlash, setClickFlash] = useState<{ x: number; y: number } | null>(null);
+  // Phase 9B — One-click Deploy
+  const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
+  // Phase 10 — Backend ready indicator
+  const [backendReady, setBackendReady] = useState<{ features: string[]; dbUrl: string } | null>(null);
+
+  // Phase 14 — BYOD: database config persisted in localStorage, never sent to NavBharatAI Firestore
+  const [dbConfig, setDbConfig] = useState<DbConfig | null>(() => {
+    try {
+      const key = userId ? `engineer_db_${userId}` : 'engineer_db_anon';
+      const stored = localStorage.getItem(key);
+      if (stored) return JSON.parse(stored) as DbConfig;
+    } catch {}
+    return null;
+  });
+  const [dbFormProvider, setDbFormProvider] = useState<DbProvider>(() => {
+    try {
+      const key = userId ? `engineer_db_${userId}` : 'engineer_db_anon';
+      const stored = localStorage.getItem(key);
+      if (stored) return (JSON.parse(stored) as DbConfig).provider;
+    } catch {}
+    return 'supabase';
+  });
+  const [dbFormCreds, setDbFormCreds] = useState<Record<string, string>>(() => {
+    try {
+      const key = userId ? `engineer_db_${userId}` : 'engineer_db_anon';
+      const stored = localStorage.getItem(key);
+      if (stored) return (JSON.parse(stored) as DbConfig).credentials ?? {};
+    } catch {}
+    return {};
+  });
+  const [dbSaving, setDbSaving] = useState(false);
+  const [dbSavedMsg, setDbSavedMsg] = useState('');
+
+  // Phase 12C/12D — image the user attached to the next message (design-to-code / asset).
+  const [attachedImage, setAttachedImage] = useState<{ base64: string; mimeType: string; filename: string } | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const workspaceIdRef = useRef<string>((() => {
     if (!userId) return `ws_anon_${Date.now()}`;
@@ -185,6 +294,33 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
       pause(); // component unmount (navigated away within the SPA)
     };
   }, []);
+
+  // Phase 9A — Live preview polling: every 3 s when a dev server is running,
+  // fetch a screenshot from the agent's Playwright viewport and update the
+  // browser tab so the user always sees the latest state even mid-build.
+  const startLivePreview = useCallback((url: string) => {
+    livePreviewUrlRef.current = url;
+    if (livePreviewTimerRef.current) clearInterval(livePreviewTimerRef.current);
+    livePreviewTimerRef.current = setInterval(async () => {
+      if (!livePreviewUrlRef.current) return;
+      try {
+        const res = await fetch(`/api/engineer-preview/${workspaceIdRef.current}?url=${encodeURIComponent(livePreviewUrlRef.current)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.base64) setLivePreviewShot(data.base64);
+        }
+      } catch { /* non-fatal */ }
+    }, 3000);
+  }, []);
+
+  const stopLivePreview = useCallback(() => {
+    livePreviewUrlRef.current = null;
+    setLivePreviewShot(null);
+    if (livePreviewTimerRef.current) { clearInterval(livePreviewTimerRef.current); livePreviewTimerRef.current = null; }
+  }, []);
+
+  // Stop polling on unmount
+  useEffect(() => () => stopLivePreview(), [stopLivePreview]);
 
   const appendChat = (role: ChatMessage['role'], text: string) =>
     setMessages(prev => [...prev, { id: uid(), role, text }]);
@@ -314,6 +450,22 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         setBrowserUrlInput(event.url);
         setActiveTab('browser');
         appendChat('agent', `🚀 Dev server running on port ${event.port} — live preview ready`);
+        startLivePreview(event.url);
+        break;
+      case 'deployed':
+        setPublishedUrl(event.url);
+        appendChat('agent', `🌐 Live preview URL: ${event.url}`);
+        break;
+      case 'deploy_result':
+        setPublishedUrl(event.url);
+        appendChat('agent', `🚀 Deployed! Permanent URL: ${event.url}`);
+        break;
+      case 'backend_ready':
+        setBackendReady({ features: event.features || [], dbUrl: event.dbUrl || '' });
+        appendChat('agent', `🗄️ Backend ready! DB + auth provisioned. Scaffold files: ${(event.scaffoldFiles || []).join(', ')}`);
+        break;
+      case 'backend_provisioned':
+        appendChat('agent', `🗄️ Database scaffolded for ${event.provider}. Files written: ${(event.filesWritten || []).join(', ')}`);
         break;
       case 'complete':
         setStatusMsg('');
@@ -393,6 +545,11 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setLiveFrame(null);
     setCheckpoints([]);
     setRestoringId(null);
+    stopLivePreview();
+    setPublishedUrl(null);
+    setPublishing(false);
+    setBackendReady(null);
+    setAttachedImage(null);
   };
 
   const handleRestore = async (checkpointId: string) => {
@@ -416,11 +573,117 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     }
   };
 
+  // Phase 9B — One-click Publish
+  const handlePublish = async () => {
+    if (publishing) return;
+    setPublishing(true);
+    try {
+      const res = await fetch('/api/engineer-deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspaceIdRef.current }),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `${res.status}`); }
+      const { url } = await res.json();
+      setPublishedUrl(url);
+      appendChat('agent', `🌐 Published! Your app is live at: ${url}`);
+    } catch (err: any) {
+      appendChat('system', `❌ Publish failed: ${err?.message}`);
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  // Phase 14 — Save the user's database credentials to localStorage and scaffold immediately.
+  const handleSaveDb = async () => {
+    const providerDef = DB_PROVIDERS.find(p => p.id === dbFormProvider);
+    if (!providerDef) return;
+    const credentials: Record<string, string> = {};
+    for (const field of providerDef.fields) {
+      credentials[field.key] = dbFormCreds[field.key] ?? '';
+    }
+    const newConfig: DbConfig = {
+      provider: dbFormProvider,
+      credentials,
+      ...(dbFormProvider === 'other' && dbFormCreds['platformName']
+        ? { platformName: dbFormCreds['platformName'] }
+        : {}),
+    };
+    try {
+      const key = userId ? `engineer_db_${userId}` : 'engineer_db_anon';
+      localStorage.setItem(key, JSON.stringify(newConfig));
+    } catch {}
+    setDbConfig(newConfig);
+    setDbSaving(true);
+    try {
+      const res = await fetch('/api/engineer-db-scaffold', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspaceIdRef.current, dbConfig: newConfig }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDbSavedMsg(data.summary || 'Database credentials saved and scaffolded.');
+      } else {
+        setDbSavedMsg('Credentials saved locally. Scaffolding will run on your next message.');
+      }
+    } catch {
+      setDbSavedMsg('Credentials saved locally. Scaffolding will run on your next message.');
+    } finally {
+      setDbSaving(false);
+      setTimeout(() => setDbSavedMsg(''), 5000);
+    }
+  };
+
+  // Phase 9A — User click on live preview screenshot: relay coordinates to agent
+  const handlePreviewClick = async (e: React.MouseEvent<HTMLImageElement>) => {
+    const rect = (e.currentTarget as HTMLImageElement).getBoundingClientRect();
+    const x = Math.round(((e.clientX - rect.left) / rect.width) * 1280);
+    const y = Math.round(((e.clientY - rect.top) / rect.height) * 720);
+    // Flash indicator at click position (percentage of image)
+    const flashX = ((e.clientX - rect.left) / rect.width) * 100;
+    const flashY = ((e.clientY - rect.top) / rect.height) * 100;
+    setClickFlash({ x: flashX, y: flashY });
+    setTimeout(() => setClickFlash(null), 800);
+    // Relay to agent
+    try {
+      await fetch('/api/engineer-browser-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspaceIdRef.current, x, y }),
+      });
+    } catch { /* non-fatal */ }
+  };
+
+  // Phase 12C/12D — read a picked image file into base64 (data-URL prefix stripped).
+  const handlePickImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      appendChat('system', 'Only image files can be attached.');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      appendChat('system', 'Image too large (max 8 MB).');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '');
+      const base64 = dataUrl.includes(',') ? dataUrl.slice(dataUrl.indexOf(',') + 1) : dataUrl;
+      setAttachedImage({ base64, mimeType: file.type, filename: file.name });
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSend = async () => {
     const instruction = input.trim();
     if (!instruction || loading) return;
+    const sendImage = attachedImage;
     setInput('');
-    appendChat('user', instruction);
+    setAttachedImage(null);
+    appendChat('user', sendImage ? `${instruction}\n🖼️ attached: ${sendImage.filename}` : instruction);
     setLoading(true);
     setStatusMsg('');
     setCurrentStep(0);
@@ -434,6 +697,10 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setLiveFrame(null);
     setCheckpoints([]);
     setRestoringId(null);
+    stopLivePreview();
+    setPublishedUrl(null);
+    setPublishing(false);
+    setBackendReady(null);
 
     try {
       const res = await fetch('/api/engineer-chat', {
@@ -443,6 +710,8 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
           workspaceId: workspaceIdRef.current,
           instruction,
           resumeSandboxId: sandboxIdRef.current || undefined,
+          attachedImage: sendImage || undefined,
+          dbConfig: dbConfig || undefined,
         }),
       });
       if (!res.ok || !res.body) throw new Error(`API error: ${res.status}`);
@@ -498,9 +767,11 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     : null;
 
   return (
-    <div className="flex h-full min-h-0 bg-[#0d1117]">
+    // Phase 12F — stack chat/workspace vertically on mobile, side-by-side on md+.
+    // Desktop behavior is preserved exactly by the md: overrides.
+    <div className="flex flex-col md:flex-row h-full min-h-0 bg-[#0d1117]">
       {/* ── Left panel: Chat ── */}
-      <div className="w-2/5 flex flex-col border-r border-white/5 min-w-0">
+      <div className={`w-full ${workspaceCollapsed ? 'flex-1' : 'h-1/2'} md:w-2/5 md:h-full flex flex-col border-b md:border-b-0 md:border-r border-white/5 min-w-0 min-h-0`}>
         {/* Header */}
         <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
           <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
@@ -508,7 +779,18 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
           </div>
           <div className="flex-1 min-w-0">
             <h2 className="text-sm font-bold text-white leading-tight">Engineer AI</h2>
-            <p className="text-[10px] text-[#8b949e]">Workspace: {workspaceIdRef.current.slice(-10)}</p>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <p className="text-[10px] text-[#8b949e]">Workspace: {workspaceIdRef.current.slice(-10)}</p>
+              {backendReady && (
+                <span
+                  className="flex items-center gap-1 text-[9px] font-medium text-green-300 bg-green-500/10 border border-green-500/20 px-1.5 py-0.5 rounded-full"
+                  title={`DB: ${backendReady.dbUrl || 'local'} · Features: ${backendReady.features.join(', ')}`}
+                >
+                  <Database className="w-2.5 h-2.5" />
+                  DB ready
+                </span>
+              )}
+            </div>
           </div>
           {/* BUG FIX (C3): New Workspace button — clears broken/stale workspace state */}
           <button
@@ -547,7 +829,34 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         </div>
 
         {/* Input */}
-        <div className="p-3 border-t border-white/5 flex items-end gap-2 shrink-0">
+        <div className="border-t border-white/5 shrink-0">
+          {attachedImage && (
+            <div className="px-3 pt-2 flex items-center gap-2">
+              <span className="flex items-center gap-1.5 text-[11px] text-indigo-200 bg-indigo-500/10 border border-indigo-500/20 px-2 py-1 rounded-lg max-w-[200px]">
+                <ImagePlus className="w-3 h-3 shrink-0" />
+                <span className="truncate">{attachedImage.filename}</span>
+                <button onClick={() => setAttachedImage(null)} title="Remove image" className="shrink-0 hover:text-white">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            </div>
+          )}
+          <div className="p-3 flex items-end gap-2">
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handlePickImage}
+            className="hidden"
+          />
+          <button
+            onClick={() => imageInputRef.current?.click()}
+            disabled={loading}
+            title="Attach an image (design to copy, or a logo/photo asset)"
+            className="w-9 h-9 rounded-xl bg-[#161b22] border border-white/10 text-[#8b949e] hover:text-white hover:border-indigo-500/40 flex items-center justify-center shrink-0 disabled:opacity-40 transition-colors"
+          >
+            <ImagePlus className="w-3.5 h-3.5" />
+          </button>
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -576,11 +885,12 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
               <Send className="w-3.5 h-3.5" />
             </button>
           )}
+          </div>
         </div>
       </div>
 
       {/* ── Right panel: Workspace ── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className={`${workspaceCollapsed ? 'shrink-0' : 'flex-1'} md:flex-1 flex flex-col min-w-0 min-h-0`}>
         {/* Tabs */}
         <div className="flex items-center border-b border-white/5 bg-[#0d1117] shrink-0">
           <button className={tabClass('terminal')} onClick={() => setActiveTab('terminal')}>
@@ -610,8 +920,24 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
               )}
             </span>
           </button>
+          <button className={tabClass('database')} onClick={() => setActiveTab('database')}>
+            <span className="flex items-center gap-1.5">
+              <Database className="w-3 h-3" />DB
+              {dbConfig && <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" title="Database configured" />}
+            </span>
+          </button>
+          {/* Mobile-only minimize/expand toggle for the workspace panel. */}
+          <button
+            onClick={() => setWorkspaceCollapsed(c => !c)}
+            title={workspaceCollapsed ? 'Expand panel' : 'Minimize panel'}
+            className="md:hidden ml-auto mr-1 w-8 h-8 rounded-lg text-[#8b949e] hover:text-white hover:bg-white/5 flex items-center justify-center shrink-0 transition-colors"
+          >
+            {workspaceCollapsed ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
         </div>
 
+        {/* Content area — hidden on mobile when the panel is minimized (desktop always shows). */}
+        <div className={`${workspaceCollapsed ? 'hidden md:flex' : 'flex'} flex-col flex-1 min-h-0`}>
         {/* Terminal tab */}
         {activeTab === 'terminal' && (
           <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0a0e13] p-4 space-y-4 font-mono text-[12px]">
@@ -766,7 +1092,6 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
                 <>
                   <button
                     onClick={() => {
-                      // Force iframe reload by briefly clearing and restoring src
                       const src = iframeSrc;
                       setIframeSrc(null);
                       setTimeout(() => setIframeSrc(src), 50);
@@ -785,9 +1110,40 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
+                  {/* Phase 9B — Publish button */}
+                  <button
+                    onClick={handlePublish}
+                    disabled={publishing}
+                    title="Publish — get a public shareable URL"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-medium bg-green-500/10 text-green-300 hover:bg-green-500/20 border border-green-500/20 transition-colors disabled:opacity-40 shrink-0"
+                  >
+                    {publishing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Rocket className="w-3 h-3" />}
+                    Publish
+                  </button>
                 </>
               )}
             </div>
+
+            {/* Phase 9B — Published URL banner */}
+            {publishedUrl && (
+              <div className="px-3 py-2 bg-green-500/10 border-b border-green-500/20 flex items-center gap-2 shrink-0">
+                <Rocket className="w-3 h-3 text-green-400 shrink-0" />
+                <span className="text-[11px] text-green-300 font-medium">Published:</span>
+                <a href={publishedUrl} target="_blank" rel="noopener noreferrer"
+                  className="text-[11px] text-green-400 hover:text-green-300 underline truncate flex-1 min-w-0">
+                  {publishedUrl}
+                </a>
+                <button
+                  onClick={async () => {
+                    try { await navigator.clipboard.writeText(publishedUrl); setUrlCopied(true); setTimeout(() => setUrlCopied(false), 1500); } catch { /* ignore */ }
+                  }}
+                  className="shrink-0 text-green-400 hover:text-green-300 transition-colors"
+                  title="Copy URL"
+                >
+                  {urlCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            )}
 
             {/* Iframe */}
             {iframeSrc && (
@@ -800,17 +1156,48 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
               />
             )}
 
+            {/* Phase 9A — Live agent-view thumbnail (Playwright polling) */}
+            {iframeSrc && livePreviewShot && (
+              <div className="border-t border-white/5 bg-[#0a0e13] shrink-0">
+                <div className="flex items-center gap-2 px-3 py-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse inline-block" />
+                  <span className="text-[10px] text-[#586069]">Agent's view (click to guide AI)</span>
+                </div>
+                <div className="relative cursor-crosshair" onClick={handlePreviewClick}>
+                  <img
+                    src={`data:image/png;base64,${livePreviewShot}`}
+                    alt="Live agent view"
+                    className="w-full block"
+                    style={{ maxHeight: '160px', objectFit: 'cover', objectPosition: 'top' }}
+                  />
+                  {clickFlash && (
+                    <div className="absolute pointer-events-none"
+                      style={{ left: `${clickFlash.x}%`, top: `${clickFlash.y}%`, transform: 'translate(-50%, -50%)', zIndex: 30 }}>
+                      <div className="w-5 h-5 rounded-full border-2 border-yellow-400 animate-ping" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Screenshot viewer (agent took a screenshot or is driving) */}
             {!iframeSrc && latestScreenshot && (
               <div className="flex-1 overflow-y-auto custom-scrollbar">
-                {/* Main screenshot with cursor overlay */}
-                <div className="relative">
+                {/* Main screenshot with cursor overlay + click-to-guide */}
+                <div className="relative cursor-crosshair" onClick={handlePreviewClick} title="Click to guide AI to this element">
                   <img
                     src={`data:image/png;base64,${latestScreenshot.base64}`}
                     alt={`Screenshot: ${latestScreenshot.url}`}
                     className="w-full block"
                     style={{ imageRendering: 'auto' }}
                   />
+                  {/* Click flash indicator */}
+                  {clickFlash && (
+                    <div className="absolute pointer-events-none"
+                      style={{ left: `${clickFlash.x}%`, top: `${clickFlash.y}%`, transform: 'translate(-50%, -50%)', zIndex: 30 }}>
+                      <div className="w-5 h-5 rounded-full border-2 border-yellow-400 animate-ping" />
+                    </div>
+                  )}
                   {/* Animated AI cursor — shown when the agent drove to this position */}
                   {latestScreenshot.cursorX != null && latestScreenshot.cursorY != null && (
                     <div
@@ -923,6 +1310,94 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
             )}
           </div>
         )}
+
+        {/* Database tab — Phase 14 BYOD: user connects their own database provider */}
+        {activeTab === 'database' && (
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
+            <div className="max-w-md space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-white mb-1">Your Database</h3>
+                <p className="text-[11px] text-[#8b949e] leading-relaxed">
+                  Connect your own database. Engineer AI scaffolds the SDK setup file and .env in your sandbox — NavBharatAI never stores or accesses your credentials.
+                </p>
+              </div>
+
+              {/* Provider selector */}
+              <div>
+                <label className="text-[11px] text-[#8b949e] font-medium block mb-1.5">Provider</label>
+                <select
+                  value={dbFormProvider}
+                  onChange={e => {
+                    setDbFormProvider(e.target.value as DbProvider);
+                    setDbFormCreds({});
+                  }}
+                  className="w-full bg-[#161b22] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500/40"
+                >
+                  {DB_PROVIDERS.map(p => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Provider-specific credential fields */}
+              {DB_PROVIDERS.find(p => p.id === dbFormProvider)?.fields.map(field => (
+                <div key={field.key}>
+                  <label className="text-[11px] text-[#8b949e] font-medium block mb-1.5">{field.label}</label>
+                  <input
+                    type={['key', 'secret', 'password', 'anonkey'].some(k => field.key.toLowerCase().includes(k)) ? 'password' : 'text'}
+                    value={dbFormCreds[field.key] ?? ''}
+                    onChange={e => setDbFormCreds(prev => ({ ...prev, [field.key]: e.target.value }))}
+                    placeholder={field.placeholder}
+                    autoComplete="off"
+                    className="w-full bg-[#161b22] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#586069] focus:outline-none focus:border-indigo-500/40 font-mono text-[11px]"
+                  />
+                </div>
+              ))}
+
+              {/* Link to the provider's key-generation page */}
+              {DB_PROVIDERS.find(p => p.id === dbFormProvider)?.keyLink && (
+                <a
+                  href={DB_PROVIDERS.find(p => p.id === dbFormProvider)!.keyLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Get {DB_PROVIDERS.find(p => p.id === dbFormProvider)?.label} API keys
+                </a>
+              )}
+
+              {/* Save & Scaffold button */}
+              <button
+                onClick={handleSaveDb}
+                disabled={dbSaving}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-medium rounded-xl transition-colors"
+              >
+                {dbSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+                {dbSaving ? 'Saving…' : 'Save & Scaffold'}
+              </button>
+
+              {/* Feedback message after save */}
+              {dbSavedMsg && (
+                <div className="flex items-start gap-2 p-3 rounded-xl bg-green-500/10 border border-green-500/20">
+                  <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-green-300 leading-relaxed">{dbSavedMsg}</p>
+                </div>
+              )}
+
+              {/* Active config indicator */}
+              {dbConfig && (
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-white/3 border border-white/5">
+                  <div className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
+                  <p className="text-[11px] text-[#8b949e]">
+                    Active: <span className="text-white font-medium">{DB_PROVIDERS.find(p => p.id === dbConfig.provider)?.label ?? dbConfig.provider}</span>
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        </div>
       </div>
     </div>
   );

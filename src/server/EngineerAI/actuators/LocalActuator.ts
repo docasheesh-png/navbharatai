@@ -3,7 +3,7 @@ import { promises as fsPromises } from 'fs';
 import path from 'path';
 import util from 'util';
 import { WorkspaceManager } from '../../AppMakerLab/WorkspaceManager';
-import { IEngineerActuator } from './IEngineerActuator';
+import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 
 const execPromise = util.promisify(exec);
 const NAMESPACE = 'engineer';
@@ -41,6 +41,12 @@ export class LocalActuator implements IEngineerActuator {
 
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void> {
     return this.workspaceManager.writeFile(workspaceId, filePath, content);
+  }
+
+  async writeBinaryFile(workspaceId: string, filePath: string, base64: string): Promise<void> {
+    const full = path.join(WORKSPACES_ROOT, workspaceId, filePath);
+    await fsPromises.mkdir(path.dirname(full), { recursive: true });
+    await fsPromises.writeFile(full, Buffer.from(base64, 'base64'));
   }
 
   readFile(workspaceId: string, filePath: string): Promise<string> {
@@ -89,8 +95,29 @@ export class LocalActuator implements IEngineerActuator {
     const workspacePath = path.join(WORKSPACES_ROOT, workspaceId);
     const opts = { cwd: workspacePath, timeout: BUILD_TIMEOUT_MS, maxBuffer: MAX_BUFFER };
     try {
-      // BUG FIX (E2): Skip npm install when node_modules already exists — saves 30-60s
-      // per build() call and prevents the done handler from hanging on reinstall.
+      // Python project: pip install + syntax check.
+      try {
+        await fsPromises.access(path.join(workspacePath, 'main.py'));
+        let installLog = '';
+        try {
+          await fsPromises.access(path.join(workspacePath, 'requirements.txt'));
+          const install = await execPromise('pip install -r requirements.txt -q', opts);
+          installLog = install.stdout + install.stderr;
+        } catch { /* no requirements.txt */ }
+        const check = await execPromise('python3 -m py_compile main.py', opts);
+        return { success: true, logs: installLog + check.stdout + check.stderr };
+      } catch (accessErr: any) {
+        if (accessErr.code !== 'ENOENT') throw accessErr;
+      }
+
+      // Static project: nothing to build.
+      try {
+        await fsPromises.access(path.join(workspacePath, 'package.json'));
+      } catch {
+        return { success: true, logs: '(no build step — static project)' };
+      }
+
+      // Node/npm project.
       let installLog = '';
       try {
         await fsPromises.access(path.join(workspacePath, 'node_modules'));
@@ -133,7 +160,7 @@ export class LocalActuator implements IEngineerActuator {
     return `http://localhost:${port}`;
   }
 
-  async screenshot(_workspaceId: string, _url: string): Promise<{ base64: string; mimeType: 'image/png' }> {
+  async screenshot(_workspaceId: string, _url: string, _viewport?: { width: number; height: number }): Promise<{ base64: string; mimeType: 'image/png' }> {
     throw new Error(
       'Screenshots require a real sandbox (set E2B_API_KEY). LocalActuator cannot run a headless browser.'
     );
@@ -185,6 +212,18 @@ export class LocalActuator implements IEngineerActuator {
       JSON.stringify({ id, createdAt: Date.now(), triggeredBy: triggeredBy.slice(0, 80) }),
     ).catch(() => {});
     return id;
+  }
+
+  async downloadDistFiles(_workspaceId: string): Promise<Map<string, Buffer>> {
+    throw new Error(
+      'Firebase Hosting deploy requires an E2B sandbox (set E2B_API_KEY). LocalActuator cannot read sandbox files.'
+    );
+  }
+
+  async provisionBackend(_workspaceId: string, _features: ('db' | 'auth' | 'storage')[]): Promise<BackendProvisionResult> {
+    throw new Error(
+      'Backend provisioning requires a real sandbox (set E2B_API_KEY). LocalActuator cannot start database services.'
+    );
   }
 
   async restore(workspaceId: string, checkpointId: string): Promise<void> {

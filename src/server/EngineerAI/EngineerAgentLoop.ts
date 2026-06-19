@@ -2,11 +2,23 @@ import { AIRouter } from '../AI/Router/AIRouter';
 import { IEngineerActuator } from './actuators/IEngineerActuator';
 import { ReActAction, EngineerAgentEvent, EngineerTask } from './EngineerAITypes';
 import { WebSearchClient } from './WebSearchClient';
+import { deploymentService } from './DeploymentService';
+import { backendScaffolder } from './BackendScaffolder';
 import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from './ContextRetriever';
+import { usageTracker } from './UsageTracker';
 
 const MAX_STEPS = 24;
 const DEADLINE_MS = 8 * 60 * 1000;
 const MAX_OBS_CHARS = 3000;
+// Phase 12A — named viewports so the agent can verify responsive layouts.
+const VIEWPORTS: Record<string, { width: number; height: number }> = {
+  mobile: { width: 390, height: 844 },   // iPhone 14-ish
+  tablet: { width: 820, height: 1180 },  // iPad Air-ish
+  desktop: { width: 1280, height: 720 },
+};
+// Phase 12A — cross-session project memory file (the agent records WHY decisions here).
+const MEMORY_PATH = '.engineer/memory.md';
+const MAX_MEMORY_CHARS = 4000;
 const MAX_HISTORY_STEPS = 20;
 const MAX_PARSE_RETRIES = 3;
 // Steps kept verbatim; older steps are condensed into a one-line summary each.
@@ -19,6 +31,7 @@ const PORT_PATTERNS = [
   /started(?:\s+server)?\s+on\s+(?:port\s+)?(\d{4,5})/i,
   /server\s+is\s+running\s+on\s+(?:port\s+)?(\d{4,5})/i,
   /:\s*(\d{4,5})\b.*(?:ready|started|running)/i,
+  /running on (?:http:\/\/)?[^:]+:(\d{4,5})/i,
 ];
 
 const SYSTEM_PROMPT = `You are Engineer AI — a sharp, friendly senior engineer who can both converse intelligently AND build real software autonomously. You have EYES and HANDS: you can take screenshots of running apps and SEE what the UI looks like, AND you can drive a real browser cursor to interact with any page.
@@ -42,7 +55,7 @@ Examples that trigger reply (in ANY language):
   "app banana hai — kya plan hoga?" (planning, not yet building)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / drive / web_search / restore / done
+MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / drive / web_search / restore / provision_db / deploy / done
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Use this when the user clearly wants you to BUILD, CREATE, MODIFY, or FIX code/files right now.
 
@@ -58,7 +71,7 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"done", "args": { ... } }
+{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"provision_db"|"deploy"|"done", "args": { ... } }
 
 Action args:
   reply:          { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
@@ -66,7 +79,9 @@ Action args:
   edit_file:      { "path": "relative/path.tsx", "content": "FULL new file content" }
   patch_file:     { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
   restore:        { "checkpointId": "ckpt_1234567890" }
-  screenshot:     { "url": "http://localhost:3000" }
+  provision_db:   { "features": "db,auth,storage" }
+  deploy:         { } — builds the project then publishes dist/ to Firebase Hosting; returns a PERMANENT public URL that survives sandbox pause/restart. Use for static/SPA apps (React/Vite, Vue, Svelte, Next.js static export). Node/Python backends: use the live-preview URL instead (E2B already exposes a public HTTPS URL via server_ready).
+  screenshot:     { "url": "http://localhost:3000", "viewport": "mobile"|"tablet"|"desktop" (optional — defaults to desktop) }
   browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait", "selector": "CSS selector", "text": "text to type / key to press", "url": "url to navigate to", "direction": "up"|"down" }
   drive:          { "steps": "[{\"action\":\"navigate\",\"url\":\"http://localhost:3000\"},{\"action\":\"click\",\"selector\":\"#btn\"}]" }
   web_search:     { "query": "what to look up — docs, error messages, package names/versions" }
@@ -99,15 +114,32 @@ Coding rules (when in MODE 2):
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
 - Use web_search when you're unsure: to confirm the correct/latest package version before installing, to read API/docs for an unfamiliar library, or to look up the fix for an error you don't recognize. Don't guess a version — search it.
 - After starting a dev server: take a screenshot (or navigate via browser_action/drive) to visually verify the UI.
+- Responsive check: when layout matters, screenshot at BOTH "mobile" and "desktop" viewports and fix anything that breaks at mobile width (overflow, tiny text, overlapping elements).
+- Project memory: record key decisions, architecture choices, and the WHY behind them in ${'`.engineer/memory.md`'} using edit_file (append to it — read it first if it exists). This file is automatically shown to you at the start of every future session, so future-you remembers context that isn't obvious from the code alone. Update it after any significant design decision.
 - For anything interactive (forms, buttons, navigation, login): actually TEST it with browser_action or drive —
   click the buttons, fill the forms, and confirm from the returned screenshot that it works.
 - If a screenshot reveals problems (wrong layout, missing elements, broken styles, errors): fix them, then re-verify.
 - After a screenshot, browser_action, or drive, any RUNTIME browser errors (console.error, uncaught exceptions, failed network requests) are reported back to you automatically. Treat them as real bugs and fix them — a clean build does NOT mean the app works at runtime.
+- Tests: for non-trivial logic, write tests and make sure they pass. When you mark done, if the project's package.json has a "test" script it is run automatically and a FAILING test blocks done exactly like a broken build — so fix red tests before declaring done. IMPORTANT: the test script MUST be single-run, never watch mode (use "vitest run", "jest --ci", or "node --test" — NOT bare "vitest"/"jest" which hang waiting for file changes).
 - Output done only AFTER you have visually confirmed the app looks AND works correctly. No confirmation = not done.
 - Paths are relative to workspace root, no leading "/" or "..".
 - When starting a dev server, use port 3000 and bind to 0.0.0.0 (--host 0.0.0.0 --port 3000).
 - Commands run with a 60-second timeout.
-- Checkpoints are created automatically before every edit_file and patch_file action. If a change makes things worse, use restore to go back: { "action": "restore", "args": { "checkpointId": "<id from checkpoint_created event>" } }.`;
+- Checkpoints are created automatically before every edit_file and patch_file action. If a change makes things worse, use restore to go back: { "action": "restore", "args": { "checkpointId": "<id from checkpoint_created event>" } }.
+- Use provision_db ONCE at the start of any task that needs a database, auth (login/signup), or file uploads. It installs and starts PostgreSQL inside the sandbox, generates a DATABASE_URL + JWT_SECRET in .env, and scaffolds src/lib/db.ts / auth.ts / storage.ts helpers. Features: "db" (PostgreSQL), "auth" (bcrypt + JWT), "storage" (local filesystem). After provision_db, install required packages with bash (npm install) if not already done, then create an Express server that uses the scaffolded helpers.
+- Supported project types: vite-react (default), nextjs, vue, svelte, node-express, python-fastapi, static. The workspace is scaffolded with the correct template on first use. For Python (python-fastapi) projects: start the server with "uvicorn main:app --host 0.0.0.0 --port 3000 --reload" and install deps with "pip install -r requirements.txt". For static sites: no build step; open index.html directly in the browser.
+- The workspace is a git repo (auto-initialized). You can use bash to run git commands: "git status", "git log --oneline", "git diff". After major milestones, commit with "git add -A && git commit -m 'message'". The final commit is created automatically when done succeeds.`;
+
+/**
+ * Phase 12C/12D — make an uploaded filename safe to write under public/uploads:
+ * strip any directory components and disallow characters, keep a sane extension.
+ * Falls back to a timestamped name when nothing usable remains.
+ */
+function sanitizeAssetName(filename: string | undefined): string {
+  const base = String(filename || '').split(/[\\/]/).pop() || '';
+  const cleaned = base.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, '').slice(0, 80);
+  return cleaned || `upload_${Date.now()}.png`;
+}
 
 function stripFences(text: string): string {
   const t = text.trim();
@@ -137,11 +169,29 @@ function parseAction(raw: string): ReActAction {
 
 export class EngineerAgentLoop {
   private search = new WebSearchClient();
+  // Phase 9A: per-workspace queue of user click events captured from the live preview.
+  // Consumed once per buildPrompt() call so the agent knows where the user clicked.
+  private userClickQueue = new Map<string, { x: number; y: number; t: number }[]>();
+
+  /** Called by the route handler when a user clicks the live preview image. */
+  addUserClick(workspaceId: string, x: number, y: number): void {
+    const q = this.userClickQueue.get(workspaceId) ?? [];
+    q.push({ x, y, t: Date.now() });
+    if (q.length > 10) q.splice(0, q.length - 10);
+    this.userClickQueue.set(workspaceId, q);
+  }
+
+  private consumeUserClicks(workspaceId: string): { x: number; y: number; t: number }[] {
+    const clicks = this.userClickQueue.get(workspaceId) ?? [];
+    this.userClickQueue.delete(workspaceId);
+    return clicks;
+  }
 
   constructor(private router: AIRouter, private actuator: IEngineerActuator) {}
 
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
-    const { workspaceId, instruction, projectType, resumeSandboxId } = task;
+    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig } = task;
+    let effectiveInstruction = instruction;
     const deadline = Date.now() + DEADLINE_MS;
 
     // Fail fast with a helpful message if no AI provider is reachable.
@@ -165,11 +215,50 @@ export class EngineerAgentLoop {
       return;
     }
 
+    // Phase 11A: auto-init git so the agent can commit milestones.
+    // Best-effort: skip if git is unavailable or workspace already has a repo.
+    if (!resumeSandboxId) {
+      await this.actuator.runCommand(workspaceId,
+        `git init && git config user.email "engineer-ai@navbharatai.app" && git config user.name "Engineer AI" && git add -A && git commit -m "chore: initial workspace scaffold" --allow-empty 2>&1 | tail -3`
+      ).catch(() => {/* non-fatal */});
+    }
+
     // Surface the persistent sandbox ID so the client can store it and resume later.
     try {
       const sandboxId = await this.actuator.getSandboxId(workspaceId);
       if (sandboxId) yield { type: 'workspace_saved', sandboxId };
     } catch { /* non-fatal */ }
+
+    // Phase 14 — BYOD: auto-scaffold the DB lib file on first use if not yet written.
+    // Runs best-effort so a scaffold failure never blocks the main conversation.
+    let dbContextBlock = '';
+    if (dbConfig) {
+      const libPaths: Record<string, string> = {
+        supabase: 'src/lib/supabase.ts',
+        firebase: 'src/lib/firebase.ts',
+        mongodb:  'src/lib/mongodb.ts',
+        neon:     'src/lib/db.ts',
+        appwrite: 'src/lib/appwrite.ts',
+        other:    '.env',
+      };
+      const expectedFile = libPaths[dbConfig.provider];
+      let alreadyScaffolded = false;
+      try { await this.actuator.readFile(workspaceId, expectedFile); alreadyScaffolded = true; } catch { /* not yet written */ }
+      if (!alreadyScaffolded) {
+        try {
+          const result = await backendScaffolder.scaffold(workspaceId, dbConfig, this.actuator);
+          yield { type: 'backend_provisioned', provider: dbConfig.provider, filesWritten: result.filesWritten };
+          if (result.npmPackages.length > 0) {
+            await this.actuator.runCommand(workspaceId, `npm install ${result.npmPackages.join(' ')}`).catch(() => {});
+          }
+        } catch { /* non-fatal — agent can still attempt DB usage */ }
+      }
+      const providerLabel = dbConfig.platformName || dbConfig.provider;
+      dbContextBlock = `\n\n[DATABASE CONFIGURED — ${providerLabel.toUpperCase()}]\n` +
+        `The user has connected their own ${providerLabel} account. The SDK setup file is at "${expectedFile}".\n` +
+        `Use this file for all database/auth operations. Do NOT call provision_db (that creates a temporary local DB).\n` +
+        `The .env file already contains the user's credentials. Never ask the user for credentials again.`;
+    }
 
     const history: { step: number; actionJson: string; observation: string }[] = [];
     let consecutiveParseFailures = 0;
@@ -177,12 +266,31 @@ export class EngineerAgentLoop {
     let lastScreenshot: string | null = null;  // base64 PNG — injected into next Grok call
     let lastConsoleCheck = Date.now();          // Phase 4 — runtime error watermark
 
+    // Phase 12C/12D — if the user attached an image, save it as a usable workspace
+    // asset AND show it to the agent (vision) so it can replicate the design or use
+    // the asset. The agent decides intent from the user's text.
+    if (attachedImage?.base64) {
+      const assetPath = `public/uploads/${sanitizeAssetName(attachedImage.filename)}`;
+      try {
+        await this.actuator.writeBinaryFile(workspaceId, assetPath, attachedImage.base64);
+        lastScreenshot = attachedImage.base64; // injected into the FIRST router call as a vision image
+        effectiveInstruction =
+          `${instruction}\n\n[ATTACHED IMAGE] The user attached an image, saved in the workspace at "${assetPath}". ` +
+          `It is also shown to you visually. If the user wants this DESIGN built, replicate its layout/colors/components faithfully. ` +
+          `If it is an ASSET (logo, photo, icon), reference it in the app from that path (e.g. <img src="/uploads/${sanitizeAssetName(attachedImage.filename)}">).`;
+        yield { type: 'files_changed', kind: 'edit', files: [{ path: assetPath, content: `(binary image asset, ${Math.round(attachedImage.base64.length * 0.75 / 1024)} KB)` }] };
+        yield { type: 'status', message: `Saved attached image to ${assetPath}` };
+      } catch (err: any) {
+        yield { type: 'status', message: `Could not save attached image: ${err?.message || 'write failed'}` };
+      }
+    }
+
     for (let step = 1; step <= MAX_STEPS; step++) {
       if (signal?.aborted) { yield { type: 'aborted' }; return; }
       if (Date.now() > deadline) { yield { type: 'max_steps_reached', steps: step - 1 }; return; }
 
       yield { type: 'status', message: `Step ${step}: reading workspace…` };
-      const prompt = await this.buildPrompt(workspaceId, instruction, history);
+      const prompt = await this.buildPrompt(workspaceId, effectiveInstruction, history);
       yield { type: 'status', message: `Step ${step}: thinking…` };
 
       // Router/provider failure is a real infra error — abort. Malformed model
@@ -191,7 +299,9 @@ export class EngineerAgentLoop {
       const images = lastScreenshot ? [lastScreenshot] : undefined;
       lastScreenshot = null; // consume: each screenshot is used exactly once
       try {
-        const { response, telemetry } = await this.router.route(prompt, SYSTEM_PROMPT, images);
+        const effectiveSystemPrompt = dbContextBlock ? SYSTEM_PROMPT + dbContextBlock : SYSTEM_PROMPT;
+        const { response, telemetry } = await this.router.route(prompt, effectiveSystemPrompt, images);
+        usageTracker.record(workspaceId, 'aiCall'); // Phase 12E — track Grok call count
         if (!telemetry.success) {
           // All providers failed (budget exhausted, wrong key, rate-limit, etc.)
           yield {
@@ -248,6 +358,7 @@ export class EngineerAgentLoop {
         drive: 'Driving the browser through a multi-step flow…',
         web_search: 'Searching the web…',
         restore: 'Restoring workspace to a prior checkpoint…',
+        provision_db: 'Provisioning database, auth, and storage…',
         done: 'Verifying the build…',
       };
       const thought = parsed.thought || thoughtFallback[parsed.action] || 'Thinking…';
@@ -344,12 +455,16 @@ export class EngineerAgentLoop {
         }
       } else if (parsed.action === 'screenshot') {
         const targetUrl = parsed.args.url || lastPreviewUrl || 'http://localhost:3000';
-        yield { type: 'status', message: `Step ${step}: taking screenshot of ${targetUrl}…` };
+        // Phase 12A — optional named viewport (mobile/tablet/desktop) for responsive checks.
+        const vpName = (parsed.args.viewport || '').toLowerCase();
+        const viewport = VIEWPORTS[vpName];
+        const vpLabel = viewport ? ` @ ${vpName} (${viewport.width}×${viewport.height})` : '';
+        yield { type: 'status', message: `Step ${step}: taking screenshot of ${targetUrl}${vpLabel}…` };
         try {
-          const shot = await this.actuator.screenshot(workspaceId, targetUrl);
+          const shot = await this.actuator.screenshot(workspaceId, targetUrl, viewport);
           lastScreenshot = shot.base64; // injected into the NEXT router call as a vision image
           yield { type: 'screenshot_result', url: targetUrl, base64: shot.base64 };
-          observation = `Screenshot captured of ${targetUrl}. The image has been attached to your next thinking step — look at it carefully and describe what you see, then decide what to fix.`;
+          observation = `Screenshot captured of ${targetUrl}${vpLabel}. The image has been attached to your next thinking step — look at it carefully and describe what you see, then decide what to fix.`;
         } catch (err: any) {
           observation = `screenshot error: ${err?.message}. If playwright is not installed, run: bash { "command": "npm install playwright && npx playwright install chromium" }`;
         }
@@ -479,17 +594,129 @@ export class EngineerAgentLoop {
             observation = `web_search error: ${err?.message}. Proceed with your existing knowledge.`;
           }
         }
+      } else if (parsed.action === 'provision_db') {
+        const featuresRaw = (parsed.args.features || 'db,auth,storage').split(',')
+          .map(f => f.trim())
+          .filter((f): f is 'db' | 'auth' | 'storage' => ['db', 'auth', 'storage'].includes(f));
+        const features: ('db' | 'auth' | 'storage')[] = featuresRaw.length > 0
+          ? featuresRaw
+          : ['db', 'auth', 'storage'];
+
+        yield { type: 'status', message: `Step ${step}: provisioning backend (${features.join(', ')})…` };
+        try {
+          const result = await this.actuator.provisionBackend(workspaceId, features);
+
+          // Write or append .env
+          const envLines = Object.entries(result.envVars).map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+          try {
+            const existing = await this.actuator.readFile(workspaceId, '.env');
+            await this.actuator.writeFile(workspaceId, '.env', existing.trimEnd() + '\n' + envLines);
+          } catch {
+            await this.actuator.writeFile(workspaceId, '.env', envLines);
+          }
+
+          // Write scaffold files
+          for (const f of result.scaffoldFiles) {
+            await this.actuator.writeFile(workspaceId, f.path, f.content);
+          }
+          if (result.scaffoldFiles.length > 0) {
+            yield { type: 'files_changed', kind: 'edit', files: result.scaffoldFiles };
+          }
+
+          // Install required npm packages
+          const { BackendProvisioner } = await import('./BackendProvisioner');
+          const pkgs = BackendProvisioner.getPackages(features);
+          if (pkgs.length > 0) {
+            yield { type: 'status', message: `Step ${step}: installing ${pkgs.join(', ')}…` };
+            const installResult = await this.actuator.runCommand(workspaceId, `npm install ${pkgs.join(' ')} 2>&1 | tail -8`);
+            yield { type: 'command_result', command: `npm install ${pkgs.join(' ')}`, exitCode: installResult.exitCode, output: installResult.stdout + installResult.stderr };
+          }
+
+          yield {
+            type: 'backend_ready',
+            features,
+            dbUrl: result.dbUrl,
+            scaffoldFiles: result.scaffoldFiles.map(f => f.path),
+          };
+
+          observation = `Backend provisioned successfully!\n` +
+            `DB URL: ${result.dbUrl || '(none)'}\n` +
+            `Env vars written to .env: ${Object.keys(result.envVars).join(', ')}\n` +
+            `Scaffold files: ${result.scaffoldFiles.map(f => f.path).join(', ')}\n` +
+            (pkgs.length > 0 ? `Packages installed: ${pkgs.join(', ')}\n` : '') +
+            `\nReady-to-use helpers:\n` +
+            (features.includes('db')      ? `  import { db } from './src/lib/db';       // Pool.query(sql, params)\n` : '') +
+            (features.includes('auth')    ? `  import { hashPw, checkPw, signJwt, verifyJwt } from './src/lib/auth';\n` : '') +
+            (features.includes('storage') ? `  import { saveFile, readFile } from './src/lib/storage';\n` : '') +
+            `\nNext step: create an Express API server (e.g. server.ts) that imports these helpers, then start it with bash (e.g. "npx ts-node server.ts &").`;
+        } catch (err: any) {
+          observation = `provision_db error: ${err?.message}. Requires E2B sandbox with apt-get access — ensure E2B_API_KEY is set.`;
+        }
+      } else if (parsed.action === 'deploy') {
+        // Phase 13 — real persistent deploy to Firebase Hosting.
+        // Runs the build first (so dist/ is fresh), downloads the files from the
+        // E2B sandbox, uploads them to a per-workspace Firebase Hosting channel,
+        // and returns a permanent HTTPS URL that survives sandbox pause/restart.
+        yield { type: 'status', message: `Step ${step}: building for deploy…` };
+        try {
+          const buildResult = await this.actuator.build(workspaceId);
+          yield { type: 'build_result', success: buildResult.success, logs: buildResult.logs.slice(-MAX_OBS_CHARS) };
+          if (!buildResult.success) {
+            observation = `Deploy aborted — build failed. Fix the errors first:\n${buildResult.logs.slice(-1500)}`;
+          } else {
+            yield { type: 'status', message: `Step ${step}: uploading to Firebase Hosting…` };
+            const files = await this.actuator.downloadDistFiles(workspaceId);
+            const url = await deploymentService.deployStatic(workspaceId, files);
+            yield { type: 'deploy_result', url };
+            observation =
+              `App deployed successfully!\n` +
+              `Permanent URL: ${url}\n` +
+              `This URL stays live even when the sandbox is paused or deleted. ` +
+              `Share it with anyone — no sign-in required to view it.`;
+          }
+        } catch (err: any) {
+          const msg = err?.message || String(err);
+          observation =
+            `deploy error: ${msg}\n` +
+            (msg.includes('403') || msg.includes('Firebase Hosting Admin')
+              ? 'Fix: grant the Cloud Run service account the "Firebase Hosting Admin" IAM role in GCP Console.'
+              : 'Ensure E2B_API_KEY is set and the build produced a dist/ directory.');
+        }
       } else if (parsed.action === 'done') {
         // Verify the build is actually clean before declaring success
         const buildResult = await this.actuator.build(workspaceId);
         yield { type: 'build_result', success: buildResult.success, logs: buildResult.logs.slice(-MAX_OBS_CHARS) };
         if (buildResult.success) {
-          yield { type: 'complete', summary: parsed.args.summary || 'Task complete.', steps: step };
-          return;
+          // Phase 12B: if the project defines a real test script, run it and treat
+          // a red test exactly like a failed build — done is NOT allowed until green.
+          yield { type: 'status', message: `Step ${step}: running tests…` };
+          const testResult = await this.runProjectTests(workspaceId);
+          if (testResult.ran) {
+            yield { type: 'build_result', success: testResult.success, logs: `[TESTS]\n${testResult.logs}`.slice(-MAX_OBS_CHARS) };
+          }
+          if (testResult.ran && !testResult.success) {
+            const testLogs = testResult.logs.slice(-2000);
+            observation = `Build passed but TESTS FAILED — cannot mark done yet. Fix the failing tests (a red test is treated like a broken build):\n${testLogs}`;
+          } else {
+            // Phase 11A: auto-commit the finished work so git history reflects each session.
+            const summary = parsed.args.summary || 'Task complete.';
+            await this.actuator.runCommand(workspaceId,
+              `git add -A && git commit -m ${JSON.stringify(`feat: ${summary.slice(0, 72)}`)} 2>&1 | tail -3`
+            ).catch(() => {/* non-fatal */});
+            yield { type: 'complete', summary, steps: step };
+            return;
+          }
+        } else {
+          // Phase 11B: extract TypeScript error codes and inject targeted hints.
+          const buildLogs = buildResult.logs.slice(-2000);
+          const tsCodes = [...new Set((buildLogs.match(/\bTS\d{4}\b/g) || []))];
+          const searchHint = tsCodes.length > 0
+            ? `\n\nTypeScript error codes found: ${tsCodes.join(', ')}. Consider using web_search to look up the fix (e.g. "${tsCodes[0]} fix typescript").`
+            : '';
+          observation = `Build failed — cannot mark done yet. Fix the errors:${searchHint}\n${buildLogs}`;
         }
-        observation = `Build failed — cannot mark done yet. Fix the errors:\n${buildResult.logs.slice(-2000)}`;
       } else {
-        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, done.`;
+        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, provision_db, deploy, done.`;
       }
 
       // Phase 4 — Live Sync: after any browser interaction, surface runtime
@@ -520,6 +747,38 @@ export class EngineerAgentLoop {
     }
 
     yield { type: 'max_steps_reached', steps: MAX_STEPS };
+  }
+
+  /**
+   * Phase 12B — run the project's test suite if it defines a real, non-watch test
+   * script. Returns ran:false when there's no intentional test script (so we never
+   * fabricate a failure for projects without tests). Uses the actuator's command
+   * timeout as a safety net against a mis-configured watch-mode script.
+   */
+  private async runProjectTests(workspaceId: string): Promise<{ ran: boolean; success: boolean; logs: string }> {
+    let pkgRaw: string;
+    try {
+      pkgRaw = await this.actuator.readFile(workspaceId, 'package.json');
+    } catch {
+      return { ran: false, success: true, logs: '' }; // no package.json (static/python) — skip
+    }
+    let testScript = '';
+    try {
+      testScript = String(JSON.parse(pkgRaw)?.scripts?.test ?? '');
+    } catch {
+      return { ran: false, success: true, logs: '' };
+    }
+    // Skip the npm default placeholder and empty scripts.
+    if (!testScript.trim() || /no test specified/i.test(testScript)) {
+      return { ran: false, success: true, logs: '' };
+    }
+    try {
+      const result = await this.actuator.runCommand(workspaceId, 'npm test');
+      const logs = (result.stdout + result.stderr).slice(-MAX_OBS_CHARS);
+      return { ran: true, success: result.exitCode === 0, logs };
+    } catch (err: any) {
+      return { ran: true, success: false, logs: err?.message || String(err) };
+    }
   }
 
   /** Extract file paths that the agent edited/patched in recent history steps. */
@@ -577,12 +836,26 @@ export class EngineerAgentLoop {
     // 6. Full file tree (paths only) — gives the model the overall shape
     const fileTree = buildFileTree(fileList);
 
+    // ── Phase 12A: cross-session project memory ───────────────────────────
+    // If the agent recorded architecture/decisions in a prior session, surface
+    // them FIRST so it remembers WHY (not just the files). Best-effort read.
+    let memorySection = '';
+    try {
+      const mem = await this.actuator.readFile(workspaceId, MEMORY_PATH);
+      if (mem && mem.trim()) {
+        memorySection = `[PROJECT MEMORY — decisions & architecture from earlier sessions]\n${mem.slice(0, MAX_MEMORY_CHARS)}`;
+      }
+    } catch { /* no memory file yet — first session */ }
+
     // ── Assemble prompt ───────────────────────────────────────────────────
     const parts: string[] = [
       `[TASK]\n${instruction}`,
+    ];
+    if (memorySection) parts.push(memorySection);
+    parts.push(
       `[WORKSPACE — FILE TREE (${fileList.length} files)]\n${fileTree}`,
       `[WORKSPACE — FILE CONTENTS (top ${fileSections.length} by relevance)]\n${fileSections.join('\n\n')}`,
-    ];
+    );
 
     if (history.length > 0) {
       const verbatim = history.slice(-HISTORY_VERBATIM_TAIL);
@@ -605,6 +878,13 @@ export class EngineerAgentLoop {
       sections.push(`[RECENT STEPS]\n${verbatimText}`);
 
       parts.push(sections.join('\n\n'));
+    }
+
+    // Phase 9A: inject any user clicks from the live preview so the agent can act on them.
+    const pendingClicks = this.consumeUserClicks(workspaceId);
+    if (pendingClicks.length > 0) {
+      const lines = pendingClicks.map(c => `  • (${c.x}, ${c.y})`).join('\n');
+      parts.push(`[USER INTERACTIONS — the user clicked on the live preview (1280×720 viewport)]\n${lines}\nUse browser_action to interact with the element the user clicked on, or describe what's at that coordinate.`);
     }
 
     parts.push('[OUTPUT the next single action JSON]');

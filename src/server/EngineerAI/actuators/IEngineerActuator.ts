@@ -1,3 +1,9 @@
+export interface BackendProvisionResult {
+  dbUrl: string;
+  envVars: Record<string, string>;
+  scaffoldFiles: { path: string; content: string }[];
+}
+
 export interface IEngineerActuator {
   /**
    * Prepare the workspace. If `resumeSandboxId` is provided, reconnect to that
@@ -7,6 +13,12 @@ export interface IEngineerActuator {
    */
   ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void>;
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
+  /**
+   * Phase 12C/12D — write a binary file (e.g. an uploaded image/logo) from a
+   * base64 payload. Decodes to raw bytes so the asset is usable as-is (a UTF-8
+   * string write would corrupt binary data). Used by the asset-upload route.
+   */
+  writeBinaryFile(workspaceId: string, filePath: string, base64: string): Promise<void>;
   readFile(workspaceId: string, filePath: string): Promise<string>;
   listFiles(workspaceId: string): Promise<string[]>;
   build(workspaceId: string): Promise<{ success: boolean; logs: string }>;
@@ -30,8 +42,14 @@ export interface IEngineerActuator {
   /**
    * Capture a screenshot of the given URL from inside the sandbox.
    * Returns a base64-encoded PNG. Requires a real sandbox with a browser available.
+   * Optional `viewport` sets the browser window size so the agent can verify
+   * responsive layouts (e.g. mobile vs desktop). Defaults to 1280×720.
    */
-  screenshot(workspaceId: string, url: string): Promise<{ base64: string; mimeType: 'image/png' }>;
+  screenshot(
+    workspaceId: string,
+    url: string,
+    viewport?: { width: number; height: number },
+  ): Promise<{ base64: string; mimeType: 'image/png' }>;
   /**
    * Perform a real browser interaction (click, type, navigate, scroll, press, wait)
    * against a persistent headless browser session inside the sandbox, then return
@@ -86,4 +104,22 @@ export interface IEngineerActuator {
    * left untouched so the next build doesn't need a full reinstall.
    */
   restore(workspaceId: string, checkpointId: string): Promise<void>;
+  /**
+   * Phase 10 — Provision a local backend inside the sandbox:
+   * - 'db':      install + start PostgreSQL, create a 'myapp' database, return the
+   *              DATABASE_URL connection string.
+   * - 'auth':    generate a JWT_SECRET env var.
+   * - 'storage': set up a local STORAGE_DIR path.
+   * Also returns ready-to-use scaffold files (src/lib/db.ts, auth.ts, storage.ts)
+   * and the npm packages that should be installed for the requested features.
+   * LocalActuator throws — provisioning requires a real sandbox (set E2B_API_KEY).
+   */
+  provisionBackend(workspaceId: string, features: ('db' | 'auth' | 'storage')[]): Promise<BackendProvisionResult>;
+  /**
+   * Phase 13 — Download the built dist/ directory from the workspace as a
+   * Map<relativePath, fileBuffer>. Used by DeploymentService to upload files
+   * to Firebase Hosting for a permanent public URL.
+   * LocalActuator throws — Firebase deploy requires a real E2B sandbox.
+   */
+  downloadDistFiles(workspaceId: string): Promise<Map<string, Buffer>>;
 }

@@ -1,6 +1,15 @@
 import { Sandbox } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
-import { IEngineerActuator } from './IEngineerActuator';
+import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
+import { BackendProvisioner } from '../BackendProvisioner';
+import { usageTracker } from '../UsageTracker';
+
+// Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
+// billing on abandoned sessions. Comfortably longer than the max single command
+// timeout (5 min), so an in-flight operation (whose start refreshes activity) is
+// never paused mid-run — only genuinely idle sandboxes get reclaimed.
+const IDLE_LIMIT_MS = 15 * 60 * 1000;
+const IDLE_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 // Dedicated tools dir outside the user's workspace — persists across workspace resets
@@ -16,7 +25,9 @@ const {chromium}=require('playwright');
 (async()=>{
   const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
   const p=await b.newPage();
-  await p.setViewportSize({width:1280,height:720});
+  const vw=parseInt(process.argv[3],10)||1280;
+  const vh=parseInt(process.argv[4],10)||720;
+  await p.setViewportSize({width:vw,height:vh});
   const url=process.argv[2]||'about:blank';
   await p.goto(url,{waitUntil:'networkidle',timeout:15000}).catch(()=>{});
   await new Promise(r=>setTimeout(r,800));
@@ -35,10 +46,12 @@ const SCREENSHOT_CDP_SCRIPT = `
 const {chromium}=require('playwright');
 (async()=>{
   const target=process.argv[2]||'';
+  const vw=parseInt(process.argv[3],10)||1280;
+  const vh=parseInt(process.argv[4],10)||720;
   const browser=await chromium.connectOverCDP('http://localhost:${CDP_PORT}');
-  const ctx=browser.contexts()[0]||await browser.newContext({viewport:{width:1280,height:720}});
+  const ctx=browser.contexts()[0]||await browser.newContext({viewport:{width:vw,height:vh}});
   let page=ctx.pages()[0]||await ctx.newPage();
-  await page.setViewportSize({width:1280,height:720}).catch(()=>{});
+  await page.setViewportSize({width:vw,height:vh}).catch(()=>{});
   if(target && page.url()!==target){
     await page.goto(target,{waitUntil:'networkidle',timeout:15000}).catch(()=>{});
   }
@@ -125,8 +138,32 @@ export class E2BActuator implements IEngineerActuator {
   private _playwrightReady = new Map<string, Promise<boolean>>();
   // Tracks per-sandbox persistent-browser daemon launch
   private _browserDaemon = new Map<string, Promise<boolean>>();
+  // Phase 12E — last activity timestamp per workspace, drives idle auto-pause.
+  private _lastActivity = new Map<string, number>();
+
+  constructor() {
+    // Phase 12E — periodic idle sweep. unref() so it never keeps the process alive.
+    const timer = setInterval(() => { void this._sweepIdleSandboxes(); }, IDLE_SWEEP_INTERVAL_MS);
+    if (typeof timer.unref === 'function') timer.unref();
+  }
+
+  /** Pause sandboxes with no activity for IDLE_LIMIT_MS (abandoned sessions). */
+  private async _sweepIdleSandboxes(): Promise<void> {
+    const now = Date.now();
+    for (const [workspaceId, sandbox] of [...this.sandboxes]) {
+      const last = this._lastActivity.get(workspaceId) ?? now;
+      if (now - last > IDLE_LIMIT_MS) {
+        await this.pauseSandbox(sandbox.sandboxId).catch(() => {});
+        this._lastActivity.delete(workspaceId);
+      }
+    }
+  }
 
   private async getSandbox(workspaceId: string, resumeSandboxId?: string): Promise<Sandbox> {
+    // Refresh activity FIRST so any in-flight operation protects its sandbox from
+    // the idle sweep for the full IDLE_LIMIT_MS window.
+    this._lastActivity.set(workspaceId, Date.now());
+
     const existing = this.sandboxes.get(workspaceId);
     if (existing) return existing;
 
@@ -144,6 +181,7 @@ export class E2BActuator implements IEngineerActuator {
       sandbox = await Sandbox.create({ timeoutMs: SANDBOX_TIMEOUT_MS });
     }
     this.sandboxes.set(workspaceId, sandbox);
+    usageTracker.record(workspaceId, 'sandbox');
     return sandbox;
   }
 
@@ -158,11 +196,18 @@ export class E2BActuator implements IEngineerActuator {
 
     await sandbox.files.makeDir(WORKSPACE_ROOT);
 
-    if (!projectType || projectType === 'vite-react' || projectType === 'auto') {
-      const files = this.templateRegistry.getProvider('vite-react').getFiles([]);
+    // Resolve template: fall back to vite-react for unknown/auto types.
+    const templateKey =
+      projectType && projectType !== 'auto' && projectType !== 'node' && projectType !== 'python'
+        ? projectType
+        : (projectType === 'python' ? 'python-fastapi' : 'vite-react');
+    try {
+      const files = this.templateRegistry.getProvider(templateKey).getFiles([]);
       await sandbox.files.writeFiles(
         Object.entries(files).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${p}`, data: content }))
       );
+    } catch {
+      // Unknown template — start with an empty workspace, agent will scaffold it.
     }
 
     // Kick off playwright install in background immediately — by the time the agent
@@ -212,6 +257,12 @@ export class E2BActuator implements IEngineerActuator {
     await sandbox.files.write(`${WORKSPACE_ROOT}/${filePath}`, content);
   }
 
+  async writeBinaryFile(workspaceId: string, filePath: string, base64: string): Promise<void> {
+    const sandbox = await this.getSandbox(workspaceId);
+    const bytes = new Uint8Array(Buffer.from(base64, 'base64'));
+    await sandbox.files.write(`${WORKSPACE_ROOT}/${filePath}`, bytes);
+  }
+
   async readFile(workspaceId: string, filePath: string): Promise<string> {
     const sandbox = await this.getSandbox(workspaceId);
     return sandbox.files.read(`${WORKSPACE_ROOT}/${filePath}`);
@@ -227,10 +278,33 @@ export class E2BActuator implements IEngineerActuator {
 
   async build(workspaceId: string): Promise<{ success: boolean; logs: string }> {
     const sandbox = await this.getSandbox(workspaceId);
+    usageTracker.record(workspaceId, 'build');
     try {
-      // Skip npm install when node_modules already exists — saves 30-60s on every
-      // build/done verification (the agent may hit `done` several times). Mirrors
-      // LocalActuator. Only the first build pays the install cost.
+      // Python project: install deps via pip, then do a syntax check (no compile step).
+      const hasPyMain = await sandbox.files.exists(`${WORKSPACE_ROOT}/main.py`).catch(() => false);
+      if (hasPyMain) {
+        const hasReqs = await sandbox.files.exists(`${WORKSPACE_ROOT}/requirements.txt`).catch(() => false);
+        let installLog = '';
+        if (hasReqs) {
+          const install = await sandbox.commands.run(
+            'pip install -r requirements.txt -q',
+            { cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS },
+          );
+          installLog = install.stdout + install.stderr;
+        }
+        const check = await sandbox.commands.run('python3 -m py_compile main.py', {
+          cwd: WORKSPACE_ROOT, timeoutMs: 30_000,
+        });
+        return { success: check.exitCode === 0, logs: installLog + check.stdout + check.stderr };
+      }
+
+      // Static project (no package.json): nothing to build.
+      const hasPkg = await sandbox.files.exists(`${WORKSPACE_ROOT}/package.json`).catch(() => false);
+      if (!hasPkg) {
+        return { success: true, logs: '(no build step — static project)' };
+      }
+
+      // Node/npm project: install if needed, then run build script.
       let installLog = '';
       const hasModules = await sandbox.files.exists(`${WORKSPACE_ROOT}/node_modules`).catch(() => false);
       if (!hasModules) {
@@ -255,6 +329,7 @@ export class E2BActuator implements IEngineerActuator {
 
   async runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     const sandbox = await this.getSandbox(workspaceId);
+    usageTracker.record(workspaceId, 'command');
 
     // Long-running commands (dev servers, watchers) never exit — run in background,
     // collect startup output for 20 s (enough for Vite/Next to print the port),
@@ -265,7 +340,8 @@ export class E2BActuator implements IEngineerActuator {
     const isLongRunning = !isFetch && (
       /\b(?:dev|serve|watch|livereload)\b/i.test(command) ||
       /npm\s+run\s+(?:dev|start|serve)\b/i.test(command) ||
-      /python.*http\.server|http-server|live-server/i.test(command)
+      /python.*http\.server|http-server|live-server/i.test(command) ||
+      /\buvicorn\b|\bgunicorn\b|\bflask\s+run\b/i.test(command)
     );
 
     if (isLongRunning) {
@@ -323,8 +399,11 @@ const {chromium}=require('playwright');
     return `https://${sandbox.getHost(port)}`;
   }
 
-  async screenshot(workspaceId: string, url: string): Promise<{ base64: string; mimeType: 'image/png' }> {
+  async screenshot(workspaceId: string, url: string, viewport?: { width: number; height: number }): Promise<{ base64: string; mimeType: 'image/png' }> {
     const sandbox = await this.getSandbox(workspaceId);
+    usageTracker.record(workspaceId, 'screenshot');
+    const vw = viewport?.width ?? 1280;
+    const vh = viewport?.height ?? 720;
 
     // Ensure playwright background install has been kicked off
     if (!this._playwrightReady.has(workspaceId)) {
@@ -349,7 +428,7 @@ const {chromium}=require('playwright');
     // to a fresh standalone browser if the daemon/CDP isn't reachable.
     await this._ensureBrowserDaemon(sandbox, workspaceId).catch(() => {});
     const cdp = await sandbox.commands.run(
-      `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/screenshot-cdp.js ${JSON.stringify(url)}`,
+      `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/screenshot-cdp.js ${JSON.stringify(url)} ${vw} ${vh}`,
       { cwd: TOOLS_DIR, timeoutMs: 30_000 }
     ).catch(() => null);
     if (cdp && cdp.exitCode === 0 && cdp.stdout) {
@@ -358,7 +437,7 @@ const {chromium}=require('playwright');
 
     // Fallback: fresh standalone browser (clean session, but always works).
     const result = await sandbox.commands.run(
-      `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/screenshot.js ${JSON.stringify(url)}`,
+      `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/screenshot.js ${JSON.stringify(url)} ${vw} ${vh}`,
       { cwd: TOOLS_DIR, timeoutMs: 30_000 }
     );
 
@@ -517,6 +596,82 @@ const {chromium}=require('playwright');
       { timeoutMs: 30_000 },
     ).catch(() => ({ stdout: '', stderr: '', exitCode: -1 }));
     return id;
+  }
+
+  async downloadDistFiles(workspaceId: string): Promise<Map<string, Buffer>> {
+    const sandbox = await this.getSandbox(workspaceId);
+    const distPath = `${WORKSPACE_ROOT}/dist`;
+
+    // Use a Node.js one-liner inside the sandbox to recursively read all files
+    // in dist/ as base64, output as JSON {relativePath: base64string}.
+    // Node.js is always available (it's the E2B base template runtime).
+    const script = [
+      `node -e "`,
+      `const fs=require('fs'),path=require('path');`,
+      `function walk(d,b,o){`,
+      `  try{for(const f of fs.readdirSync(d)){`,
+      `    const a=path.join(d,f),r=(b?b+'/':'')+f;`,
+      `    if(fs.statSync(a).isDirectory()) walk(a,r,o);`,
+      `    else o[r]=fs.readFileSync(a).toString('base64');`,
+      `  }}catch(e){}`,
+      `  return o;`,
+      `}`,
+      `const out=walk(${JSON.stringify(distPath)},'',{});`,
+      `if(!Object.keys(out).length) throw new Error('dist/ is empty or does not exist');`,
+      `console.log(JSON.stringify(out));`,
+      `"`,
+    ].join('');
+
+    const result = await sandbox.commands.run(script, { timeoutMs: 30_000 });
+    if (result.exitCode !== 0 || !result.stdout.trim()) {
+      throw new Error(
+        `dist/ directory not found or empty. Run "npm run build" first.\n` +
+        (result.stderr || result.stdout).slice(0, 300),
+      );
+    }
+
+    const data: Record<string, string> = JSON.parse(result.stdout.trim());
+    const files = new Map<string, Buffer>();
+    for (const [relPath, base64] of Object.entries(data)) {
+      files.set(relPath, Buffer.from(base64, 'base64'));
+    }
+    return files;
+  }
+
+  async provisionBackend(workspaceId: string, features: ('db' | 'auth' | 'storage')[]): Promise<BackendProvisionResult> {
+    const sandbox = await this.getSandbox(workspaceId);
+
+    let dbUrl = '';
+    if (features.includes('db')) {
+      // Install PostgreSQL if missing, then start it and create the app database.
+      // The output marker "DB_URL:<url>" is parsed below — avoids fragile log scraping.
+      const pgResult = await sandbox.commands.run(
+        `set -e
+if ! which psql > /dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq 2>&1 | tail -2
+  apt-get install -y -qq postgresql 2>&1 | tail -5
+fi
+PG_VER=$(ls /etc/postgresql/ 2>/dev/null | sort -V | tail -1)
+pg_ctlcluster "$PG_VER" main status 2>/dev/null || pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3
+sleep 2
+su postgres -c "createdb myapp 2>/dev/null || true"
+echo "DB_URL:postgresql://postgres@localhost:5432/myapp"`,
+        { timeoutMs: 120_000 },
+      ).catch(() => null);
+
+      const match = pgResult?.stdout?.match(/DB_URL:(postgresql:\/\/\S+)/);
+      dbUrl = match?.[1] ?? 'postgresql://postgres@localhost:5432/myapp';
+    }
+
+    const jwtSecret = `jwt_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+    const envVars: Record<string, string> = {};
+    if (features.includes('db'))      envVars.DATABASE_URL = dbUrl;
+    if (features.includes('auth'))    envVars.JWT_SECRET   = jwtSecret;
+    if (features.includes('storage')) envVars.STORAGE_DIR  = './uploads';
+
+    const scaffoldFiles = BackendProvisioner.getScaffoldFiles(features);
+    return { dbUrl, envVars, scaffoldFiles };
   }
 
   async restore(workspaceId: string, checkpointId: string): Promise<void> {

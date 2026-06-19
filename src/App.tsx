@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
-import { useSwipe } from './hooks/useSwipe';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { EngineBuilder } from './components/EngineBuilder';
@@ -1519,25 +1518,13 @@ export default function App() {
   }, [activeView, toggleTab, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt, setFiles, setBuildVersionStack, setProBuildProgress, setCurrentSessionId, setCurrentProSessionId, setSdaResetKey]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
-  const mainContentRef = useRef<HTMLDivElement>(null);
   const proAbortControllerRef = useRef<AbortController | null>(null);
   const pendingViewAfterLoginRef = useRef<ViewType | null>(null);
 
-  // 8.5 — touch swipe to switch tabs (left = next tab, right = previous tab)
-  useSwipe(mainContentRef, {
-    onSwipeLeft: useCallback(() => {
-      if (effectiveDeviceMode === 'desktop') return;
-      const allTabs: ViewType[] = ['home', ...openTabs.filter(t => t !== 'home')];
-      const idx = allTabs.indexOf(activeView);
-      if (idx < allTabs.length - 1) setActiveView(allTabs[idx + 1]);
-    }, [activeView, openTabs, effectiveDeviceMode]),
-    onSwipeRight: useCallback(() => {
-      if (effectiveDeviceMode === 'desktop') return;
-      const allTabs: ViewType[] = ['home', ...openTabs.filter(t => t !== 'home')];
-      const idx = allTabs.indexOf(activeView);
-      if (idx > 0) setActiveView(allTabs[idx - 1]);
-    }, [activeView, openTabs, effectiveDeviceMode]),
-  });
+  // NOTE: horizontal swipe is intentionally reserved app-wide for the sidebar
+  // (open/close) — handled by the document-level touch handler above. A previous
+  // tab-switching swipe (8.5) was removed because it competed with the sidebar
+  // gesture and made views feel like they were navigating "forward/back".
 
   useEffect(() => {
     localStorage.setItem('navbharat_keys', JSON.stringify(keys));
@@ -5994,7 +5981,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
             </div>
           </div>
         }>
-        <div ref={mainContentRef} className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
+        <div className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
           ['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem)] supports-[height:100dvh]:h-[calc(100dvh-3.5rem)] max-h-[calc(100vh-3.5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem)]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
           // 8.1 — space for bottom nav on mobile (all views including chat)
           effectiveDeviceMode !== 'desktop' ? "pb-14" : ""

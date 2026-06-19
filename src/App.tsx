@@ -91,6 +91,7 @@ const DesignSystem     = _lz(() => import('./components/ide/DesignSystem'),     
 const AppHealthMonitor = _lz(() => import('./components/ide/AppHealthMonitor'), 'AppHealthMonitor');
 const AISuggestions    = _lz(() => import('./components/ide/AISuggestions'),    'AISuggestions');
 const SecretManager    = _lz(() => import('./components/SecretManager'),        'SecretManager');
+const DatabaseSettings = _lz(() => import('./components/settings/DatabaseSettings'), 'DatabaseSettings');
 const SocialHub        = _lz(() => import('./components/social/SocialHub'),     'SocialHub');
 const ReportsListView  = _lz(() => import('./components/ReportsListView'),      'ReportsListView');
 const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
@@ -6068,6 +6069,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                             items: [
                               { id: 'general', label: 'General', icon: LayoutDashboard },
                               { id: 'secrets', label: 'Secrets & Keys', icon: Lock },
+                              { id: 'database', label: 'Database', icon: Database },
                               { id: 'connections', label: 'Connections', icon: GitFork },
                               { id: 'shell', label: 'Terminal', icon: Terminal },
                               { id: 'logs', label: 'Logs', icon: Activity },
@@ -6394,7 +6396,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     )}
 
                     {settingsScreen === 'secrets' && (
-                      <motion.div 
+                      <motion.div
                         key="secrets"
                         initial={{ opacity: 0, x: 20 }}
                         animate={{ opacity: 1, x: 0 }}
@@ -6405,6 +6407,22 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                            <SecretManager userId={user.uid} />
                         ) : (
                            <div className="p-6 text-white text-center">Please log in to manage secrets</div>
+                        )}
+                      </motion.div>
+                    )}
+
+                    {settingsScreen === 'database' && (
+                      <motion.div
+                        key="database"
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        className="space-y-6"
+                      >
+                        {user ? (
+                          <DatabaseSettings userId={user.uid} />
+                        ) : (
+                          <div className="p-6 text-white text-center">Please log in to configure your database</div>
                         )}
                       </motion.div>
                     )}

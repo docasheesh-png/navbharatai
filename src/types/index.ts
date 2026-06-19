@@ -81,7 +81,7 @@ export type ViewType =
   | 'engineer_ai';
 
 export type SettingsScreen =
-  | 'root' | 'general' | 'modules' | 'secrets' | 'connections'
+  | 'root' | 'general' | 'modules' | 'secrets' | 'database' | 'connections'
   | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell'
   | 'git' | 'logs' | 'report';
 

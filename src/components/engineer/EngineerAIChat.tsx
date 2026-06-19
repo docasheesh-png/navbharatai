@@ -626,9 +626,11 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     : null;
 
   return (
-    <div className="flex h-full min-h-0 bg-[#0d1117]">
+    // Phase 12F — stack chat/workspace vertically on mobile, side-by-side on md+.
+    // Desktop behavior is preserved exactly by the md: overrides.
+    <div className="flex flex-col md:flex-row h-full min-h-0 bg-[#0d1117]">
       {/* ── Left panel: Chat ── */}
-      <div className="w-2/5 flex flex-col border-r border-white/5 min-w-0">
+      <div className="w-full h-1/2 md:w-2/5 md:h-full flex flex-col border-b md:border-b-0 md:border-r border-white/5 min-w-0 min-h-0">
         {/* Header */}
         <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
           <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
@@ -747,7 +749,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
       </div>
 
       {/* ── Right panel: Workspace ── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Tabs */}
         <div className="flex items-center border-b border-white/5 bg-[#0d1117] shrink-0">
           <button className={tabClass('terminal')} onClick={() => setActiveTab('terminal')}>

@@ -1,5 +1,15 @@
 # NavBharatAI Pro → Real App Maker — Execution Progress
 
+> ## 📁 SCOPE OF THIS FILE — read first
+> This file tracks **ONLY the NavBharatAI Pro** workstream (the prompt → build →
+> preview → edit app-maker engine: Phases 0–7, VFS/EditEngine/BuildPipeline/
+> preview runtime, etc.).
+>
+> The **Engineer AI** workstream (the autonomous Grok+E2B agent that sees/drives/
+> tests/fixes apps) is a **separate project** — its entire roadmap and edit plan
+> live in **`ENGINEER_AI_ROADMAP.md`**. Do NOT add Engineer-AI plan/progress here,
+> and do NOT add NavBharatAI-Pro plan/progress to that file. Keep the two separate.
+
 > ## ▶ RESUME HERE (read this first, every new session)
 > **Goal:** world-best AI app maker. **Rules:** real (no hacks) • app NEVER breaks •
 > zero bugs before push • commit+push every green milestone • keep this file updated.
@@ -729,3 +739,104 @@ runtime*, not the path logic.
 **Next:** user to test on prod after deploy (~5 min). If their specific app still
 fails, the new MINI_HARNESS now surfaces the REAL esbuild/runtime error (instead of
 a silent "App"), which pinpoints the next fix.
+
+---
+
+## 🛠️ Milestone — Edit reliability + memory + Phase-3 close-out (2026-06-19)
+
+### Edit-stops-after-N-edits FIXED + Claude-Code-style memory (PR #82, merged)
+User report: app builds + preview works, but **after ~4–5 edits Pro stops editing**.
+Ground-truth trace of the live edit path (App.tsx → /api/build-stream → aiEdits)
+found the real, co-existing root causes — all fixed:
+- **Output token caps (the #1 killer):** the single edit call returns changed files
+  as JSON; once files grew past the provider `max_tokens` the reply truncated
+  mid-JSON → parsed to ZERO edits → silent no-op. Raised caps on every provider
+  (Claude proxy 8k→16k, Claude direct 4k→8k, Gemini `maxOutputTokens` 16k,
+  Groq/OpenAI/DeepSeek/OpenRouter +8k).
+- **Input context starvation:** edit context budget raised (24k/file · 80 files ·
+  500k total) AND files are now **relevance-ordered** so the file being edited is
+  shown first, in full, before the budget runs out (`aiEdits.fileContext`).
+- **Patch fragility:** `EditEngine` patch now has a **whitespace-tolerant** find→
+  replace fallback so trivial indentation/newline drift no longer silently drops it.
+- **Edit ran the fresh-build feature loop:** `BuildPipeline.isEdit` now SKIPS the
+  modular `completeFeatures` loop on edits (it was treating the edit instruction as
+  a feature spec and could undo the change).
+- **Claude-Code-style memory (full):** rolling fact-dense summary auto-generated
+  each turn (`summarizeForMemory`), recent conversation history + a per-session edit
+  log ("changes already made — do not undo") now reach the build engine, are
+  returned in the complete event, persisted on the session (state + Firestore
+  `memory_summary`/`edit_log`) and restored on load.
+- Verified: server tsc 0 · frontend tsc 0 · 202 tests · boot PASS.
+
+### PHASE 3 — hybrid build/preview runtime — **CODE-COMPLETE** (infra items flagged)
+Ground-truth audit (2026-06-19) of `src/server/runtime/*` + `routes/preview.ts`:
+**DONE in code (tested):** RuntimeRouter, StaticPreview, ReactPreview (in-browser
+React/Babel/esm.sh), renderPreview, StaticRuntime (24h TTL), server-side esbuild
+bundler `/api/preview-bundle` (LIVE in App.tsx updatePreview), ServerContainerRuntime
+(real materialize→install→launch→health-check→proxy spawn chain), WorkspaceMaterializer,
+`/preview-app/:id/*` HTTP proxy **+ WebSocket/HMR upgrade** (server.ts), all 3 preview
+routes.
+**Honesty fix done now (no fake success):** `PreviewService` 'webcontainer' branch
+used to ALWAYS fall back to static and report `{ok:true,target:'static'}` — for
+Vue/Svelte/Astro SFC apps that the in-browser renderer can't transpile, that served a
+blank page as "success". Now `canStaticRender(vfs)` gates it: React/static → real
+static fallback; genuine SFC apps → **honest `{ok:false,target:'webcontainer',reason}`**.
+1 new test (203 total). server tsc 0 · frontend tsc 0 · 203 tests · boot PASS.
+**Remaining Phase-3 items are INFRA/LICENSE-BLOCKED (need user decision, not code):**
+1. Real **StackBlitz WebContainer** adapter for Vue/Svelte/etc. (paid SDK/license).
+2. **Cloud Run prod verification** of child-process dev-server spawn + a **distributed
+   port allocator** (current PortManager is in-process → single-instance only).
+These are the only gaps; the runtime is otherwise complete and live.
+**▶ NEXT phase to work (code-doable): PHASE 5 product layer** — real Pro-gating
+(tier/usage limits, Cashfree exists), observability (structured logging / build-success
+metrics / cost tracking), QA. (Phase 6 universal architectures + Phase 7 validation
+factory remain user-deferred until React+Vanilla are rock-solid.)
+
+---
+
+## 🔭 PHASE 5 — Product layer (IN PROGRESS, 2026-06-19)
+
+Ground-truth audit (2026-06-19) of Phase 5's 5 areas found it ~30% in code:
+- ✅ DONE: Cashfree payments, NavBharat Hosting deploy (`/api/pwa/save`), tier ROUTE
+  concept, 1 enforced gate (`/api/anthropic` Pro/VIP), honest ValidationPipeline,
+  admin audit logging.
+- 🟡 code-doable (no infra): observability wiring, Pro-gating on pro-chat/pro-build,
+  usage quotas, IDE editor→preview sync.
+- 🔴 infra/account-blocked: real Vercel/Netlify/Firebase deploy (API tokens), e2e/
+  Lighthouse/axe gates (browser sandbox), Sentry (account).
+
+### Milestone 5.11 — DONE — OBSERVABILITY wired (item 28)
+Replaced the unused `ObservabilityManager`/`TokenUsageManager` stubs with a real,
+cohesive `src/server/lib/metrics.ts` (`MetricsRegistry` + `getMetrics()` singleton):
+per-provider token usage + **USD cost** (pricing table, ~4-char/token estimate) and
+**build-outcome stats** (success rate, preview rate, avg time-to-build, repair
+attempts, edit vs fresh). Wired LIVE into the build flow: `makeResilientModelCall`
+records the provider that produced each usable generation; `/api/build` and
+`/api/build-stream` record every build outcome (timed). Exposed read-only behind the
+existing admin auth at **`GET /api/admin/metrics`**. Metrics never block a build
+(all wrapped in try/catch). 5 new tests (208 total). Verified server tsc 0 + frontend
+tsc 0 + 208 tests + boot:check PASS.
+
+### Milestone 5.12 — DONE — IDE live editor→preview sync (item 26)
+CodeStudio's Monaco editor updated `files` but the preview (renders `generatedCode`)
+only refreshed on a manual Run — so hand-edits didn't show live. Added a **debounced
+auto-rebuild** (900ms idle) in `handleFileChange` that reuses the EXISTING `onRun`
+pipeline (no duplicate bundler, no loop risk — onRun rebuilds `generatedCode` from
+files, never writes files back). App.tsx's CodeStudio `onRun` now uses the exact
+edited snapshot (`(f) => updatePreview(f || files)`) so the live preview reflects the
+freshest edit. Frontend tsc 0 · 208 tests · **vite build ✓**.
+
+### Admin decisions recorded (2026-06-19): Pro-gating = KEEP OPEN until app is 90%+
+(then limit); real Vercel/Netlify/Firebase deploy = LATER (NavBharat Hosting stays the
+only real deploy for now). So those Phase-5 items are intentionally deferred by admin.
+**Phase 5 is now at its code-doable ceiling** — remaining items are admin-deferred
+(gating, deploy) or infra-blocked (real build/Lighthouse/axe QA gates need the
+browser/container sandbox = Phase-3 infra).
+
+### ⚠️ DECISIONS NEEDED FROM ADMIN before the next Phase-5 items (outward-facing/business):
+1. **Pro-gating enforcement:** `/api/pro-chat`, `/api/pro-build`, `/api/build` are
+   currently OPEN to everyone. Enforcing tiers would LOCK OUT free users — a
+   monetization decision with real user impact. Do NOT flip without admin's policy
+   (which tiers get build access? free-tier daily build/message limit?).
+2. **Real one-click deploy** to Vercel/Netlify/Firebase needs the admin's platform
+   API tokens/accounts. Until then only NavBharat Hosting deploy is real.

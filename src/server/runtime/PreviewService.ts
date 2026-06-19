@@ -6,8 +6,10 @@
  *   - 'static'           → StaticRuntime (self-contained HTML, fully working).
  *   - 'server-container' → ServerContainerRuntime (materialize → install → dev server;
  *                          real locally, and the same flow inside Cloud Run/Docker).
- *   - 'webcontainer'     → not provisioned yet (frontend StackBlitz adapter pending) —
- *                          returns an HONEST not-ready result, never a fake success.
+ *   - 'webcontainer'     → StackBlitz adapter not provisioned yet. Falls back to the
+ *                          in-browser static/React renderer when it CAN render the
+ *                          project; otherwise returns an HONEST {ok:false} (e.g. Vue/
+ *                          Svelte SFC apps) — never a blank page faked as success.
  *
  * Runtimes are injectable for testing.
  */
@@ -15,6 +17,23 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { routeRuntime, type RuntimeTarget, type PreviewRuntime } from './RuntimeRouter';
 import { StaticRuntime } from './StaticRuntime';
 import { ServerContainerRuntime } from './ServerContainerRuntime';
+import { isReactProject } from './ReactPreview';
+
+/** Framework single-file-component extensions we can NOT transpile in-browser yet. */
+const UNSUPPORTED_SFC = ['.vue', '.svelte', '.astro'];
+
+/**
+ * Can our in-browser renderer (ReactPreview / StaticPreview) actually produce a
+ * real preview for this project? True for React apps and plain static sites;
+ * false for framework SFC apps (Vue/Svelte/Astro) that need a real bundler /
+ * WebContainer — for those we must NOT pretend success with a blank static page.
+ */
+function canStaticRender(vfs: VirtualFileSystem): boolean {
+  if (vfs.paths().some((p) => UNSUPPORTED_SFC.some((ext) => p.toLowerCase().endsWith(ext)))) return false;
+  if (isReactProject(vfs)) return true;
+  // Plain static: a usable HTML entry the static builder can inline.
+  return vfs.has('index.html') || vfs.has('public/index.html');
+}
 
 export interface PreviewResult {
   ok: boolean;
@@ -66,10 +85,19 @@ export class PreviewService {
       return { ok: true, target, url, sessionId };
     }
 
-    // BUG A5 FIX: 'webcontainer' — WebContainer adapter pending, fallback to static rendering
-    // instead of returning ok: false which leaves users with no preview.
-    const { url, sessionId } = await this.staticRuntime.start(projectId, vfs);
-    return { ok: true, target: 'static', url, sessionId };
+    // 'webcontainer' — the real StackBlitz WebContainer adapter isn't provisioned
+    // yet. We fall back to the in-browser static/React renderer ONLY when it can
+    // genuinely render the project; otherwise we return an HONEST not-ready result
+    // rather than a blank static page falsely reported as success (no fake success).
+    if (canStaticRender(vfs)) {
+      const { url, sessionId } = await this.staticRuntime.start(projectId, vfs);
+      return { ok: true, target: 'static', url, sessionId };
+    }
+    return {
+      ok: false,
+      target: 'webcontainer',
+      reason: 'This framework (e.g. Vue/Svelte) needs the WebContainer runtime, which is not provisioned yet. React and static apps preview fully; this one cannot be previewed honestly right now.',
+    };
   }
 }
 

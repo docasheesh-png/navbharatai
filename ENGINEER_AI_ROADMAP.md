@@ -1,5 +1,14 @@
 # Engineer AI — Mythos-Level Build Roadmap
 
+> ## 📁 SCOPE OF THIS FILE — read first
+> This file is the **single home** for the **Engineer AI** workstream's roadmap and
+> edit plan (the autonomous Grok-only + E2B agent that sees/drives/tests/fixes apps).
+> All Engineer-AI planning, phases, and progress belong **here, and only here**.
+>
+> The **NavBharatAI Pro** app-maker engine is a **separate project** — its plan and
+> progress live in **`PROGRESS.md`**. Do NOT mix the two: no NavBharatAI-Pro plan in
+> this file, no Engineer-AI plan in `PROGRESS.md`.
+
 > **Goal:** Engineer AI jo khud banaye, khud dekhe, khud test kare, khud fix kare — bina user ke haath lagaye.
 > **AI Model:** Grok ONLY (xAI) — no Claude, no AiCredits proxy.
 > **Sandbox:** E2B (real cloud VM, full OS isolation).

@@ -72,9 +72,9 @@ describe('PreviewService', () => {
     expect(r.target).toBe('static');
   });
 
-  it('falls back to static preview for a non-vite package.json frontend (BUG A5 fix)', async () => {
-    // Previously returned ok: false for webcontainer target. Now falls back to static so
-    // users always get a preview rather than a hard failure.
+  it('falls back to static preview for a non-vite package.json frontend with a static entry', async () => {
+    // A package.json frontend with NO framework SFC files + a usable HTML entry can
+    // still be rendered by the static builder → fall back to static (real preview).
     const svc = new PreviewService();
     const vfs = VirtualFileSystem.fromRecord({
       'package.json': JSON.stringify({ dependencies: { svelte: '^4' } }), 'index.html': 'x',
@@ -83,5 +83,20 @@ describe('PreviewService', () => {
     expect(r.ok).toBe(true);
     expect(r.target).toBe('static');
     expect(r.url).toMatch(/^\/preview\//);
+  });
+
+  it('returns an HONEST {ok:false} for a real SFC app it cannot render (no fake success)', async () => {
+    // A genuine Svelte app (with .svelte components) can't be transpiled by the
+    // in-browser renderer — we must NOT serve a blank static page as "success".
+    const svc = new PreviewService();
+    const vfs = VirtualFileSystem.fromRecord({
+      'package.json': JSON.stringify({ dependencies: { svelte: '^4' }, devDependencies: { '@sveltejs/vite-plugin-svelte': '^3' } }),
+      'src/App.svelte': '<h1>Hi</h1>',
+      'src/main.js': "import App from './App.svelte';",
+    });
+    const r = await svc.startPreview('p4', vfs);
+    expect(r.ok).toBe(false);
+    expect(r.target).toBe('webcontainer');
+    expect(r.reason).toMatch(/WebContainer|not provisioned|cannot be previewed/i);
   });
 });

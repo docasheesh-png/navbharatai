@@ -6,6 +6,7 @@ import { getDb } from '../lib/db';
 import { audit } from '../lib/audit';
 import { serverStats } from '../lib/serverStats';
 import { getProviderStats } from '../AI/Router/AIRouter';
+import { getMetrics } from '../lib/metrics';
 
 /**
  * Admin dashboard routes extracted from the server.ts monolith (Phase 1).
@@ -58,6 +59,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
     next();
   };
+
+  // Observability: live token-usage/cost + build-success metrics (Phase 5, item 28).
+  app.get('/api/admin/metrics', verifyAdminToken, (_req: Request, res: Response) => {
+    res.json(getMetrics().snapshot());
+  });
 
   app.get('/api/admin/analytics', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;

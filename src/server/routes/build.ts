@@ -5,6 +5,7 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
 import { aiRouter } from '../lib/aiRouter';
 import { getPreviewService } from '../runtime/PreviewService';
+import { getMetrics, estimateTokens } from '../lib/metrics';
 
 /**
  * Phase 4 integration — the real, engine-backed build endpoint.
@@ -59,7 +60,12 @@ function makeResilientModelCall(userKey?: string): ModelCall {
     for (const a of attempts) {
       try {
         const out = await a.run();
-        if (isUsableResponse(out)) return out;
+        if (isUsableResponse(out)) {
+          // Observability: record (estimated) token use + cost for the provider
+          // that actually produced the usable generation.
+          try { getMetrics().recordModelCall(a.name, estimateTokens(system) + estimateTokens(user), estimateTokens(out)); } catch { /* never block a build on metrics */ }
+          return out;
+        }
         if (out && out.trim()) { lastOut = out; console.warn(`[BUILD] provider ${a.name} returned a canned/empty reply — trying next`); }
       } catch (e: any) {
         lastErr = e;
@@ -107,6 +113,7 @@ export function registerBuildRoutes(app: Express): void {
       const callModel: ModelCall = makeResilientModelCall(userKey);
       const { generate, fix, completeFeatures } = makeAiEditGenerator(callModel, memory);
 
+      const t0 = Date.now();
       const result = await runBuild({
         prompt,
         files: files && typeof files === 'object' ? files : undefined,
@@ -121,6 +128,7 @@ export function registerBuildRoutes(app: Express): void {
         maxRepairAttempts: 1,
         maxFeatureAttempts: 2,
       });
+      try { getMetrics().recordBuild({ ok: result.ok, previewAllowed: result.previewAllowed, isEdit: isEdit === true, ms: Date.now() - t0, repairAttempts: result.repairAttempts }); } catch { /* metrics never block */ }
 
       // Preview is a privilege: only start it when the critical gates pass.
       let previewInfo: unknown = undefined;
@@ -181,6 +189,7 @@ export function registerBuildRoutes(app: Express): void {
       const callModel: ModelCall = makeResilientModelCall(userKey);
       const { generate, fix, completeFeatures } = makeAiEditGenerator(callModel, memory);
 
+      const t0 = Date.now();
       const result = await runBuild({
         prompt,
         files: files && typeof files === 'object' ? files : undefined,
@@ -190,6 +199,7 @@ export function registerBuildRoutes(app: Express): void {
         maxRepairAttempts: 1,
         onProgress: (ev) => send(ev),
       });
+      try { getMetrics().recordBuild({ ok: result.ok, previewAllowed: result.previewAllowed, isEdit: isEdit === true, ms: Date.now() - t0, repairAttempts: result.repairAttempts }); } catch { /* metrics never block */ }
 
       // Refresh the rolling memory so the NEXT turn stays coherent (Claude-Code
       // style): append this turn, re-summarize, extend the edit log. Best-effort.

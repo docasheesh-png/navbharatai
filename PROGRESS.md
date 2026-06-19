@@ -791,3 +791,36 @@ These are the only gaps; the runtime is otherwise complete and live.
 (tier/usage limits, Cashfree exists), observability (structured logging / build-success
 metrics / cost tracking), QA. (Phase 6 universal architectures + Phase 7 validation
 factory remain user-deferred until React+Vanilla are rock-solid.)
+
+---
+
+## 🔭 PHASE 5 — Product layer (IN PROGRESS, 2026-06-19)
+
+Ground-truth audit (2026-06-19) of Phase 5's 5 areas found it ~30% in code:
+- ✅ DONE: Cashfree payments, NavBharat Hosting deploy (`/api/pwa/save`), tier ROUTE
+  concept, 1 enforced gate (`/api/anthropic` Pro/VIP), honest ValidationPipeline,
+  admin audit logging.
+- 🟡 code-doable (no infra): observability wiring, Pro-gating on pro-chat/pro-build,
+  usage quotas, IDE editor→preview sync.
+- 🔴 infra/account-blocked: real Vercel/Netlify/Firebase deploy (API tokens), e2e/
+  Lighthouse/axe gates (browser sandbox), Sentry (account).
+
+### Milestone 5.11 — DONE — OBSERVABILITY wired (item 28)
+Replaced the unused `ObservabilityManager`/`TokenUsageManager` stubs with a real,
+cohesive `src/server/lib/metrics.ts` (`MetricsRegistry` + `getMetrics()` singleton):
+per-provider token usage + **USD cost** (pricing table, ~4-char/token estimate) and
+**build-outcome stats** (success rate, preview rate, avg time-to-build, repair
+attempts, edit vs fresh). Wired LIVE into the build flow: `makeResilientModelCall`
+records the provider that produced each usable generation; `/api/build` and
+`/api/build-stream` record every build outcome (timed). Exposed read-only behind the
+existing admin auth at **`GET /api/admin/metrics`**. Metrics never block a build
+(all wrapped in try/catch). 5 new tests (208 total). Verified server tsc 0 + frontend
+tsc 0 + 208 tests + boot:check PASS.
+
+### ⚠️ DECISIONS NEEDED FROM ADMIN before the next Phase-5 items (outward-facing/business):
+1. **Pro-gating enforcement:** `/api/pro-chat`, `/api/pro-build`, `/api/build` are
+   currently OPEN to everyone. Enforcing tiers would LOCK OUT free users — a
+   monetization decision with real user impact. Do NOT flip without admin's policy
+   (which tiers get build access? free-tier daily build/message limit?).
+2. **Real one-click deploy** to Vercel/Netlify/Firebase needs the admin's platform
+   API tokens/accounts. Until then only NavBharat Hosting deploy is real.

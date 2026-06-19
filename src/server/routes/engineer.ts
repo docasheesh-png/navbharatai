@@ -6,6 +6,8 @@ import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
 import { deploymentService } from '../EngineerAI/DeploymentService';
 import { usageTracker } from '../EngineerAI/UsageTracker';
+import { DbProviderConfig } from '../EngineerAI/EngineerAITypes';
+import { backendScaffolder } from '../EngineerAI/BackendScaffolder';
 
 // Real e2b.dev cloud sandbox when configured, otherwise the process-level
 // LocalActuator (same isolation guarantees as Phase 1).
@@ -26,12 +28,19 @@ export function registerEngineerRoutes(app: Express): void {
   const agentLoop = new EngineerAgentLoop(router, actuator);
 
   app.post('/api/engineer-chat', async (req: Request, res: Response) => {
-    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage } = req.body || {};
+    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig } = req.body || {};
     if (typeof workspaceId !== 'string' || !workspaceId || typeof instruction !== 'string' || !instruction) {
       res.status(400).json({ error: 'workspaceId and instruction are required.' });
       return;
     }
     const resumeId = typeof resumeSandboxId === 'string' && resumeSandboxId ? resumeSandboxId : undefined;
+
+    // Phase 14 — validate dbConfig if provided (must have a known provider).
+    const VALID_PROVIDERS = ['supabase', 'firebase', 'mongodb', 'neon', 'appwrite', 'other'];
+    const validatedDbConfig: DbProviderConfig | undefined =
+      dbConfig && typeof dbConfig === 'object' && VALID_PROVIDERS.includes(dbConfig.provider)
+        ? { provider: dbConfig.provider, platformName: dbConfig.platformName, credentials: dbConfig.credentials ?? {} }
+        : undefined;
 
     // Phase 12C/12D — optional attached image (base64). Cap at ~8 MB decoded to
     // keep request size sane; ignore malformed payloads rather than failing.
@@ -77,7 +86,7 @@ export function registerEngineerRoutes(app: Express): void {
       // long-running E2B or AI operation begins.
       send({ type: 'status', message: 'Connecting…' });
 
-      for await (const event of agentLoop.run({ workspaceId, instruction, projectType, resumeSandboxId: resumeId, attachedImage: image }, abort.signal)) {
+      for await (const event of agentLoop.run({ workspaceId, instruction, projectType, resumeSandboxId: resumeId, attachedImage: image, dbConfig: validatedDbConfig }, abort.signal)) {
         send(event);
         if (abort.signal.aborted) break;
       }
@@ -159,6 +168,29 @@ export function registerEngineerRoutes(app: Express): void {
     const { workspaceId } = req.params;
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId required.' }); return; }
     res.json({ usage: usageTracker.get(workspaceId) });
+  });
+
+  // Phase 14 — BYOD: immediately scaffold the DB lib file + .env for the user's
+  // chosen provider. Called when the user saves credentials in the Database panel.
+  // This is a convenience shortcut; the agent loop also auto-scaffolds on first use.
+  app.post('/api/engineer-db-scaffold', async (req: Request, res: Response) => {
+    const { workspaceId, dbConfig } = req.body || {};
+    if (typeof workspaceId !== 'string' || !workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    const VALID_PROVIDERS = ['supabase', 'firebase', 'mongodb', 'neon', 'appwrite', 'other'];
+    if (!dbConfig || !VALID_PROVIDERS.includes(dbConfig.provider)) {
+      res.status(400).json({ error: 'Valid dbConfig.provider is required.' });
+      return;
+    }
+    try {
+      await actuator.ensureWorkspace(workspaceId);
+      const result = await backendScaffolder.scaffold(workspaceId, dbConfig, actuator);
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Scaffold failed.' });
+    }
   });
 
   // Pause a sandbox to stop compute billing while preserving full state for a

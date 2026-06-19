@@ -8533,7 +8533,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 onAgentChange={handleAgentChange}
                 files={files}
                 onFilesChange={(newFiles) => setFiles(newFiles as any)}
-                onRun={() => updatePreview(files)}
+                onRun={(f) => updatePreview(f || files)}
                 generatedCode={generatedCode}
                 messages={messages}
                 chatInput={input}

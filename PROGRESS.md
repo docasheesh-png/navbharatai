@@ -817,6 +817,22 @@ existing admin auth at **`GET /api/admin/metrics`**. Metrics never block a build
 (all wrapped in try/catch). 5 new tests (208 total). Verified server tsc 0 + frontend
 tsc 0 + 208 tests + boot:check PASS.
 
+### Milestone 5.12 — DONE — IDE live editor→preview sync (item 26)
+CodeStudio's Monaco editor updated `files` but the preview (renders `generatedCode`)
+only refreshed on a manual Run — so hand-edits didn't show live. Added a **debounced
+auto-rebuild** (900ms idle) in `handleFileChange` that reuses the EXISTING `onRun`
+pipeline (no duplicate bundler, no loop risk — onRun rebuilds `generatedCode` from
+files, never writes files back). App.tsx's CodeStudio `onRun` now uses the exact
+edited snapshot (`(f) => updatePreview(f || files)`) so the live preview reflects the
+freshest edit. Frontend tsc 0 · 208 tests · **vite build ✓**.
+
+### Admin decisions recorded (2026-06-19): Pro-gating = KEEP OPEN until app is 90%+
+(then limit); real Vercel/Netlify/Firebase deploy = LATER (NavBharat Hosting stays the
+only real deploy for now). So those Phase-5 items are intentionally deferred by admin.
+**Phase 5 is now at its code-doable ceiling** — remaining items are admin-deferred
+(gating, deploy) or infra-blocked (real build/Lighthouse/axe QA gates need the
+browser/container sandbox = Phase-3 infra).
+
 ### ⚠️ DECISIONS NEEDED FROM ADMIN before the next Phase-5 items (outward-facing/business):
 1. **Pro-gating enforcement:** `/api/pro-chat`, `/api/pro-build`, `/api/build` are
    currently OPEN to everyone. Enforcing tiers would LOCK OUT free users — a

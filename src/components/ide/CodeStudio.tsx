@@ -199,8 +199,18 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     }
   }, [activeFile]);
 
+  // Debounced live editor → preview sync: when the user edits a file in the Monaco
+  // editor, refresh the preview automatically (after a short idle) using the SAME
+  // build pipeline as the Run button — no duplicate bundler, no risk of a loop
+  // (onRun rebuilds `generatedCode` from files; it never writes `files` back).
+  const autoRunTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => () => { if (autoRunTimer.current) clearTimeout(autoRunTimer.current); }, []);
+
   const handleFileChange = (content: string) => {
-    onFilesChange({ ...files, [activeFile]: content });
+    const nextFiles = { ...files, [activeFile]: content };
+    onFilesChange(nextFiles);
+    if (autoRunTimer.current) clearTimeout(autoRunTimer.current);
+    autoRunTimer.current = setTimeout(() => { onRun(nextFiles); }, 900);
   };
 
   const handleTabClose = (path: string) => {

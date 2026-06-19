@@ -159,11 +159,18 @@ export class E2BActuator implements IEngineerActuator {
 
     await sandbox.files.makeDir(WORKSPACE_ROOT);
 
-    if (!projectType || projectType === 'vite-react' || projectType === 'auto') {
-      const files = this.templateRegistry.getProvider('vite-react').getFiles([]);
+    // Resolve template: fall back to vite-react for unknown/auto types.
+    const templateKey =
+      projectType && projectType !== 'auto' && projectType !== 'node' && projectType !== 'python'
+        ? projectType
+        : (projectType === 'python' ? 'python-fastapi' : 'vite-react');
+    try {
+      const files = this.templateRegistry.getProvider(templateKey).getFiles([]);
       await sandbox.files.writeFiles(
         Object.entries(files).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${p}`, data: content }))
       );
+    } catch {
+      // Unknown template — start with an empty workspace, agent will scaffold it.
     }
 
     // Kick off playwright install in background immediately — by the time the agent
@@ -229,9 +236,31 @@ export class E2BActuator implements IEngineerActuator {
   async build(workspaceId: string): Promise<{ success: boolean; logs: string }> {
     const sandbox = await this.getSandbox(workspaceId);
     try {
-      // Skip npm install when node_modules already exists — saves 30-60s on every
-      // build/done verification (the agent may hit `done` several times). Mirrors
-      // LocalActuator. Only the first build pays the install cost.
+      // Python project: install deps via pip, then do a syntax check (no compile step).
+      const hasPyMain = await sandbox.files.exists(`${WORKSPACE_ROOT}/main.py`).catch(() => false);
+      if (hasPyMain) {
+        const hasReqs = await sandbox.files.exists(`${WORKSPACE_ROOT}/requirements.txt`).catch(() => false);
+        let installLog = '';
+        if (hasReqs) {
+          const install = await sandbox.commands.run(
+            'pip install -r requirements.txt -q',
+            { cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS },
+          );
+          installLog = install.stdout + install.stderr;
+        }
+        const check = await sandbox.commands.run('python3 -m py_compile main.py', {
+          cwd: WORKSPACE_ROOT, timeoutMs: 30_000,
+        });
+        return { success: check.exitCode === 0, logs: installLog + check.stdout + check.stderr };
+      }
+
+      // Static project (no package.json): nothing to build.
+      const hasPkg = await sandbox.files.exists(`${WORKSPACE_ROOT}/package.json`).catch(() => false);
+      if (!hasPkg) {
+        return { success: true, logs: '(no build step — static project)' };
+      }
+
+      // Node/npm project: install if needed, then run build script.
       let installLog = '';
       const hasModules = await sandbox.files.exists(`${WORKSPACE_ROOT}/node_modules`).catch(() => false);
       if (!hasModules) {
@@ -266,7 +295,8 @@ export class E2BActuator implements IEngineerActuator {
     const isLongRunning = !isFetch && (
       /\b(?:dev|serve|watch|livereload)\b/i.test(command) ||
       /npm\s+run\s+(?:dev|start|serve)\b/i.test(command) ||
-      /python.*http\.server|http-server|live-server/i.test(command)
+      /python.*http\.server|http-server|live-server/i.test(command) ||
+      /\buvicorn\b|\bgunicorn\b|\bflask\s+run\b/i.test(command)
     );
 
     if (isLongRunning) {

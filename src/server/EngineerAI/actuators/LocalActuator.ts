@@ -89,8 +89,29 @@ export class LocalActuator implements IEngineerActuator {
     const workspacePath = path.join(WORKSPACES_ROOT, workspaceId);
     const opts = { cwd: workspacePath, timeout: BUILD_TIMEOUT_MS, maxBuffer: MAX_BUFFER };
     try {
-      // BUG FIX (E2): Skip npm install when node_modules already exists — saves 30-60s
-      // per build() call and prevents the done handler from hanging on reinstall.
+      // Python project: pip install + syntax check.
+      try {
+        await fsPromises.access(path.join(workspacePath, 'main.py'));
+        let installLog = '';
+        try {
+          await fsPromises.access(path.join(workspacePath, 'requirements.txt'));
+          const install = await execPromise('pip install -r requirements.txt -q', opts);
+          installLog = install.stdout + install.stderr;
+        } catch { /* no requirements.txt */ }
+        const check = await execPromise('python3 -m py_compile main.py', opts);
+        return { success: true, logs: installLog + check.stdout + check.stderr };
+      } catch (accessErr: any) {
+        if (accessErr.code !== 'ENOENT') throw accessErr;
+      }
+
+      // Static project: nothing to build.
+      try {
+        await fsPromises.access(path.join(workspacePath, 'package.json'));
+      } catch {
+        return { success: true, logs: '(no build step — static project)' };
+      }
+
+      // Node/npm project.
       let installLog = '';
       try {
         await fsPromises.access(path.join(workspacePath, 'node_modules'));

@@ -19,6 +19,7 @@ const PORT_PATTERNS = [
   /started(?:\s+server)?\s+on\s+(?:port\s+)?(\d{4,5})/i,
   /server\s+is\s+running\s+on\s+(?:port\s+)?(\d{4,5})/i,
   /:\s*(\d{4,5})\b.*(?:ready|started|running)/i,
+  /running on (?:http:\/\/)?[^:]+:(\d{4,5})/i,
 ];
 
 const SYSTEM_PROMPT = `You are Engineer AI — a sharp, friendly senior engineer who can both converse intelligently AND build real software autonomously. You have EYES and HANDS: you can take screenshots of running apps and SEE what the UI looks like, AND you can drive a real browser cursor to interact with any page.
@@ -109,7 +110,9 @@ Coding rules (when in MODE 2):
 - When starting a dev server, use port 3000 and bind to 0.0.0.0 (--host 0.0.0.0 --port 3000).
 - Commands run with a 60-second timeout.
 - Checkpoints are created automatically before every edit_file and patch_file action. If a change makes things worse, use restore to go back: { "action": "restore", "args": { "checkpointId": "<id from checkpoint_created event>" } }.
-- Use provision_db ONCE at the start of any task that needs a database, auth (login/signup), or file uploads. It installs and starts PostgreSQL inside the sandbox, generates a DATABASE_URL + JWT_SECRET in .env, and scaffolds src/lib/db.ts / auth.ts / storage.ts helpers. Features: "db" (PostgreSQL), "auth" (bcrypt + JWT), "storage" (local filesystem). After provision_db, install required packages with bash (npm install) if not already done, then create an Express server that uses the scaffolded helpers.`;
+- Use provision_db ONCE at the start of any task that needs a database, auth (login/signup), or file uploads. It installs and starts PostgreSQL inside the sandbox, generates a DATABASE_URL + JWT_SECRET in .env, and scaffolds src/lib/db.ts / auth.ts / storage.ts helpers. Features: "db" (PostgreSQL), "auth" (bcrypt + JWT), "storage" (local filesystem). After provision_db, install required packages with bash (npm install) if not already done, then create an Express server that uses the scaffolded helpers.
+- Supported project types: vite-react (default), nextjs, vue, svelte, node-express, python-fastapi, static. The workspace is scaffolded with the correct template on first use. For Python (python-fastapi) projects: start the server with "uvicorn main:app --host 0.0.0.0 --port 3000 --reload" and install deps with "pip install -r requirements.txt". For static sites: no build step; open index.html directly in the browser.
+- The workspace is a git repo (auto-initialized). You can use bash to run git commands: "git status", "git log --oneline", "git diff". After major milestones, commit with "git add -A && git commit -m 'message'". The final commit is created automatically when done succeeds.`;
 
 function stripFences(text: string): string {
   const t = text.trim();
@@ -182,6 +185,14 @@ export class EngineerAgentLoop {
     } catch (err: any) {
       yield { type: 'error', message: `Workspace init failed: ${err?.message || 'Cannot create workspace directory.'}` };
       return;
+    }
+
+    // Phase 11A: auto-init git so the agent can commit milestones.
+    // Best-effort: skip if git is unavailable or workspace already has a repo.
+    if (!resumeSandboxId) {
+      await this.actuator.runCommand(workspaceId,
+        `git init && git config user.email "engineer-ai@navbharatai.app" && git config user.name "Engineer AI" && git add -A && git commit -m "chore: initial workspace scaffold" --allow-empty 2>&1 | tail -3`
+      ).catch(() => {/* non-fatal */});
     }
 
     // Surface the persistent sandbox ID so the client can store it and resume later.
@@ -562,10 +573,21 @@ export class EngineerAgentLoop {
         const buildResult = await this.actuator.build(workspaceId);
         yield { type: 'build_result', success: buildResult.success, logs: buildResult.logs.slice(-MAX_OBS_CHARS) };
         if (buildResult.success) {
-          yield { type: 'complete', summary: parsed.args.summary || 'Task complete.', steps: step };
+          // Phase 11A: auto-commit the finished work so git history reflects each session.
+          const summary = parsed.args.summary || 'Task complete.';
+          await this.actuator.runCommand(workspaceId,
+            `git add -A && git commit -m ${JSON.stringify(`feat: ${summary.slice(0, 72)}`)} 2>&1 | tail -3`
+          ).catch(() => {/* non-fatal */});
+          yield { type: 'complete', summary, steps: step };
           return;
         }
-        observation = `Build failed — cannot mark done yet. Fix the errors:\n${buildResult.logs.slice(-2000)}`;
+        // Phase 11B: extract TypeScript error codes and inject targeted hints.
+        const buildLogs = buildResult.logs.slice(-2000);
+        const tsCodes = [...new Set((buildLogs.match(/\bTS\d{4}\b/g) || []))];
+        const searchHint = tsCodes.length > 0
+          ? `\n\nTypeScript error codes found: ${tsCodes.join(', ')}. Consider using web_search to look up the fix (e.g. "${tsCodes[0]} fix typescript").`
+          : '';
+        observation = `Build failed — cannot mark done yet. Fix the errors:${searchHint}\n${buildLogs}`;
       } else {
         observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, provision_db, done.`;
       }

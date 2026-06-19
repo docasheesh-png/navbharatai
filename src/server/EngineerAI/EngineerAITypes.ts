@@ -2,7 +2,7 @@ export interface EngineerTask {
   workspaceId: string;
   instruction: string;
   /** Optional hint about the project stack — defaults to auto-detection. */
-  projectType?: 'vite-react' | 'node' | 'python' | 'auto';
+  projectType?: 'vite-react' | 'nextjs' | 'vue' | 'svelte' | 'node-express' | 'python-fastapi' | 'static' | 'node' | 'python' | 'auto';
   /** Persisted sandbox ID to resume — restores files/node_modules/running server. */
   resumeSandboxId?: string;
 }

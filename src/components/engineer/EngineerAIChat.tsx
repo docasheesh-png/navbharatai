@@ -55,7 +55,7 @@ const WELCOME: ChatMessage = {
 
 function uid() { return `${Date.now()}_${Math.random().toString(36).slice(2)}`; }
 
-type WorkspaceTab = 'terminal' | 'files' | 'browser' | 'checkpoints' | 'database';
+type WorkspaceTab = 'terminal' | 'files' | 'browser' | 'checkpoints';
 
 type DbProvider = 'supabase' | 'firebase' | 'mongodb' | 'neon' | 'appwrite' | 'other';
 
@@ -64,59 +64,6 @@ interface DbConfig {
   platformName?: string;
   credentials: Record<string, string>;
 }
-
-const DB_PROVIDERS: { id: DbProvider; label: string; keyLink: string; fields: { key: string; label: string; placeholder: string }[] }[] = [
-  {
-    id: 'supabase', label: 'Supabase',
-    keyLink: 'https://supabase.com/dashboard/project/_/settings/api',
-    fields: [
-      { key: 'url',     label: 'Project URL',  placeholder: 'https://xxxx.supabase.co' },
-      { key: 'anonKey', label: 'Anon Key',      placeholder: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…' },
-    ],
-  },
-  {
-    id: 'firebase', label: 'Firebase',
-    keyLink: 'https://console.firebase.google.com/',
-    fields: [
-      { key: 'apiKey',            label: 'API Key',            placeholder: 'AIzaSy…' },
-      { key: 'authDomain',        label: 'Auth Domain',        placeholder: 'your-project.firebaseapp.com' },
-      { key: 'projectId',         label: 'Project ID',         placeholder: 'your-project-id' },
-      { key: 'storageBucket',     label: 'Storage Bucket',     placeholder: 'your-project.appspot.com' },
-      { key: 'messagingSenderId', label: 'Messaging Sender ID', placeholder: '123456789' },
-      { key: 'appId',             label: 'App ID',             placeholder: '1:123:web:abc' },
-    ],
-  },
-  {
-    id: 'mongodb', label: 'MongoDB Atlas',
-    keyLink: 'https://cloud.mongodb.com/',
-    fields: [
-      { key: 'uri', label: 'Connection URI', placeholder: 'mongodb+srv://user:pass@cluster.mongodb.net/mydb' },
-    ],
-  },
-  {
-    id: 'neon', label: 'Neon (Postgres)',
-    keyLink: 'https://console.neon.tech/',
-    fields: [
-      { key: 'connectionString', label: 'Connection String', placeholder: 'postgresql://user:pass@ep-xxx.neon.tech/neondb' },
-    ],
-  },
-  {
-    id: 'appwrite', label: 'Appwrite',
-    keyLink: 'https://cloud.appwrite.io/',
-    fields: [
-      { key: 'endpoint',  label: 'API Endpoint', placeholder: 'https://cloud.appwrite.io/v1' },
-      { key: 'projectId', label: 'Project ID',   placeholder: 'your-project-id' },
-    ],
-  },
-  {
-    id: 'other', label: 'Other',
-    keyLink: '',
-    fields: [
-      { key: 'platformName',     label: 'Platform Name',      placeholder: 'e.g. PlanetScale, Turso…' },
-      { key: 'connectionString', label: 'Connection String / API Key', placeholder: 'mysql://… or your API key' },
-    ],
-  },
-];
 
 // Simple LCS-based diff (capped at 300 lines each side to stay fast)
 function computeDiff(oldText: string, newText: string): Array<{ line: string; type: 'add' | 'remove' | 'same' }> {
@@ -198,8 +145,9 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   // Phase 10 — Backend ready indicator
   const [backendReady, setBackendReady] = useState<{ features: string[]; dbUrl: string } | null>(null);
 
-  // Phase 14 — BYOD: database config persisted in localStorage, never sent to NavBharatAI Firestore
-  const [dbConfig, setDbConfig] = useState<DbConfig | null>(() => {
+  // Phase 14 — BYOD: read DB config from localStorage (configured in Settings → App Settings → Database).
+  // Passed with every /api/engineer-chat request so the agent knows which SDK to scaffold.
+  const [dbConfig] = useState<DbConfig | null>(() => {
     try {
       const key = userId ? `engineer_db_${userId}` : 'engineer_db_anon';
       const stored = localStorage.getItem(key);
@@ -207,24 +155,6 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     } catch {}
     return null;
   });
-  const [dbFormProvider, setDbFormProvider] = useState<DbProvider>(() => {
-    try {
-      const key = userId ? `engineer_db_${userId}` : 'engineer_db_anon';
-      const stored = localStorage.getItem(key);
-      if (stored) return (JSON.parse(stored) as DbConfig).provider;
-    } catch {}
-    return 'supabase';
-  });
-  const [dbFormCreds, setDbFormCreds] = useState<Record<string, string>>(() => {
-    try {
-      const key = userId ? `engineer_db_${userId}` : 'engineer_db_anon';
-      const stored = localStorage.getItem(key);
-      if (stored) return (JSON.parse(stored) as DbConfig).credentials ?? {};
-    } catch {}
-    return {};
-  });
-  const [dbSaving, setDbSaving] = useState(false);
-  const [dbSavedMsg, setDbSavedMsg] = useState('');
 
   // Phase 12C/12D — image the user attached to the next message (design-to-code / asset).
   const [attachedImage, setAttachedImage] = useState<{ base64: string; mimeType: string; filename: string } | null>(null);
@@ -594,47 +524,6 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     }
   };
 
-  // Phase 14 — Save the user's database credentials to localStorage and scaffold immediately.
-  const handleSaveDb = async () => {
-    const providerDef = DB_PROVIDERS.find(p => p.id === dbFormProvider);
-    if (!providerDef) return;
-    const credentials: Record<string, string> = {};
-    for (const field of providerDef.fields) {
-      credentials[field.key] = dbFormCreds[field.key] ?? '';
-    }
-    const newConfig: DbConfig = {
-      provider: dbFormProvider,
-      credentials,
-      ...(dbFormProvider === 'other' && dbFormCreds['platformName']
-        ? { platformName: dbFormCreds['platformName'] }
-        : {}),
-    };
-    try {
-      const key = userId ? `engineer_db_${userId}` : 'engineer_db_anon';
-      localStorage.setItem(key, JSON.stringify(newConfig));
-    } catch {}
-    setDbConfig(newConfig);
-    setDbSaving(true);
-    try {
-      const res = await fetch('/api/engineer-db-scaffold', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId: workspaceIdRef.current, dbConfig: newConfig }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDbSavedMsg(data.summary || 'Database credentials saved and scaffolded.');
-      } else {
-        setDbSavedMsg('Credentials saved locally. Scaffolding will run on your next message.');
-      }
-    } catch {
-      setDbSavedMsg('Credentials saved locally. Scaffolding will run on your next message.');
-    } finally {
-      setDbSaving(false);
-      setTimeout(() => setDbSavedMsg(''), 5000);
-    }
-  };
-
   // Phase 9A — User click on live preview screenshot: relay coordinates to agent
   const handlePreviewClick = async (e: React.MouseEvent<HTMLImageElement>) => {
     const rect = (e.currentTarget as HTMLImageElement).getBoundingClientRect();
@@ -918,12 +807,6 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
               {checkpoints.length > 0 && (
                 <span className="bg-amber-500/30 text-amber-300 text-[10px] px-1.5 rounded-full">{checkpoints.length}</span>
               )}
-            </span>
-          </button>
-          <button className={tabClass('database')} onClick={() => setActiveTab('database')}>
-            <span className="flex items-center gap-1.5">
-              <Database className="w-3 h-3" />DB
-              {dbConfig && <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" title="Database configured" />}
             </span>
           </button>
           {/* Mobile-only minimize/expand toggle for the workspace panel. */}
@@ -1311,92 +1194,6 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
           </div>
         )}
 
-        {/* Database tab — Phase 14 BYOD: user connects their own database provider */}
-        {activeTab === 'database' && (
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
-            <div className="max-w-md space-y-4">
-              <div>
-                <h3 className="text-sm font-semibold text-white mb-1">Your Database</h3>
-                <p className="text-[11px] text-[#8b949e] leading-relaxed">
-                  Connect your own database. Engineer AI scaffolds the SDK setup file and .env in your sandbox — NavBharatAI never stores or accesses your credentials.
-                </p>
-              </div>
-
-              {/* Provider selector */}
-              <div>
-                <label className="text-[11px] text-[#8b949e] font-medium block mb-1.5">Provider</label>
-                <select
-                  value={dbFormProvider}
-                  onChange={e => {
-                    setDbFormProvider(e.target.value as DbProvider);
-                    setDbFormCreds({});
-                  }}
-                  className="w-full bg-[#161b22] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500/40"
-                >
-                  {DB_PROVIDERS.map(p => (
-                    <option key={p.id} value={p.id}>{p.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Provider-specific credential fields */}
-              {DB_PROVIDERS.find(p => p.id === dbFormProvider)?.fields.map(field => (
-                <div key={field.key}>
-                  <label className="text-[11px] text-[#8b949e] font-medium block mb-1.5">{field.label}</label>
-                  <input
-                    type={['key', 'secret', 'password', 'anonkey'].some(k => field.key.toLowerCase().includes(k)) ? 'password' : 'text'}
-                    value={dbFormCreds[field.key] ?? ''}
-                    onChange={e => setDbFormCreds(prev => ({ ...prev, [field.key]: e.target.value }))}
-                    placeholder={field.placeholder}
-                    autoComplete="off"
-                    className="w-full bg-[#161b22] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#586069] focus:outline-none focus:border-indigo-500/40 font-mono text-[11px]"
-                  />
-                </div>
-              ))}
-
-              {/* Link to the provider's key-generation page */}
-              {DB_PROVIDERS.find(p => p.id === dbFormProvider)?.keyLink && (
-                <a
-                  href={DB_PROVIDERS.find(p => p.id === dbFormProvider)!.keyLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors"
-                >
-                  <ExternalLink className="w-3 h-3" />
-                  Get {DB_PROVIDERS.find(p => p.id === dbFormProvider)?.label} API keys
-                </a>
-              )}
-
-              {/* Save & Scaffold button */}
-              <button
-                onClick={handleSaveDb}
-                disabled={dbSaving}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-medium rounded-xl transition-colors"
-              >
-                {dbSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
-                {dbSaving ? 'Saving…' : 'Save & Scaffold'}
-              </button>
-
-              {/* Feedback message after save */}
-              {dbSavedMsg && (
-                <div className="flex items-start gap-2 p-3 rounded-xl bg-green-500/10 border border-green-500/20">
-                  <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0 mt-0.5" />
-                  <p className="text-[11px] text-green-300 leading-relaxed">{dbSavedMsg}</p>
-                </div>
-              )}
-
-              {/* Active config indicator */}
-              {dbConfig && (
-                <div className="flex items-center gap-2 p-3 rounded-xl bg-white/3 border border-white/5">
-                  <div className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
-                  <p className="text-[11px] text-[#8b949e]">
-                    Active: <span className="text-white font-medium">{DB_PROVIDERS.find(p => p.id === dbConfig.provider)?.label ?? dbConfig.provider}</span>
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
         </div>
       </div>
     </div>

@@ -36,8 +36,14 @@ export interface IEngineerActuator {
   /**
    * Capture a screenshot of the given URL from inside the sandbox.
    * Returns a base64-encoded PNG. Requires a real sandbox with a browser available.
+   * Optional `viewport` sets the browser window size so the agent can verify
+   * responsive layouts (e.g. mobile vs desktop). Defaults to 1280×720.
    */
-  screenshot(workspaceId: string, url: string): Promise<{ base64: string; mimeType: 'image/png' }>;
+  screenshot(
+    workspaceId: string,
+    url: string,
+    viewport?: { width: number; height: number },
+  ): Promise<{ base64: string; mimeType: 'image/png' }>;
   /**
    * Perform a real browser interaction (click, type, navigate, scroll, press, wait)
    * against a persistent headless browser session inside the sandbox, then return

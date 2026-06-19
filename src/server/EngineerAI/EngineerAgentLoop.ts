@@ -7,6 +7,15 @@ import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from '
 const MAX_STEPS = 24;
 const DEADLINE_MS = 8 * 60 * 1000;
 const MAX_OBS_CHARS = 3000;
+// Phase 12A — named viewports so the agent can verify responsive layouts.
+const VIEWPORTS: Record<string, { width: number; height: number }> = {
+  mobile: { width: 390, height: 844 },   // iPhone 14-ish
+  tablet: { width: 820, height: 1180 },  // iPad Air-ish
+  desktop: { width: 1280, height: 720 },
+};
+// Phase 12A — cross-session project memory file (the agent records WHY decisions here).
+const MEMORY_PATH = '.engineer/memory.md';
+const MAX_MEMORY_CHARS = 4000;
 const MAX_HISTORY_STEPS = 20;
 const MAX_PARSE_RETRIES = 3;
 // Steps kept verbatim; older steps are condensed into a one-line summary each.
@@ -68,7 +77,7 @@ Action args:
   patch_file:     { "path": "relative/path.tsx", "old_str": "exact text to replace", "new_str": "replacement" }
   restore:        { "checkpointId": "ckpt_1234567890" }
   provision_db:   { "features": "db,auth,storage" }
-  screenshot:     { "url": "http://localhost:3000" }
+  screenshot:     { "url": "http://localhost:3000", "viewport": "mobile"|"tablet"|"desktop" (optional — defaults to desktop) }
   browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait", "selector": "CSS selector", "text": "text to type / key to press", "url": "url to navigate to", "direction": "up"|"down" }
   drive:          { "steps": "[{\"action\":\"navigate\",\"url\":\"http://localhost:3000\"},{\"action\":\"click\",\"selector\":\"#btn\"}]" }
   web_search:     { "query": "what to look up — docs, error messages, package names/versions" }
@@ -101,6 +110,8 @@ Coding rules (when in MODE 2):
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
 - Use web_search when you're unsure: to confirm the correct/latest package version before installing, to read API/docs for an unfamiliar library, or to look up the fix for an error you don't recognize. Don't guess a version — search it.
 - After starting a dev server: take a screenshot (or navigate via browser_action/drive) to visually verify the UI.
+- Responsive check: when layout matters, screenshot at BOTH "mobile" and "desktop" viewports and fix anything that breaks at mobile width (overflow, tiny text, overlapping elements).
+- Project memory: record key decisions, architecture choices, and the WHY behind them in ${'`.engineer/memory.md`'} using edit_file (append to it — read it first if it exists). This file is automatically shown to you at the start of every future session, so future-you remembers context that isn't obvious from the code alone. Update it after any significant design decision.
 - For anything interactive (forms, buttons, navigation, login): actually TEST it with browser_action or drive —
   click the buttons, fill the forms, and confirm from the returned screenshot that it works.
 - If a screenshot reveals problems (wrong layout, missing elements, broken styles, errors): fix them, then re-verify.
@@ -375,12 +386,16 @@ export class EngineerAgentLoop {
         }
       } else if (parsed.action === 'screenshot') {
         const targetUrl = parsed.args.url || lastPreviewUrl || 'http://localhost:3000';
-        yield { type: 'status', message: `Step ${step}: taking screenshot of ${targetUrl}…` };
+        // Phase 12A — optional named viewport (mobile/tablet/desktop) for responsive checks.
+        const vpName = (parsed.args.viewport || '').toLowerCase();
+        const viewport = VIEWPORTS[vpName];
+        const vpLabel = viewport ? ` @ ${vpName} (${viewport.width}×${viewport.height})` : '';
+        yield { type: 'status', message: `Step ${step}: taking screenshot of ${targetUrl}${vpLabel}…` };
         try {
-          const shot = await this.actuator.screenshot(workspaceId, targetUrl);
+          const shot = await this.actuator.screenshot(workspaceId, targetUrl, viewport);
           lastScreenshot = shot.base64; // injected into the NEXT router call as a vision image
           yield { type: 'screenshot_result', url: targetUrl, base64: shot.base64 };
-          observation = `Screenshot captured of ${targetUrl}. The image has been attached to your next thinking step — look at it carefully and describe what you see, then decide what to fix.`;
+          observation = `Screenshot captured of ${targetUrl}${vpLabel}. The image has been attached to your next thinking step — look at it carefully and describe what you see, then decide what to fix.`;
         } catch (err: any) {
           observation = `screenshot error: ${err?.message}. If playwright is not installed, run: bash { "command": "npm install playwright && npx playwright install chromium" }`;
         }
@@ -677,12 +692,26 @@ export class EngineerAgentLoop {
     // 6. Full file tree (paths only) — gives the model the overall shape
     const fileTree = buildFileTree(fileList);
 
+    // ── Phase 12A: cross-session project memory ───────────────────────────
+    // If the agent recorded architecture/decisions in a prior session, surface
+    // them FIRST so it remembers WHY (not just the files). Best-effort read.
+    let memorySection = '';
+    try {
+      const mem = await this.actuator.readFile(workspaceId, MEMORY_PATH);
+      if (mem && mem.trim()) {
+        memorySection = `[PROJECT MEMORY — decisions & architecture from earlier sessions]\n${mem.slice(0, MAX_MEMORY_CHARS)}`;
+      }
+    } catch { /* no memory file yet — first session */ }
+
     // ── Assemble prompt ───────────────────────────────────────────────────
     const parts: string[] = [
       `[TASK]\n${instruction}`,
+    ];
+    if (memorySection) parts.push(memorySection);
+    parts.push(
       `[WORKSPACE — FILE TREE (${fileList.length} files)]\n${fileTree}`,
       `[WORKSPACE — FILE CONTENTS (top ${fileSections.length} by relevance)]\n${fileSections.join('\n\n')}`,
-    ];
+    );
 
     if (history.length > 0) {
       const verbatim = history.slice(-HISTORY_VERBATIM_TAIL);

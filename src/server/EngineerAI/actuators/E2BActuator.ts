@@ -17,7 +17,9 @@ const {chromium}=require('playwright');
 (async()=>{
   const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
   const p=await b.newPage();
-  await p.setViewportSize({width:1280,height:720});
+  const vw=parseInt(process.argv[3],10)||1280;
+  const vh=parseInt(process.argv[4],10)||720;
+  await p.setViewportSize({width:vw,height:vh});
   const url=process.argv[2]||'about:blank';
   await p.goto(url,{waitUntil:'networkidle',timeout:15000}).catch(()=>{});
   await new Promise(r=>setTimeout(r,800));
@@ -36,10 +38,12 @@ const SCREENSHOT_CDP_SCRIPT = `
 const {chromium}=require('playwright');
 (async()=>{
   const target=process.argv[2]||'';
+  const vw=parseInt(process.argv[3],10)||1280;
+  const vh=parseInt(process.argv[4],10)||720;
   const browser=await chromium.connectOverCDP('http://localhost:${CDP_PORT}');
-  const ctx=browser.contexts()[0]||await browser.newContext({viewport:{width:1280,height:720}});
+  const ctx=browser.contexts()[0]||await browser.newContext({viewport:{width:vw,height:vh}});
   let page=ctx.pages()[0]||await ctx.newPage();
-  await page.setViewportSize({width:1280,height:720}).catch(()=>{});
+  await page.setViewportSize({width:vw,height:vh}).catch(()=>{});
   if(target && page.url()!==target){
     await page.goto(target,{waitUntil:'networkidle',timeout:15000}).catch(()=>{});
   }
@@ -354,8 +358,10 @@ const {chromium}=require('playwright');
     return `https://${sandbox.getHost(port)}`;
   }
 
-  async screenshot(workspaceId: string, url: string): Promise<{ base64: string; mimeType: 'image/png' }> {
+  async screenshot(workspaceId: string, url: string, viewport?: { width: number; height: number }): Promise<{ base64: string; mimeType: 'image/png' }> {
     const sandbox = await this.getSandbox(workspaceId);
+    const vw = viewport?.width ?? 1280;
+    const vh = viewport?.height ?? 720;
 
     // Ensure playwright background install has been kicked off
     if (!this._playwrightReady.has(workspaceId)) {
@@ -380,7 +386,7 @@ const {chromium}=require('playwright');
     // to a fresh standalone browser if the daemon/CDP isn't reachable.
     await this._ensureBrowserDaemon(sandbox, workspaceId).catch(() => {});
     const cdp = await sandbox.commands.run(
-      `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/screenshot-cdp.js ${JSON.stringify(url)}`,
+      `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/screenshot-cdp.js ${JSON.stringify(url)} ${vw} ${vh}`,
       { cwd: TOOLS_DIR, timeoutMs: 30_000 }
     ).catch(() => null);
     if (cdp && cdp.exitCode === 0 && cdp.stdout) {
@@ -389,7 +395,7 @@ const {chromium}=require('playwright');
 
     // Fallback: fresh standalone browser (clean session, but always works).
     const result = await sandbox.commands.run(
-      `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/screenshot.js ${JSON.stringify(url)}`,
+      `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/screenshot.js ${JSON.stringify(url)} ${vw} ${vh}`,
       { cwd: TOOLS_DIR, timeoutMs: 30_000 }
     );
 

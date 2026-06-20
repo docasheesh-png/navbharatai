@@ -9,7 +9,8 @@ import { usageTracker } from './UsageTracker';
 
 const MAX_STEPS = 60;
 const DEADLINE_MS = 45 * 60 * 1000;
-const MAX_OBS_CHARS = 3000;
+// Phase 4 — larger per-step observation window so full build logs stay visible.
+const MAX_OBS_CHARS = 6000;
 // Phase 12A — named viewports so the agent can verify responsive layouts.
 const VIEWPORTS: Record<string, { width: number; height: number }> = {
   mobile: { width: 390, height: 844 },   // iPhone 14-ish
@@ -19,7 +20,8 @@ const VIEWPORTS: Record<string, { width: number; height: number }> = {
 // Phase 12A — cross-session project memory file (the agent records WHY decisions here).
 const MEMORY_PATH = '.engineer/memory.md';
 const MAX_MEMORY_CHARS = 4000;
-const MAX_HISTORY_STEPS = 20;
+// Phase 4 — retain more steps of history so the agent keeps long-task context.
+const MAX_HISTORY_STEPS = 30;
 const MAX_PARSE_RETRIES = 3;
 // Steps kept verbatim; older steps are condensed into a one-line summary each.
 const HISTORY_VERBATIM_TAIL = 12;
@@ -71,7 +73,7 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"provision_db"|"deploy"|"done", "args": { ... } }
+{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"provision_db"|"deploy"|"clone_repo"|"git_push"|"done", "args": { ... } }
 
 Action args:
   reply:          { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
@@ -82,9 +84,12 @@ Action args:
   provision_db:   { "features": "db,auth,storage" }
   deploy:         { } — builds the project then publishes dist/ to Firebase Hosting; returns a PERMANENT public URL that survives sandbox pause/restart. Use for static/SPA apps (React/Vite, Vue, Svelte, Next.js static export). Node/Python backends: use the live-preview URL instead (E2B already exposes a public HTTPS URL via server_ready).
   screenshot:     { "url": "http://localhost:3000", "viewport": "mobile"|"tablet"|"desktop" (optional — defaults to desktop) }
-  browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait", "selector": "CSS selector", "text": "text to type / key to press", "url": "url to navigate to", "direction": "up"|"down" }
+  browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait"|"hover"|"double_click"|"select_option", "selector": "CSS selector", "text": "text to type / key to press / option value to select", "url": "url to navigate to", "direction": "up"|"down" }
+                  — hover: move the mouse over an element (reveals dropdown menus, tooltips). double_click: open/select (e.g. select a word, expand a tree item). select_option: choose a value in a <select> dropdown (pass the option value/label in "text").
   drive:          { "steps": "[{\"action\":\"navigate\",\"url\":\"http://localhost:3000\"},{\"action\":\"click\",\"selector\":\"#btn\"}]" }
   web_search:     { "query": "what to look up — docs, error messages, package names/versions" }
+  clone_repo:     { "repoUrl": "https://github.com/owner/repo" } — clones a GitHub repo INTO the workspace. Use when the user wants to work on an existing repo. The user's GitHub token (from Secrets & Keys) is used automatically for private repos.
+  git_push:       { "message": "commit message", "branch": "main" (optional) } — commits ALL current changes and pushes to the repo's origin on GitHub. Requires a GITHUB_TOKEN in Settings → App Settings → Secrets & Keys. Use clone_repo first (or set a remote) so origin is known.
   restore:        { "checkpointId": "ckpt_1234567890" }
   done:           { "summary": "one sentence describing what was accomplished" }
 
@@ -112,6 +117,7 @@ Coding rules (when in MODE 2):
 - One action per response. Wait for the observation before the next action.
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
+- Save steps: chain multiple shell commands with ${'`&&`'} in ONE bash action (e.g. ${'`npm install && npm run build`'}) instead of spending a separate step on each. Steps are limited, so batch related commands.
 - Use web_search when you're unsure: to confirm the correct/latest package version before installing, to read API/docs for an unfamiliar library, or to look up the fix for an error you don't recognize. Don't guess a version — search it.
 - After starting a dev server: take a screenshot (or navigate via browser_action/drive) to visually verify the UI.
 - Responsive check: when layout matters, screenshot at BOTH "mobile" and "desktop" viewports and fix anything that breaks at mobile width (overflow, tiny text, overlapping elements).
@@ -155,6 +161,27 @@ function extractJson(text: string): string {
   return s.slice(start, end + 1);
 }
 
+/**
+ * Phase 5 — extract "owner/repo" from any GitHub URL form
+ * (https://github.com/owner/repo, with/without .git, or a bare "owner/repo").
+ * Returns null when the input is not a recognizable GitHub repo reference.
+ */
+function normalizeGithubRepo(input: string): string | null {
+  if (!input) return null;
+  let s = input.trim().replace(/\.git$/i, '');
+  // Strip protocol + any embedded credentials + host.
+  s = s.replace(/^https?:\/\/[^/]*github\.com\//i, '');
+  s = s.replace(/^git@github\.com:/i, '');
+  const m = s.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+/** Phase 5 — never echo a GitHub token back to the user or the model. */
+function redactToken(text: string, token?: string): string {
+  if (!token) return text;
+  return text.split(token).join('***');
+}
+
 function parseAction(raw: string): ReActAction {
   const parsed = JSON.parse(extractJson(raw));
   const action = String(parsed.action || '');
@@ -190,7 +217,7 @@ export class EngineerAgentLoop {
   constructor(private router: AIRouter, private actuator: IEngineerActuator) {}
 
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
-    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig } = task;
+    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig, githubToken } = task;
     let effectiveInstruction = instruction;
     const deadline = Date.now() + DEADLINE_MS;
 
@@ -285,6 +312,25 @@ export class EngineerAgentLoop {
       }
     }
 
+    // Phase 4 — plan-first: for non-trivial build requests, generate a short
+    // high-level plan BEFORE the ReAct loop so the agent (and user) have a roadmap.
+    // Skipped for resumed sessions (a plan already exists) and conversational turns.
+    // Fully best-effort: any failure silently falls through to the normal loop.
+    if (!resumeSandboxId) {
+      try {
+        const planSteps = await this.generatePlan(effectiveInstruction, signal);
+        if (planSteps && planSteps.length > 0) {
+          yield { type: 'plan', steps: planSteps };
+          // Persist the plan to project memory so future steps/sessions can reference it.
+          const planMd = `\n\n## Build plan (${new Date().toISOString().slice(0, 10)})\n` +
+            planSteps.map((s, i) => `${i + 1}. ${s}`).join('\n') + '\n';
+          let existingMemory = '';
+          try { existingMemory = await this.actuator.readFile(workspaceId, MEMORY_PATH); } catch { /* none yet */ }
+          await this.actuator.writeFile(workspaceId, MEMORY_PATH, existingMemory + planMd).catch(() => {});
+        }
+      } catch { /* non-fatal — proceed straight to the ReAct loop */ }
+    }
+
     for (let step = 1; step <= MAX_STEPS; step++) {
       if (signal?.aborted) { yield { type: 'aborted' }; return; }
       if (Date.now() > deadline) { yield { type: 'max_steps_reached', steps: step - 1 }; return; }
@@ -359,6 +405,8 @@ export class EngineerAgentLoop {
         web_search: 'Searching the web…',
         restore: 'Restoring workspace to a prior checkpoint…',
         provision_db: 'Provisioning database, auth, and storage…',
+        clone_repo: 'Cloning a GitHub repository…',
+        git_push: 'Committing and pushing to GitHub…',
         done: 'Verifying the build…',
       };
       const thought = parsed.thought || thoughtFallback[parsed.action] || 'Thinking…';
@@ -443,6 +491,81 @@ export class EngineerAgentLoop {
             observation = `restore error: ${err?.message}`;
           }
         }
+      } else if (parsed.action === 'clone_repo') {
+        // Phase 5 — clone a GitHub repo into the workspace. Token (if present) is
+        // injected into the clone URL, then stripped from the stored remote so it
+        // never persists in .git/config. Output is redacted before display.
+        const repoUrl = (parsed.args.repoUrl || parsed.args.url || '').trim();
+        const repoPath = normalizeGithubRepo(repoUrl);
+        if (!repoPath) {
+          observation = 'clone_repo error: "args.repoUrl" must be a GitHub URL like https://github.com/owner/repo.';
+        } else {
+          const httpsUrl = `https://github.com/${repoPath}.git`;
+          const authUrl = githubToken
+            ? `https://x-access-token:${githubToken}@github.com/${repoPath}.git`
+            : httpsUrl;
+          const cmd =
+            `git clone ${authUrl} . 2>&1 && ` +
+            `git remote set-url origin ${httpsUrl} && ` +
+            `git config user.email "engineer-ai@navbharatai.app" && ` +
+            `git config user.name "Engineer AI"`;
+          let result: { exitCode: number; stdout: string; stderr: string };
+          try {
+            result = await this.actuator.runCommand(workspaceId, cmd);
+          } catch (err: any) {
+            result = { exitCode: -1, stdout: '', stderr: err?.message || String(err) };
+          }
+          const output = redactToken((result.stdout + result.stderr).slice(-MAX_OBS_CHARS), githubToken);
+          if (result.exitCode === 0) {
+            yield { type: 'repo_cloned', url: httpsUrl };
+            observation = `Cloned ${httpsUrl} into the workspace.\n${output}`;
+          } else {
+            observation = `clone_repo failed (exit ${result.exitCode}):\n${output}`;
+          }
+        }
+      } else if (parsed.action === 'git_push') {
+        // Phase 5 — commit all changes and push to the repo's origin. Requires a
+        // GitHub token from Secrets & Keys. Token is injected only for the push
+        // command and never written to stored config; output is redacted.
+        const message = parsed.args.message || 'Update from Engineer AI';
+        const branch = (parsed.args.branch || '').trim();
+        if (!githubToken) {
+          observation =
+            'git_push error: no GitHub token found. Ask the user to add a GITHUB_TOKEN in ' +
+            'Settings → App Settings → Secrets & Keys, then retry.';
+        } else {
+          // Derive owner/repo from the (tokenless) origin remote set at clone time.
+          const remoteRes = await this.actuator.runCommand(workspaceId, 'git remote get-url origin 2>&1')
+            .catch(() => ({ exitCode: 1, stdout: '', stderr: '' }));
+          const repoPath = normalizeGithubRepo((remoteRes.stdout + remoteRes.stderr).trim());
+          if (remoteRes.exitCode !== 0 || !repoPath) {
+            observation =
+              'git_push error: no GitHub origin remote found. Use clone_repo first, or set a ' +
+              'remote with bash: git remote add origin https://github.com/owner/repo.git';
+          } else {
+            const authUrl = `https://x-access-token:${githubToken}@github.com/${repoPath}.git`;
+            const safeMsg = message.replace(/"/g, '\\"');
+            const branchSpec = branch ? `HEAD:${branch}` : 'HEAD';
+            const cmd =
+              `git add -A && ` +
+              `(git commit -m "${safeMsg}" 2>&1 || echo "nothing to commit") && ` +
+              `git push ${authUrl} ${branchSpec} 2>&1`;
+            let result: { exitCode: number; stdout: string; stderr: string };
+            try {
+              result = await this.actuator.runCommand(workspaceId, cmd);
+            } catch (err: any) {
+              result = { exitCode: -1, stdout: '', stderr: err?.message || String(err) };
+            }
+            const output = redactToken((result.stdout + result.stderr).slice(-MAX_OBS_CHARS), githubToken);
+            const httpsUrl = `https://github.com/${repoPath}`;
+            if (result.exitCode === 0) {
+              yield { type: 'git_pushed', url: httpsUrl };
+              observation = `Pushed changes to ${httpsUrl}.\n${output}`;
+            } else {
+              observation = `git_push failed (exit ${result.exitCode}):\n${output}`;
+            }
+          }
+        }
       } else if (parsed.action === 'browse') {
         const url = parsed.args.url || '';
         try {
@@ -469,8 +592,8 @@ export class EngineerAgentLoop {
           observation = `screenshot error: ${err?.message}. If playwright is not installed, run: bash { "command": "npm install playwright && npx playwright install chromium" }`;
         }
       } else if (parsed.action === 'browser_action') {
-        const subAction = parsed.args.action as 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait';
-        const validActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait'];
+        const subAction = parsed.args.action as 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option';
+        const validActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait', 'hover', 'double_click', 'select_option'];
         if (!validActions.includes(subAction)) {
           observation = `browser_action error: "args.action" must be one of ${validActions.join(', ')}. Got "${subAction}".`;
         } else {
@@ -499,7 +622,7 @@ export class EngineerAgentLoop {
           observation = 'drive error: "args.steps" must be a valid JSON array of browser action objects.';
         }
         if (driveSteps.length > 0) {
-          const validActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait'];
+          const validActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait', 'hover', 'double_click', 'select_option'];
           let driveObservations: string[] = [];
           let driveScreenshot: string | null = null;
           let driveCursorX: number | undefined;
@@ -509,7 +632,7 @@ export class EngineerAgentLoop {
           for (let di = 0; di < driveSteps.length; di++) {
             if (signal?.aborted) break;
             const ds = driveSteps[di];
-            const subAction = ds.action as 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait';
+            const subAction = ds.action as 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option';
             if (!validActions.includes(subAction)) {
               driveObservations.push(`Step ${di + 1}: unknown action "${ds.action}" — skipped.`);
               continue;
@@ -794,6 +917,37 @@ export class EngineerAgentLoop {
       } catch { /* skip malformed */ }
     }
     return files;
+  }
+
+  /**
+   * Phase 4 — plan-first step. Asks the model for a short, high-level build plan
+   * BEFORE the main ReAct loop. Returns the plan steps, or null when the request
+   * is conversational (greeting/question) and needs no plan. Best-effort: returns
+   * null on any parse/router failure so the caller falls through to the loop.
+   */
+  private async generatePlan(instruction: string, signal?: AbortSignal): Promise<string[] | null> {
+    const planSystemPrompt =
+      'You are a senior engineer producing a short build plan. ' +
+      'Given a user request, decide if it is a CODING task (build/create/modify/fix software) ' +
+      'or CONVERSATIONAL (greeting, question, advice, planning chat). ' +
+      'Respond with ONE JSON object, no markdown fences:\n' +
+      '- Conversational: {"conversational": true}\n' +
+      '- Coding: {"steps": ["step 1", "step 2", ...]} with 3–8 concise, ordered, high-level steps ' +
+      '(scaffold, core features, styling, verification). Keep each step under 100 characters.';
+    const planPrompt = `User request:\n${instruction}\n\nReturn the JSON now.`;
+
+    const { response, telemetry } = await this.router.route(planPrompt, planSystemPrompt);
+    if (signal?.aborted || !telemetry.success) return null;
+
+    const parsed = JSON.parse(extractJson(response.content));
+    if (parsed.conversational === true) return null;
+    if (!Array.isArray(parsed.steps)) return null;
+
+    const steps = parsed.steps
+      .filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0)
+      .map((s: string) => s.trim().slice(0, 100))
+      .slice(0, 8);
+    return steps.length > 0 ? steps : null;
   }
 
   private async buildPrompt(

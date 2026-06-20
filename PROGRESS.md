@@ -948,3 +948,22 @@ chahiye chahe kitne bhi re-try ho" + show why/where time goes, professionally.)
   "Part N" badge so the user sees how long it's taking and why.
 - Tests: proEngine partial-on-abort test added.
 - Gate: server tsc 0 · frontend tsc 0 · 279 tests · boot:check PASS.
+
+### Milestone GUIDER.1 — DONE (2026-06-20) — Guider core (shared, decoupled, confirm-first)
+First slice of the "guider": a provider-agnostic requirements brain that wraps ANY
+generator (Pro's build OR EngineerAI's loop) in a closed loop —
+understand → PROPOSE design → CONFIRM with user → build → grade → refine.
+- New `src/server/Guider/`: GuiderTypes, LanguageDetect (talks back in the user's
+  own language — hi/hinglish/en/…), Guider controller.
+- Two hard rules baked in (admin): (1) the guider may design its own plan but NEVER
+  implements it directly — Guider.run() THROWS unless the caller passes confirmed:true
+  (the caller surfaces the proposal to the user, in the user's language, for approval);
+  (2) the refine loop is budget-capped and stops HONESTLY (passed / budget_exhausted /
+  no_progress) — never a fake "done".
+- Fully decoupled: callers inject `callModel` (interpret+grade) and `generate` (the
+  builder). Lives OUTSIDE Pro so Pro and EngineerAI can both use it.
+- NOT wired into any route yet — additive, zero risk. Wiring + UI confirmation gate
+  is the next step.
+- Tests: tests/guider.test.ts (14) — language detect, robust JSON parsing, the
+  confirmation gate, and honest loop outcomes (pass/budget/no-progress).
+- Gate: server tsc 0 · 293 tests · boot:check PASS.

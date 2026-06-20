@@ -18,6 +18,10 @@ class WorkspaceMemoryStore {
   private db: admin.firestore.Firestore | null = null;
 
   private getDb(): admin.firestore.Firestore | null {
+    // Skip Firestore under the test runner: with no GCP credentials, the
+    // google-auth metadata-server lookup hangs for seconds before failing,
+    // which would time out unit tests. Production (Cloud Run) sets neither flag.
+    if (process.env.VITEST || process.env.NODE_ENV === 'test') return null;
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) {

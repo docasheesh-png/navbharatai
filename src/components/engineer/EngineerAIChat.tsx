@@ -145,6 +145,12 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   // Phase 10 — Backend ready indicator
   const [backendReady, setBackendReady] = useState<{ features: string[]; dbUrl: string } | null>(null);
 
+  // Phase 7 — multi-step plan progress tracker (null when idle or single-step)
+  const [planProgress, setPlanProgress] = useState<{
+    steps: string[];
+    currentStep: number;
+  } | null>(null);
+
   // Phase 14 — BYOD: read DB config from localStorage (configured in Settings → App Settings → Database).
   // Passed with every /api/engineer-chat request so the agent knows which SDK to scaffold.
   const [dbConfig] = useState<DbConfig | null>(() => {
@@ -270,13 +276,22 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         appendChat('agent', event.message || '');
         break;
       case 'plan': {
-        // Phase 4 — high-level build plan shown before coding starts.
         const steps: string[] = event.steps || [];
-        if (steps.length > 0) {
-          appendChat('system', `📋 Plan:\n${steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`);
+        if (steps.length > 1) {
+          // Multi-step plan — initialize the progress tracker.
+          setPlanProgress({ steps, currentStep: -1 });
+          appendChat('system', `📋 Plan:\n${steps.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}`);
+        } else if (steps.length === 1) {
+          appendChat('system', `📋 Plan:\n1. ${steps[0]}`);
         }
         break;
       }
+      case 'plan_step_start':
+        setPlanProgress(p => p ? { ...p, currentStep: event.stepIndex } : null);
+        break;
+      case 'plan_step_done':
+        // Step finished — progress bar will advance on the next plan_step_start.
+        break;
       case 'repo_cloned':
         // Phase 5 — a GitHub repo was cloned into the workspace.
         appendChat('system', `📥 Cloned repository: ${event.url}`);
@@ -418,6 +433,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         setCurrentStep(0);
         setIsDriving(false);
         setLiveFrame(null);
+        setPlanProgress(null);
         // Conversational reply already showed the message — don't double-up with a "Done" line.
         if (event.summary !== 'Replied.') {
           appendChat('agent', `✅ Done in ${event.steps} step${event.steps === 1 ? '' : 's'}: ${event.summary}`);
@@ -428,18 +444,21 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         setCurrentStep(0);
         setIsDriving(false);
         setLiveFrame(null);
+        setPlanProgress(null);
         appendChat('system', `⚠️ Reached ${event.steps}-step limit. Task incomplete — try breaking it into smaller steps or tap ↺ to start a fresh workspace.`);
         break;
       case 'aborted':
         setStatusMsg('');
         setIsDriving(false);
         setLiveFrame(null);
+        setPlanProgress(null);
         appendChat('system', 'Stopped.');
         break;
       case 'error':
         setStatusMsg('');
         setIsDriving(false);
         setLiveFrame(null);
+        setPlanProgress(null);
         appendChat('system', `Error: ${event.message}`);
         break;
     }
@@ -496,6 +515,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setPublishing(false);
     setBackendReady(null);
     setAttachedImage(null);
+    setPlanProgress(null);
   };
 
   const handleRestore = async (checkpointId: string) => {
@@ -606,6 +626,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setPublishedUrl(null);
     setPublishing(false);
     setBackendReady(null);
+    setPlanProgress(null);
 
     try {
       const res = await fetch('/api/engineer-chat', {
@@ -709,6 +730,26 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
         </div>
+
+        {/* Phase 7 — multi-step plan progress bar (only shown while a multi-step build runs) */}
+        {planProgress && planProgress.steps.length > 1 && planProgress.currentStep >= 0 && (
+          <div className="px-4 py-2 border-b border-white/5 bg-indigo-500/5 shrink-0">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] text-indigo-300 font-medium truncate max-w-[80%]">
+                Step {planProgress.currentStep + 1}/{planProgress.steps.length} — {planProgress.steps[planProgress.currentStep]}
+              </span>
+              <span className="text-[10px] text-[#8b949e] shrink-0 ml-2">
+                {Math.round(((planProgress.currentStep + 1) / planProgress.steps.length) * 100)}%
+              </span>
+            </div>
+            <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-indigo-500 transition-all duration-500"
+                style={{ width: `${((planProgress.currentStep + 1) / planProgress.steps.length) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-3 space-y-2.5">

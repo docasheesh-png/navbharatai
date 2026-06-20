@@ -35,6 +35,24 @@ export interface EngineerTask {
   githubToken?: string;
 }
 
+/**
+ * Phase 7 — shared mutable state passed between the orchestrator and the bounded
+ * ReAct loop so context (history, screenshots, preview URL) persists across plan steps.
+ */
+export interface SharedLoopState {
+  history: { step: number; actionJson: string; observation: string }[];
+  consecutiveParseFailures: number;
+  lastPreviewUrl: string | null;
+  lastScreenshot: string | null;
+  lastConsoleCheck: number;
+  globalStep: number;
+  /** True once any terminal event (error, aborted, deadline) has been yielded. */
+  terminated: boolean;
+  /** Set (instead of yielding directly) when 'done' or 'reply' succeeds, so the
+   *  orchestrator can emit plan_step_done BEFORE the 'complete' event. */
+  completionEvent: EngineerAgentEvent | null;
+}
+
 /** One ReAct action the model outputs per turn. */
 export interface ReActAction {
   thought?: string;
@@ -46,6 +64,9 @@ export type EngineerAgentEvent =
   | { type: 'chat_reply'; message: string }
   /** Phase 4 — high-level build plan generated before the ReAct loop starts. */
   | { type: 'plan'; steps: string[] }
+  /** Phase 7 — orchestrator emits these around each CoderAgent step so the UI can track progress. */
+  | { type: 'plan_step_start'; stepIndex: number; description: string }
+  | { type: 'plan_step_done'; stepIndex: number }
   /** Phase 5 — a GitHub repo was cloned into the workspace. */
   | { type: 'repo_cloned'; url: string }
   /** Phase 5 — changes were committed and pushed to a GitHub repo. */

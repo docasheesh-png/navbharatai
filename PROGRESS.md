@@ -882,3 +882,28 @@ browser/container sandbox = Phase-3 infra).
    (which tiers get build access? free-tier daily build/message limit?).
 2. **Real one-click deploy** to Vercel/Netlify/Firebase needs the admin's platform
    API tokens/accounts. Until then only NavBharat Hosting deploy is real.
+
+### Milestone PRO-AGENTIC.1 — DONE (2026-06-20) — Pro agentic edit engine, Tier 0 (VFS), additive + flag-gated
+Pro's edits were single-shot (one JSON pass → static verify), so it "forgot" after a
+few turns and couldn't do surgical fixes. Reused EngineerAI's existing agentic loop
+(`EngineerAgentLoop`, fully injectable) as Pro's PRIMARY edit engine behind a flag,
+with a 3-tier execution backend (Phase 1 ships Tier 0 only). NOTHING changes for users
+until `PRO_AGENTIC_ENGINE=1` (or request `agentic:true`).
+- NEW `actuators/VfsActuator.ts` — `IEngineerActuator` over Pro's in-memory VFS;
+  read/write/list/search/checkpoint/restore on the VFS; `build`/`runCommand` map to the
+  static gate (SyntaxCheck + ProjectVerifier) for real self-heal feedback; sandbox-only
+  methods degrade gracefully (never throw, unlike LocalActuator).
+- NEW `AI/ProModelProvider.ts` — wraps Pro's `makeResilientModelCall` as an `AIProvider`
+  so the loop uses Pro's OWN model (not Grok); `healthCheck()=>true`.
+- NEW `ProEngineRunner.ts` — orchestrator + loop→Pro SSE adapter + `selectTier`
+  (clamped to 'vfs' in Phase 1). Finalizes with the same validation/preview gate as
+  BuildPipeline so `complete` is identical-shape. Never emits terminal events itself.
+- `routes/build.ts` `/api/build-stream` — agentic branch BEFORE `runBuild`; on error or
+  non-usable result it falls through transparently to the legacy pipeline (no terminal
+  event sent until a path succeeds → fallback invisible to the UI). UI + preview unchanged.
+- `services/buildService.ts` — optional `agentic?: boolean` on BuildRequest (rollout opt-in).
+- Tests: `tests/proEngine.test.ts` (12) — VfsActuator, ProModelProvider, selectTier,
+  end-to-end VFS run + reply-only fallback.
+- Gate: server tsc 0 · frontend tsc 0 · 234 tests pass · boot:check PASS.
+- Next (later phases): Tier 1 Cloud Run actuator (ServerContainerRuntime), Tier 2 E2B
+  with per-user key; then unclamp `selectTier` and flip the flag default on per tier.

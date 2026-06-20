@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { runBuild } from '../project/BuildPipeline';
+import { runProEngine } from '../EngineerAI/ProEngineRunner';
 import { makeAiEditGenerator, summarizeForMemory, type ModelCall, type BuildMemory } from '../project/aiEdits';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
@@ -187,6 +188,64 @@ export function registerBuildRoutes(app: Express): void {
 
       const memory = parseMemory(req.body);
       const callModel: ModelCall = makeResilientModelCall(userKey);
+
+      // ── Agentic edit engine (Phase 1 — VFS tier). Additive + flag-gated: it is
+      //    the PRIMARY edit path when enabled, and falls back transparently to the
+      //    legacy runBuild() pipeline below if it errors or yields nothing usable.
+      //    No terminal complete/error is sent until a path actually succeeds, so a
+      //    fallback is invisible to the UI. ────────────────────────────────────
+      const agenticEnabled = process.env.PRO_AGENTIC_ENGINE === '1' || req.body?.agentic === true;
+      if (agenticEnabled) {
+        try {
+          const eng = await runProEngine({
+            prompt,
+            files: files && typeof files === 'object' ? files : undefined,
+            callModel,
+            isEdit: isEdit === true,
+            sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined,
+            send: (ev) => send(ev),
+          });
+          if (eng.usable) {
+            send({ type: 'status', message: 'Updating project memory…' });
+            const thisEntry = editLogEntry(prompt, eng.files, isEdit === true);
+            const turnHistory = [
+              ...(memory.history || []),
+              { role: 'user' as const, content: prompt },
+              { role: 'assistant' as const, content: thisEntry },
+            ];
+            const updatedSummary = await summarizeForMemory(callModel, memory.summary, turnHistory);
+            const updatedEditLog = [...(memory.editLog || []), thisEntry].slice(-30);
+
+            let previewInfo: unknown = undefined;
+            if (preview && eng.previewAllowed) {
+              const vfs = VirtualFileSystem.fromRecord(eng.files);
+              previewInfo = await previewService.startPreview('build', vfs);
+            } else if (preview && !eng.previewAllowed) {
+              previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
+            }
+
+            send({
+              type: 'complete',
+              ok: eng.ok,
+              files: eng.files,
+              fileCount: eng.fileCount,
+              verify: eng.verify,
+              validation: eng.validation,
+              previewAllowed: eng.previewAllowed,
+              preview: previewInfo,
+              memorySummary: updatedSummary,
+              editLog: updatedEditLog,
+            });
+            clearInterval(heartbeat);
+            return res.end();
+          }
+          // Not usable → fall through to the legacy pipeline.
+          send({ type: 'status', message: 'Refining with the standard build pipeline…' });
+        } catch (e: any) {
+          console.warn('[BUILD] Agentic engine error — falling back to runBuild:', e?.message || e);
+        }
+      }
+
       const { generate, fix, completeFeatures } = makeAiEditGenerator(callModel, memory);
 
       const t0 = Date.now();

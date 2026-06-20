@@ -145,10 +145,20 @@ export class E2BActuator implements IEngineerActuator {
   // Phase 12E — last activity timestamp per workspace, drives idle auto-pause.
   private _lastActivity = new Map<string, number>();
 
-  constructor() {
+  /**
+   * Optional per-user E2B API key. When provided (e.g. a Pro user's own key for
+   * the top execution tier), it overrides the global E2B_API_KEY so the sandbox
+   * is billed to the user, not NavBharatAI. Falls back to the env key when empty.
+   */
+  constructor(private apiKey?: string) {
     // Phase 12E — periodic idle sweep. unref() so it never keeps the process alive.
     const timer = setInterval(() => { void this._sweepIdleSandboxes(); }, IDLE_SWEEP_INTERVAL_MS);
     if (typeof timer.unref === 'function') timer.unref();
+  }
+
+  /** Build the e2b SDK options, injecting the per-user key when set. */
+  private _opts(extra?: Record<string, unknown>): { timeoutMs: number; apiKey?: string } {
+    return { timeoutMs: SANDBOX_TIMEOUT_MS, ...(this.apiKey ? { apiKey: this.apiKey } : {}), ...extra };
   }
 
   /** Pause sandboxes with no activity for IDLE_LIMIT_MS (abandoned sessions). */
@@ -182,13 +192,13 @@ export class E2BActuator implements IEngineerActuator {
       // all files, node_modules, and any running dev server. Fall back to a fresh
       // sandbox if the resume target was killed/expired.
       try {
-        sandbox = await Sandbox.connect(resumeSandboxId, { timeoutMs: SANDBOX_TIMEOUT_MS });
+        sandbox = await Sandbox.connect(resumeSandboxId, this._opts());
         await sandbox.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
       } catch {
-        sandbox = await Sandbox.create({ timeoutMs: SANDBOX_TIMEOUT_MS });
+        sandbox = await Sandbox.create(this._opts());
       }
     } else {
-      sandbox = await Sandbox.create({ timeoutMs: SANDBOX_TIMEOUT_MS });
+      sandbox = await Sandbox.create(this._opts());
     }
     this.sandboxes.set(workspaceId, sandbox);
     usageTracker.record(workspaceId, 'sandbox');

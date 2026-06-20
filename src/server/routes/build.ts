@@ -203,6 +203,8 @@ export function registerBuildRoutes(app: Express): void {
             callModel,
             isEdit: isEdit === true,
             sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined,
+            // User's own E2B key unlocks the top tier for large apps (billed to them).
+            userE2bKey: typeof req.body?.userE2bKey === 'string' ? req.body.userE2bKey : undefined,
             send: (ev) => send(ev),
           });
           if (eng.usable) {

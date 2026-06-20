@@ -5,9 +5,10 @@
  * the loop calls `router.route()`, the router calls this provider, and this
  * provider delegates to whatever model Pro already uses.
  *
- * `name` reuses the existing `'AICREDITS'` union member so we don't have to
- * widen the closed `AIProvider['name']` type. `healthCheck()` returns true
- * because the underlying `ModelCall` has its own internal provider fallback —
+ * `name` is its OWN `'PRO'` union member (not a reused one) so it gets a
+ * dedicated cooldown / in-flight bucket in AIRouter and never collides with the
+ * real AiCreditsProvider's shared module-level state. `healthCheck()` returns
+ * true because the underlying `ModelCall` has its own internal provider fallback —
  * returning false here would make the loop emit its Grok-only "no provider"
  * error at startup.
  */
@@ -15,7 +16,7 @@ import type { AIProvider, AIProviderResponse } from '../../AI/Router/ProviderTyp
 import type { ModelCall } from '../../project/aiEdits';
 
 export class ProModelProvider implements AIProvider {
-  name = 'AICREDITS' as const;
+  name = 'PRO' as const;
   priority = 0;
 
   constructor(private callModel: ModelCall) {}
@@ -31,7 +32,7 @@ export class ProModelProvider implements AIProvider {
     return {
       content,
       latencyMs: Date.now() - start,
-      provider: 'AICREDITS',
+      provider: 'PRO',
       model: 'navbharat-pro',
     };
   }

@@ -80,7 +80,7 @@ describe('ProModelProvider', () => {
     expect(await p.healthCheck()).toBe(true);
     const res = await p.execute('the-prompt', undefined, undefined, 'the-system');
     expect(res.content).toBe('OUTPUT');
-    expect(res.provider).toBe('AICREDITS');
+    expect(res.provider).toBe('PRO');
     expect(calls[0]).toEqual({ system: 'the-system', user: 'the-prompt' });
   });
 });

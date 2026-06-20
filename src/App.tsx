@@ -311,6 +311,9 @@ export default function App() {
   // Bounds the automatic "continue" chain when the server returns a partial build.
   const proAutoContinueRef = useRef(0);
   const PRO_MAX_AUTO_CONTINUE = 4;
+  // Guider (Hybrid): a pending design proposal awaiting the user's Approve/Edit/Answer.
+  const [proGuiderPlan, setProGuiderPlan] = useState<{ prompt: string; plan: any } | null>(null);
+  const [proGuiderReplanning, setProGuiderReplanning] = useState(false);
   const [sdaResetKey, setSdaResetKey] = useState(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isProLoading, setIsProLoading] = useState<boolean>(false);
@@ -3781,12 +3784,14 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     }
   };
 
-  const handleSendForPro = async (input?: string | File[], forceBuild = false, isAutoContinue = false) => {
+  const handleSendForPro = async (input?: string | File[], forceBuild = false, isAutoContinue = false, guiderApproved = false) => {
     const fileList = Array.isArray(input) ? input : [];
     const messageToSend = typeof input === 'string' ? input : proInput.trim();
     if (!messageToSend && fileList.length === 0 || isProLoading) return;
     // A brand-new user request ends any in-flight auto-continue chain.
     if (!isAutoContinue) proAutoContinueRef.current = 0;
+    // Approving a guider proposal resumes a build for a message already in the chat.
+    if (guiderApproved) setProGuiderPlan(null);
 
     // ZIP file detected → import into Code Studio instead of sending to AI chat
     const zipFile = fileList.find(f =>
@@ -3831,7 +3836,8 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
 
     // Don't show __CONFIRM_AUTO_BUILD__ as a visible chat message
     const isConfirmBuildTap = messageToSend === '__CONFIRM_AUTO_BUILD__';
-    if (!isConfirmBuildTap) {
+    // On guider approval the user's message is already in the chat — don't re-add it.
+    if (!isConfirmBuildTap && !guiderApproved) {
       const userMessage: Message = {
         id: Date.now().toString(),
         text: messageToSend,
@@ -4115,6 +4121,25 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             setIsProLoading(false);
           }, 1200);
         };
+
+        // ── Guider (Hybrid): for a fresh/big request, propose a design and wait for
+        //    the user's confirmation BEFORE building. Small edits skip this (gate on
+        //    the server). Never blocks: any failure just proceeds to a normal build.
+        if (isAgenticEngineEnabled() && !guiderApproved && !isAutoContinue) {
+          try {
+            const planResp: any = await fetch('/api/guider/plan', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ prompt: messageToSend, files: allTextFiles, isEdit: isEditRequest, agentic: true }),
+            }).then(r => r.json());
+            if (planResp?.confirm && planResp?.plan) {
+              setProGuiderPlan({ prompt: messageToSend, plan: planResp.plan });
+              setProBuildProgress(prev => ({ ...prev, active: false }));
+              setIsProLoading(false);
+              proAbortControllerRef.current = null;
+              return; // wait for Approve / Edit / Answer from the confirmation card
+            }
+          } catch { /* planning failed — build normally */ }
+        }
 
         // ── REAL ENGINE ONLY (VFS + EditEngine + Verifier + RepairLoop + gates). ──
         // The old vanilla AppEngine is RETIRED — we never silently fall back to it.
@@ -7036,6 +7061,31 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     memorySummary={sessions.find(s => s.id === currentProSessionId)?.memorySummary || ''}
                     wallet={wallet}
                     buildProgress={proBuildProgress}
+                    guiderPlan={proGuiderPlan?.plan || null}
+                    guiderReplanning={proGuiderReplanning}
+                    onGuiderApprove={() => {
+                      const p = proGuiderPlan;
+                      if (!p) return;
+                      setProGuiderPlan(null);
+                      void handleSendForPro(p.prompt, true, false, true);
+                    }}
+                    onGuiderSend={(refinement) => {
+                      const p = proGuiderPlan;
+                      if (!p || !refinement.trim()) return;
+                      const augmented = `${p.prompt}\n\n[User refinement to the plan]: ${refinement.trim()}`;
+                      setProGuiderReplanning(true);
+                      fetch('/api/guider/plan', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt: augmented, files: {}, isEdit: false, agentic: true }),
+                      })
+                        .then(r => r.json())
+                        .then((pr: any) => {
+                          if (pr?.confirm && pr?.plan) setProGuiderPlan({ prompt: augmented, plan: pr.plan });
+                          else { setProGuiderPlan(null); void handleSendForPro(augmented, true, false, true); }
+                        })
+                        .catch(() => {/* keep the current card */})
+                        .finally(() => setProGuiderReplanning(false));
+                    }}
                     onBuildStepToggle={(i) => setProBuildProgress(prev => ({
                       ...prev,
                       steps: prev.steps.map((s, idx) => idx === i ? { ...s, expanded: !s.expanded } : s),

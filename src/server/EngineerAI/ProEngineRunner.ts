@@ -216,7 +216,7 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
           send({ type: 'status', message: `${ACTION_ICON[ev.action] || '•'} ${ev.thought || ev.action}` });
           break;
         case 'command_result':
-          send({ type: 'status', message: `$ ${ev.command} → exit ${ev.exitCode}` });
+          send({ type: 'terminal', command: ev.command, output: ev.output, exitCode: ev.exitCode });
           break;
         case 'build_result':
           send({ type: 'module', name: 'verify', state: ev.success ? 'done' : 'failed' });
@@ -226,8 +226,11 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
           didEdit = true;
           send({ type: 'files', paths: ev.files.map((f) => f.path) });
           break;
-        case 'checkpoint_created':
         case 'server_ready':
+          send({ type: 'preview_url', url: ev.url });
+          send({ type: 'status', message: `🟢 Dev server ready: ${ev.url}` });
+          break;
+        case 'checkpoint_created':
         case 'screenshot_result':
         case 'browser_action_result':
         case 'drive_frame':

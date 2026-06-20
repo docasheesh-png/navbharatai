@@ -1535,6 +1535,7 @@ export default function App() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const proAbortControllerRef = useRef<AbortController | null>(null);
+  const proLivePreviewUrlRef = useRef<string | null>(null);
   const pendingViewAfterLoginRef = useRef<ViewType | null>(null);
 
   // NOTE: horizontal swipe is intentionally reserved app-wide for the sidebar
@@ -4105,9 +4106,13 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             // Honest reporting: if the verifier found unresolved errors, show
             // structured diagnostics instead of a fake "App is live".
             const buildFailed = meta.validationReport && meta.validationReport.passed === false;
+            const liveUrl = proLivePreviewUrlRef.current;
             const statusLine = buildFailed
               ? `\n**⚠️ Build Status: NEEDS ATTENTION** — the preview may be partial. Issues above; ask me to fix them.`
-              : `**App is live in Preview** →`;
+              : liveUrl
+                ? `**App is live!** [Open in new tab](${liveUrl}) · Also visible in Preview →`
+                : `**App is live in Preview** →`;
+            proLivePreviewUrlRef.current = null;
             const processLog = [
               buildFailed ? `⚠️ Build completed with issues — see diagnostics below.` : `${replyPrefix}${replyText}`,
               ``,
@@ -4188,6 +4193,11 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
                   { label: ev.name!, sub: ev.state === 'done' ? 'done' : ev.state === 'failed' ? 'retrying' : 'building…', status: (ev.state === 'done' ? 'done' : ev.state === 'failed' ? 'error' : 'running') as 'done' | 'error' | 'running' },
                 ],
               }));
+            } else if (ev.type === 'terminal' && ev.command) {
+              const exitMark = ev.exitCode === 0 ? '✓' : `✗ (exit ${ev.exitCode})`;
+              setProBuildProgress(prev => ({ ...prev, active: true, stage: `$ ${ev.command.slice(0, 60)} ${exitMark}` }));
+            } else if (ev.type === 'preview_url' && ev.url) {
+              proLivePreviewUrlRef.current = ev.url;
             }
           }, abortController.signal);
           // Persist the refreshed Claude-Code-style memory onto the active session

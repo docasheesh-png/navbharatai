@@ -30,7 +30,9 @@ export type FeatureCompleter = (prompt: string, missing: string[], vfs: VirtualF
 export type BuildProgressEvent =
   | { type: 'status'; message: string }
   | { type: 'module'; name: string; state: 'start' | 'done' | 'failed'; coverage?: number }
-  | { type: 'files'; paths: string[] };
+  | { type: 'files'; paths: string[] }
+  | { type: 'terminal'; command: string; output: string; exitCode: number }
+  | { type: 'preview_url'; url: string };
 
 export interface BuildPipelineInput {
   prompt: string;

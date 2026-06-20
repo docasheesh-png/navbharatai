@@ -848,7 +848,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
             </button>
           </div>
           {showTools && (
-            <div className="flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+            <div className="flex flex-wrap gap-1.5">
               {QUICK_TOOLS.map(tool => {
                 const Icon = tool.icon;
                 return (
@@ -857,7 +857,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                     onClick={() => handleSend(tool.prompt)}
                     disabled={loading || messages.length < 2}
                     className={cn(
-                      "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[9px] font-black uppercase tracking-widest whitespace-nowrap transition-all shrink-0 disabled:opacity-40",
+                      "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[9px] font-black uppercase tracking-widest whitespace-nowrap transition-all disabled:opacity-40",
                       tool.color
                     )}
                   >

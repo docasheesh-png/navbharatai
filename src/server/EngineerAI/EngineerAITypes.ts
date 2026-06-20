@@ -38,6 +38,8 @@ export interface ReActAction {
 
 export type EngineerAgentEvent =
   | { type: 'chat_reply'; message: string }
+  /** Phase 4 — high-level build plan generated before the ReAct loop starts. */
+  | { type: 'plan'; steps: string[] }
   | { type: 'action_start'; step: number; action: string; thought: string }
   | { type: 'command_result'; command: string; exitCode: number; output: string }
   | { type: 'files_changed'; kind: 'edit' | 'patch'; files: { path: string; content: string }[] }

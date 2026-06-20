@@ -269,6 +269,14 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         // Pure conversational reply — show as a normal agent message, no coding started.
         appendChat('agent', event.message || '');
         break;
+      case 'plan': {
+        // Phase 4 — high-level build plan shown before coding starts.
+        const steps: string[] = event.steps || [];
+        if (steps.length > 0) {
+          appendChat('system', `📋 Plan:\n${steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`);
+        }
+        break;
+      }
       case 'action_start':
         setCurrentStep(event.step || 0);
         setStatusMsg(`Step ${event.step}: ${event.action}`);

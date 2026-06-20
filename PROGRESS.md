@@ -996,3 +996,136 @@ The guider is now reachable from EngineerAI too (admin: "dono use kar sake").
   it via injected callModel + generate).
 - Next: EngineerAI confirmation card in its own UI + grade→refine over the agent loop.
 - Gate: server tsc 0 · 301 tests · boot:check PASS.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ★ MASTER ROADMAP — "NavBharatAI Pro = Claude Code" (2026-06-20, admin-approved)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Supersedes the older phase plans above as the SINGLE forward-looking roadmap.
+Merges: (1) old PROGRESS phases 0–7, (2) admin's new 10-phase execution roadmap,
+(3) current ground truth (this session's agentic engine + tier-ladder + guider +
+result-guarantee). Old entries are kept (append-only audit trail), not deleted.
+
+GOAL: NavBharatAI Pro becomes a real autonomous coding agent — like Claude Code.
+
+PRINCIPLES (from the new roadmap): architectural correctness over speed; no upper
+layer before its foundation; a phase is "complete" only when its acceptance criteria
+pass WITH evidence (logs/screenshots/tests/metrics/URLs); no fake success / no
+placeholder / no duplicate systems; OVERLAY on existing code (never rebuild what
+exists); FINAL = the original "1000-gap audit" can no longer be reproduced.
+
+"Pro = Claude Code" DEFINITION OF DONE: on every request Pro runs an
+observe→think→act→verify→self-heal loop; runs code in a REAL runtime
+(install/build/test); drives the app in a browser to verify; fixes failures itself;
+keeps memory + git; proposes a plan + confirms for big work; never fakes success,
+never returns "no result"; ships a real shareable preview/deploy.
+
+STRATEGIC KEY: unify Pro onto the EngineerAI-grade engine (one agent loop +
+actuators + guider for both), and make real runtime/browser/test/self-heal the
+DEFAULT (currently behind a flag). Solidify foundations (Phase 1) + telemetry
+(Phase 7) first.
+
+LEGEND: ✅ done · 🟡 partial (core done, edges left) · 🔴 left · 🔒 infra/account/admin-blocked
+
+## PHASE 0 — Gap & Current-State Inventory  🔴 (needs the "1000 gaps" doc)
+1000 gaps → dedupe → root-cause → 20–25 capability clusters + dependency graph +
+priority. IMPROVEMENT: map every cluster to EXISTING code (done/partial/missing) so
+nothing is rebuilt. Output per gap: id · symptom · root cause · group · priority ·
+dependency · verification. Acceptance: every gap mapped; no orphans/dupes; current-
+state matrix ready. (No production code.)
+
+## PHASE 1 — Foundation Layer  🟡  (old P0–P2 + new P1)
+✅ VFS/ProjectModel, version history, checkpoint/restore, RuntimeRouter,
+   WorkspaceManager/Materializer, server-tsc guardrail + boot-check.
+🔴 Event Bus (every action → event) · refresh-safe persistent sessions (survive +
+   recover) · structured/searchable logging · formalize capability registry
+   (AppKnowledgeBase). Acceptance: state survives refresh · checkpoint restore ·
+   event replay · logs searchable. BLOCKING: foundations before more agent features.
+
+## PHASE 2 — Agent Architecture (Observe→Think→Act→Verify)  🟡→✅core  (old P4 + new P2)
+✅ EngineerAgentLoop (ReAct), PlannerAgent, CoderAgent, tools (read/write/patch/exec/
+   search_code/search_web/install/run_tests), Guider (reviewer/grader + plan→confirm).
+🔴 unify Pro onto this loop (Pro = the agent, not single-shot) · optional separate
+   Reviewer/Testing/Memory/Deployment agents. Acceptance: autonomous debug · retries ·
+   history · human intervention < 20%.
+
+## PHASE 3 — Execution Engine (real runtime)  🟡  (old P3 + new P3)
+"runtime success matters, not preview success." ✅ E2B/Docker actuators (npm install/
+dev/build/test), tier-ladder (VFS→Docker→E2B, graceful downgrade), result-guarantee
+(soft-deadline + partial + auto-continue). 🔴 make real runtime Pro's DEFAULT (not
+VFS-static) · process manager · env vars · runtime telemetry · Cloud Run/Docker prod
+wiring 🔒 · isolated preview origin (preview.navbharatai.app/<unguessable appId>, NOT
+the main domain — security). Acceptance: apps actually run · runtime errors captured ·
+deps resolve.
+
+## PHASE 4 — Browser Automation  🟡→✅core
+✅ E2B Playwright: screenshot, click/type/scroll/hover/select/double_click, console
+   capture. 🔴 make it part of Pro's verify loop (run app + test workflows) · network
+   capture. Acceptance: AI launches app, logs in, completes workflows, detects
+   failures, collects screenshots. BLOCKING: no deploy without browser verification.
+
+## PHASE 5 — Testing & Self-Healing  🟡  (old P5 + new P5)
+✅ self-heal loop (build_result→fix), guider grade→refine, ProjectVerifier/SyntaxCheck,
+   ValidationPipeline (pending gates honestly reported, not faked). 🔴 real unit/
+   integration/E2E/a11y/security test generation+execution · flip "pending" gates to
+   real (needs browser sandbox → depends on P3/P4). Acceptance: AI fixes failures
+   autonomously · retry loop · test pass > 95% · runtime errors = 0. BLOCKING: no
+   deploy while tests fail.
+
+## PHASE 6 — Memory & Git  🟡→✅core
+✅ .engineer/memory.md, Pro memorySummary/editLog, GitHub clone/push + loop git
+   init/commit. 🔴 richer memory (architecture decisions, preferences, past failures,
+   deploy history) · branch/diff/revert UI · restart-survival. Acceptance: sessions
+   preserve knowledge · every change traceable · rollback · workspace survives restart.
+
+## PHASE 7 — Security & Observability  🟡 / 🔒  (old P5-obs + new P7)
+ORDERING FIX: bring this early — earlier phases' criteria can't be measured without it.
+✅ metrics.ts (token/USD cost/build stats), /api/admin/metrics. 🔴 secret scanning ·
+   dependency audit · OWASP/injection checks · traces/alerts/runtime analytics · Sentry
+   🔒. Acceptance: unsafe apps blocked · failures auto-detected · every action measurable.
+
+## PHASE 8 — Deployment & CI/CD  🟡 / 🔒  (old P5-deploy + new P8)
+✅ Firebase Hosting deploy (DeploymentService), platform Cloud Run auto-deploy. 🔴
+   per-user preview URL (preview.navbharatai.app/<appId>, sandboxed origin) · one-click
+   deploy + rollback + post-deploy validation · multi-target Vercel/Netlify/Cloud Run/
+   Docker 🔒 (API tokens). Acceptance: one-click deploy · rollback · deploy validation.
+
+## PHASE 9 — Framework Expansion  🟡  (old P6 + new P9)
+✅ React+Vite, Vue3+Vite, Vanilla (preview); next/svelte/express/fastapi templates
+   (generation); BYOD DBs. 🔴 Next/Svelte/Node/FastAPI build+run+deploy end-to-end ·
+   Svelte/Astro previews. Acceptance: all frameworks build+execute+deploy.
+
+## PHASE 10 — Final Platform Validation  🔴  (old FINAL + new P10)
+Generate+deploy 7 reference apps: Hospital MS · E-commerce · CRM · School ERP · AI
+Chat · Social · Realtime-collab. Verify each: generation+runtime+browser+deploy
+success · auth · CRUD · responsive · console errors = 0 · runtime errors = 0 ·
+security pass · Lighthouse > 90 · a11y > 90. Then RE-RUN the original 1000-gap audit →
+no critical/high gaps = MISSION COMPLETE.
+
+## CROSS-CUTTING (every phase)
+- Pro rollout: flag-gated now → internal test → tier-by-tier DEFAULT-ON (the real
+  "Pro = Claude Code" switch).
+- Every task carries: owner capability · dependencies · verification · rollback · telemetry.
+- Forbidden: TODO/placeholder · fake progress · simulated execution · duplicate systems · hacks.
+- Evidence required: logs · screenshots · test reports · metrics · deploy URLs.
+- AppKnowledgeBase sync: every new user-facing feature gets its entry in the same PR.
+- Verification gate (each push): server tsc + frontend tsc + vitest run + boot:check
+  green; branch → PR → CI green → merge.
+
+## CURRENT BIG PICTURE
+Solid/near: Phase 1(core), 2(core), 3(core), 4(core), 6(core) — the Pro=Claude-Code
+ENGINE already exists (agent loop + runtime + browser + self-heal + guider + memory/git).
+Real remaining work: Phase 0 (gap inventory — needs doc) · Phase 1 foundation gaps
+(event bus/logs/refresh-state) · Phase 5 (full testing) · Phase 7 (security/observability)
+· Phase 8 (preview origin + multi-deploy 🔒) · Phase 9 (remaining frameworks) · Phase 10
+(final proof) · plus Pro DEFAULT-ON rollout.
+
+## ADMIN/INFRA DEPENDENCIES (cannot be unblocked by code)
+"1000 gaps" doc (P0) · Vercel/Netlify/Firebase deploy tokens (P8) · prod sandbox for
+browser QA gates — E2B key / Docker host (P5/P3) · Sentry account (P7) · Pro-gating
+policy decision (P8/rollout).
+
+## RECOMMENDED ORDER
+1) Phase 0 (on receiving the 1000-gaps doc) — cluster + current-state matrix, no code.
+2) Phase 1 foundation gaps (event bus, refresh-safe state, structured logs) before default-on.
+3) Phase 7 telemetry early (so criteria are measurable).
+4) Then Pro default-on rollout, alongside Phase 5/8/9, ending with the Phase 10 proof.

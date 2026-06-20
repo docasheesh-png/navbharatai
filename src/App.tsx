@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallbac
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { EngineBuilder } from './components/EngineBuilder';
-import { buildApp, buildAppStream } from './services/buildService';
+import { buildApp, buildAppStream, isAgenticEngineEnabled } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
@@ -4123,6 +4123,8 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             history: conversationHistory,
             memorySummary: proMemorySummary,
             editLog: proActiveSession?.editLog || [],
+            // Internal-testing opt-in (per-session only; see isAgenticEngineEnabled).
+            agentic: isAgenticEngineEnabled(),
           }, (ev) => {
             if (ev.type === 'status' && ev.message) {
               setProBuildProgress(prev => ({ ...prev, active: true, stage: `⚙️ ${ev.message}`, percent: Math.min(92, Math.max(prev.percent, (ev.coverage ?? 0))) }));

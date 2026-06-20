@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { detectLanguage, languageDirective } from '../src/server/Guider/LanguageDetect';
 import {
-  Guider, extractJsonObject, parsePlanResponse, parseGradeResponse, composePrompt,
+  Guider, extractJsonObject, parsePlanResponse, parseGradeResponse, composePrompt, gradeAgainstSpec,
 } from '../src/server/Guider/Guider';
 import type { GenResult, GuiderPlan } from '../src/server/Guider/GuiderTypes';
 
@@ -105,6 +105,20 @@ describe('Guider.run — confirmation gate + honest loop', () => {
     const res = await g.run(planWith(false), { confirmed: true });
     expect(res.status).toBe('no_progress');
     expect(res.iterations).toBeLessThan(6);
+  });
+});
+
+describe('gradeAgainstSpec (standalone grader for the route)', () => {
+  const spec = { summary: '', requirements: ['r'], acceptanceCriteria: [{ id: 'c1', text: 'has a login form' }], outOfScope: [] };
+  it('returns the model verdict when satisfied', async () => {
+    const g = await gradeAgainstSpec(async () => '{"pass":true,"score":91,"gaps":[],"summary":"ok"}', spec, 'files: index.html with a login form');
+    expect(g.pass).toBe(true);
+    expect(g.score).toBe(91);
+  });
+  it('is a conservative non-pass when the model call fails', async () => {
+    const g = await gradeAgainstSpec(async () => { throw new Error('down'); }, spec, 'ctx');
+    expect(g.pass).toBe(false);
+    expect(g.gaps.length).toBeGreaterThan(0);
   });
 });
 

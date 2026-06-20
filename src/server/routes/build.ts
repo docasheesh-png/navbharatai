@@ -1,8 +1,24 @@
 import type { Express, Request, Response } from 'express';
 import { runBuild } from '../project/BuildPipeline';
 import { runProEngine } from '../EngineerAI/ProEngineRunner';
-import { Guider } from '../Guider/Guider';
+import { Guider, gradeAgainstSpec } from '../Guider/Guider';
 import { shouldConfirm } from '../Guider/GuiderGate';
+import type { GuiderSpec } from '../Guider/GuiderTypes';
+
+/** Compact textual view of the built files for the grader (tree + budgeted snippets). */
+function buildGradeContext(files: Record<string, string>): string {
+  const paths = Object.keys(files);
+  let body = '';
+  let budget = 10_000;
+  for (const p of paths) {
+    if (budget <= 0) break;
+    const snippet = (files[p] || '').slice(0, 1500);
+    const block = `\n--- ${p} ---\n${snippet}`;
+    body += block.slice(0, budget);
+    budget -= block.length;
+  }
+  return `Files (${paths.length}):\n${paths.join('\n')}\n${body}`;
+}
 import { makeAiEditGenerator, summarizeForMemory, type ModelCall, type BuildMemory } from '../project/aiEdits';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
@@ -125,6 +141,28 @@ export function registerBuildRoutes(app: Express): void {
     } catch {
       // Planning must never block a build — fall through to a normal (no-confirm) build.
       return res.json({ confirm: false });
+    }
+  });
+
+  // ── Guider: grade a built app against the spec (Slice 3 — quality loop). Returns
+  //    { grade: { pass, score, gaps[] } } or { grade: null } when disabled/empty.
+  //    The frontend uses this AFTER a build fully completes to decide whether to
+  //    auto-refine. Never throws — failure returns grade:null (no refine).
+  app.post('/api/guider/grade', async (req: Request, res: Response) => {
+    try {
+      const { spec, prompt, files, userKey, agentic } = req.body || {};
+      const enabled = process.env.PRO_AGENTIC_ENGINE === '1' || agentic === true;
+      if (!enabled || !files || typeof files !== 'object' || Object.keys(files).length === 0) {
+        return res.json({ grade: null });
+      }
+      const useSpec: GuiderSpec = (spec && Array.isArray(spec.acceptanceCriteria) && spec.acceptanceCriteria.length)
+        ? spec
+        : { summary: String(prompt || ''), requirements: [String(prompt || '')], acceptanceCriteria: [{ id: 'c1', text: String(prompt || '') }], outOfScope: [] };
+      const callModel: ModelCall = makeResilientModelCall(userKey);
+      const grade = await gradeAgainstSpec(callModel, useSpec, buildGradeContext(files));
+      return res.json({ grade });
+    } catch {
+      return res.json({ grade: null });
     }
   });
 

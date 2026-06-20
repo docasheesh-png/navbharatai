@@ -22,6 +22,7 @@ function buildGradeContext(files: Record<string, string>): string {
   return `Files (${paths.length}):\n${paths.join('\n')}\n${body}`;
 }
 import { makeAiEditGenerator, summarizeForMemory, type ModelCall, type BuildMemory } from '../project/aiEdits';
+import { orchestrateGenerate } from '../pro/ProOrchestrator';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
 import { aiRouter } from '../lib/aiRouter';
@@ -350,7 +351,11 @@ export function registerBuildRoutes(app: Express): void {
         }
       }
 
-      const { generate, fix, completeFeatures } = makeAiEditGenerator(callModel, memory);
+      const { generate: singleGenerate, fix, completeFeatures } = makeAiEditGenerator(callModel, memory);
+      // Phase 72 — multi-agent orchestration: for full-stack tasks, fan out to two
+      // parallel focused generation calls (frontend + backend) and merge results.
+      const generate = (p: string, v: import('../project/ProjectModel').VirtualFileSystem) =>
+        orchestrateGenerate(p, v, callModel).catch(() => singleGenerate(p, v));
 
       const t0 = Date.now();
       // Race the build against the soft deadline so a hung/slow build can never run

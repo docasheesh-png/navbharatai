@@ -7003,6 +7003,41 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                          </div>
                       </motion.div>
                     )}
+
+                    {settingsScreen === 'git' && (
+                      <motion.div
+                        key="git"
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        className="space-y-6"
+                      >
+                        <div className="px-1 py-4">
+                          <h2 className="text-2xl font-black text-white tracking-tight">Git & Version Control</h2>
+                          <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Manage branches, commits and deployments</p>
+                        </div>
+                        <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex flex-col items-center text-center space-y-6 shadow-2xl">
+                          <div className="w-20 h-20 bg-indigo-600/10 border border-indigo-600/20 rounded-[2rem] flex items-center justify-center">
+                            <GitBranch className="w-10 h-10 text-indigo-400" />
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-black text-white uppercase tracking-widest">Git Panel</h3>
+                            <p className="text-[10px] text-[#8b949e] max-w-[240px] mx-auto mt-2 leading-relaxed">
+                              {selectedRepo
+                                ? `Active: ${selectedRepo.full_name} (${currentBranch})`
+                                : 'Connect GitHub first to use Git features'}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => { setActiveView('git'); setSettingsScreen('root'); }}
+                            className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[1.5rem] font-black uppercase tracking-widest transition-all shadow-2xl flex items-center justify-center gap-3"
+                          >
+                            <GitBranch className="w-4 h-4" />
+                            Open Git Panel
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
                   </AnimatePresence>
                 </div>
               </div>

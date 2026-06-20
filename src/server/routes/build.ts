@@ -297,6 +297,8 @@ export function registerBuildRoutes(app: Express): void {
             sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined,
             // User's own E2B key unlocks the top tier for large apps (billed to them).
             userE2bKey: typeof req.body?.userE2bKey === 'string' ? req.body.userE2bKey : undefined,
+            // GitHub token for clone_repo + git_push (from user's Secrets & Keys settings).
+            githubToken: typeof req.body?.githubToken === 'string' ? req.body.githubToken : undefined,
             send: (ev) => send(ev),
             signal: deadline.signal,
           });

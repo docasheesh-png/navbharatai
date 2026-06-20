@@ -112,6 +112,8 @@ export interface ProEngineOptions {
   sessionId?: string;
   /** User's own E2B API key — unlocks the top tier for large apps (billed to them). */
   userE2bKey?: string;
+  /** GitHub token for clone_repo + git_push actions (from user's Secrets & Keys). */
+  githubToken?: string;
   send: (ev: BuildProgressEvent) => void;
   signal?: AbortSignal;
 }
@@ -161,7 +163,7 @@ function tierPreamble(tier: ExecutionTier): string {
  * whether to emit the terminal event or fall back to the legacy pipeline.
  */
 export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineResult> {
-  const { prompt, files, callModel, isEdit, sessionId, userE2bKey, send, signal } = opts;
+  const { prompt, files, callModel, isEdit, sessionId, userE2bKey, githubToken, send, signal } = opts;
 
   const inputVfs = VirtualFileSystem.fromRecord(files);
   // Phase 6: always prefer E2B (real cloud VM) for Pro — resolveBackend() downgrades
@@ -182,6 +184,7 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     workspaceId,
     instruction: tierPreamble(backend.tier) + prompt,
     projectType: 'auto',
+    githubToken: githubToken || process.env.GITHUB_TOKEN || undefined,
   };
 
   if (backend.tier !== 'vfs') {

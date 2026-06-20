@@ -1536,6 +1536,8 @@ export default function App() {
   const shellRef = useRef<HTMLDivElement>(null);
   const proAbortControllerRef = useRef<AbortController | null>(null);
   const proLivePreviewUrlRef = useRef<string | null>(null);
+  // Phase 79 — latest E2B screenshot forwarded via the SSE stream
+  const proLiveScreenshotRef = useRef<string | null>(null);
   const pendingViewAfterLoginRef = useRef<ViewType | null>(null);
 
   // NOTE: horizontal swipe is intentionally reserved app-wide for the sidebar
@@ -4113,6 +4115,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
                 ? `**App is live!** [Open in new tab](${liveUrl}) · Also visible in Preview →`
                 : `**App is live in Preview** →`;
             proLivePreviewUrlRef.current = null;
+            proLiveScreenshotRef.current = null;
             const processLog = [
               buildFailed ? `⚠️ Build completed with issues — see diagnostics below.` : `${replyPrefix}${replyText}`,
               ``,
@@ -4222,6 +4225,10 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
                 ...prev, active: true,
                 steps: prev.steps.map((s) => s.status === 'running' ? { ...s, sub: snippet } : s),
               }));
+            } else if (ev.type === 'screenshot' && ev.base64) {
+              // Phase 79 — store latest E2B screenshot; finishBuild will include it
+              // in the build summary if no live URL is available.
+              proLiveScreenshotRef.current = ev.base64;
             }
           }, abortController.signal);
           // Persist the refreshed Claude-Code-style memory onto the active session

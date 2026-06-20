@@ -253,10 +253,22 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
           send({ type: 'preview_url', url: ev.url });
           send({ type: 'status', message: `🟢 Dev server ready: ${ev.url}` });
           break;
-        case 'checkpoint_created':
         case 'screenshot_result':
+          // Phase 79 — forward screenshot data so the Pro UI can show a live preview.
+          send({ type: 'screenshot', base64: ev.base64, url: ev.url });
+          send({ type: 'status', message: `📸 Screenshot: ${ev.url}` });
+          break;
         case 'browser_action_result':
+          // Phase 80 — forward browser action screenshots for cursor overlay.
+          if (ev.base64) send({ type: 'screenshot', base64: ev.base64, url: undefined });
+          send({ type: 'status', message: summarizeEvent(ev) });
+          break;
         case 'drive_frame':
+          // Phase 84 — drive frames show autonomous UI testing in progress.
+          if (ev.screenshot) send({ type: 'screenshot', base64: ev.screenshot, url: ev.url });
+          send({ type: 'status', message: `🚗 Driving step ${ev.step}: ${ev.stepDetail}` });
+          break;
+        case 'checkpoint_created':
         case 'console_error':
         case 'search_result':
         case 'backend_ready':

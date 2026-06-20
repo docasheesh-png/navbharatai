@@ -17,7 +17,7 @@
  */
 import { VirtualFileSystem } from './ProjectModel';
 import type { ProjectIssue } from './ProjectVerifier';
-import { selectArchitecture, forbiddenPathPatterns, type ArchitectureManifest } from './ArchitectureManifest';
+import { selectArchitecture, forbiddenPathPatterns, type ArchitectureManifest, type FrameworkId } from './ArchitectureManifest';
 
 /** Is this VFS a React app? (react dep, or any jsx/tsx source). */
 export function isReactApp(vfs: VirtualFileSystem): boolean {
@@ -30,6 +30,29 @@ export function isReactApp(vfs: VirtualFileSystem): boolean {
     } catch { /* ignore */ }
   }
   return vfs.paths().some((p) => /\.(jsx|tsx)$/i.test(p));
+}
+
+/** Declared deps (dependencies + devDependencies) from package.json, or null. */
+function readDeps(vfs: VirtualFileSystem): Set<string> | null {
+  const pkg = vfs.readText('package.json');
+  if (!pkg) return null;
+  try {
+    const j = JSON.parse(pkg);
+    return new Set([...Object.keys(j.dependencies || {}), ...Object.keys(j.devDependencies || {})]);
+  } catch { return null; }
+}
+
+/** Is this VFS a Vue app? (vue dep, or any .vue SFC source). */
+export function isVueApp(vfs: VirtualFileSystem): boolean {
+  const pkg = vfs.readText('package.json');
+  if (pkg) {
+    try {
+      const j = JSON.parse(pkg);
+      const deps = { ...(j.dependencies || {}), ...(j.devDependencies || {}) };
+      if (deps.vue) return true;
+    } catch { /* ignore */ }
+  }
+  return vfs.paths().some((p) => /\.vue$/i.test(p));
 }
 
 /** Local (non-external) reference? */
@@ -57,12 +80,18 @@ function countMountId(html: string, id: string): number {
   return (html.match(re) || []).length;
 }
 
-/** The id passed to createRoot/ReactDOM.render(getElementById('X') | querySelector('#X')). */
+/**
+ * The mount target id from the entry: React's
+ * createRoot/render(getElementById('X')|querySelector('#X')) OR Vue's
+ * createApp(App).mount('#X').
+ */
 function mountIdFromEntry(code: string): string | null {
   const byId = code.match(/getElementById\(\s*["']([^"']+)["']\s*\)/);
   if (byId) return byId[1];
   const byQuery = code.match(/querySelector\(\s*["']#([^"'.\s]+)["']\s*\)/);
   if (byQuery) return byQuery[1];
+  const byMount = code.match(/\.mount\(\s*["']#([^"'.\s]+)["']\s*\)/);
+  if (byMount) return byMount[1];
   return null;
 }
 
@@ -82,24 +111,40 @@ function resolveEntry(vfs: VirtualFileSystem, ref: string): string | null {
  */
 export function validateArchitecture(vfs: VirtualFileSystem, manifest?: ArchitectureManifest): ProjectIssue[] {
   const issues: ProjectIssue[] = [];
-  const react = manifest ? manifest.framework === 'react' : isReactApp(vfs);
-  if (!react) return issues; // vanilla apps: nothing framework-specific to enforce here
+  let framework: FrameworkId;
+  if (manifest) {
+    framework = manifest.framework;
+  } else {
+    // Dependency in package.json is the authoritative signal — it must win over
+    // loose file-extension heuristics, so a Vue app with a STRAY .jsx is still
+    // treated as Vue (and the .jsx is then flagged as mixing, not mis-detected).
+    const deps = readDeps(vfs);
+    if (deps?.has('vue')) framework = 'vue';
+    else if (deps?.has('react')) framework = 'react';
+    else if (isVueApp(vfs)) framework = 'vue';
+    else if (isReactApp(vfs)) framework = 'react';
+    else framework = 'vanilla';
+  }
+  if (framework === 'vanilla') return issues; // nothing framework-specific to enforce
 
-  const m = manifest ?? selectArchitecture('react app');
+  const isVue = framework === 'vue';
+  const label = isVue ? 'Vue' : 'React';
+  const m = manifest ?? selectArchitecture(isVue ? 'vue app' : 'react app');
   const html = vfs.readText('index.html') ?? vfs.readText('public/index.html');
   if (html == null) {
-    issues.push({ severity: 'error', file: '(project)', message: 'React app has no index.html entry document.' });
+    issues.push({ severity: 'error', file: '(project)', message: `${label} app has no index.html entry document.` });
     return issues;
   }
 
-  // 1. Mixed-architecture: forbidden vanilla layers in a React app.
+  // 1. Mixed-architecture: forbidden foreign/legacy layers in a React/Vue app.
+  const componentNoun = isVue ? 'Vue SFC (.vue)' : 'React component';
   for (const pat of forbiddenPathPatterns(m)) {
     const hit = vfs.paths().find((p) => pat.test(p));
     if (hit) {
       issues.push({
         severity: 'error',
         file: hit,
-        message: `Mixed architecture: "${hit}" is a vanilla/legacy file in a React app. Remove it — build the feature as a React component under src/.`,
+        message: `Mixed architecture: "${hit}" does not belong in a ${label} app. Remove it — build the feature as a ${componentNoun} under src/.`,
       });
     }
   }
@@ -112,11 +157,11 @@ export function validateArchitecture(vfs: VirtualFileSystem, manifest?: Architec
     issues.push({
       severity: 'error',
       file: m.html,
-      message: `Mixed architecture: legacy <script src="${t.src}"> in a React app. The HTML must load only the module entry "<script type=module src=/${m.entry}>".`,
+      message: `Mixed architecture: legacy <script src="${t.src}"> in a ${label} app. The HTML must load only the module entry "<script type=module src=/${m.entry}>".`,
     });
   }
   if (moduleEntries.length === 0) {
-    issues.push({ severity: 'error', file: m.html, message: `Missing React entry: index.html must load <script type="module" src="/${m.entry}">.` });
+    issues.push({ severity: 'error', file: m.html, message: `Missing ${label} entry: index.html must load <script type="module" src="/${m.entry}">.` });
   } else if (moduleEntries.length > 1) {
     issues.push({ severity: 'error', file: m.html, message: `Multiple module entries in index.html — there must be exactly one.` });
   }
@@ -129,17 +174,20 @@ export function validateArchitecture(vfs: VirtualFileSystem, manifest?: Architec
   }
   if (entryPath) {
     const code = vfs.readText(entryPath) || '';
-    if (/createRoot|ReactDOM\.render|hydrateRoot/.test(code)) {
+    const mountsApp = isVue ? /createApp\b/.test(code) : /createRoot|ReactDOM\.render|hydrateRoot/.test(code);
+    if (mountsApp) {
       const id = mountIdFromEntry(code);
       if (!id) {
-        issues.push({ severity: 'error', file: entryPath, message: `Entry mounts React but no getElementById('...') / querySelector('#...') target found.` });
+        issues.push({ severity: 'error', file: entryPath, message: isVue
+          ? `Entry creates a Vue app but no .mount('#...') target was found.`
+          : `Entry mounts React but no getElementById('...') / querySelector('#...') target found.` });
       } else {
         const count = countMountId(html, id);
         if (count === 0) {
           issues.push({
             severity: 'error',
             file: m.html,
-            message: `DOM mount mismatch: entry mounts to #${id} but index.html has no <div id="${id}">. (This is the React #299 cause.)`,
+            message: `DOM mount mismatch: entry mounts to #${id} but index.html has no element with id="${id}".${isVue ? '' : ' (This is the React #299 cause.)'}`,
           });
         } else if (count > 1) {
           issues.push({ severity: 'error', file: m.html, message: `Duplicate mount node: #${id} appears ${count} times — there must be exactly one.` });

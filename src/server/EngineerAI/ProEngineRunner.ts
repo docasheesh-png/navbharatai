@@ -174,6 +174,15 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     if (ev.type === 'complete' || ev.type === 'max_steps_reached' || ev.type === 'error' || ev.type === 'aborted') break;
   }
 
+  // The agent loop persists its own cross-session bookkeeping under `.engineer/`
+  // (e.g. the PlannerAgent writes `.engineer/memory.md`). That is internal to the
+  // agent, NOT part of the user's app — strip it so it never pollutes the user's
+  // project, the file list, the preview, or the validation gates. (Pro keeps its
+  // own conversation memory separately via memorySummary/editLog.)
+  for (const p of vfs.paths()) {
+    if (p === '.engineer' || p.startsWith('.engineer/')) vfs.delete(p);
+  }
+
   // ── Finalize: pull files back + run the same validation/preview gate the legacy
   //    pipeline uses (mirrors BuildPipeline.runBuild's tail), so `complete` carries
   //    an identical-shape payload. ─────────────────────────────────────────────

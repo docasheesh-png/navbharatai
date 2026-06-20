@@ -110,29 +110,35 @@ describe('selectTier', () => {
 });
 
 describe('runProEngine (end-to-end, VFS tier)', () => {
-  // A scripted model: step 1 edits a file, step 2 finishes. The loop calls the
-  // model once per step; we reply with one ReAct action each time.
-  function scriptedModel(actions: string[]): (s: string, u: string) => Promise<string> {
+  // A scripted model: the loop first calls the PlannerAgent (one call expecting a
+  // build-plan JSON), then the ReAct loop calls the model once per step. We reply
+  // with one scripted response per call, in order.
+  function scriptedModel(responses: string[]): (s: string, u: string) => Promise<string> {
     let i = 0;
-    return async () => actions[Math.min(i++, actions.length - 1)];
+    return async () => responses[Math.min(i++, responses.length - 1)];
   }
+
+  const PLAN = JSON.stringify({ steps: [{ description: 'Build the page', focusHint: 'create index.html' }] });
 
   it('produces usable files when the agent edits then finishes', async () => {
     const events: BuildProgressEvent[] = [];
     const model = scriptedModel([
+      PLAN, // PlannerAgent call (Phase 7) — runs before the ReAct loop
       JSON.stringify({ thought: 'create the page', action: 'edit_file', args: { path: 'index.html', content: '<!doctype html><html><body><h1>Hello</h1></body></html>' } }),
       JSON.stringify({ thought: 'all done', action: 'done', args: { summary: 'Built the page.' } }),
     ]);
     const res = await runProEngine({ prompt: 'make a hello page', callModel: model, send: (e) => events.push(e) });
-    const diag = JSON.stringify({ usable: res.usable, files: Object.keys(res.files), events: events.map((e: any) => e.type === 'status' ? `status:${String(e.message).slice(0, 60)}` : (e.type === 'module' ? `module:${e.state}` : e.type)) });
-    expect(res.usable, diag).toBe(true);
+    expect(res.usable).toBe(true);
     expect(res.files['index.html']).toContain('Hello');
     expect(res.tier).toBe('vfs');
     expect(events.some((e) => e.type === 'files')).toBe(true);
+    // Internal agent bookkeeping must not leak into the user's project.
+    expect(Object.keys(res.files).some((p) => p.startsWith('.engineer/'))).toBe(false);
   });
 
   it('is NOT usable for a conversational-only reply (falls back)', async () => {
     const model = scriptedModel([
+      JSON.stringify({ conversational: true }), // PlannerAgent: conversational turn
       JSON.stringify({ thought: 'just chatting', action: 'reply', args: { message: 'Hi there!' } }),
     ]);
     const res = await runProEngine({ prompt: 'hello', callModel: model, send: () => {} });

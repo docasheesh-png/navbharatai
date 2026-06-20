@@ -285,7 +285,8 @@ export function registerBuildRoutes(app: Express): void {
       //    legacy runBuild() pipeline below if it errors or yields nothing usable.
       //    No terminal complete/error is sent until a path actually succeeds, so a
       //    fallback is invisible to the UI. ────────────────────────────────────
-      const agenticEnabled = process.env.PRO_AGENTIC_ENGINE === '1' || req.body?.agentic === true;
+      // Phase 6: agentic engine is ON by default — disable with PRO_AGENTIC_ENGINE=0
+      const agenticEnabled = process.env.PRO_AGENTIC_ENGINE !== '0';
       if (agenticEnabled) {
         try {
           const eng = await runProEngine({

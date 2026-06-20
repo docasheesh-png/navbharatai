@@ -164,7 +164,11 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
   const { prompt, files, callModel, isEdit, sessionId, userE2bKey, send, signal } = opts;
 
   const inputVfs = VirtualFileSystem.fromRecord(files);
-  const desired = selectTier(inputVfs, /* clampToVfs */ false);
+  // Phase 6: always prefer E2B (real cloud VM) for Pro — resolveBackend() downgrades
+  // to Docker or VFS automatically when E2B key is unavailable. This makes real
+  // execution the default, not just a large-project escalation.
+  const e2bKey = userE2bKey || process.env.E2B_API_KEY || '';
+  const desired: ExecutionTier = e2bKey ? 'e2b' : selectTier(inputVfs, /* clampToVfs */ false);
   const backend = resolveBackend(desired, inputVfs, userE2bKey);
 
   const workspaceId = sessionId || `pro-${Date.now()}`;

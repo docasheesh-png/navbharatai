@@ -9,6 +9,7 @@ import { backendScaffolder } from './BackendScaffolder';
 import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from './ContextRetriever';
 import { usageTracker } from './UsageTracker';
 import { workspaceMemoryStore } from './WorkspaceMemoryStore';
+import { AppContextInjector } from '../AppContext/AppContextInjector';
 
 const MAX_STEPS = 60;
 const DEADLINE_MS = 45 * 60 * 1000;
@@ -467,7 +468,11 @@ export class EngineerAgentLoop {
       const images = shared.lastScreenshot ? [shared.lastScreenshot] : undefined;
       shared.lastScreenshot = null;
       try {
-        const effectiveSystemPrompt = dbContextBlock ? SYSTEM_PROMPT + dbContextBlock : SYSTEM_PROMPT;
+        // Phase 21 — inject app self-awareness ONLY when the user is asking about
+        // NavBharatAI itself (navigation/features). Empty for normal coding turns.
+        const appCtx = AppContextInjector.getRelevantContext(effectiveInstruction, 'engineer_ai');
+        let effectiveSystemPrompt = dbContextBlock ? SYSTEM_PROMPT + dbContextBlock : SYSTEM_PROMPT;
+        if (appCtx) effectiveSystemPrompt += `\n\n${appCtx}`;
         const { response, telemetry } = await this.router.route(prompt, effectiveSystemPrompt, images);
         usageTracker.record(workspaceId, 'aiCall');
         if (!telemetry.success) {

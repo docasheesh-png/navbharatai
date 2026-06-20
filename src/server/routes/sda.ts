@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import type { Express } from 'express';
+import { AppContextInjector } from '../AppContext/AppContextInjector';
 
 /**
  * Senior Doctor Assistant (SDA) chat route extracted from the server.ts monolith
@@ -189,6 +190,12 @@ Rules: Only include fields collected so far. Merge and UPDATE — never remove p
 
 IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, evidence-based, and respectful of physician authority.`;
 
+      // Phase 21 — app self-awareness: append NavBharatAI navigation context ONLY when
+      // the doctor asks about the app itself (e.g. "where is history?"). For any clinical
+      // message this is empty, so the clinical prompt and behavior are unchanged.
+      const sdaAppCtx = AppContextInjector.getRelevantContext(message, 'sda_chat');
+      const SDA_SYSTEM_FINAL = sdaAppCtx ? `${SDA_SYSTEM}\n\n${sdaAppCtx}` : SDA_SYSTEM;
+
       // Extract structured data from response (simple heuristic)
       const extractPatientUpdate = (text: string, msg: string): Record<string, any> => {
         const update: Record<string, any> = {};
@@ -266,7 +273,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // ── Shared helpers ───────────────────────────────────────────────────────
       // Build OpenAI-format message list (used by Claude proxy and Grok)
       const buildOpenAIMsgs = (userContent: any) => [
-        { role: 'system' as const, content: SDA_SYSTEM },
+        { role: 'system' as const, content: SDA_SYSTEM_FINAL },
         ...historyForAI,
         { role: 'user' as const, content: userContent },
       ];
@@ -328,7 +335,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         const contents = buildGeminiContents();
         for (const m of ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']) {
           try {
-            const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, systemInstruction: SDA_SYSTEM, contents, config: { thinkingConfig: { thinkingBudget: 0 } } } as any);
+            const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, systemInstruction: SDA_SYSTEM_FINAL, contents, config: { thinkingConfig: { thinkingBudget: 0 } } } as any);
             const t = r.text || '';
             if (t.trim()) return t;
           } catch (e: any) { if (signal.aborted) throw e; console.warn(`[SDA] Gemini ${m}: ${e.message}`); }
@@ -360,7 +367,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           const contents = buildGeminiContents();
           for (const modelName of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
             try {
-              const model = vertexAI.getGenerativeModel({ model: modelName, systemInstruction: { role: 'system', parts: [{ text: SDA_SYSTEM }] } });
+              const model = vertexAI.getGenerativeModel({ model: modelName, systemInstruction: { role: 'system', parts: [{ text: SDA_SYSTEM_FINAL }] } });
               const result = await model.generateContent({ contents });
               reply = result.response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
               if (reply) { console.log(`[SDA] Vertex ${modelName} succeeded`); break; }
@@ -396,7 +403,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
                 ? [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileData } }, { type: 'text', text: `[PDF Report: ${fileName}]\n${message}` }]
                 : message;
               const r = await new A({ apiKey: anthropicKey }).messages.create({
-                model: 'claude-3-5-sonnet-20241022', max_tokens: 2000, system: SDA_SYSTEM,
+                model: 'claude-3-5-sonnet-20241022', max_tokens: 2000, system: SDA_SYSTEM_FINAL,
                 messages: [...historyForAI, { role: 'user', content: userContent }],
               });
               reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';

@@ -53,7 +53,7 @@ Same ADC mechanism powers Phase 13 Firebase Hosting REST API calls. No new secre
 | 12B–F | Tests, design-to-code, cost control, mobile UX | ✅ DONE — merged PR #80 |
 | **13** | **Real Persistent Deploy (Firebase Hosting)** | ✅ DONE — merged PR #84 |
 | **14** | **Bring Your Own Database (user-controlled DB/Auth)** | ✅ DONE — code complete (BackendScaffolder.ts) |
-| 15 | Brave Search API (replace DuckDuckGo) | 🔜 Planned (low priority — DuckDuckGo key-free works) |
+| 15 | Brave Search API (replace DuckDuckGo) | ✅ DONE — Brave primary + DuckDuckGo fallback |
 | 16 | Production Build Pipelines (esbuild Node/Next) | ✅ DONE — merged PR #102 |
 | 17 | Real Test Generation (proactive Vitest) | ✅ DONE — merged PR #101 |
 | 18 | Grok Quality (CoT + self-review pass) | ✅ DONE — merged PR #101 |

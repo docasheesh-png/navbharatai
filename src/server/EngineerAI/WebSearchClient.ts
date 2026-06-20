@@ -8,16 +8,18 @@ const SEARCH_TIMEOUT_MS = 10_000;
 const NPM_TIMEOUT_MS = 8_000;
 
 /**
- * Key-free web search for Engineer AI.
+ * Web search for Engineer AI.
  *
- * No paid search API is required (the user only supplied GROK_API_KEY + E2B_API_KEY):
- *  - General queries → DuckDuckGo HTML SERP (scraped, no key).
- *  - Package queries → npm registry (registry.npmjs.org, no key) — the single most
- *    useful source for an app builder, since wrong versions cause install failures.
+ * Priority:
+ *  1. Brave Search API — if BRAVE_API_KEY env var is set (higher-quality results).
+ *  2. DuckDuckGo HTML SERP — key-free fallback, always available.
+ *
+ * npm registry is always queried for package-name queries regardless of provider.
  *
  * Everything degrades gracefully: on any network/parse failure it returns an empty
  * list rather than throwing, so the agent simply learns "no results" and moves on.
  */
+
 /** Fetches the raw HTML of a URL. Injected so the caller can run it from inside
  *  the E2B sandbox (open internet) instead of the egress-restricted server. */
 export type HtmlFetcher = (url: string) => Promise<string>;
@@ -39,8 +41,14 @@ export class WebSearchClient {
       if (npm) results.push(npm);
     }
 
-    // 2. General web results from DuckDuckGo.
-    const web = await this.duckDuckGo(query, limit, htmlFetcher).catch(() => []);
+    // 2. Web results: Brave Search if BRAVE_API_KEY is configured, else DuckDuckGo.
+    const braveKey = process.env.BRAVE_API_KEY;
+    const web = braveKey
+      ? await this.braveSearch(query, limit, braveKey).catch(
+          () => this.duckDuckGo(query, limit, htmlFetcher).catch(() => []),
+        )
+      : await this.duckDuckGo(query, limit, htmlFetcher).catch(() => []);
+
     for (const r of web) {
       if (results.length >= limit) break;
       if (!results.some(existing => existing.url === r.url)) results.push(r);
@@ -80,6 +88,34 @@ export class WebSearchClient {
       };
     } catch {
       return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Brave Search API — higher-quality results, requires BRAVE_API_KEY env var.
+   *  Throws on any error so the caller can fall back to DuckDuckGo. */
+  private async braveSearch(query: string, limit: number, apiKey: string): Promise<SearchResult[]> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+    try {
+      const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${limit}`;
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+          'Accept-Encoding': 'gzip',
+          'X-Subscription-Token': apiKey,
+        },
+      });
+      if (!res.ok) throw new Error(`Brave Search: HTTP ${res.status}`);
+      const data: any = await res.json();
+      const items: any[] = data?.web?.results || [];
+      return items.slice(0, limit).map(item => ({
+        title: String(item.title || ''),
+        url: String(item.url || ''),
+        snippet: String(item.description || ''),
+      }));
     } finally {
       clearTimeout(timer);
     }

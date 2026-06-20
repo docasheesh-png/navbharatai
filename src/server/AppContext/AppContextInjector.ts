@@ -1,12 +1,13 @@
 /**
- * Phase 21 — App Self-Awareness: smart, token-efficient context injection.
+ * App Self-Awareness: smart, token-efficient context injection.
  *
- * Rather than pasting the whole app map into every AI system prompt (wasteful and
- * stale-prone), this selects ONLY the AppKnowledgeBase entries relevant to the
- * user's current message — and returns an empty string when the message isn't
- * about the app at all. That empty-string property is what keeps injection safe:
- * a clinical question to Doctor AI or a coding request to Engineer AI gets no
- * injected app-context and therefore zero behavior change.
+ * Rather than pasting the whole app map into every AI system prompt (wasteful),
+ * this selects ONLY the AppKnowledgeBase entries relevant to the user's message
+ * and returns an empty string when the message isn't about the app at all.
+ *
+ * The empty-string guarantee is the safety property: clinical questions to
+ * Doctor AI and coding requests to Engineer AI get zero injected app-context
+ * and therefore zero behavior change.
  */
 import { APP_KNOWLEDGE_BASE, AppFeature, getFeatureById } from './AppKnowledgeBase';
 
@@ -15,10 +16,27 @@ const APP_QUESTION_SIGNALS = [
   // English
   'where', 'how do i', 'how to', 'how can i', 'what can', 'what does', 'what is',
   'which', 'find', 'open', 'navigate', 'feature', 'setting', 'settings', 'button',
-  'menu', 'tab', 'screen', 'page', 'option',
+  'menu', 'tab', 'screen', 'page', 'option', 'i want to', 'show me',
   // Hindi / Hinglish (romanized)
   'kahan', 'kaha', 'kaise', 'kese', 'kya kar', 'kya kya', 'kya hai', 'kahaan',
-  'milega', 'milta', 'kidhar', 'konsa', 'kaun sa', 'setting kahan',
+  'milega', 'milta', 'kidhar', 'konsa', 'kaun sa', 'setting kahan', 'kahan hai',
+  'kaha milega', 'kaise kare', 'kaise use', 'batao', 'dikha', 'kholo', 'jao',
+];
+
+// Patterns that mean "what can YOU (this specific AI) do?" — inject surface capabilities.
+const SURFACE_CAPABILITY_PATTERNS = [
+  /\bwhat can you do\b/i,
+  /\bwhat (are your|your) (features?|capabilities|abilities)\b/i,
+  /\bwhat do you (do|support|offer)\b/i,
+  /\byou (se|ko) kya (kar sakt|ho|mil)\b/i,
+  /\btum kya kar sakt/i,
+  /\baap kya kar sakt/i,
+  /\bfeatures? (kya|kya kya) hai/i,
+  /\bkya kya (kar|bol|bata) sakt/i,
+  /\bkya kya milega/i,
+  /\bapni (features?|capabilities)/i,
+  /\blist (your |all )?(features?|capabilities|abilities)/i,
+  /\btell me what you can/i,
 ];
 
 function normalize(text: string): string {
@@ -40,6 +58,12 @@ export class AppContextInjector {
       return this.formatBlock(APP_KNOWLEDGE_BASE);
     }
 
+    // "What can YOU do?" directed at a specific AI surface → all entries for that surface.
+    if (surface && SURFACE_CAPABILITY_PATTERNS.some(p => p.test(msg))) {
+      const surfaceFeatures = APP_KNOWLEDGE_BASE.filter(f => f.aiSurface === surface);
+      if (surfaceFeatures.length > 0) return this.formatBlock(surfaceFeatures);
+    }
+
     // Only inject when the message looks like an app-navigation/feature question.
     const looksLikeAppQuestion = APP_QUESTION_SIGNALS.some(sig => msg.includes(sig));
 
@@ -51,18 +75,24 @@ export class AppContextInjector {
 
     if (scored.length === 0) return '';
 
-    // A strong direct keyword hit is enough even without a question signal
-    // (e.g. "supabase" → database). A weak hit needs a question signal to inject.
+    // A strong direct keyword hit is enough even without a question signal.
+    // A weak hit needs a question signal to inject.
     const topScore = scored[0].score;
     if (topScore < 3 && !looksLikeAppQuestion) return '';
 
-    const top = scored.slice(0, 3).map(s => s.feature);
+    // Return top 5 matches (increased from 3 for better coverage).
+    const top = scored.slice(0, 5).map(s => s.feature);
     return this.formatBlock(top);
   }
 
   /** Full app summary — used when the user explicitly asks about the whole app. */
   static getFullSummary(): string {
     return this.formatBlock(APP_KNOWLEDGE_BASE);
+  }
+
+  /** All features for a specific AI surface (e.g. all Engineer AI entries). */
+  static getSurfaceFeatures(surface: string): AppFeature[] {
+    return APP_KNOWLEDGE_BASE.filter(f => f.aiSurface === surface);
   }
 
   static getFeatureById(id: string): AppFeature | null {
@@ -74,7 +104,10 @@ export class AppContextInjector {
       /\bwhat (can|does) (this|the|navbharat).{0,20}(do|app)/.test(msg) ||
       /\b(app|navbharat).{0,15}(kya kya|features?|kya kar sakt)/.test(msg) ||
       /\b(list|show|tell me).{0,20}(all )?(features?|tools?|what.s available)/.test(msg) ||
-      /\bkya kya (hai|kar sakta)/.test(msg)
+      /\bkya kya (hai|kar sakta|features)/.test(msg) ||
+      /\bsab (features?|options?|buttons?)/.test(msg) ||
+      /\bpuri? (app|site) (me kya|kya kya)/.test(msg) ||
+      /\bnavbharat(ai)?.{0,15}(kya|features|kya kya|overview)/.test(msg)
     );
   }
 
@@ -93,12 +126,12 @@ export class AppContextInjector {
   private static formatBlock(features: AppFeature[]): string {
     if (features.length === 0) return '';
     const lines = features.map(f =>
-      `• ${f.name} — ${f.path}\n  ${f.description}\n  How to use: ${f.howToUse}`,
+      `• ${f.name} — ${f.path}\n  ${f.description.split('\n')[0]}\n  How to use: ${f.howToUse}`,
     );
     return (
       `[ABOUT NAVBHARATAI — app navigation & features]\n` +
-      `You are operating inside the NavBharatAI app. When the user asks where a feature is or how to do ` +
-      `something in the app, answer with the exact path below. Never say "I don't know where that is".\n` +
+      `You are operating inside the NavBharatAI app. When the user asks where a feature is or ` +
+      `how to do something in the app, answer with the exact path below. Never say "I don't know where that is".\n` +
       lines.join('\n')
     );
   }

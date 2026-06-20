@@ -173,29 +173,38 @@ break):
   `.github/workflows/ci.yml` is green on that branch. Merging red CI to
   main breaks the live app for all users.
 
-## App Self-Awareness — AppKnowledgeBase sync rule (mandatory, Phase 21)
+## App Self-Awareness — AppKnowledgeBase sync rule (mandatory, Phase 21+)
 
 `src/server/AppContext/AppKnowledgeBase.ts` is the single source of truth for
-what NavBharatAI can do. The App Brain (Phase 21) uses it to answer user
-questions and inject relevant context into Engineer AI, Doctor AI, and Pro chat.
+what NavBharatAI can do. **Every AI in NavBharatAI** (Free Chat, Pro Chat,
+Engineer AI, Doctor AI, and any future AI) reads this to answer "where is X?",
+"how do I Y?", and "what can you do?" with exact navigation paths — not guesses.
 
-**The rule: whenever any new user-facing feature, screen, setting, or navigation
-path is added to NavBharatAI — add the corresponding entry to `AppKnowledgeBase.ts`
-in the same PR, in the same commit.** This is not optional cleanup; it is part of
-the definition of "done" for every user-facing feature.
+**THE RULE (no exceptions):** Whenever any new user-facing feature, screen,
+button, setting, or navigation path is added to NavBharatAI — add the
+corresponding entry to `AppKnowledgeBase.ts` in the same PR, in the same commit.
+This is not optional cleanup; it IS part of the definition of "done" for every
+user-facing feature. A feature not listed in `AppKnowledgeBase.ts` is invisible
+to every AI in NavBharatAI.
 
-What counts as a new entry:
+What MUST get an entry (add proactively, not after the fact):
 - A new page, route, or screen (e.g. a new Settings tab)
-- A new top-level feature (e.g. a new AI mode, a new tool in Engineer AI)
-- A new setting or configuration option that users interact with directly
-- A new navigation path or button that changes what the app does
+- A new top-level feature (e.g. a new AI mode, a new Engineer AI action)
+- A new capability of an existing AI (e.g. Engineer AI can now do X → update its entry)
+- A new setting or option that users interact with directly
+- A new navigation path, button, or menu item that changes what the app does
+- Any new AI assistant added under Professionals
 
 What does NOT need an entry:
-- Internal refactors, bug fixes, build pipeline changes (Phase 16, etc.)
+- Internal refactors, bug fixes, build pipeline changes
 - Performance improvements with no user-visible surface change
 - Changes to AI prompts, router priority, or backend infrastructure
 
-The `AppFeature` interface (in `AppKnowledgeBase.ts`) requires:
-`id`, `name`, `path`, `description`, `howToUse`, `relatedFeatures`, `keywords`.
-Keywords drive injection scoring — include the words users would actually say
-when asking about this feature.
+The `AppFeature` interface requires: `id`, `name`, `path`, `description`,
+`howToUse`, `relatedFeatures`, `keywords`, and optionally `aiSurface`.
+- `path` must be exact navigation steps (e.g. "Settings → App Settings → Database")
+- `description` should list specific sub-capabilities, not just a vague sentence
+- `keywords` must include the words a user would ACTUALLY TYPE when asking about it
+  (include English AND common Hindi/Hinglish forms)
+- `aiSurface` must be set for entries owned by a specific AI
+  ('engineer_ai', 'sda_chat', 'pro_chat', 'nbi_chat')

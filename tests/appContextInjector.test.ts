@@ -51,6 +51,26 @@ describe('AppContextInjector', () => {
     expect(out.length).toBeGreaterThan(500);
   });
 
+  it('injects all surface features when asked "what can you do?" on a specific AI', () => {
+    const out = AppContextInjector.getRelevantContext('what can you do?', 'engineer_ai');
+    expect(out).toContain('Engineer AI');
+    // Should return multiple engineer_ai entries
+    expect(out.length).toBeGreaterThan(200);
+  });
+
+  it('injects surface capabilities for Hindi "kya kya kar sakte ho"', () => {
+    const out = AppContextInjector.getRelevantContext('aap kya kya kar sakte ho?', 'engineer_ai');
+    expect(out).toContain('Engineer AI');
+  });
+
+  it('getSurfaceFeatures returns only entries for that surface', () => {
+    const engineerFeatures = AppContextInjector.getSurfaceFeatures('engineer_ai');
+    expect(engineerFeatures.length).toBeGreaterThan(0);
+    expect(engineerFeatures.every(f => f.aiSurface === 'engineer_ai')).toBe(true);
+    // Doctor AI entries should not appear
+    expect(engineerFeatures.some(f => f.id === 'doctor_ai')).toBe(false);
+  });
+
   it('every knowledge-base entry has the required fields', () => {
     for (const f of APP_KNOWLEDGE_BASE) {
       expect(f.id).toBeTruthy();
@@ -58,6 +78,19 @@ describe('AppContextInjector', () => {
       expect(f.path).toBeTruthy();
       expect(Array.isArray(f.keywords)).toBe(true);
       expect(f.keywords.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('knowledge base has grown beyond the original 17 entries', () => {
+    // Expanded KB covers IDE panels, sub-features, navigation — must have more entries
+    expect(APP_KNOWLEDGE_BASE.length).toBeGreaterThan(20);
+  });
+
+  it('doctor AI keywords contain no clinical content terms that could match patient conversations', () => {
+    const doctorEntry = APP_KNOWLEDGE_BASE.find(f => f.id === 'doctor_ai')!;
+    const forbiddenClinicalTerms = ['differentials', 'diagnosis', 'patient', 'clinical', 'medical', 'investigation', 'history taking', 'red flag'];
+    for (const term of forbiddenClinicalTerms) {
+      expect(doctorEntry.keywords).not.toContain(term);
     }
   });
 });

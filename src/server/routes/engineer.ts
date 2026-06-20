@@ -9,6 +9,7 @@ import { deploymentService } from '../EngineerAI/DeploymentService';
 import { usageTracker } from '../EngineerAI/UsageTracker';
 import { DbProviderConfig } from '../EngineerAI/EngineerAITypes';
 import { backendScaffolder } from '../EngineerAI/BackendScaffolder';
+import { getSecretValue } from '../lib/secrets';
 
 // Actuator selection (env-var driven):
 //   E2B_API_KEY set       → E2BActuator (real cloud sandbox, browser support, costs money)
@@ -32,7 +33,7 @@ export function registerEngineerRoutes(app: Express): void {
   const agentLoop = new EngineerAgentLoop(router, actuator);
 
   app.post('/api/engineer-chat', async (req: Request, res: Response) => {
-    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig } = req.body || {};
+    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig, userId } = req.body || {};
     if (typeof workspaceId !== 'string' || !workspaceId || typeof instruction !== 'string' || !instruction) {
       res.status(400).json({ error: 'workspaceId and instruction are required.' });
       return;
@@ -85,12 +86,24 @@ export function registerEngineerRoutes(app: Express): void {
       if (!res.writableEnded) res.write(JSON.stringify({ type: 'ping' }) + '\n');
     }, 15_000);
 
+    // Phase 5 — read the user's GitHub token from Secrets & Keys (GITHUB_TOKEN)
+    // so the agent can clone/push to the user's repos. Falls back to process.env.
+    // Best-effort: a lookup failure simply means no GitHub actions are available.
+    let githubToken: string | undefined;
+    if (typeof userId === 'string' && userId) {
+      try {
+        githubToken = (await getSecretValue(userId, 'GITHUB_TOKEN')) || undefined;
+      } catch { /* non-fatal — agent works without GitHub */ }
+    } else if (process.env.GITHUB_TOKEN) {
+      githubToken = process.env.GITHUB_TOKEN;
+    }
+
     try {
       // Immediate probe — verifies the SSE pipe reaches the client before any
       // long-running E2B or AI operation begins.
       send({ type: 'status', message: 'Connecting…' });
 
-      for await (const event of agentLoop.run({ workspaceId, instruction, projectType, resumeSandboxId: resumeId, attachedImage: image, dbConfig: validatedDbConfig }, abort.signal)) {
+      for await (const event of agentLoop.run({ workspaceId, instruction, projectType, resumeSandboxId: resumeId, attachedImage: image, dbConfig: validatedDbConfig, githubToken }, abort.signal)) {
         send(event);
         if (abort.signal.aborted) break;
       }

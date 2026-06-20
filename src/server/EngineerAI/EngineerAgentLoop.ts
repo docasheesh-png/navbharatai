@@ -956,7 +956,7 @@ export class EngineerAgentLoop {
               : 'Ensure E2B_API_KEY is set and the build produced a dist/ directory.');
         }
       } else if (parsed.action === 'generate_tests') {
-        yield { type: 'status', message: `Step ${step}: generating Vitest tests…` };
+        yield { type: 'status', message: `Step ${step}: generating tests…` };
         const testFiles = await this.generateTestFiles(workspaceId, effectiveInstruction, signal);
         if (testFiles.length === 0) {
           observation =
@@ -1053,24 +1053,33 @@ export class EngineerAgentLoop {
    * timeout as a safety net against a mis-configured watch-mode script.
    */
   private async runProjectTests(workspaceId: string): Promise<{ ran: boolean; success: boolean; logs: string }> {
-    let pkgRaw: string;
-    try {
-      pkgRaw = await this.actuator.readFile(workspaceId, 'package.json');
-    } catch {
-      return { ran: false, success: true, logs: '' }; // no package.json (static/python) — skip
+    // Detect language by characteristic files and pick the right test command
+    const fileList = await this.actuator.listFiles(workspaceId).catch(() => [] as string[]);
+    const hasGoTest   = fileList.some(f => f.endsWith('_test.go'));
+    const hasCargoToml = fileList.some(f => f === 'Cargo.toml');
+    const hasPomXml   = fileList.some(f => f === 'pom.xml');
+    const hasPyTest   = fileList.some(f => /test_.*\.py$|.*_test\.py$/.test(f));
+    const hasRubySpec = fileList.some(f => f.endsWith('_spec.rb'));
+
+    let testCmd: string | null = null;
+    if (hasGoTest)    testCmd = 'go test ./... 2>&1';
+    else if (hasCargoToml) testCmd = 'cargo test 2>&1';
+    else if (hasPomXml)   testCmd = 'mvn test -q 2>&1 || gradle test 2>&1';
+    else if (hasPyTest)   testCmd = 'python -m pytest -q 2>&1';
+    else if (hasRubySpec) testCmd = 'bundle exec rspec --format progress 2>&1';
+    else {
+      // JS/TS: use package.json test script
+      let pkgRaw: string;
+      try { pkgRaw = await this.actuator.readFile(workspaceId, 'package.json'); }
+      catch { return { ran: false, success: true, logs: '' }; }
+      let testScript = '';
+      try { testScript = String(JSON.parse(pkgRaw)?.scripts?.test ?? ''); } catch { return { ran: false, success: true, logs: '' }; }
+      if (!testScript.trim() || /no test specified/i.test(testScript)) return { ran: false, success: true, logs: '' };
+      testCmd = 'npm test';
     }
-    let testScript = '';
+
     try {
-      testScript = String(JSON.parse(pkgRaw)?.scripts?.test ?? '');
-    } catch {
-      return { ran: false, success: true, logs: '' };
-    }
-    // Skip the npm default placeholder and empty scripts.
-    if (!testScript.trim() || /no test specified/i.test(testScript)) {
-      return { ran: false, success: true, logs: '' };
-    }
-    try {
-      const result = await this.actuator.runCommand(workspaceId, 'npm test');
+      const result = await this.actuator.runCommand(workspaceId, testCmd);
       const logs = (result.stdout + result.stderr).slice(-MAX_OBS_CHARS);
       return { ran: true, success: result.exitCode === 0, logs };
     } catch (err: any) {
@@ -1133,13 +1142,22 @@ export class EngineerAgentLoop {
   ): Promise<{ path: string; content: string }[]> {
     if (signal?.aborted) return [];
 
-    // Gather source files (skip test files, node_modules, config)
+    // Gather source files — include all supported languages
     const fileList = await this.actuator.listFiles(workspaceId).catch(() => [] as string[]);
     const srcFiles = fileList.filter(f =>
-      /\.(ts|tsx|js|jsx|py)$/.test(f) &&
-      !/\.test\.|\.spec\.|\.config\.|node_modules/.test(f) &&
+      /\.(ts|tsx|js|jsx|py|go|rs|java|php|rb)$/.test(f) &&
+      !/\.test\.|\.spec\.|_test\.|_spec\.|node_modules/.test(f) &&
       !/^\.engineer\//.test(f),
     ).slice(0, 6);
+
+    // Detect language by file extensions
+    const hasGo   = fileList.some(f => f.endsWith('.go'));
+    const hasRust  = fileList.some(f => f.endsWith('.rs'));
+    const hasJava  = fileList.some(f => f.endsWith('.java'));
+    const hasPHP   = fileList.some(f => f.endsWith('.php'));
+    const hasRuby  = fileList.some(f => f.endsWith('.rb'));
+    const hasPy    = fileList.some(f => f.endsWith('.py'));
+    // Default: JS/TS (Vitest)
 
     const fileSections: string[] = [];
     for (const fp of srcFiles) {
@@ -1153,17 +1171,31 @@ export class EngineerAgentLoop {
       ? `\n\nSource files to test:\n${fileSections.join('\n\n')}`
       : '\n\n(No source files found — generate a placeholder test based on the task description.)';
 
+    // Language-specific test framework instructions
+    const langInstructions = hasGo
+      ? `Use Go's built-in testing package. File naming: *_test.go. Functions: func TestXxx(t *testing.T). Run: go test ./...`
+      : hasRust
+      ? `Use Rust's built-in #[test] attribute. Add tests in the same file under #[cfg(test)] mod tests { }. Run: cargo test.`
+      : hasJava
+      ? `Use JUnit 5 (@Test annotation, import org.junit.jupiter.api.*). Place tests in src/test/java/. Run: mvn test or gradle test.`
+      : hasPHP
+      ? `Use PHPUnit. File naming: *Test.php. Class extends TestCase. Run: ./vendor/bin/phpunit or composer test.`
+      : hasRuby
+      ? `Use RSpec. File naming: *_spec.rb in spec/. describe/it/expect syntax. Run: bundle exec rspec.`
+      : hasPy
+      ? `Use pytest. File naming: test_*.py or *_test.py. Functions: def test_xxx(). Run: pytest.`
+      : `Use Vitest (import { describe, it, expect } from 'vitest'). For React components use @testing-library/react.`;
+
     const testGenSystemPrompt =
-      `You are a test engineer writing minimal Vitest unit tests. ` +
-      `Use Vitest (import { describe, it, expect } from 'vitest'). ` +
-      `For React components use @testing-library/react. ` +
+      `You are a test engineer writing minimal unit tests for the language detected. ` +
+      langInstructions + ` ` +
       `Focus on pure functions and testable logic — skip untestable side-effects and fetch calls. ` +
       `Output EXACTLY one JSON object with no markdown fences: ` +
       `{ "testFiles": [{ "path": "src/__tests__/app.test.ts", "content": "..." }] }`;
 
     const testGenPrompt =
       `Task: ${instruction.slice(0, 200)}\n` +
-      `Generate 1-2 minimal Vitest test files covering the most important logic.` +
+      `Generate 1-2 minimal test files covering the most important logic.` +
       sourceContext +
       `\n\nOutput one JSON object: { "testFiles": [{ "path": "...", "content": "..." }] }`;
 

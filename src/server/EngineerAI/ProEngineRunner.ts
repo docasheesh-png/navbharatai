@@ -36,7 +36,7 @@ import { VfsActuator } from './actuators/VfsActuator';
 import { DockerActuator } from './actuators/DockerActuator';
 import { E2BActuator } from './actuators/E2BActuator';
 import type { IEngineerActuator } from './actuators/IEngineerActuator';
-import type { EngineerTask } from './EngineerAITypes';
+import type { EngineerTask, DbProviderConfig } from './EngineerAITypes';
 
 export type ExecutionTier = 'vfs' | 'cloudrun' | 'e2b';
 
@@ -114,6 +114,8 @@ export interface ProEngineOptions {
   userE2bKey?: string;
   /** GitHub token for clone_repo + git_push actions (from user's Secrets & Keys). */
   githubToken?: string;
+  /** User's database credentials — injected into the sandbox .env automatically. */
+  dbConfig?: DbProviderConfig;
   send: (ev: BuildProgressEvent) => void;
   signal?: AbortSignal;
 }
@@ -163,7 +165,7 @@ function tierPreamble(tier: ExecutionTier): string {
  * whether to emit the terminal event or fall back to the legacy pipeline.
  */
 export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineResult> {
-  const { prompt, files, callModel, isEdit, sessionId, userE2bKey, githubToken, send, signal } = opts;
+  const { prompt, files, callModel, isEdit, sessionId, userE2bKey, githubToken, dbConfig, send, signal } = opts;
 
   const inputVfs = VirtualFileSystem.fromRecord(files);
   // Phase 6: always prefer E2B (real cloud VM) for Pro — resolveBackend() downgrades
@@ -185,6 +187,7 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     instruction: tierPreamble(backend.tier) + prompt,
     projectType: 'auto',
     githubToken: githubToken || process.env.GITHUB_TOKEN || undefined,
+    dbConfig: dbConfig || undefined,
   };
 
   if (backend.tier !== 'vfs') {

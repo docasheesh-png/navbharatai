@@ -299,6 +299,8 @@ export function registerBuildRoutes(app: Express): void {
             userE2bKey: typeof req.body?.userE2bKey === 'string' ? req.body.userE2bKey : undefined,
             // GitHub token for clone_repo + git_push (from user's Secrets & Keys settings).
             githubToken: typeof req.body?.githubToken === 'string' ? req.body.githubToken : undefined,
+            // User's database credentials (from Settings → App Settings → Database).
+            dbConfig: req.body?.dbConfig && typeof req.body.dbConfig === 'object' ? req.body.dbConfig : undefined,
             send: (ev) => send(ev),
             signal: deadline.signal,
           });

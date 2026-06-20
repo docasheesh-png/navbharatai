@@ -4,15 +4,19 @@ import { EngineerAgentLoop } from '../EngineerAI/EngineerAgentLoop';
 import { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
+import { DockerActuator } from '../EngineerAI/actuators/DockerActuator';
 import { deploymentService } from '../EngineerAI/DeploymentService';
 import { usageTracker } from '../EngineerAI/UsageTracker';
 import { DbProviderConfig } from '../EngineerAI/EngineerAITypes';
 import { backendScaffolder } from '../EngineerAI/BackendScaffolder';
 
-// Real e2b.dev cloud sandbox when configured, otherwise the process-level
-// LocalActuator (same isolation guarantees as Phase 1).
+// Actuator selection (env-var driven):
+//   E2B_API_KEY set       → E2BActuator (real cloud sandbox, browser support, costs money)
+//   DOCKER_ENABLED=true   → DockerActuator (local containers, free, no browser)
+//   neither               → LocalActuator (process-level, dev/CI only)
 function buildActuator(): IEngineerActuator {
   if (process.env.E2B_API_KEY) return new E2BActuator();
+  if (process.env.DOCKER_ENABLED === 'true') return new DockerActuator();
   return new LocalActuator();
 }
 

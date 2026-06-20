@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { VfsActuator } from '../src/server/EngineerAI/actuators/VfsActuator';
 import { ProAgentRouter } from '../src/server/EngineerAI/AI/ProAgentRouter';
-import { runProEngine, selectTier } from '../src/server/EngineerAI/ProEngineRunner';
+import { runProEngine, selectTier, resolveBackend } from '../src/server/EngineerAI/ProEngineRunner';
 import { VirtualFileSystem } from '../src/server/project/ProjectModel';
 import type { BuildProgressEvent } from '../src/server/project/BuildPipeline';
 
@@ -106,6 +106,53 @@ describe('selectTier', () => {
     const huge = new VirtualFileSystem();
     for (let i = 0; i < 200; i++) huge.write(`f${i}.ts`, 'const x=1;');
     expect(selectTier(huge, false)).toBe('e2b');
+  });
+});
+
+describe('resolveBackend (availability-gated downgrade — the never-break ladder)', () => {
+  const saved = { docker: process.env.DOCKER_ENABLED, e2b: process.env.E2B_API_KEY };
+  beforeEach(() => { delete process.env.DOCKER_ENABLED; delete process.env.E2B_API_KEY; });
+  afterEach(() => {
+    if (saved.docker === undefined) delete process.env.DOCKER_ENABLED; else process.env.DOCKER_ENABLED = saved.docker;
+    if (saved.e2b === undefined) delete process.env.E2B_API_KEY; else process.env.E2B_API_KEY = saved.e2b;
+  });
+  const vfs = () => new VirtualFileSystem();
+
+  it("'vfs' desired always resolves to the in-memory backend", () => {
+    const b = resolveBackend('vfs', vfs());
+    expect(b.tier).toBe('vfs');
+    expect(b.sandbox).toBe(false);
+  });
+
+  it("downgrades 'cloudrun' to vfs when no Docker daemon", () => {
+    expect(resolveBackend('cloudrun', vfs()).tier).toBe('vfs');
+  });
+
+  it("uses the container tier when DOCKER_ENABLED=true", () => {
+    process.env.DOCKER_ENABLED = 'true';
+    const b = resolveBackend('cloudrun', vfs());
+    expect(b.tier).toBe('cloudrun');
+    expect(b.sandbox).toBe(true);
+  });
+
+  it("downgrades 'e2b' to vfs with no key and no Docker", () => {
+    expect(resolveBackend('e2b', vfs()).tier).toBe('vfs');
+  });
+
+  it("'e2b' uses the cloud VM when a user key is supplied", () => {
+    const b = resolveBackend('e2b', vfs(), 'sk-user-e2b');
+    expect(b.tier).toBe('e2b');
+    expect(b.sandbox).toBe(true);
+  });
+
+  it("'e2b' falls back to the container tier when only Docker is available", () => {
+    process.env.DOCKER_ENABLED = 'true';
+    expect(resolveBackend('e2b', vfs()).tier).toBe('cloudrun');
+  });
+
+  it("'e2b' uses the env E2B key when present", () => {
+    process.env.E2B_API_KEY = 'sk-env-e2b';
+    expect(resolveBackend('e2b', vfs()).tier).toBe('e2b');
   });
 });
 

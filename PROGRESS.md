@@ -907,3 +907,23 @@ until `PRO_AGENTIC_ENGINE=1` (or request `agentic:true`).
 - Gate: server tsc 0 · frontend tsc 0 · 234 tests pass · boot:check PASS.
 - Next (later phases): Tier 1 Cloud Run actuator (ServerContainerRuntime), Tier 2 E2B
   with per-user key; then unclamp `selectTier` and flip the flag default on per tier.
+
+### Milestone PRO-AGENTIC.2 — DONE (2026-06-20) — full tiered backend (VFS→Docker→E2B), availability-gated
+Built the complete escalation ladder for the Pro agentic engine, each tier gated
+by real availability with graceful downgrade so the app can NEVER break on a
+missing backend (admin: "maximum features, bas app break na ho").
+- `selectTier` now escalates by size (unclamped); `resolveBackend` picks the
+  highest AVAILABLE backend at/below the desired tier, else downgrades:
+  e2b (user/env E2B key) → cloudrun (DockerActuator, DOCKER_ENABLED=true) → vfs.
+- ProEngineRunner: for sandbox tiers, SEED input files into the workspace, run the
+  loop, COLLECT results back into a VFS; best-effort pause/stop in finally. Any
+  backend failure → usable:false → build.ts falls back to runBuild (invisible).
+- E2BActuator: optional per-user `apiKey` (billed to the user) — passed to
+  Sandbox.create/connect; falls back to env E2B_API_KEY.
+- build.ts: plumbs `userE2bKey` from the request into runProEngine.
+- In prod today (no DOCKER_ENABLED, no E2B key) every tier downgrades to VFS — so
+  behavior is identical to Phase 1 until infra/keys are provided. Still flag-gated
+  (PRO_AGENTIC_ENGINE / agentic:true; per-session toggle shipped in #99).
+- Tests: tests/proEngine.test.ts now 19 (added resolveBackend downgrade matrix).
+- Gate: server tsc 0 · frontend tsc 0 · 246 tests · boot:check PASS.
+- Internal-testing opt-in live (#99): ?agentic=1 or localStorage.nb_agentic_engine='1'.

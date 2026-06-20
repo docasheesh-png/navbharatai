@@ -59,7 +59,7 @@ Examples that trigger reply (in ANY language):
   "app banana hai — kya plan hoga?" (planning, not yet building)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / drive / web_search / restore / provision_db / deploy / done
+MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / drive / web_search / restore / provision_db / deploy / generate_tests / done
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Use this when the user clearly wants you to BUILD, CREATE, MODIFY, or FIX code/files right now.
 
@@ -75,7 +75,7 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "step-by-step reasoning: (1) what is the current state and what has been done, (2) what is the single most impactful next action and why, (3) what could go wrong or what to watch for", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"provision_db"|"deploy"|"clone_repo"|"git_push"|"done", "args": { ... } }
+{ "thought": "step-by-step reasoning: (1) what is the current state and what has been done, (2) what is the single most impactful next action and why, (3) what could go wrong or what to watch for", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"provision_db"|"deploy"|"clone_repo"|"git_push"|"generate_tests"|"done", "args": { ... } }
 
 Action args:
   reply:          { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
@@ -93,6 +93,7 @@ Action args:
   clone_repo:     { "repoUrl": "https://github.com/owner/repo" } — clones a GitHub repo INTO the workspace. Use when the user wants to work on an existing repo. The user's GitHub token (from Secrets & Keys) is used automatically for private repos.
   git_push:       { "message": "commit message", "branch": "main" (optional) } — commits ALL current changes and pushes to the repo's origin on GitHub. Requires a GITHUB_TOKEN in Settings → App Settings → Secrets & Keys. Use clone_repo first (or set a remote) so origin is known.
   restore:        { "checkpointId": "ckpt_1234567890" }
+  generate_tests: {} — scans the workspace source files and writes Vitest unit tests covering the main functions, utilities, and components. Also wires up "vitest run" as the package.json test script so tests run automatically on done. Call this ONCE after the core implementation is working but BEFORE done — tests act as a quality gate.
   done:           { "summary": "one sentence describing what was accomplished" }
 
 You can both SEE and INTERACT with the running app:
@@ -129,7 +130,7 @@ Coding rules (when in MODE 2):
   click the buttons, fill the forms, and confirm from the returned screenshot that it works.
 - If a screenshot reveals problems (wrong layout, missing elements, broken styles, errors): fix them, then re-verify.
 - After a screenshot, browser_action, or drive, any RUNTIME browser errors (console.error, uncaught exceptions, failed network requests) are reported back to you automatically. Treat them as real bugs and fix them — a clean build does NOT mean the app works at runtime.
-- Tests: for non-trivial logic, write tests and make sure they pass. When you mark done, if the project's package.json has a "test" script it is run automatically and a FAILING test blocks done exactly like a broken build — so fix red tests before declaring done. IMPORTANT: the test script MUST be single-run, never watch mode (use "vitest run", "jest --ci", or "node --test" — NOT bare "vitest"/"jest" which hang waiting for file changes).
+- Tests: for any app with non-trivial logic (more than 3 source files), call generate_tests ONCE after the implementation is working and the build passes. This writes Vitest unit tests for the main functions and components, wires "vitest run" into package.json scripts, and lets the automatic test gate in done catch regressions. If generated tests fail, fix the SOURCE CODE — not the tests. IMPORTANT: the test script MUST be single-run, never watch mode (use "vitest run", "jest --ci", or "node --test" — NOT bare "vitest"/"jest" which hang waiting for file changes).
 - Output done only AFTER you have visually confirmed the app looks AND works correctly. No confirmation = not done.
 - Paths are relative to workspace root, no leading "/" or "..".
 - When starting a dev server, use port 3000 and bind to 0.0.0.0 (--host 0.0.0.0 --port 3000).
@@ -498,6 +499,7 @@ export class EngineerAgentLoop {
         provision_db: 'Provisioning database, auth, and storage…',
         clone_repo: 'Cloning a GitHub repository…',
         git_push: 'Committing and pushing to GitHub…',
+        generate_tests: 'Generating test files…',
         done: 'Verifying the build…',
       };
       const thought = parsed.thought || thoughtFallback[parsed.action] || 'Thinking…';
@@ -897,6 +899,40 @@ export class EngineerAgentLoop {
               ? 'Fix: grant the Cloud Run service account the "Firebase Hosting Admin" IAM role in GCP Console.'
               : 'Ensure E2B_API_KEY is set and the build produced a dist/ directory.');
         }
+      } else if (parsed.action === 'generate_tests') {
+        yield { type: 'status', message: `Step ${step}: generating Vitest tests…` };
+        const testFiles = await this.generateTestFiles(workspaceId, effectiveInstruction, signal);
+        if (testFiles.length === 0) {
+          observation =
+            'No testable source files found, or test generation returned no results. ' +
+            'Proceed — or write tests manually with edit_file if needed.';
+        } else {
+          const written: { path: string; content: string }[] = [];
+          for (const tf of testFiles) {
+            try {
+              await this.actuator.writeFile(workspaceId, tf.path, tf.content);
+              written.push(tf);
+            } catch { /* non-fatal */ }
+          }
+          // Wire up "vitest run" as the test script so the done handler picks it up.
+          try {
+            const pkgRaw = await this.actuator.readFile(workspaceId, 'package.json');
+            const pkg = JSON.parse(pkgRaw);
+            if (!pkg.scripts) pkg.scripts = {};
+            const existing = String(pkg.scripts.test ?? '');
+            if (!existing.trim() || /no test specified/i.test(existing)) {
+              pkg.scripts.test = 'vitest run';
+              await this.actuator.writeFile(workspaceId, 'package.json', JSON.stringify(pkg, null, 2));
+            }
+          } catch { /* non-fatal — package.json may not exist yet */ }
+          if (written.length > 0) {
+            yield { type: 'files_changed', kind: 'edit', files: written };
+          }
+          observation =
+            `Generated ${written.length} test file(s): ${written.map(f => f.path).join(', ')}.\n` +
+            `Tests will run automatically when you call done. ` +
+            `If any test fails, fix the source code — not the test file.`;
+        }
       } else if (parsed.action === 'done') {
         const buildResult = await this.actuator.build(workspaceId);
         yield { type: 'build_result', success: buildResult.success, logs: buildResult.logs.slice(-MAX_OBS_CHARS) };
@@ -928,7 +964,7 @@ export class EngineerAgentLoop {
           observation = `Build failed — cannot mark done yet. Fix the errors:${searchHint}\n${buildLogs}`;
         }
       } else {
-        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, provision_db, deploy, done.`;
+        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, provision_db, deploy, generate_tests, done.`;
       }
 
       // After any browser interaction, surface runtime errors to the agent.
@@ -1026,6 +1062,65 @@ export class EngineerAgentLoop {
       return null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Phase 17 — generate Vitest test files for the workspace's source files.
+   * Makes one focused AI call with the top source files as context.
+   * Returns up to 3 test file objects, or empty array on any failure.
+   */
+  private async generateTestFiles(
+    workspaceId: string,
+    instruction: string,
+    signal?: AbortSignal,
+  ): Promise<{ path: string; content: string }[]> {
+    if (signal?.aborted) return [];
+
+    // Gather source files (skip test files, node_modules, config)
+    const fileList = await this.actuator.listFiles(workspaceId).catch(() => [] as string[]);
+    const srcFiles = fileList.filter(f =>
+      /\.(ts|tsx|js|jsx|py)$/.test(f) &&
+      !/\.test\.|\.spec\.|\.config\.|node_modules/.test(f) &&
+      !/^\.engineer\//.test(f),
+    ).slice(0, 6);
+
+    const fileSections: string[] = [];
+    for (const fp of srcFiles) {
+      try {
+        const content = await this.actuator.readFile(workspaceId, fp);
+        fileSections.push(`// ${fp}\n${content.slice(0, 1500)}`);
+      } catch { /* skip unreadable */ }
+    }
+
+    const sourceContext = fileSections.length > 0
+      ? `\n\nSource files to test:\n${fileSections.join('\n\n')}`
+      : '\n\n(No source files found — generate a placeholder test based on the task description.)';
+
+    const testGenSystemPrompt =
+      `You are a test engineer writing minimal Vitest unit tests. ` +
+      `Use Vitest (import { describe, it, expect } from 'vitest'). ` +
+      `For React components use @testing-library/react. ` +
+      `Focus on pure functions and testable logic — skip untestable side-effects and fetch calls. ` +
+      `Output EXACTLY one JSON object with no markdown fences: ` +
+      `{ "testFiles": [{ "path": "src/__tests__/app.test.ts", "content": "..." }] }`;
+
+    const testGenPrompt =
+      `Task: ${instruction.slice(0, 200)}\n` +
+      `Generate 1-2 minimal Vitest test files covering the most important logic.` +
+      sourceContext +
+      `\n\nOutput one JSON object: { "testFiles": [{ "path": "...", "content": "..." }] }`;
+
+    try {
+      const { response } = await this.router.route(testGenPrompt, testGenSystemPrompt);
+      const raw = extractJson(response.content);
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed.testFiles)) return [];
+      return (parsed.testFiles as { path: string; content: string }[])
+        .filter(f => typeof f.path === 'string' && typeof f.content === 'string' && f.path.length > 0)
+        .slice(0, 3);
+    } catch {
+      return [];
     }
   }
 

@@ -91,6 +91,28 @@ describe('EngineerAgentLoop', () => {
     expect(events.some(e => e.type === 'complete')).toBe(false);
   });
 
+  it('generates test files and wires them up before done', async () => {
+    const testContent = 'import { describe, it, expect } from "vitest";\ndescribe("smoke", () => { it("passes", () => { expect(true).toBe(true); }); });';
+    const router = fakeRouter([
+      // PlannerAgent: conversational → single unscoped loop
+      JSON.stringify({ conversational: true }),
+      // ReAct step 1: generate_tests action
+      JSON.stringify({ thought: 'write tests now', action: 'generate_tests', args: {} }),
+      // generateTestFiles() AI call — returns one test file
+      JSON.stringify({ testFiles: [{ path: 'src/__tests__/smoke.test.ts', content: testContent }] }),
+      // ReAct step 2: done
+      JSON.stringify({ thought: 'finished', action: 'done', args: { summary: 'added tests' } }),
+    ]);
+    const actuator = fakeActuator({ buildOk: true });
+    const events = await collect(new EngineerAgentLoop(router, actuator));
+
+    const changed = events.find(e => e.type === 'files_changed') as any;
+    expect(changed).toBeDefined();
+    expect(changed.files[0].path).toBe('src/__tests__/smoke.test.ts');
+    expect(actuator.files.get('src/__tests__/smoke.test.ts')).toBe(testContent);
+    expect(events.some(e => e.type === 'complete')).toBe(true);
+  });
+
   it('stops promptly when aborted before it starts', async () => {
     const ctrl = new AbortController();
     ctrl.abort();

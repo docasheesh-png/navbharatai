@@ -122,6 +122,28 @@ export function composePrompt(spec: GuiderSpec, gaps: GuiderGrade['gaps'], attem
     `Full acceptance criteria for reference:\n${ac}${oos}`;
 }
 
+/**
+ * Grade one built result against a spec (standalone so a route can grade without
+ * driving the whole loop). Robust: an unreadable grade is a conservative non-pass.
+ */
+export async function gradeAgainstSpec(
+  callModel: (system: string, user: string) => Promise<string>,
+  spec: GuiderSpec,
+  gradeContext: string,
+  passScore = DEFAULT_PASS_SCORE,
+): Promise<GuiderGrade> {
+  const system =
+    'You are a strict QA reviewer. Given the acceptance criteria and a description of what was built, ' +
+    'decide which criteria are satisfied. Respond with ONE JSON object, no fences:\n' +
+    '{ "pass": <bool>, "score": <0-100>, "gaps": [{"criterionId":"c1","issue":"<what is missing/wrong>"}], "summary": "<short>" }\n' +
+    'Only set pass=true when EVERY acceptance criterion is genuinely satisfied. Be honest — never pass incomplete work.';
+  const ac = spec.acceptanceCriteria.map(c => `[${c.id}] ${c.text}`).join('\n');
+  const user = `Acceptance criteria:\n${ac}\n\nWhat was built:\n${gradeContext.slice(0, 12000)}`;
+  let raw = '';
+  try { raw = await callModel(system, user); } catch { /* unreadable → conservative grade */ }
+  return parseGradeResponse(raw, spec, passScore);
+}
+
 export class Guider {
   private maxIterations: number;
   private passScore: number;
@@ -164,16 +186,7 @@ export class Guider {
 
   /** Grade one generated result against the spec. */
   private async grade(spec: GuiderSpec, result: GenResult): Promise<GuiderGrade> {
-    const system =
-      'You are a strict QA reviewer. Given the acceptance criteria and a description of what was built, ' +
-      'decide which criteria are satisfied. Respond with ONE JSON object, no fences:\n' +
-      '{ "pass": <bool>, "score": <0-100>, "gaps": [{"criterionId":"c1","issue":"<what is missing/wrong>"}], "summary": "<short>" }\n' +
-      'Only set pass=true when EVERY acceptance criterion is genuinely satisfied. Be honest — never pass incomplete work.';
-    const ac = spec.acceptanceCriteria.map(c => `[${c.id}] ${c.text}`).join('\n');
-    const user = `Acceptance criteria:\n${ac}\n\nWhat was built:\n${result.gradeContext.slice(0, 12000)}`;
-    let raw = '';
-    try { raw = await this.deps.callModel(system, user); } catch { /* unreadable → conservative grade */ }
-    return parseGradeResponse(raw, spec, this.passScore);
+    return gradeAgainstSpec(this.deps.callModel, spec, result.gradeContext, this.passScore);
   }
 
   /**

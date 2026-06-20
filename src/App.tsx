@@ -314,6 +314,11 @@ export default function App() {
   // Guider (Hybrid): a pending design proposal awaiting the user's Approve/Edit/Answer.
   const [proGuiderPlan, setProGuiderPlan] = useState<{ prompt: string; plan: any } | null>(null);
   const [proGuiderReplanning, setProGuiderReplanning] = useState(false);
+  // Guider grade→refine loop: the approved spec+prompt to grade against, and a bound
+  // on automatic refine rounds (separate from the partial auto-continue bound).
+  const proGuiderSpecRef = useRef<{ spec: any; prompt: string } | null>(null);
+  const proGuiderRefineRef = useRef(0);
+  const PRO_MAX_REFINE = 2;
   const [sdaResetKey, setSdaResetKey] = useState(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isProLoading, setIsProLoading] = useState<boolean>(false);
@@ -3790,6 +3795,9 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     if (!messageToSend && fileList.length === 0 || isProLoading) return;
     // A brand-new user request ends any in-flight auto-continue chain.
     if (!isAutoContinue) proAutoContinueRef.current = 0;
+    // A genuinely new user request (not an approval/refine/auto-continue) ends any
+    // in-flight guider grade→refine loop.
+    if (!isAutoContinue && !guiderApproved) { proGuiderSpecRef.current = null; proGuiderRefineRef.current = 0; }
     // Approving a guider proposal resumes a build for a message already in the chat.
     if (guiderApproved) setProGuiderPlan(null);
 
@@ -4230,6 +4238,50 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
               }, 700);
             } else {
               proAutoContinueRef.current = 0;
+              // ── Guider grade→refine (Slice 3): the build fully finished (not partial).
+              //    If this came from an approved guider plan, grade it against the spec
+              //    and auto-refine the gaps (bounded), separate from auto-continue. ──
+              if (proGuiderSpecRef.current && isAgenticEngineEnabled()) {
+                const ctx = proGuiderSpecRef.current;
+                try {
+                  const gr: any = await fetch('/api/guider/grade', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ spec: ctx.spec, prompt: ctx.prompt, files: engineRes.files, agentic: true }),
+                  }).then(r => r.json());
+                  const grade = gr?.grade;
+                  if (grade && !grade.pass && proGuiderRefineRef.current < PRO_MAX_REFINE) {
+                    proGuiderRefineRef.current += 1;
+                    const round = proGuiderRefineRef.current;
+                    const gapText = (grade.gaps || []).map((g: any) => `- ${g.issue}`).join('\n');
+                    setProMessages(prev => [...prev, {
+                      id: (Date.now() + 3).toString(),
+                      text: `🔁 Guider check: ${grade.score}/100 — kuch reh gaya, khud sudhaar raha hoon (round ${round})…`,
+                      sender: 'ai', timestamp: new Date(),
+                    }]);
+                    setTimeout(() => {
+                      void handleSendForPro(
+                        `Improve the existing app to fully meet the original request. Fix exactly these gaps without removing working features:\n${gapText}`,
+                        true, false, true,
+                      );
+                    }, 700);
+                  } else {
+                    if (grade) {
+                      setProMessages(prev => [...prev, {
+                        id: (Date.now() + 3).toString(),
+                        text: grade.pass
+                          ? `✅ Guider: saari requirements poori (${grade.score}/100).`
+                          : `Guider: abhi tak ka best version ready hai (${grade.score}/100). Aur sudhaar chahiye to bata dena.`,
+                        sender: 'ai', timestamp: new Date(),
+                      }]);
+                    }
+                    proGuiderSpecRef.current = null;
+                    proGuiderRefineRef.current = 0;
+                  }
+                } catch {
+                  proGuiderSpecRef.current = null;
+                  proGuiderRefineRef.current = 0;
+                }
+              }
             }
             return;
           }
@@ -7066,6 +7118,9 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     onGuiderApprove={() => {
                       const p = proGuiderPlan;
                       if (!p) return;
+                      // Arm the grade→refine loop with the approved spec for this build.
+                      proGuiderSpecRef.current = { spec: p.plan?.spec || null, prompt: p.prompt };
+                      proGuiderRefineRef.current = 0;
                       setProGuiderPlan(null);
                       void handleSendForPro(p.prompt, true, false, true);
                     }}

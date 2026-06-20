@@ -967,3 +967,19 @@ understand → PROPOSE design → CONFIRM with user → build → grade → refi
 - Tests: tests/guider.test.ts (14) — language detect, robust JSON parsing, the
   confirmation gate, and honest loop outcomes (pass/budget/no-progress).
 - Gate: server tsc 0 · 293 tests · boot:check PASS.
+
+### Milestone GUIDER.2 — DONE (2026-06-20) — Guider wired into Pro (Hybrid: gate → confirm → grade→refine)
+The guider now drives Pro end-to-end, behind the per-session agentic flag.
+- Slice 1 (#106): GuiderGate.shouldConfirm + /api/guider/plan (confirm only for
+  fresh/big requests; small edits skip).
+- Slice 2 (#107): chat confirmation card (Approve / Edit-Answer "Bhejo"), proposal
+  in the user's language; nothing builds until Approve.
+- Slice 3 (this): /api/guider/grade + exported gradeAgainstSpec; after an approved
+  build FULLY completes (not partial), the frontend grades it against the spec and
+  auto-refines the gaps — bounded (PRO_MAX_REFINE=2), separate from the partial
+  auto-continue bound, so the two loops never fight. Honest end: "saari requirements
+  poori (X/100)" or "best version ready (X/100)".
+- Coordination: grade runs only on a non-partial complete; refine builds reuse the
+  same robust /api/build-stream (soft-deadline + auto-continue). Default off → no
+  change for normal users.
+- Tests: guider grade tests added. Gate: server tsc 0 · frontend tsc 0 · 301 tests · boot PASS.

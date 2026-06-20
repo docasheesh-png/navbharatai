@@ -262,6 +262,11 @@ interface AIChatProps {
   onDownloadZip?: (files: Record<string, string>, appName: string) => void;
   onSendSuggestion?: (text: string) => void;
   onStop?: () => void;
+  // Guider (Hybrid) confirmation card: a proposed design awaiting Approve / Edit / Answer.
+  guiderPlan?: { language?: string; designProposal?: string; clarifyingQuestions?: string[] } | null;
+  guiderReplanning?: boolean;
+  onGuiderApprove?: () => void;
+  onGuiderSend?: (refinement: string) => void;
 }
 
 export const AIChat: React.FC<AIChatProps> = ({
@@ -299,6 +304,10 @@ export const AIChat: React.FC<AIChatProps> = ({
   onDownloadZip,
   onSendSuggestion,
   onStop,
+  guiderPlan,
+  guiderReplanning,
+  onGuiderApprove,
+  onGuiderSend,
 }) => {
   const { buildSteps } = useBuild();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -385,6 +394,8 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
   }, [buildProgress?.active]);
   const buildElapsedSec = buildProgress?.startedAt ? Math.max(0, Math.floor((nowTs - buildProgress.startedAt) / 1000)) : 0;
   const buildElapsedLabel = buildElapsedSec >= 60 ? `${Math.floor(buildElapsedSec / 60)}m ${buildElapsedSec % 60}s` : `${buildElapsedSec}s`;
+  // Guider confirmation card: the user's refinement / answer text.
+  const [guiderInput, setGuiderInput] = useState('');
 
   const [codeStudioUci] = useState<string>(() => {
     let uci = localStorage.getItem('code_studio_chat_uci');
@@ -1052,6 +1063,58 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
               {isPushing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
               {isPushing ? 'Pushing...' : 'Confirm & Push to GitHub'}
             </button>
+          </motion.div>
+        )}
+
+        {/* ── Guider Confirmation Card (Hybrid: propose → confirm before building) ── */}
+        {guiderPlan && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-[#0d1117] border border-indigo-500/30 rounded-2xl overflow-hidden shadow-xl"
+          >
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500/10 border-b border-indigo-500/20">
+              <span className="text-base">🧭</span>
+              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300">Guider — Plan ke liye aapki manzoori chahiye</span>
+            </div>
+            <div className="px-4 py-3">
+              <p className="text-[12px] leading-relaxed text-[#c9d1d9] whitespace-pre-wrap">{guiderPlan.designProposal}</p>
+              {Array.isArray(guiderPlan.clarifyingQuestions) && guiderPlan.clarifyingQuestions.length > 0 && (
+                <div className="mt-3 rounded-lg bg-white/5 border border-white/10 p-2.5">
+                  <div className="text-[9px] font-black uppercase tracking-widest text-indigo-300/80 mb-1">Kuch sawaal</div>
+                  <ul className="list-disc list-inside space-y-0.5">
+                    {guiderPlan.clarifyingQuestions.map((q, i) => (
+                      <li key={i} className="text-[11px] text-[#8b949e]">{q}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <textarea
+                value={guiderInput}
+                onChange={(e) => setGuiderInput(e.target.value)}
+                placeholder="Badlav batao ya sawaalon ke jawab do… (optional)"
+                rows={2}
+                disabled={!!guiderReplanning}
+                className="mt-3 w-full resize-none rounded-lg bg-[#161b22] border border-white/10 px-3 py-2 text-[12px] text-white placeholder-white/30 focus:outline-none focus:border-indigo-500/50 disabled:opacity-50"
+              />
+              <div className="mt-2.5 flex items-center gap-2">
+                <button
+                  onClick={() => { setGuiderInput(''); onGuiderApprove?.(); }}
+                  disabled={!!guiderReplanning}
+                  className="flex-1 px-3 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 text-white text-[11px] font-black uppercase tracking-wider hover:opacity-90 transition disabled:opacity-50"
+                >
+                  ✅ Approve — banao
+                </button>
+                <button
+                  onClick={() => { const t = guiderInput.trim(); if (t) { setGuiderInput(''); onGuiderSend?.(t); } }}
+                  disabled={!!guiderReplanning || !guiderInput.trim()}
+                  className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-[#c9d1d9] text-[11px] font-black uppercase tracking-wider hover:bg-white/10 transition disabled:opacity-40"
+                  title="Edit the plan or answer the questions"
+                >
+                  {guiderReplanning ? '⏳ Soch raha…' : '✏️ Bhejo'}
+                </button>
+              </div>
+            </div>
           </motion.div>
         )}
 

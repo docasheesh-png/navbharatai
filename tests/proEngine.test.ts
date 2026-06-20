@@ -124,7 +124,8 @@ describe('runProEngine (end-to-end, VFS tier)', () => {
       JSON.stringify({ thought: 'all done', action: 'done', args: { summary: 'Built the page.' } }),
     ]);
     const res = await runProEngine({ prompt: 'make a hello page', callModel: model, send: (e) => events.push(e) });
-    expect(res.usable).toBe(true);
+    const diag = JSON.stringify({ usable: res.usable, files: Object.keys(res.files), events: events.map((e: any) => e.type === 'status' ? `status:${String(e.message).slice(0, 60)}` : (e.type === 'module' ? `module:${e.state}` : e.type)) });
+    expect(res.usable, diag).toBe(true);
     expect(res.files['index.html']).toContain('Hello');
     expect(res.tier).toBe('vfs');
     expect(events.some((e) => e.type === 'files')).toBe(true);

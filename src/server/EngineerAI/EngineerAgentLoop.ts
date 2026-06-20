@@ -1017,6 +1017,25 @@ export class EngineerAgentLoop {
           const searchHint = tsCodes.length > 0
             ? `\n\nTypeScript error codes found: ${tsCodes.join(', ')}. Consider using web_search to look up the fix (e.g. "${tsCodes[0]} fix typescript").`
             : '';
+          // Phase 71 — focused diagnosis: one targeted AI call to identify the root
+          // cause before the agent's regular loop continues. Applied at most once per
+          // build failure (no recursive retry chain, no runaway loop).
+          const diagFix = await this.diagnoseBuildFailure(buildResult.logs, workspaceId, signal);
+          if (diagFix) {
+            try {
+              if (diagFix.action === 'patch_file') {
+                const before = await this.actuator.readFile(workspaceId, diagFix.path);
+                if (before.includes(diagFix.args.old_str)) {
+                  const after = before.replace(diagFix.args.old_str, diagFix.args.new_str ?? '');
+                  await this.actuator.writeFile(workspaceId, diagFix.path, after);
+                  yield { type: 'status', message: `Diagnosis: auto-patched "${diagFix.path}"` };
+                }
+              } else if (diagFix.action === 'edit_file' && diagFix.args.content) {
+                await this.actuator.writeFile(workspaceId, diagFix.path, diagFix.args.content);
+                yield { type: 'status', message: `Diagnosis: rewrote "${diagFix.path}"` };
+              }
+            } catch { /* non-fatal — agent will see the error on next done */ }
+          }
           observation = `Build failed — cannot mark done yet. Fix the errors:${searchHint}\n${buildLogs}`;
         }
       } else {
@@ -1123,6 +1142,40 @@ export class EngineerAgentLoop {
         parsed.args.old_str.length > 0
       ) {
         return { path: parsed.args.path, oldStr: parsed.args.old_str, newStr: parsed.args.new_str ?? '' };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Phase 71 — focused build-failure diagnosis. One targeted AI call that reads
+   * the raw build logs and returns a single surgical fix action (patch_file or
+   * edit_file) if the root cause is clear. Applied once before the agent's
+   * regular ReAct loop continues — no recursion, no retry chain.
+   */
+  private async diagnoseBuildFailure(
+    buildLogs: string,
+    workspaceId: string,
+    signal?: AbortSignal,
+  ): Promise<{ action: 'patch_file' | 'edit_file'; path: string; args: Record<string, string> } | null> {
+    if (signal?.aborted) return null;
+    const diagnosisSystemPrompt =
+      `You are a build-error expert. You will see raw build/compiler output. ` +
+      `Identify the SINGLE root-cause error (file, line, what is wrong), then output ` +
+      `exactly one JSON fix action — no markdown fences, no prose:\n` +
+      `• To patch a line: { "action": "patch_file", "args": { "path": "...", "old_str": "exact existing text", "new_str": "corrected text" } }\n` +
+      `• To rewrite a file: { "action": "edit_file", "args": { "path": "...", "content": "FULL corrected file content" } }\n` +
+      `• If you cannot determine a targeted fix: { "action": "skip", "args": {} }`;
+    const diagnosisPrompt =
+      `Build failed. Identify the root cause and provide one targeted fix:\n\n` +
+      `BUILD LOG (last 3000 chars):\n${buildLogs.slice(-3000)}`;
+    try {
+      const { response } = await this.router.route(diagnosisPrompt, diagnosisSystemPrompt);
+      const parsed = parseAction(response.content);
+      if ((parsed.action === 'patch_file' || parsed.action === 'edit_file') && parsed.args.path) {
+        return { action: parsed.action as 'patch_file' | 'edit_file', path: parsed.args.path, args: parsed.args };
       }
       return null;
     } catch {

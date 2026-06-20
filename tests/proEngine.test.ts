@@ -191,4 +191,14 @@ describe('runProEngine (end-to-end, VFS tier)', () => {
     const res = await runProEngine({ prompt: 'hello', callModel: model, send: () => {} });
     expect(res.usable).toBe(false);
   });
+
+  it('flags partial (and never throws) when the soft-deadline signal aborts the run', async () => {
+    const model = scriptedModel([PLAN]);
+    const ac = new AbortController();
+    ac.abort(); // simulate the soft deadline firing
+    const res = await runProEngine({ prompt: 'make something big', callModel: model, send: () => {}, signal: ac.signal });
+    expect(res.partial).toBe(true);
+    expect(res.usable).toBe(false); // no edits happened before the abort
+    expect(res.files).toBeTypeOf('object');
+  });
 });

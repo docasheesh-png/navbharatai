@@ -927,3 +927,24 @@ missing backend (admin: "maximum features, bas app break na ho").
 - Tests: tests/proEngine.test.ts now 19 (added resolveBackend downgrade matrix).
 - Gate: server tsc 0 · frontend tsc 0 · 246 tests · boot:check PASS.
 - Internal-testing opt-in live (#99): ?agentic=1 or localStorage.nb_agentic_engine='1'.
+
+### Milestone PRO-ROBUST.1 — DONE (2026-06-20) — builds ALWAYS return a result + professional live progress
+Fixes the live error "Build failed: Build stream ended without a result". Root cause:
+a long agentic build exceeded Cloud Run's 300s request cap, so the SSE stream was
+cut before any terminal event → client saw no result. (Admin: "user ko result milna
+chahiye chahe kitne bhi re-try ho" + show why/where time goes, professionally.)
+- build.ts /api/build-stream: SOFT_DEADLINE_MS=240s (under the 300s cap). The engine
+  runs under an AbortController; the legacy runBuild is raced against the deadline.
+  An always-terminal guard (sendComplete + finally) GUARANTEES a terminal `complete`
+  is sent — emitting a `partial:true` result with whatever was built so far rather
+  than letting the stream close empty. The "no result" error class is gone.
+- ProEngineRunner: an aborted (soft-deadline) run keeps its partial files instead of
+  discarding them; returns `partial:true`. Usable iff real edits happened.
+- buildService: BuildStreamEvent gains optional `partial`.
+- App.tsx: on a `partial` complete, AUTO-CONTINUES (bounded, max 4 rounds) with a
+  "continue exactly where you left off" turn — the user always reaches a complete
+  app over a few automatic rounds, shown as "Part N".
+- AIChat.tsx: professional progress header — live elapsed timer (Xs / Xm Ys) + a
+  "Part N" badge so the user sees how long it's taking and why.
+- Tests: proEngine partial-on-abort test added.
+- Gate: server tsc 0 · frontend tsc 0 · 279 tests · boot:check PASS.

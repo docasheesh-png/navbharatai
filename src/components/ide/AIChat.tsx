@@ -222,6 +222,8 @@ interface BuildProgressState {
   steps: { label: string; sub: string; status: 'pending' | 'running' | 'done' | 'error'; code?: string; expanded?: boolean }[];
   percent: number;
   generatedFiles: Record<string, { content: string; expanded: boolean }>;
+  startedAt?: number;
+  part?: number;
 }
 
 interface AIChatProps {
@@ -374,6 +376,15 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
   const [showReport, setShowReport] = useState<Record<string, boolean>>({});
   const [reportText, setReportText] = useState<Record<string, string>>({});
   const [progressCollapsed, setProgressCollapsed] = useState(false);
+  // Live clock for the build elapsed-time display — ticks only while a build runs.
+  const [nowTs, setNowTs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!buildProgress?.active) return;
+    const id = setInterval(() => setNowTs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [buildProgress?.active]);
+  const buildElapsedSec = buildProgress?.startedAt ? Math.max(0, Math.floor((nowTs - buildProgress.startedAt) / 1000)) : 0;
+  const buildElapsedLabel = buildElapsedSec >= 60 ? `${Math.floor(buildElapsedSec / 60)}m ${buildElapsedSec % 60}s` : `${buildElapsedSec}s`;
 
   const [codeStudioUci] = useState<string>(() => {
     let uci = localStorage.getItem('code_studio_chat_uci');
@@ -1055,7 +1066,16 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
             <div className="flex items-center gap-2 px-4 py-2.5 bg-[#0d1117] border-b border-white/5">
               <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
               <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">NavBharatAI Pro — Building</span>
+              {buildProgress.part && buildProgress.part > 1 && (
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[8px] font-black uppercase tracking-wider text-amber-300">Part {buildProgress.part}</span>
+              )}
               <div className="ml-auto flex items-center gap-2">
+                {buildProgress.startedAt && (
+                  <span className="flex items-center gap-1 text-[8px] font-mono text-white/40" title="Time spent building so far">
+                    <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+                    {buildElapsedLabel}
+                  </span>
+                )}
                 <div className="h-1.5 w-20 bg-white/5 rounded-full overflow-hidden">
                   <div
                     className="h-full rounded-full transition-all duration-500"

@@ -182,9 +182,29 @@ export function registerBuildRoutes(app: Express): void {
     const send = (event: unknown) => { try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch { /* client gone */ } };
     // Heartbeat so proxies don't idle-timeout the stream during long model calls.
     const heartbeat = setInterval(() => { try { res.write(': keep-alive\n\n'); } catch { /* ignore */ } }, 15_000);
+
+    // ── Always-terminal guarantee ──────────────────────────────────────────────
+    // Cloud Run hard-kills any request after CLOUD_RUN_TIMEOUT (300s). A long
+    // agentic build can exceed that, cutting the stream BEFORE a terminal event is
+    // sent — the client then shows "Build stream ended without a result". To make
+    // sure the user ALWAYS gets a result, we run under a soft deadline below the
+    // platform limit: when it fires we abort the engine and emit a `partial`
+    // complete with whatever was built so far (the client can then auto-continue).
+    const SOFT_DEADLINE_MS = 240_000; // 4 min, ~1 min under Cloud Run's 300s cap
+    const startedAt = Date.now();
+    const deadline = new AbortController();
+    const deadlineTimer = setTimeout(() => deadline.abort(), SOFT_DEADLINE_MS);
+    let sentTerminal = false;
+    const sendComplete = (payload: Record<string, unknown>) => {
+      if (sentTerminal) return;
+      sentTerminal = true;
+      send({ type: 'complete', ...payload });
+    };
+    const cleanup = () => { clearInterval(heartbeat); clearTimeout(deadlineTimer); };
+
     try {
       const { prompt, files, userKey, preview, isEdit } = req.body || {};
-      if (!prompt || typeof prompt !== 'string') { send({ type: 'error', message: 'prompt (string) is required' }); clearInterval(heartbeat); return res.end(); }
+      if (!prompt || typeof prompt !== 'string') { send({ type: 'error', message: 'prompt (string) is required' }); cleanup(); return res.end(); }
 
       const memory = parseMemory(req.body);
       const callModel: ModelCall = makeResilientModelCall(userKey);
@@ -206,8 +226,11 @@ export function registerBuildRoutes(app: Express): void {
             // User's own E2B key unlocks the top tier for large apps (billed to them).
             userE2bKey: typeof req.body?.userE2bKey === 'string' ? req.body.userE2bKey : undefined,
             send: (ev) => send(ev),
+            signal: deadline.signal,
           });
-          if (eng.usable) {
+          // Emit a terminal result when the engine produced usable files OR the soft
+          // deadline fired (so the user always gets what was built — never "no result").
+          if (eng.usable || deadline.signal.aborted) {
             send({ type: 'status', message: 'Updating project memory…' });
             const thisEntry = editLogEntry(prompt, eng.files, isEdit === true);
             const turnHistory = [
@@ -226,8 +249,7 @@ export function registerBuildRoutes(app: Express): void {
               previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
             }
 
-            send({
-              type: 'complete',
+            sendComplete({
               ok: eng.ok,
               files: eng.files,
               fileCount: eng.fileCount,
@@ -237,8 +259,11 @@ export function registerBuildRoutes(app: Express): void {
               preview: previewInfo,
               memorySummary: updatedSummary,
               editLog: updatedEditLog,
+              // `partial` tells the client the build was cut short by the soft
+              // deadline and can be auto-continued for a complete result.
+              partial: eng.partial || deadline.signal.aborted,
             });
-            clearInterval(heartbeat);
+            cleanup();
             return res.end();
           }
           // Not usable → fall through to the legacy pipeline.
@@ -251,15 +276,31 @@ export function registerBuildRoutes(app: Express): void {
       const { generate, fix, completeFeatures } = makeAiEditGenerator(callModel, memory);
 
       const t0 = Date.now();
-      const result = await runBuild({
-        prompt,
-        files: files && typeof files === 'object' ? files : undefined,
-        generate, fix, completeFeatures,
-        modular: true,            // one module per call, verified between each
-        isEdit: isEdit === true,  // edits skip the feature-completion loop
-        maxRepairAttempts: 1,
-        onProgress: (ev) => send(ev),
+      // Race the build against the soft deadline so a hung/slow build can never run
+      // past Cloud Run's limit and drop the stream — we emit a partial result instead.
+      const deadlineHit = new Promise<'deadline'>((resolve) => {
+        if (deadline.signal.aborted) return resolve('deadline');
+        deadline.signal.addEventListener('abort', () => resolve('deadline'), { once: true });
       });
+      const raced = await Promise.race([
+        runBuild({
+          prompt,
+          files: files && typeof files === 'object' ? files : undefined,
+          generate, fix, completeFeatures,
+          modular: true,            // one module per call, verified between each
+          isEdit: isEdit === true,  // edits skip the feature-completion loop
+          maxRepairAttempts: 1,
+          onProgress: (ev) => send(ev),
+        }),
+        deadlineHit,
+      ]);
+      if (raced === 'deadline') {
+        const inputFiles = files && typeof files === 'object' ? files : {};
+        sendComplete({ ok: false, files: inputFiles, fileCount: Object.keys(inputFiles).length, previewAllowed: false, partial: true });
+        cleanup();
+        return res.end();
+      }
+      const result = raced;
       try { getMetrics().recordBuild({ ok: result.ok, previewAllowed: result.previewAllowed, isEdit: isEdit === true, ms: Date.now() - t0, repairAttempts: result.repairAttempts }); } catch { /* metrics never block */ }
 
       // Refresh the rolling memory so the NEXT turn stays coherent (Claude-Code
@@ -282,8 +323,7 @@ export function registerBuildRoutes(app: Express): void {
         previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
       }
 
-      send({
-        type: 'complete',
+      sendComplete({
         ok: result.ok,
         files: result.files,
         fileCount: result.fileCount,
@@ -293,12 +333,23 @@ export function registerBuildRoutes(app: Express): void {
         preview: previewInfo,
         memorySummary: updatedSummary,
         editLog: updatedEditLog,
+        partial: false,
       });
     } catch (err: any) {
-      const safeMsg = (err?.message || 'Build failed').replace(/\/[^\s:]+\/[^\s:]+/g, '[path]').slice(0, 200);
-      send({ type: 'error', message: safeMsg });
+      // Only surface an error if we haven't already given the user a result.
+      if (!sentTerminal) {
+        const safeMsg = (err?.message || 'Build failed').replace(/\/[^\s:]+\/[^\s:]+/g, '[path]').slice(0, 200);
+        send({ type: 'error', message: safeMsg });
+      }
     } finally {
-      clearInterval(heartbeat);
+      // Last-resort guarantee: if no terminal event went out (an unexpected exit
+      // path), return the user's input files as a partial result rather than
+      // letting the stream close empty ("Build stream ended without a result").
+      if (!sentTerminal) {
+        const inputFiles = (req.body?.files && typeof req.body.files === 'object') ? req.body.files : {};
+        send({ type: 'complete', ok: false, files: inputFiles, fileCount: Object.keys(inputFiles).length, previewAllowed: false, partial: true });
+      }
+      cleanup();
       res.end();
     }
   });

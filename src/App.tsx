@@ -303,7 +303,14 @@ export default function App() {
     steps: { label: string; sub: string; status: 'pending' | 'running' | 'done' | 'error'; code?: string; expanded?: boolean }[];
     percent: number;
     generatedFiles: Record<string, { content: string; expanded: boolean }>;
+    /** When the current build (or auto-continue chain) started — drives the live timer. */
+    startedAt?: number;
+    /** Auto-continue part number (1 = first pass) when a build is resumed after the soft deadline. */
+    part?: number;
   }>({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+  // Bounds the automatic "continue" chain when the server returns a partial build.
+  const proAutoContinueRef = useRef(0);
+  const PRO_MAX_AUTO_CONTINUE = 4;
   const [sdaResetKey, setSdaResetKey] = useState(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isProLoading, setIsProLoading] = useState<boolean>(false);
@@ -3774,10 +3781,12 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     }
   };
 
-  const handleSendForPro = async (input?: string | File[], forceBuild = false) => {
+  const handleSendForPro = async (input?: string | File[], forceBuild = false, isAutoContinue = false) => {
     const fileList = Array.isArray(input) ? input : [];
     const messageToSend = typeof input === 'string' ? input : proInput.trim();
     if (!messageToSend && fileList.length === 0 || isProLoading) return;
+    // A brand-new user request ends any in-flight auto-continue chain.
+    if (!isAutoContinue) proAutoContinueRef.current = 0;
 
     // ZIP file detected → import into Code Studio instead of sending to AI chat
     const zipFile = fileList.find(f =>
@@ -4112,6 +4121,13 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
         try {
           setProBuildProgress(prev => ({ ...prev, percent: 20, stage: '⚙️ Building your app…' }));
           // Streaming build: live per-module progress in the chat (real, not fake).
+          // Start (or continue) the live build timer — keep the original start time
+          // across an auto-continue chain so the user sees total elapsed time.
+          setProBuildProgress(prev => ({
+            ...prev, active: true,
+            startedAt: isAutoContinue && prev.startedAt ? prev.startedAt : Date.now(),
+            part: proAutoContinueRef.current + 1,
+          }));
           const engineRes: any = await buildAppStream({
             prompt: messageToSend,
             files: Object.keys(allTextFiles).length ? allTextFiles : undefined,
@@ -4170,6 +4186,26 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
               validationReport: { score, passed, repairsApplied: engineRes.repairAttempts, syntaxIssues: issues },
               isEdit: isEditRequest,
             });
+            // The server hit its soft time-limit and returned a PARTIAL build. Keep
+            // the user moving to a complete result automatically (bounded) — they
+            // always get the finished app, it just takes a few more rounds.
+            if (engineRes.partial && proAutoContinueRef.current < PRO_MAX_AUTO_CONTINUE) {
+              proAutoContinueRef.current += 1;
+              const part = proAutoContinueRef.current + 1;
+              setProMessages(prev => [...prev, {
+                id: (Date.now() + 2).toString(),
+                text: `⏳ Reached the time limit for this round — continuing automatically (part ${part}) to finish the remaining work…`,
+                sender: 'ai', timestamp: new Date(),
+              }]);
+              setTimeout(() => {
+                void handleSendForPro(
+                  'Continue building this app from its current state. Finish every remaining feature and detail from the original request; do not restart or remove existing work.',
+                  true, true,
+                );
+              }, 700);
+            } else {
+              proAutoContinueRef.current = 0;
+            }
             return;
           }
           throw new Error('The engine returned no files.');

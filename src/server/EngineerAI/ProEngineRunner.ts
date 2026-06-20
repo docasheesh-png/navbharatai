@@ -119,6 +119,10 @@ export interface ProEngineOptions {
 export interface ProEngineResult {
   /** True when the loop produced usable file edits (route should emit complete). */
   usable: boolean;
+  /** True when the run was cut short by the abort signal (soft deadline) — the
+   *  files are real but the work isn't finished, so the caller can offer/auto-run
+   *  a "continue" turn. The user always gets whatever was built so far. */
+  partial: boolean;
   ok: boolean;
   files: Record<string, string>;
   fileCount: number;
@@ -299,10 +303,14 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     validation.qualityScore = Math.max(0, validation.qualityScore - 45);
   }
 
-  const usable = !sawError && !aborted && !runError && didEdit && Object.keys(finalFiles).length > 0;
+  // An aborted run (soft deadline) still counts as usable when it produced edits —
+  // we keep the partial work instead of throwing it away, and flag it `partial` so
+  // the caller can continue it. Only a hard error / infra failure blocks usability.
+  const usable = !sawError && !runError && didEdit && Object.keys(finalFiles).length > 0;
 
   return {
     usable,
+    partial: aborted,
     ok: verify.ok,
     files: finalFiles,
     fileCount: outVfs.count,

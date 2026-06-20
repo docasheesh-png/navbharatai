@@ -9,7 +9,8 @@ import { usageTracker } from './UsageTracker';
 
 const MAX_STEPS = 60;
 const DEADLINE_MS = 45 * 60 * 1000;
-const MAX_OBS_CHARS = 3000;
+// Phase 4 — larger per-step observation window so full build logs stay visible.
+const MAX_OBS_CHARS = 6000;
 // Phase 12A — named viewports so the agent can verify responsive layouts.
 const VIEWPORTS: Record<string, { width: number; height: number }> = {
   mobile: { width: 390, height: 844 },   // iPhone 14-ish
@@ -19,7 +20,8 @@ const VIEWPORTS: Record<string, { width: number; height: number }> = {
 // Phase 12A — cross-session project memory file (the agent records WHY decisions here).
 const MEMORY_PATH = '.engineer/memory.md';
 const MAX_MEMORY_CHARS = 4000;
-const MAX_HISTORY_STEPS = 20;
+// Phase 4 — retain more steps of history so the agent keeps long-task context.
+const MAX_HISTORY_STEPS = 30;
 const MAX_PARSE_RETRIES = 3;
 // Steps kept verbatim; older steps are condensed into a one-line summary each.
 const HISTORY_VERBATIM_TAIL = 12;
@@ -112,6 +114,7 @@ Coding rules (when in MODE 2):
 - One action per response. Wait for the observation before the next action.
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
+- Save steps: chain multiple shell commands with ${'`&&`'} in ONE bash action (e.g. ${'`npm install && npm run build`'}) instead of spending a separate step on each. Steps are limited, so batch related commands.
 - Use web_search when you're unsure: to confirm the correct/latest package version before installing, to read API/docs for an unfamiliar library, or to look up the fix for an error you don't recognize. Don't guess a version — search it.
 - After starting a dev server: take a screenshot (or navigate via browser_action/drive) to visually verify the UI.
 - Responsive check: when layout matters, screenshot at BOTH "mobile" and "desktop" viewports and fix anything that breaks at mobile width (overflow, tiny text, overlapping elements).
@@ -283,6 +286,25 @@ export class EngineerAgentLoop {
       } catch (err: any) {
         yield { type: 'status', message: `Could not save attached image: ${err?.message || 'write failed'}` };
       }
+    }
+
+    // Phase 4 — plan-first: for non-trivial build requests, generate a short
+    // high-level plan BEFORE the ReAct loop so the agent (and user) have a roadmap.
+    // Skipped for resumed sessions (a plan already exists) and conversational turns.
+    // Fully best-effort: any failure silently falls through to the normal loop.
+    if (!resumeSandboxId) {
+      try {
+        const planSteps = await this.generatePlan(effectiveInstruction, signal);
+        if (planSteps && planSteps.length > 0) {
+          yield { type: 'plan', steps: planSteps };
+          // Persist the plan to project memory so future steps/sessions can reference it.
+          const planMd = `\n\n## Build plan (${new Date().toISOString().slice(0, 10)})\n` +
+            planSteps.map((s, i) => `${i + 1}. ${s}`).join('\n') + '\n';
+          let existingMemory = '';
+          try { existingMemory = await this.actuator.readFile(workspaceId, MEMORY_PATH); } catch { /* none yet */ }
+          await this.actuator.writeFile(workspaceId, MEMORY_PATH, existingMemory + planMd).catch(() => {});
+        }
+      } catch { /* non-fatal — proceed straight to the ReAct loop */ }
     }
 
     for (let step = 1; step <= MAX_STEPS; step++) {
@@ -794,6 +816,37 @@ export class EngineerAgentLoop {
       } catch { /* skip malformed */ }
     }
     return files;
+  }
+
+  /**
+   * Phase 4 — plan-first step. Asks the model for a short, high-level build plan
+   * BEFORE the main ReAct loop. Returns the plan steps, or null when the request
+   * is conversational (greeting/question) and needs no plan. Best-effort: returns
+   * null on any parse/router failure so the caller falls through to the loop.
+   */
+  private async generatePlan(instruction: string, signal?: AbortSignal): Promise<string[] | null> {
+    const planSystemPrompt =
+      'You are a senior engineer producing a short build plan. ' +
+      'Given a user request, decide if it is a CODING task (build/create/modify/fix software) ' +
+      'or CONVERSATIONAL (greeting, question, advice, planning chat). ' +
+      'Respond with ONE JSON object, no markdown fences:\n' +
+      '- Conversational: {"conversational": true}\n' +
+      '- Coding: {"steps": ["step 1", "step 2", ...]} with 3–8 concise, ordered, high-level steps ' +
+      '(scaffold, core features, styling, verification). Keep each step under 100 characters.';
+    const planPrompt = `User request:\n${instruction}\n\nReturn the JSON now.`;
+
+    const { response, telemetry } = await this.router.route(planPrompt, planSystemPrompt);
+    if (signal?.aborted || !telemetry.success) return null;
+
+    const parsed = JSON.parse(extractJson(response.content));
+    if (parsed.conversational === true) return null;
+    if (!Array.isArray(parsed.steps)) return null;
+
+    const steps = parsed.steps
+      .filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0)
+      .map((s: string) => s.trim().slice(0, 100))
+      .slice(0, 8);
+    return steps.length > 0 ? steps : null;
   }
 
   private async buildPrompt(

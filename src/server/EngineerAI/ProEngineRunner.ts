@@ -37,6 +37,7 @@ import { DockerActuator } from './actuators/DockerActuator';
 import { E2BActuator } from './actuators/E2BActuator';
 import type { IEngineerActuator } from './actuators/IEngineerActuator';
 import type { EngineerTask, DbProviderConfig } from './EngineerAITypes';
+import { thinkingBudgetFor, isComplexTask } from '../pro/ProComplexity';
 
 export type ExecutionTier = 'vfs' | 'cloudrun' | 'e2b';
 
@@ -176,7 +177,17 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
   const backend = resolveBackend(desired, inputVfs, userE2bKey);
 
   const workspaceId = sessionId || `pro-${Date.now()}`;
-  const router = new ProAgentRouter(callModel);
+  // Phase 73 — extended thinking for complex tasks: detect architectural complexity
+  // and pass a higher thinking budget to ProAgentRouter, which will use
+  // AnthropicProvider (Claude Opus with thinking enabled) directly for complex
+  // reasoning calls. Falls back to callModel for simple tasks or if Anthropic key
+  // is unavailable.
+  const budget = thinkingBudgetFor(prompt);
+  const complex = isComplexTask(prompt);
+  if (complex) {
+    send({ type: 'status', message: '🧠 Complex task detected — using extended reasoning…' });
+  }
+  const router = new ProAgentRouter(callModel, complex ? budget : undefined);
   // Pro uses Claude Opus (200k context) — give the agent a much larger context
   // budget so it can see more files and larger file contents per prompt step.
   const loop = new EngineerAgentLoop(router, backend.actuator, {

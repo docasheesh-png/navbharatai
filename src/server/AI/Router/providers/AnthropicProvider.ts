@@ -47,14 +47,18 @@ export class AnthropicProvider implements AIProvider {
 
     const createParams: any = {
       model,
-      max_tokens: 8000,
+      max_tokens: this.enableThinking ? this.thinkingBudget + 16_000 : 8_000,
       messages,
     };
     if (systemPrompt) createParams.system = systemPrompt;
+    if (this.enableThinking) {
+      createParams.thinking = { type: 'enabled', budget_tokens: this.thinkingBudget };
+    }
 
     const response = await this.client.messages.create(createParams);
 
-    const content = (response.content[0] as Anthropic.TextBlock).text;
+    const textBlock = response.content.find((b: any) => b.type === 'text') as Anthropic.TextBlock | undefined;
+    const content = textBlock?.text ?? '';
 
     return {
       content: content,

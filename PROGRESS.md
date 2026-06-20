@@ -983,3 +983,16 @@ The guider now drives Pro end-to-end, behind the per-session agentic flag.
   same robust /api/build-stream (soft-deadline + auto-continue). Default off → no
   change for normal users.
 - Tests: guider grade tests added. Gate: server tsc 0 · frontend tsc 0 · 301 tests · boot PASS.
+
+### Milestone GUIDER.3 — DONE (2026-06-20) — Guider shared with EngineerAI
+The guider is now reachable from EngineerAI too (admin: "dono use kar sake").
+- New POST /api/engineer-guider-plan in routes/engineer.ts — runs the SAME gate
+  (shouldConfirm) + Guider.plan(), but bridges Engineer AI's own AIRouter to the
+  guider's ModelCall, so it uses EngineerAI's model (not Pro's). Returns the
+  proposal in the user's language for a confirmation card.
+- Flag-gated (PRO_AGENTIC_ENGINE / ENGINEER_GUIDER / agentic:true) + additive: the
+  existing /api/engineer-chat agent loop is untouched. Never blocks.
+- Proves the guider core is genuinely shared/decoupled (Pro + EngineerAI both drive
+  it via injected callModel + generate).
+- Next: EngineerAI confirmation card in its own UI + grade→refine over the agent loop.
+- Gate: server tsc 0 · 301 tests · boot:check PASS.

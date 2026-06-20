@@ -10,6 +10,8 @@ import { usageTracker } from '../EngineerAI/UsageTracker';
 import { DbProviderConfig } from '../EngineerAI/EngineerAITypes';
 import { backendScaffolder } from '../EngineerAI/BackendScaffolder';
 import { getSecretValue } from '../lib/secrets';
+import { Guider } from '../Guider/Guider';
+import { shouldConfirm } from '../Guider/GuiderGate';
 
 // Actuator selection (env-var driven):
 //   E2B_API_KEY set       → E2BActuator (real cloud sandbox, browser support, costs money)
@@ -31,6 +33,30 @@ export function registerEngineerRoutes(app: Express): void {
   const router = buildEngineerRouter();
   const actuator = buildActuator();
   const agentLoop = new EngineerAgentLoop(router, actuator);
+
+  // ── Guider (shared with Pro): propose a design + decide if confirmation is needed,
+  //    using Engineer AI's OWN model. Flag-gated + additive — the existing
+  //    /api/engineer-chat loop is untouched. The frontend calls this before a build;
+  //    confirm:false → run the agent directly, confirm:true → show the proposal
+  //    (in the user's language) and only run after approval. Never blocks.
+  app.post('/api/engineer-guider-plan', async (req: Request, res: Response) => {
+    try {
+      const { instruction, files, agentic } = req.body || {};
+      if (typeof instruction !== 'string' || !instruction) return res.status(400).json({ error: 'instruction (string) is required' });
+      const enabled = process.env.PRO_AGENTIC_ENGINE === '1' || process.env.ENGINEER_GUIDER === '1' || agentic === true;
+      const hasExistingFiles = !!(files && typeof files === 'object' && Object.keys(files).length > 0);
+      if (!enabled || !shouldConfirm({ prompt: instruction, hasExistingFiles, isEdit: hasExistingFiles })) {
+        return res.json({ confirm: false });
+      }
+      // Bridge Engineer AI's AIRouter to the guider's ModelCall shape.
+      const callModel = async (system: string, user: string) => (await router.route(user, system)).response.content;
+      const guider = new Guider({ callModel, generate: async () => ({ ok: false, gradeContext: '' }) });
+      const plan = await guider.plan(instruction);
+      return res.json({ confirm: true, plan });
+    } catch {
+      return res.json({ confirm: false });
+    }
+  });
 
   app.post('/api/engineer-chat', async (req: Request, res: Response) => {
     const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig, userId } = req.body || {};

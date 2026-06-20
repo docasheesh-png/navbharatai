@@ -277,6 +277,14 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         }
         break;
       }
+      case 'repo_cloned':
+        // Phase 5 — a GitHub repo was cloned into the workspace.
+        appendChat('system', `📥 Cloned repository: ${event.url}`);
+        break;
+      case 'git_pushed':
+        // Phase 5 — changes were committed and pushed to GitHub.
+        appendChat('system', `🚀 Pushed to GitHub: ${event.url}`);
+        break;
       case 'action_start':
         setCurrentStep(event.step || 0);
         setStatusMsg(`Step ${event.step}: ${event.action}`);
@@ -609,6 +617,8 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
           resumeSandboxId: sandboxIdRef.current || undefined,
           attachedImage: sendImage || undefined,
           dbConfig: dbConfig || undefined,
+          // Phase 5 — lets the server read this user's GITHUB_TOKEN from Secrets & Keys.
+          userId: userId || undefined,
         }),
       });
       if (!res.ok || !res.body) throw new Error(`API error: ${res.status}`);

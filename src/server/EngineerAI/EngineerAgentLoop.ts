@@ -73,7 +73,7 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"provision_db"|"deploy"|"done", "args": { ... } }
+{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"provision_db"|"deploy"|"clone_repo"|"git_push"|"done", "args": { ... } }
 
 Action args:
   reply:          { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
@@ -87,6 +87,8 @@ Action args:
   browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait", "selector": "CSS selector", "text": "text to type / key to press", "url": "url to navigate to", "direction": "up"|"down" }
   drive:          { "steps": "[{\"action\":\"navigate\",\"url\":\"http://localhost:3000\"},{\"action\":\"click\",\"selector\":\"#btn\"}]" }
   web_search:     { "query": "what to look up — docs, error messages, package names/versions" }
+  clone_repo:     { "repoUrl": "https://github.com/owner/repo" } — clones a GitHub repo INTO the workspace. Use when the user wants to work on an existing repo. The user's GitHub token (from Secrets & Keys) is used automatically for private repos.
+  git_push:       { "message": "commit message", "branch": "main" (optional) } — commits ALL current changes and pushes to the repo's origin on GitHub. Requires a GITHUB_TOKEN in Settings → App Settings → Secrets & Keys. Use clone_repo first (or set a remote) so origin is known.
   restore:        { "checkpointId": "ckpt_1234567890" }
   done:           { "summary": "one sentence describing what was accomplished" }
 
@@ -158,6 +160,27 @@ function extractJson(text: string): string {
   return s.slice(start, end + 1);
 }
 
+/**
+ * Phase 5 — extract "owner/repo" from any GitHub URL form
+ * (https://github.com/owner/repo, with/without .git, or a bare "owner/repo").
+ * Returns null when the input is not a recognizable GitHub repo reference.
+ */
+function normalizeGithubRepo(input: string): string | null {
+  if (!input) return null;
+  let s = input.trim().replace(/\.git$/i, '');
+  // Strip protocol + any embedded credentials + host.
+  s = s.replace(/^https?:\/\/[^/]*github\.com\//i, '');
+  s = s.replace(/^git@github\.com:/i, '');
+  const m = s.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+/** Phase 5 — never echo a GitHub token back to the user or the model. */
+function redactToken(text: string, token?: string): string {
+  if (!token) return text;
+  return text.split(token).join('***');
+}
+
 function parseAction(raw: string): ReActAction {
   const parsed = JSON.parse(extractJson(raw));
   const action = String(parsed.action || '');
@@ -193,7 +216,7 @@ export class EngineerAgentLoop {
   constructor(private router: AIRouter, private actuator: IEngineerActuator) {}
 
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
-    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig } = task;
+    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig, githubToken } = task;
     let effectiveInstruction = instruction;
     const deadline = Date.now() + DEADLINE_MS;
 
@@ -381,6 +404,8 @@ export class EngineerAgentLoop {
         web_search: 'Searching the web…',
         restore: 'Restoring workspace to a prior checkpoint…',
         provision_db: 'Provisioning database, auth, and storage…',
+        clone_repo: 'Cloning a GitHub repository…',
+        git_push: 'Committing and pushing to GitHub…',
         done: 'Verifying the build…',
       };
       const thought = parsed.thought || thoughtFallback[parsed.action] || 'Thinking…';
@@ -463,6 +488,81 @@ export class EngineerAgentLoop {
             observation = `Workspace restored to checkpoint ${checkpointId}. Source files are back to that state — re-run the build to verify.`;
           } catch (err: any) {
             observation = `restore error: ${err?.message}`;
+          }
+        }
+      } else if (parsed.action === 'clone_repo') {
+        // Phase 5 — clone a GitHub repo into the workspace. Token (if present) is
+        // injected into the clone URL, then stripped from the stored remote so it
+        // never persists in .git/config. Output is redacted before display.
+        const repoUrl = (parsed.args.repoUrl || parsed.args.url || '').trim();
+        const repoPath = normalizeGithubRepo(repoUrl);
+        if (!repoPath) {
+          observation = 'clone_repo error: "args.repoUrl" must be a GitHub URL like https://github.com/owner/repo.';
+        } else {
+          const httpsUrl = `https://github.com/${repoPath}.git`;
+          const authUrl = githubToken
+            ? `https://x-access-token:${githubToken}@github.com/${repoPath}.git`
+            : httpsUrl;
+          const cmd =
+            `git clone ${authUrl} . 2>&1 && ` +
+            `git remote set-url origin ${httpsUrl} && ` +
+            `git config user.email "engineer-ai@navbharatai.app" && ` +
+            `git config user.name "Engineer AI"`;
+          let result: { exitCode: number; stdout: string; stderr: string };
+          try {
+            result = await this.actuator.runCommand(workspaceId, cmd);
+          } catch (err: any) {
+            result = { exitCode: -1, stdout: '', stderr: err?.message || String(err) };
+          }
+          const output = redactToken((result.stdout + result.stderr).slice(-MAX_OBS_CHARS), githubToken);
+          if (result.exitCode === 0) {
+            yield { type: 'repo_cloned', url: httpsUrl };
+            observation = `Cloned ${httpsUrl} into the workspace.\n${output}`;
+          } else {
+            observation = `clone_repo failed (exit ${result.exitCode}):\n${output}`;
+          }
+        }
+      } else if (parsed.action === 'git_push') {
+        // Phase 5 — commit all changes and push to the repo's origin. Requires a
+        // GitHub token from Secrets & Keys. Token is injected only for the push
+        // command and never written to stored config; output is redacted.
+        const message = parsed.args.message || 'Update from Engineer AI';
+        const branch = (parsed.args.branch || '').trim();
+        if (!githubToken) {
+          observation =
+            'git_push error: no GitHub token found. Ask the user to add a GITHUB_TOKEN in ' +
+            'Settings → App Settings → Secrets & Keys, then retry.';
+        } else {
+          // Derive owner/repo from the (tokenless) origin remote set at clone time.
+          const remoteRes = await this.actuator.runCommand(workspaceId, 'git remote get-url origin 2>&1')
+            .catch(() => ({ exitCode: 1, stdout: '', stderr: '' }));
+          const repoPath = normalizeGithubRepo((remoteRes.stdout + remoteRes.stderr).trim());
+          if (remoteRes.exitCode !== 0 || !repoPath) {
+            observation =
+              'git_push error: no GitHub origin remote found. Use clone_repo first, or set a ' +
+              'remote with bash: git remote add origin https://github.com/owner/repo.git';
+          } else {
+            const authUrl = `https://x-access-token:${githubToken}@github.com/${repoPath}.git`;
+            const safeMsg = message.replace(/"/g, '\\"');
+            const branchSpec = branch ? `HEAD:${branch}` : 'HEAD';
+            const cmd =
+              `git add -A && ` +
+              `(git commit -m "${safeMsg}" 2>&1 || echo "nothing to commit") && ` +
+              `git push ${authUrl} ${branchSpec} 2>&1`;
+            let result: { exitCode: number; stdout: string; stderr: string };
+            try {
+              result = await this.actuator.runCommand(workspaceId, cmd);
+            } catch (err: any) {
+              result = { exitCode: -1, stdout: '', stderr: err?.message || String(err) };
+            }
+            const output = redactToken((result.stdout + result.stderr).slice(-MAX_OBS_CHARS), githubToken);
+            const httpsUrl = `https://github.com/${repoPath}`;
+            if (result.exitCode === 0) {
+              yield { type: 'git_pushed', url: httpsUrl };
+              observation = `Pushed changes to ${httpsUrl}.\n${output}`;
+            } else {
+              observation = `git_push failed (exit ${result.exitCode}):\n${output}`;
+            }
           }
         }
       } else if (parsed.action === 'browse') {

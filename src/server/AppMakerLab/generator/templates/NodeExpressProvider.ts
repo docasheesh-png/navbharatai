@@ -6,7 +6,8 @@ const PKG = JSON.stringify({
   scripts: {
     dev: 'npx ts-node src/index.ts',
     start: 'npx ts-node src/index.ts',
-    build: 'npx tsc --noEmit',
+    build: 'npx esbuild src/index.ts --bundle --platform=node --outfile=dist/index.js',
+    'start:prod': 'node dist/index.js',
   },
   dependencies: { express: '^4.18.2', cors: '^2.8.5' },
   devDependencies: {
@@ -15,6 +16,7 @@ const PKG = JSON.stringify({
     '@types/node': '^20.11.0',
     'ts-node': '^10.9.2',
     typescript: '^5.3.3',
+    esbuild: '^0.20.0',
   },
 }, null, 2);
 

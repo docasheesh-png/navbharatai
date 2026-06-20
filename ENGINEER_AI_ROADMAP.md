@@ -54,7 +54,7 @@ Same ADC mechanism powers Phase 13 Firebase Hosting REST API calls. No new secre
 | **13** | **Real Persistent Deploy (Firebase Hosting)** | ✅ DONE — merged PR #84 |
 | **14** | **Bring Your Own Database (user-controlled DB/Auth)** | 🔵 IN PROGRESS — next |
 | 15 | Brave Search API (replace DuckDuckGo) | 🔜 Planned |
-| 16 | Production Build Pipelines (esbuild Node/Next) | 🔜 Planned |
+| 16 | Production Build Pipelines (esbuild Node/Next) | ✅ DONE |
 | 17 | Real Test Generation (proactive Vitest) | 🔜 Planned |
 | 18 | Grok Quality (CoT + self-review pass) | 🔜 Planned |
 | 19 | Persistent Memory (Firestore-backed) | 🔜 Planned |

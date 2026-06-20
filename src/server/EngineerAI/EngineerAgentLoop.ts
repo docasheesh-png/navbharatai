@@ -8,6 +8,7 @@ import { deploymentService } from './DeploymentService';
 import { backendScaffolder } from './BackendScaffolder';
 import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from './ContextRetriever';
 import { usageTracker } from './UsageTracker';
+import { workspaceMemoryStore } from './WorkspaceMemoryStore';
 
 const MAX_STEPS = 60;
 const DEADLINE_MS = 45 * 60 * 1000;
@@ -246,6 +247,23 @@ export class EngineerAgentLoop {
       return;
     }
 
+    // Phase 19 — restore memory.md from Firestore if the sandbox is fresh.
+    // This gives the agent continuity across sandbox recreations — it sees the
+    // same [PROJECT MEMORY] block it built up in prior sessions.
+    if (!resumeSandboxId) {
+      try {
+        const hasLocal = await this.actuator.readFile(workspaceId, MEMORY_PATH)
+          .then(() => true).catch(() => false);
+        if (!hasLocal) {
+          const saved = await workspaceMemoryStore.load(workspaceId).catch(() => null);
+          if (saved && saved.trim()) {
+            await this.actuator.writeFile(workspaceId, MEMORY_PATH, saved);
+            yield { type: 'status', message: 'Restored project memory from previous session.' };
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
+
     // Phase 11A: auto-init git so the agent can commit milestones.
     // Best-effort: skip if git is unavailable or workspace already has a repo.
     if (!resumeSandboxId) {
@@ -387,6 +405,14 @@ export class EngineerAgentLoop {
         yield { type: 'plan_step_done', stepIndex: i };
       }
       if (shared.completionEvent) {
+        // Phase 19 — persist memory to Firestore before completing so a fresh sandbox next
+        // session can restore context without losing the decisions from this run.
+        try {
+          const memContent = await this.actuator.readFile(workspaceId, MEMORY_PATH);
+          if (memContent.trim()) {
+            await workspaceMemoryStore.save(workspaceId, memContent).catch(() => {});
+          }
+        } catch { /* no memory file — skip */ }
         yield shared.completionEvent;
         return;
       }
@@ -394,6 +420,13 @@ export class EngineerAgentLoop {
     }
 
     if (!shared.terminated) {
+      // Phase 19 — also persist on max_steps so a resumed session still has memory.
+      try {
+        const memContent = await this.actuator.readFile(workspaceId, MEMORY_PATH);
+        if (memContent.trim()) {
+          await workspaceMemoryStore.save(workspaceId, memContent).catch(() => {});
+        }
+      } catch { /* no memory file — skip */ }
       yield { type: 'max_steps_reached', steps: shared.globalStep };
     }
   }

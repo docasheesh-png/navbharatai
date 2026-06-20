@@ -14,7 +14,7 @@
  */
 import type { VirtualFileSystem } from './ProjectModel';
 
-export type Framework = 'vite-react' | 'vite-react-ts' | 'static';
+export type Framework = 'vite-react' | 'vite-react-ts' | 'vite-vue' | 'static';
 
 const REACT_HINTS = [
   'react', 'vite', 'jsx', 'tsx', 'component', 'spa', 'single page',
@@ -26,9 +26,16 @@ function wantsTypeScript(p: string): boolean {
   return /\btypescript\b|\bts\b|\.tsx?\b|\btsx\b/i.test(p);
 }
 
+/** Explicit Vue request — must be checked before React. */
+function wantsVue(p: string): boolean {
+  return /\bvue(\.?js| 3| three)?\b|\bvuejs\b|\bpinia\b|\bvue-router\b|\bnuxt\b/i.test(p);
+}
+
 /** Heuristically choose a starting framework from the user's prompt. */
 export function detectFramework(prompt: string): Framework {
   const p = (prompt || '').toLowerCase();
+  // Vue first (explicit request only) — even "vue dashboard" must pick Vue, not React.
+  if (wantsVue(p)) return 'vite-vue';
   // Explicit "plain html"/"static" requests stay static.
   if (/\b(plain|static|simple|landing page|single html|one html)\b/.test(p)) {
     // ...unless they also explicitly asked for react.
@@ -139,6 +146,46 @@ const VITE_REACT_TS_FILES: Record<string, string> = {
     `body { margin: 0; }\n`,
 };
 
+const VITE_VUE_FILES: Record<string, string> = {
+  'package.json': JSON.stringify(
+    {
+      name: 'app',
+      private: true,
+      version: '0.0.0',
+      type: 'module',
+      scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+      dependencies: { vue: '^3.4.0' },
+      devDependencies: {
+        '@vitejs/plugin-vue': '^5.1.0',
+        vite: '^5.4.0',
+      },
+    },
+    null,
+    2,
+  ) + '\n',
+  'vite.config.js':
+    `import { defineConfig } from 'vite';\n` +
+    `import vue from '@vitejs/plugin-vue';\n\n` +
+    `export default defineConfig({ plugins: [vue()] });\n`,
+  'index.html':
+    `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
+    `    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n` +
+    `    <title>App</title>\n  </head>\n  <body>\n    <div id="app"></div>\n` +
+    `    <script type="module" src="/src/main.js"></script>\n  </body>\n</html>\n`,
+  'src/main.js':
+    `import { createApp } from 'vue';\n` +
+    `import App from './App.vue';\n` +
+    `import './style.css';\n\n` +
+    `createApp(App).mount('#app');\n`,
+  'src/App.vue':
+    `<template>\n  <h1>Hello from App</h1>\n</template>\n\n` +
+    `<script setup>\n</script>\n\n` +
+    `<style scoped>\n</style>\n`,
+  'src/style.css':
+    `:root { font-family: system-ui, sans-serif; }\n` +
+    `body { margin: 0; }\n`,
+};
+
 const STATIC_FILES: Record<string, string> = {
   'index.html':
     `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
@@ -156,6 +203,7 @@ const STATIC_FILES: Record<string, string> = {
 const SKELETONS: Record<Framework, Record<string, string>> = {
   'vite-react': VITE_REACT_FILES,
   'vite-react-ts': VITE_REACT_TS_FILES,
+  'vite-vue': VITE_VUE_FILES,
   static: STATIC_FILES,
 };
 
@@ -178,5 +226,7 @@ export function scaffoldSummary(framework: Framework): string {
     return 'a Vite + React + TypeScript project: index.html → src/main.tsx → src/App.tsx, tsconfig.json, styles in src/index.css';
   if (framework === 'vite-react')
     return 'a Vite + React (JSX) project: index.html → src/main.jsx → src/App.jsx, styles in src/index.css, deps in package.json';
+  if (framework === 'vite-vue')
+    return 'a Vite + Vue 3 project: index.html → src/main.js → src/App.vue (SFC, <script setup>), styles in src/style.css, deps in package.json';
   return 'a plain static project: index.html + styles.css + app.js';
 }

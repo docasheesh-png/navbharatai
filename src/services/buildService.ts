@@ -78,6 +78,8 @@ export interface BuildRequest {
   memorySummary?: string;
   /** Log of changes already made this session. */
   editLog?: string[];
+  /** Opt into the agentic edit engine for this request (Phase-1 rollout flag). */
+  agentic?: boolean;
 }
 
 async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {

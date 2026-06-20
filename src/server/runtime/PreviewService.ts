@@ -18,19 +18,21 @@ import { routeRuntime, type RuntimeTarget, type PreviewRuntime } from './Runtime
 import { StaticRuntime } from './StaticRuntime';
 import { ServerContainerRuntime } from './ServerContainerRuntime';
 import { isReactProject } from './ReactPreview';
+import { isVueProject } from './VuePreview';
 
 /** Framework single-file-component extensions we can NOT transpile in-browser yet. */
-const UNSUPPORTED_SFC = ['.vue', '.svelte', '.astro'];
+const UNSUPPORTED_SFC = ['.svelte', '.astro'];
 
 /**
- * Can our in-browser renderer (ReactPreview / StaticPreview) actually produce a
- * real preview for this project? True for React apps and plain static sites;
- * false for framework SFC apps (Vue/Svelte/Astro) that need a real bundler /
- * WebContainer — for those we must NOT pretend success with a blank static page.
+ * Can our in-browser renderer (React / Vue / static) actually produce a real
+ * preview for this project? True for React apps, Vue apps, and plain static
+ * sites; false for framework SFC apps we can't compile yet (Svelte/Astro) that
+ * need a real bundler / WebContainer — for those we must NOT pretend success
+ * with a blank static page.
  */
 function canStaticRender(vfs: VirtualFileSystem): boolean {
+  if (isReactProject(vfs) || isVueProject(vfs)) return true;
   if (vfs.paths().some((p) => UNSUPPORTED_SFC.some((ext) => p.toLowerCase().endsWith(ext)))) return false;
-  if (isReactProject(vfs)) return true;
   // Plain static: a usable HTML entry the static builder can inline.
   return vfs.has('index.html') || vfs.has('public/index.html');
 }

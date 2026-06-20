@@ -6,6 +6,7 @@ import { promises as fsp } from 'fs';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { getPreviewService } from '../runtime/PreviewService';
 import { buildProxyUrl } from '../runtime/proxyUrl';
+import { buildVuePreview } from '../runtime/VuePreview';
 
 // ── Server-side esbuild bundler for React/TS preview ────────────────────────
 // Eliminates the browser-side Babel CDN + complex require() runtime entirely.
@@ -225,6 +226,20 @@ export function registerPreviewRoutes(app: Express): void {
     } catch (err: any) {
       console.error('[preview-bundle] error:', err?.message || err);
       return res.status(500).json({ error: err?.message || 'Bundle failed' });
+    }
+  });
+
+  // Vue preview → self-contained HTML compiled in-browser (vue3-sfc-loader). The
+  // .vue SFCs can't go through the React/esbuild path, so Vue apps use this.
+  app.post('/api/preview-vue', (req: Request, res: Response) => {
+    try {
+      const { files } = req.body || {};
+      if (!files || typeof files !== 'object') return res.status(400).json({ error: 'files required' });
+      const html = buildVuePreview(VirtualFileSystem.fromRecord(files as Record<string, string>));
+      return res.json({ html });
+    } catch (err: any) {
+      console.error('[preview-vue] error:', err?.message || err);
+      return res.status(500).json({ error: err?.message || 'Vue preview failed' });
     }
   });
 

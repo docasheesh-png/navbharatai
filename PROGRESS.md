@@ -826,6 +826,29 @@ files, never writes files back). App.tsx's CodeStudio `onRun` now uses the exact
 edited snapshot (`(f) => updatePreview(f || files)`) so the live preview reflects the
 freshest edit. Frontend tsc 0 · 208 tests · **vite build ✓**.
 
+## 🟢 PHASE 6.1 — Vue (+Vite) support — DONE (2026-06-19)
+
+Vue 3 is now a **second fully-supported architecture** (after React), end-to-end:
+generate → validate → in-browser preview → edit. Admin asked to start Phase 6 after
+the core-hardening pass.
+
+- **6.1a generation + validation** (commit 97a3c3a): manifest/scaffold/validator +
+  isScaffoldState + .vue import resolution. (See commit for detail.)
+- **6.1b in-browser preview**: `src/server/runtime/VuePreview.ts` builds ONE
+  self-contained HTML that compiles `.vue` SFCs in the browser via **vue3-sfc-loader**
+  + Vue 3 CDN — relative imports, `<style>`/CSS imports, and bare deps (vue-router/
+  pinia) loaded from esm.sh sharing the one Vue instance; unknown/failed deps surface
+  an HONEST in-preview error, never a blank screen. Wired in: `renderPreview` selects
+  React→Vue→static; `PreviewService.canStaticRender` now allows Vue (only Svelte/Astro
+  stay honest-blocked); new `POST /api/preview-vue` endpoint; `detectAppType` returns
+  'vue'; `updatePreview` fetches the compiled Vue doc (with an honest interim + error
+  state). 6 new tests (Vue preview + arch). server tsc 0 · frontend tsc 0 · **222
+  tests** · boot PASS · vite build ✓.
+
+### ✅ SUPPORTED ARCHITECTURES (updated): React+Vite · **Vue 3+Vite** · Vanilla JS/HTML/CSS
+Next: remaining Phase-6 frameworks (Svelte/Next/Angular/Node) stay planned; Svelte/
+Astro previews are honestly blocked until their loaders land.
+
 ## 🧱 CORE ROCK-SOLID hardening (2026-06-19, admin-prioritized over Phase 6/7)
 
 Ran a concrete code-level reliability audit of the React+Vanilla generate→build→
@@ -859,3 +882,28 @@ browser/container sandbox = Phase-3 infra).
    (which tiers get build access? free-tier daily build/message limit?).
 2. **Real one-click deploy** to Vercel/Netlify/Firebase needs the admin's platform
    API tokens/accounts. Until then only NavBharat Hosting deploy is real.
+
+### Milestone PRO-AGENTIC.1 — DONE (2026-06-20) — Pro agentic edit engine, Tier 0 (VFS), additive + flag-gated
+Pro's edits were single-shot (one JSON pass → static verify), so it "forgot" after a
+few turns and couldn't do surgical fixes. Reused EngineerAI's existing agentic loop
+(`EngineerAgentLoop`, fully injectable) as Pro's PRIMARY edit engine behind a flag,
+with a 3-tier execution backend (Phase 1 ships Tier 0 only). NOTHING changes for users
+until `PRO_AGENTIC_ENGINE=1` (or request `agentic:true`).
+- NEW `actuators/VfsActuator.ts` — `IEngineerActuator` over Pro's in-memory VFS;
+  read/write/list/search/checkpoint/restore on the VFS; `build`/`runCommand` map to the
+  static gate (SyntaxCheck + ProjectVerifier) for real self-heal feedback; sandbox-only
+  methods degrade gracefully (never throw, unlike LocalActuator).
+- NEW `AI/ProModelProvider.ts` — wraps Pro's `makeResilientModelCall` as an `AIProvider`
+  so the loop uses Pro's OWN model (not Grok); `healthCheck()=>true`.
+- NEW `ProEngineRunner.ts` — orchestrator + loop→Pro SSE adapter + `selectTier`
+  (clamped to 'vfs' in Phase 1). Finalizes with the same validation/preview gate as
+  BuildPipeline so `complete` is identical-shape. Never emits terminal events itself.
+- `routes/build.ts` `/api/build-stream` — agentic branch BEFORE `runBuild`; on error or
+  non-usable result it falls through transparently to the legacy pipeline (no terminal
+  event sent until a path succeeds → fallback invisible to the UI). UI + preview unchanged.
+- `services/buildService.ts` — optional `agentic?: boolean` on BuildRequest (rollout opt-in).
+- Tests: `tests/proEngine.test.ts` (12) — VfsActuator, ProModelProvider, selectTier,
+  end-to-end VFS run + reply-only fallback.
+- Gate: server tsc 0 · frontend tsc 0 · 234 tests pass · boot:check PASS.
+- Next (later phases): Tier 1 Cloud Run actuator (ServerContainerRuntime), Tier 2 E2B
+  with per-user key; then unclamp `selectTier` and flip the flag default on per tier.

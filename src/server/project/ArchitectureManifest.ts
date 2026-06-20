@@ -11,15 +11,15 @@
  * Generation that violates the manifest is rejected, not previewed.
  */
 
-export type FrameworkId = 'react' | 'vanilla';
+export type FrameworkId = 'react' | 'vue' | 'vanilla';
 
 export interface ArchitectureManifest {
   framework: FrameworkId;
   bundler: 'vite' | 'none';
   /** Honor an explicit TypeScript request. */
   language: 'typescript' | 'javascript';
-  routing: 'react-router' | 'state' | 'none';
-  state: 'context' | 'none';
+  routing: 'react-router' | 'vue-router' | 'state' | 'none';
+  state: 'context' | 'pinia' | 'none';
   storage: 'localStorage';
   /** The single module/script entry the HTML must load. */
   entry: string;
@@ -35,10 +35,32 @@ const REACT_HINTS = [
   'kanban', 'todo', 'task', 'crud',
 ];
 
+/** Explicit Vue request — checked BEFORE React so a "vue dashboard" picks Vue, not React. */
+function wantsVue(p: string): boolean {
+  return /\bvue(\.?js| 3| three)?\b|\bvuejs\b|\bpinia\b|\bvue-router\b|\bnuxt\b/i.test(p);
+}
+
 /** Choose ONE architecture from the prompt. Deterministic — scaffold + generator agree. */
 export function selectArchitecture(prompt: string): ArchitectureManifest {
   const p = (prompt || '').toLowerCase();
-  const wantsStatic = /\b(plain|static|landing page|single html|one html|vanilla)\b/.test(p) && !/\breact\b/.test(p);
+  const wantsStatic = /\b(plain|static|landing page|single html|one html|vanilla)\b/.test(p) && !/\breact\b/.test(p) && !wantsVue(p);
+
+  // Vue first (explicit request only) — Vue 3 + Vite, SFC components, #app mount.
+  if (!wantsStatic && wantsVue(p)) {
+    const ts = /\btypescript\b|\bts\b|\.tsx?\b/i.test(p);
+    return {
+      framework: 'vue',
+      bundler: 'vite',
+      language: ts ? 'typescript' : 'javascript',
+      routing: /\brouter\b|\bvue-router\b|\bmulti-page\b|\bpages\b/.test(p) ? 'vue-router' : 'none',
+      state: /\bpinia\b|\bstore\b|\bstate management\b/.test(p) ? 'pinia' : 'none',
+      storage: 'localStorage',
+      entry: ts ? 'src/main.ts' : 'src/main.js',
+      html: 'index.html',
+      mountId: 'app',
+    };
+  }
+
   const isReact = !wantsStatic && REACT_HINTS.some((h) => p.includes(h));
 
   if (isReact) {
@@ -76,12 +98,29 @@ export function forbiddenPathPatterns(m: ArchitectureManifest): RegExp[] {
     // vanilla page is caught by the legacy <script src> check instead.)
     return [/^js\//i, /^router\.js$/i, /^dashboard\.js$/i];
   }
-  // Vanilla app: no React/bundler source tree.
-  return [/^src\//i, /\.(jsx|tsx)$/i, /^vite\.config\./i];
+  if (m.framework === 'vue') {
+    // No React (JSX/TSX) tree and no vanilla legacy layers in a Vue app.
+    return [/\.(jsx|tsx)$/i, /^js\//i, /^router\.js$/i, /^dashboard\.js$/i];
+  }
+  // Vanilla app: no React/Vue/bundler source tree.
+  return [/^src\//i, /\.(jsx|tsx|vue)$/i, /^vite\.config\./i];
 }
 
 /** Human-readable contract injected into generation prompts so the model conforms. */
 export function manifestContract(m: ArchitectureManifest): string {
+  if (m.framework === 'vue') {
+    const ts = m.language === 'typescript';
+    return [
+      `ARCHITECTURE (MANDATORY — do not mix): Vue 3 + Vite, Single-File Components (.vue), ${m.storage}.`,
+      `- Build the UI as Vue 3 SFCs (.vue) under src/ using <script setup>. NO React, NO JSX/TSX.`,
+      `- The HTML entry is "${m.html}" and MUST contain exactly ONE mount node: <div id="${m.mountId}"></div>.`,
+      `- "${m.html}" MUST load ONLY: <script type="module" src="/${m.entry}"></script>. No other <script src> tags.`,
+      `- "${m.entry}" MUST be: import { createApp } from 'vue'; import App from './App.vue'; createApp(App).mount('#${m.mountId}').`,
+      m.routing === 'vue-router' ? `- Use vue-router for navigation and add "vue-router" to package.json dependencies.` : `- Single-view app unless the user asks for routing.`,
+      m.state === 'pinia' ? `- Use pinia for shared state and add "pinia" to package.json dependencies.` : `- Keep state in components (ref/reactive) unless asked otherwise.`,
+      `- FORBIDDEN: React, JSX/TSX, any js/ vanilla folder, router.js/dashboard.js, or extra legacy <script> tags.`,
+    ].join('\n');
+  }
   if (m.framework === 'react') {
     const ts = m.language === 'typescript';
     return [

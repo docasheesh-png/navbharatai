@@ -141,6 +141,9 @@ export interface BuildStreamEvent {
   // Refreshed memory to persist for the next turn (Claude-Code-style):
   memorySummary?: string;
   editLog?: string[];
+  /** True when the build was cut short by the server soft deadline — the files are
+   *  real but incomplete, so the client can auto-continue for a full result. */
+  partial?: boolean;
 }
 
 /**

@@ -14,7 +14,6 @@
  *  - Phase 1 ships the VFS tier only (`selectTier` clamps to 'vfs'); Cloud Run
  *    and E2B tiers are added in later phases behind the same selector.
  */
-import { AIRouter } from '../AI/Router/AIRouter';
 import { analyzeProject } from '../runtime/RuntimeRouter';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { verifyProject, type VerifyResult } from '../project/ProjectVerifier';
@@ -24,7 +23,7 @@ import { selectArchitecture } from '../project/ArchitectureManifest';
 import type { BuildProgressEvent } from '../project/BuildPipeline';
 import type { ModelCall } from '../project/aiEdits';
 import { EngineerAgentLoop } from './EngineerAgentLoop';
-import { ProModelProvider } from './AI/ProModelProvider';
+import { ProAgentRouter } from './AI/ProAgentRouter';
 import { VfsActuator } from './actuators/VfsActuator';
 import type { EngineerTask } from './EngineerAITypes';
 
@@ -108,8 +107,7 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
   const tier = selectTier(vfs, /* clampToVfs (Phase 1) */ true);
 
   const actuator = new VfsActuator(vfs);
-  const router = new AIRouter();
-  router.registerProvider(new ProModelProvider(callModel));
+  const router = new ProAgentRouter(callModel);
   const loop = new EngineerAgentLoop(router, actuator);
 
   const task: EngineerTask = {

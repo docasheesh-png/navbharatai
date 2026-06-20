@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { VfsActuator } from '../src/server/EngineerAI/actuators/VfsActuator';
-import { ProModelProvider } from '../src/server/EngineerAI/AI/ProModelProvider';
+import { ProAgentRouter } from '../src/server/EngineerAI/AI/ProAgentRouter';
 import { runProEngine, selectTier } from '../src/server/EngineerAI/ProEngineRunner';
 import { VirtualFileSystem } from '../src/server/project/ProjectModel';
 import type { BuildProgressEvent } from '../src/server/project/BuildPipeline';
@@ -73,14 +73,15 @@ describe('VfsActuator (Tier 0)', () => {
   });
 });
 
-describe('ProModelProvider', () => {
-  it('delegates to the injected ModelCall and reports a valid response shape', async () => {
+describe('ProAgentRouter', () => {
+  it('delegates to the injected ModelCall, bypassing the shared router gate', async () => {
     const calls: Array<{ system: string; user: string }> = [];
-    const p = new ProModelProvider(async (system, user) => { calls.push({ system, user }); return 'OUTPUT'; });
-    expect(await p.healthCheck()).toBe(true);
-    const res = await p.execute('the-prompt', undefined, undefined, 'the-system');
-    expect(res.content).toBe('OUTPUT');
-    expect(res.provider).toBe('PRO');
+    const r = new ProAgentRouter(async (system, user) => { calls.push({ system, user }); return 'OUTPUT'; });
+    expect(await r.hasHealthyProvider()).toBe(true);
+    const { response, telemetry } = await r.route('the-prompt', 'the-system');
+    expect(response.content).toBe('OUTPUT');
+    expect(response.provider).toBe('PRO');
+    expect(telemetry.success).toBe(true);
     expect(calls[0]).toEqual({ system: 'the-system', user: 'the-prompt' });
   });
 });

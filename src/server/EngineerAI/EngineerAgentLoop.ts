@@ -84,7 +84,8 @@ Action args:
   provision_db:   { "features": "db,auth,storage" }
   deploy:         { } — builds the project then publishes dist/ to Firebase Hosting; returns a PERMANENT public URL that survives sandbox pause/restart. Use for static/SPA apps (React/Vite, Vue, Svelte, Next.js static export). Node/Python backends: use the live-preview URL instead (E2B already exposes a public HTTPS URL via server_ready).
   screenshot:     { "url": "http://localhost:3000", "viewport": "mobile"|"tablet"|"desktop" (optional — defaults to desktop) }
-  browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait", "selector": "CSS selector", "text": "text to type / key to press", "url": "url to navigate to", "direction": "up"|"down" }
+  browser_action: { "action": "click"|"type"|"navigate"|"scroll"|"press"|"wait"|"hover"|"double_click"|"select_option", "selector": "CSS selector", "text": "text to type / key to press / option value to select", "url": "url to navigate to", "direction": "up"|"down" }
+                  — hover: move the mouse over an element (reveals dropdown menus, tooltips). double_click: open/select (e.g. select a word, expand a tree item). select_option: choose a value in a <select> dropdown (pass the option value/label in "text").
   drive:          { "steps": "[{\"action\":\"navigate\",\"url\":\"http://localhost:3000\"},{\"action\":\"click\",\"selector\":\"#btn\"}]" }
   web_search:     { "query": "what to look up — docs, error messages, package names/versions" }
   clone_repo:     { "repoUrl": "https://github.com/owner/repo" } — clones a GitHub repo INTO the workspace. Use when the user wants to work on an existing repo. The user's GitHub token (from Secrets & Keys) is used automatically for private repos.
@@ -591,8 +592,8 @@ export class EngineerAgentLoop {
           observation = `screenshot error: ${err?.message}. If playwright is not installed, run: bash { "command": "npm install playwright && npx playwright install chromium" }`;
         }
       } else if (parsed.action === 'browser_action') {
-        const subAction = parsed.args.action as 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait';
-        const validActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait'];
+        const subAction = parsed.args.action as 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option';
+        const validActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait', 'hover', 'double_click', 'select_option'];
         if (!validActions.includes(subAction)) {
           observation = `browser_action error: "args.action" must be one of ${validActions.join(', ')}. Got "${subAction}".`;
         } else {
@@ -621,7 +622,7 @@ export class EngineerAgentLoop {
           observation = 'drive error: "args.steps" must be a valid JSON array of browser action objects.';
         }
         if (driveSteps.length > 0) {
-          const validActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait'];
+          const validActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait', 'hover', 'double_click', 'select_option'];
           let driveObservations: string[] = [];
           let driveScreenshot: string | null = null;
           let driveCursorX: number | undefined;
@@ -631,7 +632,7 @@ export class EngineerAgentLoop {
           for (let di = 0; di < driveSteps.length; di++) {
             if (signal?.aborted) break;
             const ds = driveSteps[di];
-            const subAction = ds.action as 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait';
+            const subAction = ds.action as 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option';
             if (!validActions.includes(subAction)) {
               driveObservations.push(`Step ${di + 1}: unknown action "${ds.action}" — skipped.`);
               continue;

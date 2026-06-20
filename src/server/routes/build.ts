@@ -26,6 +26,7 @@ import { orchestrateGenerate } from '../pro/ProOrchestrator';
 import { proMemoryStore } from '../pro/ProMemory';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
+import { AnthropicProvider } from '../AI/Router/providers/AnthropicProvider';
 import { aiRouter } from '../lib/aiRouter';
 import { getPreviewService } from '../runtime/PreviewService';
 import { getMetrics, estimateTokens } from '../lib/metrics';
@@ -99,6 +100,22 @@ function makeResilientModelCall(userKey?: string): ModelCall {
     // so the caller at least sees the real message instead of throwing blindly.
     if (lastOut) return lastOut;
     throw new Error(`All AI providers failed for build${lastErr ? `: ${(lastErr as any)?.message || lastErr}` : ''}`);
+  };
+}
+
+/**
+ * Phase 85 — Design-to-Code: when the user provides design images, wrap the
+ * standard model call to include vision via AnthropicProvider (Claude Opus native
+ * vision). Falls back to text-only callModel if Anthropic is unavailable.
+ */
+function makeVisionModelCall(baseCall: ModelCall, images: string[]): ModelCall {
+  const provider = new AnthropicProvider('claude-opus-4-8');
+  return async (system, user) => {
+    try {
+      const res = await provider.execute(user, undefined, undefined, system, images);
+      if (res.content && isUsableResponse(res.content)) return res.content;
+    } catch { /* fall through to base */ }
+    return baseCall(system, user);
   };
 }
 
@@ -279,6 +296,11 @@ export function registerBuildRoutes(app: Express): void {
       sid = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : 'pro';
       eventBus.publish({ type: EventType.BUILD_STARTED, workspaceId: sid, sender: 'pro', payload: { isEdit: isEdit === true } });
 
+      // Phase 85 — design-to-code: extract uploaded design images (base64 strings)
+      const designImages: string[] | undefined = Array.isArray(req.body?.designImages)
+        ? req.body.designImages.filter((x: any) => typeof x === 'string').slice(0, 4)
+        : undefined;
+
       const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined;
       const inRequestMemory = parseMemory(req.body);
       // Phase 74 — load persisted memory from Firestore to supplement in-request
@@ -294,7 +316,11 @@ export function registerBuildRoutes(app: Express): void {
           ? inRequestMemory.editLog
           : (persistedMemory?.editLog ?? []),
       };
-      const callModel: ModelCall = makeResilientModelCall(userKey);
+      const baseCallModel: ModelCall = makeResilientModelCall(userKey);
+      // Phase 85 — use vision-enabled model call when design images are uploaded.
+      const callModel: ModelCall = designImages && designImages.length > 0
+        ? makeVisionModelCall(baseCallModel, designImages)
+        : baseCallModel;
 
       // ── Agentic edit engine (Phase 1 — VFS tier). Additive + flag-gated: it is
       //    the PRIMARY edit path when enabled, and falls back transparently to the
@@ -306,7 +332,11 @@ export function registerBuildRoutes(app: Express): void {
       if (agenticEnabled) {
         try {
           const eng = await runProEngine({
-            prompt,
+            // Phase 85: when design images are provided, prepend a design hint to the
+            // agentic prompt so the agent knows it should match the visual design.
+            prompt: designImages && designImages.length > 0
+              ? `[DESIGN IMAGE(S) PROVIDED — generate UI code that matches the visual design in the image(s)]\n${prompt}`
+              : prompt,
             files: files && typeof files === 'object' ? files : undefined,
             callModel,
             isEdit: isEdit === true,

@@ -80,6 +80,12 @@ export interface BuildRequest {
   editLog?: string[];
   /** Opt into the agentic edit engine for this request (Phase-1 rollout flag). */
   agentic?: boolean;
+  /**
+   * Phase 85 — Design-to-Code: base64-encoded design images (Figma exports,
+   * screenshots, mockups). Claude vision analyzes the images and generates UI code
+   * that matches the design layout and style.
+   */
+  designImages?: string[];
 }
 
 /**

@@ -76,6 +76,7 @@ export class AIRouterManager {
     try {
       const opus = new AnthropicProvider('claude-opus-4-8');
       opus.priority = 1;
+      opus.enableThinking = true;
       router.registerProvider(opus);
     } catch {}
 

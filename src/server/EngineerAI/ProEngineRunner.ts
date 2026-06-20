@@ -169,7 +169,11 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
 
   const workspaceId = sessionId || `pro-${Date.now()}`;
   const router = new ProAgentRouter(callModel);
-  const loop = new EngineerAgentLoop(router, backend.actuator);
+  // Pro uses Claude Opus (200k context) — give the agent a much larger context
+  // budget so it can see more files and larger file contents per prompt step.
+  const loop = new EngineerAgentLoop(router, backend.actuator, {
+    contextBudget: { total: 140_000, perFile: 20_000, maxFiles: 80 },
+  });
   const task: EngineerTask = {
     workspaceId,
     instruction: tierPreamble(backend.tier) + prompt,

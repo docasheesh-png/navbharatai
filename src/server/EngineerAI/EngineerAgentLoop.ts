@@ -222,7 +222,16 @@ export class EngineerAgentLoop {
     return clicks;
   }
 
-  constructor(private router: AIRouter, private actuator: IEngineerActuator) {}
+  /** Optional context budget override — set large values when using 200k-context models. */
+  private contextBudget?: { total: number; perFile: number; maxFiles: number };
+
+  constructor(
+    private router: AIRouter,
+    private actuator: IEngineerActuator,
+    opts?: { contextBudget?: { total: number; perFile: number; maxFiles: number } },
+  ) {
+    this.contextBudget = opts?.contextBudget;
+  }
 
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
     const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig, githubToken } = task;
@@ -1206,15 +1215,20 @@ export class EngineerAgentLoop {
 
     // 5. Read top-ranked files and pack within the context budget
     const contentMap = new Map<string, string>();
-    const MAX_TO_READ = 30;
-    for (const filePath of ranked.slice(0, MAX_TO_READ)) {
+    const maxToRead = this.contextBudget?.maxFiles ?? 30;
+    for (const filePath of ranked.slice(0, maxToRead)) {
       try {
         contentMap.set(filePath, await this.actuator.readFile(workspaceId, filePath));
       } catch {
         contentMap.set(filePath, ''); // mark as unreadable
       }
     }
-    const fileSections = packFileSections(ranked, contentMap);
+    const fileSections = packFileSections(
+      ranked, contentMap,
+      this.contextBudget?.total,
+      this.contextBudget?.perFile,
+      this.contextBudget?.maxFiles,
+    );
 
     // 6. Full file tree (paths only) — gives the model the overall shape
     const fileTree = buildFileTree(fileList);

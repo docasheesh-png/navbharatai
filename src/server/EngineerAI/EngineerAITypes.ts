@@ -56,7 +56,7 @@ export interface SharedLoopState {
 /** One ReAct action the model outputs per turn. */
 export interface ReActAction {
   thought?: string;
-  action: 'reply' | 'bash' | 'edit_file' | 'patch_file' | 'browse' | 'screenshot' | 'browser_action' | 'web_search' | 'drive' | 'restore' | 'provision_db' | 'deploy' | 'clone_repo' | 'git_push' | 'done';
+  action: 'reply' | 'bash' | 'edit_file' | 'patch_file' | 'browse' | 'screenshot' | 'browser_action' | 'web_search' | 'drive' | 'restore' | 'provision_db' | 'deploy' | 'clone_repo' | 'git_push' | 'generate_tests' | 'done';
   args: Record<string, string>;
 }
 

@@ -5,6 +5,7 @@ import { GoogleGenAI } from '@google/genai';
 import type { Express, Request, Response } from 'express';
 import { buildApp as buildAppEngine, editApp as editAppEngine, buildReactApp as buildReactAppEngine } from '../AppMakerLab/AppEngine';
 import { aiRouter } from '../lib/aiRouter';
+import { AppContextInjector } from '../AppContext/AppContextInjector';
 
 /**
  * Pro engine routes extracted from the server.ts monolith (Phase 1, AI-core step d).
@@ -98,6 +99,12 @@ export function registerProRoutes(app: Express): void {
         ? `\n\n### CURRENT APP ON CANVAS (${currentApp.length} chars):\n\`\`\`html\n${currentApp.slice(0, 3000)}\n\`\`\`\nUser is discussing modifications/additions to THIS app.`
         : '';
 
+      // Phase 21 — app self-awareness: relevant NavBharatAI navigation context, ONLY
+      // when the user asks about the app itself. Empty for normal build/plan turns, so
+      // it appends a "\n\n" + block that is a no-op in the common case.
+      const proAppCtx = AppContextInjector.getRelevantContext(message, 'pro_chat');
+      const proAppCtxBlock = proAppCtx ? `\n\n${proAppCtx}` : '';
+
       /**
        * Build a history array for provider calls with a graduated token budget.
        * Recent messages get full content; older ones are abbreviated so the total
@@ -176,7 +183,7 @@ Your role:
 - If they ask about a feature or concept: explain briefly and helpfully
 - Keep responses SHORT (2-4 sentences max)
 - End with a gentle nudge: ask them to describe their app idea if they haven't yet
-- NEVER write code`;
+- NEVER write code${proAppCtxBlock}`;
 
         try {
           const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
@@ -221,7 +228,7 @@ The user is asking a question, discussing something, or their intent is unclear.
 - Keep responses SHORT (2-5 sentences usually enough)
 - Be helpful and warm` : ''}
 
-NEVER write any code or HTML in your response.`;
+NEVER write any code or HTML in your response.${proAppCtxBlock}`;
 
         try {
           const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
@@ -274,7 +281,7 @@ Response Format:
 (text-based diagram only)
 
 ---
-🔨 Ready? Switch to **Build Mode** — I'll generate the complete working app!`;
+🔨 Ready? Switch to **Build Mode** — I'll generate the complete working app!${proAppCtxBlock}`;
 
       // Strip any code blocks that slip through AI response
       const sanitizePlanningReply = (text: string): string => {

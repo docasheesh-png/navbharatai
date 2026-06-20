@@ -8,6 +8,8 @@ import { deploymentService } from './DeploymentService';
 import { backendScaffolder } from './BackendScaffolder';
 import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from './ContextRetriever';
 import { usageTracker } from './UsageTracker';
+import { workspaceMemoryStore } from './WorkspaceMemoryStore';
+import { AppContextInjector } from '../AppContext/AppContextInjector';
 
 const MAX_STEPS = 60;
 const DEADLINE_MS = 45 * 60 * 1000;
@@ -59,7 +61,7 @@ Examples that trigger reply (in ANY language):
   "app banana hai — kya plan hoga?" (planning, not yet building)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / drive / web_search / restore / provision_db / deploy / done
+MODE 2 — AUTONOMOUS CODING  →  use bash / edit_file / patch_file / screenshot / browser_action / drive / web_search / restore / provision_db / deploy / generate_tests / done
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Use this when the user clearly wants you to BUILD, CREATE, MODIFY, or FIX code/files right now.
 
@@ -75,7 +77,7 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"provision_db"|"deploy"|"clone_repo"|"git_push"|"done", "args": { ... } }
+{ "thought": "step-by-step reasoning: (1) what is the current state and what has been done, (2) what is the single most impactful next action and why, (3) what could go wrong or what to watch for", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"provision_db"|"deploy"|"clone_repo"|"git_push"|"generate_tests"|"done", "args": { ... } }
 
 Action args:
   reply:          { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
@@ -93,6 +95,7 @@ Action args:
   clone_repo:     { "repoUrl": "https://github.com/owner/repo" } — clones a GitHub repo INTO the workspace. Use when the user wants to work on an existing repo. The user's GitHub token (from Secrets & Keys) is used automatically for private repos.
   git_push:       { "message": "commit message", "branch": "main" (optional) } — commits ALL current changes and pushes to the repo's origin on GitHub. Requires a GITHUB_TOKEN in Settings → App Settings → Secrets & Keys. Use clone_repo first (or set a remote) so origin is known.
   restore:        { "checkpointId": "ckpt_1234567890" }
+  generate_tests: {} — scans the workspace source files and writes Vitest unit tests covering the main functions, utilities, and components. Also wires up "vitest run" as the package.json test script so tests run automatically on done. Call this ONCE after the core implementation is working but BEFORE done — tests act as a quality gate.
   done:           { "summary": "one sentence describing what was accomplished" }
 
 You can both SEE and INTERACT with the running app:
@@ -116,6 +119,7 @@ browser_action examples (single step):
   Scroll down:         { "action": "scroll", "direction": "down" }
 
 Coding rules (when in MODE 2):
+- Always fill "thought" with explicit step-by-step reasoning before choosing an action: (1) what has been accomplished so far, (2) exactly what the next action will do and why it is the highest-impact choice right now, (3) one specific risk to watch for. Never leave "thought" as a vague label — concrete reasoning produces better actions.
 - One action per response. Wait for the observation before the next action.
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
@@ -128,7 +132,7 @@ Coding rules (when in MODE 2):
   click the buttons, fill the forms, and confirm from the returned screenshot that it works.
 - If a screenshot reveals problems (wrong layout, missing elements, broken styles, errors): fix them, then re-verify.
 - After a screenshot, browser_action, or drive, any RUNTIME browser errors (console.error, uncaught exceptions, failed network requests) are reported back to you automatically. Treat them as real bugs and fix them — a clean build does NOT mean the app works at runtime.
-- Tests: for non-trivial logic, write tests and make sure they pass. When you mark done, if the project's package.json has a "test" script it is run automatically and a FAILING test blocks done exactly like a broken build — so fix red tests before declaring done. IMPORTANT: the test script MUST be single-run, never watch mode (use "vitest run", "jest --ci", or "node --test" — NOT bare "vitest"/"jest" which hang waiting for file changes).
+- Tests: for any app with non-trivial logic (more than 3 source files), call generate_tests ONCE after the implementation is working and the build passes. This writes Vitest unit tests for the main functions and components, wires "vitest run" into package.json scripts, and lets the automatic test gate in done catch regressions. If generated tests fail, fix the SOURCE CODE — not the tests. IMPORTANT: the test script MUST be single-run, never watch mode (use "vitest run", "jest --ci", or "node --test" — NOT bare "vitest"/"jest" which hang waiting for file changes).
 - Output done only AFTER you have visually confirmed the app looks AND works correctly. No confirmation = not done.
 - Paths are relative to workspace root, no leading "/" or "..".
 - When starting a dev server, use port 3000 and bind to 0.0.0.0 (--host 0.0.0.0 --port 3000).
@@ -242,6 +246,23 @@ export class EngineerAgentLoop {
     } catch (err: any) {
       yield { type: 'error', message: `Workspace init failed: ${err?.message || 'Cannot create workspace directory.'}` };
       return;
+    }
+
+    // Phase 19 — restore memory.md from Firestore if the sandbox is fresh.
+    // This gives the agent continuity across sandbox recreations — it sees the
+    // same [PROJECT MEMORY] block it built up in prior sessions.
+    if (!resumeSandboxId) {
+      try {
+        const hasLocal = await this.actuator.readFile(workspaceId, MEMORY_PATH)
+          .then(() => true).catch(() => false);
+        if (!hasLocal) {
+          const saved = await workspaceMemoryStore.load(workspaceId).catch(() => null);
+          if (saved && saved.trim()) {
+            await this.actuator.writeFile(workspaceId, MEMORY_PATH, saved);
+            yield { type: 'status', message: 'Restored project memory from previous session.' };
+          }
+        }
+      } catch { /* non-fatal */ }
     }
 
     // Phase 11A: auto-init git so the agent can commit milestones.
@@ -385,6 +406,14 @@ export class EngineerAgentLoop {
         yield { type: 'plan_step_done', stepIndex: i };
       }
       if (shared.completionEvent) {
+        // Phase 19 — persist memory to Firestore before completing so a fresh sandbox next
+        // session can restore context without losing the decisions from this run.
+        try {
+          const memContent = await this.actuator.readFile(workspaceId, MEMORY_PATH);
+          if (memContent.trim()) {
+            await workspaceMemoryStore.save(workspaceId, memContent).catch(() => {});
+          }
+        } catch { /* no memory file — skip */ }
         yield shared.completionEvent;
         return;
       }
@@ -392,6 +421,13 @@ export class EngineerAgentLoop {
     }
 
     if (!shared.terminated) {
+      // Phase 19 — also persist on max_steps so a resumed session still has memory.
+      try {
+        const memContent = await this.actuator.readFile(workspaceId, MEMORY_PATH);
+        if (memContent.trim()) {
+          await workspaceMemoryStore.save(workspaceId, memContent).catch(() => {});
+        }
+      } catch { /* no memory file — skip */ }
       yield { type: 'max_steps_reached', steps: shared.globalStep };
     }
   }
@@ -432,7 +468,11 @@ export class EngineerAgentLoop {
       const images = shared.lastScreenshot ? [shared.lastScreenshot] : undefined;
       shared.lastScreenshot = null;
       try {
-        const effectiveSystemPrompt = dbContextBlock ? SYSTEM_PROMPT + dbContextBlock : SYSTEM_PROMPT;
+        // Phase 21 — inject app self-awareness ONLY when the user is asking about
+        // NavBharatAI itself (navigation/features). Empty for normal coding turns.
+        const appCtx = AppContextInjector.getRelevantContext(effectiveInstruction, 'engineer_ai');
+        let effectiveSystemPrompt = dbContextBlock ? SYSTEM_PROMPT + dbContextBlock : SYSTEM_PROMPT;
+        if (appCtx) effectiveSystemPrompt += `\n\n${appCtx}`;
         const { response, telemetry } = await this.router.route(prompt, effectiveSystemPrompt, images);
         usageTracker.record(workspaceId, 'aiCall');
         if (!telemetry.success) {
@@ -497,6 +537,7 @@ export class EngineerAgentLoop {
         provision_db: 'Provisioning database, auth, and storage…',
         clone_repo: 'Cloning a GitHub repository…',
         git_push: 'Committing and pushing to GitHub…',
+        generate_tests: 'Generating test files…',
         done: 'Verifying the build…',
       };
       const thought = parsed.thought || thoughtFallback[parsed.action] || 'Thinking…';
@@ -542,6 +583,19 @@ export class EngineerAgentLoop {
           await this.actuator.writeFile(workspaceId, filePath, content);
           yield { type: 'files_changed', kind: 'edit', files: [{ path: filePath, content }] };
           observation = `File "${filePath}" written (${content.split('\n').length} lines).`;
+          // Phase 18 — self-review: one focused AI call to catch hard bugs before moving on.
+          const editFix = await this.reviewEditedFile(filePath, content, dbContextBlock, signal);
+          if (editFix) {
+            try {
+              const before = await this.actuator.readFile(workspaceId, editFix.path);
+              if (before.includes(editFix.oldStr)) {
+                const after = before.replace(editFix.oldStr, editFix.newStr);
+                await this.actuator.writeFile(workspaceId, editFix.path, after);
+                yield { type: 'status', message: `Step ${step}: self-review corrected "${editFix.path}"` };
+                observation += `\nSelf-review found and corrected an issue in "${editFix.path}".`;
+              }
+            } catch { /* non-fatal */ }
+          }
         } catch (err: any) {
           observation = `Error writing "${filePath}": ${err?.message}`;
         }
@@ -562,6 +616,19 @@ export class EngineerAgentLoop {
             await this.actuator.writeFile(workspaceId, filePath, after);
             yield { type: 'files_changed', kind: 'patch', files: [{ path: filePath, content: after }] };
             observation = `Patched "${filePath}" successfully.`;
+            // Phase 18 — self-review the patched result to catch introduced bugs.
+            const patchFix = await this.reviewEditedFile(filePath, after, dbContextBlock, signal);
+            if (patchFix) {
+              try {
+                const current = await this.actuator.readFile(workspaceId, patchFix.path);
+                if (current.includes(patchFix.oldStr)) {
+                  const corrected = current.replace(patchFix.oldStr, patchFix.newStr);
+                  await this.actuator.writeFile(workspaceId, patchFix.path, corrected);
+                  yield { type: 'status', message: `Step ${step}: self-review corrected "${patchFix.path}"` };
+                  observation += `\nSelf-review found and corrected an issue in "${patchFix.path}".`;
+                }
+              } catch { /* non-fatal */ }
+            }
           }
         } catch (err: any) {
           observation = `Error patching "${filePath}": ${err?.message}`;
@@ -870,6 +937,40 @@ export class EngineerAgentLoop {
               ? 'Fix: grant the Cloud Run service account the "Firebase Hosting Admin" IAM role in GCP Console.'
               : 'Ensure E2B_API_KEY is set and the build produced a dist/ directory.');
         }
+      } else if (parsed.action === 'generate_tests') {
+        yield { type: 'status', message: `Step ${step}: generating Vitest tests…` };
+        const testFiles = await this.generateTestFiles(workspaceId, effectiveInstruction, signal);
+        if (testFiles.length === 0) {
+          observation =
+            'No testable source files found, or test generation returned no results. ' +
+            'Proceed — or write tests manually with edit_file if needed.';
+        } else {
+          const written: { path: string; content: string }[] = [];
+          for (const tf of testFiles) {
+            try {
+              await this.actuator.writeFile(workspaceId, tf.path, tf.content);
+              written.push(tf);
+            } catch { /* non-fatal */ }
+          }
+          // Wire up "vitest run" as the test script so the done handler picks it up.
+          try {
+            const pkgRaw = await this.actuator.readFile(workspaceId, 'package.json');
+            const pkg = JSON.parse(pkgRaw);
+            if (!pkg.scripts) pkg.scripts = {};
+            const existing = String(pkg.scripts.test ?? '');
+            if (!existing.trim() || /no test specified/i.test(existing)) {
+              pkg.scripts.test = 'vitest run';
+              await this.actuator.writeFile(workspaceId, 'package.json', JSON.stringify(pkg, null, 2));
+            }
+          } catch { /* non-fatal — package.json may not exist yet */ }
+          if (written.length > 0) {
+            yield { type: 'files_changed', kind: 'edit', files: written };
+          }
+          observation =
+            `Generated ${written.length} test file(s): ${written.map(f => f.path).join(', ')}.\n` +
+            `Tests will run automatically when you call done. ` +
+            `If any test fails, fix the source code — not the test file.`;
+        }
       } else if (parsed.action === 'done') {
         const buildResult = await this.actuator.build(workspaceId);
         yield { type: 'build_result', success: buildResult.success, logs: buildResult.logs.slice(-MAX_OBS_CHARS) };
@@ -901,7 +1002,7 @@ export class EngineerAgentLoop {
           observation = `Build failed — cannot mark done yet. Fix the errors:${searchHint}\n${buildLogs}`;
         }
       } else {
-        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, provision_db, deploy, done.`;
+        observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, provision_db, deploy, generate_tests, done.`;
       }
 
       // After any browser interaction, surface runtime errors to the agent.
@@ -956,6 +1057,108 @@ export class EngineerAgentLoop {
       return { ran: true, success: result.exitCode === 0, logs };
     } catch (err: any) {
       return { ran: true, success: false, logs: err?.message || String(err) };
+    }
+  }
+
+  /**
+   * Phase 18 — self-review pass: one focused AI call after writing a file to catch
+   * correctness bugs (missing imports, undefined variables, wrong API calls) before
+   * the main loop moves on. Returns a patch to apply, or null when code looks correct.
+   * Never throws — all failures degrade silently so the main loop is never blocked.
+   */
+  private async reviewEditedFile(
+    filePath: string,
+    content: string,
+    dbContextBlock: string,
+    signal?: AbortSignal,
+  ): Promise<{ path: string; oldStr: string; newStr: string } | null> {
+    if (signal?.aborted) return null;
+    const reviewSystemPrompt =
+      `You are a senior engineer doing a quick correctness review of code just written. ` +
+      `Find ONLY hard bugs: missing imports, undefined variables, wrong function signatures, ` +
+      `logic errors that would cause a runtime crash or build failure. ` +
+      `Do NOT suggest style changes, naming improvements, or optional refactors. ` +
+      `Output exactly one JSON object with no markdown fences:\n` +
+      `• If you find a specific fixable bug: { "action": "patch_file", "args": { "path": "...", "old_str": "exact existing text", "new_str": "corrected text" } }\n` +
+      `• If the code is correct (no hard bugs): { "action": "done_reviewing", "args": {} }`;
+    const snippet = content.slice(0, 5000);
+    const reviewPrompt =
+      `Quickly review the file you just wrote for hard bugs:\n\nFile: ${filePath}\n\`\`\`\n${snippet}\n\`\`\`\n\n` +
+      `Output a single patch_file action to fix the most critical bug, or done_reviewing if the code is correct.`;
+    try {
+      const effectiveSystem = dbContextBlock ? reviewSystemPrompt + dbContextBlock : reviewSystemPrompt;
+      const { response } = await this.router.route(reviewPrompt, effectiveSystem);
+      const parsed = parseAction(response.content);
+      if (
+        parsed.action === 'patch_file' &&
+        parsed.args.path &&
+        typeof parsed.args.old_str === 'string' &&
+        parsed.args.old_str.length > 0
+      ) {
+        return { path: parsed.args.path, oldStr: parsed.args.old_str, newStr: parsed.args.new_str ?? '' };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Phase 17 — generate Vitest test files for the workspace's source files.
+   * Makes one focused AI call with the top source files as context.
+   * Returns up to 3 test file objects, or empty array on any failure.
+   */
+  private async generateTestFiles(
+    workspaceId: string,
+    instruction: string,
+    signal?: AbortSignal,
+  ): Promise<{ path: string; content: string }[]> {
+    if (signal?.aborted) return [];
+
+    // Gather source files (skip test files, node_modules, config)
+    const fileList = await this.actuator.listFiles(workspaceId).catch(() => [] as string[]);
+    const srcFiles = fileList.filter(f =>
+      /\.(ts|tsx|js|jsx|py)$/.test(f) &&
+      !/\.test\.|\.spec\.|\.config\.|node_modules/.test(f) &&
+      !/^\.engineer\//.test(f),
+    ).slice(0, 6);
+
+    const fileSections: string[] = [];
+    for (const fp of srcFiles) {
+      try {
+        const content = await this.actuator.readFile(workspaceId, fp);
+        fileSections.push(`// ${fp}\n${content.slice(0, 1500)}`);
+      } catch { /* skip unreadable */ }
+    }
+
+    const sourceContext = fileSections.length > 0
+      ? `\n\nSource files to test:\n${fileSections.join('\n\n')}`
+      : '\n\n(No source files found — generate a placeholder test based on the task description.)';
+
+    const testGenSystemPrompt =
+      `You are a test engineer writing minimal Vitest unit tests. ` +
+      `Use Vitest (import { describe, it, expect } from 'vitest'). ` +
+      `For React components use @testing-library/react. ` +
+      `Focus on pure functions and testable logic — skip untestable side-effects and fetch calls. ` +
+      `Output EXACTLY one JSON object with no markdown fences: ` +
+      `{ "testFiles": [{ "path": "src/__tests__/app.test.ts", "content": "..." }] }`;
+
+    const testGenPrompt =
+      `Task: ${instruction.slice(0, 200)}\n` +
+      `Generate 1-2 minimal Vitest test files covering the most important logic.` +
+      sourceContext +
+      `\n\nOutput one JSON object: { "testFiles": [{ "path": "...", "content": "..." }] }`;
+
+    try {
+      const { response } = await this.router.route(testGenPrompt, testGenSystemPrompt);
+      const raw = extractJson(response.content);
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed.testFiles)) return [];
+      return (parsed.testFiles as { path: string; content: string }[])
+        .filter(f => typeof f.path === 'string' && typeof f.content === 'string' && f.path.length > 0)
+        .slice(0, 3);
+    } catch {
+      return [];
     }
   }
 

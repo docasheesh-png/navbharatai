@@ -52,21 +52,23 @@ Same ADC mechanism powers Phase 13 Firebase Hosting REST API calls. No new secre
 | 12A | Multi-viewport verify + cross-session memory | ✅ DONE — merged PR #79 |
 | 12B–F | Tests, design-to-code, cost control, mobile UX | ✅ DONE — merged PR #80 |
 | **13** | **Real Persistent Deploy (Firebase Hosting)** | ✅ DONE — merged PR #84 |
-| **14** | **Bring Your Own Database (user-controlled DB/Auth)** | 🔵 IN PROGRESS — next |
-| 15 | Brave Search API (replace DuckDuckGo) | 🔜 Planned |
-| 16 | Production Build Pipelines (esbuild Node/Next) | ✅ DONE |
-| 17 | Real Test Generation (proactive Vitest) | 🔜 Planned |
-| 18 | Grok Quality (CoT + self-review pass) | 🔜 Planned |
-| 19 | Persistent Memory (Firestore-backed) | 🔜 Planned |
+| **14** | **Bring Your Own Database (user-controlled DB/Auth)** | ✅ DONE — code complete (BackendScaffolder.ts) |
+| 15 | Brave Search API (replace DuckDuckGo) | 🔜 Planned (low priority — DuckDuckGo key-free works) |
+| 16 | Production Build Pipelines (esbuild Node/Next) | ✅ DONE — merged PR #102 |
+| 17 | Real Test Generation (proactive Vitest) | ✅ DONE — merged PR #101 |
+| 18 | Grok Quality (CoT + self-review pass) | ✅ DONE — merged PR #101 |
+| 19 | Persistent Memory (Firestore-backed) | ✅ DONE — merged PR #101 |
 | 20 | UX Polish + Mobile-First Redesign | 🔜 Planned |
-| **21** | **App Self-Awareness (NavBharatAI Brain)** | 🔜 Planned |
+| **21** | **App Self-Awareness (NavBharatAI Brain)** | ✅ DONE — merged PR #101 |
 
-> **What's live now (Phases 1–13, all merged):** Engineer AI can SEE apps (Grok vision),
+> **What's live now (Phases 1–19 + 21, all merged):** Engineer AI can SEE apps (Grok vision),
 > DRIVE them (Playwright), CATCH runtime errors, SEARCH the web, PERSIST/RESUME workspaces
-> (E2B pause/resume), and DEPLOY to a permanent Firebase Hosting URL — all Grok-only.
+> (E2B pause/resume), DEPLOY to Firebase Hosting, use esbuild for Node.js production builds,
+> write Vitest tests proactively, self-review edits with CoT, remember context across sessions
+> (Firestore memory), and understand the NavBharatAI app itself (App Self-Awareness).
+> Multi-provider fallback: Grok → Anthropic → Vertex → Gemini.
 >
-> **Phase 14 (next):** Users bring their own database credentials (Supabase / Firebase /
-> Other). NavBharatAI's Firebase project is NEVER used for user app data.
+> **Phase 20 (next):** UX Polish + Mobile-First Redesign.
 
 ---
 

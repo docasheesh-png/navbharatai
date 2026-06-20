@@ -172,3 +172,30 @@ break):
   skipped. Never merge a branch to main until you have confirmed
   `.github/workflows/ci.yml` is green on that branch. Merging red CI to
   main breaks the live app for all users.
+
+## App Self-Awareness — AppKnowledgeBase sync rule (mandatory, Phase 21)
+
+`src/server/AppContext/AppKnowledgeBase.ts` is the single source of truth for
+what NavBharatAI can do. The App Brain (Phase 21) uses it to answer user
+questions and inject relevant context into Engineer AI, Doctor AI, and Pro chat.
+
+**The rule: whenever any new user-facing feature, screen, setting, or navigation
+path is added to NavBharatAI — add the corresponding entry to `AppKnowledgeBase.ts`
+in the same PR, in the same commit.** This is not optional cleanup; it is part of
+the definition of "done" for every user-facing feature.
+
+What counts as a new entry:
+- A new page, route, or screen (e.g. a new Settings tab)
+- A new top-level feature (e.g. a new AI mode, a new tool in Engineer AI)
+- A new setting or configuration option that users interact with directly
+- A new navigation path or button that changes what the app does
+
+What does NOT need an entry:
+- Internal refactors, bug fixes, build pipeline changes (Phase 16, etc.)
+- Performance improvements with no user-visible surface change
+- Changes to AI prompts, router priority, or backend infrastructure
+
+The `AppFeature` interface (in `AppKnowledgeBase.ts`) requires:
+`id`, `name`, `path`, `description`, `howToUse`, `relatedFeatures`, `keywords`.
+Keywords drive injection scoring — include the words users would actually say
+when asking about this feature.

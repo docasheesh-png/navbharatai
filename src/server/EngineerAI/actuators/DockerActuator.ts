@@ -280,7 +280,7 @@ export class DockerActuator implements IEngineerActuator {
 
   async browserAction(
     _workspaceId: string,
-    _action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait',
+    _action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option',
     _args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
   ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }> {
     throw new Error(

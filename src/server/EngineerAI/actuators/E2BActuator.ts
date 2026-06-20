@@ -112,6 +112,9 @@ const {chromium}=require('playwright');
     else if(a.action==='type'){const c=await elCenter(a.selector);if(c){cursorX=c.x;cursorY=c.y;}await page.fill(a.selector,a.text||'',{timeout:8000});result='Typed into '+a.selector;}
     else if(a.action==='scroll'){cursorX=640;cursorY=a.direction==='up'?200:520;await page.evaluate(d=>window.scrollBy(0,d==='up'?-700:700),a.direction||'down');result='Scrolled '+(a.direction||'down');}
     else if(a.action==='press'){await page.keyboard.press(a.text||'Enter');result='Pressed '+(a.text||'Enter');}
+    else if(a.action==='hover'){const c=await elCenter(a.selector);if(c){cursorX=c.x;cursorY=c.y;}await page.hover(a.selector,{timeout:8000});result='Hovered '+a.selector;}
+    else if(a.action==='double_click'){const c=await elCenter(a.selector);if(c){cursorX=c.x;cursorY=c.y;}await page.dblclick(a.selector,{timeout:8000});result='Double-clicked '+a.selector;}
+    else if(a.action==='select_option'){const c=await elCenter(a.selector);if(c){cursorX=c.x;cursorY=c.y;}await page.selectOption(a.selector,a.text||'',{timeout:8000});result='Selected "'+(a.text||'')+'" in '+a.selector;}
     else if(a.action==='wait'){await page.waitForTimeout(2500);result='Waited';}
     else{result='Unknown browser action: '+a.action;}
     await page.waitForTimeout(600);
@@ -488,7 +491,7 @@ const {chromium}=require('playwright');
 
   async browserAction(
     workspaceId: string,
-    action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait',
+    action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option',
     args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
   ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }> {
     const sandbox = await this.getSandbox(workspaceId);

@@ -40,21 +40,31 @@ async function collect(loop: EngineerAgentLoop, signal?: AbortSignal): Promise<E
 
 describe('EngineerAgentLoop', () => {
   it('runs edit_file then done, emitting file content and completing on a clean build', async () => {
+    // Phase 7: first route() call is the PlannerAgent; subsequent calls drive the ReAct loop.
     const router = fakeRouter([
+      // PlannerAgent response — structured step objects
+      JSON.stringify({ steps: [{ description: 'write app.js', focusHint: 'create the app.js file' }] }),
       JSON.stringify({ thought: 'write it', action: 'edit_file', args: { path: 'app.js', content: 'console.log(1)' } }),
       JSON.stringify({ thought: 'finished', action: 'done', args: { summary: 'wrote app.js' } }),
     ]);
     const actuator = fakeActuator({ buildOk: true });
     const events = await collect(new EngineerAgentLoop(router, actuator));
 
+    // PlannerAgent emits a plan event + step progress events.
+    const plan = events.find(e => e.type === 'plan') as any;
+    expect(plan.steps).toEqual(['write app.js']);
+    expect(events.some(e => e.type === 'plan_step_start' && (e as any).stepIndex === 0)).toBe(true);
     const changed = events.find(e => e.type === 'files_changed') as any;
     expect(changed.files[0]).toEqual({ path: 'app.js', content: 'console.log(1)' });
     expect(actuator.files.get('app.js')).toBe('console.log(1)');
+    expect(events.some(e => e.type === 'plan_step_done' && (e as any).stepIndex === 0)).toBe(true);
     expect(events.some(e => e.type === 'complete')).toBe(true);
   });
 
   it('recovers from a malformed response instead of aborting the run', async () => {
     const router = fakeRouter([
+      // PlannerAgent returns conversational → planSteps=[] → single unscoped loop.
+      JSON.stringify({ conversational: true }),
       'sorry, here is some prose not json',
       JSON.stringify({ thought: 'now valid', action: 'done', args: { summary: 'ok' } }),
     ]);
@@ -67,6 +77,8 @@ describe('EngineerAgentLoop', () => {
 
   it('does not complete when the build fails on done', async () => {
     const router = fakeRouter([
+      // PlannerAgent returns conversational → single unscoped loop, no plan displayed.
+      JSON.stringify({ conversational: true }),
       JSON.stringify({ thought: 'done?', action: 'done', args: { summary: 'x' } }),
     ]);
     const events = await collect(new EngineerAgentLoop(router, fakeActuator({ buildOk: false })));

@@ -27,17 +27,50 @@ export interface EngineerTask {
   attachedImage?: { base64: string; mimeType: string; filename: string };
   /** Phase 14 — user's own database provider + credentials. */
   dbConfig?: DbProviderConfig;
+  /**
+   * Phase 5 — the user's GitHub personal-access token, read server-side from
+   * Secrets & Keys (GITHUB_TOKEN). Used for clone_repo/git_push. Never sent by
+   * the client; injected by the route so the agent can push to the user's repos.
+   */
+  githubToken?: string;
+}
+
+/**
+ * Phase 7 — shared mutable state passed between the orchestrator and the bounded
+ * ReAct loop so context (history, screenshots, preview URL) persists across plan steps.
+ */
+export interface SharedLoopState {
+  history: { step: number; actionJson: string; observation: string }[];
+  consecutiveParseFailures: number;
+  lastPreviewUrl: string | null;
+  lastScreenshot: string | null;
+  lastConsoleCheck: number;
+  globalStep: number;
+  /** True once any terminal event (error, aborted, deadline) has been yielded. */
+  terminated: boolean;
+  /** Set (instead of yielding directly) when 'done' or 'reply' succeeds, so the
+   *  orchestrator can emit plan_step_done BEFORE the 'complete' event. */
+  completionEvent: EngineerAgentEvent | null;
 }
 
 /** One ReAct action the model outputs per turn. */
 export interface ReActAction {
   thought?: string;
-  action: 'reply' | 'bash' | 'edit_file' | 'patch_file' | 'browse' | 'screenshot' | 'browser_action' | 'web_search' | 'drive' | 'restore' | 'provision_db' | 'deploy' | 'done';
+  action: 'reply' | 'bash' | 'edit_file' | 'patch_file' | 'browse' | 'screenshot' | 'browser_action' | 'web_search' | 'drive' | 'restore' | 'provision_db' | 'deploy' | 'clone_repo' | 'git_push' | 'done';
   args: Record<string, string>;
 }
 
 export type EngineerAgentEvent =
   | { type: 'chat_reply'; message: string }
+  /** Phase 4 — high-level build plan generated before the ReAct loop starts. */
+  | { type: 'plan'; steps: string[] }
+  /** Phase 7 — orchestrator emits these around each CoderAgent step so the UI can track progress. */
+  | { type: 'plan_step_start'; stepIndex: number; description: string }
+  | { type: 'plan_step_done'; stepIndex: number }
+  /** Phase 5 — a GitHub repo was cloned into the workspace. */
+  | { type: 'repo_cloned'; url: string }
+  /** Phase 5 — changes were committed and pushed to a GitHub repo. */
+  | { type: 'git_pushed'; url: string }
   | { type: 'action_start'; step: number; action: string; thought: string }
   | { type: 'command_result'; command: string; exitCode: number; output: string }
   | { type: 'files_changed'; kind: 'edit' | 'patch'; files: { path: string; content: string }[] }

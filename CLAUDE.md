@@ -128,8 +128,12 @@ follow this standard from the start.
 
 ## Engineer AI — permanent constraints (never change without admin sign-off)
 
-- **AI Model:** Grok ONLY (`api.x.ai` via `GROK_API_KEY`/`XAI_API_KEY`).
-  Never use Claude or the AiCredits proxy for Engineer AI inference.
+- **AI Model (multi-provider fallback — Phase 2, admin-approved):**
+  Grok is primary (priority 1, `GROK_API_KEY`/`XAI_API_KEY`).
+  Automatic fallback chain: Anthropic (priority 2) → Vertex AI (priority 3) → Gemini direct (priority 4).
+  This keeps Engineer AI working when Grok is down or throttled.
+  **AiCreditsProvider is NEVER registered** — it proxies through NavBharatAI's own account
+  credits, which must never be spent on user builds.
 - **User apps run on the user's own accounts.** NavBharatAI's Firebase project
   (`gen-lang-client-0866594388`) is NEVER used for end-user app databases,
   auth, or storage — that would charge NavBharatAI's billing account.

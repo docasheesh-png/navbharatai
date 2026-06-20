@@ -5,16 +5,17 @@ import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
-// billing on abandoned sessions. Comfortably longer than the max single command
-// timeout (5 min), so an in-flight operation (whose start refreshes activity) is
-// never paused mid-run — only genuinely idle sandboxes get reclaimed.
-const IDLE_LIMIT_MS = 15 * 60 * 1000;
+// billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
+// idle sweep fires before E2B kills the sandbox on its own.
+const IDLE_LIMIT_MS = 45 * 60 * 1000;
 const IDLE_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 // Dedicated tools dir outside the user's workspace — persists across workspace resets
 const TOOLS_DIR = '/home/user/.e-tools';
-const SANDBOX_TIMEOUT_MS = 10 * 60 * 1000;
+// 1-hour sandbox lifetime. Refreshed on every activity via sandbox.setTimeout() so
+// a long build (npm install + AI steps) never gets killed mid-run.
+const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 
 const CDP_PORT = 9222;
@@ -111,6 +112,9 @@ const {chromium}=require('playwright');
     else if(a.action==='type'){const c=await elCenter(a.selector);if(c){cursorX=c.x;cursorY=c.y;}await page.fill(a.selector,a.text||'',{timeout:8000});result='Typed into '+a.selector;}
     else if(a.action==='scroll'){cursorX=640;cursorY=a.direction==='up'?200:520;await page.evaluate(d=>window.scrollBy(0,d==='up'?-700:700),a.direction||'down');result='Scrolled '+(a.direction||'down');}
     else if(a.action==='press'){await page.keyboard.press(a.text||'Enter');result='Pressed '+(a.text||'Enter');}
+    else if(a.action==='hover'){const c=await elCenter(a.selector);if(c){cursorX=c.x;cursorY=c.y;}await page.hover(a.selector,{timeout:8000});result='Hovered '+a.selector;}
+    else if(a.action==='double_click'){const c=await elCenter(a.selector);if(c){cursorX=c.x;cursorY=c.y;}await page.dblclick(a.selector,{timeout:8000});result='Double-clicked '+a.selector;}
+    else if(a.action==='select_option'){const c=await elCenter(a.selector);if(c){cursorX=c.x;cursorY=c.y;}await page.selectOption(a.selector,a.text||'',{timeout:8000});result='Selected "'+(a.text||'')+'" in '+a.selector;}
     else if(a.action==='wait'){await page.waitForTimeout(2500);result='Waited';}
     else{result='Unknown browser action: '+a.action;}
     await page.waitForTimeout(600);
@@ -165,7 +169,12 @@ export class E2BActuator implements IEngineerActuator {
     this._lastActivity.set(workspaceId, Date.now());
 
     const existing = this.sandboxes.get(workspaceId);
-    if (existing) return existing;
+    if (existing) {
+      // Reset the E2B cloud-side countdown on every activity so a long build never
+      // gets killed mid-run. Fire-and-forget — failure is non-fatal.
+      existing.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
+      return existing;
+    }
 
     let sandbox: Sandbox;
     if (resumeSandboxId) {
@@ -174,6 +183,7 @@ export class E2BActuator implements IEngineerActuator {
       // sandbox if the resume target was killed/expired.
       try {
         sandbox = await Sandbox.connect(resumeSandboxId, { timeoutMs: SANDBOX_TIMEOUT_MS });
+        await sandbox.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
       } catch {
         sandbox = await Sandbox.create({ timeoutMs: SANDBOX_TIMEOUT_MS });
       }
@@ -481,7 +491,7 @@ const {chromium}=require('playwright');
 
   async browserAction(
     workspaceId: string,
-    action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait',
+    action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option',
     args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
   ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }> {
     const sandbox = await this.getSandbox(workspaceId);

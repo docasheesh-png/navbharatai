@@ -75,7 +75,7 @@ Examples that trigger coding (in ANY language):
 OUTPUT FORMAT — always one JSON object, no markdown fences:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{ "thought": "one-sentence reasoning", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"provision_db"|"deploy"|"clone_repo"|"git_push"|"done", "args": { ... } }
+{ "thought": "step-by-step reasoning: (1) what is the current state and what has been done, (2) what is the single most impactful next action and why, (3) what could go wrong or what to watch for", "action": "reply"|"bash"|"edit_file"|"patch_file"|"browse"|"screenshot"|"browser_action"|"drive"|"web_search"|"restore"|"provision_db"|"deploy"|"clone_repo"|"git_push"|"done", "args": { ... } }
 
 Action args:
   reply:          { "message": "your conversational response — can be detailed, friendly, multi-paragraph" }
@@ -116,6 +116,7 @@ browser_action examples (single step):
   Scroll down:         { "action": "scroll", "direction": "down" }
 
 Coding rules (when in MODE 2):
+- Always fill "thought" with explicit step-by-step reasoning before choosing an action: (1) what has been accomplished so far, (2) exactly what the next action will do and why it is the highest-impact choice right now, (3) one specific risk to watch for. Never leave "thought" as a vague label — concrete reasoning produces better actions.
 - One action per response. Wait for the observation before the next action.
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
@@ -542,6 +543,19 @@ export class EngineerAgentLoop {
           await this.actuator.writeFile(workspaceId, filePath, content);
           yield { type: 'files_changed', kind: 'edit', files: [{ path: filePath, content }] };
           observation = `File "${filePath}" written (${content.split('\n').length} lines).`;
+          // Phase 18 — self-review: one focused AI call to catch hard bugs before moving on.
+          const editFix = await this.reviewEditedFile(filePath, content, dbContextBlock, signal);
+          if (editFix) {
+            try {
+              const before = await this.actuator.readFile(workspaceId, editFix.path);
+              if (before.includes(editFix.oldStr)) {
+                const after = before.replace(editFix.oldStr, editFix.newStr);
+                await this.actuator.writeFile(workspaceId, editFix.path, after);
+                yield { type: 'status', message: `Step ${step}: self-review corrected "${editFix.path}"` };
+                observation += `\nSelf-review found and corrected an issue in "${editFix.path}".`;
+              }
+            } catch { /* non-fatal */ }
+          }
         } catch (err: any) {
           observation = `Error writing "${filePath}": ${err?.message}`;
         }
@@ -562,6 +576,19 @@ export class EngineerAgentLoop {
             await this.actuator.writeFile(workspaceId, filePath, after);
             yield { type: 'files_changed', kind: 'patch', files: [{ path: filePath, content: after }] };
             observation = `Patched "${filePath}" successfully.`;
+            // Phase 18 — self-review the patched result to catch introduced bugs.
+            const patchFix = await this.reviewEditedFile(filePath, after, dbContextBlock, signal);
+            if (patchFix) {
+              try {
+                const current = await this.actuator.readFile(workspaceId, patchFix.path);
+                if (current.includes(patchFix.oldStr)) {
+                  const corrected = current.replace(patchFix.oldStr, patchFix.newStr);
+                  await this.actuator.writeFile(workspaceId, patchFix.path, corrected);
+                  yield { type: 'status', message: `Step ${step}: self-review corrected "${patchFix.path}"` };
+                  observation += `\nSelf-review found and corrected an issue in "${patchFix.path}".`;
+                }
+              } catch { /* non-fatal */ }
+            }
           }
         } catch (err: any) {
           observation = `Error patching "${filePath}": ${err?.message}`;
@@ -956,6 +983,49 @@ export class EngineerAgentLoop {
       return { ran: true, success: result.exitCode === 0, logs };
     } catch (err: any) {
       return { ran: true, success: false, logs: err?.message || String(err) };
+    }
+  }
+
+  /**
+   * Phase 18 — self-review pass: one focused AI call after writing a file to catch
+   * correctness bugs (missing imports, undefined variables, wrong API calls) before
+   * the main loop moves on. Returns a patch to apply, or null when code looks correct.
+   * Never throws — all failures degrade silently so the main loop is never blocked.
+   */
+  private async reviewEditedFile(
+    filePath: string,
+    content: string,
+    dbContextBlock: string,
+    signal?: AbortSignal,
+  ): Promise<{ path: string; oldStr: string; newStr: string } | null> {
+    if (signal?.aborted) return null;
+    const reviewSystemPrompt =
+      `You are a senior engineer doing a quick correctness review of code just written. ` +
+      `Find ONLY hard bugs: missing imports, undefined variables, wrong function signatures, ` +
+      `logic errors that would cause a runtime crash or build failure. ` +
+      `Do NOT suggest style changes, naming improvements, or optional refactors. ` +
+      `Output exactly one JSON object with no markdown fences:\n` +
+      `• If you find a specific fixable bug: { "action": "patch_file", "args": { "path": "...", "old_str": "exact existing text", "new_str": "corrected text" } }\n` +
+      `• If the code is correct (no hard bugs): { "action": "done_reviewing", "args": {} }`;
+    const snippet = content.slice(0, 5000);
+    const reviewPrompt =
+      `Quickly review the file you just wrote for hard bugs:\n\nFile: ${filePath}\n\`\`\`\n${snippet}\n\`\`\`\n\n` +
+      `Output a single patch_file action to fix the most critical bug, or done_reviewing if the code is correct.`;
+    try {
+      const effectiveSystem = dbContextBlock ? reviewSystemPrompt + dbContextBlock : reviewSystemPrompt;
+      const { response } = await this.router.route(reviewPrompt, effectiveSystem);
+      const parsed = parseAction(response.content);
+      if (
+        parsed.action === 'patch_file' &&
+        parsed.args.path &&
+        typeof parsed.args.old_str === 'string' &&
+        parsed.args.old_str.length > 0
+      ) {
+        return { path: parsed.args.path, oldStr: parsed.args.old_str, newStr: parsed.args.new_str ?? '' };
+      }
+      return null;
+    } catch {
+      return null;
     }
   }
 

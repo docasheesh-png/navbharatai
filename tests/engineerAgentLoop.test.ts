@@ -41,10 +41,13 @@ async function collect(loop: EngineerAgentLoop, signal?: AbortSignal): Promise<E
 describe('EngineerAgentLoop', () => {
   it('runs edit_file then done, emitting file content and completing on a clean build', async () => {
     // Phase 7: first route() call is the PlannerAgent; subsequent calls drive the ReAct loop.
+    // Phase 18: after edit_file the loop makes one self-review call before continuing.
     const router = fakeRouter([
       // PlannerAgent response — structured step objects
       JSON.stringify({ steps: [{ description: 'write app.js', focusHint: 'create the app.js file' }] }),
       JSON.stringify({ thought: 'write it', action: 'edit_file', args: { path: 'app.js', content: 'console.log(1)' } }),
+      // Self-review response — code looks correct, no fix needed.
+      JSON.stringify({ action: 'done_reviewing', args: {} }),
       JSON.stringify({ thought: 'finished', action: 'done', args: { summary: 'wrote app.js' } }),
     ]);
     const actuator = fakeActuator({ buildOk: true });

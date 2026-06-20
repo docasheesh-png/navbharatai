@@ -250,6 +250,15 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
         case 'browse_result':
           send({ type: 'status', message: summarizeEvent(ev) });
           break;
+        case 'plan':
+          send({ type: 'plan', steps: ev.steps });
+          break;
+        case 'plan_step_start':
+          send({ type: 'plan_step_start', stepIndex: ev.stepIndex, description: ev.description });
+          break;
+        case 'plan_step_done':
+          send({ type: 'plan_step_done', stepIndex: ev.stepIndex });
+          break;
         case 'chat_reply':
           send({ type: 'status', message: ev.message.slice(0, 200) });
           break;

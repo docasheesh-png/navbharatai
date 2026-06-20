@@ -4198,6 +4198,22 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
               setProBuildProgress(prev => ({ ...prev, active: true, stage: `$ ${ev.command.slice(0, 60)} ${exitMark}` }));
             } else if (ev.type === 'preview_url' && ev.url) {
               proLivePreviewUrlRef.current = ev.url;
+            } else if (ev.type === 'plan' && ev.steps) {
+              setProBuildProgress(prev => ({
+                ...prev, active: true, stage: 'Planning…',
+                steps: ev.steps!.map((label, i) => ({ label, sub: i === 0 ? 'up next' : 'queued', status: 'pending' as const })),
+              }));
+            } else if (ev.type === 'plan_step_start' && ev.stepIndex != null) {
+              setProBuildProgress(prev => ({
+                ...prev, active: true,
+                stage: `Step ${ev.stepIndex! + 1}/${prev.steps.length} — ${ev.description ?? prev.steps[ev.stepIndex!]?.label ?? ''}`,
+                steps: prev.steps.map((s, i) => i === ev.stepIndex ? { ...s, status: 'running' as const, sub: 'working…' } : s),
+              }));
+            } else if (ev.type === 'plan_step_done' && ev.stepIndex != null) {
+              setProBuildProgress(prev => ({
+                ...prev,
+                steps: prev.steps.map((s, i) => i === ev.stepIndex ? { ...s, status: 'done' as const, sub: 'done' } : s),
+              }));
             }
           }, abortController.signal);
           // Persist the refreshed Claude-Code-style memory onto the active session

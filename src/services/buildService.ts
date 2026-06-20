@@ -124,7 +124,7 @@ export function buildApp(req: BuildRequest, signal?: AbortSignal): Promise<Build
 
 /** A live progress event streamed from /api/build-stream. */
 export interface BuildStreamEvent {
-  type: 'status' | 'module' | 'files' | 'complete' | 'error' | 'terminal' | 'preview_url';
+  type: 'status' | 'module' | 'files' | 'complete' | 'error' | 'terminal' | 'preview_url' | 'plan' | 'plan_step_start' | 'plan_step_done';
   message?: string;
   name?: string;
   state?: 'start' | 'done' | 'failed';
@@ -136,6 +136,10 @@ export interface BuildStreamEvent {
   exitCode?: number;
   // preview_url event (Phase 10 — real E2B dev server URL)
   url?: string;
+  // plan events (Phase 68 — PlannerAgent step visibility)
+  steps?: string[];
+  stepIndex?: number;
+  description?: string;
   // present on the final 'complete' event:
   ok?: boolean;
   files?: Record<string, string>;

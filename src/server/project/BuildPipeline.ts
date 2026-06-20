@@ -32,7 +32,10 @@ export type BuildProgressEvent =
   | { type: 'module'; name: string; state: 'start' | 'done' | 'failed'; coverage?: number }
   | { type: 'files'; paths: string[] }
   | { type: 'terminal'; command: string; output: string; exitCode: number }
-  | { type: 'preview_url'; url: string };
+  | { type: 'preview_url'; url: string }
+  | { type: 'plan'; steps: string[] }
+  | { type: 'plan_step_start'; stepIndex: number; description: string }
+  | { type: 'plan_step_done'; stepIndex: number };
 
 export interface BuildPipelineInput {
   prompt: string;

@@ -82,6 +82,27 @@ export interface BuildRequest {
   agentic?: boolean;
 }
 
+/**
+ * Internal-testing opt-in for the agentic edit engine (Phase-1 rollout).
+ * Enabled ONLY for the current browser/session — never for all users — via either
+ * a `?agentic=1` URL param or `localStorage.nb_agentic_engine = '1'`. This lets an
+ * admin exercise the new engine on the live site while everyone else keeps the
+ * existing pipeline untouched. The server still falls back transparently on any
+ * engine error, so this is safe to leave on.
+ */
+export function isAgenticEngineEnabled(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get('agentic');
+    if (q === '1' || q === 'true') return true;
+    if (q === '0' || q === 'false') return false;
+    return window.localStorage.getItem('nb_agentic_engine') === '1';
+  } catch {
+    return false;
+  }
+}
+
 async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',

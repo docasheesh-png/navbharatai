@@ -1,6 +1,8 @@
 import type { Express, Request, Response } from 'express';
 import { runBuild } from '../project/BuildPipeline';
 import { runProEngine } from '../EngineerAI/ProEngineRunner';
+import { Guider } from '../Guider/Guider';
+import { shouldConfirm } from '../Guider/GuiderGate';
 import { makeAiEditGenerator, summarizeForMemory, type ModelCall, type BuildMemory } from '../project/aiEdits';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
@@ -102,6 +104,30 @@ function editLogEntry(prompt: string, files: Record<string, string>, isEdit: boo
 }
 
 export function registerBuildRoutes(app: Express): void {
+  // ── Guider: propose a design + decide if user confirmation is needed (Hybrid).
+  //    Flag-gated. The frontend calls this BEFORE a build; if `confirm` is false
+  //    it builds straight away, otherwise it shows a confirmation card with the
+  //    proposal (in the user's language) and only builds after approval. Never
+  //    blocks: any failure returns `confirm:false` so the normal build proceeds.
+  app.post('/api/guider/plan', async (req: Request, res: Response) => {
+    try {
+      const { prompt, files, userKey, isEdit, agentic } = req.body || {};
+      if (!prompt || typeof prompt !== 'string') return res.status(400).json({ error: 'prompt (string) is required' });
+      const enabled = process.env.PRO_AGENTIC_ENGINE === '1' || agentic === true;
+      const hasExistingFiles = !!(files && typeof files === 'object' && Object.keys(files).length > 0);
+      if (!enabled || !shouldConfirm({ prompt, hasExistingFiles, isEdit: isEdit === true })) {
+        return res.json({ confirm: false });
+      }
+      const callModel: ModelCall = makeResilientModelCall(userKey);
+      const guider = new Guider({ callModel, generate: async () => ({ ok: false, gradeContext: '' }) });
+      const plan = await guider.plan(prompt);
+      return res.json({ confirm: true, plan });
+    } catch {
+      // Planning must never block a build — fall through to a normal (no-confirm) build.
+      return res.json({ confirm: false });
+    }
+  });
+
   app.post('/api/build', async (req: Request, res: Response) => {
     try {
       const { prompt, files, userKey, preview, isEdit } = req.body || {};

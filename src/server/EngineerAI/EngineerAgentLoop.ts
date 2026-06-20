@@ -1,7 +1,9 @@
 import { AIRouter } from '../AI/Router/AIRouter';
 import { IEngineerActuator } from './actuators/IEngineerActuator';
-import { ReActAction, EngineerAgentEvent, EngineerTask } from './EngineerAITypes';
+import { ReActAction, EngineerAgentEvent, EngineerTask, SharedLoopState } from './EngineerAITypes';
 import { WebSearchClient } from './WebSearchClient';
+import { PlannerAgent } from './PlannerAgent';
+import { CoderAgent, STEPS_PER_PLAN_STEP } from './CoderAgent';
 import { deploymentService } from './DeploymentService';
 import { backendScaffolder } from './BackendScaffolder';
 import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from './ContextRetriever';
@@ -117,11 +119,11 @@ Coding rules (when in MODE 2):
 - One action per response. Wait for the observation before the next action.
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
-- Save steps: chain multiple shell commands with ${'`&&`'} in ONE bash action (e.g. ${'`npm install && npm run build`'}) instead of spending a separate step on each. Steps are limited, so batch related commands.
+- Save steps: chain multiple shell commands with \`&&\` in ONE bash action (e.g. \`npm install && npm run build\`) instead of spending a separate step on each. Steps are limited, so batch related commands.
 - Use web_search when you're unsure: to confirm the correct/latest package version before installing, to read API/docs for an unfamiliar library, or to look up the fix for an error you don't recognize. Don't guess a version — search it.
 - After starting a dev server: take a screenshot (or navigate via browser_action/drive) to visually verify the UI.
 - Responsive check: when layout matters, screenshot at BOTH "mobile" and "desktop" viewports and fix anything that breaks at mobile width (overflow, tiny text, overlapping elements).
-- Project memory: record key decisions, architecture choices, and the WHY behind them in ${'`.engineer/memory.md`'} using edit_file (append to it — read it first if it exists). This file is automatically shown to you at the start of every future session, so future-you remembers context that isn't obvious from the code alone. Update it after any significant design decision.
+- Project memory: record key decisions, architecture choices, and the WHY behind them in \`.engineer/memory.md\` using edit_file (append to it — read it first if it exists). This file is automatically shown to you at the start of every future session, so future-you remembers context that isn't obvious from the code alone. Update it after any significant design decision.
 - For anything interactive (forms, buttons, navigation, login): actually TEST it with browser_action or drive —
   click the buttons, fill the forms, and confirm from the returned screenshot that it works.
 - If a screenshot reveals problems (wrong layout, missing elements, broken styles, errors): fix them, then re-verify.
@@ -287,11 +289,18 @@ export class EngineerAgentLoop {
         `The .env file already contains the user's credentials. Never ask the user for credentials again.`;
     }
 
-    const history: { step: number; actionJson: string; observation: string }[] = [];
-    let consecutiveParseFailures = 0;
-    let lastPreviewUrl: string | null = null;  // updated when server_ready fires
-    let lastScreenshot: string | null = null;  // base64 PNG — injected into next Grok call
-    let lastConsoleCheck = Date.now();          // Phase 4 — runtime error watermark
+    // Phase 7 — shared mutable state passed into the bounded loop so history,
+    // screenshots, and preview URL accumulate across multiple plan steps.
+    const shared: SharedLoopState = {
+      history: [],
+      consecutiveParseFailures: 0,
+      lastPreviewUrl: null,
+      lastScreenshot: null,
+      lastConsoleCheck: Date.now(),
+      globalStep: 0,
+      terminated: false,
+      completionEvent: null,
+    };
 
     // Phase 12C/12D — if the user attached an image, save it as a usable workspace
     // asset AND show it to the agent (vision) so it can replicate the design or use
@@ -300,7 +309,7 @@ export class EngineerAgentLoop {
       const assetPath = `public/uploads/${sanitizeAssetName(attachedImage.filename)}`;
       try {
         await this.actuator.writeBinaryFile(workspaceId, assetPath, attachedImage.base64);
-        lastScreenshot = attachedImage.base64; // injected into the FIRST router call as a vision image
+        shared.lastScreenshot = attachedImage.base64; // injected into the FIRST router call as a vision image
         effectiveInstruction =
           `${instruction}\n\n[ATTACHED IMAGE] The user attached an image, saved in the workspace at "${assetPath}". ` +
           `It is also shown to you visually. If the user wants this DESIGN built, replicate its layout/colors/components faithfully. ` +
@@ -312,44 +321,121 @@ export class EngineerAgentLoop {
       }
     }
 
-    // Phase 4 — plan-first: for non-trivial build requests, generate a short
-    // high-level plan BEFORE the ReAct loop so the agent (and user) have a roadmap.
-    // Skipped for resumed sessions (a plan already exists) and conversational turns.
-    // Fully best-effort: any failure silently falls through to the normal loop.
-    if (!resumeSandboxId) {
+    // Phase 7 — PlannerAgent: get a structured build plan before the ReAct loop.
+    // Returns [] for conversational turns (skips multi-step orchestration).
+    // Returns fallback single-step on any failure so planning never blocks the build.
+    // Skipped for resumed sessions (plan already persisted in memory.md).
+    let planSteps = [] as import('./PlannerAgent').PlanStep[];
+    if (!resumeSandboxId && !signal?.aborted) {
       try {
-        const planSteps = await this.generatePlan(effectiveInstruction, signal);
-        if (planSteps && planSteps.length > 0) {
-          yield { type: 'plan', steps: planSteps };
-          // Persist the plan to project memory so future steps/sessions can reference it.
+        const fileTreeForPlanner = await this.actuator.listFiles(workspaceId).catch(() => [] as string[]);
+        const planner = new PlannerAgent(this.router);
+        planSteps = await planner.plan(
+          effectiveInstruction,
+          fileTreeForPlanner.slice(0, 80).join('\n'),
+          signal,
+        );
+        if (planSteps.length > 0 && !signal?.aborted) {
+          yield { type: 'plan', steps: planSteps.map(s => s.description) };
+          // Persist plan to project memory so the agent can reference it in future sessions.
           const planMd = `\n\n## Build plan (${new Date().toISOString().slice(0, 10)})\n` +
-            planSteps.map((s, i) => `${i + 1}. ${s}`).join('\n') + '\n';
+            planSteps.map((s, i) => `${i + 1}. ${s.description}`).join('\n') + '\n';
           let existingMemory = '';
           try { existingMemory = await this.actuator.readFile(workspaceId, MEMORY_PATH); } catch { /* none yet */ }
           await this.actuator.writeFile(workspaceId, MEMORY_PATH, existingMemory + planMd).catch(() => {});
         }
-      } catch { /* non-fatal — proceed straight to the ReAct loop */ }
+      } catch { /* non-fatal */ }
     }
 
-    for (let step = 1; step <= MAX_STEPS; step++) {
+    // Phase 7 — Orchestrator: run one CoderAgent per plan step.
+    // Conversational turns (planSteps=[]) run as a single unscoped bounded loop.
+    const isMultiStep = planSteps.length > 0;
+    const effectivePlanSteps = isMultiStep
+      ? planSteps
+      : [{ description: '', focusHint: '' }];
+
+    const coderRunner = (
+      task: EngineerTask,
+      inst: string,
+      ctx: string,
+      sh: SharedLoopState,
+      max: number,
+      ddl: number,
+      dbc: string,
+      sig?: AbortSignal,
+    ) => this.runBoundedLoop(task, inst, ctx, sh, max, ddl, dbc, sig);
+    const coder = new CoderAgent(coderRunner);
+
+    for (let i = 0; i < effectivePlanSteps.length; i++) {
       if (signal?.aborted) { yield { type: 'aborted' }; return; }
-      if (Date.now() > deadline) { yield { type: 'max_steps_reached', steps: step - 1 }; return; }
+      if (Date.now() > deadline || shared.terminated) break;
+
+      if (isMultiStep) {
+        yield { type: 'plan_step_start', stepIndex: i, description: effectivePlanSteps[i].description };
+      }
+
+      const maxStepsForThisStep = isMultiStep ? STEPS_PER_PLAN_STEP : MAX_STEPS;
+      yield* coder.runStep(
+        task, effectiveInstruction, effectivePlanSteps[i],
+        i, effectivePlanSteps.length, shared,
+        maxStepsForThisStep, deadline, dbContextBlock, signal,
+      );
+
+      if (isMultiStep) {
+        yield { type: 'plan_step_done', stepIndex: i };
+      }
+      if (shared.completionEvent) {
+        yield shared.completionEvent;
+        return;
+      }
+      if (shared.terminated) break;
+    }
+
+    if (!shared.terminated) {
+      yield { type: 'max_steps_reached', steps: shared.globalStep };
+    }
+  }
+
+  /**
+   * Phase 7 — bounded ReAct execution loop. Runs up to `maxSteps` iterations of
+   * the plan-code-observe cycle. All mutable state is stored in `shared` so it
+   * persists across multiple CoderAgent steps (history, screenshots, preview URL).
+   *
+   * Terminal conditions (done-success, reply, error, abort, deadline) set
+   * `shared.terminated = true`. For done/reply, the completion event is stored in
+   * `shared.completionEvent` so the orchestrator can emit it AFTER plan_step_done.
+   */
+  private async *runBoundedLoop(
+    task: EngineerTask,
+    effectiveInstruction: string,
+    stepContextPrefix: string,
+    shared: SharedLoopState,
+    maxSteps: number,
+    deadline: number,
+    dbContextBlock: string,
+    signal?: AbortSignal,
+  ): AsyncGenerator<EngineerAgentEvent> {
+    const { workspaceId, githubToken } = task;
+
+    for (let localStep = 0; localStep < maxSteps; localStep++) {
+      shared.globalStep++;
+      const step = shared.globalStep;
+
+      if (signal?.aborted) { yield { type: 'aborted' }; shared.terminated = true; return; }
+      if (Date.now() > deadline) { yield { type: 'max_steps_reached', steps: step - 1 }; shared.terminated = true; return; }
 
       yield { type: 'status', message: `Step ${step}: reading workspace…` };
-      const prompt = await this.buildPrompt(workspaceId, effectiveInstruction, history);
+      const prompt = await this.buildPrompt(workspaceId, effectiveInstruction, shared.history, stepContextPrefix);
       yield { type: 'status', message: `Step ${step}: thinking…` };
 
-      // Router/provider failure is a real infra error — abort. Malformed model
-      // output is recoverable — feed the parse error back and let it retry.
       let rawResponse: string;
-      const images = lastScreenshot ? [lastScreenshot] : undefined;
-      lastScreenshot = null; // consume: each screenshot is used exactly once
+      const images = shared.lastScreenshot ? [shared.lastScreenshot] : undefined;
+      shared.lastScreenshot = null;
       try {
         const effectiveSystemPrompt = dbContextBlock ? SYSTEM_PROMPT + dbContextBlock : SYSTEM_PROMPT;
         const { response, telemetry } = await this.router.route(prompt, effectiveSystemPrompt, images);
-        usageTracker.record(workspaceId, 'aiCall'); // Phase 12E — track Grok call count
+        usageTracker.record(workspaceId, 'aiCall');
         if (!telemetry.success) {
-          // All providers failed (budget exhausted, wrong key, rate-limit, etc.)
           yield {
             type: 'error',
             message:
@@ -358,39 +444,43 @@ export class EngineerAgentLoop {
               '② xAI API rate limit — wait a minute and retry, ' +
               '③ xAI API is temporarily down — check status.x.ai',
           };
+          shared.terminated = true;
           return;
         }
         rawResponse = response.content;
       } catch (err: any) {
         yield { type: 'error', message: `AI planning failed: ${err?.message || String(err)}` };
+        shared.terminated = true;
         return;
       }
 
-      if (signal?.aborted) { yield { type: 'aborted' }; return; }
+      if (signal?.aborted) { yield { type: 'aborted' }; shared.terminated = true; return; }
 
       let parsed: ReActAction;
       try {
         parsed = parseAction(rawResponse);
       } catch {
-        consecutiveParseFailures++;
-        if (consecutiveParseFailures >= MAX_PARSE_RETRIES) {
+        shared.consecutiveParseFailures++;
+        if (shared.consecutiveParseFailures >= MAX_PARSE_RETRIES) {
           yield { type: 'error', message: 'Model repeatedly returned output that was not a valid single-action JSON object.' };
+          shared.terminated = true;
           return;
         }
-        history.push({
+        shared.history.push({
           step,
           actionJson: '(unparseable model output)',
           observation: 'Your last response was not a valid single-action JSON object. Respond with EXACTLY one JSON object {"thought","action","args"} and nothing else — no prose, no markdown fences.',
         });
         continue;
       }
-      consecutiveParseFailures = 0;
+      shared.consecutiveParseFailures = 0;
 
-      // ── reply: conversational response, no coding needed ──────────────────
+      // ── reply: conversational response ──────────────────────────────────────
       if (parsed.action === 'reply') {
         const message = parsed.args.message || parsed.thought || 'How can I help you?';
         yield { type: 'chat_reply', message };
-        yield { type: 'complete', summary: 'Replied.', steps: step };
+        shared.completionEvent = { type: 'complete', summary: 'Replied.', steps: step };
+        shared.terminated = true;
         return;
       }
 
@@ -425,7 +515,6 @@ export class EngineerAgentLoop {
         const output = (result.stdout + result.stderr).slice(-MAX_OBS_CHARS);
         yield { type: 'command_result', command, exitCode: result.exitCode, output };
 
-        // Detect a dev server starting — emit a live-preview URL
         for (const pattern of PORT_PATTERNS) {
           const m = output.match(pattern);
           if (m) {
@@ -433,7 +522,7 @@ export class EngineerAgentLoop {
             if (port > 1000 && port < 65536) {
               try {
                 const url = await this.actuator.getPortUrl(workspaceId, port);
-                lastPreviewUrl = url;
+                shared.lastPreviewUrl = url;
                 yield { type: 'server_ready', url, port };
               } catch { /* non-fatal */ }
               break;
@@ -445,11 +534,10 @@ export class EngineerAgentLoop {
       } else if (parsed.action === 'edit_file') {
         const filePath = parsed.args.path || '';
         const content = parsed.args.content || '';
-        // Auto-checkpoint before every write so the user can restore if needed.
         try {
           const ckptId = await this.actuator.checkpoint(workspaceId, `before edit: ${filePath}`);
           yield { type: 'checkpoint_created', checkpointId: ckptId, createdAt: Date.now(), triggeredBy: `before edit: ${filePath}` };
-        } catch { /* non-fatal — proceed even if checkpoint fails */ }
+        } catch { /* non-fatal */ }
         try {
           await this.actuator.writeFile(workspaceId, filePath, content);
           yield { type: 'files_changed', kind: 'edit', files: [{ path: filePath, content }] };
@@ -461,7 +549,6 @@ export class EngineerAgentLoop {
         const filePath = parsed.args.path || '';
         const oldStr = parsed.args.old_str || '';
         const newStr = parsed.args.new_str ?? '';
-        // Auto-checkpoint before every patch so the user can restore if needed.
         try {
           const ckptId = await this.actuator.checkpoint(workspaceId, `before patch: ${filePath}`);
           yield { type: 'checkpoint_created', checkpointId: ckptId, createdAt: Date.now(), triggeredBy: `before patch: ${filePath}` };
@@ -492,9 +579,6 @@ export class EngineerAgentLoop {
           }
         }
       } else if (parsed.action === 'clone_repo') {
-        // Phase 5 — clone a GitHub repo into the workspace. Token (if present) is
-        // injected into the clone URL, then stripped from the stored remote so it
-        // never persists in .git/config. Output is redacted before display.
         const repoUrl = (parsed.args.repoUrl || parsed.args.url || '').trim();
         const repoPath = normalizeGithubRepo(repoUrl);
         if (!repoPath) {
@@ -524,9 +608,6 @@ export class EngineerAgentLoop {
           }
         }
       } else if (parsed.action === 'git_push') {
-        // Phase 5 — commit all changes and push to the repo's origin. Requires a
-        // GitHub token from Secrets & Keys. Token is injected only for the push
-        // command and never written to stored config; output is redacted.
         const message = parsed.args.message || 'Update from Engineer AI';
         const branch = (parsed.args.branch || '').trim();
         if (!githubToken) {
@@ -534,7 +615,6 @@ export class EngineerAgentLoop {
             'git_push error: no GitHub token found. Ask the user to add a GITHUB_TOKEN in ' +
             'Settings → App Settings → Secrets & Keys, then retry.';
         } else {
-          // Derive owner/repo from the (tokenless) origin remote set at clone time.
           const remoteRes = await this.actuator.runCommand(workspaceId, 'git remote get-url origin 2>&1')
             .catch(() => ({ exitCode: 1, stdout: '', stderr: '' }));
           const repoPath = normalizeGithubRepo((remoteRes.stdout + remoteRes.stderr).trim());
@@ -577,15 +657,14 @@ export class EngineerAgentLoop {
           observation = `browse error: ${err?.message}`;
         }
       } else if (parsed.action === 'screenshot') {
-        const targetUrl = parsed.args.url || lastPreviewUrl || 'http://localhost:3000';
-        // Phase 12A — optional named viewport (mobile/tablet/desktop) for responsive checks.
+        const targetUrl = parsed.args.url || shared.lastPreviewUrl || 'http://localhost:3000';
         const vpName = (parsed.args.viewport || '').toLowerCase();
         const viewport = VIEWPORTS[vpName];
         const vpLabel = viewport ? ` @ ${vpName} (${viewport.width}×${viewport.height})` : '';
         yield { type: 'status', message: `Step ${step}: taking screenshot of ${targetUrl}${vpLabel}…` };
         try {
           const shot = await this.actuator.screenshot(workspaceId, targetUrl, viewport);
-          lastScreenshot = shot.base64; // injected into the NEXT router call as a vision image
+          shared.lastScreenshot = shot.base64;
           yield { type: 'screenshot_result', url: targetUrl, base64: shot.base64 };
           observation = `Screenshot captured of ${targetUrl}${vpLabel}. The image has been attached to your next thinking step — look at it carefully and describe what you see, then decide what to fix.`;
         } catch (err: any) {
@@ -602,10 +681,10 @@ export class EngineerAgentLoop {
             const res = await this.actuator.browserAction(workspaceId, subAction, {
               selector: parsed.args.selector,
               text: parsed.args.text,
-              url: parsed.args.url || lastPreviewUrl || undefined,
+              url: parsed.args.url || shared.lastPreviewUrl || undefined,
               direction: parsed.args.direction === 'up' ? 'up' : 'down',
             });
-            lastScreenshot = res.screenshot; // attached to next router call as a vision image
+            shared.lastScreenshot = res.screenshot;
             yield { type: 'browser_action_result', action: subAction, detail: res.result, base64: res.screenshot, cursorX: res.cursorX, cursorY: res.cursorY };
             observation = `${res.result}. A screenshot of the resulting page is attached to your next thinking step — look at it and decide the next action.`;
           } catch (err: any) {
@@ -613,8 +692,6 @@ export class EngineerAgentLoop {
           }
         }
       } else if (parsed.action === 'drive') {
-        // Multi-step browser driving — executes each step and streams a drive_frame event
-        // per step so the user sees the cursor moving in real-time on the live preview.
         let driveSteps: { action: string; selector?: string; text?: string; url?: string; direction?: string }[] = [];
         try {
           driveSteps = JSON.parse(parsed.args.steps || '[]');
@@ -622,18 +699,18 @@ export class EngineerAgentLoop {
           observation = 'drive error: "args.steps" must be a valid JSON array of browser action objects.';
         }
         if (driveSteps.length > 0) {
-          const validActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait', 'hover', 'double_click', 'select_option'];
+          const validDriveActions = ['click', 'type', 'navigate', 'scroll', 'press', 'wait', 'hover', 'double_click', 'select_option'];
           let driveObservations: string[] = [];
           let driveScreenshot: string | null = null;
           let driveCursorX: number | undefined;
           let driveCursorY: number | undefined;
-          const driveUrl = lastPreviewUrl || 'http://localhost:3000';
+          const driveUrl = shared.lastPreviewUrl || 'http://localhost:3000';
 
           for (let di = 0; di < driveSteps.length; di++) {
             if (signal?.aborted) break;
             const ds = driveSteps[di];
             const subAction = ds.action as 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option';
-            if (!validActions.includes(subAction)) {
+            if (!validDriveActions.includes(subAction)) {
               driveObservations.push(`Step ${di + 1}: unknown action "${ds.action}" — skipped.`);
               continue;
             }
@@ -650,7 +727,6 @@ export class EngineerAgentLoop {
               driveCursorY = res.cursorY;
               const stepDetail = res.result;
               driveObservations.push(`Step ${di + 1}: ${stepDetail}`);
-              // Stream a drive_frame so the frontend can show the cursor moving live
               yield {
                 type: 'drive_frame',
                 screenshot: res.screenshot,
@@ -664,9 +740,8 @@ export class EngineerAgentLoop {
               driveObservations.push(`Step ${di + 1}: ERROR — ${err?.message}`);
             }
           }
-          // After all steps: attach the final screenshot for the next AI think step
           if (driveScreenshot) {
-            lastScreenshot = driveScreenshot;
+            shared.lastScreenshot = driveScreenshot;
             yield {
               type: 'browser_action_result',
               action: 'drive_complete',
@@ -678,11 +753,10 @@ export class EngineerAgentLoop {
           }
           observation = `Drive completed ${driveSteps.length} step(s):\n${driveObservations.join('\n')}\nFinal screenshot attached to your next thinking step.`;
 
-          // Collect runtime errors after the drive sequence
           try {
             const checkStart = Date.now();
-            const { errors } = await this.actuator.getConsoleErrors(workspaceId, lastConsoleCheck);
-            lastConsoleCheck = checkStart;
+            const { errors } = await this.actuator.getConsoleErrors(workspaceId, shared.lastConsoleCheck);
+            shared.lastConsoleCheck = checkStart;
             if (errors.length > 0) {
               yield { type: 'console_error', errors: errors.map(e => ({ kind: e.kind, text: e.text })) };
               observation += `\n\n[RUNTIME BROWSER ERRORS]\n` + errors.map(e => `• [${e.kind}] ${e.text}`).join('\n');
@@ -696,8 +770,6 @@ export class EngineerAgentLoop {
         } else {
           yield { type: 'status', message: `Step ${step}: searching the web for "${query}"…` };
           try {
-            // Fetch the SERP from INSIDE the sandbox (open internet) rather than the
-            // egress-restricted server. Falls back to server-side fetch if it errors.
             const htmlFetcher = async (url: string): Promise<string> => {
               const r = await this.actuator.runCommand(
                 workspaceId,
@@ -729,7 +801,6 @@ export class EngineerAgentLoop {
         try {
           const result = await this.actuator.provisionBackend(workspaceId, features);
 
-          // Write or append .env
           const envLines = Object.entries(result.envVars).map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
           try {
             const existing = await this.actuator.readFile(workspaceId, '.env');
@@ -738,7 +809,6 @@ export class EngineerAgentLoop {
             await this.actuator.writeFile(workspaceId, '.env', envLines);
           }
 
-          // Write scaffold files
           for (const f of result.scaffoldFiles) {
             await this.actuator.writeFile(workspaceId, f.path, f.content);
           }
@@ -746,7 +816,6 @@ export class EngineerAgentLoop {
             yield { type: 'files_changed', kind: 'edit', files: result.scaffoldFiles };
           }
 
-          // Install required npm packages
           const { BackendProvisioner } = await import('./BackendProvisioner');
           const pkgs = BackendProvisioner.getPackages(features);
           if (pkgs.length > 0) {
@@ -776,10 +845,6 @@ export class EngineerAgentLoop {
           observation = `provision_db error: ${err?.message}. Requires E2B sandbox with apt-get access — ensure E2B_API_KEY is set.`;
         }
       } else if (parsed.action === 'deploy') {
-        // Phase 13 — real persistent deploy to Firebase Hosting.
-        // Runs the build first (so dist/ is fresh), downloads the files from the
-        // E2B sandbox, uploads them to a per-workspace Firebase Hosting channel,
-        // and returns a permanent HTTPS URL that survives sandbox pause/restart.
         yield { type: 'status', message: `Step ${step}: building for deploy…` };
         try {
           const buildResult = await this.actuator.build(workspaceId);
@@ -806,12 +871,9 @@ export class EngineerAgentLoop {
               : 'Ensure E2B_API_KEY is set and the build produced a dist/ directory.');
         }
       } else if (parsed.action === 'done') {
-        // Verify the build is actually clean before declaring success
         const buildResult = await this.actuator.build(workspaceId);
         yield { type: 'build_result', success: buildResult.success, logs: buildResult.logs.slice(-MAX_OBS_CHARS) };
         if (buildResult.success) {
-          // Phase 12B: if the project defines a real test script, run it and treat
-          // a red test exactly like a failed build — done is NOT allowed until green.
           yield { type: 'status', message: `Step ${step}: running tests…` };
           const testResult = await this.runProjectTests(workspaceId);
           if (testResult.ran) {
@@ -821,16 +883,16 @@ export class EngineerAgentLoop {
             const testLogs = testResult.logs.slice(-2000);
             observation = `Build passed but TESTS FAILED — cannot mark done yet. Fix the failing tests (a red test is treated like a broken build):\n${testLogs}`;
           } else {
-            // Phase 11A: auto-commit the finished work so git history reflects each session.
             const summary = parsed.args.summary || 'Task complete.';
             await this.actuator.runCommand(workspaceId,
               `git add -A && git commit -m ${JSON.stringify(`feat: ${summary.slice(0, 72)}`)} 2>&1 | tail -3`
             ).catch(() => {/* non-fatal */});
-            yield { type: 'complete', summary, steps: step };
+            // Store completion — orchestrator emits it after plan_step_done.
+            shared.completionEvent = { type: 'complete', summary, steps: step };
+            shared.terminated = true;
             return;
           }
         } else {
-          // Phase 11B: extract TypeScript error codes and inject targeted hints.
           const buildLogs = buildResult.logs.slice(-2000);
           const tsCodes = [...new Set((buildLogs.match(/\bTS\d{4}\b/g) || []))];
           const searchHint = tsCodes.length > 0
@@ -842,34 +904,27 @@ export class EngineerAgentLoop {
         observation = `Unknown action "${parsed.action}". Valid actions: bash, edit_file, patch_file, browse, screenshot, browser_action, drive, web_search, restore, provision_db, deploy, done.`;
       }
 
-      // Phase 4 — Live Sync: after any browser interaction, surface runtime
-      // errors (console.error, uncaught exceptions, failed requests) to BOTH
-      // the user (console_error event) and the agent (appended to observation,
-      // so it self-corrects on runtime bugs a clean build would never reveal).
+      // After any browser interaction, surface runtime errors to the agent.
       if (parsed.action === 'screenshot' || parsed.action === 'browser_action') {
-        // Note: 'drive' handles console errors inside its own loop above, so it's excluded here.
         try {
-          // Capture the watermark BEFORE the read so an error logged during the
-          // read isn't skipped next time (no-miss; at worst a sub-second re-report).
           const checkStart = Date.now();
-          const { errors } = await this.actuator.getConsoleErrors(workspaceId, lastConsoleCheck);
-          lastConsoleCheck = checkStart;
+          const { errors } = await this.actuator.getConsoleErrors(workspaceId, shared.lastConsoleCheck);
+          shared.lastConsoleCheck = checkStart;
           if (errors.length > 0) {
             yield { type: 'console_error', errors: errors.map(e => ({ kind: e.kind, text: e.text })) };
             observation += `\n\n[RUNTIME BROWSER ERRORS — these happened in the live app, fix them]\n` +
               errors.map(e => `• [${e.kind}] ${e.text}`).join('\n');
           }
-        } catch { /* non-fatal — console capture is best-effort */ }
+        } catch { /* non-fatal */ }
       }
 
-      history.push({
+      shared.history.push({
         step,
         actionJson: JSON.stringify({ action: parsed.action, args: parsed.args }),
         observation: observation.slice(-MAX_OBS_CHARS),
       });
     }
-
-    yield { type: 'max_steps_reached', steps: MAX_STEPS };
+    // Step budget for this plan step exhausted — orchestrator moves to next step.
   }
 
   /**
@@ -919,43 +974,12 @@ export class EngineerAgentLoop {
     return files;
   }
 
-  /**
-   * Phase 4 — plan-first step. Asks the model for a short, high-level build plan
-   * BEFORE the main ReAct loop. Returns the plan steps, or null when the request
-   * is conversational (greeting/question) and needs no plan. Best-effort: returns
-   * null on any parse/router failure so the caller falls through to the loop.
-   */
-  private async generatePlan(instruction: string, signal?: AbortSignal): Promise<string[] | null> {
-    const planSystemPrompt =
-      'You are a senior engineer producing a short build plan. ' +
-      'Given a user request, decide if it is a CODING task (build/create/modify/fix software) ' +
-      'or CONVERSATIONAL (greeting, question, advice, planning chat). ' +
-      'Respond with ONE JSON object, no markdown fences:\n' +
-      '- Conversational: {"conversational": true}\n' +
-      '- Coding: {"steps": ["step 1", "step 2", ...]} with 3–8 concise, ordered, high-level steps ' +
-      '(scaffold, core features, styling, verification). Keep each step under 100 characters.';
-    const planPrompt = `User request:\n${instruction}\n\nReturn the JSON now.`;
-
-    const { response, telemetry } = await this.router.route(planPrompt, planSystemPrompt);
-    if (signal?.aborted || !telemetry.success) return null;
-
-    const parsed = JSON.parse(extractJson(response.content));
-    if (parsed.conversational === true) return null;
-    if (!Array.isArray(parsed.steps)) return null;
-
-    const steps = parsed.steps
-      .filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0)
-      .map((s: string) => s.trim().slice(0, 100))
-      .slice(0, 8);
-    return steps.length > 0 ? steps : null;
-  }
-
   private async buildPrompt(
     workspaceId: string,
     instruction: string,
-    history: { step: number; actionJson: string; observation: string }[]
+    history: { step: number; actionJson: string; observation: string }[],
+    stepContextPrefix?: string,
   ): Promise<string> {
-    // ── Phase 7: smart context retrieval ──────────────────────────────────
     // 1. Get full file list (paths only — always fast)
     const fileList = await this.actuator.listFiles(workspaceId);
 
@@ -990,9 +1014,7 @@ export class EngineerAgentLoop {
     // 6. Full file tree (paths only) — gives the model the overall shape
     const fileTree = buildFileTree(fileList);
 
-    // ── Phase 12A: cross-session project memory ───────────────────────────
-    // If the agent recorded architecture/decisions in a prior session, surface
-    // them FIRST so it remembers WHY (not just the files). Best-effort read.
+    // Phase 12A: cross-session project memory — surface first so agent remembers WHY.
     let memorySection = '';
     try {
       const mem = await this.actuator.readFile(workspaceId, MEMORY_PATH);
@@ -1001,10 +1023,10 @@ export class EngineerAgentLoop {
       }
     } catch { /* no memory file yet — first session */ }
 
-    // ── Assemble prompt ───────────────────────────────────────────────────
-    const parts: string[] = [
-      `[TASK]\n${instruction}`,
-    ];
+    const taskSection = stepContextPrefix
+      ? `[TASK]\n${instruction}\n\n${stepContextPrefix}`
+      : `[TASK]\n${instruction}`;
+    const parts: string[] = [taskSection];
     if (memorySection) parts.push(memorySection);
     parts.push(
       `[WORKSPACE — FILE TREE (${fileList.length} files)]\n${fileTree}`,

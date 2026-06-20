@@ -4,6 +4,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { collection, addDoc } from 'firebase/firestore';
 import { getDb } from '../lib/db';
 import { aiRouter } from '../lib/aiRouter';
+import { AppContextInjector } from '../AppContext/AppContextInjector';
 
 /**
  * Chat routes (general + Vishwakarma tiers) extracted from the server.ts monolith
@@ -247,6 +248,14 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       systemPrompt = buildDynamicPrompt(message); // Phase 9: template-aware dynamic prompt
     } else {
       systemPrompt = SYSTEM_PROMPT_CHAT;
+    }
+
+    // App awareness injection — inject only for conversation mode (not canvas/build).
+    // Teaches every chat tier to answer "where is X?" and "how do I Y?" correctly.
+    if (!hasCanvas && !isBuildIntent) {
+      const chatSurface = isFree ? 'nbi_chat' : 'pro_chat';
+      const appCtx = AppContextInjector.getRelevantContext(message, chatSurface);
+      if (appCtx) systemPrompt = `${systemPrompt}\n\n${appCtx}`;
     }
 
     // Build contextual message with canvas app prepended (Pro/VIP only)

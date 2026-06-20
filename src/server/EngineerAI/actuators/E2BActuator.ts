@@ -620,10 +620,12 @@ const {chromium}=require('playwright');
 
   async downloadDistFiles(workspaceId: string): Promise<Map<string, Buffer>> {
     const sandbox = await this.getSandbox(workspaceId);
+    // Phase 16 — try dist/ first (Vite, esbuild), then out/ (Next.js static export).
     const distPath = `${WORKSPACE_ROOT}/dist`;
+    const outPath = `${WORKSPACE_ROOT}/out`;
 
     // Use a Node.js one-liner inside the sandbox to recursively read all files
-    // in dist/ as base64, output as JSON {relativePath: base64string}.
+    // in the output directory as base64, output as JSON {relativePath: base64string}.
     // Node.js is always available (it's the E2B base template runtime).
     const script = [
       `node -e "`,
@@ -636,8 +638,10 @@ const {chromium}=require('playwright');
       `  }}catch(e){}`,
       `  return o;`,
       `}`,
-      `const out=walk(${JSON.stringify(distPath)},'',{});`,
-      `if(!Object.keys(out).length) throw new Error('dist/ is empty or does not exist');`,
+      `let out={};`,
+      `const dirs=[${JSON.stringify(distPath)},${JSON.stringify(outPath)}];`,
+      `for(const d of dirs){const r=walk(d,'',{});if(Object.keys(r).length){out=r;break;}}`,
+      `if(!Object.keys(out).length) throw new Error('dist/ and out/ are empty or do not exist');`,
       `console.log(JSON.stringify(out));`,
       `"`,
     ].join('');
@@ -645,7 +649,7 @@ const {chromium}=require('playwright');
     const result = await sandbox.commands.run(script, { timeoutMs: 30_000 });
     if (result.exitCode !== 0 || !result.stdout.trim()) {
       throw new Error(
-        `dist/ directory not found or empty. Run "npm run build" first.\n` +
+        `No build output found in dist/ or out/. Run "npm run build" first (for Next.js static export add output:'export' to next.config.js).\n` +
         (result.stderr || result.stdout).slice(0, 300),
       );
     }

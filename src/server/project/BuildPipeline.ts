@@ -35,7 +35,8 @@ export type BuildProgressEvent =
   | { type: 'preview_url'; url: string }
   | { type: 'plan'; steps: string[] }
   | { type: 'plan_step_start'; stepIndex: number; description: string }
-  | { type: 'plan_step_done'; stepIndex: number };
+  | { type: 'plan_step_done'; stepIndex: number }
+  | { type: 'thinking'; content: string };
 
 export interface BuildPipelineInput {
   prompt: string;

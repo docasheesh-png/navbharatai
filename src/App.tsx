@@ -4214,6 +4214,14 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
                 ...prev,
                 steps: prev.steps.map((s, i) => i === ev.stepIndex ? { ...s, status: 'done' as const, sub: 'done' } : s),
               }));
+            } else if (ev.type === 'thinking' && ev.content) {
+              // Show reasoning as a transient sub-label on the current running step.
+              // Truncate so it doesn't overwhelm the progress display.
+              const snippet = ev.content.slice(0, 120).replace(/\n+/g, ' ');
+              setProBuildProgress(prev => ({
+                ...prev, active: true,
+                steps: prev.steps.map((s) => s.status === 'running' ? { ...s, sub: snippet } : s),
+              }));
             }
           }, abortController.signal);
           // Persist the refreshed Claude-Code-style memory onto the active session

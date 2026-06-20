@@ -219,7 +219,13 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
           send({ type: 'status', message: ev.message });
           break;
         case 'action_start':
-          send({ type: 'status', message: `${ACTION_ICON[ev.action] || '•'} ${ev.thought || ev.action}` });
+          // Emit the thought separately so the UI can show it as a collapsible
+          // reasoning block (Phase 69 — CoT visibility). Only emit when the thought
+          // is substantive (not just the action-name fallback ≤ 40 chars).
+          if (ev.thought && ev.thought.length > 40) {
+            send({ type: 'thinking', content: ev.thought });
+          }
+          send({ type: 'status', message: `${ACTION_ICON[ev.action] || '•'} ${ev.action}` });
           break;
         case 'command_result':
           send({ type: 'terminal', command: ev.command, output: ev.output, exitCode: ev.exitCode });

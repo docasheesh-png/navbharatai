@@ -124,7 +124,7 @@ export function buildApp(req: BuildRequest, signal?: AbortSignal): Promise<Build
 
 /** A live progress event streamed from /api/build-stream. */
 export interface BuildStreamEvent {
-  type: 'status' | 'module' | 'files' | 'complete' | 'error' | 'terminal' | 'preview_url' | 'plan' | 'plan_step_start' | 'plan_step_done';
+  type: 'status' | 'module' | 'files' | 'complete' | 'error' | 'terminal' | 'preview_url' | 'plan' | 'plan_step_start' | 'plan_step_done' | 'thinking';
   message?: string;
   name?: string;
   state?: 'start' | 'done' | 'failed';
@@ -140,6 +140,8 @@ export interface BuildStreamEvent {
   steps?: string[];
   stepIndex?: number;
   description?: string;
+  // thinking event (Phase 69 — CoT step-by-step reasoning visible in UI)
+  content?: string;
   // present on the final 'complete' event:
   ok?: boolean;
   files?: Record<string, string>;

@@ -6,22 +6,25 @@ export class AnthropicProvider implements AIProvider {
   priority = 4;
 
   private client: Anthropic;
+  private readonly modelId: string;
 
-  constructor() {
+  constructor(modelId = 'claude-3-5-sonnet-20241022') {
+    this.modelId = modelId;
     console.log("ANTHROPIC_API_KEY check:", !!process.env.ANTHROPIC_API_KEY);
-    this.client = new Anthropic({ 
-        apiKey: process.env.ANTHROPIC_API_KEY, 
-        baseURL: process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '') 
+    this.client = new Anthropic({
+        apiKey: process.env.ANTHROPIC_API_KEY,
+        baseURL: process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '')
     });
   }
 
   async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string): Promise<AIProviderResponse> {
     const startTime = Date.now();
+    const model = modelOverride || this.modelId;
 
     const messages: Anthropic.MessageParam[] = [{ role: "user", content: prompt }];
 
     const createParams: any = {
-      model: modelOverride || "claude-3-5-sonnet-20240620",
+      model,
       max_tokens: 8000,
       messages,
     };
@@ -35,13 +38,13 @@ export class AnthropicProvider implements AIProvider {
       content: content,
       latencyMs: Date.now() - startTime,
       provider: 'ANTHROPIC',
-      model: 'claude-3-5-sonnet-20240620'
+      model,
     };
   }
 
   async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void): Promise<string> {
     const params: any = {
-      model: 'claude-3-5-sonnet-20240620',
+      model: this.modelId,
       max_tokens: 8000,
       messages: [{ role: 'user', content: prompt }],
     };

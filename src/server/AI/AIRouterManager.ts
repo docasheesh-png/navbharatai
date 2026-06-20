@@ -68,15 +68,21 @@ export class AIRouterManager {
     return router;
   }
 
-  // PRO: Claude (best quality) → Grok → Vertex → Gemini (full fallback)
+  // PRO: Claude Opus 4.8 (primary) → Sonnet 3.5 → Grok → Vertex → Gemini
   private static buildPro(): AIRouter {
     const router = new AIRouter();
-    console.log('[ROUTER_MGR] Building PRO chain: Claude×2 → Grok×2 → Vertex×5 → Gemini×3');
+    console.log('[ROUTER_MGR] Building PRO chain: Opus4.8(p1) → Sonnet3.5(p2) → Grok×2 → Vertex×5 → Gemini×3');
 
     try {
-      const claude = new AnthropicProvider();
-      router.registerProvider(slot(claude, 1, 'claude-3-5-sonnet-20241022'));
-      router.registerProvider(slot(claude, 2, 'claude-3-haiku-20240307'));
+      const opus = new AnthropicProvider('claude-opus-4-8');
+      opus.priority = 1;
+      router.registerProvider(opus);
+    } catch {}
+
+    try {
+      const sonnet = new AnthropicProvider('claude-3-5-sonnet-20241022');
+      sonnet.priority = 2;
+      router.registerProvider(sonnet);
     } catch {}
 
     try {

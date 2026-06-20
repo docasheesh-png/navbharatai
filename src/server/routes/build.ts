@@ -23,6 +23,7 @@ function buildGradeContext(files: Record<string, string>): string {
 }
 import { makeAiEditGenerator, summarizeForMemory, type ModelCall, type BuildMemory } from '../project/aiEdits';
 import { orchestrateGenerate } from '../pro/ProOrchestrator';
+import { proMemoryStore } from '../pro/ProMemory';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
 import { aiRouter } from '../lib/aiRouter';
@@ -278,7 +279,21 @@ export function registerBuildRoutes(app: Express): void {
       sid = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : 'pro';
       eventBus.publish({ type: EventType.BUILD_STARTED, workspaceId: sid, sender: 'pro', payload: { isEdit: isEdit === true } });
 
-      const memory = parseMemory(req.body);
+      const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined;
+      const inRequestMemory = parseMemory(req.body);
+      // Phase 74 — load persisted memory from Firestore to supplement in-request
+      // memory (frontend passes current session state; Firestore adds cross-session
+      // persistence so the project stays coherent after a browser refresh).
+      const persistedMemory = sessionId
+        ? await proMemoryStore.load(sessionId).catch(() => null)
+        : null;
+      const memory: import('../project/aiEdits').BuildMemory = {
+        history: inRequestMemory.history,
+        summary: persistedMemory?.memorySummary || inRequestMemory.summary,
+        editLog: (inRequestMemory.editLog ?? []).length > 0
+          ? inRequestMemory.editLog
+          : (persistedMemory?.editLog ?? []),
+      };
       const callModel: ModelCall = makeResilientModelCall(userKey);
 
       // ── Agentic edit engine (Phase 1 — VFS tier). Additive + flag-gated: it is
@@ -295,7 +310,7 @@ export function registerBuildRoutes(app: Express): void {
             files: files && typeof files === 'object' ? files : undefined,
             callModel,
             isEdit: isEdit === true,
-            sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined,
+            sessionId,
             // User's own E2B key unlocks the top tier for large apps (billed to them).
             userE2bKey: typeof req.body?.userE2bKey === 'string' ? req.body.userE2bKey : undefined,
             // GitHub token for clone_repo + git_push (from user's Secrets & Keys settings).
@@ -418,6 +433,12 @@ export function registerBuildRoutes(app: Express): void {
         partial: false,
       });
       eventBus.publish({ type: EventType.BUILD_COMPLETED, workspaceId: sid, sender: 'pro', payload: { path: 'legacy', ok: result.ok, fileCount: result.fileCount, previewAllowed: result.previewAllowed, partial: false } });
+      if (sessionId) {
+        proMemoryStore.save(sessionId, {
+          memorySummary: updatedSummary,
+          editLog: updatedEditLog,
+        }).catch(() => {});
+      }
     } catch (err: any) {
       // Only surface an error if we haven't already given the user a result.
       if (!sentTerminal) {

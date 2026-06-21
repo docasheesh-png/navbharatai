@@ -1366,3 +1366,14 @@ G8 adds the GUI layer:
   name / site ID / owner+repo), error display, "Deploy Now" button with spinner.
 - AppKnowledgeBase.ts: 'one-click-deploy' entry added (mandatory per CLAUDE.md rule).
 Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
+
+### Milestone G9 — Quick-Start Gallery (2026-06-21)
+Adds 8 example prompt cards to Pro Chat empty state (Bolt.new-style "blank page" fix):
+- AIChat.tsx: when messages.length === 0 and activeAgent === 'navbharatai-pro', a 2×4
+  grid of example cards appears. Each card has an emoji, title, and a detailed prompt
+  for one app type: Analytics Dashboard, E-commerce Page, Todo App, Portfolio Site,
+  Quiz App, Weather App, Chat Interface, Note-taking App. Clicking fills the chat input.
+- AppKnowledgeBase.ts: 'quick-start-gallery' entry added. Keywords scoped to intent
+  phrases ('example prompt', 'quick start', 'app ideas') to avoid false context
+  injection on build instructions (prevents appContextInjector test regression).
+Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.

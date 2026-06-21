@@ -501,20 +501,33 @@ _NavBharatAI's genuine competitive moat. Claude Code will never do any of this._
 
 tsc x2 clean, vitest 361/361 green.
 
-### 6.4 — Real deploy targets
-**Status: PARTIAL (Vercel + Netlify live)**
+### 6.4 — Real deploy targets ✅ PARTIAL (2026-06-21)
+**Branch:** `claude/test-coverage-analysis-bq0yev`
 
-Add:
-- Cloudflare Pages (real CF API)
-- Railway (full-stack + managed DB)
-- Supabase Edge Functions (serverless backend)
+**Shipped — Cloudflare Pages deploy (PR #153):**
+- `src/server/pro/ProDeploy.ts` — added `deployCloudflarePages(token, accountId, projectName, files)`: uses native `fetch` for all 3 HTTP calls (project check, create, deploy). Builds SHA-256 manifest + multipart FormData for Cloudflare Direct Upload API.
+- `src/server/routes/pro.ts` — added `cloudflare` as 4th deploy provider; validates `accountId + name`.
+- `src/components/panels/DeployModal.tsx` — 4-platform grid (2×2); Cloudflare option shows Account ID + Project Name fields.
+- `src/App.tsx` — state type updated; Cloudflare validation + body building wired.
+- `tests/proDeploy.test.ts` — 8 unit tests (existing project, new project create, FormData structure, URL fallback, error cases). All using `vi.stubGlobal('fetch', ...)`.
+- tsc x2 clean, 406/406 green.
 
-### 6.5 — Modern backend scaffolds
-**Status: TODO**
+**Still TODO (infra-gated):**
+- Railway deploy (no direct file upload API — requires git push workflow or CLI)
+- Supabase Edge Functions (requires Supabase CLI + managed runtime)
 
-- Convex (real-time backend with auth)
-- PocketBase (self-hosted SQLite)
-- Supabase (improve existing: add auth + storage + realtime)
+### 6.5 — Modern backend scaffolds ✅ DONE (2026-06-21)
+**Branch:** `claude/test-coverage-analysis-bq0yev`
+
+**Shipped:**
+- `Scaffold.ts` — Added `'vite-pocketbase'` and `'vite-convex'` framework types. `detectFramework()` checks for PocketBase/Convex keywords before React/Svelte/Vue (priority ordering). Scaffolds full working skeletons: PocketBase (`src/lib/pb.js` singleton with `VITE_PB_URL`, auth + record listing in `App.jsx`, `.env.example`); Convex (`ConvexProvider` in `main.jsx`, `useQuery`/`useMutation` in `App.jsx`, `convex/schema.ts`, `convex/tasks.ts`, `.env.example`). `scaffoldSummary()` describes both.
+- `DependencySync.ts` — Added `pocketbase ^0.21.0` and `convex ^1.13.0` to `KNOWN_VERSIONS`. Also expanded by ~50 more pinned packages: firebase, @supabase/supabase-js, @stripe/stripe-js, @clerk/clerk-react, @prisma/client, 10+ more Radix UI components, @headlessui/react, @tanstack/react-table, @tanstack/react-router, @trpc/*, three, @react-three/fiber, @react-three/drei, chart.js, react-chartjs-2, d3, reactflow, @monaco-editor/react, @tiptap/react, react-window, embla-carousel-react, gsap, appwrite, and more.
+- `ErrorPatternMatcher.ts` — Added 10 new ERROR_PATTERNS: Objects as React child, missing key prop, Firebase invalid API key, CORS, Next.js SSR data fetching, maximum update depth (infinite re-render), useRouter from wrong Next.js package, invalid hook call, React hydration mismatch. Added 9 new INSTRUCTION_HINTS: Stripe, Clerk, PocketBase, Convex, Three.js, Charts/D3, Prisma, Appwrite.
+- `AppKnowledgeBase.ts` — added `backend-scaffolds` entry (PocketBase + Convex scaffold detection, generated files, setup instructions).
+- `tests/scaffold.test.ts` — +8 tests for PocketBase + Convex detect + scaffold.
+- `tests/dependencySync.test.ts` — +2 tests for pocketbase/convex curated versions.
+- `tests/errorPatternMatcher.test.ts` — +16 tests for new error patterns + instruction hints (422/422 total green).
+- tsc x2 clean, 422/422 green.
 
 **Phase 6 DONE when:** UPI payment app builds + deploys in <5 min. Full Pro Chat works on
 mobile. All framework/deploy claims are PASS-verified end-to-end. Nothing faked.

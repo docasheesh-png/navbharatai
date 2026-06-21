@@ -1087,6 +1087,24 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
               </div>
             )}
 
+            {/* External sites often block embedding (X-Frame-Options / CSP). The iframe
+                cannot bypass that, so surface an honest notice + a real "open in new tab"
+                action whenever the URL isn't a local preview. */}
+            {iframeSrc && /^https?:\/\//i.test(iframeSrc) && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(iframeSrc) && (
+              <div className="px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-2 shrink-0">
+                <AlertCircle className="w-3 h-3 text-amber-400 shrink-0" />
+                <span className="text-[11px] text-amber-200/90 flex-1 min-w-0">
+                  Some sites (Google, YouTube, banks…) block embedding for security. If the page below is blank, open it in a real browser tab.
+                </span>
+                <button
+                  onClick={() => window.open(iframeSrc, '_blank', 'noopener,noreferrer')}
+                  className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-[10px] font-medium transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" /> Open in new tab
+                </button>
+              </div>
+            )}
+
             {/* Iframe */}
             {iframeSrc && (
               <iframe

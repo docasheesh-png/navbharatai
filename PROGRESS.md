@@ -1377,3 +1377,29 @@ Adds 8 example prompt cards to Pro Chat empty state (Bolt.new-style "blank page"
   phrases ('example prompt', 'quick start', 'app ideas') to avoid false context
   injection on build instructions (prevents appContextInjector test regression).
 Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
+
+### Milestone G10 — Iterative Agent Build + Retry Memory Fix (2026-06-21)
+Fixes two root-cause bugs reported by the user ("photo editing app" failure + "try again" amnesia):
+
+**Problem 1 — Memory loss on retry**: When a build failed, saying "please try again" caused
+Pro Chat to lose context — it said "Sure, happy to try again!" with no idea what to rebuild.
+Root cause: in AUTO mode, "please try again" → classifyAutoIntent returns 'chat'
+(no build verb, no app noun) → routed to /api/pro-chat → conversational response.
+
+**Problem 2 — Iterative engine**: The multi-step agentic engine (PlannerAgent + CoderAgent +
+EngineerAgentLoop) was ALREADY wired in production via buildAppStream → /api/build-stream
+→ runProEngine. The VFS tier always runs the iterative loop. The "single shot" perception
+was because the engine was silently falling back to runBuild on context/timeout failures.
+
+**Fix**:
+- App.tsx: `lastBuildPromptRef = useRef<string>('')` stores the effective prompt before every build.
+- Retry detection: pure-regex (`/^(please\s+)?(try\s+again|retry)…/`) + empty-workspace guard
+  + non-empty stored prompt guard = `isRetryAfterFailure` flag.
+- AUTO mode intercept: when `isRetryAfterFailure`, skip classifyAutoIntent entirely — force-build
+  with `handleSendForPro(lastBuildPromptRef.current, forceBuild=true, guiderApproved=true)`.
+  `guiderApproved=true` prevents the original prompt from being re-added as a duplicate
+  chat message (user still sees "please try again" in chat, followed by the build progress).
+- BUILD mode: `buildPrompt` variable (= lastBuildPromptRef or messageToSend) used for both
+  the Guider plan call and the buildAppStream prompt.
+- AppKnowledgeBase.ts: 'iterative-agent-build' entry added.
+Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.

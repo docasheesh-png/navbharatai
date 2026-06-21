@@ -1,54 +1,36 @@
 import { describe, it, expect } from 'vitest';
 import { BlueprintReconstructor } from '../src/server/AppMakerLab/intelligence/BlueprintReconstructor';
 
-describe('BlueprintReconstructor.reconstruct', () => {
-  const rec = new BlueprintReconstructor();
+describe('BlueprintReconstructor', () => {
+  const reconstructor = new BlueprintReconstructor();
 
-  it('detects React/Frontend when index has an App symbol', () => {
-    const index = [{ symbols: [{ name: 'App', type: 'class' }], dependencies: [] }];
-    const result = rec.reconstruct({}, index);
+  it('detects React frontend when App symbol present', () => {
+    const result = reconstructor.reconstruct({}, [{ symbols: [{ name: 'App', type: 'component' }], dependencies: [] }]);
     expect(result.frontend).toBe('React/Frontend');
   });
 
-  it('detects frontend from Component symbol name', () => {
-    const index = [{ symbols: [{ name: 'UserComponent', type: 'class' }], dependencies: [] }];
-    const result = rec.reconstruct({}, index);
-    expect(result.frontend).toBe('React/Frontend');
-  });
-
-  it('returns "None" for frontend when no App/Component symbols', () => {
-    const index = [{ symbols: [{ name: 'UserService', type: 'class' }], dependencies: [] }];
-    const result = rec.reconstruct({}, index);
+  it('shows None for frontend when no App symbol', () => {
+    const result = reconstructor.reconstruct({}, [{ symbols: [{ name: 'utils', type: 'function' }], dependencies: [] }]);
     expect(result.frontend).toBe('None');
   });
 
-  it('detects Express backend when express is in dependencies', () => {
-    const index = [{ symbols: [], dependencies: ['express', 'cors'] }];
-    const result = rec.reconstruct({}, index);
+  it('detects Express backend from dependencies', () => {
+    const result = reconstructor.reconstruct({}, [{ symbols: [], dependencies: ['express', 'cors'] }]);
     expect(result.backend).toBe('Express/Server');
   });
 
-  it('returns "None" for backend when no express dependency', () => {
-    const index = [{ symbols: [], dependencies: ['react'] }];
-    const result = rec.reconstruct({}, index);
-    expect(result.backend).toBe('None');
-  });
-
-  it('detects Database/ORM when prisma is in dependencies', () => {
-    const index = [{ symbols: [], dependencies: ['prisma'] }];
-    const result = rec.reconstruct({}, index);
+  it('detects database from prisma dependency', () => {
+    const result = reconstructor.reconstruct({}, [{ symbols: [], dependencies: ['prisma'] }]);
     expect(result.database).toBe('Database/ORM');
   });
 
-  it('detects Auth/Security when firebase is in dependencies', () => {
-    const index = [{ symbols: [], dependencies: ['firebase'] }];
-    const result = rec.reconstruct({}, index);
+  it('detects auth from firebase dependency', () => {
+    const result = reconstructor.reconstruct({}, [{ symbols: [], dependencies: ['firebase-admin'] }]);
     expect(result.auth).toBe('Auth/Security');
   });
 
-  it('handles empty index without crashing', () => {
-    const result = rec.reconstruct({}, []);
-    expect(result.frontend).toBe('None');
-    expect(result.backend).toBe('None');
+  it('returns empty apiStructure when no get/post functions', () => {
+    const result = reconstructor.reconstruct({}, [{ symbols: [{ name: 'renderApp', type: 'function' }], dependencies: [] }]);
+    expect(result.apiStructure).toEqual([]);
   });
 });

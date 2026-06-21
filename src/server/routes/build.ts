@@ -53,6 +53,44 @@ import { buildHistoryStore } from '../project/BuildHistoryStore';
 const previewService = getPreviewService();
 
 /**
+ * Phase 2.2 — Unified preview ladder helper.
+ *
+ * Single code path used by BOTH the agentic and legacy build routes. Wraps
+ * startPreview with:
+ *   - Consistent 8s timeout (was missing on the legacy path — could hang indefinitely)
+ *   - try/catch so a preview failure never breaks the build response
+ *   - Early `preview_url` SSE event so the iframe can start loading before
+ *     `sendComplete` arrives (was previously only available after the full payload)
+ *
+ * Returns the PreviewResult (or a {ok:false} on failure) and also emits the
+ * `preview_url` event via `send` when the preview is ready.
+ */
+async function startPreviewSafe(
+  files: Record<string, string>,
+  previewAllowed: boolean,
+  wantPreview: boolean,
+  send: (ev: unknown) => void,
+): Promise<unknown> {
+  if (!wantPreview) return undefined;
+  if (!previewAllowed) {
+    return { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
+  }
+  try {
+    const vfs = VirtualFileSystem.fromRecord(files);
+    const result = await Promise.race([
+      previewService.startPreview('build', vfs),
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 8000)),
+    ]);
+    if (result?.ok && result.url) {
+      send({ type: 'preview_url', url: result.url });
+    }
+    return result;
+  } catch {
+    return { ok: false, target: 'static', reason: 'Preview start failed.' };
+  }
+}
+
+/**
  * Resilient model call: try providers in order and return the first non-empty
  * reply. The engine must run even when one provider's key is absent — relying on
  * Claude alone made the new engine silently fall back to the legacy path in
@@ -429,17 +467,8 @@ export function registerBuildRoutes(app: Express): void {
             ]);
             const updatedEditLog = [...(memory.editLog || []), thisEntry].slice(-30);
 
-            let previewInfo: unknown = undefined;
-            if (preview && eng.previewAllowed) {
-              const vfs = VirtualFileSystem.fromRecord(eng.files);
-              // G11 — cap preview at 8s so we stay well within Cloud Run's budget.
-              previewInfo = await Promise.race([
-                previewService.startPreview('build', vfs),
-                new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 8000)),
-              ]);
-            } else if (preview && !eng.previewAllowed) {
-              previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
-            }
+            // Phase 2.2 — unified preview ladder (both paths through one helper).
+            const previewInfo = await startPreviewSafe(eng.files, eng.previewAllowed, !!preview, send);
 
             // G5 — code review quality gate (best-effort, 12s cap, never blocks build).
             let codeReview: unknown = undefined;
@@ -567,13 +596,8 @@ export function registerBuildRoutes(app: Express): void {
         } catch { /* test gen never blocks the build */ }
       }
 
-      let previewInfo: unknown = undefined;
-      if (preview && result.previewAllowed) {
-        const vfs = VirtualFileSystem.fromRecord(finalFiles);
-        previewInfo = await previewService.startPreview('build', vfs);
-      } else if (preview && !result.previewAllowed) {
-        previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
-      }
+      // Phase 2.2 — unified preview ladder (both paths through one helper).
+      const previewInfo = await startPreviewSafe(finalFiles, result.previewAllowed, !!preview, send);
 
       // G5 — code review quality gate (best-effort, 12s cap, never blocks build).
       let codeReview: unknown = undefined;

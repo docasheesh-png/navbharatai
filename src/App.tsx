@@ -7924,6 +7924,12 @@ ${pending.map(p => `  - ${p}`).join('\n')}
               onUpload={handleFilesUpload}
               onDownloadZip={() => downloadAppZip(files as any, 'NavBharatApp')}
               onOpenFile={(path) => { setActiveFile(path); toggleTab('studio'); }}
+              sessionId={currentProSessionId}
+              onRestoreVersion={(restoredFiles, commitMsg) => {
+                setFiles(restoredFiles);
+                addLog(`Restored to: ${commitMsg}`, 'success');
+                toggleTab('studio');
+              }}
             />
           )}
 

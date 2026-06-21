@@ -277,3 +277,43 @@ export function previewSrcFor(preview: PreviewInfo | undefined): string | null {
   if (preview.target === 'server-container') return `/preview-app/${preview.sessionId}/`;
   return preview.url || null;
 }
+
+// Phase 2.1 — Version history types and API calls.
+
+export interface VersionMeta {
+  id: string;
+  sessionId: string;
+  commitMessage: string;
+  createdAt: string;
+  fileCount: number;
+  isEdit: boolean;
+  tier?: string;
+  ok: boolean;
+}
+
+export interface VersionEntry extends VersionMeta {
+  files: Record<string, string>;
+}
+
+/** List all version checkpoints for a workspace (metadata only, newest first). */
+export async function listBuildHistory(sessionId: string): Promise<VersionMeta[]> {
+  try {
+    const res = await fetch(`/api/build-history/${encodeURIComponent(sessionId)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.versions || []) as VersionMeta[];
+  } catch {
+    return [];
+  }
+}
+
+/** Fetch a specific version with its full file snapshot. */
+export async function fetchBuildVersion(sessionId: string, versionId: string): Promise<VersionEntry | null> {
+  try {
+    const res = await fetch(`/api/build-history/${encodeURIComponent(sessionId)}/${encodeURIComponent(versionId)}`);
+    if (!res.ok) return null;
+    return await res.json() as VersionEntry;
+  } catch {
+    return null;
+  }
+}

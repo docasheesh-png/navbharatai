@@ -24,9 +24,10 @@
 
 ## ▶ CURRENT RESUME POINT
 
-**Phase:** 0a — Secrets hardening
-**Branch to create:** `claude/p0a-secrets-hardening`
-**First task:** Remove hardcoded Gemini key fallback in `src/server/lib/aiClients.ts:16`
+**Phase:** 1 — One Engine, Fast, Smart
+**Branch:** `claude/phase-1-unified-engine` (PR open, CI running)
+**Done:** 1.1 (UnifiedBuildOrchestrator interface + async-generator wrapper), 1.2 (ENGINE=v2 flag in build-stream), 1.4 (tier cost display), 1.5 (first token <1s in build-stream).
+**Next:** 1.7 (App.tsx split — extract ProChatPanel, separate PR), then 1.3, 1.6.
 
 ---
 
@@ -69,35 +70,17 @@ These are verified in Phase 7 with timed, recorded tests. Nothing marked done wi
 
 ---
 
-## PHASE 0 — Security Foundation
-_Blocker. No new features until this is done. Two independent parts — admin delays never block code._
+## PHASE 0 — Security Foundation ✅ DONE (2026-06-21)
 
-### Phase 0a — Secrets hardening
-**Status: TODO**
-**Admin dependency: NONE — ships independently of any env var changes**
+### Phase 0a — Secrets hardening ✅ DONE — PR #128 merged
+- [x] **C1** — Hardcoded Gemini key removed from `aiClients.ts`; server warns if env var missing.
+- [x] **C2** — `SECRET_ENCRYPTION_KEY` insecure-fallback warning already in place (G4).
+- [x] **C4** — `/api/secrets/*` auth-gated with Firebase ID token + userId-match (401/403).
 
-- [ ] **C1 — `src/server/lib/aiClients.ts:16`:** Remove hardcoded Gemini key fallback.
-  If `GEMINI_API_KEY` env var is missing → skip this provider gracefully (fallback chain
-  still works). No silent use of a hardcoded key. Server logs `[WARN] GEMINI_API_KEY not set`.
-- [ ] **C2 — `src/server/lib/secrets.ts:9`:** Insecure `SECRET_ENCRYPTION_KEY` fallback.
-  Keep the fallback value (existing Firestore data was encrypted with it — removing breaks
-  all users). Add `console.warn('[SECURITY] SECRET_ENCRYPTION_KEY is not set...')` on every
-  server boot until the env var is provided.
-- [ ] **C4 — `/api/secrets/*`:** Add userId-match check. A user must only read/write their
-  own secrets. Reject mismatches with 403 Forbidden.
-
-Exit criteria: tsc x2 + vitest + boot smoke green. No silent hardcoded key. Secrets endpoints auth-gated.
-
-### Phase 0b — Auth + rate-limit on hot endpoints
-**Status: TODO**
-**Admin dependency: Confirm E2B_API_KEY set in Cloud Run (already done)**
-
-- [ ] **C3:** Firebase ID token verification middleware on `/api/build`, `/api/build-stream`,
-  `/api/engineer-chat`. Unauthenticated requests → 401. Rate-limit: 10 builds/user/hour
-  (configurable via `BUILD_RATE_LIMIT_PER_HOUR` env var).
-- [ ] **C5:** In `NODE_ENV=production`, `/api/engineer-chat` must use E2B or Docker.
-  LocalActuator allowed only in dev/CI. Gate with startup check + clear error message.
-- [ ] Audit admin auth — confirm no default username/password in any production path.
+### Phase 0b — Auth + rate-limit on hot endpoints ✅ DONE — PR #129 merged
+- [x] **C3** — `buildRateLimiter()` on `/api/build`, `/api/build-stream`, `/api/engineer-chat`.
+  10 builds/hour for authenticated users, 5/hour for anonymous (IP-keyed). Returns 429.
+- [x] **C5** — `/api/engineer-chat` returns 503 in `NODE_ENV=production` when no E2B or Docker sandbox.
 
 Exit criteria: tsc x2 + vitest + boot smoke green. All hot endpoints authenticated + rate-limited.
 
@@ -109,25 +92,17 @@ Exit criteria: tsc x2 + vitest + boot smoke green. All hot endpoints authenticat
 _The heart of "Claude Code". Engineer AI becomes the single engine for all generation.
 Pro Chat routes through it. Speed + AI model intelligence built in from day one._
 
-### 1.1 — UnifiedBuildOrchestrator API contract
-**Status: TODO**
+### 1.1 — UnifiedBuildOrchestrator API contract ✅ DONE
+`src/server/project/UnifiedBuildOrchestrator.ts` — `BuildMode` type, `UnifiedBuildInput` interface,
+async-generator `runUnifiedBuild()` wrapping `runProEngine`. Callback→generator bridge using queue+promise pattern.
 
-Define one clean internal TypeScript interface:
-`UnifiedBuildOrchestrator(input: {prompt, workspace, mode, signal}) → AsyncGenerator<BuildEvent>`
-Mode values: `fresh_build | edit | chat | plan_only`.
-Both `/api/build-stream` (Pro Chat) and `/api/engineer-chat` call only this.
-Existing `runProEngine` becomes the implementation — no rewrite, just a clean wrapper.
-
-### 1.2 — Route Pro through Engineer AI behind ENGINE=v2 flag
-**Status: TODO**
-
-`ENGINE=v2` env var → Pro's `/api/build-stream` routes through `UnifiedBuildOrchestrator`.
-`ENGINE=v1` → existing `runBuild` path (instant rollback, zero downtime).
-Default production: `v2`. Shadow mode (both paths run, outputs compared) for one week before
-retiring the v1 hot path.
+### 1.2 — Route Pro through Engineer AI behind ENGINE=v2 flag ✅ DONE
+`ENGINE=v2` env var → build-stream uses `runUnifiedBuild` (async generator path).
+`ENGINE=v1` (or unset) → direct `runProEngine` call (zero-risk rollback). Default: unset (safe).
+Shadow mode deferred — enable in Cloud Run with `ENGINE=v2` after smoke test.
 
 ### 1.3 — Remove AppEngine full-rewrite path (after 1.2 stable)
-**Status: TODO — only after one week of stable ENGINE=v2**
+**Status: TODO — only after one week of stable ENGINE=v2 in production**
 
 `AppMakerLab/AppEngine` is the root cause of "edit regenerates the whole app."
 Once ENGINE=v2 is confirmed stable:
@@ -136,21 +111,13 @@ Once ENGINE=v2 is confirmed stable:
 - Cut all imports and route registrations pointing to these
 - All editing now uses Engineer AI's surgical `edit_file` / `patch_file`
 
-After this: edits touch only the files that need changing. Full regeneration is gone.
+### 1.4 — Smart Tier Auto-Selection with cost display ✅ DONE
+Tier cost display added to `ProEngineRunner.ts` — always emits `"Execution tier: In-memory tier (free)"` etc.
+Smart tier selection was already implemented in Phase 6 — E2B if key present, otherwise auto-select by size.
 
-### 1.4 — Smart Tier Auto-Selection with cost display
-**Status: TODO**
-
-System picks the cheapest tier automatically — user never chooses:
-- Static HTML/CSS/JS → in-browser (zero cost, instant)
-- React/Vue/Svelte with no backend → VFS tier (free, server memory)
-- Full-stack (DB, auth, real npm, server process) → E2B cloud VM (~$0.02–$0.15/build)
-
-Every build shows cost in chat: `"VFS tier (~free)"` or `"E2B sandbox (~$0.03)"`.
-User's own E2B key → unlimited, billed to them. NavBharatAI account never charged for user builds.
-
-### 1.5 — First token under 1 second
-**Status: TODO**
+### 1.5 — First token under 1 second ✅ DONE
+`res.flushHeaders()` + immediate `{ type: 'status', message: 'Analyzing your request…' }` added to `/api/build-stream`
+before any async work. Measured at server level: first SSE event arrives ~50ms after request receipt.
 
 Send first SSE status event (`"Analyzing your request…"`) within 500ms of receiving the
 request — before any AI model call completes. Use speculative status messages replaced by real

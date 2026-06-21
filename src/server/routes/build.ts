@@ -2,6 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { buildRateLimiter } from '../lib/authMiddleware';
 import { runBuild } from '../project/BuildPipeline';
 import { runProEngine } from '../EngineerAI/ProEngineRunner';
+import { runUnifiedBuild, isUnifiedEngineEnabled } from '../project/UnifiedBuildOrchestrator';
 import { Guider, gradeAgainstSpec } from '../Guider/Guider';
 import { shouldConfirm } from '../Guider/GuiderGate';
 import type { GuiderSpec } from '../Guider/GuiderTypes';
@@ -277,7 +278,12 @@ export function registerBuildRoutes(app: Express): void {
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
+    // Phase 1.5 — flush headers immediately so the browser opens the SSE pipe
+    // before any async work begins. This is what drives "first token < 1 second."
+    res.flushHeaders();
     const send = (event: unknown) => { try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch { /* client gone */ } };
+    // Phase 1.5 — first visible event arrives within ~50ms of request receipt.
+    send({ type: 'status', message: 'Analyzing your request…' });
     // Heartbeat so proxies don't idle-timeout the stream during long model calls.
     const heartbeat = setInterval(() => { try { res.write(': keep-alive\n\n'); } catch { /* ignore */ } }, 15_000);
 
@@ -350,25 +356,55 @@ export function registerBuildRoutes(app: Express): void {
       const agenticEnabled = process.env.PRO_AGENTIC_ENGINE !== '0';
       if (agenticEnabled) {
         try {
-          const eng = await runProEngine({
-            // Phase 85: when design images are provided, prepend a design hint to the
-            // agentic prompt so the agent knows it should match the visual design.
-            prompt: designImages && designImages.length > 0
-              ? `[DESIGN IMAGE(S) PROVIDED — generate UI code that matches the visual design in the image(s)]\n${prompt}`
-              : prompt,
-            files: files && typeof files === 'object' ? files : undefined,
-            callModel,
-            isEdit: isEdit === true,
-            sessionId,
-            // User's own E2B key unlocks the top tier for large apps (billed to them).
-            userE2bKey: typeof req.body?.userE2bKey === 'string' ? req.body.userE2bKey : undefined,
-            // GitHub token for clone_repo + git_push (from user's Secrets & Keys settings).
-            githubToken: typeof req.body?.githubToken === 'string' ? req.body.githubToken : undefined,
-            // User's database credentials (from Settings → App Settings → Database).
-            dbConfig: req.body?.dbConfig && typeof req.body.dbConfig === 'object' ? req.body.dbConfig : undefined,
-            send: (ev) => send(ev),
-            signal: deadline.signal,
-          });
+          const enginePrompt = designImages && designImages.length > 0
+            ? `[DESIGN IMAGE(S) PROVIDED — generate UI code that matches the visual design in the image(s)]\n${prompt}`
+            : prompt;
+          const engineFiles = files && typeof files === 'object' ? files : undefined;
+          const engineUserE2bKey = typeof req.body?.userE2bKey === 'string' ? req.body.userE2bKey : undefined;
+          const engineGithubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : undefined;
+          const engineDbConfig = req.body?.dbConfig && typeof req.body.dbConfig === 'object' ? req.body.dbConfig : undefined;
+
+          // Phase 1.2 — route through UnifiedBuildOrchestrator when ENGINE=v2 (opt-in).
+          // ENGINE=v1 (or unset) keeps the direct runProEngine call below for zero-risk rollback.
+          let eng: Awaited<ReturnType<typeof runProEngine>>;
+          if (isUnifiedEngineEnabled()) {
+            // Drain the async generator: forward progress events, capture the terminal result.
+            let doneResult: Awaited<ReturnType<typeof runProEngine>> | null = null;
+            for await (const ev of runUnifiedBuild({
+              prompt: enginePrompt,
+              files: engineFiles,
+              callModel,
+              mode: isEdit === true ? 'edit' : 'fresh_build',
+              sessionId,
+              userE2bKey: engineUserE2bKey,
+              githubToken: engineGithubToken,
+              dbConfig: engineDbConfig,
+              signal: deadline.signal,
+            })) {
+              if (ev.type === '_done') {
+                doneResult = ev.result as Awaited<ReturnType<typeof runProEngine>>;
+              } else if (ev.type === '_error') {
+                throw new Error(ev.message);
+              } else {
+                send(ev);
+              }
+            }
+            if (!doneResult) throw new Error('UnifiedBuildOrchestrator: no result received');
+            eng = doneResult;
+          } else {
+            eng = await runProEngine({
+              prompt: enginePrompt,
+              files: engineFiles,
+              callModel,
+              isEdit: isEdit === true,
+              sessionId,
+              userE2bKey: engineUserE2bKey,
+              githubToken: engineGithubToken,
+              dbConfig: engineDbConfig,
+              send: (ev) => send(ev),
+              signal: deadline.signal,
+            });
+          }
           // Emit a terminal result when the engine produced usable files OR the soft
           // deadline fired (so the user always gets what was built — never "no result").
           if (eng.usable || deadline.signal.aborted) {

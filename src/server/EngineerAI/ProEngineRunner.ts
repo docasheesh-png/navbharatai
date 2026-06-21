@@ -201,9 +201,13 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     dbConfig: dbConfig || undefined,
   };
 
-  if (backend.tier !== 'vfs') {
-    send({ type: 'status', message: `⚙️ Running in ${backend.tier === 'e2b' ? 'a cloud VM' : 'a real container'} (full build + test)…` });
-  }
+  // Phase 1.4 — always emit tier + cost so users know what they're getting.
+  const TIER_DISPLAY: Record<ExecutionTier, string> = {
+    vfs:      'In-memory tier (free)',
+    cloudrun: 'Container tier (free)',
+    e2b:      'E2B cloud VM (~$0.02–$0.15)',
+  };
+  send({ type: 'status', message: `Execution tier: ${TIER_DISPLAY[backend.tier]}` });
 
   let didEdit = false;
   let sawError = false;

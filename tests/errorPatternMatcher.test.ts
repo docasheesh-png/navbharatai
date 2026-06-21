@@ -91,6 +91,60 @@ describe('matchErrorPatterns', () => {
     expect(hints.length).toBeGreaterThan(0);
     expect(hints[0]).toContain('postcss.config');
   });
+
+  it('matches Objects are not valid as a React child', () => {
+    const hints = matchErrorPatterns('Objects are not valid as a React child (found: object with keys {name, value})');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('JSON.stringify');
+  });
+
+  it('matches missing key prop warning', () => {
+    const hints = matchErrorPatterns('Each child in a list should have a unique "key" prop.');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('key');
+  });
+
+  it('matches Firebase invalid API key error', () => {
+    const hints = matchErrorPatterns('FirebaseError: Firebase: Error (auth/invalid-api-key).');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('VITE_FIREBASE_API_KEY');
+  });
+
+  it('matches CORS policy blocked error', () => {
+    const hints = matchErrorPatterns('Access to fetch at http://localhost:3001/api has been blocked by CORS policy');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('CORS');
+  });
+
+  it('matches Next.js getStaticProps SSR error', () => {
+    const hints = matchErrorPatterns("Error: 'getStaticProps' is not exported from this file");
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints.some(h => h.includes('App Router'))).toBe(true);
+  });
+
+  it('matches Maximum update depth exceeded (infinite re-render)', () => {
+    const hints = matchErrorPatterns('Error: Maximum update depth exceeded. This can happen when a component repeatedly calls setState inside componentWillUpdate.');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('dependency array');
+  });
+
+  it('matches useRouter from wrong Next.js package', () => {
+    const hints = matchErrorPatterns("Error: useRouter only works within next/navigation, not next/router");
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain("next/navigation");
+  });
+
+  it('matches invalid hook call error', () => {
+    const hints = matchErrorPatterns('Invalid hook call. Hooks can only be called inside of the body of a function component.');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('function component');
+  });
+
+  it('matches React hydration mismatch error', () => {
+    const hints = matchErrorPatterns('Error: Hydration failed because the initial UI does not match what was rendered on the server.');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('useEffect');
+  });
 });
 
 describe('hintForInstruction', () => {
@@ -136,5 +190,47 @@ describe('hintForInstruction', () => {
     const hints = hintForInstruction('tailwind tailwind css tailwindcss');
     const unique = new Set(hints);
     expect(hints.length).toBe(unique.size);
+  });
+
+  it('returns stripe hint for stripe/payment instructions', () => {
+    const hints = hintForInstruction('Build a checkout page with Stripe payment');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('Stripe');
+  });
+
+  it('returns clerk hint for auth/authentication instructions', () => {
+    const hints = hintForInstruction('Add Clerk authentication to the app');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('Clerk');
+  });
+
+  it('returns pocketbase hint for pocketbase instructions', () => {
+    const hints = hintForInstruction('Build a CRUD app with PocketBase backend');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('PocketBase');
+  });
+
+  it('returns convex hint for convex instructions', () => {
+    const hints = hintForInstruction('Build a todo app with Convex backend');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints.some(h => h.includes('Convex'))).toBe(true);
+  });
+
+  it('returns three.js hint for 3D/WebGL instructions', () => {
+    const hints = hintForInstruction('Build a 3D scene with Three.js');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('Canvas');
+  });
+
+  it('returns prisma hint for ORM/database instructions', () => {
+    const hints = hintForInstruction('Use Prisma ORM for the database layer');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('server');
+  });
+
+  it('returns appwrite hint for appwrite instructions', () => {
+    const hints = hintForInstruction('Build a todo app with Appwrite as backend');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('Appwrite');
   });
 });

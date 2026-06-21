@@ -99,6 +99,42 @@ const ERROR_PATTERNS: ErrorPattern[] = [
     regex: /Cannot find module.*react-dom\/client|react-dom.*client.*not found/i,
     hint: "react-dom/client is available in React 18+. Ensure react and react-dom are pinned to ^18. For React 17 use ReactDOM.render() instead of createRoot().",
   },
+  {
+    regex: /Objects are not valid as a React child|React\.Children.*invalid/i,
+    hint: "Objects cannot be rendered directly in JSX. Convert the object to a string (JSON.stringify or template literal), map its keys, or access a specific string property. Common cause: passing a Date, Promise, or plain object where a string/number is expected.",
+  },
+  {
+    regex: /Each child in a list should have a unique.*key|missing.*key.*prop|key.*prop.*required/i,
+    hint: "Every list item rendered with .map() needs a unique 'key' prop: <li key={item.id}>{item.name}</li>. Use a stable unique id from the data (not array index) to avoid re-render bugs.",
+  },
+  {
+    regex: /auth\/invalid-api-key|Firebase.*api.key.*invalid|firebaseError.*invalid-api-key/i,
+    hint: "Firebase API key is invalid or missing. Check that VITE_FIREBASE_API_KEY is set in .env and the Firebase project's API key restrictions (in Cloud Console) allow the current domain.",
+  },
+  {
+    regex: /cors|Cross-Origin Request Blocked|has been blocked by CORS policy/i,
+    hint: "CORS error: the backend must allow the frontend origin. For Vite dev server: add server.proxy in vite.config.ts to forward /api/* to your backend. For production: the backend must send 'Access-Control-Allow-Origin' headers.",
+  },
+  {
+    regex: /getStaticProps|getServerSideProps.*not.*exported|next\/image.*no.*src/i,
+    hint: "Next.js data fetching: getStaticProps/getServerSideProps are only valid in the pages/ directory. In the App Router (app/), use async server components or the fetch() API with revalidate options.",
+  },
+  {
+    regex: /Maximum update depth exceeded|Too many re-renders/i,
+    hint: "Infinite re-render loop: a state update is triggered on every render. Check useEffect dependency arrays — an empty dependency array [] means 'run once'. Never call setState unconditionally in a component body.",
+  },
+  {
+    regex: /useRouter.*outside.*next\/navigation|router.*only.*works.*within/i,
+    hint: "Next.js App Router: use useRouter from 'next/navigation' (not 'next/router'). The hook only works in Client Components (add 'use client' at the top of the file).",
+  },
+  {
+    regex: /invalid.*hook.*call|hooks.*can only be called.*function component/i,
+    hint: "React Hooks can only be called in function components, not in class components, event handlers, or regular functions. Move the hook to the top level of a React function component.",
+  },
+  {
+    regex: /Hydration.*failed|Hydration.*mismatch|server.*client.*mismatch|did not match.*server/i,
+    hint: "React hydration mismatch: server-rendered HTML doesn't match client output. Common causes: using Date(), Math.random(), or browser-only APIs (localStorage) during render. Wrap these in useEffect() or check 'typeof window !== \"undefined\"'.",
+  },
 ];
 
 /** Pre-build hints based on common keywords in the task instruction. */
@@ -151,6 +187,38 @@ const INSTRUCTION_HINTS: InstructionHint[] = [
   {
     keywords: /map|leaflet|mapbox|google.*map|geolocation/i,
     hint: "Maps: for Leaflet use 'react-leaflet' + import its CSS ('leaflet/dist/leaflet.css'). Leaflet requires a fixed height on the map container (e.g. height: '400px'). Wrap in dynamic import in Next.js to avoid SSR issues.",
+  },
+  {
+    keywords: /stripe|payment.*gateway|checkout|credit.*card/i,
+    hint: "Stripe: install '@stripe/stripe-js' and '@stripe/react-stripe-js'. Wrap the checkout form in <Elements stripe={stripePromise}>. Never expose the secret key on the frontend — use only the publishable key (VITE_STRIPE_PUBLIC_KEY).",
+  },
+  {
+    keywords: /clerk|authentication|auth.*provider|login.*system/i,
+    hint: "Clerk auth: wrap the app in <ClerkProvider publishableKey={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY}>. Use <SignIn/>, <SignUp/>, useUser(), and useAuth() hooks. Protect routes with <SignedIn>/<SignedOut> components.",
+  },
+  {
+    keywords: /pocketbase|pocket.?base/i,
+    hint: "PocketBase: create a singleton client in src/lib/pb.js — import PocketBase from 'pocketbase'; export const pb = new PocketBase(import.meta.env.VITE_PB_URL || 'http://127.0.0.1:8090'). Use pb.collection('name').getList() for data.",
+  },
+  {
+    keywords: /convex|convex.*backend/i,
+    hint: "Convex: wrap the React app in <ConvexProvider client={new ConvexReactClient(import.meta.env.VITE_CONVEX_URL)}>. Define queries/mutations in convex/*.ts files. Run 'npx convex dev' to start the backend and generate TypeScript types.",
+  },
+  {
+    keywords: /three\.?js|webgl|3d.*scene|react.*three/i,
+    hint: "Three.js with React: use '@react-three/fiber' (Canvas, mesh, etc.) and '@react-three/drei' (helpers). Put all 3D logic inside <Canvas>. Ensure the Canvas container has an explicit height (e.g. height: '100vh').",
+  },
+  {
+    keywords: /chart|graph|visualization|data.*viz/i,
+    hint: "Charts: for Recharts use ResponsiveContainer + the specific chart type (BarChart, LineChart). For Chart.js use 'react-chartjs-2' and register needed components. For D3 use refs and useEffect to avoid SSR issues.",
+  },
+  {
+    keywords: /prisma|database.*orm|sql.*orm/i,
+    hint: "Prisma is a Node.js ORM — it runs on the server only (not in browser/Vite). Build a backend API (Express/Next.js API routes) that uses Prisma, then call those API endpoints from your frontend React code.",
+  },
+  {
+    keywords: /appwrite/i,
+    hint: "Appwrite: install 'appwrite' and create a client: new Client().setEndpoint(url).setProject(projectId). Use Account, Databases, Storage, etc. from 'appwrite'. Read credentials from VITE_APPWRITE_ENDPOINT and VITE_APPWRITE_PROJECT_ID.",
   },
 ];
 

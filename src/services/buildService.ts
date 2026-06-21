@@ -171,12 +171,14 @@ export async function fetchBuildSession(sessionId: string): Promise<BuildRespons
 
 /** A live progress event streamed from /api/build-stream. */
 export interface BuildStreamEvent {
-  type: 'status' | 'module' | 'files' | 'complete' | 'error' | 'terminal' | 'preview_url' | 'plan' | 'plan_step_start' | 'plan_step_done' | 'thinking' | 'screenshot';
+  type: 'status' | 'module' | 'files' | 'file' | 'complete' | 'error' | 'terminal' | 'preview_url' | 'plan' | 'plan_step_start' | 'plan_step_done' | 'thinking' | 'screenshot';
   message?: string;
   name?: string;
   state?: 'start' | 'done' | 'failed';
   coverage?: number;
   paths?: string[];
+  // file event (G12 — real-time file content as agent writes each file)
+  fileName?: string;
   // terminal event (Phase 7 — real bash output from E2B sandbox)
   command?: string;
   output?: string;

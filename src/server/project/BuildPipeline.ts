@@ -32,6 +32,8 @@ export type BuildProgressEvent =
   | { type: 'status'; message: string }
   | { type: 'module'; name: string; state: 'start' | 'done' | 'failed'; coverage?: number }
   | { type: 'files'; paths: string[] }
+  /** G12 — real-time file content streamed as agent writes each file. */
+  | { type: 'file'; fileName: string; content: string }
   | { type: 'terminal'; command: string; output: string; exitCode: number }
   | { type: 'preview_url'; url: string }
   | { type: 'plan'; steps: string[] }

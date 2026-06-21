@@ -4384,6 +4384,16 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
               const names = ev.paths.slice(0, 3).map((p: string) => p.split('/').pop() || p).join(', ');
               const more = ev.paths.length > 3 ? ` +${ev.paths.length - 3} more` : '';
               setProBuildProgress(prev => ({ ...prev, active: true, stage: `✏️ ${names}${more}`, percent: Math.min(90, prev.percent + 2) }));
+            } else if (ev.type === 'file' && ev.fileName && ev.content !== undefined) {
+              // G12 — real-time file content: populate the Generated Files panel as each
+              // file is written so the user sees code appearing live (Claude Code feel).
+              setProBuildProgress(prev => ({
+                ...prev,
+                generatedFiles: {
+                  ...prev.generatedFiles,
+                  [ev.fileName!]: { content: ev.content!, expanded: false },
+                },
+              }));
             } else if (ev.type === 'module' && ev.name) {
               const icon = ev.state === 'done' ? '✓' : ev.state === 'failed' ? '⚠️' : '⏳';
               setProBuildProgress(prev => ({

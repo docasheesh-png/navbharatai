@@ -92,17 +92,15 @@ export function verifyProject(vfs: VirtualFileSystem): VerifyResult {
 
   // 4. Module-level checks for JS/TS source apps: dangling relative imports
   //    (real build breakers) and bare deps not declared in package.json.
-  const SRC_RE = /\.(jsx?|tsx?|mjs|cjs)$/i;
   const sourceFiles = vfs.list().filter(f => f.encoding === 'utf8' && SRC_RE.test(f.path));
   if (sourceFiles.length) {
     const declaredDeps = collectDeclaredDeps(vfs);
-    const importRe = /(?:import\s[^'"]*?from\s*|import\s*|export\s[^'"]*?from\s*|require\(\s*|import\(\s*)["']([^"']+)["']/g;
     for (const f of sourceFiles) {
       const src = vfs.readText(f.path) || '';
       let m: RegExpExecArray | null;
-      importRe.lastIndex = 0;
+      IMPORT_RE.lastIndex = 0;
       const seenBare = new Set<string>();
-      while ((m = importRe.exec(src))) {
+      while ((m = IMPORT_RE.exec(src))) {
         const spec = m[1];
         if (!spec) continue;
         if (spec.startsWith('.') || spec.startsWith('/')) {
@@ -134,6 +132,11 @@ export function verifyProject(vfs: VirtualFileSystem): VerifyResult {
 const MODULE_EXTS = ['', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.cjs', '.vue', '.json', '.css',
   '/index.tsx', '/index.ts', '/index.jsx', '/index.js', '/index.vue'];
 
+const SRC_RE = /\.(jsx?|tsx?|mjs|cjs)$/i;
+
+/** Shared import regex — used by both verifyProject and extractBareImports to avoid drift. */
+const IMPORT_RE = /(?:import\s[^'"]*?from\s*|import\s*|export\s[^'"]*?from\s*|require\(\s*|import\(\s*)["']([^"']+)["']/g;
+
 /** Resolve a relative/absolute local import to a real VFS path, trying extensions. */
 function resolveModuleRef(vfs: VirtualFileSystem, fromPath: string, spec: string): string | null {
   const base = resolveRef(fromPath, spec.split(/[?#]/)[0]);
@@ -148,8 +151,8 @@ function bareRoot(spec: string): string {
   return spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
 }
 
-/** Declared deps from package.json (deps+devDeps), or null if no/invalid package.json. */
-function collectDeclaredDeps(vfs: VirtualFileSystem): Set<string> | null {
+/** Declared deps from package.json (deps+devDeps+peerDeps), or null if no/invalid package.json. */
+export function collectDeclaredDeps(vfs: VirtualFileSystem): Set<string> | null {
   const text = vfs.readText('package.json');
   if (!text) return null;
   try {
@@ -160,6 +163,28 @@ function collectDeclaredDeps(vfs: VirtualFileSystem): Set<string> | null {
       ...Object.keys(pkg.peerDependencies || {}),
     ]);
   } catch { return null; }
+}
+
+/**
+ * Scan every JS/TS source file in the VFS and return the de-duped list of bare
+ * package roots imported (relative imports and Node.js builtins excluded).
+ * Used by DependencySync to auto-declare missing packages in package.json.
+ */
+export function extractBareImports(vfs: VirtualFileSystem): string[] {
+  const seen = new Set<string>();
+  for (const f of vfs.list()) {
+    if (!f.encoding || f.encoding !== 'utf8' || !SRC_RE.test(f.path)) continue;
+    const src = vfs.readText(f.path) || '';
+    let m: RegExpExecArray | null;
+    IMPORT_RE.lastIndex = 0;
+    while ((m = IMPORT_RE.exec(src))) {
+      const spec = m[1];
+      if (!spec || spec.startsWith('.') || spec.startsWith('/')) continue;
+      const pkg = bareRoot(spec);
+      if (!isNodeBuiltin(pkg)) seen.add(pkg);
+    }
+  }
+  return Array.from(seen);
 }
 
 const NODE_BUILTINS = new Set([

@@ -18,6 +18,7 @@ import { verifyProject, type VerifyResult } from './ProjectVerifier';
 import { autoRepair, type FixGenerator } from './RepairLoop';
 import { detectFramework, scaffold, type Framework } from './Scaffold';
 import { runValidation, type ValidationReport, MIN_FEATURE_COVERAGE } from './ValidationPipeline';
+import { syncDependencies } from './DependencySync';
 import { selectArchitecture } from './ArchitectureManifest';
 import { computeFeatureCoverage } from './FeatureCoverage';
 import { checkSyntax } from './SyntaxCheck';
@@ -176,6 +177,16 @@ export async function runBuild(input: BuildPipelineInput): Promise<BuildPipeline
     }
   }
   progress({ type: 'status', message: 'Verifying the build…' });
+
+  // G6 — dependency hardening: declare every imported package in package.json so
+  // the generated app actually installs and runs (critical for VFS-tier builds).
+  try {
+    const depSync = syncDependencies(vfs);
+    if (depSync.added.length) {
+      const noun = depSync.added.length === 1 ? 'dependency' : 'dependencies';
+      progress({ type: 'status', message: `Declared ${depSync.added.length} missing ${noun}: ${depSync.added.join(', ')}` });
+    }
+  } catch { /* dep sync never blocks the build */ }
 
   // Auto-fix: if any JS file uses ES6 import/export, ensure index.html has type="module"
   // Belt-and-suspenders guard for when the AI ignores the manifest instruction.

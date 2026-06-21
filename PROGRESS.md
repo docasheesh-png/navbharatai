@@ -1330,3 +1330,17 @@ but never adds axios to package.json → npm install misses it → runtime crash
 - tests/projectVerifier.test.ts: +3 extractBareImports tests (guard the refactor).
 - AppKnowledgeBase.ts: 'auto-dependency-sync' entry added (mandatory per CLAUDE.md rule).
 Gate: server tsc 0 · frontend tsc 0 · 321/321 tests pass. PR #119 open.
+
+### Milestone G6 Slice 1 — DONE (2026-06-21)
+(See above — PR #119 merged to main.)
+
+### Milestone G6 Slice 2 — IN PROGRESS (2026-06-21) — npm ci + peer-dep fallback + dev-server health
+E2B_API_KEY already set in Cloud Run (production-verified path). Changes in E2BActuator.ts:
+- _npmInstall() private method: (1) npm ci if package-lock.json exists, (2) npm install,
+  (3) npm install --legacy-peer-deps on ERESOLVE. Never throws, returns log for agent.
+- build() method: replaced bare 'npm install' with _npmInstall() call + early failure return.
+- runCommand() long-running path: after 20s startup wait, nc health-check on detected port.
+  If PORT_DOWN: kills old process, restarts once, waits 15s more. Reports UP/DOWN in stdout.
+- extractDevPort() helper: guesses port from --port flag, PORT= env, or framework default.
+Gate: server tsc 0 · frontend tsc 0 · 321/321 tests pass. PR #120 open.
+Verify: merge -> Cloud Run deploy -> Pro build with peer-dep conflict -> logs show retry -> success.

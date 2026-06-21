@@ -532,6 +532,43 @@ tsc x2 clean, vitest 361/361 green.
 **Phase 6 DONE when:** UPI payment app builds + deploys in <5 min. Full Pro Chat works on
 mobile. All framework/deploy claims are PASS-verified end-to-end. Nothing faked.
 
+### 6.6 — Test Coverage Expansion ✅ IN PROGRESS (2026-06-21)
+**Branch:** `claude/test-coverage-analysis-bq0yev`
+
+**Shipped — 1016 tests / 132 test files (started from 422/422):**
+
+New test files added (pure unit tests, no I/O, no flaky mocks):
+- `tests/templateProviders.test.ts` — StaticProvider, NodeExpressProvider, NextjsProvider, SvelteProvider, VueProvider, PythonFastapiProvider, TemplateRegistry (19 tests)
+- `tests/featureExtractor.test.ts` — FeatureExtractor keyword detection (8 tests)
+- `tests/intentExtractor.test.ts` — IntentExtractor domain/role/type detection (8 tests)
+- `tests/failureClassifier.test.ts` — FailureClassifier error classification (7 tests)
+- `tests/repairScorer.test.ts` — RepairScorer deterministic scoring (5 tests)
+- `tests/moduleClassifier.test.ts` — ModuleClassifier feature→type mapping (8 tests)
+- `tests/taskScheduler.test.ts` — TaskScheduler DAG + status propagation (6 tests)
+- `tests/impactAnalyzer.test.ts` — ImpactAnalyzer BFS graph traversal (7 tests)
+- `tests/repairConfidenceEngine.test.ts` — RepairConfidenceEngine weighted scoring (8 tests)
+- `tests/patternMatcher.test.ts` — PatternMatcher scoring + filtering (5 tests)
+- `tests/errorPatternMatcher.test.ts` — matchErrorPatterns + hintForInstruction (9 tests, refined)
+- `tests/featureCoverage.test.ts` — extractRequestedFeatures + computeFeatureCoverage (10 tests)
+- `tests/blueprintBuilder.test.ts` — BlueprintBuilder.build() (8 tests)
+- `tests/patternResolutionEngine.test.ts` — PatternResolutionEngine.resolve() (5 tests)
+- `tests/generationEngines.test.ts` — BackendGenerationEngine, FrontendGenerationEngine, DatabaseGenerationEngine, DefaultGenerationEngine (11 tests)
+- `tests/serverStats.test.ts` — serverStats singleton (7 tests)
+- `tests/engineDispatcher.test.ts` — EngineDispatcher dispatch + error (3 tests)
+- `tests/kernelErrors.test.ts` — KernelStateError, DependencyError, ServiceStartupError, ServiceShutdownError (5 tests)
+- `tests/workspaceMemoryStore.test.ts` — WorkspaceMemoryStore VITEST-skip (2 tests)
+- `tests/workspaceRegistry.test.ts` — WorkspaceRegistry CRUD via in-memory repo (5 tests)
+- `tests/conflictDetector.test.ts` — ConflictDetector (3 tests)
+- `tests/auditManager.test.ts` — AuditManager console delegation (3 tests)
+- `tests/errorPatternStore.test.ts` — ErrorPatternStore VITEST-skip (4 tests)
+- `tests/appKnowledgeBase.test.ts` — APP_KNOWLEDGE_BASE integrity + getFeatureById (6 tests)
+- `tests/aiRouter.test.ts` — AIRouter circuit breaker + fallback (6 tests)
+- `tests/staticRuntime.test.ts` — StaticRuntime session lifecycle (7 tests)
+- `tests/aiRouterManager.test.ts` — AIRouterManager singleton pattern (5 tests)
+- `tests/executionOrchestrator.test.ts` — ExecutionOrchestrator DAG execution (3 tests)
+
+tsc x2 clean (0 errors), vitest 1016/1016 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

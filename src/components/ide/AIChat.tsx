@@ -224,6 +224,8 @@ interface BuildProgressState {
   generatedFiles: Record<string, { content: string; expanded: boolean }>;
   startedAt?: number;
   part?: number;
+  /** G3 — Execution tier reported by the agentic engine. */
+  tier?: 'vfs' | 'cloudrun' | 'e2b';
 }
 
 interface AIChatProps {
@@ -1131,6 +1133,15 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
               <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">NavBharatAI Pro — Building</span>
               {buildProgress.part && buildProgress.part > 1 && (
                 <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[8px] font-black uppercase tracking-wider text-amber-300">Part {buildProgress.part}</span>
+              )}
+              {buildProgress.tier && (
+                <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${
+                  buildProgress.tier === 'e2b' ? 'bg-green-500/15 border border-green-500/30 text-green-400' :
+                  buildProgress.tier === 'cloudrun' ? 'bg-blue-500/15 border border-blue-500/30 text-blue-400' :
+                  'bg-white/5 border border-white/10 text-[#484f58]'
+                }`}>
+                  {buildProgress.tier === 'e2b' ? 'E2B cloud' : buildProgress.tier === 'cloudrun' ? 'Server' : 'In-memory'}
+                </span>
               )}
               <div className="ml-auto flex items-center gap-2">
                 {buildProgress.startedAt && (

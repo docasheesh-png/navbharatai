@@ -363,6 +363,8 @@ export function registerBuildRoutes(app: Express): void {
           // Emit a terminal result when the engine produced usable files OR the soft
           // deadline fired (so the user always gets what was built — never "no result").
           if (eng.usable || deadline.signal.aborted) {
+            // G3 — surface the execution tier so the client can show the badge.
+            if (eng.tier) send({ type: 'status', message: `Engine: ${eng.tier === 'e2b' ? 'E2B cloud VM' : eng.tier === 'cloudrun' ? 'server container' : 'in-memory'}` });
             send({ type: 'status', message: 'Updating project memory…' });
             const thisEntry = editLogEntry(prompt, eng.files, isEdit === true);
             const turnHistory = [
@@ -391,8 +393,7 @@ export function registerBuildRoutes(app: Express): void {
               preview: previewInfo,
               memorySummary: updatedSummary,
               editLog: updatedEditLog,
-              // `partial` tells the client the build was cut short by the soft
-              // deadline and can be auto-continued for a complete result.
+              tier: eng.tier,
               partial: eng.partial || deadline.signal.aborted,
             });
             eventBus.publish({ type: EventType.BUILD_COMPLETED, workspaceId: sid, sender: 'pro', payload: { path: 'agentic', tier: eng.tier, usable: eng.usable, partial: eng.partial || deadline.signal.aborted, fileCount: eng.fileCount, previewAllowed: eng.previewAllowed } });

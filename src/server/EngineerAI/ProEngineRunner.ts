@@ -38,6 +38,7 @@ import { E2BActuator } from './actuators/E2BActuator';
 import type { IEngineerActuator } from './actuators/IEngineerActuator';
 import type { EngineerTask, DbProviderConfig } from './EngineerAITypes';
 import { thinkingBudgetFor, isComplexTask } from '../pro/ProComplexity';
+import { proMemoryStore } from '../pro/ProMemory';
 
 export type ExecutionTier = 'vfs' | 'cloudrun' | 'e2b';
 
@@ -177,6 +178,14 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
   const backend = resolveBackend(desired, inputVfs, userE2bKey);
 
   const workspaceId = sessionId || `pro-${Date.now()}`;
+
+  // Phase 2.3 — load Pro Chat's persisted memory so the agent inherits context
+  // built up in previous Pro sessions (rolling summary + recent edit log).
+  // Best-effort: never blocks or throws — missing memory is not a failure.
+  const proMem = sessionId
+    ? await proMemoryStore.load(sessionId).catch(() => null)
+    : null;
+
   // Phase 73 — extended thinking for complex tasks: detect architectural complexity
   // and pass a higher thinking budget to ProAgentRouter, which will use
   // AnthropicProvider (Claude Opus with thinking enabled) directly for complex
@@ -199,6 +208,8 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     projectType: 'auto',
     githubToken: githubToken || process.env.GITHUB_TOKEN || undefined,
     dbConfig: dbConfig || undefined,
+    proMemorySummary: proMem?.memorySummary || undefined,
+    proEditLog: proMem?.editLog?.length ? proMem.editLog : undefined,
   };
 
   // Phase 1.4 — always emit tier + cost so users know what they're getting.

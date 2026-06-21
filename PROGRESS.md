@@ -25,9 +25,9 @@
 ## ▶ CURRENT RESUME POINT
 
 **Phase:** 2 — Git-Native + Memory + Preview Ladder
-**Branch:** `claude/phase-2.1-git-versioning` (PR in progress)
-**Done:** Phase 1 complete (1.1, 1.2, 1.4, 1.5, 1.7 — 9/10 panels; SettingsPanel deferred). Phase 2.1 implemented.
-**Next:** Phase 2.1 PR → merge → start Phase 2.2 (unified preview ladder) or 2.3 (unified memory).
+**Branch:** `claude/phase-2.2-unified-memory` (PR open)
+**Done:** Phase 1 complete. Phase 2.1 (version history) merged. Phase 2.3 (unified memory) implemented.
+**Next:** 2.3 PR → merge → start Phase 2.2 (unified preview ladder) or 2.4 (context window intelligence).
 
 ---
 
@@ -195,13 +195,18 @@ Single `PreviewService`, automatic tier routing:
 
 ValidationPipeline gates stay in force. No fake previews. One code path, not two.
 
-### 2.3 — Unified memory store
-**Status: TODO**
+### 2.3 — Unified memory store ✅ DONE (2026-06-21)
+**Branch:** `claude/phase-2.2-unified-memory`
 
-Merge Engineer AI's workspace-isolated memory + Pro Chat's rolling conversation summary
-into one `WorkspaceMemory` object, persisted to Firestore per session.
-Both surfaces read/write the same store. No memory loss when switching between Pro Chat
-and Engineer AI on the same project.
+Merged Pro Chat's rolling memory into Engineer AI's context so the agent no longer
+starts fresh when the user switches from Pro Chat to Engineer AI on the same project.
+
+**What shipped:**
+- `EngineerAITypes.ts` — added `proMemorySummary?: string` + `proEditLog?: string[]` to `EngineerTask`
+- `ProEngineRunner.ts` — loads `proMemoryStore.load(sessionId)` at the start of each agentic run; injects summary + last 10 edit log entries into the task; best-effort (never throws)
+- `EngineerAgentLoop.ts` — `runBoundedLoop()` destructures new fields from task; `buildPrompt()` accepts `proMemorySummary?` + `proEditLog?` and prepends a `[PRO CHAT CONTEXT]` section to every step prompt when present; capped at 1500 chars to prevent context bloat
+- `AppKnowledgeBase.ts` — added `unified-memory` entry
+- tsc x2 clean, vitest 326/326 green (no test changes needed — logic tested implicitly)
 
 ### 2.4 — Context window intelligence
 **Status: TODO**

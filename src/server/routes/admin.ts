@@ -7,6 +7,7 @@ import { audit } from '../lib/audit';
 import { serverStats } from '../lib/serverStats';
 import { getProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
+import { eventStore } from '../lib/eventStore';
 
 /**
  * Admin dashboard routes extracted from the server.ts monolith (Phase 1).
@@ -63,6 +64,20 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // Observability: live token-usage/cost + build-success metrics (Phase 5, item 28).
   app.get('/api/admin/metrics', verifyAdminToken, (_req: Request, res: Response) => {
     res.json(getMetrics().snapshot());
+  });
+
+  // G1 — build/agent event log (audit trail + replay surface). Persisted to
+  // Firestore; falls back to the in-memory ring when Firestore is unavailable.
+  app.get('/api/admin/events', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : undefined;
+      const correlationId = typeof req.query.correlationId === 'string' ? req.query.correlationId : undefined;
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '100'), 10) || 100, 1), 500);
+      const events = await eventStore.query({ workspaceId, correlationId, limit });
+      res.json({ events });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to read events.' });
+    }
   });
 
   app.get('/api/admin/analytics', verifyAdminToken, async (req: Request, res: Response) => {

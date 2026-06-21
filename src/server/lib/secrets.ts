@@ -6,7 +6,10 @@ import { getDb } from './db';
  * Encryption & user-secret helpers extracted from the server.ts monolith
  * (Phase 1). Behavior unchanged — Firestore is read via getDb().
  */
-const ENCRYPTION_KEY = process.env.SECRET_ENCRYPTION_KEY || 'navBharatAISecurityLedgerFallbackKey';
+const ENCRYPTION_KEY = process.env.SECRET_ENCRYPTION_KEY || (() => {
+  console.warn('[SECURITY] SECRET_ENCRYPTION_KEY is not set — using insecure fallback. Set this env var in production.');
+  return 'navBharatAISecurityLedgerFallbackKey';
+})();
 
 export const encrypt = (text: string): string => {
   const iv = crypto.randomBytes(16);

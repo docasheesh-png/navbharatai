@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from 'express';
+import { setCorsHeaders } from '../lib/cors';
 import { buildEngineerRouter } from '../EngineerAI/EngineerRouterFactory';
 import { EngineerAgentLoop } from '../EngineerAI/EngineerAgentLoop';
 import { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
@@ -93,7 +94,7 @@ export function registerEngineerRoutes(app: Express): void {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('Transfer-Encoding', 'chunked');
     res.setHeader('X-Accel-Buffering', 'no');
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    setCorsHeaders(req, res);
     res.flushHeaders();
 
     // Kill switch — abort the agent loop if the client disconnects.

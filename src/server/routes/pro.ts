@@ -1,4 +1,5 @@
 import path from 'path';
+import { setCorsHeaders } from '../lib/cors';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { GoogleGenAI } from '@google/genai';
@@ -518,7 +519,7 @@ Response Format:
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    setCorsHeaders(req, res);
     res.flushHeaders();
 
     const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);

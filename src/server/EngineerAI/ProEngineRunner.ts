@@ -140,6 +140,9 @@ export interface ProEngineResult {
   previewAllowed: boolean;
   /** The tier that actually executed (after any availability downgrade). */
   tier: ExecutionTier;
+  /** Phase 4.2 — rough AI cost estimate for this build (Grok rate-card estimate).
+   *  Undefined for builds that failed at the infra level before any AI calls. */
+  estimatedCostUsd?: number;
 }
 
 const ACTION_ICON: Record<string, string> = {
@@ -236,6 +239,9 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
   let sawError = false;
   let aborted = false;
   let runError = false;
+  // Phase 4.2 — per-build cost transparency: count AI reasoning steps so we can
+  // show an estimated cost to the user once the build is done.
+  let aiStepCount = 0;
   // For 'vfs' the actuator wraps inputVfs directly; for sandbox tiers we collect
   // the result back into a fresh VFS after the run.
   let outVfs: VirtualFileSystem = inputVfs;
@@ -264,6 +270,7 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
             send({ type: 'thinking', content: ev.thought });
           }
           send({ type: 'status', message: `${ACTION_ICON[ev.action] || '•'} ${ev.action}` });
+          aiStepCount++;
           break;
         case 'command_result':
           send({ type: 'terminal', command: ev.command, output: ev.output, exitCode: ev.exitCode });
@@ -432,10 +439,30 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     }
   }
 
+  // Phase 4.2 — cost transparency: emit estimated build cost before the final result.
+  // Uses realistic averages per AI step (Grok grok-3 rates):
+  //   ~6,000 input tokens/step × $0.05/1M = $0.00030/step
+  //   ~400 output tokens/step × $0.08/1M = $0.000032/step
+  // → ~$0.000332 per step. For a 20-step build: ~$0.0066. Shown as "~$X" to be
+  // honest about the estimate nature. Not shown for 0-step or infra-error runs.
+  if (aiStepCount > 0 && !runError) {
+    const AVG_IN_TOKENS = 6_000;
+    const AVG_OUT_TOKENS = 400;
+    const estimatedCostUsd = aiStepCount * ((AVG_IN_TOKENS / 1_000_000) * 0.05 + (AVG_OUT_TOKENS / 1_000_000) * 0.08);
+    const costStr = estimatedCostUsd < 0.001
+      ? '<$0.001'
+      : `~$${estimatedCostUsd.toFixed(4)}`;
+    send({ type: 'status', message: `${aiStepCount} reasoning step${aiStepCount === 1 ? '' : 's'} — estimated AI cost: ${costStr}` });
+  }
+
   // An aborted run (soft deadline) still counts as usable when it produced edits —
   // we keep the partial work instead of throwing it away, and flag it `partial` so
   // the caller can continue it. Only a hard error / infra failure blocks usability.
   const usable = !sawError && !runError && didEdit && Object.keys(finalFiles).length > 0;
+
+  const estimatedCostUsd = aiStepCount > 0
+    ? aiStepCount * ((6_000 / 1_000_000) * 0.05 + (400 / 1_000_000) * 0.08)
+    : undefined;
 
   return {
     usable,
@@ -447,6 +474,7 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     validation,
     previewAllowed: validation.previewAllowed,
     tier: backend.tier,
+    estimatedCostUsd,
   };
 }
 

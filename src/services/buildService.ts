@@ -82,6 +82,8 @@ export interface BuildResponse {
   tier?: 'vfs' | 'cloudrun' | 'e2b';
   /** G5 — AI code review: security, quality, and tech debt findings. */
   codeReview?: CodeReviewResult;
+  /** Phase 4.2 — estimated AI cost for this build (Grok rate-card estimate). */
+  costUsd?: number;
 }
 
 export interface BuildRequest {
@@ -211,6 +213,8 @@ export interface BuildStreamEvent {
   tier?: 'vfs' | 'cloudrun' | 'e2b';
   /** G5 — AI code review: security, quality, and tech debt findings for new builds. */
   codeReview?: CodeReviewResult;
+  /** Phase 4.2 — estimated AI cost for this build (Grok rate-card estimate). */
+  costUsd?: number;
 }
 
 /**

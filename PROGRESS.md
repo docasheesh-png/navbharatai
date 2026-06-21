@@ -306,14 +306,18 @@ In-process memory breaks at multiple Cloud Run instances. Fix in priority order:
 
 Default: Firestore for all (zero new infra). Redis only if Phase 7 load test proves it's needed.
 
-### 4.2 — Pricing intelligence per build
-**Status: TODO**
+### 4.2 — Pricing intelligence per build ✅ PARTIAL (2026-06-21) — PR #141
+**Branch:** `claude/phase-4.2-cost-display`
 
-Every build shows real cost in chat. Monthly usage in Settings → Billing.
-Hard quotas enforced server-side:
-- Free: 3 builds/day, VFS only
-- Pro: 20 builds/day, VFS + 5 E2B builds/day
-- User's own E2B key: unlimited (their bill, not NavBharatAI's)
+**Shipped (cost display):**
+- `ProEngineRunner.ts` — counts `action_start` events as AI reasoning steps; emits `"N reasoning steps — estimated AI cost: ~$X"` status event before every build completes. Cost calculation: Grok grok-3 rates × 6K input + 400 output tokens/step ≈ $0.000332/step. Also returns `estimatedCostUsd` in `ProEngineResult`.
+- `build.ts` — includes `costUsd` in every `sendComplete` payload
+- `buildService.ts` — added `costUsd?` to `BuildResponse` and `BuildStreamEvent`
+- tsc x2 clean, vitest 345/345 green
+
+**Still TODO:**
+- Monthly usage summary in Settings → Billing (needs Firestore per-user accumulation)
+- Hard server-side quotas by tier (Free: 3/day, Pro: 20/day) — needs user-tier lookup
 
 ### 4.3 — Metrics + traces + alerts
 **Status: TODO**

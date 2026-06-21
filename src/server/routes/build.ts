@@ -494,6 +494,7 @@ export function registerBuildRoutes(app: Express): void {
               tier: eng.tier,
               partial: eng.partial || deadline.signal.aborted,
               codeReview,
+              costUsd: eng.estimatedCostUsd,
             });
             eventBus.publish({ type: EventType.BUILD_COMPLETED, workspaceId: sid, sender: 'pro', payload: { path: 'agentic', tier: eng.tier, usable: eng.usable, partial: eng.partial || deadline.signal.aborted, fileCount: eng.fileCount, previewAllowed: eng.previewAllowed } });
             // G2 — wire metrics that were previously missing from the agentic path.

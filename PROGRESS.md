@@ -639,6 +639,28 @@ New test files added (pure unit tests, no I/O, no flaky mocks):
 
 tsc x2 clean (0 errors), vitest 1016/1016 green.
 
+**Extended — 1180 tests / 159 test files (continued 2026-06-21):**
+
+Additional test files (this session):
+- `tests/unifiedBuildOrchestrator.test.ts` — isUnifiedEngineEnabled() flag (4 tests)
+- `tests/featureImplementationAgent.test.ts` — FeatureImplementationAgent shape (4 tests)
+- `tests/userCostStore.test.ts` — UserCostStore VITEST-skip (5 tests)
+- `tests/aiAgents.test.ts` — PlanningAgent, ProjectStructureAgent, RequirementsAgent (8 tests)
+- `tests/projectGraph.test.ts` — InitialMemory shape + MemoryIndexer.index() (8 tests)
+- `tests/renderPreview.test.ts` — isReactProject, isVueProject, renderPreview dispatch (12 tests)
+- `tests/buildEngineTypes.test.ts` — BuildManifest/Feature types + BuildVerifier (9 tests)
+- `tests/securityEvaluator.test.ts` — SecurityEvaluator PASS/FAIL + nested scan + node_modules skip (6 tests)
+- `tests/workspaceManagerAI.test.ts` — WorkspaceManager path-traversal jail + command whitelist + ChessEngine + AIRuntimeManager (14 tests)
+- `tests/workspaceController.test.ts` — WorkspaceController create/save/get/delete/updateStatus (8 tests)
+- `tests/proMemory.test.ts` — ProMemoryStore VITEST-skip (8 tests)
+- `tests/firestoreStores.test.ts` — logStore, metricsStore, proBuildSessionStore VITEST-skip (11 tests)
+- `tests/coderAgentAndRouter.test.ts` — CoderAgent delegation + buildEngineerRouter factory (8 tests)
+- `tests/portManager.test.ts` — PortManager real-socket port allocation + release (4 tests)
+- `tests/fileAnalyzerAndPatternLibrary.test.ts` — FileAnalyzer TypeScript AST + PatternLibrary integrity (12 tests)
+Also fixed: SecurityEvaluator regex (now matches `KEY = "value"` with spaces around `=`).
+
+tsc x2 clean (0 errors), vitest 1180/1180 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

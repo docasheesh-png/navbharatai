@@ -1342,8 +1342,10 @@ E2B_API_KEY already set in Cloud Run (production-verified path). Changes in E2BA
 - runCommand() long-running path: after 20s startup wait, nc health-check on detected port.
   If PORT_DOWN: kills old process, restarts once, waits 15s more. Reports UP/DOWN in stdout.
 - extractDevPort() helper: guesses port from --port flag, PORT= env, or framework default.
-Gate: server tsc 0 · frontend tsc 0 · 321/321 tests pass. PR #120 open.
-Verify: merge -> Cloud Run deploy -> Pro build with peer-dep conflict -> logs show retry -> success.
+Gate: server tsc 0 · frontend tsc 0 · 321/321 tests pass. PR #120 merged.
+
+### Milestone G6 Slice 2 — DONE (2026-06-21)
+(See IN PROGRESS entry above for details — PR #120 merged to main.)
 
 ### Milestone G7 — DONE (2026-06-21) — Live Preview in Pro Chat
 Backend preview system was already complete (PreviewService, /preview/:id, gates). G7 wired the
@@ -1441,3 +1443,14 @@ was because the engine was silently falling back to runBuild on context/timeout 
   the Guider plan call and the buildAppStream prompt.
 - AppKnowledgeBase.ts: 'iterative-agent-build' entry added.
 Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
+
+### Milestone Guider-Always-On — DONE (2026-06-21)
+Removed isAgenticEngineEnabled() gate from Guider plan + grade/refine so ALL users get
+the full pipeline (not just those with ?agentic=1 URL param).
+- Guider plan confirmation runs for every fresh Pro build (pre-build design card).
+- Guider grade→refine runs after every completed build (auto-refines gaps, max 2 rounds).
+- Always passes agentic: true to server (runProEngine is always-on; flag was misleading).
+- Fixed CLAUDE.md violation: Hindi strings in grade messages replaced with English.
+- Removed unused isAgenticEngineEnabled import.
+- AppKnowledgeBase.ts: 'guider-plan-confirm' entry added.
+Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass. PR #125 merged.

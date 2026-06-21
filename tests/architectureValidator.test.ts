@@ -65,6 +65,35 @@ describe('selectArchitecture', () => {
     expect(m.bundler).toBe('none');
     expect(manifestContract(m)).toMatch(/Vanilla JavaScript/);
   });
+
+  it('React + TypeScript prompt → .tsx entry and TS language', () => {
+    const m = selectArchitecture('build a react typescript dashboard');
+    expect(m.framework).toBe('react');
+    expect(m.language).toBe('typescript');
+    expect(m.entry).toBe('src/main.tsx');
+    const contract = manifestContract(m);
+    expect(contract).toMatch(/TypeScript/);
+    expect(contract).toMatch(/\.tsx/);
+    // Must not suggest .jsx for a TS project
+    expect(contract).not.toMatch(/LANGUAGE IS JAVASCRIPT/);
+  });
+
+  it('React without TypeScript keyword → .jsx entry and JS language', () => {
+    const m = selectArchitecture('build a react todo app');
+    expect(m.framework).toBe('react');
+    expect(m.language).toBe('javascript');
+    expect(m.entry).toBe('src/main.jsx');
+    const contract = manifestContract(m);
+    expect(contract).toMatch(/LANGUAGE IS JAVASCRIPT/);
+    expect(contract).not.toMatch(/LANGUAGE IS TYPESCRIPT/);
+  });
+
+  it('Vue + TypeScript prompt → .ts entry and TS language', () => {
+    const m = selectArchitecture('vue typescript app');
+    expect(m.framework).toBe('vue');
+    expect(m.language).toBe('typescript');
+    expect(m.entry).toBe('src/main.ts');
+  });
 });
 
 describe('no false positives (rock-solid for legitimate apps)', () => {

@@ -2,18 +2,19 @@ import type { Express, Request, Response } from 'express';
 import { doc, updateDoc, collection, addDoc, getDocs, query, where } from 'firebase/firestore';
 import { getDb } from '../lib/db';
 import { encrypt } from '../lib/secrets';
+import { requireUserMatch } from '../lib/authMiddleware';
 
 /**
  * User-secret CRUD routes extracted from the server.ts monolith (Phase 1).
- * Behavior unchanged. Values are stored AES-encrypted; reads return non-deleted
- * entries. The shared Firestore handle is read via getDb().
+ * P0a C4: all three routes now require a valid Firebase ID token whose uid
+ * matches the :userId path param. Mismatches → 401/403.
  *
  * - GET    /api/secrets/:userId            — list a user's (non-deleted) secrets
  * - POST   /api/secrets/:userId            — save an encrypted secret
  * - DELETE /api/secrets/:userId/:secretId  — soft-delete a secret
  */
 export function registerSecretsRoutes(app: Express): void {
-  app.get('/api/secrets/:userId', async (req: Request, res: Response) => {
+  app.get('/api/secrets/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     console.log('[DEBUG] GET /api/secrets/:userId called for:', req.params.userId);
     try {
@@ -28,7 +29,7 @@ export function registerSecretsRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/secrets/:userId', async (req: Request, res: Response) => {
+  app.post('/api/secrets/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
       const { userId } = req.params;
@@ -46,7 +47,7 @@ export function registerSecretsRoutes(app: Express): void {
     }
   });
 
-  app.delete('/api/secrets/:userId/:secretId', async (req: Request, res: Response) => {
+  app.delete('/api/secrets/:userId/:secretId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
       const { secretId } = req.params;

@@ -1253,3 +1253,16 @@ Large batch merged to main. All verified: 0 tsc errors, 307/307 tests pass.
 - feat(pro): /code-review and /deploy commands in Pro chat
 - feat(pro): 5 new AppKnowledgeBase entries for Pro features
 Gate: server tsc 0 · frontend tsc 0 · 307 tests · CI green on PR #113.
+
+### Milestone G3 — DONE (2026-06-21) — Pro-unify: credential wiring + tier display
+G3 (Pro-unify) wires user credentials to the agentic engine and surfaces the execution
+tier in the build progress widget:
+- buildService.ts: added userE2bKey, githubToken, dbConfig to BuildRequest interface;
+  added tier? ('vfs'|'cloudrun'|'e2b') to BuildStreamEvent and BuildResponse.
+- App.tsx: added userE2bKey state (localStorage 'engineer_e2b_key'); wired githubToken,
+  userE2bKey, dbConfig into buildAppStream call; captures tier from engineRes after
+  complete event; added E2B API key input card in Settings → Connections.
+- routes/build.ts: emits tier status event after runProEngine; includes tier in sendComplete.
+- AIChat.tsx: added tier? to BuildProgressState; shows colored tier badge in header
+  (grey 'In-memory' / blue 'Server' / green 'E2B cloud').
+Gate: frontend tsc 0 · server tsc 0 · 307/307 tests pass. Branch: claude/g3-pro-unify.

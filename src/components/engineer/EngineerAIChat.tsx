@@ -125,6 +125,11 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   const [screenshots, setScreenshots] = useState<ScreenshotEntry[]>([]);
   const [iframeSrc, setIframeSrc] = useState<string | null>(null);
   const [browserUrlInput, setBrowserUrlInput] = useState('');
+  // Interactive in-app browser (drives the sandbox's real Chromium for ANY site).
+  const [browseShot, setBrowseShot] = useState<string | null>(null);
+  const [browseBusy, setBrowseBusy] = useState(false);
+  const [browseErr, setBrowseErr] = useState<string | null>(null);
+  const [browseTypeInput, setBrowseTypeInput] = useState('');
   // Phase 6.5 — Visible AI Cursor
   const [isDriving, setIsDriving] = useState(false);
   // Live frame during a drive action (replaces the screenshot array for instant streaming)
@@ -580,6 +585,57 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     } catch { /* non-fatal */ }
   };
 
+  // Interactive in-app browser: drives the sandbox's REAL Chromium so ANY site
+  // (incl. ones that block iframe embedding, like google.com) opens in-app.
+  const isLocalUrl = (u: string) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(u);
+
+  const runBrowse = async (action: string, params: Record<string, unknown> = {}) => {
+    setBrowseBusy(true);
+    setBrowseErr(null);
+    try {
+      const res = await fetch('/api/engineer-browse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspaceIdRef.current, action, ...params }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setBrowseErr(data?.error || 'Browser action failed.'); return; }
+      if (data.screenshot) setBrowseShot(data.screenshot);
+    } catch (e) {
+      setBrowseErr(e instanceof Error ? e.message : 'Network error.');
+    } finally {
+      setBrowseBusy(false);
+    }
+  };
+
+  const openInBrowser = (raw: string) => {
+    const url = raw.trim();
+    if (!url) return;
+    const normalized = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    setBrowserUrlInput(normalized);
+    if (isLocalUrl(normalized)) {
+      // Local previews embed fine in an iframe (fast, no sandbox cost).
+      setBrowseShot(null);
+      setBrowseErr(null);
+      setIframeSrc(normalized);
+    } else {
+      // External sites: drive the real sandbox browser (renders anything).
+      setIframeSrc(null);
+      runBrowse('navigate', { url: normalized });
+    }
+  };
+
+  const handleBrowseClick = (e: React.MouseEvent<HTMLImageElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.round(((e.clientX - rect.left) / rect.width) * 1280);
+    const y = Math.round(((e.clientY - rect.top) / rect.height) * 720);
+    const flashX = ((e.clientX - rect.left) / rect.width) * 100;
+    const flashY = ((e.clientY - rect.top) / rect.height) * 100;
+    setClickFlash({ x: flashX, y: flashY });
+    setTimeout(() => setClickFlash(null), 600);
+    runBrowse('click', { x, y });
+  };
+
   // Phase 12C/12D — read a picked image file into base64 (data-URL prefix stripped).
   const handlePickImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -617,6 +673,8 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setSelectedFile(null);
     setIframeSrc(null);
     setBrowserUrlInput('');
+    setBrowseShot(null);
+    setBrowseErr(null);
     setScreenshots([]);
     setIsDriving(false);
     setLiveFrame(null);
@@ -1005,27 +1063,13 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
                 type="text"
                 value={browserUrlInput}
                 onChange={e => setBrowserUrlInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    const url = browserUrlInput.trim();
-                    if (!url) return;
-                    const normalized = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-                    setIframeSrc(normalized);
-                    setBrowserUrlInput(normalized);
-                  }
-                }}
+                onKeyDown={e => { if (e.key === 'Enter') openInBrowser(browserUrlInput); }}
                 placeholder="Enter URL or wait for live preview…"
                 className="flex-1 min-w-0 bg-[#161b22] border border-white/10 rounded-lg px-3 py-1 text-xs text-white placeholder:text-[#586069] focus:outline-none focus:border-indigo-500/50"
               />
               <button
-                onClick={() => {
-                  const url = browserUrlInput.trim();
-                  if (!url) return;
-                  const normalized = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-                  setIframeSrc(normalized);
-                  setBrowserUrlInput(normalized);
-                }}
-                disabled={!browserUrlInput.trim()}
+                onClick={() => openInBrowser(browserUrlInput)}
+                disabled={!browserUrlInput.trim() || browseBusy}
                 className="px-2.5 py-1 bg-indigo-600/70 hover:bg-indigo-600 disabled:opacity-30 text-white text-xs rounded-lg transition-colors shrink-0"
               >
                 Go
@@ -1087,6 +1131,85 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
               </div>
             )}
 
+            {/* External sites often block embedding (X-Frame-Options / CSP). The iframe
+                cannot bypass that, so surface an honest notice + a real "open in new tab"
+                action whenever the URL isn't a local preview. */}
+            {iframeSrc && /^https?:\/\//i.test(iframeSrc) && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(iframeSrc) && (
+              <div className="px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-2 shrink-0">
+                <AlertCircle className="w-3 h-3 text-amber-400 shrink-0" />
+                <span className="text-[11px] text-amber-200/90 flex-1 min-w-0">
+                  Some sites (Google, YouTube, banks…) block embedding for security. If the page below is blank, open it in a real browser tab.
+                </span>
+                <button
+                  onClick={() => window.open(iframeSrc, '_blank', 'noopener,noreferrer')}
+                  className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-[10px] font-medium transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" /> Open in new tab
+                </button>
+              </div>
+            )}
+
+            {/* Interactive real-browser view (any site, via the sandbox's Chromium).
+                Active for external URLs; click the page to interact, type + Enter,
+                scroll. Falls back to an honest message + new-tab link if no sandbox. */}
+            {(browseShot || browseBusy || browseErr) && (
+              <div className="flex-1 flex flex-col min-h-0 bg-[#0a0e13]">
+                {browseErr ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center px-6 gap-3">
+                    <AlertCircle className="w-6 h-6 text-amber-400" />
+                    <p className="text-xs text-amber-200/90 max-w-sm leading-relaxed">{browseErr}</p>
+                    <a
+                      href={browserUrlInput}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" /> Open in new tab instead
+                    </a>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5 bg-[#0d1117] shrink-0">
+                      <button onClick={() => runBrowse('scroll', { direction: 'up' })} disabled={browseBusy} title="Scroll up" className="w-6 h-6 rounded text-[#8b949e] hover:text-white hover:bg-white/5 disabled:opacity-30 flex items-center justify-center text-xs">▲</button>
+                      <button onClick={() => runBrowse('scroll', { direction: 'down' })} disabled={browseBusy} title="Scroll down" className="w-6 h-6 rounded text-[#8b949e] hover:text-white hover:bg-white/5 disabled:opacity-30 flex items-center justify-center text-xs">▼</button>
+                      <input
+                        value={browseTypeInput}
+                        onChange={e => setBrowseTypeInput(e.target.value)}
+                        onKeyDown={async e => {
+                          if (e.key === 'Enter' && browseTypeInput) {
+                            const t = browseTypeInput;
+                            setBrowseTypeInput('');
+                            await runBrowse('type', { text: t });
+                            await runBrowse('press', { text: 'Enter' });
+                          }
+                        }}
+                        placeholder="Click a field on the page, then type here + Enter"
+                        className="flex-1 min-w-0 bg-[#161b22] border border-white/10 rounded-lg px-3 py-1 text-xs text-white placeholder:text-[#586069] focus:outline-none focus:border-indigo-500/50"
+                      />
+                      {browseBusy && <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400 shrink-0" />}
+                      <span className="text-[10px] text-green-400 font-medium shrink-0">● Real browser</span>
+                    </div>
+                    <div className="flex-1 overflow-auto custom-scrollbar">
+                      {browseShot ? (
+                        <div className="relative cursor-pointer" onClick={handleBrowseClick} title="Click anywhere on the page to interact">
+                          <img src={`data:image/png;base64,${browseShot}`} alt="Live page" className="w-full block" />
+                          {clickFlash && (
+                            <div className="absolute pointer-events-none" style={{ left: `${clickFlash.x}%`, top: `${clickFlash.y}%`, transform: 'translate(-50%, -50%)', zIndex: 30 }}>
+                              <div className="w-5 h-5 rounded-full border-2 border-yellow-400 animate-ping" />
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center h-full gap-2 text-[#586069] text-xs">
+                          <Loader2 className="w-4 h-4 animate-spin" /> Loading page…
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Iframe */}
             {iframeSrc && (
               <iframe
@@ -1123,7 +1246,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
             )}
 
             {/* Screenshot viewer (agent took a screenshot or is driving) */}
-            {!iframeSrc && latestScreenshot && (
+            {!iframeSrc && !browseShot && !browseBusy && !browseErr && latestScreenshot && (
               <div className="flex-1 overflow-y-auto custom-scrollbar">
                 {/* Main screenshot with cursor overlay + click-to-guide */}
                 <div className="relative cursor-crosshair" onClick={handlePreviewClick} title="Click to guide AI to this element">
@@ -1187,7 +1310,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
             )}
 
             {/* Text browse results (agent curl output) */}
-            {!iframeSrc && !latestScreenshot && (
+            {!iframeSrc && !browseShot && !browseBusy && !browseErr && !latestScreenshot && (
               <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
                 {!latestBrowse ? (
                   <div className="flex flex-col items-center justify-center h-full gap-3 text-[#586069]">

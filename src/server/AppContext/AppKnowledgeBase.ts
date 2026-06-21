@@ -429,6 +429,16 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['dependency', 'package.json', 'missing module', 'cannot find module', 'npm install', 'missing dependency', 'undeclared package', 'import error', 'module not found', 'package missing', 'auto install', 'dep sync'],
   },
   {
+    id: 'quick-start-gallery',
+    name: 'Quick-Start Gallery — Example Prompt Cards',
+    path: 'Pro Chat → empty chat → example cards grid (visible before first message)',
+    description: `G9: When Pro Chat has no messages yet, a 2×4 grid of example prompt cards is shown. Cards cover common app types: Analytics Dashboard, E-commerce Page, Todo App, Portfolio Site, Quiz App, Weather App, Chat Interface, Note-taking App. Clicking any card fills the Pro Chat input with a detailed, well-crafted prompt for that app type. The user can edit the prompt before sending or just press Enter to build immediately.`,
+    howToUse: 'Open Pro Chat with no previous messages. Scroll past the header — the Quick-Start Gallery appears. Click any card to load its prompt into the chat input. Edit as needed, then send.',
+    relatedFeatures: ['pro_chat'],
+    aiSurface: 'pro_chat',
+    keywords: ['example prompt', 'quick start', 'starter template', 'example cards', 'prompt gallery', 'what can you build', 'kya bana sakte ho', 'show examples', 'example apps', 'ideas for app', 'app ideas'],
+  },
+  {
     id: 'one-click-deploy',
     name: 'One-Click Deploy Button',
     path: 'Pro Chat → header bar → Deploy button (visible after app is built)',

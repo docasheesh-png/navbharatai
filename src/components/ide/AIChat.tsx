@@ -927,8 +927,37 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
               </div>
               <p className={cn("text-[10px] font-black uppercase tracking-widest text-[#8b949e]")}>Ready to architect and build.</p>
             </div>
+
+            {/* G9 — Quick-Start Gallery: example prompts for Pro Chat */}
+            {activeAgent === 'navbharatai-pro' && (
+              <div className="px-3 pb-3 space-y-2">
+                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-[#484f58] text-center">Try one of these</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { icon: '📊', title: 'Analytics Dashboard', prompt: 'Build a modern analytics dashboard with sales charts, user metrics, revenue trends, and KPI cards. Use dark theme with gradient accents.' },
+                    { icon: '🛒', title: 'E-commerce Page', prompt: 'Create a product landing page with hero section, features grid, pricing table, customer reviews, and a buy-now button.' },
+                    { icon: '✅', title: 'Todo App', prompt: 'Build a todo app with categories, due dates, priority levels, drag-to-reorder, and localStorage persistence. Dark, minimal design.' },
+                    { icon: '🎨', title: 'Portfolio Site', prompt: 'Create a developer portfolio with animated hero section, projects grid with tech tags, skills section, and contact form.' },
+                    { icon: '🧠', title: 'Quiz App', prompt: 'Build an interactive quiz with 5 trivia questions, countdown timer, progress bar, score tracking, and a celebratory results screen.' },
+                    { icon: '☁️', title: 'Weather App', prompt: 'Create a weather dashboard with current conditions, hourly forecast, 5-day outlook, and animated weather icons. Use a glassmorphism card layout.' },
+                    { icon: '💬', title: 'Chat Interface', prompt: 'Build a real-time-style chat UI with message bubbles, timestamp, emoji reactions, typing indicator, and a message input with file attach.' },
+                    { icon: '📝', title: 'Note-taking App', prompt: 'Create a Notion-inspired note-taking app with rich text editor, tags, search, sidebar navigation, and localStorage sync.' },
+                  ].map(({ icon, title, prompt }) => (
+                    <button
+                      key={title}
+                      onClick={() => onInputChange(prompt)}
+                      className="text-left p-2.5 bg-[#161b22] hover:bg-[#1c2430] border border-white/5 hover:border-indigo-500/30 rounded-2xl transition-all group active:scale-95"
+                    >
+                      <span className="text-base leading-none">{icon}</span>
+                      <p className="text-[10px] font-black text-white mt-1.5 group-hover:text-indigo-300 transition-colors">{title}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-center py-4 border-t border-white/5 mt-4">
-               <button 
+               <button
                  onClick={() => document.querySelector<HTMLButtonElement>('[title="Security Scan"]')?.click()}
                  className="p-2 px-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl flex items-center gap-2 transition-all shadow-lg"
                  title="Open Security Scan Hub"

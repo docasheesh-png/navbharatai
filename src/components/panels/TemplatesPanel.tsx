@@ -9,7 +9,7 @@ import React from 'react';
 import { motion } from 'motion/react';
 import {
   Sparkles, Activity, Cpu, Clock, Smartphone, Globe, ShieldCheck, LayoutDashboard,
-  Package, Plus, X,
+  Package, Plus, X, IndianRupee, Languages, FileText, Building2,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -72,6 +72,190 @@ export const CURATED_TEMPLATES: TemplateDefinition[] = [
   {
     id: 'dashboard', name: 'Admin Dashboard', icon: LayoutDashboard, isPro: true,
     prompt: 'Build a professional admin dashboard: sidebar navigation, header with user info, metric cards (4 KPIs), recent activity table (10 rows), line chart using Chart.js CDN. Dark theme, responsive. All data should be realistic sample data.',
+  },
+  // ── Bharat-First templates (Phase 6.1) ──────────────────────────────────────
+  {
+    id: 'upi_payment', name: 'UPI Payment App', icon: IndianRupee, isPro: true,
+    prompt: `Build a complete UPI payment integration app using React + Vite + Tailwind CSS with Razorpay.
+
+### TECH STACK
+- React 18 + Vite + Tailwind CSS
+- Razorpay Web SDK (load from https://checkout.razorpay.com/v1/checkout.js)
+- Environment: VITE_RAZORPAY_KEY_ID (read via import.meta.env)
+
+### FEATURES TO BUILD
+
+1. **Payment Form** (src/components/PaymentForm.tsx)
+   - Fields: Amount (₹), Customer Name, Email, Phone (10-digit Indian mobile)
+   - Amount presets: ₹99, ₹199, ₹499, ₹999 quick-select buttons
+   - "Pay Now" button that triggers Razorpay checkout
+
+2. **Razorpay Integration** (src/lib/razorpay.ts)
+   - loadRazorpay(): dynamically loads the SDK script, returns Promise<boolean>
+   - openCheckout(options): creates Razorpay instance and opens the modal
+   - Options: key, amount (in paise), currency='INR', name, description, prefill
+
+3. **Payment Status UI** (src/components/PaymentStatus.tsx)
+   - Success state: green check, transaction ID, amount paid
+   - Failure state: red X, error message, retry button
+   - Pending state: loading spinner
+
+4. **Order Summary** (src/components/OrderSummary.tsx)
+   - Show what's being purchased, GST breakdown (18% GST), total
+
+### IMPORTANT IMPLEMENTATION NOTES
+- amount in Razorpay is in PAISE (multiply ₹ amount by 100)
+- Use import.meta.env.VITE_RAZORPAY_KEY_ID for the API key
+- Add a .env.example file with VITE_RAZORPAY_KEY_ID=rzp_test_xxxx
+- handler callback receives { razorpay_payment_id, razorpay_order_id, razorpay_signature }
+- For test mode: any card number 4111111111111111, CVV 123, expiry any future date
+- Style with Tailwind, saffron/green Indian flag color accent
+- Show ₹ (Indian Rupee) symbol throughout`,
+  },
+  {
+    id: 'hindi_app', name: 'Hindi Language App', icon: Languages, isPro: true,
+    prompt: `Build a bilingual Hindi/English React app with full Devanagari font support.
+
+### TECH STACK
+- React 18 + Vite + Tailwind CSS
+- Google Fonts: Noto Sans Devanagari (for Hindi) + Inter (for English)
+- i18next + react-i18next for translations
+
+### APP: Bharat Job Board (नौकरी खोजें)
+A simple job listing app that shows in both Hindi and English.
+
+### FEATURES
+
+1. **Language Toggle** (top-right header button)
+   - Switch between हिन्दी and English instantly
+   - Persist choice in localStorage
+   - Button shows current language: "हिन्दी | EN"
+
+2. **Translation Setup** (src/i18n.ts)
+   - Initialize i18next with two languages: 'hi' and 'en'
+   - Resources object with both languages inline (no JSON files needed)
+   - Hindi translations for: app title, search placeholder, job titles, locations, apply button, filter labels
+
+3. **Job Cards** (src/components/JobCard.tsx)
+   - Company logo placeholder (colored circle with initials)
+   - Job title (translated), company name, location (city in Hindi/English)
+   - Salary range in ₹/month, job type (Full-time/Part-time/Remote)
+   - "Apply Now" / "अभी आवेदन करें" button
+
+4. **Search & Filter** (src/components/SearchBar.tsx)
+   - Search by job title or company
+   - Filter by location: Delhi, Mumbai, Bangalore, Chennai, Hyderabad, Pune
+   - Filter by job type
+
+5. **Sample Data** (src/data/jobs.ts)
+   - 8 realistic Indian job listings (Software Engineer, CA, Teacher, etc.)
+   - Include popular Indian cities, salary ranges in ₹
+
+### FONT SETUP
+- In index.html: <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+- CSS: font-family: 'Noto Sans Devanagari', 'Inter', sans-serif
+- Tailwind config: extend fontFamily with devanagari
+
+### STYLE
+- Saffron (#FF9933) + white + green (#138808) — Indian flag palette
+- Clean, mobile-first card layout`,
+  },
+  {
+    id: 'gst_invoice', name: 'GST Invoice', icon: FileText, isPro: true,
+    prompt: `Build a GST-compliant invoice generator using React + Vite + Tailwind CSS. This must generate real, legally-valid GST invoices that Indian businesses can use.
+
+### FEATURES
+
+1. **Invoice Form** (src/components/InvoiceForm.tsx)
+   - Seller details: Business Name, GSTIN (15-char format: 22AAAAA0000A1Z5), Address, State
+   - Buyer details: Name, GSTIN (optional for B2C), Address, State
+   - Line items table: Description, HSN/SAC Code, Qty, Unit, Rate (₹), Discount %
+   - Add/remove line items dynamically
+   - Invoice No. (auto-increment), Invoice Date, Due Date, Place of Supply
+
+2. **GST Calculation Logic** (src/lib/gstCalculator.ts)
+   - If seller state === buyer state: split into CGST (half) + SGST (half)
+   - If different states: full IGST
+   - GST rates: 0%, 5%, 12%, 18%, 28% (per item)
+   - Calculate: subtotal, discount, taxable value, tax amounts, total
+   - Round off to nearest rupee
+
+3. **Invoice Preview** (src/components/InvoicePreview.tsx)
+   - Professional A4 layout with company letterhead
+   - Table with all line items, HSN codes, tax columns
+   - Tax summary table at bottom (CGST/SGST or IGST)
+   - Amount in words (e.g., "Rupees Five Thousand Only")
+   - QR code placeholder for e-invoice
+   - "Print Invoice" button using window.print()
+   - Print CSS: hide form, show only invoice
+
+4. **GSTIN Validator** (src/lib/gstin.ts)
+   - Validate 15-char GSTIN format: 2-digit state code + 10-char PAN + 1 entity + 1 Z + 1 check
+   - State codes map (01=J&K, 06=Haryana, 07=Delhi, 09=UP, 19=WB, 27=Maharashtra, 29=Karnataka, 33=Tamil Nadu, 36=Telangana)
+   - Real-time validation as user types
+
+5. **Amount in Words** (src/lib/numberToWords.ts)
+   - Convert number to Indian English words (lakh/crore system)
+   - "12,50,000" → "Twelve Lakh Fifty Thousand Rupees Only"
+
+### STYLE
+- Clean white/grey professional design
+- Orange accent (GST Portal colors: #E77817)
+- Responsive for both screen and print`,
+  },
+  {
+    id: 'startup_tracker', name: 'Startup Tracker', icon: Building2, isPro: true,
+    prompt: `Build a React + Vite + Tailwind CSS app for Indian startup founders to track their company registration journey.
+
+### APP: Startup India Registration Tracker
+
+1. **Registration Checklist** (src/components/Checklist.tsx)
+   Track completion of these real steps in order:
+   - [ ] PAN Card (for business owner)
+   - [ ] Aadhaar Card linking
+   - [ ] Digital Signature Certificate (DSC) — Class 3
+   - [ ] Director Identification Number (DIN)
+   - [ ] Company Name Reservation (RUN - Reserve Unique Name)
+   - [ ] Certificate of Incorporation (MCA21 portal)
+   - [ ] PAN + TAN for company
+   - [ ] GST Registration (mandatory if turnover > ₹20L)
+   - [ ] MSME/Udyam Registration (udyamregistration.gov.in)
+   - [ ] Startup India Recognition (startupindia.gov.in)
+   - [ ] Bank Account Opening
+
+2. **Progress Dashboard** (src/components/Dashboard.tsx)
+   - Circular progress ring showing % complete
+   - Estimated time to next milestone
+   - Days since incorporation (from stored date)
+   - Important deadlines (e.g., GST filing due dates)
+
+3. **Document Vault** (src/components/DocumentVault.tsx)
+   - List of required documents with status (Pending/Uploaded/Verified)
+   - Each document: name, description, where to get it, typical cost/time
+   - Mark as obtained button (stored in localStorage)
+
+4. **Compliance Calendar** (src/components/Calendar.tsx)
+   - Monthly view of filing deadlines:
+     - GST: GSTR-1 (11th), GSTR-3B (20th)
+     - TDS return: quarterly
+     - ROC Annual Filing: September 30
+     - Income Tax: July 31
+   - Highlight overdue items in red, upcoming in amber, completed in green
+
+5. **Cost Tracker** (src/components/CostTracker.tsx)
+   - Track registration costs: CA fees, govt fees, DSC cost, etc.
+   - Total spent vs. budget
+   - Typical cost ranges for each step
+
+### DATA
+- Store all state in localStorage (no backend needed)
+- Pre-populate with realistic default values
+- Use Indian date format: DD/MM/YYYY
+
+### STYLE
+- Dark theme with saffron accent (#FF9933)
+- Mobile-first (founders use phones)
+- Progress indicators with green checkmarks`,
   },
 ];
 

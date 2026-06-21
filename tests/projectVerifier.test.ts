@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { VirtualFileSystem } from '../src/server/project/ProjectModel';
-import { verifyProject } from '../src/server/project/ProjectVerifier';
+import { verifyProject, extractBareImports } from '../src/server/project/ProjectVerifier';
 
 const vfsFrom = (f: Record<string, string>) => VirtualFileSystem.fromRecord(f);
 
@@ -95,5 +95,37 @@ describe('verifyProject', () => {
       'index.html': '<script type="module" src="src/index.ts"></script>',
     }));
     expect(r.warnings).toBe(0);
+  });
+});
+
+describe('extractBareImports', () => {
+  it('returns expected bare roots from source files', () => {
+    const result = extractBareImports(vfsFrom({
+      'package.json': JSON.stringify({ dependencies: { react: '^18' } }),
+      'src/main.tsx': "import React from 'react';\nimport { create } from 'zustand';\nimport './local';\n",
+      'src/utils.ts': "import axios from 'axios';\nimport fs from 'fs';\n",
+    }));
+    expect(result).toContain('react');
+    expect(result).toContain('zustand');
+    expect(result).toContain('axios');
+    expect(result).not.toContain('fs');          // node builtin excluded
+    expect(result).not.toContain('./local');     // relative excluded
+  });
+
+  it('deduplicates across files', () => {
+    const result = extractBareImports(vfsFrom({
+      'package.json': JSON.stringify({}),
+      'src/a.ts': "import axios from 'axios';",
+      'src/b.ts': "import axios from 'axios';",
+    }));
+    expect(result.filter(p => p === 'axios')).toHaveLength(1);
+  });
+
+  it('returns empty array for a static project with no source files', () => {
+    const result = extractBareImports(vfsFrom({
+      'index.html': '<h1>Hello</h1>',
+      'style.css': 'body {}',
+    }));
+    expect(result).toHaveLength(0);
   });
 });

@@ -1310,3 +1310,23 @@ G5 wires the existing ProCodeReview module as an automatic quality gate on every
   (score badge + top critical/high findings with file:line + fix suggestion).
 - AppKnowledgeBase.ts: 'auto-code-review' entry added (mandatory per CLAUDE.md rule).
 Gate: server tsc 0 · frontend tsc 0 · 307/307 tests pass. PR #118 open.
+
+### Milestone G5 — DONE (2026-06-21) — Testing+Quality: ProCodeReview wired as build quality gate
+(See G5 IN PROGRESS entry above for details — PR #118 merged to main.)
+
+### Milestone G6 Slice 1 — IN PROGRESS (2026-06-21) — Execution-hardening: Dependency auto-sync
+Fixes the #1 "app generated but won't run" failure: AI generates `import axios from 'axios'`
+but never adds axios to package.json → npm install misses it → runtime crash. Now auto-fixed:
+- ProjectVerifier.ts: collectDeclaredDeps exported; new extractBareImports() exported (shared
+  import parser — regex + bareRoot + isNodeBuiltin moved to module scope to avoid drift).
+- DependencySync.ts (NEW): syncDependencies(vfs) scans all source files via extractBareImports,
+  finds packages not in package.json, and adds them with curated pinned versions for 30+
+  common packages (react-router-dom ^6.26.0, zustand ^4.5.0, axios ^1.7.0, framer-motion
+  ^11.3.0, lucide-react ^0.400.0, zod ^3.23.0, @tanstack/react-query ^5.51.0, etc.).
+  Unknown packages fall back to 'latest'. Pure, no I/O, never throws.
+- BuildPipeline.ts: syncDependencies() called before runValidation() — emits status message
+  listing added packages. Wrapped in try/catch so it never blocks a build.
+- tests/dependencySync.test.ts (NEW): 11 tests covering all cases.
+- tests/projectVerifier.test.ts: +3 extractBareImports tests (guard the refactor).
+- AppKnowledgeBase.ts: 'auto-dependency-sync' entry added (mandatory per CLAUDE.md rule).
+Gate: server tsc 0 · frontend tsc 0 · 321/321 tests pass. PR #119 open.

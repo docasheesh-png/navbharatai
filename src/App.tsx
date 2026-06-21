@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallbac
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { EngineBuilder } from './components/EngineBuilder';
-import { buildApp, buildAppStream, fetchBuildSession, isAgenticEngineEnabled } from './services/buildService';
+import { buildApp, buildAppStream, fetchBuildSession, isAgenticEngineEnabled, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
@@ -4317,7 +4317,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
           const engineRes: any = await buildAppStream({
             prompt: messageToSend,
             files: Object.keys(allTextFiles).length ? allTextFiles : undefined,
-            preview: false,
+            preview: true,
             // Claude-Code-style memory: tell the engine this is an edit (skips the
             // fresh-build feature loop) and pass conversation + rolling summary +
             // prior-change log so edits stay coherent across many turns.
@@ -4398,6 +4398,13 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
           // G5 — store code review result for display in build summary.
           if (engineRes?.codeReview) {
             setProBuildProgress(prev => ({ ...prev, codeReview: (engineRes as any).codeReview }));
+          }
+          // G7 — server-side live preview: if the build produced a previewable static
+          // bundle, wire its URL into proLivePreviewUrlRef so finishBuild shows the
+          // "App is live!" link (same path as E2B live URL, no new code needed).
+          if ((engineRes as any)?.previewAllowed && (engineRes as any)?.preview) {
+            const src = previewSrcFor((engineRes as any).preview);
+            if (src && !proLivePreviewUrlRef.current) proLivePreviewUrlRef.current = src;
           }
           if (engineRes && (typeof engineRes.memorySummary === 'string' || Array.isArray(engineRes.editLog))) {
             setSessions(prev => prev.map(s => s.id === currentProSessionId

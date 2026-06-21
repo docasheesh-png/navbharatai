@@ -1129,3 +1129,88 @@ policy decision (P8/rollout).
 2) Phase 1 foundation gaps (event bus, refresh-safe state, structured logs) before default-on.
 3) Phase 7 telemetry early (so criteria are measurable).
 4) Then Pro default-on rollout, alongside Phase 5/8/9, ending with the Phase 10 proof.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ★ PHASE 0 — GAP & CURRENT-STATE INVENTORY — DONE (2026-06-20)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Input: admin's 1000 gaps pre-clustered into 25 ROOT CAUSES. Phase-0 task (NO
+production code): map every root cause to EXISTING code so nothing is rebuilt, and
+extract the real remaining work + priority + dependency + verification. Goal:
+Pro = Claude Code. Method: 3 parallel Explore agents swept the whole codebase.
+
+HEADLINE: of the 25 root causes, ~10 are already ✅ DONE, ~14 🟡 PARTIAL (with a real
+core), and only 1 (Security) is 🔴 MISSING. The gaps doc reads as if nothing exists;
+the reality is the opposite.
+
+KEY FINDINGS
+1. EngineerAI is already a near-complete autonomous engineer: agent loop
+   (observe→think→act→verify, EngineerAgentLoop, PlannerAgent, CoderAgent), real
+   execution (E2B/Docker/Local actuators — npm/pip install/dev/build/test, ports, env,
+   console capture), browser automation (E2B Playwright, 9 actions + console capture),
+   self-heal (RepairLoop + per-file self-review + guider grade→refine), memory
+   (WorkspaceMemoryStore/Firestore + .engineer/memory.md + Pro memorySummary/editLog),
+   tools (bash/web_search/file-search/git/deploy/provision_db).
+2. The real gap for "Pro = Claude Code" is that PRO DOESN'T USE THIS ENGINE BY DEFAULT
+   (it's flag-gated). So the goal = unify Pro onto the engine + default-on — NOT a new
+   engine.
+3. Foundations are half-built already in src/server/AppMakerLab/: EventBus +
+   EventHistory + EventTypes(45+), JournalManager + TransactionCoordinator,
+   ServiceRegistry (dep + circular detection), CheckpointManager,
+   DeploymentRollbackManager, AppKnowledgeBase (70+ features) — but they're
+   AppMakerLab-scoped, not wired into Pro/Engineer.
+4. The genuinely thin areas are only ~4-5: Security (🔴), Observability persistence/
+   alerts/traces, Deployment targets (Firebase only), full Testing (unit only), and
+   wiring the existing foundations across Pro/Engineer.
+
+25 ROOT CAUSES → STATUS  (✅ done · 🟡 partial · 🔴 missing)
+ 1 Real Execution Env ✅ (E2B/Docker/Local actuators)        → Phase 3
+ 2 Persistent Workspace 🟡 (WorkspaceStore/sync/resume)      → Phase 1
+ 3 Autonomous Agent Loop ✅ (EngineerAgentLoop+Planner+Coder)→ Phase 2 (Pro unify+default)
+ 4 Browser Automation ✅ (E2B Playwright + console)          → Phase 4
+ 5 Test Automation 🟡 (Vitest gen + npm test)                → Phase 5
+ 6 Self-Healing/Debug ✅ (RepairLoop+self-review+guider)     → Phase 5
+ 7 Git Integration 🟡 (init/clone/branch/commit/push)        → Phase 6
+ 8 Runtime Observability 🟡 (metrics.ts/audit/UsageTracker)  → Phase 7
+ 9 Checkpoint/Rollback ✅ (VersionStore+actuator+managers)   → Phase 1/6
+10 Multi-Framework 🟡 (React/Vue/Vanilla full; rest partial) → Phase 9
+11 Package Install/Runtime ✅ (actuator.build npm/pip)       → Phase 3
+12 Deployment Pipeline 🟡 (Firebase Hosting + health/rollback)→ Phase 8 🔒
+13 Memory Architecture ✅ (WorkspaceMemoryStore/Firestore)   → Phase 6
+14 Context Retrieval ✅ (ContextRetriever rank/pack)         → Phase 2/6
+15 Tool Ecosystem ✅ (bash/web/file/browser/git/deploy/db)   → Phase 2
+16 Security Layer 🔴 (only secret encryption; gate pending)  → Phase 7  CRITICAL
+17 Secret Management 🟡 (secrets.ts AES + Firestore)         → Phase 7
+18 Quality Gates 🟡 (ValidationPipeline + CI tsc/boot)       → Phase 5/7
+19 Fake-Progress Prevention ✅ (honest pending gates)        → cross-cut (keep)
+20 Capability Registry 🟡 (ServiceRegistry + AppKnowledgeBase)→ Phase 1
+21 Event Sourcing 🟡 (EventBus+Journal+TxCoordinator)        → Phase 1
+22 Dependency Graph 🟡 (ServiceRegistry + Planner ordering)  → Phase 1/2
+23 Runtime Telemetry 🟡 (metrics.ts + UsageTracker)          → Phase 7
+24 Architecture Awareness 🟡 (AppKnowledgeBase+Manifest)     → Phase 0/2
+25 Production Validation 🟡 (HealthChecker+DeploymentEngine) → Phase 8/10
+
+CAPABILITY CLUSTERS (25 → 8 actionable groups, dependency-ordered)
+ G1 Foundations-wiring (2,9,20,21,22,24) — wire existing EventBus/Journal/Registry/
+    Checkpoint/KnowledgeBase into Pro+Engineer + persist (Firestore) + refresh-safe state.
+ G2 Observability (8,23) — persist metrics + structured logs + traces + alerts + dashboards.
+ G3 Pro-unify (3,14,15 + 4,6) — Pro onto the EngineerAI agent loop, DEFAULT-ON. The heart
+    of "Pro = Claude Code" (engine exists → just wire + rollout).
+ G4 Security+Secrets (16,17) — npm audit, rate-limit, CSP/helmet, input-validation,
+    secret-scan. CRITICAL (biggest real gap).
+ G5 Testing+Quality (5,18) — real E2E/a11y/security/perf gates (needs browser sandbox → G3).
+ G6 Execution-hardening (1,11) — lock-files, version/peer-dep detection, process restart.
+ G7 Deployment (12,25 🔒) — multi-target deploy + isolated preview origin + smoke/SLA.
+ G8 Frameworks (10) — Next/Svelte/Node/FastAPI run+deploy end-to-end.
+ (19 honesty = cross-cutting, already enforced, keep.)
+
+RECOMMENDED ORDER: G1 → G2 → G3 (Pro default-on) → G4 → G5 → G6 → G7 🔒 → G8 →
+Phase-10 final proof (7 apps + 1000-gap re-audit). Rationale: foundations + telemetry
+first (so criteria are measurable); then switch Pro onto the existing engine (max user
+impact, least new code); then the real gaps (security/testing); proof last.
+
+EVIDENCE RULE (per group): a group is "complete" only when its gaps' evidence exists —
+logs · screenshots · test reports · runtime proof · deployment URLs.
+
+ADMIN/INFRA-BLOCKED (cannot be unblocked by code): multi-target deploy tokens (G7) ·
+prod sandbox/E2B key/Docker host for browser QA gates (G5/G3) · Sentry account (G2) ·
+Pro-gating policy decision (G3 rollout).

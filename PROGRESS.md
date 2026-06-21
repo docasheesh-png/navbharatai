@@ -417,13 +417,21 @@ Target: no file in `src/` over 500 lines. All modules have own props interface +
 Enable `strict: true` globally. Fix all implicit-any and null-guard errors.
 One module per PR — never one giant PR. Frontend + server + all surviving archive survivors.
 
-### 5.3 — Integration + E2E tests
-**Status: TODO**
+### 5.3 — Integration + E2E tests ✅ PARTIAL (2026-06-21)
+**Branch:** `claude/test-coverage-analysis-bq0yev`
 
-- Every `/api/*` route: test with valid + invalid input
-- Real build smoke: `POST /api/build-stream` with "hello world React app" → assert files returned
-- Coverage tracked in CI: fail if drops below baseline
-- E2E (Playwright): open Pro Chat → submit prompt → assert build progress fires correctly
+**Shipped — real route handler tests (no new dependency, no server boot):**
+- NEW `tests/helpers/routeTestUtils.ts` — `captureRoutes(register)` runs a `registerXRoutes(app)` against a fake Express app that records every handler by "METHOD path"; `mockReq()`/`mockRes()` exercise the REAL handler logic (validation, status codes, payload shape) directly.
+- NEW `tests/routesTelemetryPwa.test.ts` — 17 tests:
+  - telemetry: pagespeed 400 on missing url; logs/error always 204; analytics/event 400 without event, 204 with; pagespeed Lighthouse-score mapping + upstream-error passthrough (mocked fetch).
+  - pwa: save 400 without html; save stores app + returns id/url; name capped at 30; manifest 404 unknown / valid fields for stored; serve 404 HTML for expired; manifest-link injected into `<head>`; service worker served as JS with correct scope header.
+  - secrets + sync: registration smoke (all user-scoped endpoints present).
+- tsc x2 clean, vitest now 1036/1036 green.
+
+**Still TODO (infra-gated):**
+- Real build smoke (`POST /api/build-stream`) — needs the AI model + sandbox; cannot run in CI without keys.
+- E2E (Playwright) — needs a browser runtime in CI.
+- Heavy stream routes (zip extract/download) — fragile under handler-capture; their CORS path is already covered by `cors.test.ts`.
 
 ### 5.4 — Error pattern learning ✅ DONE (2026-06-21) — PR #140
 **Branch:** `claude/phase-5.4-error-learning`

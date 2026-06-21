@@ -1,5 +1,5 @@
 /**
- * P0a — Reusable Firebase ID-token verification helpers.
+ * P0a/P0b — Reusable Firebase ID-token verification + rate-limiting helpers.
  *
  * verifyFirebaseToken(req) — resolves to the decoded token's uid, or null if
  *   no/invalid Bearer token is provided. Best-effort: never throws.
@@ -10,8 +10,10 @@
  *   3. Asserts decoded uid === req.params[paramName]
  *   Returns 401 (missing/invalid token) or 403 (uid mismatch).
  *
- * Used by /api/secrets/* routes (C4). Will also be used in Phase 0b for
- * /api/build, /api/build-stream, /api/engineer-chat (C3).
+ * buildRateLimiter() — Express middleware for hot build endpoints:
+ *   - Authenticated users (valid Bearer token): 10 builds per hour
+ *   - Anonymous (no token): 5 builds per hour (keyed by IP)
+ *   Returns 429 when over limit. VITEST-skipped.
  */
 import type { Request, Response, NextFunction } from 'express';
 
@@ -54,6 +56,44 @@ export function requireUserMatch(paramName = 'userId') {
       res.status(403).json({ error: 'Forbidden.' });
       return;
     }
+    next();
+  };
+}
+
+// In-memory rate-limit buckets — keyed by uid (authenticated) or IP (anonymous).
+// Map is periodically self-pruning to prevent unbounded growth.
+const _rateBuckets = new Map<string, { count: number; windowStart: number }>();
+const RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const RATE_LIMIT_AUTHED = 10;          // builds per hour, authenticated user
+const RATE_LIMIT_ANON   = 5;           // builds per hour, anonymous (by IP)
+
+export function buildRateLimiter() {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (process.env.VITEST) { next(); return; }
+
+    const uid = await verifyFirebaseToken(req);
+    const key = uid ?? (req.ip || 'anon');
+    const limit = uid ? RATE_LIMIT_AUTHED : RATE_LIMIT_ANON;
+    const now = Date.now();
+
+    // Self-prune when the map gets large (evict windows that have expired).
+    if (_rateBuckets.size > 5000) {
+      for (const [k, v] of _rateBuckets) {
+        if (now - v.windowStart > RATE_WINDOW_MS) _rateBuckets.delete(k);
+      }
+    }
+
+    const bucket = _rateBuckets.get(key);
+    if (!bucket || now - bucket.windowStart > RATE_WINDOW_MS) {
+      _rateBuckets.set(key, { count: 1, windowStart: now });
+      next();
+      return;
+    }
+    if (bucket.count >= limit) {
+      res.status(429).json({ error: `Rate limit exceeded: max ${limit} builds per hour. Try again later.` });
+      return;
+    }
+    bucket.count++;
     next();
   };
 }

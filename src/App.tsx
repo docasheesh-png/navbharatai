@@ -4379,6 +4379,11 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
           }, (ev) => {
             if (ev.type === 'status' && ev.message) {
               setProBuildProgress(prev => ({ ...prev, active: true, stage: `⚙️ ${ev.message}`, percent: Math.min(92, Math.max(prev.percent, (ev.coverage ?? 0))) }));
+            } else if (ev.type === 'files' && ev.paths && ev.paths.length > 0) {
+              // G11 — real-time file display: show which files the agent is writing.
+              const names = ev.paths.slice(0, 3).map((p: string) => p.split('/').pop() || p).join(', ');
+              const more = ev.paths.length > 3 ? ` +${ev.paths.length - 3} more` : '';
+              setProBuildProgress(prev => ({ ...prev, active: true, stage: `✏️ ${names}${more}`, percent: Math.min(90, prev.percent + 2) }));
             } else if (ev.type === 'module' && ev.name) {
               const icon = ev.state === 'done' ? '✓' : ev.state === 'failed' ? '⚠️' : '⏳';
               setProBuildProgress(prev => ({

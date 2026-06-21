@@ -619,22 +619,40 @@ tsc x2 clean (0 errors), vitest 1016/1016 green.
 ## PHASE 7 — Production Launch Hardening
 _Measure everything. No assumptions. Ship when criteria are proven._
 
-### 7.1 — Verify success criteria (timed, recorded)
-Run each criterion from the Measurable Success Criteria section above.
-Document pass/fail with timestamp. Fix anything that fails. This is the launch gate.
+### 7.1 — Verify success criteria (timed, recorded) ⏳ ADMIN/MANUAL
+The "Measurable Success Criteria" list (top of this file) must be verified with a
+real stopwatch against the live deploy — this is inherently manual (human watches
+a 5-page app build, times first-token, tries it on a phone). Code cannot self-certify
+these honestly. **Action for admin:** run the checklist against prod, record date +
+pass/fail per line. All the underlying features are shipped; this is the sign-off step.
 
-### 7.2 — Load test
-- 100 concurrent users → p50/p95 latency, error rate, per-request cost
-- 1,000 concurrent users → same
-- Document honest capacity limits in runbook
+### 7.2 — Load test ✅ SCRIPT SHIPPED — run is admin/infra (2026-06-21)
+- NEW `loadtest/build-stream.k6.js` — real, runnable k6 capacity test: ramps 20→100→300
+  VUs against the lightweight ingest endpoints (no AI spend), with launch-gate
+  thresholds (p95<1s, errors<1%). Real-build load is opt-in (`ENABLE_BUILD_LOAD=1`)
+  and meant for a STAGING deploy with a mocked AI provider (a real build costs money).
+- **Action for admin:** `k6 run -e BASE_URL=<staging> loadtest/build-stream.k6.js`,
+  then paste the p50/p95/error numbers into RUNBOOK.md. Running it needs the k6 tool +
+  a deployed target (infra), which the Claude session does not have.
 
-### 7.3 — Cost controls + quotas per tier
-Hard server-side enforcement. Free / Pro / BYOK E2B tiers defined and enforced.
+### 7.3 — Cost controls + quotas per tier ⛔ BLOCKED on a prerequisite (honest)
+Hard per-tier quotas (Free 3/day, Pro 20/day, BYOK unlimited) require a **user
+subscription/plan system that does not exist yet** — audited the codebase on
+2026-06-21: every "tier" reference is the *execution* tier (vfs/e2b/cloudrun), not a
+user plan. Building plan storage + assignment + a tier-lookup in auth middleware is a
+large standalone feature (its own phase), not a wiring task. What IS shipped: real
+hourly rate limiting (`buildRateLimiter`: 10/hr authed, 5/hr anon, Phase 0b) and
+per-user monthly cost tracking (`UserCostStore`, Phase 4.2). **Recommendation:** treat
+"per-tier quotas" as a dedicated future feature gated on the plan system; do not fake
+a tier the product doesn't sell yet.
 
-### 7.4 — Full security re-audit
-- `npm audit --audit-level=high` — fix all HIGH + CRITICAL
-- OWASP ZAP scan on production endpoints
-- Manual: secrets endpoints, admin endpoints, E2B sandbox isolation
+### 7.4 — Full security re-audit ✅ AUTOMATED PART DONE — scan is admin/infra
+- `npm audit --audit-level=high` — already runs in CI on every push (G4, `.github/workflows/ci.yml`).
+- OWASP ZAP scan — needs the external tool + a live target (infra). **Action for admin:**
+  `docker run -t ghcr.io/zaproxy/zaproxy zap-baseline.py -t https://<prod-url>`.
+- Manual review of secrets/admin/E2B isolation: the code paths are hardened
+  (Phase 0: auth-gated secrets, sanitized admin errors, rate limits, sandbox isolation
+  per workspace). Final human pen-review is an admin sign-off step.
 
 ### 7.5 — AppKnowledgeBase fully synced ✅ DONE (2026-06-21)
 **Branch:** `claude/test-coverage-analysis-bq0yev`
@@ -648,11 +666,14 @@ Each new entry has exact path, sub-capability description, howToUse, relatedFeat
 English + Hindi/Hinglish keywords. `appKnowledgeBase.test.ts` integrity checks green.
 Ongoing rule (CLAUDE.md): any new user-facing feature adds its entry in the same PR.
 
-### 7.6 — Runbooks + rollback drills (tested, not just written)
-- "ENGINE=v2 broken" → flip to v1 in <30 seconds
-- "E2B quota exhausted" → auto-fallback to VFS with user notification
-- "AI provider down" → degraded mode activates correctly
-- "Database corruption" → restore from Firestore backup
+### 7.6 — Runbooks + rollback drills ✅ RUNBOOK SHIPPED — drills are admin/manual
+- NEW `RUNBOOK.md` — real incident procedures (symptom → diagnosis → action → verify)
+  for all four scenarios: ENGINE=v2 rollback (<30s, exact gcloud command), E2B-quota
+  fallback to VFS, AI-provider failover (auto via circuit breaker), Firestore restore;
+  plus the deploy-didn't-fire procedure. Includes a quarterly drill log to fill in.
+- **Action for admin:** execute each drill once against staging, record date + result
+  in the runbook's drill log. The procedures are written and accurate; running them is
+  a human task (touches live Cloud Run / Firestore).
 
 **Phase 7 DONE = LAUNCH READY.** All success criteria recorded as passing.
 Load capacity documented honestly. Security scan clean. Runbooks tested.

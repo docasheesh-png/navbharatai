@@ -3916,6 +3916,57 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
       return;
     }
 
+    // ── /deploy command — Vercel / Netlify / GitHub Pages one-click deploy ──
+    // Usage: /deploy vercel <token> <project-name>
+    //        /deploy netlify <token> <site-id>
+    //        /deploy github <token> <owner> <repo>
+    if (messageToSend.trim().toLowerCase().startsWith('/deploy ')) {
+      const parts = messageToSend.trim().split(/\s+/);
+      const provider = parts[1]?.toLowerCase() as 'vercel' | 'netlify' | 'github' | undefined;
+      const token = parts[2];
+      const arg1 = parts[3];
+      const arg2 = parts[4];
+
+      const deployFiles = files && Object.keys(files).length > 0 ? files : null;
+      if (!deployFiles) {
+        setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: 'No files to deploy. Build or import an app first.', sender: 'ai' as const, timestamp: new Date() }]);
+        setIsProLoading(false);
+        proAbortControllerRef.current = null;
+        return;
+      }
+      if (!provider || !token || !arg1) {
+        setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: `**Deploy usage:**\n\`\`\`\n/deploy vercel <token> <project-name>\n/deploy netlify <token> <site-id>\n/deploy github <token> <owner> <repo>\n\`\`\`\nGet a Vercel token at vercel.com/account/tokens`, sender: 'ai' as const, timestamp: new Date() }]);
+        setIsProLoading(false);
+        proAbortControllerRef.current = null;
+        return;
+      }
+      try {
+        setProMessages(prev => [...prev, { id: (Date.now() + 0.5).toString(), text: `Deploying to ${provider}...`, sender: 'ai' as const, timestamp: new Date() }]);
+        const body: Record<string, string | Record<string, string>> = { provider, token, files: deployFiles };
+        if (provider === 'vercel') body.name = arg1;
+        else if (provider === 'netlify') body.siteId = arg1;
+        else if (provider === 'github') { body.owner = arg1; body.repo = arg2 || ''; }
+
+        const resp = await fetch('/api/pro/deploy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: abortController.signal,
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json().catch(() => ({})) as any;
+        if (!resp.ok) throw new Error(data?.error || `Deploy failed (${resp.status})`);
+        setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: `**Deployed!** Your app is live at:\n\n${data.url}`, sender: 'ai' as const, timestamp: new Date() }]);
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: `Deploy failed: ${e.message}`, sender: 'ai' as const, timestamp: new Date() }]);
+        }
+      } finally {
+        setIsProLoading(false);
+        proAbortControllerRef.current = null;
+      }
+      return;
+    }
+
     // ── Mode is the single source of truth — forceBuild skips auto routing ──
     const isBuildMode = mode === 'build' || forceBuild;
     const isAutoMode  = mode === 'auto' && !forceBuild;

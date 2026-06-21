@@ -8,6 +8,7 @@ import { aiRouter } from '../lib/aiRouter';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { reviewCode, formatReviewReport } from '../pro/ProCodeReview';
+import { deployVercel, deployNetlify, deployGitHubPages } from '../pro/ProDeploy';
 
 /**
  * Pro engine routes extracted from the server.ts monolith (Phase 1, AI-core step d).
@@ -736,6 +737,45 @@ Response Format:
     } catch (err: any) {
       console.error('[PRO/code-review] Error:', err?.message || err);
       res.status(500).json({ error: err?.message || 'Code review failed.' });
+    }
+  });
+
+  // ══ DEPLOY ENDPOINT — Vercel / Netlify / GitHub Pages ══
+  // Body: { provider: 'vercel'|'netlify'|'github', token, files, name?, siteId?, owner?, repo? }
+  app.post('/api/pro/deploy', async (req: Request, res: Response) => {
+    try {
+      const { provider, token, files, name, siteId, owner, repo } = req.body as {
+        provider: 'vercel' | 'netlify' | 'github';
+        token: string;
+        files: Record<string, string>;
+        name?: string;
+        siteId?: string;
+        owner?: string;
+        repo?: string;
+      };
+
+      if (!provider || !token || !files || Object.keys(files).length === 0) {
+        return res.status(400).json({ error: 'provider, token, and files are required.' });
+      }
+
+      let url: string;
+      if (provider === 'vercel') {
+        if (!name) return res.status(400).json({ error: 'name required for Vercel deploy.' });
+        url = await deployVercel(token, name, files);
+      } else if (provider === 'netlify') {
+        if (!siteId) return res.status(400).json({ error: 'siteId required for Netlify deploy.' });
+        url = await deployNetlify(token, siteId, files);
+      } else if (provider === 'github') {
+        if (!owner || !repo) return res.status(400).json({ error: 'owner and repo required for GitHub Pages deploy.' });
+        url = await deployGitHubPages(token, owner, repo, files);
+      } else {
+        return res.status(400).json({ error: `Unknown provider: ${provider}` });
+      }
+
+      res.json({ url });
+    } catch (err: any) {
+      console.error('[PRO/deploy] Error:', err?.message || err);
+      res.status(500).json({ error: err?.message || 'Deployment failed.' });
     }
   });
 }

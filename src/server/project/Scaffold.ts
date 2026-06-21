@@ -14,7 +14,7 @@
  */
 import type { VirtualFileSystem } from './ProjectModel';
 
-export type Framework = 'vite-react' | 'vite-react-ts' | 'vite-vue' | 'static';
+export type Framework = 'vite-react' | 'vite-react-ts' | 'vite-vue' | 'vite-svelte' | 'static';
 
 const REACT_HINTS = [
   'react', 'vite', 'jsx', 'tsx', 'component', 'spa', 'single page',
@@ -31,10 +31,17 @@ function wantsVue(p: string): boolean {
   return /\bvue(\.?js| 3| three)?\b|\bvuejs\b|\bpinia\b|\bvue-router\b|\bnuxt\b/i.test(p);
 }
 
+/** Explicit Svelte request — checked before React/Vue. */
+function wantsSvelte(p: string): boolean {
+  return /\bsvelte(\.?js| kit| store| 4| 5)?\b|\bsveltekit\b/i.test(p);
+}
+
 /** Heuristically choose a starting framework from the user's prompt. */
 export function detectFramework(prompt: string): Framework {
   const p = (prompt || '').toLowerCase();
-  // Vue first (explicit request only) — even "vue dashboard" must pick Vue, not React.
+  // Svelte first (explicit keyword only).
+  if (wantsSvelte(p)) return 'vite-svelte';
+  // Vue second (explicit request only) — even "vue dashboard" must pick Vue, not React.
   if (wantsVue(p)) return 'vite-vue';
   // Explicit "plain html"/"static" requests stay static.
   if (/\b(plain|static|simple|landing page|single html|one html)\b/.test(p)) {
@@ -186,6 +193,46 @@ const VITE_VUE_FILES: Record<string, string> = {
     `body { margin: 0; }\n`,
 };
 
+const VITE_SVELTE_FILES: Record<string, string> = {
+  'package.json': JSON.stringify(
+    {
+      name: 'app',
+      private: true,
+      version: '0.0.0',
+      type: 'module',
+      scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+      dependencies: { svelte: '^4.2.19' },
+      devDependencies: {
+        '@sveltejs/vite-plugin-svelte': '^3.1.2',
+        vite: '^5.4.0',
+      },
+    },
+    null,
+    2,
+  ) + '\n',
+  'vite.config.js':
+    `import { defineConfig } from 'vite';\n` +
+    `import { svelte } from '@sveltejs/vite-plugin-svelte';\n\n` +
+    `export default defineConfig({ plugins: [svelte()] });\n`,
+  'index.html':
+    `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
+    `    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n` +
+    `    <title>App</title>\n  </head>\n  <body>\n    <div id="app"></div>\n` +
+    `    <script type="module" src="/src/main.js"></script>\n  </body>\n</html>\n`,
+  'src/main.js':
+    `import App from './App.svelte';\n` +
+    `import './app.css';\n\n` +
+    `const app = new App({ target: document.getElementById('app') });\n` +
+    `export default app;\n`,
+  'src/App.svelte':
+    `<script>\n  let count = 0;\n</script>\n\n` +
+    `<main>\n  <h1>Hello from Svelte</h1>\n` +
+    `  <button on:click={() => count++}>Clicked {count} times</button>\n</main>\n\n` +
+    `<style>\n  main { font-family: system-ui, sans-serif; }\n</style>\n`,
+  'src/app.css':
+    `body { margin: 0; }\n`,
+};
+
 const STATIC_FILES: Record<string, string> = {
   'index.html':
     `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
@@ -204,6 +251,7 @@ const SKELETONS: Record<Framework, Record<string, string>> = {
   'vite-react': VITE_REACT_FILES,
   'vite-react-ts': VITE_REACT_TS_FILES,
   'vite-vue': VITE_VUE_FILES,
+  'vite-svelte': VITE_SVELTE_FILES,
   static: STATIC_FILES,
 };
 
@@ -228,5 +276,7 @@ export function scaffoldSummary(framework: Framework): string {
     return 'a Vite + React (JSX) project: index.html → src/main.jsx → src/App.jsx, styles in src/index.css, deps in package.json';
   if (framework === 'vite-vue')
     return 'a Vite + Vue 3 project: index.html → src/main.js → src/App.vue (SFC, <script setup>), styles in src/style.css, deps in package.json';
+  if (framework === 'vite-svelte')
+    return 'a Vite + Svelte 4 project: index.html → src/main.js → src/App.svelte (SFC, on: events), styles in src/app.css, deps in package.json';
   return 'a plain static project: index.html + styles.css + app.js';
 }

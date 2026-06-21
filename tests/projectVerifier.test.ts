@@ -129,3 +129,15 @@ describe('extractBareImports', () => {
     expect(result).toHaveLength(0);
   });
 });
+
+describe('Svelte .svelte extension resolution', () => {
+  it('resolves bare .svelte imports without flagging broken import', () => {
+    const r = verifyProject(vfsFrom({
+      'package.json': JSON.stringify({ dependencies: { svelte: '^4.2.0' } }),
+      'index.html': '<div id="app"></div><script type="module" src="/src/main.js"></script>',
+      'src/main.js': "import App from './App.svelte';\nconst app = new App({ target: document.getElementById('app') });",
+      'src/App.svelte': '<script>let count = 0;</script><button on:click={() => count++}>{count}</button>',
+    }));
+    expect(r.issues.some(i => /Broken import.*App\.svelte/.test(i.message))).toBe(false);
+  });
+});

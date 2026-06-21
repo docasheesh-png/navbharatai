@@ -129,8 +129,8 @@ export function verifyProject(vfs: VirtualFileSystem): VerifyResult {
   return { ok: errors === 0, errors, warnings, issues };
 }
 
-const MODULE_EXTS = ['', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.cjs', '.vue', '.json', '.css',
-  '/index.tsx', '/index.ts', '/index.jsx', '/index.js', '/index.vue'];
+const MODULE_EXTS = ['', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.cjs', '.vue', '.svelte', '.json', '.css',
+  '/index.tsx', '/index.ts', '/index.jsx', '/index.js', '/index.vue', '/index.svelte'];
 
 const SRC_RE = /\.(jsx?|tsx?|mjs|cjs)$/i;
 

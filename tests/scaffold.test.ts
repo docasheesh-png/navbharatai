@@ -61,4 +61,23 @@ describe('scaffold', () => {
   it('plain react (no TS) still scaffolds .jsx', () => {
     expect(detectFramework('a react todo app')).toBe('vite-react');
   });
+
+  it('detects Svelte and seeds a correct Svelte 4 + Vite skeleton', () => {
+    expect(detectFramework('build a svelte todo app')).toBe('vite-svelte');
+    expect(detectFramework('create a SvelteKit dashboard')).toBe('vite-svelte');
+    const vfs = VirtualFileSystem.fromRecord({});
+    expect(scaffold(vfs, 'vite-svelte')).toBe('vite-svelte');
+    expect(vfs.paths()).toContain('src/App.svelte');
+    expect(vfs.paths()).toContain('src/main.js');
+    expect(vfs.paths()).toContain('vite.config.js');
+    expect(vfs.readText('index.html')).toContain('/src/main.js');
+    expect(vfs.readText('vite.config.js')).toContain('@sveltejs/vite-plugin-svelte');
+    const pkg = JSON.parse(vfs.readText('package.json')!);
+    expect(pkg.dependencies.svelte).toBeTruthy();
+    expect(pkg.devDependencies['@sveltejs/vite-plugin-svelte']).toBeTruthy();
+  });
+
+  it('scaffoldSummary describes Svelte', () => {
+    expect(scaffoldSummary('vite-svelte')).toContain('Svelte');
+  });
 });

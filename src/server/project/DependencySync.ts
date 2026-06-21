@@ -86,6 +86,8 @@ const KNOWN_VERSIONS: Record<string, string> = {
   'react-select': '^5.8.0',
   'react-datepicker': '^7.3.0',
   '@hello-pangea/dnd': '^16.6.0',
+  // Svelte runtime (plugin goes in devDeps — see KNOWN_DEV_VERSIONS)
+  'svelte': '^4.2.19',
 };
 
 /** Packages that belong in devDependencies (build tools, type declarations, test infra). */
@@ -108,6 +110,7 @@ const KNOWN_DEV_VERSIONS: Record<string, string> = {
   // Vite plugins
   '@vitejs/plugin-react': '^4.3.1',
   '@vitejs/plugin-vue': '^5.1.0',
+  '@sveltejs/vite-plugin-svelte': '^3.1.2',
   // Testing
   'vitest': '^2.0.0',
   '@testing-library/react': '^16.0.0',

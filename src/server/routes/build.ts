@@ -287,7 +287,13 @@ export function registerBuildRoutes(app: Express): void {
     // sure the user ALWAYS gets a result, we run under a soft deadline below the
     // platform limit: when it fires we abort the engine and emit a `partial`
     // complete with whatever was built so far (the client can then auto-continue).
-    const SOFT_DEADLINE_MS = 240_000; // 4 min, ~1 min under Cloud Run's 300s cap
+    //
+    // G11 — reduced from 240s to 200s so the ~60s post-engine work (memory
+    // update + preview + code review) has a 40s buffer before Cloud Run kills us.
+    // Root cause of "Build stream ended without a result": summarizeForMemory had
+    // no timeout and could take 30-60s AFTER the deadline fired, consuming the
+    // remaining buffer before sendComplete was called.
+    const SOFT_DEADLINE_MS = 200_000; // 3 min 20 s, ~100s under Cloud Run's 300s cap
     const startedAt = Date.now();
     const deadline = new AbortController();
     const deadlineTimer = setTimeout(() => deadline.abort(), SOFT_DEADLINE_MS);
@@ -374,13 +380,25 @@ export function registerBuildRoutes(app: Express): void {
               { role: 'user' as const, content: prompt },
               { role: 'assistant' as const, content: thisEntry },
             ];
-            const updatedSummary = await summarizeForMemory(callModel, memory.summary, turnHistory);
+            // G11 — cap memory update at 8s: summarizeForMemory is an AI call with
+            // no timeout of its own. If it runs long after the soft deadline, the
+            // total request time can exceed Cloud Run's 300s hard kill, causing
+            // "Build stream ended without a result". Fall back to the existing
+            // summary to keep memory coherent even on timeout.
+            const updatedSummary = await Promise.race([
+              summarizeForMemory(callModel, memory.summary, turnHistory),
+              new Promise<string>((resolve) => setTimeout(() => resolve(memory.summary || ''), 8000)),
+            ]);
             const updatedEditLog = [...(memory.editLog || []), thisEntry].slice(-30);
 
             let previewInfo: unknown = undefined;
             if (preview && eng.previewAllowed) {
               const vfs = VirtualFileSystem.fromRecord(eng.files);
-              previewInfo = await previewService.startPreview('build', vfs);
+              // G11 — cap preview at 8s so we stay well within Cloud Run's budget.
+              previewInfo = await Promise.race([
+                previewService.startPreview('build', vfs),
+                new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 8000)),
+              ]);
             } else if (preview && !eng.previewAllowed) {
               previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
             }

@@ -1377,3 +1377,67 @@ Adds 8 example prompt cards to Pro Chat empty state (Bolt.new-style "blank page"
   phrases ('example prompt', 'quick start', 'app ideas') to avoid false context
   injection on build instructions (prevents appContextInjector test regression).
 Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
+
+### Milestone G12 — Real-Time File Content Streaming (2026-06-21)
+Claude Code feel: code files now appear in the Generated Files panel as the agent writes them,
+instead of waiting until the entire build completes.
+
+Root insight: `files_changed` events from `EngineerAgentLoop` already carry `{ path, content }[]`
+for every `edit_file`/`patch_file` action — no extra VFS reads needed.
+
+Changes:
+- BuildPipeline.ts: added `{ type: 'file'; fileName: string; content: string }` to `BuildProgressEvent`
+- buildService.ts: added `'file'` to `BuildStreamEvent.type` union + `fileName?` field
+- ProEngineRunner.ts: on `files_changed`, emit individual `file` events (≤8 files, ≤40KB each)
+- App.tsx: `buildAppStream` callback handles `type === 'file'` → updates `generatedFiles` state
+  in real-time; files appear in the Generated Files panel as they're written
+
+Result: users watch code appearing file by file during the build — same interactive feel as
+Claude Code's live editing view.
+Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
+
+### Milestone G11 — Build Reliability + Real-Time File Display (2026-06-21)
+Root cause fix for "Build stream ended without a result" (reported by user after "photo editing app"):
+
+**Root cause**: Cloud Run kills requests at 300s hard limit. SOFT_DEADLINE_MS was 240s, but
+post-engine work had NO timeout: `summarizeForMemory` (unbounded AI call, up to 60s) +
+`previewService.startPreview` (unbounded, up to 30s) + code review (capped at 12s) =
+potentially 100s of additional time after the soft deadline, pushing past the 300s kill.
+
+**Fixes in build.ts**:
+- SOFT_DEADLINE_MS: 240,000ms → 200,000ms (3m20s, gives 100s buffer before 300s kill)
+- `summarizeForMemory`: add 8s Promise.race cap; falls back to existing summary on timeout
+- `previewService.startPreview`: add 8s Promise.race cap; preview omitted gracefully if slow
+- Max post-engine time: 8s + 8s + 12s = 28s. Total max: 200s + 28s = 228s (72s under limit)
+
+**UX improvement in App.tsx**:
+- Handle `files` events from the agent loop to show file names being written: "✏️ App.tsx, utils.ts"
+  Previously these events were silently dropped; now users see live coding progress.
+
+Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
+
+### Milestone G10 — Iterative Agent Build + Retry Memory Fix (2026-06-21)
+Fixes two root-cause bugs reported by the user ("photo editing app" failure + "try again" amnesia):
+
+**Problem 1 — Memory loss on retry**: When a build failed, saying "please try again" caused
+Pro Chat to lose context — it said "Sure, happy to try again!" with no idea what to rebuild.
+Root cause: in AUTO mode, "please try again" → classifyAutoIntent returns 'chat'
+(no build verb, no app noun) → routed to /api/pro-chat → conversational response.
+
+**Problem 2 — Iterative engine**: The multi-step agentic engine (PlannerAgent + CoderAgent +
+EngineerAgentLoop) was ALREADY wired in production via buildAppStream → /api/build-stream
+→ runProEngine. The VFS tier always runs the iterative loop. The "single shot" perception
+was because the engine was silently falling back to runBuild on context/timeout failures.
+
+**Fix**:
+- App.tsx: `lastBuildPromptRef = useRef<string>('')` stores the effective prompt before every build.
+- Retry detection: pure-regex (`/^(please\s+)?(try\s+again|retry)…/`) + empty-workspace guard
+  + non-empty stored prompt guard = `isRetryAfterFailure` flag.
+- AUTO mode intercept: when `isRetryAfterFailure`, skip classifyAutoIntent entirely — force-build
+  with `handleSendForPro(lastBuildPromptRef.current, forceBuild=true, guiderApproved=true)`.
+  `guiderApproved=true` prevents the original prompt from being re-added as a duplicate
+  chat message (user still sees "please try again" in chat, followed by the build progress).
+- BUILD mode: `buildPrompt` variable (= lastBuildPromptRef or messageToSend) used for both
+  the Guider plan call and the buildAppStream prompt.
+- AppKnowledgeBase.ts: 'iterative-agent-build' entry added.
+Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.

@@ -248,6 +248,15 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
         case 'files_changed':
           didEdit = true;
           send({ type: 'files', paths: ev.files.map((f) => f.path) });
+          // G12 — real-time file streaming: emit each file's content so the UI can
+          // show code appearing as the agent writes it (like Claude Code).
+          // Cap at 8 files and 40 KB per file to keep SSE traffic manageable.
+          // The content is carried directly in the files_changed event — no extra reads.
+          for (const f of ev.files.slice(0, 8)) {
+            if (f.content.length < 40_000) {
+              send({ type: 'file', fileName: f.path, content: f.content });
+            }
+          }
           break;
         case 'server_ready':
           send({ type: 'preview_url', url: ev.url });

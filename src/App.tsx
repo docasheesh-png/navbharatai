@@ -1596,6 +1596,8 @@ export default function App() {
   // Phase 79 — latest E2B screenshot forwarded via the SSE stream
   const proLiveScreenshotRef = useRef<string | null>(null);
   const pendingViewAfterLoginRef = useRef<ViewType | null>(null);
+  // G10 — stores the last build prompt so retry requests ("try again") can restore context.
+  const lastBuildPromptRef = useRef<string>('');
 
   // NOTE: horizontal swipe is intentionally reserved app-wide for the sidebar
   // (open/close) — handled by the document-level touch handler above. A previous
@@ -3928,6 +3930,14 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     const proMemorySummary = proActiveSession?.memorySummary || undefined;
     const proHistoryForAPI = [...proRestoredMessages, ...proMessages];
 
+    // G10 — memory fix: detect "try again" requests after a failed build so we can
+    // restore the original build prompt and retry with full context.
+    const isPureRetry = /^(please\s+)?(try\s+again|retry)\s*[!.?]*$/i.test(messageToSend.trim())
+      || /^(dobara\s+(try|karo|banao)|phir\s+se\s+(try|bana|karo))\s*[!.?]*$/i.test(messageToSend.trim());
+    const isRetryAfterFailure = isPureRetry
+      && Object.keys(files).filter(k => !k.startsWith('.')).length === 0
+      && !!lastBuildPromptRef.current;
+
     // ── /code-review command — OWASP + quality + tech debt scan of current files ──
     if (messageToSend.trim().toLowerCase() === '/code-review') {
       const reviewFiles = files && Object.keys(files).length > 0 ? files : null;
@@ -4031,6 +4041,16 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
 
     // ── AUTO MODE — smart routing: human-like chat, clarify, or build ──
     if (isAutoMode) {
+      // G10 — memory fix: retry after a failed build — skip auto-routing and
+      // force-build with the original prompt. guiderApproved=true prevents the
+      // original prompt from being re-added as a duplicate user message in chat.
+      if (isRetryAfterFailure) {
+        setIsProLoading(false);
+        proAbortControllerRef.current = null;
+        setTimeout(() => void handleSendForPro(lastBuildPromptRef.current, true, false, true), 50);
+        return;
+      }
+
       const isConfirmBuild = isConfirmBuildTap;
       const actualMessage = isConfirmBuild
         ? (proMessages.filter(m => m.sender === 'user').slice(-1)[0]?.text || messageToSend)
@@ -4292,6 +4312,14 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
           }, 1200);
         };
 
+        // G10 — memory fix: on retry after a failed build, restore the original
+        // prompt so the build has full context. Also store the effective prompt so
+        // a SUBSEQUENT retry can re-use it.
+        const buildPrompt = (isRetryAfterFailure && lastBuildPromptRef.current)
+          ? lastBuildPromptRef.current
+          : messageToSend;
+        lastBuildPromptRef.current = buildPrompt;
+
         // ── Guider (Hybrid): for a fresh/big request, propose a design and wait for
         //    the user's confirmation BEFORE building. Small edits skip this (gate on
         //    the server). Never blocks: any failure just proceeds to a normal build.
@@ -4299,10 +4327,10 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
           try {
             const planResp: any = await fetch('/api/guider/plan', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ prompt: messageToSend, files: allTextFiles, isEdit: isEditRequest, agentic: true }),
+              body: JSON.stringify({ prompt: buildPrompt, files: allTextFiles, isEdit: isEditRequest, agentic: true }),
             }).then(r => r.json());
             if (planResp?.confirm && planResp?.plan) {
-              setProGuiderPlan({ prompt: messageToSend, plan: planResp.plan });
+              setProGuiderPlan({ prompt: buildPrompt, plan: planResp.plan });
               setProBuildProgress(prev => ({ ...prev, active: false }));
               setIsProLoading(false);
               proAbortControllerRef.current = null;
@@ -4324,7 +4352,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             part: proAutoContinueRef.current + 1,
           }));
           const engineRes: any = await buildAppStream({
-            prompt: messageToSend,
+            prompt: buildPrompt,
             files: Object.keys(allTextFiles).length ? allTextFiles : undefined,
             preview: true,
             // Claude-Code-style memory: tell the engine this is an edit (skips the
@@ -4351,6 +4379,21 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
           }, (ev) => {
             if (ev.type === 'status' && ev.message) {
               setProBuildProgress(prev => ({ ...prev, active: true, stage: `⚙️ ${ev.message}`, percent: Math.min(92, Math.max(prev.percent, (ev.coverage ?? 0))) }));
+            } else if (ev.type === 'files' && ev.paths && ev.paths.length > 0) {
+              // G11 — real-time file display: show which files the agent is writing.
+              const names = ev.paths.slice(0, 3).map((p: string) => p.split('/').pop() || p).join(', ');
+              const more = ev.paths.length > 3 ? ` +${ev.paths.length - 3} more` : '';
+              setProBuildProgress(prev => ({ ...prev, active: true, stage: `✏️ ${names}${more}`, percent: Math.min(90, prev.percent + 2) }));
+            } else if (ev.type === 'file' && ev.fileName && ev.content !== undefined) {
+              // G12 — real-time file content: populate the Generated Files panel as each
+              // file is written so the user sees code appearing live (Claude Code feel).
+              setProBuildProgress(prev => ({
+                ...prev,
+                generatedFiles: {
+                  ...prev.generatedFiles,
+                  [ev.fileName!]: { content: ev.content!, expanded: false },
+                },
+              }));
             } else if (ev.type === 'module' && ev.name) {
               const icon = ev.state === 'done' ? '✓' : ev.state === 'failed' ? '⚠️' : '⏳';
               setProBuildProgress(prev => ({

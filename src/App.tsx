@@ -4,6 +4,7 @@ import { useToast, ToastContainer } from './components/Toast';
 import { EngineBuilder } from './components/EngineBuilder';
 import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
 import { GitViewPanel } from './components/panels/GitViewPanel';
+import { DeploySuccessPanel } from './components/panels/DeploySuccessPanel';
 import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
@@ -9108,37 +9109,11 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           {activeView === 'history' && <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} />}
 
           {activeView === 'deploy' && (
-            <div className="flex-1 p-8 bg-[#0d1117] flex items-center justify-center">
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="max-w-md w-full bg-[#161b22] border border-white/10 rounded-3xl p-10 text-center shadow-3xl overflow-hidden relative"
-              >
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 animate-pulse"></div>
-                
-                <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-8 border border-emerald-500/20">
-                  <Rocket className="w-10 h-10 text-emerald-500" />
-                </div>
-                
-                <h3 className="text-2xl font-bold text-white mb-2">App is Live!</h3>
-                <p className="text-sm text-[#8b949e] mb-8">Your application has been deployed to the edge network.</p>
-                
-                <div className="bg-[#0d1117] border border-white/10 rounded-2xl p-4 flex items-center justify-between mb-8">
-                   <div className="text-xs font-mono text-indigo-400 truncate pr-4">{deployUrl}</div>
-                   <button 
-                    onClick={() => window.open(deployUrl, '_blank')}
-                    className="shrink-0 p-2 hover:bg-white/5 rounded-lg transition-colors"
-                  >
-                    <Globe className="w-4 h-4 text-[#8b949e] hover:text-white" />
-                   </button>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <button onClick={() => toggleTab('preview')} className="py-3 px-4 bg-white/5 hover:bg-white/10 text-white rounded-xl text-xs font-bold transition-all">Preview App</button>
-                  <button onClick={() => setIsDeployed(false)} className="py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/20">Back to Code</button>
-                </div>
-              </motion.div>
-            </div>
+            <DeploySuccessPanel
+              deployUrl={deployUrl}
+              onOpenPreview={() => toggleTab('preview')}
+              onBackToCode={() => setIsDeployed(false)}
+            />
           )}
 
           {activeView === 'studio' && (

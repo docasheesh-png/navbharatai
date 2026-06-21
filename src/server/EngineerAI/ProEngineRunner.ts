@@ -36,7 +36,8 @@ import { VfsActuator } from './actuators/VfsActuator';
 import { DockerActuator } from './actuators/DockerActuator';
 import { E2BActuator } from './actuators/E2BActuator';
 import type { IEngineerActuator } from './actuators/IEngineerActuator';
-import type { EngineerTask } from './EngineerAITypes';
+import type { EngineerTask, DbProviderConfig } from './EngineerAITypes';
+import { thinkingBudgetFor, isComplexTask } from '../pro/ProComplexity';
 
 export type ExecutionTier = 'vfs' | 'cloudrun' | 'e2b';
 
@@ -112,6 +113,10 @@ export interface ProEngineOptions {
   sessionId?: string;
   /** User's own E2B API key — unlocks the top tier for large apps (billed to them). */
   userE2bKey?: string;
+  /** GitHub token for clone_repo + git_push actions (from user's Secrets & Keys). */
+  githubToken?: string;
+  /** User's database credentials — injected into the sandbox .env automatically. */
+  dbConfig?: DbProviderConfig;
   send: (ev: BuildProgressEvent) => void;
   signal?: AbortSignal;
 }
@@ -161,19 +166,39 @@ function tierPreamble(tier: ExecutionTier): string {
  * whether to emit the terminal event or fall back to the legacy pipeline.
  */
 export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineResult> {
-  const { prompt, files, callModel, isEdit, sessionId, userE2bKey, send, signal } = opts;
+  const { prompt, files, callModel, isEdit, sessionId, userE2bKey, githubToken, dbConfig, send, signal } = opts;
 
   const inputVfs = VirtualFileSystem.fromRecord(files);
-  const desired = selectTier(inputVfs, /* clampToVfs */ false);
+  // Phase 6: always prefer E2B (real cloud VM) for Pro — resolveBackend() downgrades
+  // to Docker or VFS automatically when E2B key is unavailable. This makes real
+  // execution the default, not just a large-project escalation.
+  const e2bKey = userE2bKey || process.env.E2B_API_KEY || '';
+  const desired: ExecutionTier = e2bKey ? 'e2b' : selectTier(inputVfs, /* clampToVfs */ false);
   const backend = resolveBackend(desired, inputVfs, userE2bKey);
 
   const workspaceId = sessionId || `pro-${Date.now()}`;
-  const router = new ProAgentRouter(callModel);
-  const loop = new EngineerAgentLoop(router, backend.actuator);
+  // Phase 73 — extended thinking for complex tasks: detect architectural complexity
+  // and pass a higher thinking budget to ProAgentRouter, which will use
+  // AnthropicProvider (Claude Opus with thinking enabled) directly for complex
+  // reasoning calls. Falls back to callModel for simple tasks or if Anthropic key
+  // is unavailable.
+  const budget = thinkingBudgetFor(prompt);
+  const complex = isComplexTask(prompt);
+  if (complex) {
+    send({ type: 'status', message: '🧠 Complex task detected — using extended reasoning…' });
+  }
+  const router = new ProAgentRouter(callModel, complex ? budget : undefined);
+  // Pro uses Claude Opus (200k context) — give the agent a much larger context
+  // budget so it can see more files and larger file contents per prompt step.
+  const loop = new EngineerAgentLoop(router, backend.actuator, {
+    contextBudget: { total: 140_000, perFile: 20_000, maxFiles: 80 },
+  });
   const task: EngineerTask = {
     workspaceId,
     instruction: tierPreamble(backend.tier) + prompt,
     projectType: 'auto',
+    githubToken: githubToken || process.env.GITHUB_TOKEN || undefined,
+    dbConfig: dbConfig || undefined,
   };
 
   if (backend.tier !== 'vfs') {
@@ -205,10 +230,16 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
           send({ type: 'status', message: ev.message });
           break;
         case 'action_start':
-          send({ type: 'status', message: `${ACTION_ICON[ev.action] || '•'} ${ev.thought || ev.action}` });
+          // Emit the thought separately so the UI can show it as a collapsible
+          // reasoning block (Phase 69 — CoT visibility). Only emit when the thought
+          // is substantive (not just the action-name fallback ≤ 40 chars).
+          if (ev.thought && ev.thought.length > 40) {
+            send({ type: 'thinking', content: ev.thought });
+          }
+          send({ type: 'status', message: `${ACTION_ICON[ev.action] || '•'} ${ev.action}` });
           break;
         case 'command_result':
-          send({ type: 'status', message: `$ ${ev.command} → exit ${ev.exitCode}` });
+          send({ type: 'terminal', command: ev.command, output: ev.output, exitCode: ev.exitCode });
           break;
         case 'build_result':
           send({ type: 'module', name: 'verify', state: ev.success ? 'done' : 'failed' });
@@ -218,11 +249,26 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
           didEdit = true;
           send({ type: 'files', paths: ev.files.map((f) => f.path) });
           break;
-        case 'checkpoint_created':
         case 'server_ready':
+          send({ type: 'preview_url', url: ev.url });
+          send({ type: 'status', message: `🟢 Dev server ready: ${ev.url}` });
+          break;
         case 'screenshot_result':
+          // Phase 79 — forward screenshot data so the Pro UI can show a live preview.
+          send({ type: 'screenshot', base64: ev.base64, url: ev.url });
+          send({ type: 'status', message: `📸 Screenshot: ${ev.url}` });
+          break;
         case 'browser_action_result':
+          // Phase 80 — forward browser action screenshots for cursor overlay.
+          if (ev.base64) send({ type: 'screenshot', base64: ev.base64, url: undefined });
+          send({ type: 'status', message: summarizeEvent(ev) });
+          break;
         case 'drive_frame':
+          // Phase 84 — drive frames show autonomous UI testing in progress.
+          if (ev.screenshot) send({ type: 'screenshot', base64: ev.screenshot, url: ev.url });
+          send({ type: 'status', message: `🚗 Driving step ${ev.step}: ${ev.stepDetail}` });
+          break;
+        case 'checkpoint_created':
         case 'console_error':
         case 'search_result':
         case 'backend_ready':
@@ -232,6 +278,15 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
         case 'workspace_saved':
         case 'browse_result':
           send({ type: 'status', message: summarizeEvent(ev) });
+          break;
+        case 'plan':
+          send({ type: 'plan', steps: ev.steps });
+          break;
+        case 'plan_step_start':
+          send({ type: 'plan_step_start', stepIndex: ev.stepIndex, description: ev.description });
+          break;
+        case 'plan_step_done':
+          send({ type: 'plan_step_done', stepIndex: ev.stepIndex });
           break;
         case 'chat_reply':
           send({ type: 'status', message: ev.message.slice(0, 200) });

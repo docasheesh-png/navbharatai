@@ -139,7 +139,14 @@ Coding rules (when in MODE 2):
 - Commands run with a 60-second timeout.
 - Checkpoints are created automatically before every edit_file and patch_file action. If a change makes things worse, use restore to go back: { "action": "restore", "args": { "checkpointId": "<id from checkpoint_created event>" } }.
 - Use provision_db ONCE at the start of any task that needs a database, auth (login/signup), or file uploads. It installs and starts PostgreSQL inside the sandbox, generates a DATABASE_URL + JWT_SECRET in .env, and scaffolds src/lib/db.ts / auth.ts / storage.ts helpers. Features: "db" (PostgreSQL), "auth" (bcrypt + JWT), "storage" (local filesystem). After provision_db, install required packages with bash (npm install) if not already done, then create an Express server that uses the scaffolded helpers.
-- Supported project types: vite-react (default), nextjs, vue, svelte, node-express, python-fastapi, static. The workspace is scaffolded with the correct template on first use. For Python (python-fastapi) projects: start the server with "uvicorn main:app --host 0.0.0.0 --port 3000 --reload" and install deps with "pip install -r requirements.txt". For static sites: no build step; open index.html directly in the browser.
+- Supported project types: vite-react (default), nextjs, vue, svelte, node-express, python-fastapi, python-django, python-flask, go-gin, go-fiber, rust-axum, java-spring, php-laravel, ruby-rails, static. The workspace is scaffolded with the correct template on first use.
+- Language-specific setup commands (run before starting the server):
+  Python (FastAPI/Flask/Django): pip install -r requirements.txt. Run: uvicorn main:app --host 0.0.0.0 --port 3000 --reload (FastAPI) OR python manage.py runserver 0.0.0.0:3000 (Django) OR flask run --host 0.0.0.0 --port 3000 (Flask).
+  Go: go mod init app && go mod tidy. Build: go build -o app . Run: ./app (bind to 0.0.0.0:3000). For Gin: import "github.com/gin-gonic/gin".
+  Rust: cargo build. Run: cargo run. Bind to 0.0.0.0:3000. For Axum: add axum, tokio to Cargo.toml.
+  Java (Spring Boot): mvn spring-boot:run OR ./gradlew bootRun. Port: server.port=3000 in application.properties.
+  PHP: php -S 0.0.0.0:3000 (built-in server). For Laravel: php artisan serve --host 0.0.0.0 --port 3000.
+  Ruby (Rails): bundle install && rails s -b 0.0.0.0 -p 3000. For plain Ruby: ruby server.rb.
 - Node.js production build (Express, Fastify, Hono, etc.): use esbuild to produce a single bundled file: "npx esbuild src/index.ts --bundle --platform=node --outfile=dist/index.js". Add esbuild to devDependencies. Use "node dist/index.js" to test the production bundle. The node-express template already includes this build script — only add it manually if you wrote your own package.json.
 - Next.js static export (for Firebase Hosting deploy): add output:'export' to next.config.js so "next build" exports to out/ instead of .next/. The deploy action detects out/ automatically.
 - The workspace is a git repo (auto-initialized). You can use bash to run git commands: "git status", "git log --oneline", "git diff". After major milestones, commit with "git add -A && git commit -m 'message'". The final commit is created automatically when done succeeds.`;
@@ -222,7 +229,16 @@ export class EngineerAgentLoop {
     return clicks;
   }
 
-  constructor(private router: AIRouter, private actuator: IEngineerActuator) {}
+  /** Optional context budget override — set large values when using 200k-context models. */
+  private contextBudget?: { total: number; perFile: number; maxFiles: number };
+
+  constructor(
+    private router: AIRouter,
+    private actuator: IEngineerActuator,
+    opts?: { contextBudget?: { total: number; perFile: number; maxFiles: number } },
+  ) {
+    this.contextBudget = opts?.contextBudget;
+  }
 
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
     const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig, githubToken } = task;
@@ -940,7 +956,7 @@ export class EngineerAgentLoop {
               : 'Ensure E2B_API_KEY is set and the build produced a dist/ directory.');
         }
       } else if (parsed.action === 'generate_tests') {
-        yield { type: 'status', message: `Step ${step}: generating Vitest tests…` };
+        yield { type: 'status', message: `Step ${step}: generating tests…` };
         const testFiles = await this.generateTestFiles(workspaceId, effectiveInstruction, signal);
         if (testFiles.length === 0) {
           observation =
@@ -1001,6 +1017,25 @@ export class EngineerAgentLoop {
           const searchHint = tsCodes.length > 0
             ? `\n\nTypeScript error codes found: ${tsCodes.join(', ')}. Consider using web_search to look up the fix (e.g. "${tsCodes[0]} fix typescript").`
             : '';
+          // Phase 71 — focused diagnosis: one targeted AI call to identify the root
+          // cause before the agent's regular loop continues. Applied at most once per
+          // build failure (no recursive retry chain, no runaway loop).
+          const diagFix = await this.diagnoseBuildFailure(buildResult.logs, workspaceId, signal);
+          if (diagFix) {
+            try {
+              if (diagFix.action === 'patch_file') {
+                const before = await this.actuator.readFile(workspaceId, diagFix.path);
+                if (before.includes(diagFix.args.old_str)) {
+                  const after = before.replace(diagFix.args.old_str, diagFix.args.new_str ?? '');
+                  await this.actuator.writeFile(workspaceId, diagFix.path, after);
+                  yield { type: 'status', message: `Diagnosis: auto-patched "${diagFix.path}"` };
+                }
+              } else if (diagFix.action === 'edit_file' && diagFix.args.content) {
+                await this.actuator.writeFile(workspaceId, diagFix.path, diagFix.args.content);
+                yield { type: 'status', message: `Diagnosis: rewrote "${diagFix.path}"` };
+              }
+            } catch { /* non-fatal — agent will see the error on next done */ }
+          }
           observation = `Build failed — cannot mark done yet. Fix the errors:${searchHint}\n${buildLogs}`;
         }
       } else {
@@ -1037,24 +1072,33 @@ export class EngineerAgentLoop {
    * timeout as a safety net against a mis-configured watch-mode script.
    */
   private async runProjectTests(workspaceId: string): Promise<{ ran: boolean; success: boolean; logs: string }> {
-    let pkgRaw: string;
-    try {
-      pkgRaw = await this.actuator.readFile(workspaceId, 'package.json');
-    } catch {
-      return { ran: false, success: true, logs: '' }; // no package.json (static/python) — skip
+    // Detect language by characteristic files and pick the right test command
+    const fileList = await this.actuator.listFiles(workspaceId).catch(() => [] as string[]);
+    const hasGoTest   = fileList.some(f => f.endsWith('_test.go'));
+    const hasCargoToml = fileList.some(f => f === 'Cargo.toml');
+    const hasPomXml   = fileList.some(f => f === 'pom.xml');
+    const hasPyTest   = fileList.some(f => /test_.*\.py$|.*_test\.py$/.test(f));
+    const hasRubySpec = fileList.some(f => f.endsWith('_spec.rb'));
+
+    let testCmd: string | null = null;
+    if (hasGoTest)    testCmd = 'go test ./... 2>&1';
+    else if (hasCargoToml) testCmd = 'cargo test 2>&1';
+    else if (hasPomXml)   testCmd = 'mvn test -q 2>&1 || gradle test 2>&1';
+    else if (hasPyTest)   testCmd = 'python -m pytest -q 2>&1';
+    else if (hasRubySpec) testCmd = 'bundle exec rspec --format progress 2>&1';
+    else {
+      // JS/TS: use package.json test script
+      let pkgRaw: string;
+      try { pkgRaw = await this.actuator.readFile(workspaceId, 'package.json'); }
+      catch { return { ran: false, success: true, logs: '' }; }
+      let testScript = '';
+      try { testScript = String(JSON.parse(pkgRaw)?.scripts?.test ?? ''); } catch { return { ran: false, success: true, logs: '' }; }
+      if (!testScript.trim() || /no test specified/i.test(testScript)) return { ran: false, success: true, logs: '' };
+      testCmd = 'npm test';
     }
-    let testScript = '';
+
     try {
-      testScript = String(JSON.parse(pkgRaw)?.scripts?.test ?? '');
-    } catch {
-      return { ran: false, success: true, logs: '' };
-    }
-    // Skip the npm default placeholder and empty scripts.
-    if (!testScript.trim() || /no test specified/i.test(testScript)) {
-      return { ran: false, success: true, logs: '' };
-    }
-    try {
-      const result = await this.actuator.runCommand(workspaceId, 'npm test');
+      const result = await this.actuator.runCommand(workspaceId, testCmd);
       const logs = (result.stdout + result.stderr).slice(-MAX_OBS_CHARS);
       return { ran: true, success: result.exitCode === 0, logs };
     } catch (err: any) {
@@ -1106,6 +1150,40 @@ export class EngineerAgentLoop {
   }
 
   /**
+   * Phase 71 — focused build-failure diagnosis. One targeted AI call that reads
+   * the raw build logs and returns a single surgical fix action (patch_file or
+   * edit_file) if the root cause is clear. Applied once before the agent's
+   * regular ReAct loop continues — no recursion, no retry chain.
+   */
+  private async diagnoseBuildFailure(
+    buildLogs: string,
+    workspaceId: string,
+    signal?: AbortSignal,
+  ): Promise<{ action: 'patch_file' | 'edit_file'; path: string; args: Record<string, string> } | null> {
+    if (signal?.aborted) return null;
+    const diagnosisSystemPrompt =
+      `You are a build-error expert. You will see raw build/compiler output. ` +
+      `Identify the SINGLE root-cause error (file, line, what is wrong), then output ` +
+      `exactly one JSON fix action — no markdown fences, no prose:\n` +
+      `• To patch a line: { "action": "patch_file", "args": { "path": "...", "old_str": "exact existing text", "new_str": "corrected text" } }\n` +
+      `• To rewrite a file: { "action": "edit_file", "args": { "path": "...", "content": "FULL corrected file content" } }\n` +
+      `• If you cannot determine a targeted fix: { "action": "skip", "args": {} }`;
+    const diagnosisPrompt =
+      `Build failed. Identify the root cause and provide one targeted fix:\n\n` +
+      `BUILD LOG (last 3000 chars):\n${buildLogs.slice(-3000)}`;
+    try {
+      const { response } = await this.router.route(diagnosisPrompt, diagnosisSystemPrompt);
+      const parsed = parseAction(response.content);
+      if ((parsed.action === 'patch_file' || parsed.action === 'edit_file') && parsed.args.path) {
+        return { action: parsed.action as 'patch_file' | 'edit_file', path: parsed.args.path, args: parsed.args };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Phase 17 — generate Vitest test files for the workspace's source files.
    * Makes one focused AI call with the top source files as context.
    * Returns up to 3 test file objects, or empty array on any failure.
@@ -1117,13 +1195,22 @@ export class EngineerAgentLoop {
   ): Promise<{ path: string; content: string }[]> {
     if (signal?.aborted) return [];
 
-    // Gather source files (skip test files, node_modules, config)
+    // Gather source files — include all supported languages
     const fileList = await this.actuator.listFiles(workspaceId).catch(() => [] as string[]);
     const srcFiles = fileList.filter(f =>
-      /\.(ts|tsx|js|jsx|py)$/.test(f) &&
-      !/\.test\.|\.spec\.|\.config\.|node_modules/.test(f) &&
+      /\.(ts|tsx|js|jsx|py|go|rs|java|php|rb)$/.test(f) &&
+      !/\.test\.|\.spec\.|_test\.|_spec\.|node_modules/.test(f) &&
       !/^\.engineer\//.test(f),
     ).slice(0, 6);
+
+    // Detect language by file extensions
+    const hasGo   = fileList.some(f => f.endsWith('.go'));
+    const hasRust  = fileList.some(f => f.endsWith('.rs'));
+    const hasJava  = fileList.some(f => f.endsWith('.java'));
+    const hasPHP   = fileList.some(f => f.endsWith('.php'));
+    const hasRuby  = fileList.some(f => f.endsWith('.rb'));
+    const hasPy    = fileList.some(f => f.endsWith('.py'));
+    // Default: JS/TS (Vitest)
 
     const fileSections: string[] = [];
     for (const fp of srcFiles) {
@@ -1137,17 +1224,31 @@ export class EngineerAgentLoop {
       ? `\n\nSource files to test:\n${fileSections.join('\n\n')}`
       : '\n\n(No source files found — generate a placeholder test based on the task description.)';
 
+    // Language-specific test framework instructions
+    const langInstructions = hasGo
+      ? `Use Go's built-in testing package. File naming: *_test.go. Functions: func TestXxx(t *testing.T). Run: go test ./...`
+      : hasRust
+      ? `Use Rust's built-in #[test] attribute. Add tests in the same file under #[cfg(test)] mod tests { }. Run: cargo test.`
+      : hasJava
+      ? `Use JUnit 5 (@Test annotation, import org.junit.jupiter.api.*). Place tests in src/test/java/. Run: mvn test or gradle test.`
+      : hasPHP
+      ? `Use PHPUnit. File naming: *Test.php. Class extends TestCase. Run: ./vendor/bin/phpunit or composer test.`
+      : hasRuby
+      ? `Use RSpec. File naming: *_spec.rb in spec/. describe/it/expect syntax. Run: bundle exec rspec.`
+      : hasPy
+      ? `Use pytest. File naming: test_*.py or *_test.py. Functions: def test_xxx(). Run: pytest.`
+      : `Use Vitest (import { describe, it, expect } from 'vitest'). For React components use @testing-library/react.`;
+
     const testGenSystemPrompt =
-      `You are a test engineer writing minimal Vitest unit tests. ` +
-      `Use Vitest (import { describe, it, expect } from 'vitest'). ` +
-      `For React components use @testing-library/react. ` +
+      `You are a test engineer writing minimal unit tests for the language detected. ` +
+      langInstructions + ` ` +
       `Focus on pure functions and testable logic — skip untestable side-effects and fetch calls. ` +
       `Output EXACTLY one JSON object with no markdown fences: ` +
       `{ "testFiles": [{ "path": "src/__tests__/app.test.ts", "content": "..." }] }`;
 
     const testGenPrompt =
       `Task: ${instruction.slice(0, 200)}\n` +
-      `Generate 1-2 minimal Vitest test files covering the most important logic.` +
+      `Generate 1-2 minimal test files covering the most important logic.` +
       sourceContext +
       `\n\nOutput one JSON object: { "testFiles": [{ "path": "...", "content": "..." }] }`;
 
@@ -1206,15 +1307,20 @@ export class EngineerAgentLoop {
 
     // 5. Read top-ranked files and pack within the context budget
     const contentMap = new Map<string, string>();
-    const MAX_TO_READ = 30;
-    for (const filePath of ranked.slice(0, MAX_TO_READ)) {
+    const maxToRead = this.contextBudget?.maxFiles ?? 30;
+    for (const filePath of ranked.slice(0, maxToRead)) {
       try {
         contentMap.set(filePath, await this.actuator.readFile(workspaceId, filePath));
       } catch {
         contentMap.set(filePath, ''); // mark as unreadable
       }
     }
-    const fileSections = packFileSections(ranked, contentMap);
+    const fileSections = packFileSections(
+      ranked, contentMap,
+      this.contextBudget?.total,
+      this.contextBudget?.perFile,
+      this.contextBudget?.maxFiles,
+    );
 
     // 6. Full file tree (paths only) — gives the model the overall shape
     const fileTree = buildFileTree(fileList);

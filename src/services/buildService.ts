@@ -80,6 +80,12 @@ export interface BuildRequest {
   editLog?: string[];
   /** Opt into the agentic edit engine for this request (Phase-1 rollout flag). */
   agentic?: boolean;
+  /**
+   * Phase 85 — Design-to-Code: base64-encoded design images (Figma exports,
+   * screenshots, mockups). Claude vision analyzes the images and generates UI code
+   * that matches the design layout and style.
+   */
+  designImages?: string[];
 }
 
 /**
@@ -124,12 +130,26 @@ export function buildApp(req: BuildRequest, signal?: AbortSignal): Promise<Build
 
 /** A live progress event streamed from /api/build-stream. */
 export interface BuildStreamEvent {
-  type: 'status' | 'module' | 'files' | 'complete' | 'error';
+  type: 'status' | 'module' | 'files' | 'complete' | 'error' | 'terminal' | 'preview_url' | 'plan' | 'plan_step_start' | 'plan_step_done' | 'thinking' | 'screenshot';
   message?: string;
   name?: string;
   state?: 'start' | 'done' | 'failed';
   coverage?: number;
   paths?: string[];
+  // terminal event (Phase 7 — real bash output from E2B sandbox)
+  command?: string;
+  output?: string;
+  exitCode?: number;
+  // preview_url event (Phase 10 — real E2B dev server URL)
+  url?: string;
+  // plan events (Phase 68 — PlannerAgent step visibility)
+  steps?: string[];
+  stepIndex?: number;
+  description?: string;
+  // thinking event (Phase 69 — CoT step-by-step reasoning visible in UI)
+  content?: string;
+  // screenshot event (Phase 79 — live preview screenshot from E2B browser)
+  base64?: string;
   // present on the final 'complete' event:
   ok?: boolean;
   files?: Record<string, string>;

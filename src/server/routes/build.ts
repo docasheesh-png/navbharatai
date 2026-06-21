@@ -22,8 +22,12 @@ function buildGradeContext(files: Record<string, string>): string {
   return `Files (${paths.length}):\n${paths.join('\n')}\n${body}`;
 }
 import { makeAiEditGenerator, summarizeForMemory, type ModelCall, type BuildMemory } from '../project/aiEdits';
+import { orchestrateGenerate } from '../pro/ProOrchestrator';
+import { proMemoryStore } from '../pro/ProMemory';
+import { generateTests } from '../pro/ProTestGen';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
+import { AnthropicProvider } from '../AI/Router/providers/AnthropicProvider';
 import { aiRouter } from '../lib/aiRouter';
 import { getPreviewService } from '../runtime/PreviewService';
 import { getMetrics, estimateTokens } from '../lib/metrics';
@@ -97,6 +101,22 @@ function makeResilientModelCall(userKey?: string): ModelCall {
     // so the caller at least sees the real message instead of throwing blindly.
     if (lastOut) return lastOut;
     throw new Error(`All AI providers failed for build${lastErr ? `: ${(lastErr as any)?.message || lastErr}` : ''}`);
+  };
+}
+
+/**
+ * Phase 85 — Design-to-Code: when the user provides design images, wrap the
+ * standard model call to include vision via AnthropicProvider (Claude Opus native
+ * vision). Falls back to text-only callModel if Anthropic is unavailable.
+ */
+function makeVisionModelCall(baseCall: ModelCall, images: string[]): ModelCall {
+  const provider = new AnthropicProvider('claude-opus-4-8');
+  return async (system, user) => {
+    try {
+      const res = await provider.execute(user, undefined, undefined, system, images);
+      if (res.content && isUsableResponse(res.content)) return res.content;
+    } catch { /* fall through to base */ }
+    return baseCall(system, user);
   };
 }
 
@@ -277,25 +297,57 @@ export function registerBuildRoutes(app: Express): void {
       sid = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : 'pro';
       eventBus.publish({ type: EventType.BUILD_STARTED, workspaceId: sid, sender: 'pro', payload: { isEdit: isEdit === true } });
 
-      const memory = parseMemory(req.body);
-      const callModel: ModelCall = makeResilientModelCall(userKey);
+      // Phase 85 — design-to-code: extract uploaded design images (base64 strings)
+      const designImages: string[] | undefined = Array.isArray(req.body?.designImages)
+        ? req.body.designImages.filter((x: any) => typeof x === 'string').slice(0, 4)
+        : undefined;
+
+      const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined;
+      const inRequestMemory = parseMemory(req.body);
+      // Phase 74 — load persisted memory from Firestore to supplement in-request
+      // memory (frontend passes current session state; Firestore adds cross-session
+      // persistence so the project stays coherent after a browser refresh).
+      const persistedMemory = sessionId
+        ? await proMemoryStore.load(sessionId).catch(() => null)
+        : null;
+      const memory: import('../project/aiEdits').BuildMemory = {
+        history: inRequestMemory.history,
+        summary: persistedMemory?.memorySummary || inRequestMemory.summary,
+        editLog: (inRequestMemory.editLog ?? []).length > 0
+          ? inRequestMemory.editLog
+          : (persistedMemory?.editLog ?? []),
+      };
+      const baseCallModel: ModelCall = makeResilientModelCall(userKey);
+      // Phase 85 — use vision-enabled model call when design images are uploaded.
+      const callModel: ModelCall = designImages && designImages.length > 0
+        ? makeVisionModelCall(baseCallModel, designImages)
+        : baseCallModel;
 
       // ── Agentic edit engine (Phase 1 — VFS tier). Additive + flag-gated: it is
       //    the PRIMARY edit path when enabled, and falls back transparently to the
       //    legacy runBuild() pipeline below if it errors or yields nothing usable.
       //    No terminal complete/error is sent until a path actually succeeds, so a
       //    fallback is invisible to the UI. ────────────────────────────────────
-      const agenticEnabled = process.env.PRO_AGENTIC_ENGINE === '1' || req.body?.agentic === true;
+      // Phase 6: agentic engine is ON by default — disable with PRO_AGENTIC_ENGINE=0
+      const agenticEnabled = process.env.PRO_AGENTIC_ENGINE !== '0';
       if (agenticEnabled) {
         try {
           const eng = await runProEngine({
-            prompt,
+            // Phase 85: when design images are provided, prepend a design hint to the
+            // agentic prompt so the agent knows it should match the visual design.
+            prompt: designImages && designImages.length > 0
+              ? `[DESIGN IMAGE(S) PROVIDED — generate UI code that matches the visual design in the image(s)]\n${prompt}`
+              : prompt,
             files: files && typeof files === 'object' ? files : undefined,
             callModel,
             isEdit: isEdit === true,
-            sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined,
+            sessionId,
             // User's own E2B key unlocks the top tier for large apps (billed to them).
             userE2bKey: typeof req.body?.userE2bKey === 'string' ? req.body.userE2bKey : undefined,
+            // GitHub token for clone_repo + git_push (from user's Secrets & Keys settings).
+            githubToken: typeof req.body?.githubToken === 'string' ? req.body.githubToken : undefined,
+            // User's database credentials (from Settings → App Settings → Database).
+            dbConfig: req.body?.dbConfig && typeof req.body.dbConfig === 'object' ? req.body.dbConfig : undefined,
             send: (ev) => send(ev),
             signal: deadline.signal,
           });
@@ -345,7 +397,11 @@ export function registerBuildRoutes(app: Express): void {
         }
       }
 
-      const { generate, fix, completeFeatures } = makeAiEditGenerator(callModel, memory);
+      const { generate: singleGenerate, fix, completeFeatures } = makeAiEditGenerator(callModel, memory);
+      // Phase 72 — multi-agent orchestration: for full-stack tasks, fan out to two
+      // parallel focused generation calls (frontend + backend) and merge results.
+      const generate = (p: string, v: import('../project/ProjectModel').VirtualFileSystem) =>
+        orchestrateGenerate(p, v, callModel).catch(() => singleGenerate(p, v));
 
       const t0 = Date.now();
       // Race the build against the soft deadline so a hung/slow build can never run
@@ -387,9 +443,25 @@ export function registerBuildRoutes(app: Express): void {
       const updatedSummary = await summarizeForMemory(callModel, memory.summary, turnHistory);
       const updatedEditLog = [...(memory.editLog || []), thisEntry].slice(-30);
 
+      // Phase 17 — auto test generation: add a Vitest test file alongside the build.
+      // Best-effort, 8s cap — never blocks or fails the build.
+      let finalFiles = result.files;
+      if (!isEdit) {
+        try {
+          const testFiles = await Promise.race([
+            generateTests(result.files, callModel),
+            new Promise<Record<string, string>>((resolve) => setTimeout(() => resolve({}), 8000)),
+          ]);
+          if (Object.keys(testFiles).length > 0) {
+            finalFiles = { ...result.files, ...testFiles };
+            send({ type: 'status', message: `Generated ${Object.keys(testFiles).join(', ')}` });
+          }
+        } catch { /* test gen never blocks the build */ }
+      }
+
       let previewInfo: unknown = undefined;
       if (preview && result.previewAllowed) {
-        const vfs = VirtualFileSystem.fromRecord(result.files);
+        const vfs = VirtualFileSystem.fromRecord(finalFiles);
         previewInfo = await previewService.startPreview('build', vfs);
       } else if (preview && !result.previewAllowed) {
         previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
@@ -397,8 +469,8 @@ export function registerBuildRoutes(app: Express): void {
 
       sendComplete({
         ok: result.ok,
-        files: result.files,
-        fileCount: result.fileCount,
+        files: finalFiles,
+        fileCount: Object.keys(finalFiles).length,
         verify: result.verify,
         validation: result.validation,
         previewAllowed: result.previewAllowed,
@@ -408,6 +480,12 @@ export function registerBuildRoutes(app: Express): void {
         partial: false,
       });
       eventBus.publish({ type: EventType.BUILD_COMPLETED, workspaceId: sid, sender: 'pro', payload: { path: 'legacy', ok: result.ok, fileCount: result.fileCount, previewAllowed: result.previewAllowed, partial: false } });
+      if (sessionId) {
+        proMemoryStore.save(sessionId, {
+          memorySummary: updatedSummary,
+          editLog: updatedEditLog,
+        }).catch(() => {});
+      }
     } catch (err: any) {
       // Only surface an error if we haven't already given the user a result.
       if (!sentTerminal) {

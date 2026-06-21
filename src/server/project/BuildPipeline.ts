@@ -30,7 +30,14 @@ export type FeatureCompleter = (prompt: string, missing: string[], vfs: VirtualF
 export type BuildProgressEvent =
   | { type: 'status'; message: string }
   | { type: 'module'; name: string; state: 'start' | 'done' | 'failed'; coverage?: number }
-  | { type: 'files'; paths: string[] };
+  | { type: 'files'; paths: string[] }
+  | { type: 'terminal'; command: string; output: string; exitCode: number }
+  | { type: 'preview_url'; url: string }
+  | { type: 'plan'; steps: string[] }
+  | { type: 'plan_step_start'; stepIndex: number; description: string }
+  | { type: 'plan_step_done'; stepIndex: number }
+  | { type: 'thinking'; content: string }
+  | { type: 'screenshot'; base64: string; url?: string };
 
 export interface BuildPipelineInput {
   prompt: string;

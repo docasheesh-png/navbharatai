@@ -345,6 +345,64 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
       'open', 'go to', 'find', 'navigate', 'back button', 'tabs', 'hamburger menu', 'mobile menu',
     ],
   },
+
+  // ─── PRO CHAT — NEW CAPABILITIES (Phases 68-100) ─────────────────────────
+
+  {
+    id: 'pro_chat_extended_thinking',
+    name: 'Pro Chat — Extended Thinking (Complex Tasks)',
+    path: 'Pro Chat → just describe a complex task (auto-detected)',
+    description: `Pro Chat automatically detects complex tasks (full-stack apps, multi-system architecture, OAuth, real-time features, enterprise scale) and activates Claude Opus extended reasoning (16k token thinking budget). No setting needed — the AI decides when deep reasoning is required. You will see a "🧠 Complex task detected — using extended reasoning…" status message when active.`,
+    howToUse: 'Describe a complex app (e.g. "Build a full-stack SaaS with OAuth and Stripe payments") and Pro will automatically use extended thinking for deeper architectural reasoning.',
+    relatedFeatures: ['pro_chat', 'pro_chat_planner'],
+    aiSurface: 'pro_chat',
+    keywords: ['extended thinking', 'deep reasoning', 'complex task', 'thinking budget', 'opus thinking', 'architecture decision'],
+  },
+  {
+    id: 'pro_chat_planner',
+    name: 'Pro Chat — Build Planner (Step-by-Step Progress)',
+    path: 'Pro Chat → submit a build request → see step progress bar',
+    description: `For large builds, Pro Chat shows a live step-by-step progress bar. The AI plans the build first (e.g. "Scaffold files → Install deps → Build UI → Add auth → Integrate DB"), then works through each step. Each step shows: name, current status (pending/working/done), and a reasoning snippet from the AI's chain-of-thought. The reasoning shows WHY the AI is taking the next action.`,
+    howToUse: 'Submit a multi-component build request. The progress panel shows each step as the AI works. Reasoning snippets appear under each running step to show the AI\'s thought process.',
+    relatedFeatures: ['pro_chat', 'pro_chat_extended_thinking'],
+    aiSurface: 'pro_chat',
+    keywords: ['build planner', 'step progress', 'plan', 'steps', 'progress bar', 'thinking', 'reasoning', 'chain of thought'],
+  },
+  {
+    id: 'pro_chat_session_memory',
+    name: 'Pro Chat — Cross-Session Memory',
+    path: 'Pro Chat → automatic (no user action needed)',
+    description: `Pro Chat remembers your project across sessions — even after closing the browser or switching devices. It stores: rolling build summary, edit log (what changed in each turn), architectural decisions, and user preferences in Firestore. On the next session with the same project, Pro already knows the stack, past decisions, and recent changes. It will NOT undo things you already built.`,
+    howToUse: 'Just continue building. Pro automatically loads previous session memory at the start of each build request. No setup needed — works as long as you use the same Pro session.',
+    relatedFeatures: ['pro_chat', 'pro_chat_planner', 'history'],
+    aiSurface: 'pro_chat',
+    keywords: ['session memory', 'remember', 'persistent memory', 'cross session', 'project memory', 'context', 'remember project', 'past builds', 'yaad rakhna'],
+  },
+  {
+    id: 'pro_chat_design_to_code',
+    name: 'Pro Chat — Design-to-Code (Image → UI)',
+    path: 'Pro Chat → attach a design image → describe the app',
+    description: `Upload a Figma export, screenshot, or UI mockup alongside your build request. Claude Opus vision analyzes the design image and generates React/CSS code that matches the visual layout, colors, and component structure. Supports up to 4 design images per request.`,
+    howToUse: 'In Pro Chat, attach a design image (Figma screenshot, UI mockup, wireframe) using the attachment icon, then type your build prompt (e.g. "Build this design as a React app"). Pro will generate matching code.',
+    relatedFeatures: ['pro_chat', 'pro_chat_file_upload'],
+    aiSurface: 'pro_chat',
+    keywords: ['design to code', 'figma to code', 'image to code', 'ui from design', 'mockup', 'wireframe', 'screenshot to code', 'visual design', 'design convert'],
+  },
+  {
+    id: 'pro_chat_multi_deploy',
+    name: 'Pro Chat — Multi-Provider Deployment',
+    path: 'Engineer AI can deploy to Vercel/Netlify/GitHub Pages (via agentic loop)',
+    description: `Pro Chat can deploy your app to multiple platforms beyond Firebase Hosting:
+• Vercel — React, Next.js, Vue apps → *.vercel.app URL
+• Netlify — static sites → *.netlify.app URL
+• GitHub Pages — static sites → username.github.io/repo/ URL
+• Custom domains — map your own domain (Vercel)
+Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will use the platform's REST API directly — no CLI tools needed.`,
+    howToUse: 'In your Pro Chat or Engineer AI session, provide your deploy token (Vercel, Netlify, or GitHub PAT) via Settings → Secrets & Keys, then ask to deploy.',
+    relatedFeatures: ['pro_chat', 'engineer_ai_deploy', 'settings_secrets'],
+    aiSurface: 'pro_chat',
+    keywords: ['vercel deploy', 'netlify deploy', 'github pages', 'deploy', 'hosting', 'custom domain', 'publish app', 'live url', 'deploy karo', 'production'],
+  },
 ];
 
 /** Quick lookup by id. */

@@ -1535,6 +1535,9 @@ export default function App() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const proAbortControllerRef = useRef<AbortController | null>(null);
+  const proLivePreviewUrlRef = useRef<string | null>(null);
+  // Phase 79 — latest E2B screenshot forwarded via the SSE stream
+  const proLiveScreenshotRef = useRef<string | null>(null);
   const pendingViewAfterLoginRef = useRef<ViewType | null>(null);
 
   // NOTE: horizontal swipe is intentionally reserved app-wide for the sidebar
@@ -3868,6 +3871,102 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     const proMemorySummary = proActiveSession?.memorySummary || undefined;
     const proHistoryForAPI = [...proRestoredMessages, ...proMessages];
 
+    // ── /code-review command — OWASP + quality + tech debt scan of current files ──
+    if (messageToSend.trim().toLowerCase() === '/code-review') {
+      const reviewFiles = files && Object.keys(files).length > 0 ? files : null;
+      if (!reviewFiles) {
+        setProMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          text: 'No files to review. Build or import an app first, then run `/code-review`.',
+          sender: 'ai' as const,
+          timestamp: new Date(),
+        }]);
+        setIsProLoading(false);
+        proAbortControllerRef.current = null;
+        return;
+      }
+      try {
+        const resp = await fetch('/api/pro/code-review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: abortController.signal,
+          body: JSON.stringify({ files: reviewFiles }),
+        });
+        const data = await resp.json().catch(() => ({})) as any;
+        if (!resp.ok) throw new Error(data?.error || `Review failed (${resp.status})`);
+        setProMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          text: data.report || 'Code review complete.',
+          sender: 'ai' as const,
+          timestamp: new Date(),
+        }]);
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          setProMessages(prev => [...prev, {
+            id: (Date.now() + 1).toString(),
+            text: `Code review failed: ${e.message}`,
+            sender: 'ai' as const,
+            timestamp: new Date(),
+          }]);
+        }
+      } finally {
+        setIsProLoading(false);
+        proAbortControllerRef.current = null;
+      }
+      return;
+    }
+
+    // ── /deploy command — Vercel / Netlify / GitHub Pages one-click deploy ──
+    // Usage: /deploy vercel <token> <project-name>
+    //        /deploy netlify <token> <site-id>
+    //        /deploy github <token> <owner> <repo>
+    if (messageToSend.trim().toLowerCase().startsWith('/deploy ')) {
+      const parts = messageToSend.trim().split(/\s+/);
+      const provider = parts[1]?.toLowerCase() as 'vercel' | 'netlify' | 'github' | undefined;
+      const token = parts[2];
+      const arg1 = parts[3];
+      const arg2 = parts[4];
+
+      const deployFiles = files && Object.keys(files).length > 0 ? files : null;
+      if (!deployFiles) {
+        setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: 'No files to deploy. Build or import an app first.', sender: 'ai' as const, timestamp: new Date() }]);
+        setIsProLoading(false);
+        proAbortControllerRef.current = null;
+        return;
+      }
+      if (!provider || !token || !arg1) {
+        setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: `**Deploy usage:**\n\`\`\`\n/deploy vercel <token> <project-name>\n/deploy netlify <token> <site-id>\n/deploy github <token> <owner> <repo>\n\`\`\`\nGet a Vercel token at vercel.com/account/tokens`, sender: 'ai' as const, timestamp: new Date() }]);
+        setIsProLoading(false);
+        proAbortControllerRef.current = null;
+        return;
+      }
+      try {
+        setProMessages(prev => [...prev, { id: (Date.now() + 0.5).toString(), text: `Deploying to ${provider}...`, sender: 'ai' as const, timestamp: new Date() }]);
+        const body: Record<string, string | Record<string, string>> = { provider, token, files: deployFiles };
+        if (provider === 'vercel') body.name = arg1;
+        else if (provider === 'netlify') body.siteId = arg1;
+        else if (provider === 'github') { body.owner = arg1; body.repo = arg2 || ''; }
+
+        const resp = await fetch('/api/pro/deploy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: abortController.signal,
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json().catch(() => ({})) as any;
+        if (!resp.ok) throw new Error(data?.error || `Deploy failed (${resp.status})`);
+        setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: `**Deployed!** Your app is live at:\n\n${data.url}`, sender: 'ai' as const, timestamp: new Date() }]);
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          setProMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: `Deploy failed: ${e.message}`, sender: 'ai' as const, timestamp: new Date() }]);
+        }
+      } finally {
+        setIsProLoading(false);
+        proAbortControllerRef.current = null;
+      }
+      return;
+    }
+
     // ── Mode is the single source of truth — forceBuild skips auto routing ──
     const isBuildMode = mode === 'build' || forceBuild;
     const isAutoMode  = mode === 'auto' && !forceBuild;
@@ -4105,9 +4204,14 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             // Honest reporting: if the verifier found unresolved errors, show
             // structured diagnostics instead of a fake "App is live".
             const buildFailed = meta.validationReport && meta.validationReport.passed === false;
+            const liveUrl = proLivePreviewUrlRef.current;
             const statusLine = buildFailed
               ? `\n**⚠️ Build Status: NEEDS ATTENTION** — the preview may be partial. Issues above; ask me to fix them.`
-              : `**App is live in Preview** →`;
+              : liveUrl
+                ? `**App is live!** [Open in new tab](${liveUrl}) · Also visible in Preview →`
+                : `**App is live in Preview** →`;
+            proLivePreviewUrlRef.current = null;
+            proLiveScreenshotRef.current = null;
             const processLog = [
               buildFailed ? `⚠️ Build completed with issues — see diagnostics below.` : `${replyPrefix}${replyText}`,
               ``,
@@ -4188,6 +4292,39 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
                   { label: ev.name!, sub: ev.state === 'done' ? 'done' : ev.state === 'failed' ? 'retrying' : 'building…', status: (ev.state === 'done' ? 'done' : ev.state === 'failed' ? 'error' : 'running') as 'done' | 'error' | 'running' },
                 ],
               }));
+            } else if (ev.type === 'terminal' && ev.command) {
+              const exitMark = ev.exitCode === 0 ? '✓' : `✗ (exit ${ev.exitCode})`;
+              setProBuildProgress(prev => ({ ...prev, active: true, stage: `$ ${ev.command.slice(0, 60)} ${exitMark}` }));
+            } else if (ev.type === 'preview_url' && ev.url) {
+              proLivePreviewUrlRef.current = ev.url;
+            } else if (ev.type === 'plan' && ev.steps) {
+              setProBuildProgress(prev => ({
+                ...prev, active: true, stage: 'Planning…',
+                steps: ev.steps!.map((label, i) => ({ label, sub: i === 0 ? 'up next' : 'queued', status: 'pending' as const })),
+              }));
+            } else if (ev.type === 'plan_step_start' && ev.stepIndex != null) {
+              setProBuildProgress(prev => ({
+                ...prev, active: true,
+                stage: `Step ${ev.stepIndex! + 1}/${prev.steps.length} — ${ev.description ?? prev.steps[ev.stepIndex!]?.label ?? ''}`,
+                steps: prev.steps.map((s, i) => i === ev.stepIndex ? { ...s, status: 'running' as const, sub: 'working…' } : s),
+              }));
+            } else if (ev.type === 'plan_step_done' && ev.stepIndex != null) {
+              setProBuildProgress(prev => ({
+                ...prev,
+                steps: prev.steps.map((s, i) => i === ev.stepIndex ? { ...s, status: 'done' as const, sub: 'done' } : s),
+              }));
+            } else if (ev.type === 'thinking' && ev.content) {
+              // Show reasoning as a transient sub-label on the current running step.
+              // Truncate so it doesn't overwhelm the progress display.
+              const snippet = ev.content.slice(0, 120).replace(/\n+/g, ' ');
+              setProBuildProgress(prev => ({
+                ...prev, active: true,
+                steps: prev.steps.map((s) => s.status === 'running' ? { ...s, sub: snippet } : s),
+              }));
+            } else if (ev.type === 'screenshot' && ev.base64) {
+              // Phase 79 — store latest E2B screenshot; finishBuild will include it
+              // in the build summary if no live URL is available.
+              proLiveScreenshotRef.current = ev.base64;
             }
           }, abortController.signal);
           // Persist the refreshed Claude-Code-style memory onto the active session
@@ -4721,6 +4858,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     { id: 'files',        label: 'Files',             icon: FolderOpen },
     { id: 'history',      label: 'History',           icon: History },
     { id: 'studio',       label: 'Code Studio',       icon: Smartphone },
+    { id: 'git',          label: 'Git',               icon: GitBranch },
     { id: 'billing',      label: 'Wallet & Billing',  icon: Wallet },
     { id: 'professionals', label: 'Professionals',    icon: Briefcase, status: 'New' },
     { id: 'donation',     label: 'Donate',            icon: Heart },
@@ -6960,6 +7098,41 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                <p className="text-[10px] text-amber-600 font-bold uppercase leading-relaxed tracking-wider">Multi-user real-time collaboration requires specialized Navbharat Enterprise seat.</p>
                             </div>
                          </div>
+                      </motion.div>
+                    )}
+
+                    {settingsScreen === 'git' && (
+                      <motion.div
+                        key="git"
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        className="space-y-6"
+                      >
+                        <div className="px-1 py-4">
+                          <h2 className="text-2xl font-black text-white tracking-tight">Git & Version Control</h2>
+                          <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Manage branches, commits and deployments</p>
+                        </div>
+                        <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex flex-col items-center text-center space-y-6 shadow-2xl">
+                          <div className="w-20 h-20 bg-indigo-600/10 border border-indigo-600/20 rounded-[2rem] flex items-center justify-center">
+                            <GitBranch className="w-10 h-10 text-indigo-400" />
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-black text-white uppercase tracking-widest">Git Panel</h3>
+                            <p className="text-[10px] text-[#8b949e] max-w-[240px] mx-auto mt-2 leading-relaxed">
+                              {selectedRepo
+                                ? `Active: ${selectedRepo.full_name} (${currentBranch})`
+                                : 'Connect GitHub first to use Git features'}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => { setActiveView('git'); setSettingsScreen('root'); }}
+                            className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[1.5rem] font-black uppercase tracking-widest transition-all shadow-2xl flex items-center justify-center gap-3"
+                          >
+                            <GitBranch className="w-4 h-4" />
+                            Open Git Panel
+                          </button>
+                        </div>
                       </motion.div>
                     )}
                   </AnimatePresence>

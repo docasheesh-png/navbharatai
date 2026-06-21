@@ -21,6 +21,23 @@ describe('RuntimeRouter.analyzeProject', () => {
     expect(p.needsNodeServer).toBe(false);
   });
 
+  it('detects a Svelte project via package.json dep', () => {
+    const p = analyzeProject(vfsFrom({
+      'package.json': JSON.stringify({ dependencies: { svelte: '^4' }, devDependencies: { '@sveltejs/vite-plugin-svelte': '^3' } }),
+      'index.html': '<div id=app></div>',
+    }));
+    expect(p.framework).toBe('svelte');
+    expect(p.needsNodeServer).toBe(false);
+  });
+
+  it('detects a Svelte project via .svelte file presence', () => {
+    const p = analyzeProject(vfsFrom({
+      'package.json': JSON.stringify({ devDependencies: { vite: '^5' } }),
+      'src/App.svelte': '<script>let count = 0;</script>',
+    }));
+    expect(p.framework).toBe('svelte');
+  });
+
   it('detects an Express/Node server project', () => {
     const p = analyzeProject(vfsFrom({
       'package.json': JSON.stringify({ dependencies: { express: '^4' } }),

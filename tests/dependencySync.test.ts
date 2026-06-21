@@ -167,4 +167,27 @@ describe('syncDependencies', () => {
     expect(result.addedDev).toHaveLength(0);
     expect(result.added).toContain('zustand');
   });
+
+  it('adds svelte as a runtime dep with pinned version', () => {
+    const vfs = vfsFrom({
+      'package.json': JSON.stringify({ dependencies: {} }),
+      'src/main.js': "import App from './App.svelte'; import { writable } from 'svelte/store';",
+    });
+    const result = syncDependencies(vfs);
+    expect(result.added).toContain('svelte');
+    const pkg = JSON.parse(vfs.readText('package.json')!);
+    expect(pkg.dependencies.svelte).toBe('^4.2.19');
+  });
+
+  it('adds @sveltejs/vite-plugin-svelte as a devDep with pinned version', () => {
+    const vfs = vfsFrom({
+      'package.json': JSON.stringify({ dependencies: {} }),
+      'vite.config.js': "import { svelte } from '@sveltejs/vite-plugin-svelte';",
+    });
+    const result = syncDependencies(vfs);
+    expect(result.addedDev).toContain('@sveltejs/vite-plugin-svelte');
+    expect(result.added).not.toContain('@sveltejs/vite-plugin-svelte');
+    const pkg = JSON.parse(vfs.readText('package.json')!);
+    expect(pkg.devDependencies?.['@sveltejs/vite-plugin-svelte']).toBe('^3.1.2');
+  });
 });

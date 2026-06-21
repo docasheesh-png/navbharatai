@@ -12,7 +12,7 @@ import React from 'react';
 import { cn } from '../../lib/utils';
 import { Rocket, X, Loader2 } from 'lucide-react';
 
-type DeployPlatform = 'vercel' | 'netlify' | 'github';
+export type DeployPlatform = 'vercel' | 'netlify' | 'github' | 'cloudflare';
 
 export interface DeployModalProps {
   platform: DeployPlatform;
@@ -51,19 +51,24 @@ export function DeployModal({
         </div>
 
         {/* Platform selector */}
-        <div className="grid grid-cols-3 gap-2">
-          {(['vercel', 'netlify', 'github'] as const).map(p => (
+        <div className="grid grid-cols-2 gap-2">
+          {([
+            { id: 'vercel', label: 'Vercel' },
+            { id: 'netlify', label: 'Netlify' },
+            { id: 'cloudflare', label: 'Cloudflare' },
+            { id: 'github', label: 'GitHub' },
+          ] as const).map(p => (
             <button
-              key={p}
-              onClick={() => { onPlatformChange(p); onClearError(); }}
+              key={p.id}
+              onClick={() => { onPlatformChange(p.id); onClearError(); }}
               className={cn(
                 "py-2 px-3 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all",
-                platform === p
+                platform === p.id
                   ? "bg-emerald-900/40 border-emerald-500/50 text-emerald-300"
                   : "bg-white/5 border-white/10 text-[#8b949e] hover:border-white/20 hover:text-white"
               )}
             >
-              {p === 'github' ? 'GitHub' : p.charAt(0).toUpperCase() + p.slice(1)}
+              {p.label}
             </button>
           ))}
         </div>
@@ -71,13 +76,18 @@ export function DeployModal({
         {/* Token input */}
         <div className="space-y-1">
           <label className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">
-            {platform === 'vercel' ? 'Vercel Token' : platform === 'netlify' ? 'Netlify Token' : 'GitHub Token'}
+            {platform === 'vercel' ? 'Vercel Token' : platform === 'netlify' ? 'Netlify Token' : platform === 'cloudflare' ? 'Cloudflare API Token' : 'GitHub Token'}
           </label>
           <input
             type="password"
             value={token}
             onChange={e => { onTokenChange(e.target.value); onClearError(); }}
-            placeholder={platform === 'vercel' ? 'Get at vercel.com/account/tokens' : platform === 'netlify' ? 'Get at app.netlify.com/user/applications' : 'github.com → Settings → Tokens'}
+            placeholder={
+              platform === 'vercel' ? 'Get at vercel.com/account/tokens' :
+              platform === 'netlify' ? 'Get at app.netlify.com/user/applications' :
+              platform === 'cloudflare' ? 'Needs Pages:Edit permission' :
+              'github.com → Settings → Tokens'
+            }
             className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-emerald-500/50"
           />
         </div>
@@ -105,6 +115,30 @@ export function DeployModal({
               placeholder="Leave blank to create new site"
               className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-emerald-500/50"
             />
+          </div>
+        )}
+        {platform === 'cloudflare' && (
+          <div className="space-y-2">
+            <div className="space-y-1">
+              <label className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">Account ID</label>
+              <input
+                type="text"
+                value={owner}
+                onChange={e => { onOwnerChange(e.target.value); onClearError(); }}
+                placeholder="dashboard.cloudflare.com → top-right"
+                className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-emerald-500/50"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">Project Name</label>
+              <input
+                type="text"
+                value={projectName}
+                onChange={e => { onProjectNameChange(e.target.value); onClearError(); }}
+                placeholder="my-app → my-app.pages.dev"
+                className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-emerald-500/50"
+              />
+            </div>
           </div>
         )}
         {platform === 'github' && (

@@ -1144,7 +1144,7 @@ export default function App() {
   const [isDeployed, setIsDeployed] = useState(false);
   const [deployUrl, setDeployUrl] = useState('');
   const [showDeployPanel, setShowDeployPanel] = useState(false);
-  const [deployPlatform, setDeployPlatform] = useState<'vercel' | 'netlify' | 'github'>('vercel');
+  const [deployPlatform, setDeployPlatform] = useState<'vercel' | 'netlify' | 'github' | 'cloudflare'>('vercel');
   const [deployToken, setDeployToken] = useState('');
   const [deployProjectName, setDeployProjectName] = useState('');
   const [deployOwner, setDeployOwner] = useState('');
@@ -4869,6 +4869,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     if (!deployToken.trim()) { setDeployPanelError('Please enter your API token.'); return; }
     if (deployPlatform === 'vercel' && !deployProjectName.trim()) { setDeployPanelError('Please enter a project name.'); return; }
     if (deployPlatform === 'github' && (!deployOwner.trim() || !deployRepo.trim())) { setDeployPanelError('Please enter owner and repo.'); return; }
+    if (deployPlatform === 'cloudflare' && (!deployOwner.trim() || !deployProjectName.trim())) { setDeployPanelError('Please enter Account ID and project name.'); return; }
     setIsDeploying(true);
     setDeployPanelError('');
     try {
@@ -4876,6 +4877,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
       if (deployPlatform === 'vercel') body.name = deployProjectName.trim();
       else if (deployPlatform === 'netlify') body.siteId = deployProjectName.trim();
       else if (deployPlatform === 'github') { body.owner = deployOwner.trim(); body.repo = deployRepo.trim(); }
+      else if (deployPlatform === 'cloudflare') { body.accountId = deployOwner.trim(); body.name = deployProjectName.trim(); }
       const resp = await fetch('/api/pro/deploy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

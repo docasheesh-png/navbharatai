@@ -988,16 +988,16 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
         if (!fileTarget) {
           term.writeln('Usage: nano [filename]');
         } else {
+          // Open the file in the REAL Monaco editor pane above (same as `code`),
+          // instead of a simulated in-terminal editor. Edits there save live.
           const resolvedPath = resolveFilePathForId(fileTarget, id);
-          const content = filesRef.current[resolvedPath];
-          
-          nanoFilesRef.current[id] = resolvedPath;
-          nanoBuffersRef.current[id] = content !== undefined ? content : '';
-          
-          // Switch model layout to nano
-          terminalModesRef.current[id] = 'nano';
-          drawNanoForId();
-          return; // Skip writing normal terminal prompt
+          if (filesRef.current[resolvedPath] === undefined) {
+            const updated = { ...filesRef.current, [resolvedPath]: '' };
+            filesRef.current = updated;
+            if (onFilesChangeRef.current) onFilesChangeRef.current(updated);
+          }
+          if (onActiveFileChangeRef.current) onActiveFileChangeRef.current(resolvedPath);
+          term.writeln(`\x1b[1;32mOpened '${resolvedPath}' in the editor pane above — edit it there, changes save automatically.\x1b[0m`);
         }
         break;
       }

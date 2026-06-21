@@ -17,9 +17,9 @@ import { ThemeMode, getThemeClasses, THEME_MODES } from '../../lib/theme';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { 
-  Menu as MenuIcon, X, Maximize2, Minimize2, 
+  Menu as MenuIcon, X, Maximize2, Minimize2,
   ChevronUp, ChevronDown, Rocket, Command, Search, Keyboard,
-  Bot, Palette, Monitor
+  Bot, Palette, Monitor, FileCode, Plus
 } from 'lucide-react';
 
 interface CodeStudioProps {
@@ -115,15 +115,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   onUnlockVishwakarma,
 }) => {
   const themeClasses = getThemeClasses(theme);
-  console.log('[DEBUG CODE] CodeStudio rendered with activeAgent=', activeAgent);
-  useEffect(() => {
-    console.log('[DEBUG] CodeStudio mounted/remounted. activeAgent=', activeAgent, 'activeScreen=', activeScreen);
-  }, [activeAgent]);
   const [activeScreen, setActiveScreen] = useState<IDEScreen>(() => {
     const saved = localStorage.getItem('github_oauth_return_active_screen');
-    const screen = (saved as IDEScreen) || 'files';
-    console.log('[DEBUG] CodeStudio activeScreen initialized to:', screen);
-    return screen;
+    return (saved as IDEScreen) || 'files';
   });
   const [activeFile, setActiveFile] = useState<string>(Object.keys(files)[0] || 'index.html');
   const [openTabs, setOpenTabs] = useState<Tab[]>(
@@ -140,6 +134,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const [isCursorPopupOpen, setIsCursorPopupOpen] = useState(false);
   const [editorInstance, setEditorInstance] = useState<any>(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [replaceQuery, setReplaceQuery] = useState('');
 
   const handleScreenChange = (screen: IDEScreen) => {
     if (screen === 'shortcuts') {
@@ -233,9 +229,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     handleTabClose(path);
   };
 
+  const handleRenameFile = (oldPath: string, newName: string) => {
+    const target = (newName || '').trim();
+    if (!target || target === oldPath || files[oldPath] === undefined) return;
+    if (files[target] !== undefined) return; // don't overwrite an existing file
+    // Rebuild preserving insertion order so the tree doesn't reshuffle.
+    const next: Record<string, string> = {};
+    for (const [p, c] of Object.entries(files)) next[p === oldPath ? target : p] = c;
+    onFilesChange(next);
+    setOpenTabs(prev => prev.map(t => (t.path === oldPath ? { path: target } : t)));
+    if (activeFile === oldPath) setActiveFile(target);
+  };
+
   const handleShortcut = (keys: string[], command?: string) => {
-    console.log('IDE Shortcut Triggered:', { keys, command });
-    
+
     // 1. Direct Editor Commands
     if (editorInstance && command && (command.startsWith('editor.') || command.startsWith('actions.') || command.startsWith('cursor') || command === 'undo' || command === 'redo' || command === 'acceptSelectedSuggestion')) {
       editorInstance.focus();
@@ -368,8 +375,18 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   };
 
   const handleCommandAction = (id: string) => {
-    console.log('Action:', id);
-    // Real implementation based on ID
+    // Map palette command ids onto the existing shortcut/screen handlers.
+    switch (id) {
+      case 'files-new': {
+        const name = (window.prompt('New file name (e.g. index.html)') || '').trim();
+        if (name) handleCreateFile(name);
+        break;
+      }
+      case 'settings-open': handleScreenChange('settings'); setIsSidebarOpen(true); break;
+      case 'git-commit': handleScreenChange('git'); setIsSidebarOpen(true); break;
+      case 'theme-dark': if (onThemeChange) onThemeChange('dark'); break;
+      default: break;
+    }
   };
 
   const renderSidebarContent = () => {
@@ -385,25 +402,88 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
             }}
             onFileCreate={handleCreateFile}
             onFileDelete={handleDeleteFile}
-            onFileRename={() => {}} 
+            onFileRename={handleRenameFile}
           />
         );
-      case 'search':
+      case 'search': {
+        const q = searchQuery.trim();
+        const results: { path: string; line: number; text: string }[] = [];
+        if (q) {
+          const needle = q.toLowerCase();
+          for (const [path, content] of Object.entries(files)) {
+            const lines = (content || '').split('\n');
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].toLowerCase().includes(needle)) {
+                results.push({ path, line: i + 1, text: lines[i].trim().slice(0, 140) });
+                if (results.length > 500) break;
+              }
+            }
+            if (results.length > 500) break;
+          }
+        }
+        const fileCount = new Set(results.map(r => r.path)).size;
+        const doReplaceAll = () => {
+          if (!q) return;
+          const next: Record<string, string> = {};
+          for (const [path, content] of Object.entries(files)) {
+            next[path] = (content || '').split(q).join(replaceQuery);
+          }
+          onFilesChange(next);
+        };
         return (
-           <div className="p-6 h-full bg-[#161b22]">
-              <h3 className="text-white font-black uppercase tracking-widest text-[10px] mb-6 flex items-center gap-2">Global Search</h3>
-              <div className="space-y-4">
-                 <div className="space-y-1">
-                    <label className="text-[9px] font-black text-[#8b949e] uppercase">Search</label>
-                    <input className="w-full bg-black/20 border border-white/5 rounded-lg px-4 py-3 text-xs outline-none focus:border-indigo-500/50" placeholder="Find..." />
+           <div className="flex flex-col h-full bg-[#161b22]">
+              <div className="p-4 space-y-2 border-b border-white/5 shrink-0">
+                 <h3 className="text-white font-black uppercase tracking-widest text-[10px] mb-1 flex items-center gap-2"><Search className="w-3 h-3" /> Search</h3>
+                 <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    autoFocus
+                    className="w-full bg-black/20 border border-white/5 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500/50"
+                    placeholder="Search all files…"
+                 />
+                 <div className="flex gap-2">
+                    <input
+                       value={replaceQuery}
+                       onChange={(e) => setReplaceQuery(e.target.value)}
+                       className="flex-1 bg-black/20 border border-white/5 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500/50"
+                       placeholder="Replace with…"
+                    />
+                    <button
+                       onClick={doReplaceAll}
+                       disabled={!q}
+                       title="Replace all occurrences in every file"
+                       className="px-3 rounded-lg bg-indigo-600 disabled:opacity-40 text-white text-[10px] font-bold flex items-center gap-1 whitespace-nowrap"
+                    >
+                       Replace All
+                    </button>
                  </div>
-                 <div className="space-y-1">
-                    <label className="text-[9px] font-black text-[#8b949e] uppercase">Replace</label>
-                    <input className="w-full bg-black/20 border border-white/5 rounded-lg px-4 py-3 text-xs outline-none focus:border-indigo-500/50" placeholder="Replace..." />
-                 </div>
+                 {q && (
+                    <p className="text-[10px] text-[#8b949e] font-medium">
+                       {results.length}{results.length > 500 ? '+' : ''} match{results.length === 1 ? '' : 'es'} in {fileCount} file{fileCount === 1 ? '' : 's'}
+                    </p>
+                 )}
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                 {results.map((r, i) => (
+                    <button
+                       key={`${r.path}:${r.line}:${i}`}
+                       onClick={() => { setActiveFile(r.path); if (isMobile) setIsSidebarOpen(false); }}
+                       className="w-full text-left px-4 py-2 hover:bg-white/5 border-b border-white/[0.03]"
+                    >
+                       <div className="text-[10px] text-indigo-300 font-mono truncate">{r.path}:{r.line}</div>
+                       <div className="text-[11px] text-[#c9d1d9] font-mono truncate">{r.text || '(empty line)'}</div>
+                    </button>
+                 ))}
+                 {q && results.length === 0 && (
+                    <p className="p-4 text-[11px] text-[#8b949e]">No matches for “{q}”.</p>
+                 )}
+                 {!q && (
+                    <p className="p-4 text-[11px] text-[#8b949e]">Type above to search across all project files. Click a result to open it.</p>
+                 )}
               </div>
            </div>
         );
+      }
       case 'git': 
         return (
           <GitPanel 
@@ -611,8 +691,30 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
              <PreviewPanel files={files} generatedCode={generatedCode} onRun={() => onRun(files)} />
           ) : activeScreen === 'security' ? (
              <SecurityScan files={files} />
+          ) : Object.keys(files).length === 0 ? (
+             <div className="flex-1 flex flex-col items-center justify-center text-center px-6 select-none">
+                <div className="w-14 h-14 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center mb-4">
+                   <FileCode className="w-7 h-7 text-indigo-400" />
+                </div>
+                <h3 className="text-white font-bold text-sm mb-1">Empty workspace</h3>
+                <p className="text-[#8b949e] text-xs mb-5 max-w-xs leading-relaxed">No files yet. Create one to start coding, or ask the AI to build your app.</p>
+                <div className="flex items-center gap-2">
+                   <button
+                      onClick={() => { const name = (window.prompt('New file name (e.g. index.html)') || '').trim(); if (name) handleCreateFile(name); }}
+                      className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5"
+                   >
+                      <Plus className="w-3.5 h-3.5" /> New File
+                   </button>
+                   <button
+                      onClick={() => (onOpenProChat ? onOpenProChat() : handleScreenChange('ai'))}
+                      className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/80 text-xs font-bold flex items-center gap-1.5"
+                   >
+                      <Bot className="w-3.5 h-3.5" /> Ask AI
+                   </button>
+                </div>
+             </div>
           ) : (
-             <Editor 
+             <Editor
                 content={files[activeFile] || ''}
                 fileName={activeFile}
                 activeTab={activeFile}

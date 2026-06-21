@@ -58,6 +58,8 @@ export interface BillingPanelProps {
   onSetLimitError: (v: string | null) => void;
   onSetLimitSuccess: (v: string | null) => void;
   onToast: (message: string, type?: ToastType) => void;
+  /** Phase 4.2 — current month's AI cost accumulated from Pro builds. */
+  monthlyAiCost?: { totalBuilds: number; totalCostUsd: number; month: string } | null;
 }
 
 export function BillingPanel(props: BillingPanelProps) {
@@ -74,6 +76,7 @@ export function BillingPanel(props: BillingPanelProps) {
     onCreateBillingOrder, onSetTempReminderLimit, onSetTempBudgetLimit,
     onSetLimitError, onSetLimitSuccess, onToast,
   } = props;
+  const { monthlyAiCost } = props;
 
   return (
     <div className="flex-1 bg-[#0d1117] p-6 text-left min-h-screen">
@@ -143,6 +146,20 @@ export function BillingPanel(props: BillingPanelProps) {
               </button>
             </div>
           </div>
+
+          {/* Phase 4.2 — This Month's AI Cost card */}
+          {monthlyAiCost !== undefined && (
+            <div className="bg-[#161b22] border border-indigo-500/20 rounded-2xl p-5 flex items-center justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-[9px] font-black text-[#484f58] uppercase tracking-widest">This Month's AI Cost</p>
+                <p className="text-2xl font-black text-indigo-400 font-mono">
+                  ${(monthlyAiCost?.totalCostUsd ?? 0).toFixed(4)}
+                </p>
+                <p className="text-[10px] text-[#8b949e]">{monthlyAiCost?.totalBuilds ?? 0} Pro builds · {monthlyAiCost?.month ?? new Date().toISOString().slice(0, 7)}</p>
+              </div>
+              <Activity className="w-8 h-8 text-indigo-500/40 shrink-0" />
+            </div>
+          )}
 
           {/* Autonomous Warning Alert Popup (Reminder Limit Trigger) */}
           {wallet && wallet.remaining_balance <= reminderLimit && !dismissedReminderWarning && (

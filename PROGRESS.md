@@ -310,18 +310,24 @@ _Multi-instance safe. Observable. No surprise bills._
 - UsageTracker → Firestore (billing accuracy requires shared state)
 - Event ring → Firestore
 
-### 4.2 — Pricing intelligence per build ✅ PARTIAL (2026-06-21) — PR #141
-**Branch:** `claude/phase-4.2-cost-display`
+### 4.2 — Pricing intelligence per build ✅ DONE (2026-06-21)
 
-**Shipped (cost display):**
-- `ProEngineRunner.ts` — counts `action_start` events as AI reasoning steps; emits `"N reasoning steps — estimated AI cost: ~$X"` status event before every build completes. Cost calculation: Grok grok-3 rates × 6K input + 400 output tokens/step ≈ $0.000332/step. Also returns `estimatedCostUsd` in `ProEngineResult`.
+**Shipped (cost display — PR #141):**
+- `ProEngineRunner.ts` — counts reasoning steps, emits estimated cost, returns `estimatedCostUsd`
 - `build.ts` — includes `costUsd` in every `sendComplete` payload
 - `buildService.ts` — added `costUsd?` to `BuildResponse` and `BuildStreamEvent`
-- tsc x2 clean, vitest 345/345 green
 
-**Still TODO:**
-- Monthly usage summary in Settings → Billing (needs Firestore per-user accumulation)
-- Hard server-side quotas by tier (Free: 3/day, Pro: 20/day) — needs user-tier lookup
+**Shipped (monthly accumulation — branch `claude/p4.2-usage-billing`, 2026-06-21):**
+- `UserCostStore.ts` (NEW) — Firestore `user_costs` collection, doc `{userId}_{YYYY-MM}`, transaction-based increment of `totalBuilds` + `totalCostUsd`. VITEST-skip, best-effort (never throws, never blocks).
+- `build.ts` — extracts `userId` from request body, calls `userCostStore.record()` after every agentic build with `estimatedCostUsd > 0`; adds `GET /api/user/usage/:userId` endpoint (returns monthly doc or zero defaults)
+- `buildService.ts` — adds `userId?: string` to `BuildRequest`
+- `App.tsx` — passes `userId: user?.uid` in `buildAppStream` call; fetches `/api/user/usage/:userId` inside `fetchWallet()`; stores result in `monthlyAiCost` state; passes to `BillingPanel`
+- `BillingPanel.tsx` — adds `monthlyAiCost` prop and "This Month's AI Cost" display card (builds count + USD total + month)
+- `AppKnowledgeBase.ts` — billing entry updated with monthly AI cost keywords
+- tsc x2 clean, vitest 358/358 green
+
+**Deferred (hard quotas):**
+- Free: 3/day, Pro: 20/day — needs user-tier lookup wired to auth middleware
 
 ### 4.3 — Metrics + traces + alerts
 **Status: TODO**

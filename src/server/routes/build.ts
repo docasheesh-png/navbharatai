@@ -39,6 +39,7 @@ import { getMetrics, estimateTokens } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
 import { workspaceLock } from '../project/WorkspaceLock';
+import { userCostStore } from '../lib/UserCostStore';
 
 /**
  * Phase 4 integration — the real, engine-backed build endpoint.
@@ -356,6 +357,7 @@ export function registerBuildRoutes(app: Express): void {
     try {
       const { prompt, files, userKey, preview, isEdit } = req.body || {};
       if (!prompt || typeof prompt !== 'string') { send({ type: 'error', message: 'prompt (string) is required' }); cleanup(); return res.end(); }
+      const reqUserId: string | undefined = typeof req.body?.userId === 'string' && req.body.userId ? req.body.userId : undefined;
 
       // Foundations (G1) — best-effort lifecycle events (never block the build).
       sid = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : 'pro';
@@ -513,6 +515,10 @@ export function registerBuildRoutes(app: Express): void {
             // G2 — wire metrics that were previously missing from the agentic path.
             try { getMetrics().recordBuild({ ok: eng.ok, previewAllowed: !!eng.previewAllowed, isEdit: isEdit === true, ms: Date.now() - startedAt }); } catch { /* metrics never block */ }
             metricsStore.save().catch(() => {});
+            // Phase 4.2 — accumulate per-user monthly AI cost (display-only, never blocks).
+            if (reqUserId && typeof eng.estimatedCostUsd === 'number' && eng.estimatedCostUsd > 0) {
+              userCostStore.record(reqUserId, eng.estimatedCostUsd).catch(() => {});
+            }
             // Phase 2.1 — save version checkpoint for every successful build.
             if (sessionId && eng.ok && !eng.partial) {
               const shortPrompt = (prompt || '').slice(0, 60).replace(/\s+/g, ' ');
@@ -725,5 +731,14 @@ export function registerBuildRoutes(app: Express): void {
     } catch {
       return res.status(500).json({ error: 'failed to load version' });
     }
+  });
+
+  // Phase 4.2 — Per-user monthly AI cost summary for the Billing panel.
+  app.get('/api/user/usage/:userId', async (req: Request, res: Response) => {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    const month = typeof req.query.month === 'string' ? req.query.month : undefined;
+    const doc = await userCostStore.get(userId, month);
+    return res.json(doc ?? { userId, month: month ?? new Date().toISOString().slice(0, 7), totalBuilds: 0, totalCostUsd: 0, updatedAt: 0 });
   });
 }

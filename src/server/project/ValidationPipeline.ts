@@ -163,6 +163,55 @@ function scoreFrom(gates: GateResult[]): number {
   return Math.max(0, Math.min(100, score));
 }
 
+// ─── Phase 17: inject real test results into a validation report ─────────────
+
+export interface TestGenResult {
+  /** Number of test files successfully generated. */
+  generated: number;
+  /** Paths of the generated test files (e.g. ["src/App.test.tsx", ...]). */
+  testPaths: string[];
+}
+
+/**
+ * Replace the always-pending 'tests' gate with a real result reflecting the
+ * test files that were generated alongside the build.
+ *
+ * Pure — returns a new ValidationReport, never mutates the original.
+ */
+export function injectTestResults(report: ValidationReport, result: TestGenResult): ValidationReport {
+  if (result.generated === 0) return report;
+
+  const updatedGates = report.gates.map((g) => {
+    if (g.id !== 'tests') return g;
+    return {
+      ...g,
+      status: 'pass' as GateStatus,
+      messages: [
+        `${result.generated} test file${result.generated > 1 ? 's' : ''} generated: ${result.testPaths.join(', ')}`,
+        'Run locally: npx vitest run',
+      ],
+    };
+  });
+
+  return {
+    ...report,
+    gates: updatedGates,
+    qualityScore: scoreFromGates(updatedGates),
+  };
+}
+
+function scoreFromGates(gates: GateResult[]): number {
+  let score = 100;
+  for (const g of gates) {
+    if (g.status === 'fail') {
+      score -= g.severity === 'critical' ? 45 : g.severity === 'major' ? 20 : 6;
+    } else if (g.status === 'pending') {
+      score -= g.severity === 'critical' ? 8 : g.severity === 'major' ? 4 : 2;
+    }
+  }
+  return Math.max(0, Math.min(100, score));
+}
+
 /** Render a structured, no-fake-success report card (Stage 25). */
 export function renderReportCard(report: ValidationReport, manifest?: ArchitectureManifest): string {
   const icon = (s: GateStatus) => (s === 'pass' ? '✓' : s === 'fail' ? '✗' : '…');

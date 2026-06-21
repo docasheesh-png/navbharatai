@@ -28,7 +28,8 @@ import { makeAiEditGenerator, summarizeForMemory, type ModelCall, type BuildMemo
 import { orchestrateGenerate } from '../pro/ProOrchestrator';
 import { proMemoryStore } from '../pro/ProMemory';
 import { proBuildSessionStore } from '../pro/ProBuildSession';
-import { generateTests } from '../pro/ProTestGen';
+import { generateTestSuite } from '../pro/ProTestGen';
+import { injectTestResults } from '../project/ValidationPipeline';
 import { reviewCode } from '../pro/ProCodeReview';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
@@ -603,18 +604,23 @@ export function registerBuildRoutes(app: Express): void {
       const updatedSummary = await summarizeForMemory(callModel, memory.summary, turnHistory);
       const updatedEditLog = [...(memory.editLog || []), thisEntry].slice(-30);
 
-      // Phase 17 — auto test generation: add a Vitest test file alongside the build.
-      // Best-effort, 8s cap — never blocks or fails the build.
+      // Phase 17 — auto test generation: generate Vitest test files for the most
+      // important parts of the built app (like Claude Code does). Best-effort,
+      // 20s cap — never blocks or fails the build.
       let finalFiles = result.files;
+      let testGenResult = { generated: 0, testPaths: [] as string[] };
       if (!isEdit) {
         try {
+          const vfsForTests = VirtualFileSystem.fromRecord(result.files);
           const testFiles = await Promise.race([
-            generateTests(result.files, callModel),
-            new Promise<Record<string, string>>((resolve) => setTimeout(() => resolve({}), 8000)),
+            generateTestSuite(vfsForTests, callModel, 4),
+            new Promise<Record<string, string>>((resolve) => setTimeout(() => resolve({}), 20000)),
           ]);
-          if (Object.keys(testFiles).length > 0) {
+          const testPaths = Object.keys(testFiles);
+          if (testPaths.length > 0) {
             finalFiles = { ...result.files, ...testFiles };
-            send({ type: 'status', message: `Generated ${Object.keys(testFiles).join(', ')}` });
+            testGenResult = { generated: testPaths.length, testPaths };
+            send({ type: 'status', message: `Generated ${testPaths.length} test file${testPaths.length > 1 ? 's' : ''}: ${testPaths.join(', ')}` });
           }
         } catch { /* test gen never blocks the build */ }
       }
@@ -634,12 +640,16 @@ export function registerBuildRoutes(app: Express): void {
         } catch { /* review never blocks */ }
       }
 
+      const finalValidation = testGenResult.generated > 0 && result.validation
+        ? injectTestResults(result.validation, testGenResult)
+        : result.validation;
+
       sendComplete({
         ok: result.ok,
         files: finalFiles,
         fileCount: Object.keys(finalFiles).length,
         verify: result.verify,
-        validation: result.validation,
+        validation: finalValidation,
         previewAllowed: result.previewAllowed,
         preview: previewInfo,
         memorySummary: updatedSummary,

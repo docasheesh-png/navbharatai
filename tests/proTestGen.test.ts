@@ -69,7 +69,7 @@ describe('generateTests', () => {
     expect(result).toEqual({});
   });
 
-  it('prefers App.tsx over other component files', async () => {
+  it('always generates a test for App.tsx (highest-priority file)', async () => {
     mockCallModel.mockResolvedValue(
       `import { render } from '@testing-library/react';\nit('renders', () => render(<App/>));\n`,
     );
@@ -78,7 +78,8 @@ describe('generateTests', () => {
       'src/components/Button.tsx': LONG_BTN,
     };
     const result = await generateTests(files, mockCallModel);
-    expect(Object.keys(result)).toHaveLength(1);
+    // Phase 17: generates tests for ALL high-value files (up to 4), not just one.
+    expect(Object.keys(result).length).toBeGreaterThanOrEqual(1);
     expect(result['src/App.test.tsx']).toBeDefined();
   });
 });

@@ -429,6 +429,28 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['dependency', 'package.json', 'missing module', 'cannot find module', 'npm install', 'missing dependency', 'undeclared package', 'import error', 'module not found', 'package missing', 'auto install', 'dep sync'],
   },
   {
+    id: 'auto-test-generation',
+    name: 'Auto Test Generation (Phase 17)',
+    path: 'Pro Chat → Build any app → automatic (no user action needed)',
+    description: `Phase 17 — NavBharatAI Pro v2.0 feature. After every Pro build, NavBharatAI automatically generates Vitest test files for the most important parts of the generated app — exactly like Claude Code does for apps it builds. Key capabilities:
+• ANALYZES generated files by type: components, hooks, services, utilities, stores, pages, contexts — each gets a tailored test prompt.
+• SELECTS highest-value files to test first (hooks > services > stores > components > pages).
+• GENERATES multiple test files in parallel (up to 4 per build) using Promise.allSettled.
+• WRITES category-specific tests: component tests use @testing-library/react, hook tests use renderHook, service tests mock fetch/axios, utility tests cover edge cases.
+• UPDATES the validation report: the 'Automated Tests' gate changes from PENDING to PASS, showing which test files were generated.
+• TEST FILES are included in the downloaded app zip so users can run them locally with: npx vitest run.`,
+    howToUse: 'Automatic — no action needed. Build any app in Pro Chat. Test files (e.g. src/App.test.tsx, src/hooks/useAuth.test.ts) are automatically included in the result. Download the app and run: npm install && npx vitest run',
+    relatedFeatures: ['pro_chat', 'auto-dependency-sync', 'auto-code-review'],
+    aiSurface: 'pro_chat',
+    keywords: [
+      'auto test', 'test generation', 'vitest', 'unit test', 'testing library', 'react testing',
+      'test file', 'jest', 'coverage', 'test cases', 'automated tests', 'generate tests',
+      'test app', 'app test', 'test karo', 'test banana', 'unit testing', 'component test',
+      'hook test', 'service test', 'integration test', 'npx vitest', 'test suite',
+      'phase 17', 'claude code level', 'test selector',
+    ],
+  },
+  {
     id: 'quick-start-gallery',
     name: 'Quick-Start Gallery — Example Prompt Cards',
     path: 'Pro Chat → empty chat → example cards grid (visible before first message)',

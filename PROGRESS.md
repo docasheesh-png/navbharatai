@@ -51,6 +51,7 @@ All G-cluster work merged to main. These are the bedrock — build on top, never
 | G11 | Build reliability (no more "stream ended without result") | merged |
 | G12 | Real-time file streaming (files appear live as agent writes) | merged |
 | Guider | Pre-build plan confirm + post-build grade → auto-refine, all users | merged |
+| Phase 17 | Auto Test Generation: multi-file Vitest tests for every Pro build (TestAnalyzer + generateTestSuite + ValidationPipeline injection) | branch ready |
 
 ---
 

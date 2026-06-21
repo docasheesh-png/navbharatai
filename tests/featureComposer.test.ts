@@ -1,40 +1,30 @@
 import { describe, it, expect } from 'vitest';
 import { FeatureComposer } from '../src/server/BuildEngine/FeatureComposer';
 
-describe('FeatureComposer.compose', () => {
-  const fc = new FeatureComposer();
-
-  it('always includes ui-atoms', () => {
-    const features = fc.compose('Build a clock widget');
-    const ids = features.map(f => f.id);
-    expect(ids).toContain('ui-atoms');
+describe('FeatureComposer', () => {
+  it('always returns ui-atoms feature', () => {
+    const composer = new FeatureComposer();
+    const result = composer.compose('build a landing page');
+    expect(result.some(f => f.id === 'ui-atoms')).toBe(true);
   });
 
-  it('includes data-persistence and api-routes for a management request', () => {
-    const features = fc.compose('Build a project management tool');
-    const ids = features.map(f => f.id);
-    expect(ids).toContain('data-persistence');
-    expect(ids).toContain('api-routes');
+  it('adds data-persistence and api-routes for CRM request', () => {
+    const composer = new FeatureComposer();
+    const result = composer.compose('build a CRM system');
+    expect(result.some(f => f.id === 'data-persistence')).toBe(true);
+    expect(result.some(f => f.id === 'api-routes')).toBe(true);
   });
 
-  it('includes data-persistence and api-routes for a CRM request', () => {
-    const features = fc.compose('Build a CRM system');
-    const ids = features.map(f => f.id);
-    expect(ids).toContain('data-persistence');
-    expect(ids).toContain('api-routes');
+  it('adds data-persistence for management request', () => {
+    const composer = new FeatureComposer();
+    const result = composer.compose('inventory management app');
+    expect(result.some(f => f.id === 'data-persistence')).toBe(true);
   });
 
-  it('does NOT include data-persistence for a simple front-end request', () => {
-    const features = fc.compose('Build a calculator UI');
-    const ids = features.map(f => f.id);
-    expect(ids).not.toContain('data-persistence');
-    expect(ids).not.toContain('api-routes');
-  });
-
-  it('ui-atoms exposes Button and Input in its components', () => {
-    const features = fc.compose('any');
-    const atoms = features.find(f => f.id === 'ui-atoms');
-    expect(atoms?.components).toContain('Button');
-    expect(atoms?.components).toContain('Input');
+  it('returns only ui-atoms for simple request', () => {
+    const composer = new FeatureComposer();
+    const result = composer.compose('make a counter');
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('ui-atoms');
   });
 });

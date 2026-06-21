@@ -370,12 +370,17 @@ NavBharatAI now learns from build failures to prevent them repeating.
 - `tests/errorPatternMatcher.test.ts` — 16 unit tests (345/345 total green)
 - tsc x2 clean
 
-### 5.5 — Offline / degraded mode
-**Status: TODO**
+### 5.5 — Offline / degraded mode ✅ PARTIAL (2026-06-21) — PR #142
+**Branch:** `claude/phase-5.5-degraded-mode`
 
-Provider down → show honest status ("Grok slow, using Anthropic").
-Queue request for retry on recovery (opt-in). Template-based generation as last resort for
-static apps. Never show fake progress when nothing is happening.
+**Shipped (provider fallback visibility):**
+- `AIRouter.ts` — now populates `telemetry.fallbackReason` (was always `undefined` before) when ≥1 higher-priority provider failed before a successful one
+- `EngineerAITypes.ts` — added `providerFallbackShown: boolean` to `SharedLoopState`
+- `EngineerAgentLoop.ts` — after each `router.route()` call, if `telemetry.retries > 0` and not yet shown, yields a `status` event: "⚠️ Primary AI provider unavailable — using ANTHROPIC (1 provider tried first). Build continues normally." Shown once per build (not on every step). Also improved the all-providers-failed error message.
+
+**Still TODO:**
+- Queue request for retry on recovery (opt-in)
+- Template-based generation as last resort for static apps
 
 **Phase 5 DONE when:** Strict types everywhere. Real E2E green in CI. Error learning active.
 Degraded mode tested. No file over 500 lines.

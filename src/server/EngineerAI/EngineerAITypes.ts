@@ -65,6 +65,9 @@ export interface SharedLoopState {
   /** Set (instead of yielding directly) when 'done' or 'reply' succeeds, so the
    *  orchestrator can emit plan_step_done BEFORE the 'complete' event. */
   completionEvent: EngineerAgentEvent | null;
+  /** Phase 5.5 — set to true once the provider-fallback warning has been shown so
+   *  we don't spam it on every step of a degraded-mode build. */
+  providerFallbackShown: boolean;
 }
 
 /** One ReAct action the model outputs per turn. */

@@ -197,7 +197,14 @@ export class AIRouter {
 
           return {
             response,
-            telemetry: { provider: provider.name, retries: errors.length, latency, success: true },
+            telemetry: {
+              provider: provider.name,
+              retries: errors.length,
+              latency,
+              success: true,
+              // Populated when ≥1 higher-priority provider failed before this one succeeded
+              fallbackReason: errors.length > 0 ? `Skipped: ${errors.slice(0, 3).join('; ')}` : undefined,
+            },
           };
         } catch (error: any) {
           const secs = cooldownSeconds(error);

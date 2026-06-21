@@ -339,6 +339,7 @@ export class EngineerAgentLoop {
       globalStep: 0,
       terminated: false,
       completionEvent: null,
+      providerFallbackShown: false,
     };
 
     // Phase 12C/12D — if the user attached an image, save it as a usable workspace
@@ -495,14 +496,22 @@ export class EngineerAgentLoop {
         // PlannerAgent keeps grok-3-fast (default) since it only needs structured JSON.
         const { response, telemetry } = await this.router.route(prompt, effectiveSystemPrompt, images, 'grok-3');
         usageTracker.record(workspaceId, 'aiCall');
+        // Phase 5.5 — provider fallback visibility: notify once per build when the
+        // primary AI provider (Grok) is unavailable and a fallback took over.
+        // Prevents silent degraded-mode builds where users see slow responses with
+        // no explanation.
+        if (telemetry.success && telemetry.retries > 0 && !shared.providerFallbackShown) {
+          shared.providerFallbackShown = true;
+          yield { type: 'status', message: `⚠️ Primary AI provider unavailable — using ${telemetry.provider} (${telemetry.retries} provider${telemetry.retries > 1 ? 's' : ''} tried first). Build continues normally.` };
+        }
         if (!telemetry.success) {
           yield {
             type: 'error',
             message:
-              'Grok API call failed. Check: ' +
-              '① GROK_API_KEY (or XAI_API_KEY) is set correctly in Cloud Run env vars — get it at console.x.ai, ' +
+              'All AI providers are unavailable. Check: ' +
+              '① GROK_API_KEY (or XAI_API_KEY) is set in Cloud Run env vars — get it at console.x.ai, ' +
               '② xAI API rate limit — wait a minute and retry, ' +
-              '③ xAI API is temporarily down — check status.x.ai',
+              '③ All providers may be temporarily down — check status.x.ai and wait 1–2 minutes',
           };
           shared.terminated = true;
           return;

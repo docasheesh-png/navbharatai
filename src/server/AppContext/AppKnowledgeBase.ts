@@ -305,10 +305,10 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     id: 'billing',
     name: 'Billing & Plan',
     path: 'Settings → Billing  OR  Header → user area',
-    description: 'View your current subscription plan (Free / Pro / VIP), usage statistics, and payment options.',
-    howToUse: 'Open Billing to check your plan, view remaining credits, or upgrade.',
+    description: 'View your current subscription plan (Free / Pro / VIP), usage statistics, payment options, and This Month\'s AI Cost — a running total of estimated AI spend across all Pro builds in the current calendar month.',
+    howToUse: 'Open Billing to check your plan, view remaining credits, see monthly AI cost, or upgrade.',
     relatedFeatures: ['settings_root', 'donate'],
-    keywords: ['billing', 'plan', 'subscription', 'usage', 'payment', 'pricing', 'upgrade', 'credits', 'pro plan', 'free plan'],
+    keywords: ['billing', 'plan', 'subscription', 'usage', 'payment', 'pricing', 'upgrade', 'credits', 'pro plan', 'free plan', 'monthly cost', 'ai cost', 'monthly ai cost', 'build cost', 'how much spent'],
   },
   {
     id: 'donate',
@@ -432,11 +432,31 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     id: 'quick-start-gallery',
     name: 'Quick-Start Gallery — Example Prompt Cards',
     path: 'Pro Chat → empty chat → example cards grid (visible before first message)',
-    description: `G9: When Pro Chat has no messages yet, a 2×4 grid of example prompt cards is shown. Cards cover common app types: Analytics Dashboard, E-commerce Page, Todo App, Portfolio Site, Quiz App, Weather App, Chat Interface, Note-taking App. Clicking any card fills the Pro Chat input with a detailed, well-crafted prompt for that app type. The user can edit the prompt before sending or just press Enter to build immediately.`,
-    howToUse: 'Open Pro Chat with no previous messages. Scroll past the header — the Quick-Start Gallery appears. Click any card to load its prompt into the chat input. Edit as needed, then send.',
+    description: `G9: When Pro Chat has no messages yet, a grid of example prompt cards is shown. Cards cover common app types AND Bharat-first templates: Analytics Dashboard, E-commerce Page, Portfolio Site, Admin Dashboard, UPI Payment App (Razorpay integration), Hindi Language App (bilingual Devanagari), GST Invoice Generator, Startup Registration Tracker. Clicking any card fills the Pro Chat input with a detailed prompt. The Bharat-first templates (UPI, Hindi, GST, Startup) generate real, working Indian-context apps.`,
+    howToUse: 'Open Pro Chat with no previous messages. Scroll past the header — the Quick-Start Gallery appears. Click any card to load its prompt into the chat input. For Bharat-first templates: UPI Payment needs RAZORPAY_KEY_ID, Hindi app is fully self-contained, GST Invoice needs no API key, Startup Tracker stores data in localStorage.',
     relatedFeatures: ['pro_chat'],
     aiSurface: 'pro_chat',
-    keywords: ['example prompt', 'quick start', 'starter template', 'example cards', 'prompt gallery', 'what can you build', 'kya bana sakte ho', 'show examples', 'example apps', 'ideas for app', 'app ideas'],
+    keywords: ['example prompt', 'quick start', 'starter template', 'example cards', 'prompt gallery', 'what can you build', 'kya bana sakte ho', 'show examples', 'example apps', 'ideas for app', 'app ideas', 'upi', 'payment', 'hindi', 'gst', 'invoice', 'startup', 'bharat', 'india', 'razorpay', 'devanagari', 'rupee', 'msme', 'registration'],
+  },
+  {
+    id: 'build-version-history',
+    name: 'Build Version History — Go Back to Any Previous Version',
+    path: 'Pro Chat → sidebar → Files → History tab',
+    description: `Phase 2.1: Every successful Pro build automatically creates a version checkpoint in Firestore. The History tab in the Files panel shows all past builds for the current session, newest first, each labeled with an auto-generated commit message (e.g. "feat: build \\"todo app\\" — 12 files, vfs tier"). Users can restore any previous version with one click — the workspace reverts to that exact file snapshot and the Code Studio switches to show the restored files. Versions are retained for up to 50 builds per session. Each entry shows: commit message, relative time, file count, build tier, and version number (v1, v2, v3...).`,
+    howToUse: 'Build any app in Pro Chat. Open the Files view (sidebar → Files). Click the "History" tab in the panel header. All past builds appear as version entries. Click "Restore" next to any entry to revert the workspace to that version.',
+    relatedFeatures: ['pro_chat', 'files-panel', 'auto-dependency-sync'],
+    aiSurface: 'pro_chat',
+    keywords: ['version history', 'go back', 'restore', 'undo build', 'previous version', 'revert', 'old version', 'build history', 'checkpoint', 'purana version', 'version 3 pe wapas', 'rollback', 'undo changes', 'history', 'past builds'],
+  },
+  {
+    id: 'unified-memory',
+    name: 'Unified Memory — Pro Chat and Engineer AI Share Context',
+    path: 'Automatic — happens every time you build in Pro Chat then ask Engineer AI to edit',
+    description: `Phase 2.3: Pro Chat maintains a rolling memory of what was built (project summary + last 10 edits). When Engineer AI runs on the same workspace, it now receives this context at the start of every step — so the agent knows what Pro Chat already built, which decisions were made, and what the project contains. This eliminates the "fresh-start" problem where Engineer AI would re-reason decisions already established by Pro Chat. The memory is stored in Firestore (pro_memories collection) and loaded automatically by ProEngineRunner at the start of each agentic run.`,
+    howToUse: 'Automatic — no user action needed. Build in Pro Chat → the memory is saved. Then ask Engineer AI to edit → it picks up the context. Context includes: project summary, tech stack, last 10 edits.',
+    relatedFeatures: ['pro_chat', 'build-version-history', 'iterative-agent-build'],
+    aiSurface: 'engineer_ai',
+    keywords: ['memory', 'context', 'remember', 'remember project', 'forget', 'fresh start', 'context lost', 'yaad', 'bhool gaya', 'pichla kaam', 'previous build', 'project context', 'session memory', 'unified memory'],
   },
   {
     id: 'one-click-deploy',
@@ -470,6 +490,28 @@ On success: navigates to the "App is Live!" screen with the live URL. No command
     keywords: ['iterative build', 'step by step', 'agent build', 'build failed try again', 'try again', 'retry build', 'complex app', 'multi step', 'pro chat build', 'app build', 'build engine', 'photo editing app', 'phir se bana', 'dobara bana', 'memory', 'context', 'remember'],
   },
   {
+    id: 'guider-plan-confirm',
+    name: 'Guider — Pre-Build Design Confirmation + Post-Build Quality Grader',
+    path: 'Pro Chat → type any app description → Guider card appears before build starts',
+    description: `Guider is the Pro Chat quality layer that wraps every build with two checks:
+
+PRE-BUILD (Plan Confirmation):
+• For every fresh app request, Guider proposes a structured design spec (screens, features, tech stack) and shows it as a confirmation card BEFORE building.
+• User can Approve, Edit the spec, or ask a clarifying question.
+• Small edits and follow-up messages skip this step automatically (server-side gate).
+• On approval, the spec is stored; build starts immediately.
+
+POST-BUILD (Grade + Auto-Refine):
+• After the build completes, Guider grades the result against the confirmed spec (0–100 score).
+• If score < threshold and gaps are found, Guider auto-refines up to 2 rounds without any user action.
+• Each refine round targets only the specific gaps (e.g. "missing dark mode toggle", "no error handling in login") without removing working features.
+• Final score + pass/fail shown in chat message.`,
+    howToUse: 'Open Pro Chat and describe an app. A Guider design card will appear — review and click Approve (or edit it). Build starts. After it completes, watch for the Guider grade message — it will auto-fix gaps.',
+    relatedFeatures: ['iterative-agent-build', 'pro_chat', 'auto-code-review'],
+    aiSurface: 'pro_chat',
+    keywords: ['guider', 'design plan', 'plan confirmation', 'approve plan', 'build spec', 'quality check', 'grade', 'refine', 'auto refine', 'gaps', 'requirements', 'spec', 'confirmation card', 'before build', 'pre build', 'post build', 'quality score', 'plan approve karo', 'design confirm'],
+  },
+  {
     id: 'auto-code-review',
     name: 'Auto Code Review',
     path: 'Pro Chat → Build any app → review appears in build summary',
@@ -486,6 +528,21 @@ Also available on-demand via Settings → Pro → Code Review button.`,
     relatedFeatures: ['pro_chat', 'engineer_ai', 'admin-metrics'],
     aiSurface: 'pro_chat',
     keywords: ['code review', 'security', 'quality', 'owasp', 'xss', 'injection', 'tech debt', 'accessibility', 'score', 'findings', 'auto review', 'code quality', 'security scan'],
+  },
+  {
+    id: 'error-pattern-learning',
+    name: 'Error Pattern Learning — Builds Get Smarter After Failures',
+    path: 'Automatic — active on every Pro build (no user action needed)',
+    description: `Phase 5.4: NavBharatAI learns from build failures to prevent them from repeating.
+Two mechanisms:
+• Pre-build hints: before the agent starts coding, technology-specific pitfalls are injected based on keywords in your prompt (e.g. "Tailwind" triggers Tailwind v4 setup hints, "Supabase" triggers auth key hints). This prevents the most common first-build failures.
+• Session-level learning: when a build fails with a recognizable pattern (ERESOLVE, unclosed JSX, Cannot find module, React hooks violation, etc.), the specific fix hint is saved for that session. The next retry automatically receives these hints in the agent's context, so the agent corrects the issue without needing you to describe it.
+Patterns tracked: ERESOLVE peer deps, Cannot find module, named import errors, unclosed JSX, React hooks rules, TypeScript type errors, Vite config missing, Supabase env keys, null/undefined access.
+Hints are cleared after a successful build so they don't carry over to unrelated future work.`,
+    howToUse: 'Automatic — no user action needed. When a build fails, retry it and the agent will have the specific fix hints injected. Over time, NavBharatAI builds a knowledge base of common errors across all sessions.',
+    relatedFeatures: ['pro_chat', 'auto-dependency-sync', 'iterative-agent-build'],
+    aiSurface: 'pro_chat',
+    keywords: ['error', 'build fail', 'fix', 'retry', 'learn', 'pattern', 'cannot find module', 'eresolve', 'peer dep', 'jsx error', 'tailwind', 'supabase', 'smart build', 'auto fix', 'error detection', 'build smarter', 'galti', 'error fix', 'dobara banao'],
   },
 ];
 

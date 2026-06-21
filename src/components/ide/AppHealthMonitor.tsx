@@ -109,7 +109,10 @@ export function AppHealthMonitor() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <HeartPulse size={20} color="#ef4444" />
           <div>
-            <div style={{ fontWeight: 600, fontSize: 15, color: '#f1f5f9' }}>App Health Monitor</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontWeight: 600, fontSize: 15, color: '#f1f5f9' }}>App Health Monitor</span>
+              <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: '#451a03', color: '#fb923c', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Demo Data</span>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 6, height: 6, borderRadius: '50%', background: overallHealth === 'healthy' ? '#10b981' : '#f59e0b', animation: isLive ? 'pulse 2s infinite' : 'none' }} />
               <span style={{ color: overallHealth === 'healthy' ? '#10b981' : '#f59e0b', fontSize: 11 }}>

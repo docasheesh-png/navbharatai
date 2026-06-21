@@ -56,39 +56,110 @@ const KNOWN_VERSIONS: Record<string, string> = {
   // Utilities
   'lodash': '^4.17.21',
   'lodash-es': '^4.17.21',
+  // DnD
+  '@dnd-kit/core': '^6.1.0',
+  '@dnd-kit/sortable': '^8.0.0',
+  // Real-time
+  'socket.io-client': '^4.7.0',
+  // Maps
+  'react-leaflet': '^4.2.1',
+  'leaflet': '^1.9.4',
+  // Excel / PDF
+  'xlsx': '^0.18.5',
+  'jspdf': '^2.5.1',
+  // QR codes
+  'qrcode.react': '^4.0.0',
+  // Markdown
+  'react-markdown': '^9.0.0',
+  'marked': '^13.0.0',
+  // Syntax highlighting
+  'highlight.js': '^11.10.0',
+  'prismjs': '^1.29.0',
+  // Validation
+  'yup': '^1.4.0',
+  // HTTP alternative
+  'swr': '^2.2.5',
+  // i18n
+  'i18next': '^23.12.0',
+  'react-i18next': '^15.0.0',
+  // Misc UI
+  'react-select': '^5.8.0',
+  'react-datepicker': '^7.3.0',
+  '@hello-pangea/dnd': '^16.6.0',
+  // Svelte runtime (plugin goes in devDeps — see KNOWN_DEV_VERSIONS)
+  'svelte': '^4.2.19',
+};
+
+/** Packages that belong in devDependencies (build tools, type declarations, test infra). */
+const KNOWN_DEV_VERSIONS: Record<string, string> = {
+  // TypeScript type stubs
+  '@types/react': '^18.3.3',
+  '@types/react-dom': '^18.3.0',
+  '@types/node': '^20.14.0',
+  '@types/lodash': '^4.17.0',
+  '@types/lodash-es': '^4.17.12',
+  '@types/uuid': '^10.0.0',
+  '@types/leaflet': '^1.9.12',
+  '@types/prismjs': '^1.26.4',
+  // CSS toolchain
+  'autoprefixer': '^10.4.19',
+  'postcss': '^8.4.40',
+  // Tailwind
+  'tailwindcss': '^3.4.7',
+  '@tailwindcss/vite': '^4.0.0',
+  // Vite plugins
+  '@vitejs/plugin-react': '^4.3.1',
+  '@vitejs/plugin-vue': '^5.1.0',
+  '@sveltejs/vite-plugin-svelte': '^3.1.2',
+  // Testing
+  'vitest': '^2.0.0',
+  '@testing-library/react': '^16.0.0',
+  '@testing-library/user-event': '^14.5.0',
+  'happy-dom': '^14.12.0',
 };
 
 const DEFAULT_VERSION = 'latest';
 
 export interface DependencySyncResult {
   added: string[];
+  addedDev: string[];
 }
 
 /**
  * Ensure every bare package imported by the project's source files is declared
- * in package.json. Writes the updated package.json back into the VFS only when
- * at least one package was added. Best-effort: never throws.
+ * in package.json (dependencies or devDependencies). Writes the updated
+ * package.json back into the VFS only when at least one package was added.
+ * Best-effort: never throws.
  */
 export function syncDependencies(vfs: VirtualFileSystem): DependencySyncResult {
   const text = vfs.readText('package.json');
-  if (!text) return { added: [] };
+  if (!text) return { added: [], addedDev: [] };
   let pkg: any;
-  try { pkg = JSON.parse(text); } catch { return { added: [] }; }
+  try { pkg = JSON.parse(text); } catch { return { added: [], addedDev: [] }; }
 
   const declared = collectDeclaredDeps(vfs) ?? new Set<string>();
   const imported = extractBareImports(vfs);
   const added: string[] = [];
+  const addedDev: string[] = [];
 
   pkg.dependencies = pkg.dependencies || {};
   for (const name of imported) {
     if (declared.has(name)) continue;
-    pkg.dependencies[name] = KNOWN_VERSIONS[name] ?? DEFAULT_VERSION;
-    added.push(name);
+    if (KNOWN_DEV_VERSIONS[name] !== undefined) {
+      // Build tool / type declaration — belongs in devDependencies
+      pkg.devDependencies = pkg.devDependencies || {};
+      pkg.devDependencies[name] = KNOWN_DEV_VERSIONS[name];
+      addedDev.push(name);
+    } else {
+      pkg.dependencies[name] = KNOWN_VERSIONS[name] ?? DEFAULT_VERSION;
+      added.push(name);
+    }
   }
 
-  if (added.length) {
+  if (added.length || addedDev.length) {
     added.sort();
+    addedDev.sort();
     vfs.write('package.json', JSON.stringify(pkg, null, 2) + '\n');
   }
-  return { added };
+  return { added, addedDev };
 }

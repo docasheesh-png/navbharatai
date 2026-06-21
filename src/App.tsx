@@ -2,7 +2,16 @@ import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallbac
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { EngineBuilder } from './components/EngineBuilder';
-import { buildApp, buildAppStream, fetchBuildSession, isAgenticEngineEnabled, previewSrcFor } from './services/buildService';
+import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
+import { GitViewPanel } from './components/panels/GitViewPanel';
+import { DeploySuccessPanel } from './components/panels/DeploySuccessPanel';
+import { AboutPanel } from './components/panels/AboutPanel';
+import { AdminLoginPanel } from './components/panels/AdminLoginPanel';
+import { FilesPanel } from './components/panels/FilesPanel';
+import { DonationPanel } from './components/panels/DonationPanel';
+import { BillingPanel } from './components/panels/BillingPanel';
+import { DeployModal } from './components/panels/DeployModal';
+import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
@@ -805,6 +814,7 @@ export default function App() {
   const [billingLogs, setBillingLogs] = useState<any[]>([]);
   const [billingTransactions, setBillingTransactions] = useState<any[]>([]);
   const [loadingWallet, setLoadingWallet] = useState(false);
+  const [monthlyAiCost, setMonthlyAiCost] = useState<{ totalBuilds: number; totalCostUsd: number; month: string } | null>(null);
   const [isRecharging, setIsRecharging] = useState(false);
   const [paymentSession, setPaymentSession] = useState<any>(null);
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
@@ -903,6 +913,15 @@ export default function App() {
 
       const txsRes = await axios.get(`/api/wallet/${user.uid}/transactions`);
       setBillingTransactions(Array.isArray(txsRes.data) ? txsRes.data : []);
+
+      // Phase 4.2 — fetch monthly AI cost (best-effort, never blocks wallet load).
+      try {
+        const usageRes = await fetch(`/api/user/usage/${encodeURIComponent(user.uid)}`);
+        if (usageRes.ok) {
+          const usageData = await usageRes.json();
+          setMonthlyAiCost({ totalBuilds: usageData.totalBuilds ?? 0, totalCostUsd: usageData.totalCostUsd ?? 0, month: usageData.month ?? '' });
+        }
+      } catch { /* usage fetch never blocks wallet */ }
     } catch (err) {
       console.error('Failed to sync wallet data with Firestore:', err);
     } finally {
@@ -4323,7 +4342,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
         // ── Guider (Hybrid): for a fresh/big request, propose a design and wait for
         //    the user's confirmation BEFORE building. Small edits skip this (gate on
         //    the server). Never blocks: any failure just proceeds to a normal build.
-        if (isAgenticEngineEnabled() && !guiderApproved && !isAutoContinue) {
+        if (!guiderApproved && !isAutoContinue) {
           try {
             const planResp: any = await fetch('/api/guider/plan', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4362,10 +4381,12 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             history: conversationHistory,
             memorySummary: proMemorySummary,
             editLog: proActiveSession?.editLog || [],
-            // Internal-testing opt-in (per-session only; see isAgenticEngineEnabled).
-            agentic: isAgenticEngineEnabled(),
+            // The agentic engine (runProEngine) is always on — always pass true.
+            agentic: true,
             // G1.2 — stable session ID so server can persist + restore this build.
             sessionId: currentProSessionId,
+            // Phase 4.2 — pass userId so server can record per-user monthly cost.
+            userId: user?.uid || undefined,
             // G3 — credentials: let the agentic engine use real execution tier.
             githubToken: githubToken || undefined,
             userE2bKey: userE2bKey || undefined,
@@ -4510,7 +4531,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
               // ── Guider grade→refine (Slice 3): the build fully finished (not partial).
               //    If this came from an approved guider plan, grade it against the spec
               //    and auto-refine the gaps (bounded), separate from auto-continue. ──
-              if (proGuiderSpecRef.current && isAgenticEngineEnabled()) {
+              if (proGuiderSpecRef.current) {
                 const ctx = proGuiderSpecRef.current;
                 try {
                   const gr: any = await fetch('/api/guider/grade', {
@@ -4524,7 +4545,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
                     const gapText = (grade.gaps || []).map((g: any) => `- ${g.issue}`).join('\n');
                     setProMessages(prev => [...prev, {
                       id: (Date.now() + 3).toString(),
-                      text: `🔁 Guider check: ${grade.score}/100 — kuch reh gaya, khud sudhaar raha hoon (round ${round})…`,
+                      text: `🔁 Guider check: ${grade.score}/100 — gaps found, auto-refining (round ${round})…`,
                       sender: 'ai', timestamp: new Date(),
                     }]);
                     setTimeout(() => {
@@ -4538,8 +4559,8 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
                       setProMessages(prev => [...prev, {
                         id: (Date.now() + 3).toString(),
                         text: grade.pass
-                          ? `✅ Guider: saari requirements poori (${grade.score}/100).`
-                          : `Guider: abhi tak ka best version ready hai (${grade.score}/100). Aur sudhaar chahiye to bata dena.`,
+                          ? `✅ Guider: all requirements met (${grade.score}/100).`
+                          : `Guider: best version ready (${grade.score}/100). Let me know if you'd like further improvements.`,
                         sender: 'ai', timestamp: new Date(),
                       }]);
                     }
@@ -5925,17 +5946,8 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     addLog(`Template "${name}" saved to marketplace ✓`, 'success');
   };
 
-  const templates = [
-    { id: 'intro', name: 'Introduction', icon: Sparkles, prompt: 'hey 👋 , tell me about yourself!' },
-    { id: 'analytics', name: 'Smart Analytics', icon: Activity, prompt: 'Create a high-performance Data Analytics Dashboard for a modern business. I want real-time visualization of key performance indicators (KPIs) including monthly revenue, user growth, and churn rate. Use a sophisticated dark-glassmorphism theme with SVG charts and interactive data tables. Ensure the UI is fully responsive and supports dynamic data filtering.' },
-    { id: 'calc', name: 'Simple Calculator', icon: Cpu, prompt: 'I want you to act as a World-Class Software Architect. Build a Professional High-Precision Scientific Calculator. \n\n### MANDATORY FUNCTIONAL REQUIREMENTS:\n1. **Core Logic**: You MUST implement a robust JavaScript evaluation engine in `script.js`. It should handle click events for all buttons, manage a screen buffer, and accurately calculate results for basic (+, -, *, /) and scientific (sqrt, sin, cos, tan, log) operations. Ensure the calculator works perfectly upon loading.\n2. **UI Architecture**: In `style.css`, create a premium "Space-Age Glass" design with deep shadows and tactile hover animations. Use a responsive grid layout.\n3. **History System**: Implement a history list that records the last 5 operations.\n4. **Checklist**: All button IDs in `index.html` must match the selectors used in `script.js`. Ensure NO empty functions.' },
-    { id: 'clock', name: 'Simple Clock', icon: Clock, prompt: 'Create a fully functional, production-grade analog clock/watch application for Android + Web (responsive mobile-first UI).\n\n### PRIMARY GOAL\nBuild an ultra-realistic, smooth, accurate analog watch application with professional mechanics, synchronized with the device time down to the millisecond. It must look and behave like a real luxury wristwatch.\n\n### CRITICAL FUNCTIONAL REQUIREMENTS\n1. **REAL TIME SYNC**: Automatically sync with device local time, hours, minutes, and seconds. The clock MUST NOT freeze or use hardcoded angles. Use `requestAnimationFrame` for continuous updates.\n2. **SMOOTH MOVEMENT**: Second hand must move smoothly every frame (not teleport). Minute and Hour hands must move proportionally as seconds progress.\n3. **HAND ALIGNMENT**: All hands MUST originate from EXACTLY the same center pivot point (0,0 center). No misaligned axes.\n4. **DESIGN**: Premium luxury watch face with metallic frame, realistic dial texture, and inner shadows. Include 12 hour markers and minute ticks.\n5. **GEOMETRY**: Perfectly circular (1:1 aspect ratio) and centered on all screens (Android/Desktop).\n6. **FORMULAS**:\n   - Seconds: `seconds * 6` degrees\n   - Minutes: `(minutes * 6) + (seconds * 0.1)` degrees\n   - Hours: `(hours % 12 * 30) + (minutes * 0.5)` degrees\n7. **TECHNICAL**: Use HTML/CSS/JS with SVG or Canvas for real-time rendering. Provide separate code for index.html, style.css, and script.js with NO placeholders.' },
-    // 9.6 — React Native / Mobile App generation template
-    { id: 'rn_app', name: 'React Native App', icon: Smartphone, isPro: true, prompt: 'Build a React Native (Expo) mobile app. Generate the complete project structure with:\n1. App.js entry point with React Navigation\n2. HomeScreen, DetailScreen components\n3. Bottom tab navigation\n4. StyleSheet with platform-specific styling (ios/android)\n5. Async storage for state persistence\n\nProvide separate files: App.js, screens/HomeScreen.js, screens/DetailScreen.js, package.json (Expo), README with run commands.\nApp theme: dark mode with indigo accent. Include sample data and list rendering.' },
-    { id: 'portfolio', name: 'Portfolio Site', icon: Globe, isPro: false, prompt: 'Build a stunning personal portfolio website with: hero section with animated gradient, about me, skills grid, projects showcase (3 cards), contact form with validation. Dark theme with glassmorphism cards, smooth scroll animations, mobile-first responsive. HTML/CSS/JS only.' },
-    { id: 'ecommerce', name: 'E-Commerce UI', icon: ShieldCheck, isPro: true, prompt: 'Build a modern e-commerce product listing page: navbar with cart counter, hero banner, product grid (8 items with images, prices, add-to-cart), cart sidebar with total calculation. Tailwind CSS style with indigo/white palette. Full JavaScript interactions.' },
-    { id: 'dashboard', name: 'Admin Dashboard', icon: LayoutDashboard, isPro: true, prompt: 'Build a professional admin dashboard: sidebar navigation, header with user info, metric cards (4 KPIs), recent activity table (10 rows), line chart using Chart.js CDN. Dark theme, responsive. All data should be realistic sample data.' },
-  ];
+  // Phase 1.7 — template list lives in TemplatesPanel.tsx (CURATED_TEMPLATES).
+  const templates = CURATED_TEMPLATES;
 
   const themeClasses = getThemeClasses(theme);
 
@@ -7637,113 +7649,23 @@ ${pending.map(p => `  - ${p}`).join('\n')}
 
               {/* G8 — One-click Deploy Panel (modal overlay) */}
               {showDeployPanel && (
-                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setShowDeployPanel(false); }}>
-                  <div className="w-full max-w-sm mx-4 bg-[#161b22] border border-white/10 rounded-3xl p-6 shadow-2xl space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Rocket className="w-4 h-4 text-emerald-400" />
-                        <h3 className="text-sm font-black text-white uppercase tracking-widest">Deploy App</h3>
-                      </div>
-                      <button onClick={() => setShowDeployPanel(false)} className="p-1 hover:bg-white/10 rounded-lg transition-colors">
-                        <X className="w-4 h-4 text-[#8b949e]" />
-                      </button>
-                    </div>
-
-                    {/* Platform selector */}
-                    <div className="grid grid-cols-3 gap-2">
-                      {(['vercel', 'netlify', 'github'] as const).map(p => (
-                        <button
-                          key={p}
-                          onClick={() => { setDeployPlatform(p); setDeployPanelError(''); }}
-                          className={cn(
-                            "py-2 px-3 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all",
-                            deployPlatform === p
-                              ? "bg-emerald-900/40 border-emerald-500/50 text-emerald-300"
-                              : "bg-white/5 border-white/10 text-[#8b949e] hover:border-white/20 hover:text-white"
-                          )}
-                        >
-                          {p === 'github' ? 'GitHub' : p.charAt(0).toUpperCase() + p.slice(1)}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Token input */}
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">
-                        {deployPlatform === 'vercel' ? 'Vercel Token' : deployPlatform === 'netlify' ? 'Netlify Token' : 'GitHub Token'}
-                      </label>
-                      <input
-                        type="password"
-                        value={deployToken}
-                        onChange={e => { setDeployToken(e.target.value); setDeployPanelError(''); }}
-                        placeholder={deployPlatform === 'vercel' ? 'Get at vercel.com/account/tokens' : deployPlatform === 'netlify' ? 'Get at app.netlify.com/user/applications' : 'github.com → Settings → Tokens'}
-                        className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-emerald-500/50"
-                      />
-                    </div>
-
-                    {/* Platform-specific fields */}
-                    {deployPlatform === 'vercel' && (
-                      <div className="space-y-1">
-                        <label className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">Project Name</label>
-                        <input
-                          type="text"
-                          value={deployProjectName}
-                          onChange={e => { setDeployProjectName(e.target.value); setDeployPanelError(''); }}
-                          placeholder="my-app"
-                          className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-emerald-500/50"
-                        />
-                      </div>
-                    )}
-                    {deployPlatform === 'netlify' && (
-                      <div className="space-y-1">
-                        <label className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">Site ID (optional)</label>
-                        <input
-                          type="text"
-                          value={deployProjectName}
-                          onChange={e => { setDeployProjectName(e.target.value); setDeployPanelError(''); }}
-                          placeholder="Leave blank to create new site"
-                          className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-emerald-500/50"
-                        />
-                      </div>
-                    )}
-                    {deployPlatform === 'github' && (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="space-y-1">
-                          <label className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">Owner</label>
-                          <input
-                            type="text"
-                            value={deployOwner}
-                            onChange={e => { setDeployOwner(e.target.value); setDeployPanelError(''); }}
-                            placeholder="username"
-                            className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-emerald-500/50"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">Repo</label>
-                          <input
-                            type="text"
-                            value={deployRepo}
-                            onChange={e => { setDeployRepo(e.target.value); setDeployPanelError(''); }}
-                            placeholder="repo-name"
-                            className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-emerald-500/50"
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {deployPanelError && (
-                      <p className="text-[10px] text-red-400 bg-red-900/20 border border-red-500/20 rounded-xl px-3 py-2">{deployPanelError}</p>
-                    )}
-
-                    <button
-                      onClick={handleDeployApp}
-                      disabled={isDeploying}
-                      className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20"
-                    >
-                      {isDeploying ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Deploying...</> : <><Rocket className="w-3.5 h-3.5" /> Deploy Now</>}
-                    </button>
-                  </div>
-                </div>
+                <DeployModal
+                  platform={deployPlatform}
+                  token={deployToken}
+                  projectName={deployProjectName}
+                  owner={deployOwner}
+                  repo={deployRepo}
+                  error={deployPanelError}
+                  isDeploying={isDeploying}
+                  onClose={() => setShowDeployPanel(false)}
+                  onPlatformChange={setDeployPlatform}
+                  onTokenChange={setDeployToken}
+                  onProjectNameChange={setDeployProjectName}
+                  onOwnerChange={setDeployOwner}
+                  onRepoChange={setDeployRepo}
+                  onClearError={() => setDeployPanelError('')}
+                  onDeploy={handleDeployApp}
+                />
               )}
             </div>
           )}
@@ -7769,1151 +7691,123 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           )}
 
                     {activeView === 'about' && (
-            <div className="flex-1 bg-[#0d1117] overflow-y-auto custom-scrollbar p-6 sm:p-12 relative">
-               {isAdmin && (
-                 <div className="sticky top-0 right-0 z-50 flex justify-end pb-4">
-                    <div className="bg-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest text-white shadow-xl flex items-center gap-2">
-                       <Shield className="w-3.5 h-3.5 hover:rotate-12 transition-transform" />
-                       Admin Edit Mode Active
-                    </div>
-                 </div>
-               )}
-               <div className="max-w-4xl mx-auto space-y-12 pb-20">
-                  <motion.header 
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="text-center space-y-4 relative group/header"
-                  >
-                     <div className="inline-block p-4 bg-indigo-600/10 rounded-[2.5rem] border border-indigo-500/20 mb-4 relative">
-                        <Bot className="w-16 h-16 text-indigo-500" />
-                        {isAdmin && (
-                          <button 
-                            onClick={() => {
-                              const url = prompt('Enter Logo URL:', aboutData.logoUrl || '');
-                              if (url !== null) setAboutData({...aboutData, logoUrl: url});
-                            }}
-                            className="absolute -bottom-2 -right-2 p-2 bg-indigo-600 text-white rounded-xl shadow-lg hover:scale-110 transition-all opacity-0 group-hover/header:opacity-100"
-                          >
-                            <Camera className="w-3 h-3" />
-                          </button>
-                        )}
-                     </div>
-                     <div className="flex items-center justify-center gap-4">
-                        <h1 className="text-4xl sm:text-6xl font-black text-white tracking-tighter uppercase">{aboutData.headline}</h1>
-                        {isAdmin && (
-                          <button 
-                            onClick={() => {
-                              const val = prompt('Edit Headline:', aboutData.headline);
-                              if (val) setAboutData({...aboutData, headline: val});
-                            }}
-                            className="p-2 bg-white/5 hover:bg-indigo-600 rounded-xl text-indigo-400 hover:text-white transition-all opacity-0 group-hover/header:opacity-100"
-                          >
-                             <Edit2 className="w-4 h-4" />
-                          </button>
-                        )}
-                     </div>
-                     <div className="relative group/desc">
-                        <p className="text-[#8b949e] text-lg max-w-2xl mx-auto font-medium leading-relaxed">{aboutData.description}</p>
-                        {isAdmin && (
-                          <button 
-                            onClick={() => {
-                              const val = prompt('Edit Description:', aboutData.description);
-                              if (val) setAboutData({...aboutData, description: val});
-                            }}
-                            className="absolute -top-4 -right-4 p-2 bg-white/5 hover:bg-indigo-600 rounded-xl text-indigo-400 hover:text-white transition-all opacity-0 group-hover/desc:opacity-100"
-                          >
-                             <Edit2 className="w-4 h-4" />
-                          </button>
-                        )}
-                     </div>
-                  </motion.header>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-12">
-                     <motion.div 
-                       initial={{ opacity: 0, x: -20 }}
-                       animate={{ opacity: 1, x: 0 }}
-                       className="bg-[#161b22] border border-white/5 p-8 rounded-[2.5rem] space-y-4 shadow-2xl relative group/card1"
-                     >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                             <div className="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center">
-                                <User className="w-5 h-5 text-white" />
-                             </div>
-                             <h3 className="text-xl font-black text-white tracking-tight uppercase">Our Team</h3>
-                          </div>
-                          {isAdmin && (
-                            <button 
-                              onClick={() => {
-                                const val = prompt('Edit Team Info:', aboutData.team);
-                                if (val) setAboutData({...aboutData, team: val});
-                              }}
-                              className="p-2 bg-white/5 hover:bg-indigo-600 rounded-xl text-indigo-400 hover:text-white transition-all opacity-0 group-hover/card1:opacity-100"
-                            >
-                               <Edit2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                        <p className="text-[#8b949e] font-medium leading-relaxed">{aboutData.team}</p>
-                     </motion.div>
-
-                     <motion.div 
-                       initial={{ opacity: 0, x: 20 }}
-                       animate={{ opacity: 1, x: 0 }}
-                       className="bg-[#161b22] border border-white/5 p-8 rounded-[2.5rem] space-y-4 shadow-2xl relative group/card2"
-                     >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                             <div className="w-10 h-10 bg-emerald-600 rounded-2xl flex items-center justify-center">
-                                <Eye className="w-5 h-5 text-white" />
-                             </div>
-                             <h3 className="text-xl font-black text-white tracking-tight uppercase">Vision</h3>
-                          </div>
-                          {isAdmin && (
-                            <button 
-                              onClick={() => {
-                                const val = prompt('Edit Vision Info:', aboutData.vision);
-                                if (val) setAboutData({...aboutData, vision: val});
-                              }}
-                              className="p-2 bg-white/5 hover:bg-emerald-600 rounded-xl text-emerald-400 hover:text-white transition-all opacity-0 group-hover/card2:opacity-100"
-                            >
-                               <Edit2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                        <p className="text-[#8b949e] font-medium leading-relaxed">{aboutData.vision}</p>
-                     </motion.div>
-                  </div>
-               </div>
-            </div>
+            <AboutPanel
+              isAdmin={isAdmin}
+              aboutData={aboutData}
+              onAboutDataChange={setAboutData}
+            />
           )}
 
           {activeView === 'admin' && (
-            <div className="flex-1 bg-[#0d1117] flex flex-col items-center justify-center p-6">
-               {!isAdmin ? (
-                 <motion.div 
-                   initial={{ opacity: 0, scale: 0.95 }}
-                   animate={{ opacity: 1, scale: 1 }}
-                   className="w-full max-w-md bg-[#161b22] border border-white/10 p-8 rounded-[2.5rem] shadow-3xl space-y-8"
-                 >
-                    <div className="text-center space-y-2">
-                       <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-2xl mb-4">
-                          <Lock className="w-10 h-10 text-white" />
-                       </div>
-                       <h2 className="text-2xl font-black text-white tracking-tight uppercase">Admin Access</h2>
-                       <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Navbharat Enterprise Cloud Console</p>
-                    </div>
-
-                    <form onSubmit={handleAdminLogin} className="space-y-4">
-                       <div className="space-y-2">
-                          <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest ml-1">Username</label>
-                          <input 
-                             type="text"
-                             value={adminEmail}
-                             onChange={(e) => setAdminEmail(e.target.value)}
-                             className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-bold outline-none focus:border-indigo-500"
-                             placeholder="aashishcpmt09"
-                          />
-                       </div>
-                       <div className="space-y-2">
-                          <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest ml-1">Password</label>
-                          <input 
-                             type="password"
-                             value={adminPassword}
-                             onChange={(e) => setAdminPassword(e.target.value)}
-                             className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-bold outline-none focus:border-indigo-500"
-                             placeholder="••••••••••••"
-                          />
-                       </div>
-                       {adminError && <p className="text-[10px] text-red-500 font-bold uppercase tracking-widest text-center">{adminError}</p>}
-                       <button className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/30 transition-all active:scale-95">
-                          Authenticate
-                       </button>
-                    </form>
-                 </motion.div>
-               ) : (
-                 <AdminDashboard
-                   adminToken={sessionStorage.getItem('admin_token') || ''}
-                   onLogout={() => setIsAdmin(false)}
-                 />
-               )}
-            </div>
+            <AdminLoginPanel
+              isAdmin={isAdmin}
+              adminEmail={adminEmail}
+              adminPassword={adminPassword}
+              adminError={adminError}
+              onEmailChange={setAdminEmail}
+              onPasswordChange={setAdminPassword}
+              onSubmit={handleAdminLogin}
+              onLogout={() => setIsAdmin(false)}
+              adminToken={sessionStorage.getItem('admin_token') || ''}
+            />
          )}
 
           {activeView === 'billing' && (
-            <div className="flex-1 bg-[#0d1117] p-6 text-left min-h-screen">
-               {!user ? (
-                 <div className="max-w-md mx-auto text-center py-24 space-y-6">
-                    <div className="w-20 h-20 bg-indigo-600/10 rounded-[2rem] flex items-center justify-center mx-auto border border-indigo-600/20 shadow-2xl">
-                       <Wallet className="w-10 h-10 text-indigo-500" />
-                    </div>
-                    <div className="space-y-2">
-                       <h2 className="text-2xl font-black text-white uppercase tracking-tight">Active Portal Session Required</h2>
-                       <p className="text-[#8b949e] font-medium text-sm">Please sign in or register to set up your navBharatAI multi-model cloud token budget.</p>
-                    </div>
-                    <button 
-                      onClick={() => setShowAuth(true)}
-                      className="px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-indigo-600/30 transition-all active:scale-95"
-                    >
-                       Authenticate Profile
-                    </button>
-                 </div>
-               ) : (
-                 <div className="w-full max-w-6xl mx-auto space-y-8 py-4">
-                    {/* Header bar */}
-                    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/5 pb-6">
-                       <div>
-                          <div className="flex items-center gap-2 text-indigo-400 font-black uppercase tracking-widest text-[10px] font-mono">
-                             <Zap className="w-4 h-4 text-orange-500 animate-bounce" />
-                             Cloud Token Ledger
-                          </div>
-                          <h1 className="text-3xl font-black text-white uppercase tracking-tight mt-1">Multi-Model Token Wallet</h1>
-                          <p className="text-xs text-[#8b949e] mt-1">Connected account: <span className="text-white font-mono font-bold">{user.email}</span></p>
-                       </div>
-                       <div className="flex items-center gap-3">
-                          <button 
-                             onClick={fetchWallet}
-                             disabled={loadingWallet}
-                             className="flex items-center gap-2 px-6 py-3 bg-white/5 border border-white/10 hover:border-indigo-500 rounded-2xl text-[10px] font-black uppercase tracking-widest text-white transition-all active:scale-95"
-                          >
-                             <RefreshCw className={`w-3.5 h-3.5 ${loadingWallet ? 'animate-spin' : ''}`} />
-                             Sync Balance
-                          </button>
-                       </div>
-                    </div>
-
-                    {/* 11.3 — Daily Usage Stats + 11.4 Referral Code */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div className="bg-[#161b22] border border-white/5 rounded-2xl p-5 space-y-2">
-                        <p className="text-[9px] font-black text-[#484f58] uppercase tracking-widest">Today's Messages</p>
-                        <p className="text-3xl font-black text-white">{dailyUsage.date === new Date().toDateString() ? dailyUsage.count : 0}</p>
-                        <p className="text-[10px] text-emerald-400">Unlimited for registered users ✓</p>
-                      </div>
-                      <div className="bg-[#161b22] border border-white/5 rounded-2xl p-5 space-y-2">
-                        <p className="text-[9px] font-black text-[#484f58] uppercase tracking-widest">Today's Builds</p>
-                        <p className="text-3xl font-black text-white">{dailyUsage.date === new Date().toDateString() ? dailyUsage.builds : 0}</p>
-                        <p className="text-[10px] text-indigo-400">Preview builds today</p>
-                      </div>
-                      <div className="bg-[#161b22] border border-white/5 rounded-2xl p-5 space-y-2">
-                        <p className="text-[9px] font-black text-[#484f58] uppercase tracking-widest">My Referral Code</p>
-                        <p className="text-xl font-black text-indigo-400 font-mono">{myReferralCode}</p>
-                        <button
-                          onClick={() => {
-                            navigator.clipboard?.writeText(`Join NavBharatAI — भारत का अपना AI App Maker! Use my code ${myReferralCode} for bonus credits: https://navbharatai.com`);
-                            addToast('Referral link copied! ✓', 'success');
-                          }}
-                          className="text-[9px] font-black text-indigo-400 hover:text-white uppercase tracking-widest transition-colors"
-                        >
-                          Copy & Share →
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Autonomous Warning Alert Popup (Reminder Limit Trigger) */}
-                    {wallet && wallet.remaining_balance <= reminderLimit && !dismissedReminderWarning && (
-                       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 animate-fade-in backdrop-blur-sm">
-                          <div className="w-full max-w-md bg-[#161b22] border border-red-500/30 rounded-[2.5rem] p-8 space-y-6 shadow-[0_0_50px_rgba(239,68,68,0.25)] text-left relative overflow-hidden">
-                             <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-red-500 to-rose-600"></div>
-                             
-                             <div className="flex items-center gap-4">
-                                <div className="p-4 bg-red-500/10 rounded-2xl border border-red-500/20 text-red-500">
-                                   <AlertCircle className="w-7 h-7 animate-bounce" />
-                                </div>
-                                <div>
-                                   <h3 className="text-xl font-black text-white uppercase tracking-tight">Limit Reached! ⚠️</h3>
-                                   <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest font-mono">Autonomous Budget SRE Warning</p>
-                                </div>
-                             </div>
-
-                             <p className="text-xs text-[#8b949e] leading-relaxed font-semibold">
-                                Warning! You have reached your reminder limit set at <span className="text-white font-mono font-black">₹{reminderLimit.toFixed(2)}</span>. Your active credit wallet balance is now <span className="text-red-400 font-mono font-black animate-pulse">₹{(wallet?.remaining_balance || 10.00).toFixed(4)}</span>.
-                             </p>
-
-                             <div className="space-y-4 bg-black/30 border border-white/5 p-5 rounded-2xl">
-                                <span className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider block">Adjust Warning Threshold Limit</span>
-                                <div className="flex items-center gap-3 bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 focus-within:border-indigo-500 transition-colors">
-                                   <input 
-                                     type="number"
-                                     value={reminderLimit === 0 ? '' : reminderLimit}
-                                     placeholder="Enter limit value in Rupees"
-                                     onChange={(e) => {
-                                       const val = parseFloat(e.target.value) || 0;
-                                       setReminderLimit(val);
-                                     }}
-                                     className="w-full bg-transparent text-sm font-mono font-bold text-white focus:outline-none"
-                                   />
-                                   <span className="text-xs text-[#8b949e] font-bold font-mono">₹</span>
-                                </div>
-                             </div>
-
-                             <div className="flex gap-4 pt-2">
-                                <button 
-                                  onClick={() => setDismissedReminderWarning(true)}
-                                  className="flex-1 py-4 bg-white/5 border border-white/10 hover:bg-white/10 text-[#8b949e] hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95"
-                                >
-                                   Dismiss Warning
-                                </button>
-                                <button 
-                                  onClick={() => {
-                                    setActiveBillingDetailTab('budget');
-                                    setDismissedReminderWarning(true);
-                                  }}
-                                  className="flex-1 py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-red-600/20 transition-all hover:scale-105 active:scale-95"
-                                >
-                                   Modify Limits
-                                </button>
-                             </div>
-                          </div>
-                       </div>
-                    )}
-
-                    {/* iOS / iPhone App Icons Styled Clickable Cards Panel */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                       
-                       {/* CARD 1: AVAILABLE CREDIT */}
-                       <div 
-                         onClick={() => setActiveBillingDetailTab('remaining')}
-                         className={cn(
-                           "relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border group select-none",
-                           activeBillingDetailTab === 'remaining' 
-                             ? "bg-gradient-to-br from-indigo-950/80 to-[#161b22] border-indigo-505 shadow-[0_0_25px_rgba(99,102,241,0.15)] ring-2 ring-indigo-500" 
-                             : "bg-[#161b22]/90 border-white/5 hover:border-indigo-500/40 hover:bg-[#1a212b]"
-                         )}
-                       >
-                          <div className="absolute -top-12 -right-12 w-28 h-28 bg-indigo-500/10 rounded-full blur-2xl group-hover:bg-indigo-500/20 transition-all duration-300"></div>
-                          <div className="flex justify-between items-start">
-                             <div className={cn(
-                                "p-3 rounded-2xl border transition-all duration-300",
-                                activeBillingDetailTab === 'remaining'
-                                  ? "bg-indigo-500/20 border-indigo-400/30 text-indigo-400"
-                                  : "bg-white/5 border-white/10 text-[#8b949e] group-hover:text-indigo-400 group-hover:bg-indigo-500/10"
-                             )}>
-                                <Wallet className="w-5 h-5" />
-                             </div>
-                             <span className="text-[8px] font-black font-mono tracking-widest uppercase bg-indigo-500/10 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/20">
-                                ACTIVE COINS
-                             </span>
-                          </div>
-                          <div>
-                             <p className="text-[10px] text-[#8b949e] font-extrabold uppercase tracking-widest text-[#8b949e]">Available Credit</p>
-                             <h2 className="text-2xl font-black text-white tracking-tight mt-1.5 font-mono truncate">
-                                ₹{(wallet?.remaining_balance || 10.05).toFixed(2)}
-                             </h2>
-                             <div className="text-[9px] text-amber-400 font-mono font-bold mt-1 uppercase flex items-center gap-1">
-                                <span>👑 VK Balance:</span>
-                                <span>{(wallet?.tokenBalance || 0).toLocaleString()} Tokens</span>
-                             </div>
-                          </div>
-                       </div>
-
-                       {/* CARD 2: PROMOCODE */}
-                       <div 
-                         onClick={() => setActiveBillingDetailTab('gift')}
-                         className={cn(
-                           "relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border group select-none",
-                           activeBillingDetailTab === 'gift' 
-                             ? "bg-gradient-to-br from-amber-950/40 to-[#161b22] border-amber-500 shadow-[0_0_25px_rgba(245,158,11,0.15)] ring-2 ring-amber-500" 
-                             : "bg-[#161b22]/90 border-white/5 hover:border-amber-500/40 hover:bg-[#1a212b]"
-                         )}
-                       >
-                          <div className="absolute -top-12 -right-12 w-28 h-28 bg-amber-500/5 rounded-full blur-2xl group-hover:bg-amber-500/10 transition-all duration-300"></div>
-                          <div className="flex justify-between items-start">
-                             <div className={cn(
-                                "p-3 rounded-2xl border transition-all duration-300",
-                                activeBillingDetailTab === 'gift'
-                                  ? "bg-amber-500/20 border-amber-400/30 text-amber-400"
-                                  : "bg-white/5 border-white/10 text-[#8b949e] group-hover:text-amber-400 group-hover:bg-amber-500/10"
-                             )}>
-                                <Gift className="w-5 h-5" />
-                             </div>
-                             <span className="text-[8px] font-black font-mono tracking-widest uppercase bg-amber-500/10 text-amber-300 px-2 py-0.5 rounded border border-amber-500/20">
-                                REFERRALS
-                             </span>
-                          </div>
-                          <div>
-                             <p className="text-[10px] text-[#8b949e] font-extrabold uppercase tracking-widest text-[#8b949e]">Promocode</p>
-                             <h2 className="text-2xl font-black text-white tracking-tight mt-1.5 font-mono truncate">
-                                ₹{(billingTransactions.filter(tx => tx.paymentProvider === 'COUPON_REDEEM' || tx.paymentProvider === 'REFERRAL').reduce((sum, tx) => sum + (tx.balanceAdded || 0), 0)).toFixed(2)}
-                             </h2>
-                          </div>
-                       </div>
-
-                       {/* CARD 3: BUY CREDIT */}
-                       <div 
-                         onClick={() => setActiveBillingDetailTab('purchase')}
-                         className={cn(
-                           "relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border group select-none",
-                           activeBillingDetailTab === 'purchase' ? "bg-gradient-to-br from-emerald-950/40 to-[#161b22] border-emerald-500 shadow-[0_0_25px_rgba(16,185,129,0.15)] ring-2 ring-emerald-500" : "bg-[#161b22]/90 border-white/5 hover:border-emerald-500/40 hover:bg-[#1a212b]"
-                         )}
-                       >
-                          <div className="absolute -top-12 -right-12 w-28 h-28 bg-emerald-500/5 rounded-full blur-2xl group-hover:bg-emerald-500/10 transition-all duration-300"></div>
-                          <div className="flex justify-between items-start">
-                             <div className={cn(
-                                "p-3 rounded-2xl border transition-all duration-300",
-                                activeBillingDetailTab === 'purchase'
-                                  ? "bg-emerald-500/20 border-emerald-400/30 text-emerald-400"
-                                  : "bg-white/5 border-white/10 text-[#8b949e] group-hover:text-emerald-400 group-hover:bg-emerald-500/10"
-                             )}>
-                                <CreditCard className="w-5 h-5" />
-                             </div>
-                             <span className="text-[8px] font-black font-mono tracking-widest uppercase bg-emerald-500/10 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/20">
-                                100x VALUE
-                             </span>
-                          </div>
-                          <div>
-                             <p className="text-[10px] text-[#8b949e] font-extrabold uppercase tracking-widest text-[#8b949e]">Buy Credit</p>
-                             <h2 className="text-lg font-black text-white tracking-tight mt-1.5 font-mono">
-                                100 Credit/₹
-                             </h2>
-                          </div>
-                       </div>
-
-                       {/* CARD 4: BUDGET & LIMITS */}
-                       <div 
-                         onClick={() => setActiveBillingDetailTab('budget')}
-                         className={cn(
-                           "relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border group select-none",
-                           activeBillingDetailTab === 'budget' 
-                             ? "bg-gradient-to-br from-violet-950/40 to-[#161b22] border-violet-500 shadow-[0_0_25px_rgba(139,92,246,0.15)] ring-2 ring-violet-500" 
-                             : "bg-[#161b22]/90 border-white/5 hover:border-violet-500/40 hover:bg-[#1a212b]"
-                         )}
-                       >
-                          <div className="absolute -top-12 -right-12 w-28 h-28 bg-violet-500/5 rounded-full blur-2xl group-hover:bg-violet-500/10 transition-all duration-300"></div>
-                          <div className="flex justify-between items-start">
-                             <div className={cn(
-                                "p-3 rounded-2xl border transition-all duration-300",
-                                activeBillingDetailTab === 'budget'
-                                  ? "bg-violet-500/20 border-violet-400/30 text-violet-400"
-                                  : "bg-white/5 border-white/10 text-[#8b949e] group-hover:text-violet-400 group-hover:bg-violet-500/10"
-                             )}>
-                                <Activity className="w-5 h-5" />
-                             </div>
-                             <span className={cn(
-                               "text-[8px] font-black font-mono tracking-widest uppercase px-2 py-0.5 rounded border",
-                               wallet && wallet.remaining_balance <= budgetLimit
-                                 ? "bg-red-500/10 text-red-400 border-red-500/20 animate-pulse"
-                                 : "bg-violet-500/10 text-violet-300 border-violet-500/20"
-                             )}>
-                                {wallet && wallet.remaining_balance <= budgetLimit ? 'FREE MODE ⚠️' : 'LIMIT ACTIVE'}
-                             </span>
-                          </div>
-                          <div>
-                             <p className="text-[10px] text-[#8b949e] font-extrabold uppercase tracking-widest text-[#8b949e]">Budget</p>
-                             <h2 className="text-[11px] font-black text-white tracking-tight mt-1.5 font-mono flex flex-wrap gap-1 leading-relaxed">
-                                <span>Rem: ₹{reminderLimit}</span>
-                                <span className="opacity-40">|</span>
-                                <span>Bud: ₹{budgetLimit}</span>
-                             </h2>
-                          </div>
-                       </div>
-                    </div>
-
-                    {/* Integrated Sub-Panel Details Module */}
-                    <div className="bg-[#161b22] border border-white/10 rounded-[2.5rem] p-6 sm:p-8 shadow-3xl text-left space-y-6">
-                       
-                       {/* DETAILED TAB 1: AVAILABLE CREDIT */}
-                       {activeBillingDetailTab === 'remaining' && (
-                          <div className="space-y-6 animate-in fade-in duration-300">
-                             <div className="flex flex-wrap items-center justify-between border-b border-white/5 pb-4 gap-4">
-                                <div>
-                                   <div className="inline-flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest font-mono">
-                                      <Sparkles className="w-3.5 h-3.5" /> Core Credit Audit
-                                   </div>
-                                   <h3 className="text-lg font-black text-white uppercase tracking-tight mt-2">Active Multi-Model Resource Pool</h3>
-                                </div>
-                                <button 
-                                   onClick={() => {
-                                      fetchWallet();
-                                      setDismissedReminderWarning(false);
-                                   }}
-                                   disabled={loadingWallet}
-                                   className="flex items-center gap-2 px-5 py-2.5 bg-white/5 border border-white/10 hover:border-indigo-500 rounded-xl text-[10px] font-black uppercase tracking-widest text-white transition-all active:scale-95"
-                                >
-                                   <RefreshCw className={`w-3.5 h-3.5 ${loadingWallet ? 'animate-spin' : ''}`} />
-                                   Refresh Wallet Registry
-                                </button>
-                             </div>
-
-                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-2">
-                                <div className="space-y-4">
-                                   <p className="text-xs text-[#8b949e] leading-relaxed font-semibold">
-                                      Your wallet contains unexpired cloud resource balances. Input context models are charged at ₹0.00, meaning you only pay for generated outputs! Every credit matches direct hardware API queries.
-                                   </p>
-                                   <div className="grid grid-cols-2 gap-4">
-                                      <div className="bg-black/30 border border-white/5 rounded-2xl p-4 font-mono">
-                                         <div className="text-[9px] text-[#8b949e] font-black uppercase tracking-wider">Estimated Lifespan</div>
-                                         <div className="text-lg font-black text-white mt-1">Unlimited</div>
-                                         <div className="text-[9px] text-[#8b949e] mt-1">SRE credits never expire</div>
-                                      </div>
-                                      <div className="bg-black/30 border border-white/5 rounded-2xl p-4 font-mono">
-                                         <div className="text-[9px] text-[#8b949e] font-black uppercase tracking-wider">Output Pool</div>
-                                         <div className="text-lg font-black text-white mt-1">
-                                            {wallet?.remaining_balance ? Math.round(wallet.remaining_balance * 200).toLocaleString() : '2,000'}
-                                         </div>
-                                         <div className="text-[9px] text-[#8b949e] mt-1">Unspent outputs remaining</div>
-                                      </div>
-                                   </div>
-                                </div>
-
-                                <div className="bg-black/30 border border-white/5 rounded-[2rem] p-6 space-y-3 font-mono text-xs">
-                                   <h4 className="text-[10px] font-black text-white uppercase tracking-widest font-sans">Live Wallet Breakdown</h4>
-                                   <div className="flex justify-between items-center py-0.5">
-                                      <span className="text-[#8b949e]">Total Balance Added:</span>
-                                      <span className="text-[#58a6ff] font-bold">₹{(wallet?.total_balance || 10.00).toFixed(2)}</span>
-                                   </div>
-                                   <div className="flex justify-between items-center py-0.5">
-                                      <span className="text-[#8b949e]">Total Spent Consumption:</span>
-                                      <span className="text-orange-400 font-bold">₹{((wallet?.total_balance || 10.00) - (wallet?.remaining_balance || 10.00)).toFixed(4)}</span>
-                                   </div>
-                                   <div className="border-t border-white/5 pt-3.5 flex justify-between items-center text-sm font-black">
-                                      <span className="text-[#8b949e] tracking-tight font-sans">Active Liquidity Credit:</span>
-                                      <span className="text-emerald-400">₹{(wallet?.remaining_balance || 10.00).toFixed(4)}</span>
-                                   </div>
-                                </div>
-                             </div>
-
-                             {/* Unified Statement: Purchase Invoices & prompt usages */}
-                             <div className="space-y-4 pt-4 border-t border-white/5">
-                                <h4 className="text-xs font-black text-white uppercase tracking-widest font-mono">Invoice Records & Task Deductions Trace</h4>
-                                <div className="space-y-6">
-                                   <div>
-                                      <p className="text-[9px] text-[#58a6ff] font-black uppercase tracking-wider font-mono mb-2">Deposits & Promotional Code Additions</p>
-                                      <div className="overflow-y-auto max-h-[160px] custom-scrollbar border border-white/5 rounded-2xl bg-black/10">
-                                         <table className="w-full text-left text-[11px] font-mono">
-                                            <thead>
-                                               <tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px] bg-black/40">
-                                                  <th className="py-2.5 px-4">OrderID / Reference</th>
-                                                  <th className="py-2.5 px-4">Type</th>
-                                                  <th className="py-2.5 px-4 text-emerald-400">Amount Received</th>
-                                                  <th className="py-2.5 px-4">Datetime</th>
-                                               </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-white/5 font-bold">
-                                               {billingTransactions.map((tx: any, i: number) => (
-                                                  <tr key={i} className="hover:bg-white/5 transition-colors">
-                                                     <td className="py-2.5 px-4 text-white font-semibold truncate max-w-[140px]">#{tx.orderId || tx.transactionId}</td>
-                                                     <td className="py-2.5 px-4 text-[#8b949e]">
-                                                        <span className="text-[9px] bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded uppercase font-black tracking-wider">
-                                                           {tx.paymentProvider || 'DEPOSIT'}
-                                                        </span>
-                                                     </td>
-                                                     <td className="py-2.5 px-4 text-emerald-400 font-black">₹{(tx.balanceAdded || tx.amountPaid || 0).toFixed(2)}</td>
-                                                     <td className="py-2.5 px-4 text-[#8b949e] text-[10px]">
-                                                        {tx.createdAt ? new Date(tx.createdAt.seconds ? tx.createdAt.seconds * 1000 : tx.createdAt).toLocaleString() : 'Just now'}
-                                                     </td>
-                                                  </tr>
-                                               ))}
-                                               {billingTransactions.length === 0 && (
-                                                  <tr>
-                                                     <td colSpan={4} className="py-6 text-center text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
-                                                        No transactions recorded yet.
-                                                     </td>
-                                                  </tr>
-                                               )}
-                                            </tbody>
-                                         </table>
-                                      </div>
-                                   </div>
-
-                                   <div>
-                                      <p className="text-[9px] text-orange-400 font-black uppercase tracking-wider font-mono mb-2">Prompt Dedution logs (Deducted per command output)</p>
-                                      <div className="overflow-y-auto max-h-[180px] custom-scrollbar border border-white/5 rounded-2xl bg-black/10">
-                                         <table className="w-full text-left text-[11px] font-mono">
-                                            <thead>
-                                               <tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px] bg-black/40">
-                                                  <th className="py-2.5 px-4">Command / Agent Call</th>
-                                                                                                    <th className="py-2.5 px-4">Output Tokens</th>
-                                                  <th className="py-2.5 px-4 text-red-400">Rupees Charged</th>
-                                                  <th className="py-2.5 px-4">Datetime</th>
-                                               </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-white/5 font-bold">
-                                               {billingLogs.map((log: any, i: number) => (
-                                                  <tr key={i} className="hover:bg-white/5 transition-colors">
-                                                     <td className="py-2.5 px-4 text-white font-semibold uppercase">{log.agent || 'Chat Prompt'}</td>
-                                                     <td className="py-2.5 px-4 text-[#8b949e] truncate max-w-[150px]"></td>
-                                                     <td className="py-2.5 px-4 text-orange-400">{(log.output_tokens || log.outputTokens || 0).toLocaleString()}</td>
-                                                     <td className="py-2.5 px-4 text-red-405 font-black text-red-400">-₹{(log.amount_deducted || log.amountDeducted || 0).toFixed(4)}</td>
-                                                     <td className="py-2.5 px-4 text-[#8b949e] text-[10px]">
-                                                        {log.timestamp ? (log.timestamp.seconds ? new Date(log.timestamp.seconds * 1000).toLocaleString() : new Date(log.timestamp).toLocaleString()) : 'Just now'}
-                                                     </td>
-                                                  </tr>
-                                               ))}
-                                               {billingLogs.length === 0 && (
-                                                  <tr>
-                                                     <td colSpan={4} className="py-6 text-center text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
-                                                        No AI task execution logs captured yet.
-                                                     </td>
-                                                  </tr>
-                                               )}
-                                            </tbody>
-                                         </table>
-                                      </div>
-                                   </div>
-                                </div>
-                             </div>
-                          </div>
-                       )}
-
-                       {/* DETAILED TAB 2: PROMOCODE */}
-                       {activeBillingDetailTab === 'gift' && (
-                          <div className="space-y-6 animate-in fade-in duration-300">
-                             <div className="border-b border-white/5 pb-4">
-                                <span className="text-[10px] bg-amber-500/10 border border-amber-500/20 text-amber-400 px-3 py-1.5 rounded-xl font-black uppercase tracking-wider font-mono">
-                                   Promo Hub & Referrals
-                                </span>
-                                <h3 className="text-xl font-black text-white uppercase tracking-tight mt-3">Promotional Voucher & Reward Engine</h3>
-                             </div>
-
-                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-                                <div className="space-y-6">
-                                   
-                                   {/* Copyable Code Box */}
-                                   <div className="bg-black/30 border border-amber-500/20 rounded-2xl p-6 relative overflow-hidden group">
-                                      <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-xl group-hover:bg-amber-500/10 transition-all"></div>
-                                      <h4 className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Apka Unique Referral Code</h4>
-                                      <div className="flex items-center justify-between gap-4 mt-3 bg-[#0d1117] border border-white/10 rounded-xl px-5 py-3.5">
-                                         <span className="text-base text-amber-400 font-mono font-black tracking-widest">
-                                            NAV-{(user?.email || 'USER').split('@')[0].toUpperCase()}-REF
-                                         </span>
-                                         <button 
-                                           onClick={() => {
-                                             navigator.clipboard.writeText(`NAV-${(user?.email || 'USER').split('@')[0].toUpperCase()}-REF`);
-                                             setCopiedReferral(true);
-                                             setTimeout(() => setCopiedReferral(false), 2000);
-                                           }}
-                                           className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-black text-[10px] font-black uppercase tracking-widest rounded-lg transition-all"
-                                         >
-                                            {copiedReferral ? 'COPIED!' : 'COPY'}
-                                         </button>
-                                      </div>
-                                      <p className="text-xs text-amber-200/70 leading-relaxed font-semibold mt-4">
-                                         🤝 Earn <span className="text-white font-black">10% Free Credits</span> for every referral — when your referred user purchases credits, 10% gets added to your account for free!
-                                      </p>
-                                   </div>
-
-                                   {/* Voucher redeem panel */}
-                                   <div className="bg-black/20 border border-white/5 rounded-2xl p-6 space-y-4">
-                                      <div>
-                                         <h4 className="text-xs font-black text-white uppercase tracking-wider">Redeem Reward Coupons</h4>
-                                         <p className="text-[10px] text-[#8b949e] font-bold font-mono">Each promo code / referral code can only be applied once!</p>
-                                      </div>
-                                      <div className="flex gap-3">
-                                         <input 
-                                           type="text" 
-                                           placeholder="e.g. WELCOME100, NAVBHARAT50" 
-                                           value={couponCodeInput}
-                                           onChange={(e) => setCouponCodeInput(e.target.value)}
-                                           className="flex-1 bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 text-xs font-mono font-bold uppercase tracking-widest text-white focus:outline-none focus:border-amber-500 transition-colors"
-                                         />
-                                         <button
-                                           onClick={() => redeemPromoCoupon(couponCodeInput)}
-                                           disabled={isRedeemingCoupon || !couponCodeInput}
-                                           className="px-6 py-3 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/20 disabled:text-[#8b949e]/30 text-black rounded-xl font-black uppercase tracking-widest text-[9px] transition-all duration-200"
-                                         >
-                                            {isRedeemingCoupon ? 'VALIDATING...' : 'APPLY CODE'}
-                                         </button>
-                                      </div>
-
-                                      {couponError && (
-                                         <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-xs flex items-center gap-2 font-semibold">
-                                            <AlertCircle className="w-4 h-4 shrink-0" />
-                                            <span>{couponError}</span>
-                                         </div>
-                                      )}
-
-                                      {couponSuccess && (
-                                         <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-3 rounded-xl text-xs flex items-center gap-2 font-semibold animate-pulse">
-                                            <CheckCircle2 className="w-4 h-4 shrink-0" />
-                                            <span>{couponSuccess}</span>
-                                         </div>
-                                      )}
-                                   </div>
-                                </div>
-
-                                {/* Refer history */}
-                                <div className="space-y-4">
-                                   <h4 className="text-xs font-black text-white uppercase tracking-wider font-mono">Referred Accounts & Credits Earned</h4>
-                                   <div className="border border-white/5 rounded-2xl overflow-hidden font-mono text-xs bg-black/10">
-                                      <table className="w-full text-left">
-                                         <thead>
-                                            <tr className="border-b border-white/5 bg-black/30 text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
-                                               <th className="py-2.5 px-4">User Email Referred</th>
-                                               <th className="py-2.5 px-4">Reward Link</th>
-                                               <th className="py-2.5 px-4 text-emerald-400">Claim Value</th>
-                                            </tr>
-                                         </thead>
-                                         <tbody className="divide-y divide-white/5 font-semibold">
-                                            {referralHistory.map((ref, idx) => (
-                                               <tr key={idx} className="hover:bg-white/5 transition-all">
-                                                  <td className="py-3 px-4 text-white font-medium">{ref.email}</td>
-                                                  <td className="py-3 px-4">
-                                                     <span className={`text-[8px] px-2 py-0.5 rounded font-black uppercase tracking-wider ${
-                                                        ref.status === 'CLAIMED' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-500/10 text-slate-400 border border-slate-500/15'
-                                                     }`}>
-                                                        {ref.status} (10%)
-                                                     </span>
-                                                  </td>
-                                                  <td className="py-3 px-4 text-emerald-400 font-bold">₹{ref.creditsEarned.toFixed(2)}</td>
-                                               </tr>
-                                            ))}
-                                         </tbody>
-                                      </table>
-                                   </div>
-                                </div>
-                             </div>
-                          </div>
-                       )}
-
-                       {/* DETAILED TAB 3: BUY CREDIT */}
-                       {activeBillingDetailTab === 'purchase' && (
-                          <div className="space-y-6 animate-in fade-in duration-300">
-                             <div className="flex flex-wrap items-center justify-between border-b border-white/5 pb-4 gap-4">
-                                <div>
-                                   <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-xl font-black uppercase tracking-wider font-mono">
-                                      Balance Store & Gateway simulation
-                                   </span>
-                                   <h3 className="text-xl font-black text-white uppercase tracking-tight mt-3">Buy Token Credits Instant Gateway</h3>
-                                </div>
-                             </div>
-
-                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-                                <div className="space-y-6">
-                                   <div className="bg-black/20 border border-white/5 p-6 rounded-[2rem] space-y-4">
-                                      <h4 className="text-xs font-black text-white uppercase tracking-widest font-mono">Instant balance calculator (₹1 to ₹999999)</h4>
-                                      
-                                      <div className="space-y-3">
-                                         <label className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider block">Enter Amount (₹)</label>
-                                         <div className="flex items-center gap-3 bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 focus-within:border-emerald-500 transition-colors">
-                                            <span className="text-emerald-400 font-mono font-bold text-sm">₹</span>
-                                            <input 
-                                              type="number"
-                                              min="1"
-                                              max="999999"
-                                              value={buyAmountInput}
-                                              onChange={(e) => {
-                                                const val = e.target.value;
-                                                setBuyAmountInput(val);
-                                              }}
-                                              className="w-full bg-transparent text-white font-mono font-bold text-sm focus:outline-none"
-                                              placeholder="Amount in Rupees"
-                                            />
-                                         </div>
-                                      </div>
-
-                                      {/* Live tokens calculations outputs */}
-                                      <div className="grid grid-cols-2 gap-4 bg-black/40 border border-white/5 p-4 rounded-xl font-mono text-center">
-                                         <div>
-                                            <span className="text-[9px] text-[#8b949e] font-black uppercase tracking-widest block">Wallet Credits</span>
-                                            <span className="text-base text-emerald-400 font-extrabold block mt-1">{(parseFloat(buyAmountInput) || 0) * 100}</span>
-                                            <span className="text-[8px] text-[#8b949e]">at ₹1 = 100 credits</span>
-                                         </div>
-                                         <div>
-                                            <span className="text-[9px] text-[#8b949e] font-black uppercase tracking-widest block">Equivalent AI Outputs</span>
-                                            <span className="text-base text-indigo-400 font-extrabold block mt-1">{(parseFloat(buyAmountInput) || 0) * 100 * 200}</span>
-                                            <span className="text-[8px] text-[#8b949e]">At 1 Credit = 200 outputs</span>
-                                         </div>
-                                      </div>
-
-                                      <button 
-                                        onClick={() => {
-                                          const enteredVal = parseFloat(buyAmountInput);
-                                          if (isNaN(enteredVal) || enteredVal < 1 || enteredVal > 999999) {
-                                            alert("Please enter a valid amount between ₹1 and ₹9,99,999");
-                                            return;
-                                          }
-                                          createBillingOrder(enteredVal);
-                                        }}
-                                        disabled={isRecharging}
-                                        className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-xl font-black uppercase tracking-widest text-xs shadow-lg shadow-emerald-600/20 active:scale-95 transition-all"
-                                      >
-                                         Purchase Wallet Credit (₹{(parseFloat(buyAmountInput) || 0).toLocaleString('en-IN')})
-                                      </button>
-                                   </div>
-                                </div>
-
-                                <div className="space-y-4">
-                                   <p className="text-xs text-[#8b949e] leading-relaxed font-semibold">
-                                      Credits are immediately funded into your multi-model ledger on successful bank sync. Checkout parameters are fully encrypted.
-                                   </p>
-                                   
-                                   <h4 className="text-xs font-black text-white uppercase tracking-wider font-mono">Invoice Records Summary</h4>
-                                   <div className="overflow-y-auto max-h-[220px] custom-scrollbar border border-white/5 rounded-2xl bg-black/10">
-                                      <table className="w-full text-left text-xs font-mono">
-                                         <thead>
-                                            <tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px] bg-black/40">
-                                               <th className="py-2 px-4">OrderID</th>
-                                               <th className="py-2 px-4 text-emerald-400">Rupees Paid</th>
-                                               <th className="py-2 px-4">Method</th>
-                                               <th className="py-2 px-4">Datetime</th>
-                                            </tr>
-                                         </thead>
-                                         <tbody className="divide-y divide-white/5 font-bold">
-                                            {billingTransactions.filter(tx => tx.paymentProvider !== 'WELCOME_BONUS' && tx.paymentProvider !== 'COUPON_REDEEM').map((tx: any, i: number) => (
-                                               <tr key={i} className="hover:bg-white/5 transition-colors">
-                                                  <td className="py-2.5 px-4 text-white truncate max-w-[125px]">#{tx.orderId || tx.transactionId}</td>
-                                                  <td className="py-2.5 px-4 text-emerald-400">₹{(tx.amountPaid || tx.amount || 0).toFixed(2)}</td>
-                                                  <td className="py-2.5 px-4 text-indigo-400 text-[10px] uppercase">{tx.paymentProvider || 'CASHFREE'}</td>
-                                                  <td className="py-2.5 px-4 text-[#8b949e]">
-                                                     {tx.createdAt ? new Date(tx.createdAt.seconds ? tx.createdAt.seconds * 1000 : tx.createdAt).toLocaleDateString() : 'Today'}
-                                                  </td>
-                                               </tr>
-                                            ))}
-                                         </tbody>
-                                      </table>
-                                   </div>
-                                </div>
-                             </div>
-                          </div>
-                       )}
-
-                       {/* DETAILED TAB 4: BUDGET & REMINDER SRE */}
-                        {activeBillingDetailTab === 'budget' && (
-                           <div className="space-y-6 animate-in fade-in duration-300">
-                              <div className="border-b border-white/5 pb-4">
-                                 <span className="text-[10px] bg-violet-500/10 border border-violet-500/20 text-violet-400 px-3 py-1.5 rounded-xl font-black uppercase tracking-wider font-mono">
-                                    Autonomous SRE Controls
-                                 </span>
-                                 <h3 className="text-xl font-black text-white uppercase tracking-tight mt-3">Safety & Threshold Limits console</h3>
-                              </div>
-
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-                                 <div className="space-y-6 bg-black/20 border border-white/5 p-6 rounded-[2rem]">
-                                    
-                                    {/* REMINDER SETTING */}
-                                    <div className="space-y-3">
-                                       <h4 className="text-xs font-black text-white uppercase tracking-widest font-mono">a. Reminder warning limit</h4>
-                                       <p className="text-xs text-[#8b949e]">Is limit se niche credit bache hone par apko popup warning ⚠️ seen hoga. Ap reminder threshold settings change kar sakte hain.</p>
-                                       <div className="flex items-center gap-3 bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 focus-within:border-violet-500 transition-all">
-                                          <input 
-                                            type="text"
-                                            value={tempReminderLimit}
-                                            placeholder="Enter warning limit in Rupees"
-                                            onChange={(e) => {
-                                              setTempReminderLimit(e.target.value);
-                                            }}
-                                            className="w-full bg-transparent text-white font-mono font-bold text-sm focus:outline-none"
-                                          />
-                                          <span className="text-xs text-[#8b949e] font-bold font-mono">₹</span>
-                                       </div>
-                                    </div>
-
-                                    {/* BUDGET FLOOR SETTING */}
-                                    <div className="space-y-3 pt-4 border-t border-white/5">
-                                       <h4 className="text-xs font-black text-white uppercase tracking-widest font-mono">b. Last hard budget limit</h4>
-                                       <p className="text-xs text-[#8b949e]">Apna budget flow floor value set karen. Is limit par system automatically apko Free version mode activate kar dega.</p>
-                                       <div className="flex items-center gap-3 bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 focus-within:border-violet-500 transition-all">
-                                          <input 
-                                            type="text"
-                                            value={tempBudgetLimit}
-                                            placeholder="Enter budget limit in Rupees"
-                                            onChange={(e) => {
-                                              setTempBudgetLimit(e.target.value);
-                                            }}
-                                            className="w-full bg-transparent text-white font-mono font-bold text-sm focus:outline-none"
-                                          />
-                                          <span className="text-xs text-[#8b949e] font-bold font-mono">₹</span>
-                                       </div>
-                                    </div>
-
-                                    {/* ACTION SET BUTTON */}
-                                    <div className="pt-4 border-t border-white/5 flex flex-col gap-3">
-                                       {limitError && (
-                                          <div className="text-xs bg-red-500/10 border border-red-500/20 text-red-100 p-3.5 rounded-xl font-bold font-mono">
-                                             ⚠️ {limitError}
-                                          </div>
-                                       )}
-                                       {limitSuccess && (
-                                          <div className="text-xs bg-emerald-500/10 border border-emerald-500/20 text-emerald-100 p-3.5 rounded-xl font-bold font-mono">
-                                             ✅ {limitSuccess}
-                                          </div>
-                                       )}
-                                       <button
-                                          onClick={() => {
-                                             setLimitError(null);
-                                             setLimitSuccess(null);
-                                             const rLimit = parseFloat(tempReminderLimit);
-                                             const bLimit = parseFloat(tempBudgetLimit);
-                                             const available = wallet?.remaining_balance || 10.0;
-
-                                             if (isNaN(rLimit) || rLimit < 0) {
-                                                setLimitError("Please enter a valid Reminder Warning Limit (>= 0).");
-                                                return;
-                                             }
-                                             if (isNaN(bLimit) || bLimit < 0) {
-                                                setLimitError("Please enter a valid Hard Budget Limit (>= 0).");
-                                                return;
-                                             }
-
-                                             // Rule 2a: always warning limit < hard budget limit
-                                             if (rLimit >= bLimit) {
-                                                setLimitError("Warning limit must be strictly LESS than the hard budget limit (Warning Limit < Hard Budget Limit)!");
-                                                return;
-                                             }
-
-                                             // Rule 2b: always last hard budget limit < total available credit
-                                             if (bLimit >= available) {
-                                                setLimitError(`Hard budget limit (₹${bLimit.toFixed(2)}) must be strictly LESS than your total available credit (₹${available.toFixed(4)})! Please recharge or lower the limit.`);
-                                                return;
-                                             }
-
-                                             setReminderLimit(rLimit);
-                                             setBudgetLimit(bLimit);
-                                             setLimitSuccess("Success: Threshold limits successfully configured and applied!");
-                                             
-                                             setTimeout(() => {
-                                                setLimitSuccess(null);
-                                             }, 4000);
-                                          }}
-                                          className="w-full py-3 bg-violet-600 hover:bg-violet-500 hover:border-violet-400 border border-violet-700 rounded-xl text-xs font-black uppercase tracking-widest text-white transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-violet-900/20"
-                                       >
-                                          Set Limits & Save Controls
-                                       </button>
-                                    </div>
-                                 </div>
-
-                                 {/* Active SRE system status card */}
-                                 <div className="space-y-4">
-                                    <h4 className="text-xs font-black text-white uppercase tracking-wider font-mono">System Compliance & VIP Status</h4>
-                                    <div className={cn(
-                                      "p-6 rounded-[2rem] border relative overflow-hidden transition-all duration-300",
-                                      wallet && wallet.remaining_balance <= budgetLimit
-                                        ? "border-red-500/20 bg-red-500/5 text-red-100"
-                                        : "border-emerald-500/20 bg-emerald-500/5 text-emerald-100"
-                                    )}>
-                                       <div className="flex items-center gap-3">
-                                          {wallet && wallet.remaining_balance <= budgetLimit ? (
-                                             <div className="p-3 bg-red-500/10 rounded-2xl border border-red-500/20 text-red-400">
-                                                <AlertCircle className="w-5 h-5 animate-pulse" />
-                                             </div>
-                                          ) : (
-                                             <div className="p-3 bg-emerald-500/10 rounded-2xl border border-emerald-500/20 text-emerald-400">
-                                                <ShieldCheck className="w-5 h-5" />
-                                             </div>
-                                          )}
-                                          <div>
-                                             <span className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest font-mono block">Compliance Status</span>
-                                             <span className="text-sm font-black uppercase">
-                                                {wallet && wallet.remaining_balance <= budgetLimit ? 'Free version enabled mode' : 'Premium VIP Active'}
-                                             </span>
-                                          </div>
-                                       </div>
-
-                                       <p className="text-xs text-[#8b949e] leading-relaxed mt-4 font-semibold">
-                                          {wallet && wallet.remaining_balance <= budgetLimit 
-                                             ? "Alert: Your active credit has reached your budget limit. Premium high-compute models are paused, and NavBharat AI Free core engine is running for basic queries only."
-                                             : `Compliance: Perfect working conditions. Remaining credit exceeds budget limits. Safe computing threshold remains above the set ${budgetLimit} INR constraint.`
-                                          }
-                                       </p>
-                                    </div>
-                                 </div>
-                              </div>
-
-                              <div className="pt-4 border-t border-white/5">
-                                 <button 
-                                   onClick={() => window.open(window.location.href, '_blank')}
-                                   className="w-full py-3 bg-indigo-600/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all gap-2 flex items-center justify-center"
-                                 >
-                                    Still having issues? Try Open in New Tab
-                                    <ExternalLink className="w-3 h-3" />
-                                 </button>
-                              </div>
-                           </div>
-                        )}
-                     </div>
-                  </div>
-               )}
-               </div>
-            )}
+            <BillingPanel
+              user={user}
+              wallet={wallet}
+              loadingWallet={loadingWallet}
+              dailyUsage={dailyUsage}
+              myReferralCode={myReferralCode}
+              billingTransactions={billingTransactions}
+              billingLogs={billingLogs}
+              referralHistory={referralHistory}
+              activeBillingDetailTab={activeBillingDetailTab}
+              reminderLimit={reminderLimit}
+              budgetLimit={budgetLimit}
+              dismissedReminderWarning={dismissedReminderWarning}
+              couponCodeInput={couponCodeInput}
+              isRedeemingCoupon={isRedeemingCoupon}
+              couponError={couponError}
+              couponSuccess={couponSuccess}
+              copiedReferral={copiedReferral}
+              buyAmountInput={buyAmountInput}
+              isRecharging={isRecharging}
+              tempReminderLimit={tempReminderLimit}
+              tempBudgetLimit={tempBudgetLimit}
+              limitError={limitError}
+              limitSuccess={limitSuccess}
+              onShowAuth={() => setShowAuth(true)}
+              onFetchWallet={fetchWallet}
+              onSetActiveBillingDetailTab={setActiveBillingDetailTab}
+              onSetReminderLimit={setReminderLimit}
+              onSetBudgetLimit={setBudgetLimit}
+              onSetDismissedReminderWarning={setDismissedReminderWarning}
+              onSetCouponCodeInput={setCouponCodeInput}
+              onRedeemPromoCoupon={redeemPromoCoupon}
+              onSetCopiedReferral={setCopiedReferral}
+              onSetBuyAmountInput={setBuyAmountInput}
+              onCreateBillingOrder={createBillingOrder}
+              onSetTempReminderLimit={setTempReminderLimit}
+              onSetTempBudgetLimit={setTempBudgetLimit}
+              onSetLimitError={setLimitError}
+              onSetLimitSuccess={setLimitSuccess}
+              onToast={addToast}
+              monthlyAiCost={monthlyAiCost}
+            />
+          )}
 
             {activeView === 'git' && (
-                <div className="flex-1 bg-[#0d1117] p-4 lg:p-6 text-left min-h-screen flex flex-col items-center">
-                  <div className="max-w-4xl w-full h-[88vh] flex flex-col bg-[#161b22] border border-white/10 rounded-3xl overflow-hidden shadow-2xl relative">
-                    <div className="p-4 bg-[#0d1117] border-b border-white/5 flex flex-col sm:flex-row sm:items-center justify-between shrink-0 gap-3">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 bg-indigo-600/10 border border-indigo-600/20 rounded-xl flex items-center justify-center">
-                          <Rocket className="w-4.5 h-4.5 text-indigo-400" />
-                        </div>
-                        <div>
-                          <h3 className="text-xs font-black text-white uppercase tracking-widest leading-none font-sans">navBharatAI DevOps Engine</h3>
-                          <p className="text-[9px] text-[#8b949e] font-serif uppercase tracking-widest mt-1">
-                            {selectedRepo ? `Active Repo: ${selectedRepo.name} (${currentBranch})` : 'Sandbox Simulator Mode (GitHub Unconnected)'}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                         {githubToken ? (
-                           <button
-                             onClick={() => {
-                               setActiveView('settings');
-                               setSettingsScreen('github_repos');
-                             }}
-                             className="px-3 py-1 bg-indigo-600/10 border border-indigo-500/25 hover:bg-indigo-600/20 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all text-indigo-400 flex items-center gap-1.5 cursor-pointer"
-                           >
-                             <List className="w-3 h-3" />
-                             {selectedRepo ? 'Switch Repo' : 'Select Repo'}
-                           </button>
-                         ) : (
-                           <button
-                             onClick={() => {
-                               setActiveView('settings');
-                               setSettingsScreen('connections');
-                             }}
-                             className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all text-white flex items-center gap-1.5 cursor-pointer"
-                           >
-                             <Github className="w-3 h-3 text-white" />
-                             Connect GitHub
-                           </button>
-                         )}
-                         {selectedRepo && (
-                           <button
-                             onClick={() => importRepo(selectedRepo, currentBranch)}
-                             disabled={isGHSyncing}
-                             className="px-3 py-1 bg-white/5 border border-white/5 hover:border-white/10 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all hover:bg-white/10 flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
-                           >
-                             {isGHSyncing ? <RefreshCw className="w-3 h-3 animate-spin text-white" /> : <Search className="w-3 h-3 text-white" />}
-                             Review Files
-                           </button>
-                         )}
-                      </div>
-                    </div>
-                    <div className="flex-1 overflow-hidden">
-                      <GitPanel 
-                        token={githubToken}
-                        user={githubUser}
-                        repoContext={githubRepoContext || (selectedRepo ? { owner: selectedRepo.owner.login, repo: selectedRepo.name, branch: currentBranch } : null)}
-                        isSyncing={isGHSyncing}
-                        isPushing={isPushing}
-                        onConnect={connectGitHub}
-                        onDisconnect={disconnectGitHub}
-                        onPush={selectedRepo ? pushToRepo : (msg) => {
-                          alert(`[Sandbox Commit] Committing files and starting deployment.\nCommit Message: "${msg || 'Update via navBharatAI'}"`);
-                        }}
-                        files={files}
-                        projectId={currentSessionId}
-                        projectName={sessions.find(s => s.id === currentSessionId)?.title}
-                        firebaseToken={firebaseToken}
-                        firebaseUser={firebaseUser}
-                        onFirebaseConnect={connectFirebase}
-                        onFirebaseDisconnect={disconnectFirebase}
-                        onFilesChange={(newFiles) => {
-                          setFiles(newFiles);
-                          updatePreview(newFiles);
-                        }}
-                        onAgentChange={handleAgentChange}
-                        onToggleView={toggleTab}
-                        onActivatePreview={handleTriggerPreviewBuild}
-                        onActivateWorkspace={handleActivateWorkspace}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
+              // Phase 1.7 — extracted to GitViewPanel component
+              <GitViewPanel
+                selectedRepo={selectedRepo}
+                currentBranch={currentBranch}
+                githubToken={githubToken}
+                githubUser={githubUser}
+                githubRepoContext={githubRepoContext}
+                isGHSyncing={isGHSyncing}
+                isPushing={isPushing}
+                firebaseToken={firebaseToken}
+                firebaseUser={firebaseUser}
+                files={files}
+                currentSessionId={currentSessionId}
+                sessions={sessions}
+                onNavigateToGitHubRepos={() => { setActiveView('settings'); setSettingsScreen('github_repos'); }}
+                onNavigateToConnections={() => { setActiveView('settings'); setSettingsScreen('connections'); }}
+                onImportRepo={importRepo}
+                onConnectGitHub={connectGitHub}
+                onDisconnectGitHub={disconnectGitHub}
+                onPushToRepo={selectedRepo ? pushToRepo : null}
+                onConnectFirebase={connectFirebase}
+                onDisconnectFirebase={disconnectFirebase}
+                onFilesChange={(newFiles) => { setFiles(newFiles); updatePreview(newFiles); }}
+                onAgentChange={handleAgentChange}
+                onToggleView={toggleTab}
+                onActivatePreview={handleTriggerPreviewBuild}
+                onActivateWorkspace={handleActivateWorkspace}
+              />
+            )}
 
 
 
           {activeView === 'templates' && (
-            <div className="flex-1 p-8 bg-[#0d1117] overflow-y-auto custom-scrollbar">
-              <div className="max-w-6xl mx-auto">
-                <div className="flex flex-col mb-10">
-                  <h3 className="text-2xl font-bold text-white mb-2">Project Blueprints</h3>
-                  <p className="text-sm text-[#8b949e]">Accelerate your development with AI-optimized templates</p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {templates.map(t => {
-                    const isLocked = (t as any).isPro && !user;
-                    return (
-                    <motion.button
-                      whileHover={{ y: -5 }}
-                      key={t.id}
-                      onClick={() => {
-                        if (isLocked) { setShowAuth(true); addToast('Sign in to use Pro templates', 'warning'); return; }
-                        setInput(t.prompt);
-                        toggleTab('nbi_chat');
-                      }}
-                      className={`flex flex-col items-start p-6 bg-[#161b22] border rounded-2xl transition-all text-left group shadow-xl relative overflow-hidden ${
-                        isLocked ? 'border-amber-500/20 hover:border-amber-500/40' : 'border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/5'
-                      }`}
-                    >
-                      {(t as any).isPro && (
-                        <span className="absolute top-3 right-3 text-[8px] font-black px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-amber-400 uppercase tracking-widest">
-                          {isLocked ? '🔒 Pro' : '⭐ Pro'}
-                        </span>
-                      )}
-                      <div className={`w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center mb-6 transition-colors ${isLocked ? 'group-hover:bg-amber-600' : 'group-hover:bg-indigo-600'}`}>
-                        <t.icon className={`w-6 h-6 ${isLocked ? 'text-amber-400 group-hover:text-white' : 'text-indigo-400 group-hover:text-white'}`} />
-                      </div>
-                      <h4 className="font-bold text-white mb-2">{t.name}</h4>
-                      <p className="text-[11px] text-[#8b949e] leading-relaxed mb-6 opacity-70">Pre-configured scaffolding for modern responsive web applications.</p>
-                      <div className="mt-auto w-full flex items-center justify-between">
-                         <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${isLocked ? 'text-amber-400 bg-amber-500/10' : 'text-indigo-400 bg-indigo-500/10'}`}>
-                           {isLocked ? 'Sign In to Use' : 'Fast Build'}
-                         </span>
-                      </div>
-                    </motion.button>
-                    );
-                  })}
-                </div>
-
-                {/* 9.4 — My Saved Templates (local marketplace) */}
-                <div className="mt-12">
-                  <div className="flex items-center justify-between mb-6">
-                    <div>
-                      <h3 className="text-xl font-bold text-white">My Templates</h3>
-                      <p className="text-sm text-[#8b949e]">Your saved apps — reuse, remix, and share</p>
-                    </div>
-                    {hasGeneratedCode && (
-                      <button
-                        onClick={saveCurrentAsTemplate}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95"
-                      >
-                        <Plus className="w-4 h-4" />
-                        Save Current App
-                      </button>
-                    )}
-                  </div>
-                  {savedTemplates.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-16 border border-dashed border-white/10 rounded-2xl text-center gap-3">
-                      <Package className="w-10 h-10 text-white/20" />
-                      <p className="text-[#484f58] text-sm font-medium">No saved templates yet</p>
-                      <p className="text-[10px] text-[#484f58]">Build an app and click "Save Current App" to save it here</p>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {savedTemplates.map(t => (
-                        <div key={t.id} className="flex flex-col bg-[#161b22] border border-white/5 rounded-2xl p-5 gap-3 hover:border-indigo-500/30 transition-all group">
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <h4 className="text-white font-bold text-sm">{t.name}</h4>
-                              <p className="text-[9px] text-[#484f58] mt-0.5">Saved {t.savedAt}</p>
-                            </div>
-                            <button
-                              onClick={() => setSavedTemplates(prev => prev.filter(x => x.id !== t.id))}
-                              className="p-1.5 hover:bg-red-500/10 rounded-lg text-[#484f58] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </div>
-                          <div className="text-[9px] text-[#8b949e] font-mono bg-black/30 rounded-lg p-2 truncate">
-                            {t.html.slice(0, 80)}...
-                          </div>
-                          <button
-                            onClick={() => {
-                              setGeneratedCode(t.html);
-                              setHasGeneratedCode(true);
-                              updatePreview({ 'index.html': t.html });
-                              toggleTab('preview');
-                            }}
-                            className="w-full py-2 bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/20 text-indigo-400 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
-                          >
-                            Load & Preview
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+            // Phase 1.7 — extracted to TemplatesPanel component
+            <TemplatesPanel
+              user={user}
+              templates={templates}
+              savedTemplates={savedTemplates}
+              hasGeneratedCode={hasGeneratedCode}
+              onSelectTemplate={(prompt) => { setInput(prompt); toggleTab('nbi_chat'); }}
+              onRequireAuth={() => { setShowAuth(true); addToast('Sign in to use Pro templates', 'warning'); }}
+              onSaveCurrentTemplate={saveCurrentAsTemplate}
+              onDeleteSavedTemplate={(id) => setSavedTemplates(prev => prev.filter(x => x.id !== id))}
+              onLoadSavedTemplate={(html) => {
+                setGeneratedCode(html);
+                setHasGeneratedCode(true);
+                updatePreview({ 'index.html': html });
+                toggleTab('preview');
+              }}
+            />
           )}
 
           {activeView === 'engine_builder' && (
@@ -8929,361 +7823,29 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           )}
 
           {activeView === 'donation' && (
-            <div className={cn("flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-8 relative min-h-screen transition-colors duration-500", themeClasses.bg)}>
-              {/* Master Edit Toggle */}
-              {isAdmin && (
-                <div className="sticky top-0 right-0 z-50 flex justify-end pb-4">
-                  <button 
-                    onClick={() => setIsDonationEditing(!isDonationEditing)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-xl active:scale-95 ${
-                      isDonationEditing 
-                      ? 'bg-emerald-600 shadow-emerald-500/20 text-white' 
-                      : 'bg-indigo-600 shadow-indigo-600/20 text-white'
-                    }`}
-                  >
-                    {isDonationEditing ? <Check className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
-                    {isDonationEditing ? 'Finish Editing' : 'Edit Page Content'}
-                  </button>
-                </div>
-              )}
-
-              <div className="max-w-3xl mx-auto space-y-8 pb-12">
-                {/* Hero section */}
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-[#161b22] border border-white/10 rounded-[2.5rem] p-8 sm:p-12 text-center shadow-3xl relative overflow-hidden group"
-                >
-                  <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-orange-500 via-white to-green-500"></div>
-                  <div className="absolute -top-24 -right-24 w-64 h-64 bg-indigo-600/5 rounded-full blur-[80px] group-hover:bg-indigo-600/10 transition-colors"></div>
-                  
-                  <div className="relative inline-block group/edit mb-8">
-                    {donationData.logoUrl ? (
-                      <div className="relative">
-                        <img 
-                          src={donationData.logoUrl} 
-                          alt="Creator" 
-                          className="w-24 h-24 rounded-3xl object-cover border-2 border-indigo-500 shadow-xl"
-                        />
-                        {isAdmin && isDonationEditing && (
-                          <label className="absolute -bottom-2 -right-2 p-2 bg-indigo-600 rounded-xl cursor-pointer shadow-lg hover:bg-indigo-700 transition-colors">
-                            <Camera className="w-3.5 h-3.5 text-white" />
-                            <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, 'logoUrl')} />
-                          </label>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="relative">
-                        <div className="w-20 h-20 bg-indigo-600/10 rounded-3xl flex items-center justify-center mx-auto border border-indigo-500/20 shadow-inner group-hover:rotate-12 transition-transform duration-500">
-                          <HeartHandshake className="w-10 h-10 text-indigo-500" />
-                        </div>
-                        {isAdmin && isDonationEditing && (
-                          <label className="absolute -bottom-2 -right-2 p-2 bg-indigo-600 rounded-xl cursor-pointer shadow-lg hover:bg-indigo-700 transition-colors">
-                            <Upload className="w-3.5 h-3.5 text-white" />
-                            <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, 'logoUrl')} />
-                          </label>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="relative group/edit">
-                    {isDonationEditing ? (
-                      <input 
-                        value={donationData.headline}
-                        onChange={(e) => setDonationData({...donationData, headline: e.target.value})}
-                        className="text-2xl sm:text-3xl font-black text-white mb-4 tracking-tighter leading-tight bg-white/5 border border-white/10 rounded-xl px-4 py-2 w-full text-center outline-none focus:border-indigo-500"
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center gap-4 mb-4">
-                        <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tighter leading-tight">
-                          {donationData.headline}
-                        </h2>
-                        {isAdmin && (
-                          <button 
-                            onClick={() => setIsDonationEditing(true)}
-                            className="p-2 opacity-0 group-hover/edit:opacity-100 bg-white/5 hover:bg-white/10 rounded-lg text-indigo-400 transition-all border border-white/10 shadow-lg"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="relative group/edit">
-                    {isDonationEditing ? (
-                      <input 
-                        value={donationData.subHeadline}
-                        onChange={(e) => setDonationData({...donationData, subHeadline: e.target.value})}
-                        className="text-sm font-bold text-indigo-400 uppercase tracking-[0.2em] mb-8 bg-white/5 border border-white/10 rounded-xl px-4 py-2 w-full text-center outline-none focus:border-indigo-500"
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center gap-4 mb-8">
-                        <p className="text-lg font-bold text-indigo-400 uppercase tracking-[0.2em]">{donationData.subHeadline}</p>
-                        {isAdmin && (
-                          <button 
-                            onClick={() => setIsDonationEditing(true)}
-                            className="p-1 px-2 opacity-0 group-hover/edit:opacity-100 bg-white/5 hover:bg-white/10 rounded-lg text-indigo-400 transition-all border border-white/10 shadow-lg flex items-center gap-1"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                            <span className="text-[8px] font-black uppercase">Edit</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="max-w-2xl mx-auto text-left space-y-6">
-                    <div className="relative group/edit">
-                      <div className="text-[#c9d1d9] text-base leading-relaxed font-medium">
-                        नमस्कार भारतीय भाइयों और बहनों,
-                        <br /><br />
-                        {isDonationEditing ? (
-                          <div className="space-y-4">
-                            <div className="flex gap-2 items-center">
-                              <span className="text-[10px] text-[#8b949e] font-bold uppercase">Name:</span>
-                              <input 
-                                value={donationData.name}
-                                onChange={(e) => setDonationData({...donationData, name: e.target.value})}
-                                className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white text-sm outline-none focus:border-indigo-500"
-                              />
-                            </div>
-                            <textarea 
-                              value={donationData.missionStatement}
-                              onChange={(e) => setDonationData({...donationData, missionStatement: e.target.value})}
-                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-[#c9d1d9] outline-none focus:border-indigo-500 min-h-[100px]"
-                            />
-                          </div>
-                        ) : (
-                          <div className="flex items-start gap-4">
-                            <span>मैं <span className="text-white font-bold underline decoration-indigo-500 decoration-2 underline-offset-4">{donationData.name}</span> हूँ। {donationData.missionStatement}</span>
-                        {isAdmin && (
-                          <button 
-                            onClick={() => setIsDonationEditing(true)}
-                            className="p-1 px-2 mt-1 bg-white/5 hover:bg-white/10 rounded-lg text-indigo-400 opacity-0 group-hover/edit:opacity-100 transition-all border border-white/10 shadow-lg flex items-center gap-1 shrink-0"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                          </button>
-                        )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    
-                    <div className="p-6 bg-white/5 rounded-3xl border border-white/10 backdrop-blur-sm relative group/edit">
-                      {isDonationEditing ? (
-                        <textarea 
-                          value={donationData.dreamStatement}
-                          onChange={(e) => setDonationData({...donationData, dreamStatement: e.target.value})}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-[#8b949e] italic text-center outline-none focus:border-indigo-500 min-h-[100px]"
-                        />
-                      ) : (
-                        <div className="flex flex-col items-center">
-                          <p className="text-sm text-[#8b949e] leading-relaxed italic text-center">
-                            {donationData.dreamStatement}
-                          </p>
-                          {isAdmin && (
-                            <button 
-                              onClick={() => setIsDonationEditing(true)}
-                              className="mt-4 p-1 px-2 bg-white/5 hover:bg-white/10 rounded-lg text-indigo-400 opacity-0 group-hover/edit:opacity-100 transition-all border border-white/10 shadow-lg flex items-center gap-1"
-                            >
-                              <Edit2 className="w-3 h-3" />
-                              <span className="text-[8px] font-black uppercase">Edit Dream</span>
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    <p className="text-[#8b949e] text-sm leading-relaxed">
-                      मैं चाहता हूँ कि भारत भी AI की दुनिया में अपनी एक अलग पहचान बनाए — एक ऐसा AI जो भारतीय लोगों की भाषा, सोच, संस्कृति और जरूरतों को वास्तव में समझे।
-                    </p>
-
-                    <div className="space-y-4">
-                      <div className="text-xs font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-2">
-                        <div className="w-1 h-3 bg-indigo-500 rounded-full"></div>
-                        मिशन के लिए आवश्यक संसाधन:
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                         {['बेहतर सर्वर', 'AI ट्रेनिंग', 'रिसर्च', 'डेवलपमेंट'].map(item => (
-                           <div key={item} className="flex items-center gap-2 text-xs text-white font-bold bg-white/5 p-3 rounded-xl border border-white/5">
-                             <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></div>
-                             {item}
-                           </div>
-                         ))}
-                      </div>
-                    </div>
-
-                    <p className="text-[#c9d1d9] text-sm leading-relaxed font-medium border-l-2 border-indigo-500 pl-4 py-1">
-                      इसके लिए मुझे आपकी मदद की आवश्यकता है। ❤️ <br />
-                      यदि आपको "नवभारत AI" का सपना अच्छा लगता है, तो कृपया अपनी इच्छा अनुसार छोटा या बड़ा कोई भी सहयोग करें।
-                    </p>
-
-                    <p className="text-center text-indigo-300 font-bold text-sm bg-indigo-500/10 py-3 rounded-2xl border border-indigo-500/20">
-                      आपका छोटा सा योगदान भी इस भारतीय AI मिशन को आगे बढ़ाने में बहुत बड़ी मदद करेगा। 🙏
-                    </p>
-                  </div>
-                </motion.div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* QR Code Section */}
-                  <motion.div 
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="bg-[#161b22] border border-white/10 rounded-[2.5rem] p-8 text-center flex flex-col items-center justify-center shadow-2xl relative group"
-                  >
-                    <div className="absolute top-4 right-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                      <QrCode className="w-12 h-12 text-white" />
-                    </div>
-                    <h4 className="text-sm font-black text-white uppercase tracking-widest mb-6">स्कैन करके सहयोग करें</h4>
-                    
-                    <div className="relative group/edit">
-                      <div className="w-48 h-48 bg-white p-3 rounded-2xl shadow-inner relative flex items-center justify-center">
-                        <img 
-                          src={donationData.qrUrl || `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${donationData.upiId}&pn=${encodeURIComponent(donationData.name)}&cu=INR`} 
-                          alt="Donation QR Code"
-                          className="w-full h-full object-contain"
-                        />
-                        {!isDonationEditing && (
-                          <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity bg-white/80 rounded-2xl pointer-events-none text-center p-4">
-                            <span className="text-[10px] font-bold text-black uppercase tracking-tight">{donationData.upiId}</span>
-                          </div>
-                        )}
-                        {isDonationEditing && (
-                          <label className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px] text-white opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl cursor-pointer">
-                            <Upload className="w-8 h-8 mb-2" />
-                            <span className="text-[10px] font-black uppercase">Upload QR Code</span>
-                            <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, 'qrUrl')} />
-                          </label>
-                        )}
-                      </div>
-                      {isDonationEditing && donationData.qrUrl && (
-                        <button 
-                          onClick={() => setDonationData({...donationData, qrUrl: ''})}
-                          className="mt-2 text-[8px] font-bold text-rose-500 uppercase flex items-center gap-1 mx-auto"
-                        >
-                          Reset to Auto-Generated QR
-                        </button>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-[#8b949e] mt-4 font-medium italic">Supports all UPI apps (GPay, PhonePe, Paytm)</p>
-                  </motion.div>
-
-                  {/* UPI & CTA Section */}
-                  <motion.div 
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="flex flex-col gap-6"
-                  >
-                    <div className="bg-[#161b22] border border-white/10 rounded-[2.5rem] p-8 shadow-2xl relative group/edit">
-                      <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">UPI IDENTITY</h4>
-                        {isAdmin && !isDonationEditing && (
-                          <button 
-                            onClick={() => setIsDonationEditing(true)}
-                            className="p-1 px-2 bg-white/5 hover:bg-white/10 rounded-lg text-indigo-400 opacity-0 group-hover/edit:opacity-100 transition-all border border-white/10 shadow-lg flex items-center gap-1"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                            <span className="text-[8px] font-black uppercase">Edit</span>
-                          </button>
-                        )}
-                      </div>
-                      <div className="relative group">
-                        <input 
-                          readOnly={!isDonationEditing}
-                          value={donationData.upiId}
-                          onChange={(e) => setDonationData({...donationData, upiId: e.target.value})}
-                          className={`w-full border rounded-2xl px-5 py-4 text-sm font-mono text-white outline-none transition-all shadow-inner ${
-                            isDonationEditing ? 'bg-white/5 border-indigo-500/50' : 'bg-[#0d1117] border-white/10 group-hover:border-indigo-500/50'
-                          }`}
-                        />
-                        {!isDonationEditing && (
-                          <button 
-                            onClick={() => {
-                              navigator.clipboard.writeText(donationData.upiId);
-                              addLog('UPI ID copied to clipboard.', 'success');
-                            }}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-all shadow-lg active:scale-95 flex items-center gap-2 group/btn"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                            <span className="text-[9px] font-black uppercase">Copy</span>
-                          </button>
-                        )}
-                      </div>
-                      <p className="text-[9px] text-[#484f58] mt-3 font-medium text-center">Verify the name displayed: <span className="text-white">{donationData.name}</span></p>
-                    </div>
-
-                    <div className="bg-indigo-600 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden group">
-                      <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent pointer-events-none"></div>
-                      <div className="relative z-10">
-                        <h4 className="text-xl font-black text-white mb-2 flex items-center gap-3">
-                          <Heart className="w-6 h-6 fill-rose-400 text-rose-400 animate-pulse" />
-                          दिल से Donate करें
-                        </h4>
-                        <p className="text-xs text-indigo-100 font-medium leading-relaxed mb-6">
-                          आपका सहयोग भारत के अपने AI को दुनिया के सबसे शानदार प्लेटफॉर्म्स में से एक बनाएगा। 🇮🇳
-                        </p>
-                        <button 
-                          onClick={() => window.open(`upi://pay?pa=${donationData.upiId}&pn=${encodeURIComponent(donationData.name)}&cu=INR`, '_blank')}
-                          className="w-full bg-white text-indigo-600 font-black py-4 rounded-2xl text-xs uppercase tracking-widest shadow-xl hover:bg-indigo-50 transition-all active:scale-95 flex items-center justify-center gap-2"
-                        >
-                          अंकदान / Donation (UPI)
-                          <ExternalLink className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </motion.div>
-                </div>
-
-                <motion.div 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="p-8 text-center border-t border-white/5"
-                >
-                  <p className="text-xs text-[#484f58] italic font-medium max-w-xl mx-auto leading-relaxed">
-                    "मैं वादा करता हूँ — एक दिन आपके सहयोग से नवभारत AI दुनिया के सबसे शानदार AI प्लेटफॉर्म्स में गिना जाएगा।" 🇮🇳
-                  </p>
-                </motion.div>
-              </div>
-            </div>
+            <DonationPanel
+              isAdmin={isAdmin}
+              isDonationEditing={isDonationEditing}
+              donationData={donationData}
+              bgClass={themeClasses.bg}
+              onToggleEditing={() => setIsDonationEditing(p => !p)}
+              onStartEditing={() => setIsDonationEditing(true)}
+              onDonationDataChange={setDonationData}
+              onFileUpload={handleFileUpload}
+              onCopySuccess={() => addLog('UPI ID copied to clipboard.', 'success')}
+            />
           )}
+
 
           {activeView === 'report' && <ReportsListView user={user} />}
           {activeView === 'history' && <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} />}
 
           {activeView === 'deploy' && (
-            <div className="flex-1 p-8 bg-[#0d1117] flex items-center justify-center">
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="max-w-md w-full bg-[#161b22] border border-white/10 rounded-3xl p-10 text-center shadow-3xl overflow-hidden relative"
-              >
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 animate-pulse"></div>
-                
-                <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-8 border border-emerald-500/20">
-                  <Rocket className="w-10 h-10 text-emerald-500" />
-                </div>
-                
-                <h3 className="text-2xl font-bold text-white mb-2">App is Live!</h3>
-                <p className="text-sm text-[#8b949e] mb-8">Your application has been deployed to the edge network.</p>
-                
-                <div className="bg-[#0d1117] border border-white/10 rounded-2xl p-4 flex items-center justify-between mb-8">
-                   <div className="text-xs font-mono text-indigo-400 truncate pr-4">{deployUrl}</div>
-                   <button 
-                    onClick={() => window.open(deployUrl, '_blank')}
-                    className="shrink-0 p-2 hover:bg-white/5 rounded-lg transition-colors"
-                  >
-                    <Globe className="w-4 h-4 text-[#8b949e] hover:text-white" />
-                   </button>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <button onClick={() => toggleTab('preview')} className="py-3 px-4 bg-white/5 hover:bg-white/10 text-white rounded-xl text-xs font-bold transition-all">Preview App</button>
-                  <button onClick={() => setIsDeployed(false)} className="py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/20">Back to Code</button>
-                </div>
-              </motion.div>
-            </div>
+            <DeploySuccessPanel
+              deployUrl={deployUrl}
+              onOpenPreview={() => toggleTab('preview')}
+              onBackToCode={() => setIsDeployed(false)}
+            />
           )}
 
           {activeView === 'studio' && (
@@ -9367,95 +7929,21 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           )}
 
           {activeView === 'files' && (
-            <div className="flex-1 h-full overflow-hidden bg-[#0d1117] flex flex-col">
-              {/* Upload conflict popup */}
-              {fileUploadConflict && (
-                <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" onClick={() => setFileUploadConflict(null)}>
-                  <div className="bg-[#161b22] border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl" onClick={e => e.stopPropagation()}>
-                    <p className="text-[13px] font-black text-white mb-1">
-                      {fileUploadConflict.isZip ? 'ZIP Upload' : `File Conflict: ${fileUploadConflict.file.name}`}
-                    </p>
-                    <p className="text-[11px] text-[#8b949e] mb-5">
-                      {fileUploadConflict.isZip
-                        ? 'Workspace already has files. Replace everything or merge new files alongside existing ones?'
-                        : `"${fileUploadConflict.existingKey}" already exists. Replace it or keep both versions?`}
-                    </p>
-                    <div className="flex gap-3">
-                      <button onClick={() => resolveFileConflict('replace')} className="flex-1 py-2.5 rounded-xl bg-red-600/20 border border-red-500/30 text-red-400 text-[11px] font-black hover:bg-red-600/30 transition-all active:scale-95">Replace</button>
-                      <button onClick={() => resolveFileConflict('merge')} className="flex-1 py-2.5 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 text-[11px] font-black hover:bg-indigo-600/30 transition-all active:scale-95">Merge</button>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {/* Hidden file input for upload */}
-              <input
-                ref={filesUploadRef}
-                type="file"
-                className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) handleFilesUpload(f); e.target.value = ''; }}
-              />
-              <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5 bg-[#161b22]">
-                <FolderOpen className="w-4 h-4 text-indigo-400" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Project Files</span>
-                <div className="ml-auto flex items-center gap-2">
-                  {hasGeneratedCode && (
-                    <span className="text-[8px] text-emerald-400 font-black uppercase tracking-widest mr-1">
-                      {Object.keys(files).filter(k => !k.startsWith('__pending__')).length} files
-                    </span>
-                  )}
-                  <button
-                    onClick={() => filesUploadRef.current?.click()}
-                    className="flex items-center gap-1 px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[9px] font-black uppercase tracking-wider text-[#8b949e] hover:text-white transition-all active:scale-95"
-                    title="Upload any file"
-                  >
-                    <Upload className="w-3 h-3" /> Upload
-                  </button>
-                  {hasGeneratedCode && (
-                    <button
-                      onClick={() => downloadAppZip(files as any, 'NavBharatApp')}
-                      className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/30 rounded-lg text-[9px] font-black uppercase tracking-wider text-indigo-400 hover:text-indigo-300 transition-all active:scale-95"
-                      title="Download all files as ZIP"
-                    >
-                      <Download className="w-3 h-3" /> Download ZIP
-                    </button>
-                  )}
-                </div>
-              </div>
-              {!hasGeneratedCode ? (
-                <div className="flex-1 flex items-center justify-center flex-col gap-3 text-center p-8">
-                  <FolderOpen className="w-12 h-12 text-white/10" />
-                  <p className="text-[11px] text-[#484f58] font-medium">No app generated yet.</p>
-                  <p className="text-[9px] text-[#484f58]">Build an app in NavBharatAI Pro — files will appear here.</p>
-                </div>
-              ) : (
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
-                  <div className="space-y-1">
-                    {Object.entries(files).map(([path, content]) => {
-                      const ext = path.split('.').pop() || '';
-                      const extColor: Record<string, string> = {
-                        html: 'text-orange-400', css: 'text-blue-400', js: 'text-yellow-400',
-                        ts: 'text-cyan-400', tsx: 'text-cyan-400', json: 'text-green-400',
-                        md: 'text-purple-400', py: 'text-emerald-400',
-                      };
-                      const color = extColor[ext] || 'text-white/50';
-                      const lines = (content as string).split('\n').length;
-                      return (
-                        <button
-                          key={path}
-                          onClick={() => { setActiveFile(path); toggleTab('studio'); }}
-                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors group text-left"
-                        >
-                          <FileCode className={`w-4 h-4 flex-shrink-0 ${color}`} />
-                          <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{path}</span>
-                          <span className="text-[8px] text-[#484f58] font-mono">{lines}L</span>
-                          <ChevronRight className="w-3 h-3 text-white/20 group-hover:text-white/50 transition-colors" />
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
+            <FilesPanel
+              files={files}
+              hasGeneratedCode={hasGeneratedCode}
+              fileUploadConflict={fileUploadConflict}
+              onResolveConflict={resolveFileConflict}
+              onUpload={handleFilesUpload}
+              onDownloadZip={() => downloadAppZip(files as any, 'NavBharatApp')}
+              onOpenFile={(path) => { setActiveFile(path); toggleTab('studio'); }}
+              sessionId={currentProSessionId}
+              onRestoreVersion={(restoredFiles, commitMsg) => {
+                setFiles(restoredFiles);
+                addLog(`Restored to: ${commitMsg}`, 'success');
+                toggleTab('studio');
+              }}
+            />
           )}
 
           {/* Phase 3 — Testing System */}

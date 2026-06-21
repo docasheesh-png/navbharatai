@@ -154,6 +154,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
           language={getLanguage(fileName)}
           value={content}
           theme="vs-dark"
+          loading={<div className="w-full h-full flex items-center justify-center bg-[#1e1e1e] text-[#8b949e] text-xs font-mono">Loading editor…</div>}
           onMount={handleEditorDidMount}
           onChange={(val) => onChange(val || '')}
           options={{

@@ -192,39 +192,27 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
       return;
     }
 
-    // Other platforms: show config + fake simulation (real deploy needs API tokens)
-    const buildLogs = LOG_MESSAGES.building;
-    for (let i = 0; i < buildLogs.length; i++) {
-      await new Promise(r => setTimeout(r, 300 + Math.random() * 200));
-      setLogs(prev => [...prev, buildLogs[i]]);
-    }
-
-    setDeployStatus('deploying');
-    const deployLogs = LOG_MESSAGES.deploying;
-    for (let i = 0; i < deployLogs.length; i++) {
-      await new Promise(r => setTimeout(r, 400 + Math.random() * 300));
-      setLogs(prev => [...prev, deployLogs[i]]);
-    }
-
-    const success = Math.random() > 0.1;
-    if (success) {
-      setDeployStatus('success');
-      const url = `https://${PLATFORMS[selectedPlatform].name.toLowerCase().replace(' ', '-')}-navbharat-${Math.random().toString(36).slice(2, 8)}.${selectedPlatform === 'vercel' ? 'vercel.app' : selectedPlatform === 'netlify' ? 'netlify.app' : selectedPlatform === 'firebase' ? 'web.app' : 'run.app'}`;
-      setLiveUrl(url);
-      setLogs(prev => [...prev, ...LOG_MESSAGES.success, `> URL: ${url}`]);
-      const dep: Deployment = {
-        id: Date.now().toString(),
-        platform: selectedPlatform,
-        url,
-        status: 'live',
-        timestamp: Date.now(),
-        duration: 8 + Math.floor(Math.random() * 10),
-      };
-      setDeployments(prev => [dep, ...prev.slice(0, 9)]);
-    } else {
-      setDeployStatus('failed');
-      setLogs(prev => [...prev, ...LOG_MESSAGES.failed]);
-    }
+    // Other platforms need a real CLI + API token — show honest deploy instructions.
+    const cliCommands: Partial<Record<Platform, string>> = {
+      vercel:   'npx vercel --prod',
+      netlify:  `npx netlify deploy --prod --dir=${PLATFORMS[selectedPlatform].outputDir}`,
+      firebase: 'npx firebase deploy --only hosting',
+      cloudrun: 'gcloud run deploy --source . --platform managed --region asia-southeast1 --allow-unauthenticated',
+      railway:  'railway up',
+      render:   '# Connect your Git repo at render.com — auto-deploys on every push',
+    };
+    const cliCmd = cliCommands[selectedPlatform] ?? 'npm run build && <platform deploy command>';
+    setDeployStatus('idle');
+    setLogs([
+      '─────────────────────────────────────────',
+      `Deploy to ${PLATFORMS[selectedPlatform].name} — CLI steps:`,
+      '─────────────────────────────────────────',
+      `1. Build:   npm run build`,
+      `2. Deploy:  ${cliCmd}`,
+      '',
+      'NavBharat Hosting is instant — no CLI needed.',
+      'Switch to NavBharat Hosting above for a live URL in seconds.',
+    ]);
   };
 
   const copyUrl = () => {
@@ -244,7 +232,7 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
           <CloudUpload size={20} color="#3b82f6" />
           <div>
             <div style={{ fontWeight: 600, fontSize: 15, color: '#f1f5f9' }}>Multi-Cloud Deploy</div>
-            <div style={{ color: '#64748b', fontSize: 11 }}>Deploy to 6 platforms with one click</div>
+            <div style={{ color: '#64748b', fontSize: 11 }}>Instant NavBharat Hosting · CLI guides for Vercel, Netlify &amp; more</div>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
@@ -299,8 +287,8 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
             </div>
 
             {/* Deploy Button & Logs */}
-            <button onClick={runDeploy} disabled={deployStatus === 'building' || deployStatus === 'deploying'} style={{ padding: '12px', borderRadius: 8, border: 'none', cursor: deployStatus === 'building' || deployStatus === 'deploying' ? 'not-allowed' : 'pointer', background: deployStatus === 'success' ? '#10b981' : deployStatus === 'failed' ? '#ef4444' : '#3b82f6', color: '#fff', fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: deployStatus === 'building' || deployStatus === 'deploying' ? 0.8 : 1 }}>
-              {deployStatus === 'building' || deployStatus === 'deploying' ? <><Loader2 size={16} className="animate-spin" /> {deployStatus === 'building' ? 'Building...' : 'Deploying...'}</> : deployStatus === 'success' ? <><CloudCheck size={16} /> Deployed! Deploy Again</> : deployStatus === 'failed' ? <><RefreshCw size={16} /> Retry Deploy</> : <><Rocket size={16} /> Deploy to {cfg.name}</>}
+            <button onClick={runDeploy} style={{ padding: '12px', borderRadius: 8, border: 'none', cursor: 'pointer', background: deployStatus === 'success' ? '#10b981' : '#3b82f6', color: '#fff', fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              {deployStatus === 'success' && selectedPlatform === 'navbharat' ? <><CloudCheck size={16} /> Deployed! Deploy Again</> : selectedPlatform === 'navbharat' ? <><Rocket size={16} /> Deploy to NavBharat Hosting</> : <><Terminal size={16} /> Show Deploy Steps</>}
             </button>
 
             {/* Live URL */}

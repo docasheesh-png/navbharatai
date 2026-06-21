@@ -1,6 +1,8 @@
 import type { Express, Request, Response } from 'express';
+import { buildRateLimiter } from '../lib/authMiddleware';
 import { runBuild } from '../project/BuildPipeline';
 import { runProEngine } from '../EngineerAI/ProEngineRunner';
+import { runUnifiedBuild, isUnifiedEngineEnabled } from '../project/UnifiedBuildOrchestrator';
 import { Guider, gradeAgainstSpec } from '../Guider/Guider';
 import { shouldConfirm } from '../Guider/GuiderGate';
 import type { GuiderSpec } from '../Guider/GuiderTypes';
@@ -35,6 +37,9 @@ import { aiRouter } from '../lib/aiRouter';
 import { getPreviewService } from '../runtime/PreviewService';
 import { getMetrics, estimateTokens } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
+import { buildHistoryStore } from '../project/BuildHistoryStore';
+import { workspaceLock } from '../project/WorkspaceLock';
+import { userCostStore } from '../lib/UserCostStore';
 
 /**
  * Phase 4 integration — the real, engine-backed build endpoint.
@@ -48,6 +53,44 @@ import { metricsStore } from '../lib/metricsStore';
  * The Pro frontend can migrate to it incrementally; the legacy route is untouched.
  */
 const previewService = getPreviewService();
+
+/**
+ * Phase 2.2 — Unified preview ladder helper.
+ *
+ * Single code path used by BOTH the agentic and legacy build routes. Wraps
+ * startPreview with:
+ *   - Consistent 8s timeout (was missing on the legacy path — could hang indefinitely)
+ *   - try/catch so a preview failure never breaks the build response
+ *   - Early `preview_url` SSE event so the iframe can start loading before
+ *     `sendComplete` arrives (was previously only available after the full payload)
+ *
+ * Returns the PreviewResult (or a {ok:false} on failure) and also emits the
+ * `preview_url` event via `send` when the preview is ready.
+ */
+async function startPreviewSafe(
+  files: Record<string, string>,
+  previewAllowed: boolean,
+  wantPreview: boolean,
+  send: (ev: unknown) => void,
+): Promise<unknown> {
+  if (!wantPreview) return undefined;
+  if (!previewAllowed) {
+    return { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
+  }
+  try {
+    const vfs = VirtualFileSystem.fromRecord(files);
+    const result = await Promise.race([
+      previewService.startPreview('build', vfs),
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 8000)),
+    ]);
+    if (result?.ok && result.url) {
+      send({ type: 'preview_url', url: result.url });
+    }
+    return result;
+  } catch {
+    return { ok: false, target: 'static', reason: 'Preview start failed.' };
+  }
+}
 
 /**
  * Resilient model call: try providers in order and return the first non-empty
@@ -199,7 +242,7 @@ export function registerBuildRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/build', async (req: Request, res: Response) => {
+  app.post('/api/build', buildRateLimiter(), async (req: Request, res: Response) => {
     try {
       const { prompt, files, userKey, preview, isEdit } = req.body || {};
       if (!prompt || typeof prompt !== 'string') {
@@ -271,12 +314,17 @@ export function registerBuildRoutes(app: Express): void {
   // Streaming build (SSE): module-by-module generation with LIVE real progress.
   // The open connection means the many small per-module calls never hit the
   // gateway 504, so large multi-module apps build to ~100% coverage.
-  app.post('/api/build-stream', async (req: Request, res: Response) => {
+  app.post('/api/build-stream', buildRateLimiter(), async (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
+    // Phase 1.5 — flush headers immediately so the browser opens the SSE pipe
+    // before any async work begins. This is what drives "first token < 1 second."
+    res.flushHeaders();
     const send = (event: unknown) => { try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch { /* client gone */ } };
+    // Phase 1.5 — first visible event arrives within ~50ms of request receipt.
+    send({ type: 'status', message: 'Analyzing your request…' });
     // Heartbeat so proxies don't idle-timeout the stream during long model calls.
     const heartbeat = setInterval(() => { try { res.write(': keep-alive\n\n'); } catch { /* ignore */ } }, 15_000);
 
@@ -309,6 +357,7 @@ export function registerBuildRoutes(app: Express): void {
     try {
       const { prompt, files, userKey, preview, isEdit } = req.body || {};
       if (!prompt || typeof prompt !== 'string') { send({ type: 'error', message: 'prompt (string) is required' }); cleanup(); return res.end(); }
+      const reqUserId: string | undefined = typeof req.body?.userId === 'string' && req.body.userId ? req.body.userId : undefined;
 
       // Foundations (G1) — best-effort lifecycle events (never block the build).
       sid = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : 'pro';
@@ -348,26 +397,68 @@ export function registerBuildRoutes(app: Express): void {
       // Phase 6: agentic engine is ON by default — disable with PRO_AGENTIC_ENGINE=0
       const agenticEnabled = process.env.PRO_AGENTIC_ENGINE !== '0';
       if (agenticEnabled) {
+        // Phase 4.1 — distributed workspace lock: prevent two concurrent builds on
+        // the same workspace across Cloud Run instances (race condition guard).
+        // Fail-open: if Firestore is unreachable, the lock returns acquired:true so
+        // builds always proceed. The lock is released in the finally block below.
+        const lockResult = sid ? await workspaceLock.tryAcquire(sid) : { acquired: true, lockId: 'nosid' };
+        if (!lockResult.acquired) {
+          const existingFiles = files && typeof files === 'object' ? files : {};
+          send({ type: 'status', message: `Another build is already running for this workspace. ${lockResult.reason || ''}` });
+          send({ type: 'complete', ok: false, files: existingFiles, fileCount: Object.keys(existingFiles).length, previewAllowed: false, partial: true });
+          return;
+        }
+        const wsLockId = lockResult.lockId!;
         try {
-          const eng = await runProEngine({
-            // Phase 85: when design images are provided, prepend a design hint to the
-            // agentic prompt so the agent knows it should match the visual design.
-            prompt: designImages && designImages.length > 0
-              ? `[DESIGN IMAGE(S) PROVIDED — generate UI code that matches the visual design in the image(s)]\n${prompt}`
-              : prompt,
-            files: files && typeof files === 'object' ? files : undefined,
-            callModel,
-            isEdit: isEdit === true,
-            sessionId,
-            // User's own E2B key unlocks the top tier for large apps (billed to them).
-            userE2bKey: typeof req.body?.userE2bKey === 'string' ? req.body.userE2bKey : undefined,
-            // GitHub token for clone_repo + git_push (from user's Secrets & Keys settings).
-            githubToken: typeof req.body?.githubToken === 'string' ? req.body.githubToken : undefined,
-            // User's database credentials (from Settings → App Settings → Database).
-            dbConfig: req.body?.dbConfig && typeof req.body.dbConfig === 'object' ? req.body.dbConfig : undefined,
-            send: (ev) => send(ev),
-            signal: deadline.signal,
-          });
+          const enginePrompt = designImages && designImages.length > 0
+            ? `[DESIGN IMAGE(S) PROVIDED — generate UI code that matches the visual design in the image(s)]\n${prompt}`
+            : prompt;
+          const engineFiles = files && typeof files === 'object' ? files : undefined;
+          const engineUserE2bKey = typeof req.body?.userE2bKey === 'string' ? req.body.userE2bKey : undefined;
+          const engineGithubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : undefined;
+          const engineDbConfig = req.body?.dbConfig && typeof req.body.dbConfig === 'object' ? req.body.dbConfig : undefined;
+
+          // Phase 1.2 — route through UnifiedBuildOrchestrator when ENGINE=v2 (opt-in).
+          // ENGINE=v1 (or unset) keeps the direct runProEngine call below for zero-risk rollback.
+          let eng: Awaited<ReturnType<typeof runProEngine>>;
+          if (isUnifiedEngineEnabled()) {
+            // Drain the async generator: forward progress events, capture the terminal result.
+            let doneResult: Awaited<ReturnType<typeof runProEngine>> | null = null;
+            for await (const ev of runUnifiedBuild({
+              prompt: enginePrompt,
+              files: engineFiles,
+              callModel,
+              mode: isEdit === true ? 'edit' : 'fresh_build',
+              sessionId,
+              userE2bKey: engineUserE2bKey,
+              githubToken: engineGithubToken,
+              dbConfig: engineDbConfig,
+              signal: deadline.signal,
+            })) {
+              if (ev.type === '_done') {
+                doneResult = ev.result as Awaited<ReturnType<typeof runProEngine>>;
+              } else if (ev.type === '_error') {
+                throw new Error(ev.message);
+              } else {
+                send(ev);
+              }
+            }
+            if (!doneResult) throw new Error('UnifiedBuildOrchestrator: no result received');
+            eng = doneResult;
+          } else {
+            eng = await runProEngine({
+              prompt: enginePrompt,
+              files: engineFiles,
+              callModel,
+              isEdit: isEdit === true,
+              sessionId,
+              userE2bKey: engineUserE2bKey,
+              githubToken: engineGithubToken,
+              dbConfig: engineDbConfig,
+              send: (ev) => send(ev),
+              signal: deadline.signal,
+            });
+          }
           // Emit a terminal result when the engine produced usable files OR the soft
           // deadline fired (so the user always gets what was built — never "no result").
           if (eng.usable || deadline.signal.aborted) {
@@ -391,17 +482,8 @@ export function registerBuildRoutes(app: Express): void {
             ]);
             const updatedEditLog = [...(memory.editLog || []), thisEntry].slice(-30);
 
-            let previewInfo: unknown = undefined;
-            if (preview && eng.previewAllowed) {
-              const vfs = VirtualFileSystem.fromRecord(eng.files);
-              // G11 — cap preview at 8s so we stay well within Cloud Run's budget.
-              previewInfo = await Promise.race([
-                previewService.startPreview('build', vfs),
-                new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 8000)),
-              ]);
-            } else if (preview && !eng.previewAllowed) {
-              previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
-            }
+            // Phase 2.2 — unified preview ladder (both paths through one helper).
+            const previewInfo = await startPreviewSafe(eng.files, eng.previewAllowed, !!preview, send);
 
             // G5 — code review quality gate (best-effort, 12s cap, never blocks build).
             let codeReview: unknown = undefined;
@@ -427,11 +509,31 @@ export function registerBuildRoutes(app: Express): void {
               tier: eng.tier,
               partial: eng.partial || deadline.signal.aborted,
               codeReview,
+              costUsd: eng.estimatedCostUsd,
             });
             eventBus.publish({ type: EventType.BUILD_COMPLETED, workspaceId: sid, sender: 'pro', payload: { path: 'agentic', tier: eng.tier, usable: eng.usable, partial: eng.partial || deadline.signal.aborted, fileCount: eng.fileCount, previewAllowed: eng.previewAllowed } });
             // G2 — wire metrics that were previously missing from the agentic path.
             try { getMetrics().recordBuild({ ok: eng.ok, previewAllowed: !!eng.previewAllowed, isEdit: isEdit === true, ms: Date.now() - startedAt }); } catch { /* metrics never block */ }
             metricsStore.save().catch(() => {});
+            // Phase 4.2 — accumulate per-user monthly AI cost (display-only, never blocks).
+            if (reqUserId && typeof eng.estimatedCostUsd === 'number' && eng.estimatedCostUsd > 0) {
+              userCostStore.record(reqUserId, eng.estimatedCostUsd).catch(() => {});
+            }
+            // Phase 2.1 — save version checkpoint for every successful build.
+            if (sessionId && eng.ok && !eng.partial) {
+              const shortPrompt = (prompt || '').slice(0, 60).replace(/\s+/g, ' ');
+              const commitMsg = isEdit
+                ? `feat(edit): ${shortPrompt} — ${eng.fileCount} files`
+                : `feat: build "${shortPrompt}" — ${eng.fileCount} files, ${eng.tier || 'vfs'} tier`;
+              buildHistoryStore.save(sessionId, {
+                commitMessage: commitMsg,
+                fileCount: eng.fileCount,
+                files: eng.files,
+                isEdit: isEdit === true,
+                tier: eng.tier,
+                ok: eng.ok,
+              }).catch(() => {});
+            }
             if (sessionId) {
               proBuildSessionStore.save(sessionId, {
                 ok: eng.ok, files: eng.files, fileCount: eng.fileCount,
@@ -448,6 +550,9 @@ export function registerBuildRoutes(app: Express): void {
           send({ type: 'status', message: 'Refining with the standard build pipeline…' });
         } catch (e: any) {
           console.warn('[BUILD] Agentic engine error — falling back to runBuild:', e?.message || e);
+        } finally {
+          // Phase 4.1 — always release the workspace lock (success, failure, or fallback).
+          if (sid && wsLockId !== 'nosid') workspaceLock.release(sid, wsLockId).catch(() => {});
         }
       }
 
@@ -514,13 +619,8 @@ export function registerBuildRoutes(app: Express): void {
         } catch { /* test gen never blocks the build */ }
       }
 
-      let previewInfo: unknown = undefined;
-      if (preview && result.previewAllowed) {
-        const vfs = VirtualFileSystem.fromRecord(finalFiles);
-        previewInfo = await previewService.startPreview('build', vfs);
-      } else if (preview && !result.previewAllowed) {
-        previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
-      }
+      // Phase 2.2 — unified preview ladder (both paths through one helper).
+      const previewInfo = await startPreviewSafe(finalFiles, result.previewAllowed, !!preview, send);
 
       // G5 — code review quality gate (best-effort, 12s cap, never blocks build).
       let codeReview: unknown = undefined;
@@ -548,6 +648,22 @@ export function registerBuildRoutes(app: Express): void {
         codeReview,
       });
       eventBus.publish({ type: EventType.BUILD_COMPLETED, workspaceId: sid, sender: 'pro', payload: { path: 'legacy', ok: result.ok, fileCount: result.fileCount, previewAllowed: result.previewAllowed, partial: false } });
+      // Phase 2.1 — save version checkpoint for every successful build.
+      if (sessionId && result.ok) {
+        const shortPrompt = (prompt || '').slice(0, 60).replace(/\s+/g, ' ');
+        const finalFileCount = Object.keys(finalFiles).length;
+        const commitMsg = isEdit
+          ? `feat(edit): ${shortPrompt} — ${finalFileCount} files`
+          : `feat: build "${shortPrompt}" — ${finalFileCount} files, vfs tier`;
+        buildHistoryStore.save(sessionId, {
+          commitMessage: commitMsg,
+          fileCount: finalFileCount,
+          files: finalFiles,
+          isEdit: isEdit === true,
+          tier: 'vfs',
+          ok: result.ok,
+        }).catch(() => {});
+      }
       if (sessionId) {
         proMemoryStore.save(sessionId, { memorySummary: updatedSummary, editLog: updatedEditLog }).catch(() => {});
         proBuildSessionStore.save(sessionId, {
@@ -589,5 +705,40 @@ export function registerBuildRoutes(app: Express): void {
     } catch {
       return res.status(500).json({ error: 'failed to load session' });
     }
+  });
+
+  // Phase 2.1 — List all version checkpoints for a workspace (metadata only, no files).
+  // Used by the frontend version history panel.
+  app.get('/api/build-history/:sessionId', async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ error: 'sessionId required' });
+      const versions = await buildHistoryStore.list(sessionId);
+      return res.json({ versions });
+    } catch {
+      return res.status(500).json({ error: 'failed to load history' });
+    }
+  });
+
+  // Phase 2.1 — Fetch a specific version's full file snapshot for restore.
+  app.get('/api/build-history/:sessionId/:versionId', async (req: Request, res: Response) => {
+    try {
+      const { sessionId, versionId } = req.params;
+      if (!sessionId || !versionId) return res.status(400).json({ error: 'sessionId and versionId required' });
+      const version = await buildHistoryStore.get(sessionId, versionId);
+      if (!version) return res.status(404).json({ error: 'version not found' });
+      return res.json(version);
+    } catch {
+      return res.status(500).json({ error: 'failed to load version' });
+    }
+  });
+
+  // Phase 4.2 — Per-user monthly AI cost summary for the Billing panel.
+  app.get('/api/user/usage/:userId', async (req: Request, res: Response) => {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    const month = typeof req.query.month === 'string' ? req.query.month : undefined;
+    const doc = await userCostStore.get(userId, month);
+    return res.json(doc ?? { userId, month: month ?? new Date().toISOString().slice(0, 7), totalBuilds: 0, totalCostUsd: 0, updatedAt: 0 });
   });
 }

@@ -25,10 +25,18 @@ export class FirestoreJobStore implements JobStore {
     }
 
     async updateJobStatus(jobId: string, status: JobStatus, progress: number, log?: string): Promise<void> {
-        const update: any = { status, progress, updatedAt: new Date() };
+        const docRef = this.db.collection(this.collection).doc(jobId);
         if (log) {
-            update.logs = admin.firestore.FieldValue.arrayUnion(log);
+            // Use a transaction to append + cap at 100 entries — prevents Firestore
+            // documents from exceeding the 1MB limit on long/verbose builds.
+            await this.db.runTransaction(async tx => {
+                const snap = await tx.get(docRef);
+                const existing: string[] = snap.exists ? (snap.data()?.logs ?? []) : [];
+                const trimmed = [...existing, log].slice(-100);
+                tx.set(docRef, { status, progress, updatedAt: new Date(), logs: trimmed }, { merge: true });
+            });
+        } else {
+            await docRef.update({ status, progress, updatedAt: new Date() });
         }
-        await this.db.collection(this.collection).doc(jobId).update(update);
     }
 }

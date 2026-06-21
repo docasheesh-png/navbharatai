@@ -27,7 +27,10 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { verifyProject, type VerifyResult } from '../project/ProjectVerifier';
 import { checkSyntax } from '../project/SyntaxCheck';
 import { runValidation, type ValidationReport } from '../project/ValidationPipeline';
+import { syncDependencies } from '../project/DependencySync';
 import { selectArchitecture } from '../project/ArchitectureManifest';
+import { matchErrorPatterns, hintForInstruction } from '../project/ErrorPatternMatcher';
+import { errorPatternStore } from '../project/ErrorPatternStore';
 import type { BuildProgressEvent } from '../project/BuildPipeline';
 import type { ModelCall } from '../project/aiEdits';
 import { EngineerAgentLoop } from './EngineerAgentLoop';
@@ -38,6 +41,7 @@ import { E2BActuator } from './actuators/E2BActuator';
 import type { IEngineerActuator } from './actuators/IEngineerActuator';
 import type { EngineerTask, DbProviderConfig } from './EngineerAITypes';
 import { thinkingBudgetFor, isComplexTask } from '../pro/ProComplexity';
+import { proMemoryStore } from '../pro/ProMemory';
 
 export type ExecutionTier = 'vfs' | 'cloudrun' | 'e2b';
 
@@ -136,6 +140,9 @@ export interface ProEngineResult {
   previewAllowed: boolean;
   /** The tier that actually executed (after any availability downgrade). */
   tier: ExecutionTier;
+  /** Phase 4.2 — rough AI cost estimate for this build (Grok rate-card estimate).
+   *  Undefined for builds that failed at the infra level before any AI calls. */
+  estimatedCostUsd?: number;
 }
 
 const ACTION_ICON: Record<string, string> = {
@@ -177,6 +184,22 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
   const backend = resolveBackend(desired, inputVfs, userE2bKey);
 
   const workspaceId = sessionId || `pro-${Date.now()}`;
+
+  // Phase 2.3 — load Pro Chat's persisted memory so the agent inherits context
+  // built up in previous Pro sessions (rolling summary + recent edit log).
+  // Best-effort: never blocks or throws — missing memory is not a failure.
+  const proMem = sessionId
+    ? await proMemoryStore.load(sessionId).catch(() => null)
+    : null;
+
+  // Phase 5.4 — error pattern learning: combine pre-build technology hints
+  // (based on prompt keywords) with session-level hints saved from previous
+  // failed attempts. Injected into every agent step so the agent avoids
+  // known pitfalls without needing to discover them through failure.
+  const instructionHints = hintForInstruction(prompt);
+  const sessionHints = sessionId ? await errorPatternStore.getHints(sessionId).catch(() => []) : [];
+  const errorHints = [...new Set([...instructionHints, ...sessionHints])].slice(0, 8);
+
   // Phase 73 — extended thinking for complex tasks: detect architectural complexity
   // and pass a higher thinking budget to ProAgentRouter, which will use
   // AnthropicProvider (Claude Opus with thinking enabled) directly for complex
@@ -199,16 +222,26 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     projectType: 'auto',
     githubToken: githubToken || process.env.GITHUB_TOKEN || undefined,
     dbConfig: dbConfig || undefined,
+    proMemorySummary: proMem?.memorySummary || undefined,
+    proEditLog: proMem?.editLog?.length ? proMem.editLog : undefined,
+    errorHints: errorHints.length ? errorHints : undefined,
   };
 
-  if (backend.tier !== 'vfs') {
-    send({ type: 'status', message: `⚙️ Running in ${backend.tier === 'e2b' ? 'a cloud VM' : 'a real container'} (full build + test)…` });
-  }
+  // Phase 1.4 — always emit tier + cost so users know what they're getting.
+  const TIER_DISPLAY: Record<ExecutionTier, string> = {
+    vfs:      'In-memory tier (free)',
+    cloudrun: 'Container tier (free)',
+    e2b:      'E2B cloud VM (~$0.02–$0.15)',
+  };
+  send({ type: 'status', message: `Execution tier: ${TIER_DISPLAY[backend.tier]}` });
 
   let didEdit = false;
   let sawError = false;
   let aborted = false;
   let runError = false;
+  // Phase 4.2 — per-build cost transparency: count AI reasoning steps so we can
+  // show an estimated cost to the user once the build is done.
+  let aiStepCount = 0;
   // For 'vfs' the actuator wraps inputVfs directly; for sandbox tiers we collect
   // the result back into a fresh VFS after the run.
   let outVfs: VirtualFileSystem = inputVfs;
@@ -237,6 +270,7 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
             send({ type: 'thinking', content: ev.thought });
           }
           send({ type: 'status', message: `${ACTION_ICON[ev.action] || '•'} ${ev.action}` });
+          aiStepCount++;
           break;
         case 'command_result':
           send({ type: 'terminal', command: ev.command, output: ev.output, exitCode: ev.exitCode });
@@ -347,6 +381,18 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     if (p === '.engineer' || p.startsWith('.engineer/')) outVfs.delete(p);
   }
 
+  // ── G6.1 — dependency auto-sync: declare every imported package in package.json
+  //    so `npm install` on the exported files actually resolves all imports.
+  //    Mirrors BuildPipeline.runBuild's dep-sync step. Best-effort, never throws.
+  try {
+    const depSync = syncDependencies(outVfs);
+    const totalAdded = depSync.added.length + depSync.addedDev.length;
+    if (totalAdded) {
+      const all = [...depSync.added, ...depSync.addedDev.map(d => `${d} (dev)`)].join(', ');
+      send({ type: 'status', message: `Declared ${totalAdded} missing dependenc${totalAdded > 1 ? 'ies' : 'y'}: ${all}` });
+    }
+  } catch { /* dep sync never blocks the build */ }
+
   // ── Finalize: run the same validation/preview gate the legacy pipeline uses
   //    (mirrors BuildPipeline.runBuild's tail) so `complete` is identical-shape.
   const finalFiles = outVfs.toRecord();
@@ -367,10 +413,57 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     validation.qualityScore = Math.max(0, validation.qualityScore - 45);
   }
 
+  // Phase 5.4 — error pattern learning: on validation failure, extract error hints
+  // from the gates and save them for the next retry on this session. On success,
+  // clear any saved hints so they don't bleed into future unrelated work.
+  // All Firestore ops are best-effort fire-and-forget — never blocks the build.
+  if (sessionId) {
+    const allErrors = [
+      ...validation.blockingReasons,
+      ...(syntaxIssues.map(i => `${i.file}: ${i.message}`)),
+    ].join('\n');
+    if (allErrors.trim()) {
+      const newHints = matchErrorPatterns(allErrors);
+      if (newHints.length) {
+        errorPatternStore.saveHints(sessionId, newHints).catch(() => {});
+        // Bump aggregate stats for the most informative pattern keyword
+        const key = allErrors.includes('ERESOLVE') ? 'eresolve'
+          : allErrors.includes('Cannot find module') ? 'cannot_find_module'
+          : allErrors.includes('JSX') ? 'unclosed_jsx'
+          : allErrors.includes('is not exported') ? 'named_export'
+          : 'other';
+        errorPatternStore.bumpPatternStat(key);
+      }
+    } else if (!sawError && !runError && verify.ok) {
+      // Successful build — clear stale hints so they don't pollute future tasks.
+      errorPatternStore.clearHints(sessionId).catch(() => {});
+    }
+  }
+
+  // Phase 4.2 — cost transparency: emit estimated build cost before the final result.
+  // Uses realistic averages per AI step (Grok grok-3 rates):
+  //   ~6,000 input tokens/step × $0.05/1M = $0.00030/step
+  //   ~400 output tokens/step × $0.08/1M = $0.000032/step
+  // → ~$0.000332 per step. For a 20-step build: ~$0.0066. Shown as "~$X" to be
+  // honest about the estimate nature. Not shown for 0-step or infra-error runs.
+  if (aiStepCount > 0 && !runError) {
+    const AVG_IN_TOKENS = 6_000;
+    const AVG_OUT_TOKENS = 400;
+    const estimatedCostUsd = aiStepCount * ((AVG_IN_TOKENS / 1_000_000) * 0.05 + (AVG_OUT_TOKENS / 1_000_000) * 0.08);
+    const costStr = estimatedCostUsd < 0.001
+      ? '<$0.001'
+      : `~$${estimatedCostUsd.toFixed(4)}`;
+    send({ type: 'status', message: `${aiStepCount} reasoning step${aiStepCount === 1 ? '' : 's'} — estimated AI cost: ${costStr}` });
+  }
+
   // An aborted run (soft deadline) still counts as usable when it produced edits —
   // we keep the partial work instead of throwing it away, and flag it `partial` so
   // the caller can continue it. Only a hard error / infra failure blocks usability.
   const usable = !sawError && !runError && didEdit && Object.keys(finalFiles).length > 0;
+
+  const estimatedCostUsd = aiStepCount > 0
+    ? aiStepCount * ((6_000 / 1_000_000) * 0.05 + (400 / 1_000_000) * 0.08)
+    : undefined;
 
   return {
     usable,
@@ -382,6 +475,7 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     validation,
     previewAllowed: validation.previewAllowed,
     tier: backend.tier,
+    estimatedCostUsd,
   };
 }
 

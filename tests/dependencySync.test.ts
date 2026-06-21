@@ -121,4 +121,73 @@ describe('syncDependencies', () => {
     expect(result.added).toHaveLength(0);
     expect(vfs.readText('package.json')).toBe(original); // file untouched
   });
+
+  it('adds @types/ packages to devDependencies', () => {
+    const vfs = vfsFrom({
+      'package.json': JSON.stringify({ dependencies: {} }),
+      'src/app.ts': "import { v4 } from 'uuid';",
+    });
+    const result = syncDependencies(vfs);
+    // uuid should go to dependencies, @types/uuid is not imported directly so not added
+    expect(result.added).toContain('uuid');
+    expect(result.addedDev).toHaveLength(0);
+  });
+
+  it('routes build-tool packages to devDependencies', () => {
+    const vfs = vfsFrom({
+      'package.json': JSON.stringify({ dependencies: {} }),
+      'src/app.ts': "import tailwindcss from 'tailwindcss'; import autoprefixer from 'autoprefixer';",
+    });
+    const result = syncDependencies(vfs);
+    expect(result.added).not.toContain('tailwindcss');
+    expect(result.added).not.toContain('autoprefixer');
+    expect(result.addedDev).toContain('tailwindcss');
+    expect(result.addedDev).toContain('autoprefixer');
+    const pkg = JSON.parse(vfs.readText('package.json')!);
+    expect(pkg.devDependencies?.tailwindcss).toBeDefined();
+    expect(pkg.devDependencies?.autoprefixer).toBeDefined();
+  });
+
+  it('addedDev is sorted alphabetically', () => {
+    const vfs = vfsFrom({
+      'package.json': JSON.stringify({ dependencies: {} }),
+      'src/app.ts': "import postcss from 'postcss'; import autoprefixer from 'autoprefixer'; import tailwindcss from 'tailwindcss';",
+    });
+    const result = syncDependencies(vfs);
+    expect(result.addedDev.length).toBeGreaterThan(1);
+    expect(result.addedDev).toEqual([...result.addedDev].sort());
+  });
+
+  it('returns empty addedDev when no dev packages are imported', () => {
+    const vfs = vfsFrom({
+      'package.json': JSON.stringify({ dependencies: {} }),
+      'src/app.ts': "import { create } from 'zustand';",
+    });
+    const result = syncDependencies(vfs);
+    expect(result.addedDev).toHaveLength(0);
+    expect(result.added).toContain('zustand');
+  });
+
+  it('adds svelte as a runtime dep with pinned version', () => {
+    const vfs = vfsFrom({
+      'package.json': JSON.stringify({ dependencies: {} }),
+      'src/main.js': "import App from './App.svelte'; import { writable } from 'svelte/store';",
+    });
+    const result = syncDependencies(vfs);
+    expect(result.added).toContain('svelte');
+    const pkg = JSON.parse(vfs.readText('package.json')!);
+    expect(pkg.dependencies.svelte).toBe('^4.2.19');
+  });
+
+  it('adds @sveltejs/vite-plugin-svelte as a devDep with pinned version', () => {
+    const vfs = vfsFrom({
+      'package.json': JSON.stringify({ dependencies: {} }),
+      'vite.config.js': "import { svelte } from '@sveltejs/vite-plugin-svelte';",
+    });
+    const result = syncDependencies(vfs);
+    expect(result.addedDev).toContain('@sveltejs/vite-plugin-svelte');
+    expect(result.added).not.toContain('@sveltejs/vite-plugin-svelte');
+    const pkg = JSON.parse(vfs.readText('package.json')!);
+    expect(pkg.devDependencies?.['@sveltejs/vite-plugin-svelte']).toBe('^3.1.2');
+  });
 });

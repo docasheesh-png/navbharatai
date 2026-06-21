@@ -14,6 +14,27 @@ done) lives in `PROGRESS.md`, not here.
 Goal: make NavBharatAI the world's best AI app maker. Every rule below exists
 to protect that one rule.
 
+## The second absolute rule: Real features only — no exceptions, no matter how long it takes
+
+**Every feature, button, or capability added to NavBharatAI must be real, fully wired,
+and working end-to-end before it ships. No half-done work. Ever.**
+
+This means:
+- A button MUST do what it says — "Deploy" must actually deploy, "Save" must actually save.
+- A form MUST send real data to a real backend — no `console.log()` placeholder wiring.
+- A feature visible in the UI MUST have its server API wired and returning real data.
+- A status indicator MUST reflect real state — never hardcoded, never faked.
+- A feature that "looks done" but does nothing is NOT done — do not commit, do not merge.
+
+If the real implementation needs infrastructure not yet available (no API key, no sandbox,
+no third-party service), the feature MUST NOT ship until that infrastructure exists — OR it
+must show an honest, clear "not available" state with a real message. Never fake the result.
+
+**There are only two valid states: (a) fully working, or (b) not built yet.**
+"Built but not really working" does not exist in NavBharatAI.
+
+This rule has no exceptions. No time pressure, no credit pressure, nothing overrides it.
+
 ## The 7 safeguards (mandatory, every session)
 
 1. **Fresh-state check before trusting any doc.** At the start of every

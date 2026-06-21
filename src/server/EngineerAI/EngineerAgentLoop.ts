@@ -241,7 +241,7 @@ export class EngineerAgentLoop {
   }
 
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
-    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig, githubToken } = task;
+    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig, githubToken, proMemorySummary, proEditLog } = task;
     let effectiveInstruction = instruction;
     const deadline = Date.now() + DEADLINE_MS;
 
@@ -339,6 +339,7 @@ export class EngineerAgentLoop {
       globalStep: 0,
       terminated: false,
       completionEvent: null,
+      providerFallbackShown: false,
     };
 
     // Phase 12C/12D — if the user attached an image, save it as a usable workspace
@@ -469,7 +470,7 @@ export class EngineerAgentLoop {
     dbContextBlock: string,
     signal?: AbortSignal,
   ): AsyncGenerator<EngineerAgentEvent> {
-    const { workspaceId, githubToken } = task;
+    const { workspaceId, githubToken, proMemorySummary, proEditLog, errorHints } = task;
 
     for (let localStep = 0; localStep < maxSteps; localStep++) {
       shared.globalStep++;
@@ -479,7 +480,7 @@ export class EngineerAgentLoop {
       if (Date.now() > deadline) { yield { type: 'max_steps_reached', steps: step - 1 }; shared.terminated = true; return; }
 
       yield { type: 'status', message: `Step ${step}: reading workspace…` };
-      const prompt = await this.buildPrompt(workspaceId, effectiveInstruction, shared.history, stepContextPrefix);
+      const prompt = await this.buildPrompt(workspaceId, effectiveInstruction, shared.history, stepContextPrefix, proMemorySummary, proEditLog, errorHints);
       yield { type: 'status', message: `Step ${step}: thinking…` };
 
       let rawResponse: string;
@@ -491,16 +492,26 @@ export class EngineerAgentLoop {
         const appCtx = AppContextInjector.getRelevantContext(effectiveInstruction, 'engineer_ai');
         let effectiveSystemPrompt = dbContextBlock ? SYSTEM_PROMPT + dbContextBlock : SYSTEM_PROMPT;
         if (appCtx) effectiveSystemPrompt += `\n\n${appCtx}`;
-        const { response, telemetry } = await this.router.route(prompt, effectiveSystemPrompt, images);
+        // Phase 1.6 — CoderAgent uses grok-3 (most capable) for accurate code generation;
+        // PlannerAgent keeps grok-3-fast (default) since it only needs structured JSON.
+        const { response, telemetry } = await this.router.route(prompt, effectiveSystemPrompt, images, 'grok-3');
         usageTracker.record(workspaceId, 'aiCall');
+        // Phase 5.5 — provider fallback visibility: notify once per build when the
+        // primary AI provider (Grok) is unavailable and a fallback took over.
+        // Prevents silent degraded-mode builds where users see slow responses with
+        // no explanation.
+        if (telemetry.success && telemetry.retries > 0 && !shared.providerFallbackShown) {
+          shared.providerFallbackShown = true;
+          yield { type: 'status', message: `⚠️ Primary AI provider unavailable — using ${telemetry.provider} (${telemetry.retries} provider${telemetry.retries > 1 ? 's' : ''} tried first). Build continues normally.` };
+        }
         if (!telemetry.success) {
           yield {
             type: 'error',
             message:
-              'Grok API call failed. Check: ' +
-              '① GROK_API_KEY (or XAI_API_KEY) is set correctly in Cloud Run env vars — get it at console.x.ai, ' +
+              'All AI providers are unavailable. Check: ' +
+              '① GROK_API_KEY (or XAI_API_KEY) is set in Cloud Run env vars — get it at console.x.ai, ' +
               '② xAI API rate limit — wait a minute and retry, ' +
-              '③ xAI API is temporarily down — check status.x.ai',
+              '③ All providers may be temporarily down — check status.x.ai and wait 1–2 minutes',
           };
           shared.terminated = true;
           return;
@@ -1285,9 +1296,24 @@ export class EngineerAgentLoop {
     instruction: string,
     history: { step: number; actionJson: string; observation: string }[],
     stepContextPrefix?: string,
+    proMemorySummary?: string,
+    proEditLog?: string[],
+    errorHints?: string[],
   ): Promise<string> {
     // 1. Get full file list (paths only — always fast)
     const fileList = await this.actuator.listFiles(workspaceId);
+
+    // Phase 2.4 — adaptive context budget: scale down verbatim history tail and
+    // file budget when the session grows large (deep history OR many files).
+    // Prevents prompt overflow on long multi-step builds without losing the agent's
+    // view of the most recent steps (always keeps the last 6 verbatim).
+    const sessionLarge = history.length > 20 || fileList.length > 50;
+    const effectiveVerbatimTail = sessionLarge ? 6 : HISTORY_VERBATIM_TAIL;
+    const effectiveBudgetTotal = sessionLarge
+      ? Math.min(this.contextBudget?.total ?? 50_000, 60_000)
+      : this.contextBudget?.total;
+    const effectiveBudgetPerFile = sessionLarge ? 3_000 : this.contextBudget?.perFile;
+    const effectiveBudgetMaxFiles = sessionLarge ? 20 : (this.contextBudget?.maxFiles ?? 30);
 
     // 2. Extract search terms from instruction + recent observations
     const recentObs = history.slice(-5).map(h => h.observation);
@@ -1307,7 +1333,7 @@ export class EngineerAgentLoop {
 
     // 5. Read top-ranked files and pack within the context budget
     const contentMap = new Map<string, string>();
-    const maxToRead = this.contextBudget?.maxFiles ?? 30;
+    const maxToRead = effectiveBudgetMaxFiles;
     for (const filePath of ranked.slice(0, maxToRead)) {
       try {
         contentMap.set(filePath, await this.actuator.readFile(workspaceId, filePath));
@@ -1317,9 +1343,9 @@ export class EngineerAgentLoop {
     }
     const fileSections = packFileSections(
       ranked, contentMap,
-      this.contextBudget?.total,
-      this.contextBudget?.perFile,
-      this.contextBudget?.maxFiles,
+      effectiveBudgetTotal,
+      effectiveBudgetPerFile,
+      effectiveBudgetMaxFiles,
     );
 
     // 6. Full file tree (paths only) — gives the model the overall shape
@@ -1334,10 +1360,31 @@ export class EngineerAgentLoop {
       }
     } catch { /* no memory file yet — first session */ }
 
+    // Phase 2.3 — unified memory: prepend Pro Chat's rolling summary + edit log so
+    // the agent doesn't re-reason decisions Pro already made in this workspace.
+    let proMemSection = '';
+    if (proMemorySummary && proMemorySummary.trim()) {
+      const editLogLines = proEditLog && proEditLog.length > 0
+        ? `\nRecent edits:\n${proEditLog.slice(-10).map(e => `  - ${e}`).join('\n')}`
+        : '';
+      proMemSection = `[PRO CHAT CONTEXT — what was built in this session]\n${proMemorySummary.slice(0, 1500)}${editLogLines}`;
+    }
+
+    // Phase 5.4 — error pattern learning: inject known-issue hints from previous
+    // failed attempts and pre-build technology hints into every prompt step.
+    // Capped to prevent context bloat. Injected before the file tree.
+    let errorHintsSection = '';
+    if (errorHints && errorHints.length > 0) {
+      const hintsText = errorHints.slice(0, 5).map((h, i) => `${i + 1}. ${h}`).join('\n');
+      errorHintsSection = `[KNOWN ISSUES — apply these fixes proactively]\n${hintsText}`;
+    }
+
     const taskSection = stepContextPrefix
       ? `[TASK]\n${instruction}\n\n${stepContextPrefix}`
       : `[TASK]\n${instruction}`;
     const parts: string[] = [taskSection];
+    if (proMemSection) parts.push(proMemSection);
+    if (errorHintsSection) parts.push(errorHintsSection);
     if (memorySection) parts.push(memorySection);
     parts.push(
       `[WORKSPACE — FILE TREE (${fileList.length} files)]\n${fileTree}`,
@@ -1345,8 +1392,8 @@ export class EngineerAgentLoop {
     );
 
     if (history.length > 0) {
-      const verbatim = history.slice(-HISTORY_VERBATIM_TAIL);
-      const condensed = history.slice(0, history.length - HISTORY_VERBATIM_TAIL);
+      const verbatim = history.slice(-effectiveVerbatimTail);
+      const condensed = history.slice(0, history.length - effectiveVerbatimTail);
       const sections: string[] = [];
 
       if (condensed.length > 0) {

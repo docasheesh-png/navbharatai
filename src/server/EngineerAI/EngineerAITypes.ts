@@ -33,6 +33,20 @@ export interface EngineerTask {
    * the client; injected by the route so the agent can push to the user's repos.
    */
   githubToken?: string;
+  /**
+   * Phase 2.3 — unified memory: Pro Chat's rolling session summary + recent edit
+   * log. Injected by ProEngineRunner so the agent knows what Pro already built in
+   * this workspace. Prevents the agent from re-reasoning decisions Pro already made.
+   */
+  proMemorySummary?: string;
+  proEditLog?: string[];
+  /**
+   * Phase 5.4 — error pattern learning: hints from previous failed attempts on this
+   * session (ERESOLVE, unclosed JSX, missing module, etc.) and pre-build hints based
+   * on detected technology keywords. Injected into the agent's system prompt so it
+   * avoids repeating known mistakes from prior failed builds.
+   */
+  errorHints?: string[];
 }
 
 /**
@@ -51,6 +65,9 @@ export interface SharedLoopState {
   /** Set (instead of yielding directly) when 'done' or 'reply' succeeds, so the
    *  orchestrator can emit plan_step_done BEFORE the 'complete' event. */
   completionEvent: EngineerAgentEvent | null;
+  /** Phase 5.5 — set to true once the provider-fallback warning has been shown so
+   *  we don't spam it on every step of a degraded-mode build. */
+  providerFallbackShown: boolean;
 }
 
 /** One ReAct action the model outputs per turn. */

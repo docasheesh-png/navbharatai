@@ -22,6 +22,78 @@ describe('selectArchitecture', () => {
     // pages/*.js is NOT blanket-forbidden (React projects may have .js helpers)
     expect(pats.some((p) => p.test('pages/Home.jsx'))).toBe(false);
   });
+
+  it('selects Vue 3 architecture for explicit Vue prompts', () => {
+    const m = selectArchitecture('build a vue 3 dashboard with pinia');
+    expect(m.framework).toBe('vue');
+    expect(m.bundler).toBe('vite');
+    expect(m.mountId).toBe('app');
+    expect(m.entry).toBe('src/main.js');
+    expect(manifestContract(m)).toMatch(/Vue 3/);
+    expect(manifestContract(m)).toMatch(/do not mix/i);
+  });
+  it('forbids JSX/TSX and vanilla js/ in a Vue manifest', () => {
+    const pats = forbiddenPathPatterns(selectArchitecture('vue app'));
+    expect(pats.some((p) => p.test('App.tsx'))).toBe(true);
+    expect(pats.some((p) => p.test('js/helpers.js'))).toBe(true);
+    expect(pats.some((p) => p.test('src/App.vue'))).toBe(false);
+  });
+
+  it('selects Svelte 4 architecture for explicit Svelte prompts', () => {
+    const m = selectArchitecture('build a svelte todo app');
+    expect(m.framework).toBe('svelte');
+    expect(m.bundler).toBe('vite');
+    expect(m.mountId).toBe('app');
+    expect(m.entry).toBe('src/main.js');
+    expect(manifestContract(m)).toMatch(/Svelte 4/);
+    expect(manifestContract(m)).toMatch(/do not mix/i);
+    expect(manifestContract(m)).toMatch(/\.svelte/);
+  });
+  it('forbids JSX/TSX and .vue in a Svelte manifest', () => {
+    const pats = forbiddenPathPatterns(selectArchitecture('svelte app'));
+    expect(pats.some((p) => p.test('App.tsx'))).toBe(true);
+    expect(pats.some((p) => p.test('App.vue'))).toBe(true);
+    expect(pats.some((p) => p.test('src/App.svelte'))).toBe(false);
+  });
+  it('Svelte prompt does NOT get misidentified as Vue or React', () => {
+    const m = selectArchitecture('sveltekit blog with components');
+    expect(m.framework).toBe('svelte');
+  });
+  it('selects vanilla for plain/static prompts', () => {
+    const m = selectArchitecture('a plain landing page');
+    expect(m.framework).toBe('vanilla');
+    expect(m.bundler).toBe('none');
+    expect(manifestContract(m)).toMatch(/Vanilla JavaScript/);
+  });
+
+  it('React + TypeScript prompt → .tsx entry and TS language', () => {
+    const m = selectArchitecture('build a react typescript dashboard');
+    expect(m.framework).toBe('react');
+    expect(m.language).toBe('typescript');
+    expect(m.entry).toBe('src/main.tsx');
+    const contract = manifestContract(m);
+    expect(contract).toMatch(/TypeScript/);
+    expect(contract).toMatch(/\.tsx/);
+    // Must not suggest .jsx for a TS project
+    expect(contract).not.toMatch(/LANGUAGE IS JAVASCRIPT/);
+  });
+
+  it('React without TypeScript keyword → .jsx entry and JS language', () => {
+    const m = selectArchitecture('build a react todo app');
+    expect(m.framework).toBe('react');
+    expect(m.language).toBe('javascript');
+    expect(m.entry).toBe('src/main.jsx');
+    const contract = manifestContract(m);
+    expect(contract).toMatch(/LANGUAGE IS JAVASCRIPT/);
+    expect(contract).not.toMatch(/LANGUAGE IS TYPESCRIPT/);
+  });
+
+  it('Vue + TypeScript prompt → .ts entry and TS language', () => {
+    const m = selectArchitecture('vue typescript app');
+    expect(m.framework).toBe('vue');
+    expect(m.language).toBe('typescript');
+    expect(m.entry).toBe('src/main.ts');
+  });
 });
 
 describe('no false positives (rock-solid for legitimate apps)', () => {

@@ -184,9 +184,11 @@ export async function runBuild(input: BuildPipelineInput): Promise<BuildPipeline
   // the generated app actually installs and runs (critical for VFS-tier builds).
   try {
     const depSync = syncDependencies(vfs);
-    if (depSync.added.length) {
-      const noun = depSync.added.length === 1 ? 'dependency' : 'dependencies';
-      progress({ type: 'status', message: `Declared ${depSync.added.length} missing ${noun}: ${depSync.added.join(', ')}` });
+    const totalAdded = depSync.added.length + depSync.addedDev.length;
+    if (totalAdded) {
+      const all = [...depSync.added, ...depSync.addedDev.map(d => `${d} (dev)`)].join(', ');
+      const noun = totalAdded === 1 ? 'dependency' : 'dependencies';
+      progress({ type: 'status', message: `Declared ${totalAdded} missing ${noun}: ${all}` });
     }
   } catch { /* dep sync never blocks the build */ }
 

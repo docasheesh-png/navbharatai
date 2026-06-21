@@ -11,7 +11,7 @@
  * Generation that violates the manifest is rejected, not previewed.
  */
 
-export type FrameworkId = 'react' | 'vue' | 'vanilla';
+export type FrameworkId = 'react' | 'vue' | 'svelte' | 'vanilla';
 
 export interface ArchitectureManifest {
   framework: FrameworkId;
@@ -40,12 +40,32 @@ function wantsVue(p: string): boolean {
   return /\bvue(\.?js| 3| three)?\b|\bvuejs\b|\bpinia\b|\bvue-router\b|\bnuxt\b/i.test(p);
 }
 
+/** Explicit Svelte request — checked before Vue/React. */
+function wantsSvelte(p: string): boolean {
+  return /\bsvelte(\.?js| kit| store| 4| 5)?\b|\bsveltekit\b/i.test(p);
+}
+
 /** Choose ONE architecture from the prompt. Deterministic — scaffold + generator agree. */
 export function selectArchitecture(prompt: string): ArchitectureManifest {
   const p = (prompt || '').toLowerCase();
-  const wantsStatic = /\b(plain|static|landing page|single html|one html|vanilla)\b/.test(p) && !/\breact\b/.test(p) && !wantsVue(p);
+  const wantsStatic = /\b(plain|static|landing page|single html|one html|vanilla)\b/.test(p) && !/\breact\b/.test(p) && !wantsVue(p) && !wantsSvelte(p);
 
-  // Vue first (explicit request only) — Vue 3 + Vite, SFC components, #app mount.
+  // Svelte first (explicit keyword only).
+  if (!wantsStatic && wantsSvelte(p)) {
+    return {
+      framework: 'svelte',
+      bundler: 'vite',
+      language: 'javascript',
+      routing: 'none',
+      state: 'none',
+      storage: 'localStorage',
+      entry: 'src/main.js',
+      html: 'index.html',
+      mountId: 'app',
+    };
+  }
+
+  // Vue second (explicit request only) — Vue 3 + Vite, SFC components, #app mount.
   if (!wantsStatic && wantsVue(p)) {
     const ts = /\btypescript\b|\bts\b|\.tsx?\b/i.test(p);
     return {
@@ -102,12 +122,28 @@ export function forbiddenPathPatterns(m: ArchitectureManifest): RegExp[] {
     // No React (JSX/TSX) tree and no vanilla legacy layers in a Vue app.
     return [/\.(jsx|tsx)$/i, /^js\//i, /^router\.js$/i, /^dashboard\.js$/i];
   }
-  // Vanilla app: no React/Vue/bundler source tree.
-  return [/^src\//i, /\.(jsx|tsx|vue)$/i, /^vite\.config\./i];
+  if (m.framework === 'svelte') {
+    // No React/Vue SFCs in a Svelte project.
+    return [/\.(jsx|tsx|vue)$/i, /^js\//i];
+  }
+  // Vanilla app: no React/Vue/Svelte/bundler source tree.
+  return [/^src\//i, /\.(jsx|tsx|vue|svelte)$/i, /^vite\.config\./i];
 }
 
 /** Human-readable contract injected into generation prompts so the model conforms. */
 export function manifestContract(m: ArchitectureManifest): string {
+  if (m.framework === 'svelte') {
+    return [
+      `ARCHITECTURE (MANDATORY — do not mix): Svelte 4 + Vite, Single-File Components (.svelte), ${m.storage}.`,
+      `- Build the UI as Svelte SFCs (.svelte) under src/. NO React, NO Vue, NO JSX/TSX.`,
+      `- The HTML entry is "${m.html}" and MUST contain exactly ONE mount node: <div id="${m.mountId}"></div>.`,
+      `- "${m.html}" MUST load ONLY: <script type="module" src="/${m.entry}"></script>. No other <script src> tags.`,
+      `- "${m.entry}" MUST be: import App from './App.svelte'; const app = new App({ target: document.getElementById('${m.mountId}') }); export default app;`,
+      `- Use Svelte 4 syntax: reactive with $:, events with on:click, stores from svelte/store.`,
+      `- FORBIDDEN: React, Vue, JSX/TSX, any js/ vanilla folder, or extra legacy <script> tags.`,
+      `- NOTE: In-browser preview is not available for Svelte — users can download the ZIP and run "npm install && npm run dev" locally.`,
+    ].join('\n');
+  }
   if (m.framework === 'vue') {
     const ts = m.language === 'typescript';
     return [

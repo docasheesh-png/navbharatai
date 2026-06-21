@@ -18,7 +18,7 @@ export type RuntimeTarget = 'static' | 'webcontainer' | 'server-container';
 
 export interface ProjectProfile {
   hasPackageJson: boolean;
-  framework: 'vite' | 'next' | 'cra' | 'node' | 'static' | 'python' | 'go' | 'rust' | 'java' | 'php' | 'ruby' | 'unknown';
+  framework: 'vite' | 'svelte' | 'next' | 'cra' | 'node' | 'static' | 'python' | 'go' | 'rust' | 'java' | 'php' | 'ruby' | 'unknown';
   /** Needs a persistent server process (Express/Next SSR/etc.). */
   needsNodeServer: boolean;
   /** Pure static site (html/css/js, no build). */
@@ -58,6 +58,7 @@ export function analyzeProject(vfs: VirtualFileSystem): ProjectProfile {
   // Framework detection (Node/JS first, then other languages by file presence)
   let framework: ProjectProfile['framework'] = 'unknown';
   if (depSet.has('next')) framework = 'next';
+  else if (depSet.has('svelte') || vfs.paths().some(p => p.endsWith('.svelte'))) framework = 'svelte';
   else if (depSet.has('vite')) framework = 'vite';
   else if (depSet.has('react-scripts')) framework = 'cra';
   else if (hasPackageJson && (depSet.has('express') || depSet.has('koa') || depSet.has('fastify') || depSet.has('@nestjs/core'))) framework = 'node';

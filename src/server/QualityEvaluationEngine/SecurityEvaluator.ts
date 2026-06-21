@@ -4,7 +4,7 @@ import * as path from 'path';
 export class SecurityEvaluator {
     async evaluate(workspaceId: string): Promise<{ status: 'PASS' | 'FAIL', errors: string[] }> {
         const errors: string[] = [];
-        const secretRegex = /(?:API_KEY|SECRET|TOKEN|PASSWORD|PRIVATE_KEY|JWT_SECRET)[^=]*=["']?[a-zA-Z0-9_\-]{16,40}["']?/i;
+        const secretRegex = /(?:API_KEY|SECRET|TOKEN|PASSWORD|PRIVATE_KEY|JWT_SECRET)[^=]*=\s*["']?[a-zA-Z0-9_\-]{16,40}["']?/i;
 
         const scanDirectory = (dir: string) => {
             const files = fs.readdirSync(dir);

@@ -221,11 +221,12 @@ build output. `build.ts` uses `eng.previewAllowed` to gate preview via `startPre
 `App.tsx` reads `engineRes.validation` and shows validation status + quality score in the
 build result message. Nothing to do — fully wired end-to-end.
 
-### 2.6 — Dedup: context retrieval + Guider
-**Status: TODO**
+### 2.6 — Dedup: context retrieval + Guider ✅ DONE — audited (2026-06-21)
 
-Audit whether Pro Chat and Engineer AI have separate implementations.
-If yes: keep the better one, archive the other. One shared implementation.
+Audit result: **no duplication.**
+- `ContextRetriever.ts` is Engineer AI-only; Pro Chat (legacy path) regenerates from scratch and does not need context retrieval.
+- `Guider` is one implementation (`src/server/Guider/`) used by both `build.ts` and `engineer.ts` routes — no duplication.
+Nothing to dedup.
 
 **Phase 2 DONE when:** "Go back to version 3" works. Preview tier-aware and honest.
 Memory works across session restarts. Large projects (50+ files) don't degrade agent quality.
@@ -258,12 +259,11 @@ Move to `ARCHIVE/` (read-only, excluded from tsconfig, kept in git forever):
 
 One PR per archive. Each: verify tsc passes, vitest passes, no broken imports.
 
-### 3.3 — Pick ONE editor: Monaco
-**Status: TODO**
+### 3.3 — Pick ONE editor: Monaco ✅ DONE (2026-06-21)
+**Branch:** `claude/phase-2.5-validation-gates`
 
-Audit: if both Monaco and CodeMirror are bundled → Monaco stays (VS Code engine,
-better TypeScript integration). Archive CodeMirror. One PR: remove import, verify
-bundle size drops, verify editor functionality unchanged.
+Audit confirmed both Monaco (`@monaco-editor/react`) and CodeMirror (`@codemirror/*`, `@uiw/react-codemirror`) were in `package.json` but **CodeMirror had zero imports in source** — already abandoned.
+Removed 6 unused CodeMirror packages from `package.json`. Monaco is the only active editor.
 
 ### 3.4 — Brand rename: NavBharatAI Pro v2.0
 **Status: TODO — dedicated PR, nothing else in it**

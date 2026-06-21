@@ -80,4 +80,54 @@ describe('scaffold', () => {
   it('scaffoldSummary describes Svelte', () => {
     expect(scaffoldSummary('vite-svelte')).toContain('Svelte');
   });
+
+  it('detects PocketBase and seeds a correct PocketBase + React skeleton', () => {
+    expect(detectFramework('build a pocketbase app')).toBe('vite-pocketbase');
+    expect(detectFramework('create a pocketbase dashboard')).toBe('vite-pocketbase');
+    const vfs = VirtualFileSystem.fromRecord({});
+    expect(scaffold(vfs, 'vite-pocketbase')).toBe('vite-pocketbase');
+    expect(vfs.has('src/main.jsx')).toBe(true);
+    expect(vfs.has('src/App.jsx')).toBe(true);
+    expect(vfs.has('src/lib/pb.js')).toBe(true);
+    expect(vfs.has('.env.example')).toBe(true);
+    const pkg = JSON.parse(vfs.readText('package.json')!);
+    expect(pkg.dependencies.pocketbase).toMatch(/\^0\./);
+    expect(pkg.dependencies.react).toBeTruthy();
+    expect(vfs.readText('src/lib/pb.js')).toContain('PocketBase');
+    expect(vfs.readText('src/lib/pb.js')).toContain('VITE_PB_URL');
+  });
+
+  it('scaffoldSummary describes PocketBase', () => {
+    expect(scaffoldSummary('vite-pocketbase')).toContain('PocketBase');
+  });
+
+  it('detects Convex and seeds a correct Convex + React skeleton', () => {
+    expect(detectFramework('build a convex app')).toBe('vite-convex');
+    expect(detectFramework('build a todo app with convex backend')).toBe('vite-convex');
+    const vfs = VirtualFileSystem.fromRecord({});
+    expect(scaffold(vfs, 'vite-convex')).toBe('vite-convex');
+    expect(vfs.has('src/main.jsx')).toBe(true);
+    expect(vfs.has('src/App.jsx')).toBe(true);
+    expect(vfs.has('convex/schema.ts')).toBe(true);
+    expect(vfs.has('convex/tasks.ts')).toBe(true);
+    expect(vfs.has('.env.example')).toBe(true);
+    const pkg = JSON.parse(vfs.readText('package.json')!);
+    expect(pkg.dependencies.convex).toMatch(/\^1\./);
+    expect(pkg.dependencies.react).toBeTruthy();
+    expect(vfs.readText('src/main.jsx')).toContain('ConvexProvider');
+    expect(vfs.readText('src/main.jsx')).toContain('VITE_CONVEX_URL');
+    expect(vfs.readText('convex/schema.ts')).toContain('defineSchema');
+  });
+
+  it('scaffoldSummary describes Convex', () => {
+    expect(scaffoldSummary('vite-convex')).toContain('Convex');
+  });
+
+  it('PocketBase prompt does not mis-detect as React or static', () => {
+    expect(detectFramework('a pocketbase crud app')).toBe('vite-pocketbase');
+  });
+
+  it('Convex prompt does not mis-detect as React or static', () => {
+    expect(detectFramework('convex.dev task manager')).toBe('vite-convex');
+  });
 });

@@ -88,6 +88,9 @@ const KNOWN_VERSIONS: Record<string, string> = {
   '@hello-pangea/dnd': '^16.6.0',
   // Svelte runtime (plugin goes in devDeps — see KNOWN_DEV_VERSIONS)
   'svelte': '^4.2.19',
+  // Backend-as-a-service SDKs
+  'pocketbase': '^0.21.0',
+  'convex': '^1.13.0',
 };
 
 /** Packages that belong in devDependencies (build tools, type declarations, test infra). */

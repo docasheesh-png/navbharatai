@@ -14,7 +14,7 @@
  */
 import type { VirtualFileSystem } from './ProjectModel';
 
-export type Framework = 'vite-react' | 'vite-react-ts' | 'vite-vue' | 'vite-svelte' | 'static';
+export type Framework = 'vite-react' | 'vite-react-ts' | 'vite-vue' | 'vite-svelte' | 'vite-pocketbase' | 'vite-convex' | 'static';
 
 const REACT_HINTS = [
   'react', 'vite', 'jsx', 'tsx', 'component', 'spa', 'single page',
@@ -36,9 +36,22 @@ function wantsSvelte(p: string): boolean {
   return /\bsvelte(\.?js| kit| store| 4| 5)?\b|\bsveltekit\b/i.test(p);
 }
 
+/** Explicit PocketBase request. */
+function wantsPocketBase(p: string): boolean {
+  return /\bpocketbase\b|\bpocket.?base\b/i.test(p);
+}
+
+/** Explicit Convex request. */
+function wantsConvex(p: string): boolean {
+  return /\bconvex(\.?dev)?\b/i.test(p);
+}
+
 /** Heuristically choose a starting framework from the user's prompt. */
 export function detectFramework(prompt: string): Framework {
   const p = (prompt || '').toLowerCase();
+  // PocketBase / Convex — explicit keywords only, checked before React.
+  if (wantsPocketBase(p)) return 'vite-pocketbase';
+  if (wantsConvex(p)) return 'vite-convex';
   // Svelte first (explicit keyword only).
   if (wantsSvelte(p)) return 'vite-svelte';
   // Vue second (explicit request only) — even "vue dashboard" must pick Vue, not React.
@@ -233,6 +246,168 @@ const VITE_SVELTE_FILES: Record<string, string> = {
     `body { margin: 0; }\n`,
 };
 
+const VITE_POCKETBASE_FILES: Record<string, string> = {
+  'package.json': JSON.stringify(
+    {
+      name: 'app',
+      private: true,
+      version: '0.0.0',
+      type: 'module',
+      scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+      dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1', pocketbase: '^0.21.0' },
+      devDependencies: { '@vitejs/plugin-react': '^4.3.1', vite: '^5.4.0' },
+    },
+    null,
+    2,
+  ) + '\n',
+  'vite.config.js':
+    `import { defineConfig } from 'vite';\n` +
+    `import react from '@vitejs/plugin-react';\n\n` +
+    `export default defineConfig({ plugins: [react()] });\n`,
+  'index.html':
+    `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
+    `    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n` +
+    `    <title>App</title>\n  </head>\n  <body>\n    <div id="root"></div>\n` +
+    `    <script type="module" src="/src/main.jsx"></script>\n  </body>\n</html>\n`,
+  'src/main.jsx':
+    `import React from 'react';\n` +
+    `import { createRoot } from 'react-dom/client';\n` +
+    `import App from './App.jsx';\n` +
+    `import './index.css';\n\n` +
+    `createRoot(document.getElementById('root')).render(\n` +
+    `  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n);\n`,
+  'src/App.jsx':
+    `import { useState, useEffect } from 'react';\n` +
+    `import { pb } from './lib/pb.js';\n\n` +
+    `export default function App() {\n` +
+    `  const [records, setRecords] = useState([]);\n` +
+    `  const [user, setUser] = useState(pb.authStore.model);\n\n` +
+    `  useEffect(() => {\n` +
+    `    pb.authStore.onChange((token, model) => setUser(model));\n` +
+    `  }, []);\n\n` +
+    `  async function login(email, password) {\n` +
+    `    await pb.collection('users').authWithPassword(email, password);\n` +
+    `  }\n\n` +
+    `  async function fetchItems() {\n` +
+    `    const result = await pb.collection('items').getList(1, 20);\n` +
+    `    setRecords(result.items);\n` +
+    `  }\n\n` +
+    `  if (!user) {\n` +
+    `    return (\n` +
+    `      <div style={{ padding: '2rem', fontFamily: 'system-ui' }}>\n` +
+    `        <h1>PocketBase App</h1>\n` +
+    `        <p>Sign in to continue.</p>\n` +
+    `        <button onClick={() => login('test@example.com', 'password123')}>Login</button>\n` +
+    `        <p style={{ color: '#888', fontSize: '0.8rem' }}>\n` +
+    `          Connect your PocketBase server via VITE_PB_URL in .env\n` +
+    `        </p>\n` +
+    `      </div>\n` +
+    `    );\n` +
+    `  }\n\n` +
+    `  return (\n` +
+    `    <div style={{ padding: '2rem', fontFamily: 'system-ui' }}>\n` +
+    `      <h1>Hello, {user.email}</h1>\n` +
+    `      <button onClick={fetchItems}>Load Items</button>\n` +
+    `      <button onClick={() => pb.authStore.clear()}>Logout</button>\n` +
+    `      <ul>{records.map(r => <li key={r.id}>{r.id}</li>)}</ul>\n` +
+    `    </div>\n` +
+    `  );\n` +
+    `}\n`,
+  'src/lib/pb.js':
+    `import PocketBase from 'pocketbase';\n\n` +
+    `const url = import.meta.env.VITE_PB_URL || 'http://127.0.0.1:8090';\n` +
+    `export const pb = new PocketBase(url);\n`,
+  'src/index.css':
+    `:root { font-family: system-ui, sans-serif; }\nbody { margin: 0; }\n`,
+  '.env.example':
+    `# PocketBase server URL\nVITE_PB_URL=https://your-project.pocketbase.io\n`,
+};
+
+const VITE_CONVEX_FILES: Record<string, string> = {
+  'package.json': JSON.stringify(
+    {
+      name: 'app',
+      private: true,
+      version: '0.0.0',
+      type: 'module',
+      scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+      dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1', convex: '^1.13.0' },
+      devDependencies: { '@vitejs/plugin-react': '^4.3.1', vite: '^5.4.0' },
+    },
+    null,
+    2,
+  ) + '\n',
+  'vite.config.js':
+    `import { defineConfig } from 'vite';\n` +
+    `import react from '@vitejs/plugin-react';\n\n` +
+    `export default defineConfig({ plugins: [react()] });\n`,
+  'index.html':
+    `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
+    `    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n` +
+    `    <title>App</title>\n  </head>\n  <body>\n    <div id="root"></div>\n` +
+    `    <script type="module" src="/src/main.jsx"></script>\n  </body>\n</html>\n`,
+  'src/main.jsx':
+    `import React from 'react';\n` +
+    `import { createRoot } from 'react-dom/client';\n` +
+    `import { ConvexProvider, ConvexReactClient } from 'convex/react';\n` +
+    `import App from './App.jsx';\n` +
+    `import './index.css';\n\n` +
+    `const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL || '');\n\n` +
+    `createRoot(document.getElementById('root')).render(\n` +
+    `  <React.StrictMode>\n` +
+    `    <ConvexProvider client={convex}>\n` +
+    `      <App />\n` +
+    `    </ConvexProvider>\n` +
+    `  </React.StrictMode>,\n` +
+    `);\n`,
+  'src/App.jsx':
+    `import { useQuery, useMutation } from 'convex/react';\n` +
+    `import { api } from '../convex/_generated/api';\n\n` +
+    `export default function App() {\n` +
+    `  const tasks = useQuery(api.tasks.list);\n` +
+    `  const addTask = useMutation(api.tasks.add);\n\n` +
+    `  return (\n` +
+    `    <div style={{ padding: '2rem', fontFamily: 'system-ui' }}>\n` +
+    `      <h1>Convex Tasks</h1>\n` +
+    `      <button onClick={() => addTask({ text: 'New task' })}>Add Task</button>\n` +
+    `      <ul>\n` +
+    `        {tasks?.map(t => <li key={t._id}>{t.text}</li>)}\n` +
+    `      </ul>\n` +
+    `      {!import.meta.env.VITE_CONVEX_URL && (\n` +
+    `        <p style={{ color: '#888', fontSize: '0.8rem' }}>\n` +
+    `          Run <code>npx convex dev</code> and set VITE_CONVEX_URL in .env\n` +
+    `        </p>\n` +
+    `      )}\n` +
+    `    </div>\n` +
+    `  );\n` +
+    `}\n`,
+  'src/index.css':
+    `:root { font-family: system-ui, sans-serif; }\nbody { margin: 0; }\n`,
+  'convex/schema.ts':
+    `import { defineSchema, defineTable } from 'convex/server';\n` +
+    `import { v } from 'convex/values';\n\n` +
+    `export default defineSchema({\n` +
+    `  tasks: defineTable({\n` +
+    `    text: v.string(),\n` +
+    `    completed: v.boolean(),\n` +
+    `  }),\n` +
+    `});\n`,
+  'convex/tasks.ts':
+    `import { query, mutation } from './_generated/server';\n` +
+    `import { v } from 'convex/values';\n\n` +
+    `export const list = query({\n` +
+    `  handler: async (ctx) => ctx.db.query('tasks').collect(),\n` +
+    `});\n\n` +
+    `export const add = mutation({\n` +
+    `  args: { text: v.string() },\n` +
+    `  handler: async (ctx, args) => {\n` +
+    `    await ctx.db.insert('tasks', { text: args.text, completed: false });\n` +
+    `  },\n` +
+    `});\n`,
+  '.env.example':
+    `# Get this URL from: npx convex dev (first run)\nVITE_CONVEX_URL=https://your-project.convex.cloud\n`,
+};
+
 const STATIC_FILES: Record<string, string> = {
   'index.html':
     `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
@@ -252,6 +427,8 @@ const SKELETONS: Record<Framework, Record<string, string>> = {
   'vite-react-ts': VITE_REACT_TS_FILES,
   'vite-vue': VITE_VUE_FILES,
   'vite-svelte': VITE_SVELTE_FILES,
+  'vite-pocketbase': VITE_POCKETBASE_FILES,
+  'vite-convex': VITE_CONVEX_FILES,
   static: STATIC_FILES,
 };
 
@@ -278,5 +455,9 @@ export function scaffoldSummary(framework: Framework): string {
     return 'a Vite + Vue 3 project: index.html → src/main.js → src/App.vue (SFC, <script setup>), styles in src/style.css, deps in package.json';
   if (framework === 'vite-svelte')
     return 'a Vite + Svelte 4 project: index.html → src/main.js → src/App.svelte (SFC, on: events), styles in src/app.css, deps in package.json';
+  if (framework === 'vite-pocketbase')
+    return 'a Vite + React + PocketBase project: index.html → src/main.jsx → src/App.jsx, PocketBase client singleton in src/lib/pb.js, server URL from VITE_PB_URL env var';
+  if (framework === 'vite-convex')
+    return 'a Vite + React + Convex project: index.html → src/main.jsx (ConvexProvider) → src/App.jsx, schema in convex/schema.ts, queries/mutations in convex/tasks.ts, VITE_CONVEX_URL from .env';
   return 'a plain static project: index.html + styles.css + app.js';
 }

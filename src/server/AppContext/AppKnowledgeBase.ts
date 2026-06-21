@@ -439,6 +439,28 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['example prompt', 'quick start', 'starter template', 'example cards', 'prompt gallery', 'what can you build', 'kya bana sakte ho', 'show examples', 'example apps', 'ideas for app', 'app ideas', 'upi', 'payment', 'hindi', 'gst', 'invoice', 'startup', 'bharat', 'india', 'razorpay', 'devanagari', 'rupee', 'msme', 'registration'],
   },
   {
+    id: 'backend-scaffolds',
+    name: 'Backend Scaffolds — PocketBase & Convex',
+    path: 'Pro Chat → describe a PocketBase or Convex app → auto-seeded skeleton',
+    description: `Phase 6.5: Two backend-as-a-service scaffolds are now supported alongside React/Vue/Svelte:
+
+PocketBase (vite-pocketbase):
+• Triggers on: "pocketbase app", "pocketbase dashboard", etc.
+• Files: package.json (react + pocketbase deps), vite.config.js, src/lib/pb.js (PocketBase singleton with VITE_PB_URL), src/App.jsx (auth + record listing example), .env.example
+• Self-hosted SQLite backend — user runs their own PocketBase server
+
+Convex (vite-convex):
+• Triggers on: "convex app", "convex todo", "build with convex", etc.
+• Files: package.json (react + convex deps), src/main.jsx (ConvexProvider), src/App.jsx (useQuery/useMutation), convex/schema.ts, convex/tasks.ts, .env.example
+• Real-time backend in the cloud — user runs npx convex dev to get VITE_CONVEX_URL
+
+Both scaffolds produce real, correctly wired code. The backend services (PocketBase server / Convex cloud) must be provisioned by the user separately.`,
+    howToUse: 'In Pro Chat, include "pocketbase" or "convex" in your prompt. NavBharatAI auto-detects and seeds the correct skeleton. For PocketBase: set VITE_PB_URL in .env to your server URL. For Convex: run npx convex dev in the project folder to provision the backend.',
+    relatedFeatures: ['pro_chat', 'auto-dependency-sync'],
+    aiSurface: 'pro_chat',
+    keywords: ['pocketbase', 'pocket base', 'convex', 'backend scaffold', 'self hosted', 'real time backend', 'baas', 'backend as a service', 'sqlite backend', 'pocketbase app', 'convex app', 'convex dev'],
+  },
+  {
     id: 'build-version-history',
     name: 'Build Version History — Go Back to Any Previous Version',
     path: 'Pro Chat → sidebar → Files → History tab',

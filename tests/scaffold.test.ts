@@ -130,4 +130,27 @@ describe('scaffold', () => {
   it('Convex prompt does not mis-detect as React or static', () => {
     expect(detectFramework('convex.dev task manager')).toBe('vite-convex');
   });
+
+  it('detects Vue and seeds a correct Vue 3 + Vite skeleton', () => {
+    expect(detectFramework('build a vue app')).toBe('vite-vue');
+    expect(detectFramework('create a Vue 3 dashboard')).toBe('vite-vue');
+    const vfs = VirtualFileSystem.fromRecord({});
+    expect(scaffold(vfs, 'vite-vue')).toBe('vite-vue');
+    expect(vfs.has('src/App.vue')).toBe(true);
+    expect(vfs.has('src/main.js')).toBe(true);
+    expect(vfs.has('vite.config.js')).toBe(true);
+    expect(vfs.readText('index.html')).toContain('/src/main.js');
+    expect(vfs.readText('vite.config.js')).toContain('@vitejs/plugin-vue');
+    const pkg = JSON.parse(vfs.readText('package.json')!);
+    expect(pkg.dependencies.vue).toMatch(/\^3\./);
+    expect(pkg.devDependencies['@vitejs/plugin-vue']).toBeTruthy();
+  });
+
+  it('scaffoldSummary describes Vue', () => {
+    expect(scaffoldSummary('vite-vue')).toContain('Vue');
+  });
+
+  it('Vue prompt does not mis-detect as React or static', () => {
+    expect(detectFramework('a vue 3 todo app with components')).toBe('vite-vue');
+  });
 });

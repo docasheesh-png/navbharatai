@@ -386,9 +386,10 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
   //    Mirrors BuildPipeline.runBuild's dep-sync step. Best-effort, never throws.
   try {
     const depSync = syncDependencies(outVfs);
-    if (depSync.added.length) {
-      const count = depSync.added.length;
-      send({ type: 'status', message: `Declared ${count} missing dependenc${count > 1 ? 'ies' : 'y'}: ${depSync.added.join(', ')}` });
+    const totalAdded = depSync.added.length + depSync.addedDev.length;
+    if (totalAdded) {
+      const all = [...depSync.added, ...depSync.addedDev.map(d => `${d} (dev)`)].join(', ');
+      send({ type: 'status', message: `Declared ${totalAdded} missing dependenc${totalAdded > 1 ? 'ies' : 'y'}: ${all}` });
     }
   } catch { /* dep sync never blocks the build */ }
 

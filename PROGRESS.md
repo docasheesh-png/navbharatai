@@ -330,14 +330,21 @@ Metrics already persisted (G2 done). Add:
 - Cloud Trace spans on `/api/build-stream` (start → plan → code → preview → done)
 - Alerts: build error rate >10%, p95 latency >30s, E2B quota >80%
 
-### 4.4 — Cap unbounded Firestore growth ✅ DONE (2026-06-21)
+### 4.4 + 5.4b — Firestore cap + dep-sync + error-pattern expansion ✅ DONE (2026-06-21)
 **Branch:** `claude/g6-dependency-sync`
 
 Prevents Firestore documents from hitting the 1MB size limit on verbose/long builds.
 
-- `FirestoreJobStore.ts` — `updateJobStatus()` now uses a Firestore transaction to read logs, append the new entry, and trim to **last 100 entries** before writing. Replaces the unbounded `arrayUnion(log)` call.
-- `ProMemory.ts` — `logDecision()` and `logErrorPattern()` also switched to transactions with caps: **50 decisions** and **20 error patterns** per session. Prevents pro_memories documents from growing unbounded across long projects.
-- tsc x2 clean, vitest 350/350 green
+**Phase 4.4 — Firestore growth cap:**
+- `FirestoreJobStore.ts` — `updateJobStatus()` now uses a Firestore transaction to read logs, append the new entry, and trim to **last 100 entries** before writing. Replaces unbounded `arrayUnion(log)`.
+- `ProMemory.ts` — `logDecision()` and `logErrorPattern()` also use transactions, capped at **50 decisions** and **20 error patterns** per session.
+
+**Phase 5.4b — DependencySync + ErrorPatternMatcher expansion:**
+- `DependencySync.ts` — Added `KNOWN_DEV_VERSIONS` (type packages, PostCSS, Tailwind, Vite plugins, test libs). `syncDependencies()` now routes build-tool imports to `devDependencies` instead of `dependencies`. Result has new `addedDev: string[]` field. 18 runtime + 19 dev packages in curated tables.
+- `ErrorPatternMatcher.ts` — Added 6 new error patterns: `@/` path alias not configured, `process is not defined` (Node global in browser), `localStorage is not defined` (SSR), PostCSS/Tailwind `@tailwind` rule, `react-dom/client` React 17→18 migration, OpenSSL EVP error. Added 4 new instruction hints: Next.js, drag-and-drop, WebSocket/real-time, Maps/Leaflet.
+- `tests/errorPatternMatcher.test.ts` — 4 new test cases (20 total)
+- `tests/dependencySync.test.ts` — 5 new test cases for `addedDev` (15 total)
+- tsc x2 clean, vitest 358/358 green
 
 **Phase 4 DONE when:** Safe at 10 Cloud Run instances (no cross-instance corruption).
 Every build shows tier + cost. Alerts firing. Load test baseline documented.

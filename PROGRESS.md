@@ -422,12 +422,21 @@ _NavBharatAI's genuine competitive moat. Claude Code will never do any of this._
 - PhonePe integration (requires merchant approval + webhook server)
 - End-to-end verified with live Razorpay test key (needs admin to add test key)
 
-### 6.2 — Mobile-first experience
-**Status: TODO**
+### 6.2 — Mobile-first experience ✅ PARTIAL (2026-06-21)
+**Branch:** `claude/p6.2-mobile-improvements`
 
-Pro Chat fully usable on phone (touch-optimized, no horizontal scroll, no tiny tap targets).
-File streaming works on mobile network. Voice input: speak → transcribe → build.
-Responsive editor usable without keyboard. Tested on real mobile device.
+**Shipped — AIChat.tsx touch + layout improvements:**
+- **Mobile "Preview ready" banner** — after a successful build, a sticky emerald banner appears between messages and input on mobile (<640px). Single-tap "View Preview →" button. Replaces the draggable floating button which was hidden on small screens and overlapped the header.
+- **Larger touch targets** — Send button `p-2.5` → `p-3` (~38px); Stop button same. Attach/Voice `p-2` → `p-2.5` (~36px). All have `active:scale-95` touch feedback. Approaching 44px WCAG minimum.
+- **Horizontal suggestion chip scroll** — Follow-up suggestion chips changed from `flex-wrap` (multi-row clutter on mobile) to `overflow-x-auto no-scrollbar` single-row scroll. Each chip has `shrink-0`.
+- **Desktop floating button cleanup** — Added `hidden sm:block` + `cursor-grab` to the draggable Live Preview button; reduced its drag constraint from 400px to 100px downward to prevent it escaping the view area.
+- tsc 0 errors, vitest 358/358 green
+
+**Still TODO:**
+- File streaming on mobile network (works, but no offline/slow-network handling)
+- Voice input improvements (browser-dependent, works in Chrome already)
+- Responsive editor usable without keyboard (Monaco is heavy on mobile)
+- Tested on real mobile device (requires manual QA)
 
 ### 6.3 — Real framework breadth (verified, not faked)
 **Status: TODO**

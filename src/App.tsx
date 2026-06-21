@@ -7,13 +7,14 @@ import { GitViewPanel } from './components/panels/GitViewPanel';
 import { DeploySuccessPanel } from './components/panels/DeploySuccessPanel';
 import { AboutPanel } from './components/panels/AboutPanel';
 import { AdminLoginPanel } from './components/panels/AdminLoginPanel';
-import { FilesPanel } from './components/panels/FilesPanel';
+// FilesPanel → moved to ViewPanels.tsx
 import { DonationPanel } from './components/panels/DonationPanel';
 import { BillingPanel } from './components/panels/BillingPanel';
 import { DeployModal } from './components/panels/DeployModal';
 import { WorkspacePane } from './components/panels/WorkspacePane';
 import { SettingsPanel } from './components/panels/SettingsPanel';
 import { ProChatPanel } from './components/panels/ProChatPanel';
+import { ViewPanels } from './components/panels/ViewPanels';
 import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
@@ -54,63 +55,18 @@ export const db = getFirestore(app, firebaseConfig.firestoreDbId);
 
 // ── Eager imports — always needed on first render ───────────────────────────
 import { AIChat } from './components/ide/AIChat';
-import { PreviewPanel } from './components/ide/PreviewPanel';
 
-// ── Task 2.2: React.lazy code-splitting — 44 view-only components ────────────
+// ── Lazy imports still used directly in App.tsx ──────────────────────────────
 // Helper: wraps a named export into the {default} shape lazy() requires
 const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
   lazy(() => fn().then(m => ({ default: m[k] as React.ComponentType<any> })));
 
-const CodeStudio       = _lz(() => import('./components/ide/CodeStudio'),       'CodeStudio');
-const GitPanel         = _lz(() => import('./components/ide/GitPanel'),         'GitPanel');
-const SecurityScan     = _lz(() => import('./components/ide/SecurityScan'),     'SecurityScan');
-const TestPanel        = _lz(() => import('./components/ide/TestPanel'),        'TestPanel');
-const DiffViewer       = _lz(() => import('./components/ide/DiffViewer'),       'DiffViewer');
-const DatabaseUI       = _lz(() => import('./components/ide/DatabaseUI'),       'DatabaseUI');
-const VoiceToApp       = _lz(() => import('./components/ide/VoiceToApp'),       'VoiceToApp');
-const BotBuilder       = _lz(() => import('./components/ide/BotBuilder'),       'BotBuilder');
-const CostEstimator    = _lz(() => import('./components/ide/CostEstimator'),    'CostEstimator');
-const ScreenshotToCode = _lz(() => import('./components/ide/ScreenshotToCode'),'ScreenshotToCode');
-const MultiPageBuilder = _lz(() => import('./components/ide/MultiPageBuilder'), 'MultiPageBuilder');
-const AppAnalytics     = _lz(() => import('./components/ide/AppAnalytics'),     'AppAnalytics');
-const AIDebugger       = _lz(() => import('./components/ide/AIDebugger'),       'AIDebugger');
-const PerformanceAnalyzer = _lz(() => import('./components/ide/PerformanceAnalyzer'), 'PerformanceAnalyzer');
-const ComponentLibrary = _lz(() => import('./components/ide/ComponentLibrary'), 'ComponentLibrary');
-const SEOOptimizer     = _lz(() => import('./components/ide/SEOOptimizer'),     'SEOOptimizer');
-const APKBuilder       = _lz(() => import('./components/ide/APKBuilder'),       'APKBuilder');
-const FigmaImporter    = _lz(() => import('./components/ide/FigmaImporter'),    'FigmaImporter');
-const CustomDomain     = _lz(() => import('./components/ide/CustomDomain'),     'CustomDomain');
-const TeamCollaboration= _lz(() => import('./components/ide/TeamCollaboration'),'TeamCollaboration');
-const PWANotifications = _lz(() => import('./components/ide/PWANotifications'), 'PWANotifications');
-const CodeMinifier     = _lz(() => import('./components/ide/CodeMinifier'),     'CodeMinifier');
-const DarkModeGenerator= _lz(() => import('./components/ide/DarkModeGenerator'),'DarkModeGenerator');
-const MonetizationWizard= _lz(() => import('./components/ide/MonetizationWizard'),'MonetizationWizard');
-const AIImageGenerator = _lz(() => import('./components/ide/AIImageGenerator'), 'AIImageGenerator');
-const CodeVersioning   = _lz(() => import('./components/ide/CodeVersioning'),   'CodeVersioning');
-const APIMarketplace   = _lz(() => import('./components/ide/APIMarketplace'),   'APIMarketplace');
-const AppStorePublisher= _lz(() => import('./components/ide/AppStorePublisher'),'AppStorePublisher');
-const LiveCollaboration= _lz(() => import('./components/ide/LiveCollaboration'),'LiveCollaboration');
-const AITestingSuite   = _lz(() => import('./components/ide/AITestingSuite'),   'AITestingSuite');
-const LocalizationManager = _lz(() => import('./components/ide/LocalizationManager'), 'LocalizationManager');
-const AICodeReview     = _lz(() => import('./components/ide/AICodeReview'),     'AICodeReview');
-const DatabaseStudio   = _lz(() => import('./components/ide/DatabaseStudio'),   'DatabaseStudio');
-const CICDPipeline     = _lz(() => import('./components/ide/CICDPipeline'),     'CICDPipeline');
-const PluginSystem     = _lz(() => import('./components/ide/PluginSystem'),     'PluginSystem');
-const WhitelabelBranding= _lz(() => import('./components/ide/WhitelabelBranding'),'WhitelabelBranding');
-const AIProjectManager = _lz(() => import('./components/ide/AIProjectManager'), 'AIProjectManager');
-const MultiCloudDeploy = _lz(() => import('./components/ide/MultiCloudDeploy'), 'MultiCloudDeploy');
-const DesignSystem     = _lz(() => import('./components/ide/DesignSystem'),     'DesignSystem');
-const AppHealthMonitor = _lz(() => import('./components/ide/AppHealthMonitor'), 'AppHealthMonitor');
 const AISuggestions    = _lz(() => import('./components/ide/AISuggestions'),    'AISuggestions');
 const SecretManager    = _lz(() => import('./components/SecretManager'),        'SecretManager');
 const DatabaseSettings = _lz(() => import('./components/settings/DatabaseSettings'), 'DatabaseSettings');
 const SocialHub        = _lz(() => import('./components/social/SocialHub'),     'SocialHub');
 const ReportsListView  = _lz(() => import('./components/ReportsListView'),      'ReportsListView');
 const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
-const ReportProblemComponent = _lz(() => import('./components/ReportProblemComponent'), 'ReportProblemComponent');
-
-// APITester has a default export
-const APITester = lazy(() => import('./components/ide/APITester'));
 import { motion, AnimatePresence } from 'motion/react';
 import axios from 'axios';
 
@@ -133,7 +89,7 @@ import { HomeView } from './components/home/HomeView';
 import { GitHubService } from './lib/githubService';
 import { trackEvent } from './lib/analytics';
 import { saveFile, saveAllFiles, loadAllFiles, clearWorkspace } from './lib/storage';
-import { ZipSizeModal } from './components/ide/ZipSizeModal';
+// ZipSizeModal component → moved to ViewPanels.tsx
 import type { ZipSizeModalVariant } from './components/ide/ZipSizeModal';
 // AgentMode → re-exported from ./types
 
@@ -6871,390 +6827,64 @@ ${pending.map(p => `  - ${p}`).join('\n')}
             />
           )}
 
-          {activeView === 'studio' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <CodeStudio 
-                key={activeAgent}
-                activeAgent={activeAgent}
-                onAgentChange={handleAgentChange}
-                files={files}
-                onFilesChange={(newFiles) => setFiles(newFiles as any)}
-                onRun={(f) => updatePreview(f || files)}
-                generatedCode={generatedCode}
-                messages={messages}
-                chatInput={input}
-                onChatInputChange={setInput}
-                onChatSend={() => handleSendForTab(activeAgent.startsWith('vishwakarma') ? 'asc_chat' : 'nbi_pro_chat')}
-                isChatLoading={isLoading}
-                activeIntent={activeIntent}
-                githubToken={githubToken}
-                githubUser={githubUser}
-                githubRepoContext={githubRepoContext}
-                isGHSyncing={isGHSyncing}
-                firebaseToken={firebaseToken}
-                firebaseUser={firebaseUser}
-                onFirebaseConnect={connectFirebase}
-                onFirebaseDisconnect={disconnectFirebase}
-                onGHConnect={connectGitHub}
-                onGHDisconnect={disconnectGitHub}
-                onGHPush={pushToRepo}
-                isPinned={sessions.find(s => s.id === currentSessionId)?.isPinned || false}
-                onTogglePin={() => togglePin(currentSessionId)}
-                isLoggedIn={!!user}
-                onShowLogin={() => setShowAuth(true)}
-                mode={mode}
-                onModeChange={setMode}
-                isAppBuilt={isAppBuilt}
-                onPreviewClick={() => toggleTab('preview')}
-                theme={theme}
-                onThemeChange={setTheme}
-                pendingGHEdit={pendingGHEdit}
-                onConfirmPush={handleGHConfirmPush}
-                isGHPushing={isPushing}
-                onGoToMain={() => {
-                  toggleTab('nbi_pro_chat');
-                  addLog('Cognitive memory layer successfully merged and redirected to main cockpit.', 'info');
-                }}
-                onOpenProChat={() => toggleTab('nbi_pro_chat')}
-                wallet={wallet}
-                onUnlockVishwakarma={() => setShowVishwakarmaUnlockModal(true)}
-              />
-            </div>
-          )}
-
-          {activeView === 'preview' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <PreviewPanel
-                files={files}
-                onRun={() => updatePreview(files)}
-                generatedCode={generatedCode}
-                previewHistory={previewHistory}
-                onRestoreHistory={(html) => setGeneratedCode(html)}
-                onHtmlChange={(html) => setGeneratedCode(html)}
-                onGoPro={() => toggleTab('nbi_pro_chat')}
-                onEditWithAI={(hint) => {
-                  setMode('build');
-                  if (hint) setProInput(hint);
-                  toggleTab('nbi_pro_chat');
-                }}
-              />
-            </div>
-          )}
-
-          {/* ZIP size modal — global so it appears regardless of active view */}
-          {zipSizeModal && (
-            <ZipSizeModal
-              variant={zipSizeModal.variant}
-              fileName={zipSizeModal.fileName}
-              fileSizeMB={zipSizeModal.fileSizeMB}
-              onClose={() => setZipSizeModal(null)}
-            />
-          )}
-
-          {activeView === 'files' && (
-            <FilesPanel
-              files={files}
-              hasGeneratedCode={hasGeneratedCode}
-              fileUploadConflict={fileUploadConflict}
-              onResolveConflict={resolveFileConflict}
-              onUpload={handleFilesUpload}
-              onDownloadZip={() => downloadAppZip(files as any, 'NavBharatApp')}
-              onOpenFile={(path) => { setActiveFile(path); toggleTab('studio'); }}
-              sessionId={currentProSessionId}
-              onRestoreVersion={(restoredFiles, commitMsg) => {
-                setFiles(restoredFiles);
-                addLog(`Restored to: ${commitMsg}`, 'success');
-                toggleTab('studio');
-              }}
-            />
-          )}
-
-          {/* Phase 3 — Testing System */}
-          {activeView === 'testing' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <TestPanel generatedCode={generatedCode} files={files} />
-            </div>
-          )}
-
-          {/* Phase 3 — API Tester */}
-          {activeView === 'api' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <APITester />
-            </div>
-          )}
-
-          {/* Phase 3 — Diff Viewer */}
-          {activeView === 'diff' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <DiffViewer files={files} />
-            </div>
-          )}
-
-          {/* Phase 3 — Database UI */}
-          {activeView === 'database' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <DatabaseUI userId={user?.uid} userTier={activeAgent} />
-            </div>
-          )}
-
-          {/* Phase 4 — Voice to App */}
-          {activeView === 'voice' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <VoiceToApp onAppGenerated={(code, _prompt) => {
-                setGeneratedCode(code);
-                toggleTab('preview');
-              }} />
-            </div>
-          )}
-
-          {/* Phase 4 — Bot Builder */}
-          {activeView === 'botbuilder' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <BotBuilder />
-            </div>
-          )}
-
-          {/* Phase 4 — Cost Estimator */}
-          {activeView === 'cost' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <CostEstimator />
-            </div>
-          )}
-
-          {/* Phase 5 — Screenshot to Code */}
-          {activeView === 'screenshot' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <ScreenshotToCode onCodeGenerated={(code) => {
-                setGeneratedCode(code);
-                toggleTab('preview');
-              }} />
-            </div>
-          )}
-
-          {/* Phase 5 — Multi-Page Builder */}
-          {activeView === 'multipages' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <MultiPageBuilder
-                initialCode={generatedCode}
-                onExport={(pages) => {
-                  const firstPage = Object.values(pages)[0];
-                  if (firstPage) { setGeneratedCode(firstPage as string); toggleTab('preview'); }
-                }}
-              />
-            </div>
-          )}
-
-          {/* Phase 5 — Analytics */}
-          {activeView === 'analytics' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AppAnalytics userId={user?.uid} />
-            </div>
-          )}
-
-          {/* Phase 6 — AI Debugger */}
-          {activeView === 'debugger' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AIDebugger files={files} />
-            </div>
-          )}
-
-          {/* Phase 6 — Performance Analyzer */}
-          {activeView === 'performance' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <PerformanceAnalyzer generatedCode={generatedCode} />
-            </div>
-          )}
-
-          {/* Phase 6 — Component Library */}
-          {activeView === 'components' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <ComponentLibrary onInsert={(html) => {
-                setGeneratedCode(generatedCode ? generatedCode.replace('</body>', html + '\n</body>') : html);
-                toggleTab('preview');
-              }} />
-            </div>
-          )}
-
-          {/* Phase 6 — SEO Optimizer */}
-          {activeView === 'seo' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <SEOOptimizer generatedCode={generatedCode} appName="NavBharatAI App" onCodeUpdate={(c) => setGeneratedCode(c)} />
-            </div>
-          )}
-
-          {/* Phase 7 — APK Builder */}
-          {activeView === 'apk' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <APKBuilder generatedCode={generatedCode} appName="NavBharatAI App" />
-            </div>
-          )}
-
-          {/* Phase 7 — Figma Importer */}
-          {activeView === 'figma' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <FigmaImporter onCodeGenerated={(code) => {
-                setGeneratedCode(code);
-                toggleTab('preview');
-              }} />
-            </div>
-          )}
-
-          {/* Phase 7 — Custom Domain */}
-          {activeView === 'domain' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <CustomDomain />
-            </div>
-          )}
-
-          {/* Phase 7 — Team Collaboration */}
-          {activeView === 'team' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <TeamCollaboration userId={user?.uid} projectName="NavBharatAI Project" />
-            </div>
-          )}
-
-          {/* Phase 8 — PWA Notifications */}
-          {activeView === 'pwa' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <PWANotifications generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
-            </div>
-          )}
-
-          {/* Phase 8 — Code Minifier */}
-          {activeView === 'minifier' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <CodeMinifier generatedCode={generatedCode} onOptimized={(c) => { setGeneratedCode(c); toggleTab('preview'); }} />
-            </div>
-          )}
-
-          {/* Phase 8 — Dark Mode Generator */}
-          {activeView === 'darkmode' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <DarkModeGenerator generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
-            </div>
-          )}
-
-          {/* Phase 8 — Monetization Wizard */}
-          {activeView === 'monetize' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <MonetizationWizard generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
-            </div>
-          )}
-
-          {/* Phase 9 — AI Image Generator */}
-          {activeView === 'imagegen' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AIImageGenerator onImageGenerated={(url, prompt) => {
-                setGeneratedCode(generatedCode + `\n<!-- Generated Image: ${prompt} -->\n<img src="${url}" alt="${prompt}" style="max-width:100%;border-radius:12px;" />`);
-              }} />
-            </div>
-          )}
-
-          {/* Phase 9 — Code Versioning */}
-          {activeView === 'versioning' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <CodeVersioning
-                generatedCode={generatedCode}
-                onRestore={(c) => setGeneratedCode(c)}
-                onRestoreFiles={(f) => { setFiles(f as any); updatePreview(f as any); setIsAppBuilt(true); setHasGeneratedCode(true); addToast('Version restored ✓', 'success'); }}
-              />
-            </div>
-          )}
-
-          {/* Phase 9 — API Marketplace */}
-          {activeView === 'apimarket' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <APIMarketplace onCodeInsert={(code) => setGeneratedCode(generatedCode + '\n\n' + code)} />
-            </div>
-          )}
-
-          {/* Phase 9 — App Store Publisher */}
-          {activeView === 'appstore' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AppStorePublisher generatedCode={generatedCode} />
-            </div>
-          )}
-
-          {/* Phase 10 — Live Collaboration */}
-          {activeView === 'collab' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <LiveCollaboration
-                generatedCode={generatedCode}
-                onCodeUpdate={(c) => setGeneratedCode(c)}
-                userId={user?.uid}
-                userName={user?.displayName || user?.email?.split('@')[0]}
-              />
-            </div>
-          )}
-
-          {/* Phase 10 — AI Testing Suite */}
-          {activeView === 'aitesting' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AITestingSuite generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
-            </div>
-          )}
-
-          {/* Phase 10 — Localization Manager */}
-          {activeView === 'localization' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <LocalizationManager />
-            </div>
-          )}
-
-          {/* Phase 10 — AI Code Review */}
-          {activeView === 'codereview' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AICodeReview generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
-            </div>
-          )}
-
-          {activeView === 'dbstudio' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <DatabaseStudio />
-            </div>
-          )}
-
-          {activeView === 'cicd' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <CICDPipeline />
-            </div>
-          )}
-
-          {activeView === 'plugins' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <PluginSystem />
-            </div>
-          )}
-
-          {activeView === 'whitelabel' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <WhitelabelBranding />
-            </div>
-          )}
-
-          {activeView === 'projectmgr' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AIProjectManager />
-            </div>
-          )}
-
-          {activeView === 'cloudeploy' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <MultiCloudDeploy generatedCode={generatedCode} />
-            </div>
-          )}
-
-          {activeView === 'designsys' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <DesignSystem generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
-            </div>
-          )}
-
-          {activeView === 'healthmon' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AppHealthMonitor />
-            </div>
-          )}
+          <ViewPanels
+            activeView={activeView}
+            generatedCode={generatedCode}
+            setGeneratedCode={setGeneratedCode}
+            files={files}
+            setFiles={setFiles as any}
+            hasGeneratedCode={hasGeneratedCode}
+            setIsAppBuilt={setIsAppBuilt}
+            setHasGeneratedCode={setHasGeneratedCode}
+            user={user}
+            activeAgent={activeAgent}
+            mode={mode}
+            setMode={setMode}
+            isAppBuilt={isAppBuilt}
+            theme={theme}
+            setTheme={setTheme}
+            messages={messages}
+            input={input}
+            setInput={setInput}
+            setProInput={setProInput}
+            isLoading={isLoading}
+            activeIntent={activeIntent}
+            handleSendForTab={handleSendForTab}
+            toggleTab={toggleTab}
+            updatePreview={updatePreview}
+            addLog={addLog}
+            addToast={addToast}
+            handleAgentChange={handleAgentChange}
+            githubToken={githubToken}
+            githubUser={githubUser}
+            githubRepoContext={githubRepoContext}
+            isGHSyncing={isGHSyncing}
+            pendingGHEdit={pendingGHEdit}
+            handleGHConfirmPush={handleGHConfirmPush}
+            isPushing={isPushing}
+            connectGitHub={connectGitHub}
+            disconnectGitHub={disconnectGitHub}
+            pushToRepo={pushToRepo}
+            firebaseToken={firebaseToken}
+            firebaseUser={firebaseUser}
+            connectFirebase={connectFirebase}
+            disconnectFirebase={disconnectFirebase}
+            sessions={sessions}
+            currentSessionId={currentSessionId}
+            togglePin={togglePin}
+            currentProSessionId={currentProSessionId}
+            previewHistory={previewHistory}
+            fileUploadConflict={fileUploadConflict}
+            resolveFileConflict={resolveFileConflict}
+            handleFilesUpload={handleFilesUpload}
+            downloadAppZip={downloadAppZip}
+            setActiveFile={setActiveFile}
+            wallet={wallet}
+            setShowVishwakarmaUnlockModal={setShowVishwakarmaUnlockModal}
+            setShowAuth={setShowAuth}
+            zipSizeModal={zipSizeModal}
+            setZipSizeModal={setZipSizeModal}
+          />
 
         </div>
         </Suspense>

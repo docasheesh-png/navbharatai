@@ -1,0 +1,516 @@
+import React, { lazy } from 'react';
+import { PreviewPanel } from '../ide/PreviewPanel';
+import { FilesPanel } from './FilesPanel';
+import { ZipSizeModal } from '../ide/ZipSizeModal';
+import type { ZipSizeModalVariant } from '../ide/ZipSizeModal';
+import type { ViewType, FileSystem, ChatSession, Message } from '../../types';
+import type { AgentMode } from '../../types';
+import type { ThemeMode } from '../../lib/theme';
+import type { User as FirebaseUser } from 'firebase/auth';
+
+// ── Lazy-loaded view components ─────────────────────────────────────────────
+const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
+  lazy(() => fn().then(m => ({ default: m[k] as React.ComponentType<any> })));
+
+const CodeStudio        = _lz(() => import('../ide/CodeStudio'),         'CodeStudio');
+const TestPanel         = _lz(() => import('../ide/TestPanel'),          'TestPanel');
+const DiffViewer        = _lz(() => import('../ide/DiffViewer'),         'DiffViewer');
+const DatabaseUI        = _lz(() => import('../ide/DatabaseUI'),         'DatabaseUI');
+const VoiceToApp        = _lz(() => import('../ide/VoiceToApp'),         'VoiceToApp');
+const BotBuilder        = _lz(() => import('../ide/BotBuilder'),         'BotBuilder');
+const CostEstimator     = _lz(() => import('../ide/CostEstimator'),      'CostEstimator');
+const ScreenshotToCode  = _lz(() => import('../ide/ScreenshotToCode'),   'ScreenshotToCode');
+const MultiPageBuilder  = _lz(() => import('../ide/MultiPageBuilder'),   'MultiPageBuilder');
+const AppAnalytics      = _lz(() => import('../ide/AppAnalytics'),       'AppAnalytics');
+const AIDebugger        = _lz(() => import('../ide/AIDebugger'),         'AIDebugger');
+const PerformanceAnalyzer = _lz(() => import('../ide/PerformanceAnalyzer'), 'PerformanceAnalyzer');
+const ComponentLibrary  = _lz(() => import('../ide/ComponentLibrary'),   'ComponentLibrary');
+const SEOOptimizer      = _lz(() => import('../ide/SEOOptimizer'),       'SEOOptimizer');
+const APKBuilder        = _lz(() => import('../ide/APKBuilder'),         'APKBuilder');
+const FigmaImporter     = _lz(() => import('../ide/FigmaImporter'),      'FigmaImporter');
+const CustomDomain      = _lz(() => import('../ide/CustomDomain'),       'CustomDomain');
+const TeamCollaboration = _lz(() => import('../ide/TeamCollaboration'),  'TeamCollaboration');
+const PWANotifications  = _lz(() => import('../ide/PWANotifications'),   'PWANotifications');
+const CodeMinifier      = _lz(() => import('../ide/CodeMinifier'),       'CodeMinifier');
+const DarkModeGenerator = _lz(() => import('../ide/DarkModeGenerator'),  'DarkModeGenerator');
+const MonetizationWizard= _lz(() => import('../ide/MonetizationWizard'), 'MonetizationWizard');
+const AIImageGenerator  = _lz(() => import('../ide/AIImageGenerator'),   'AIImageGenerator');
+const CodeVersioning    = _lz(() => import('../ide/CodeVersioning'),     'CodeVersioning');
+const APIMarketplace    = _lz(() => import('../ide/APIMarketplace'),     'APIMarketplace');
+const AppStorePublisher = _lz(() => import('../ide/AppStorePublisher'),  'AppStorePublisher');
+const LiveCollaboration = _lz(() => import('../ide/LiveCollaboration'),  'LiveCollaboration');
+const AITestingSuite    = _lz(() => import('../ide/AITestingSuite'),     'AITestingSuite');
+const LocalizationManager = _lz(() => import('../ide/LocalizationManager'), 'LocalizationManager');
+const AICodeReview      = _lz(() => import('../ide/AICodeReview'),       'AICodeReview');
+const DatabaseStudio    = _lz(() => import('../ide/DatabaseStudio'),     'DatabaseStudio');
+const CICDPipeline      = _lz(() => import('../ide/CICDPipeline'),       'CICDPipeline');
+const PluginSystem      = _lz(() => import('../ide/PluginSystem'),       'PluginSystem');
+const WhitelabelBranding= _lz(() => import('../ide/WhitelabelBranding'), 'WhitelabelBranding');
+const AIProjectManager  = _lz(() => import('../ide/AIProjectManager'),   'AIProjectManager');
+const MultiCloudDeploy  = _lz(() => import('../ide/MultiCloudDeploy'),   'MultiCloudDeploy');
+const DesignSystem      = _lz(() => import('../ide/DesignSystem'),       'DesignSystem');
+const AppHealthMonitor  = _lz(() => import('../ide/AppHealthMonitor'),   'AppHealthMonitor');
+const APITester         = lazy(() => import('../ide/APITester'));
+
+export interface ViewPanelsProps {
+  activeView: ViewType;
+  generatedCode: string;
+  setGeneratedCode: (code: string) => void;
+  files: FileSystem;
+  setFiles: (files: any) => void;
+  hasGeneratedCode: boolean;
+  setIsAppBuilt: (v: boolean) => void;
+  setHasGeneratedCode: (v: boolean) => void;
+  user: FirebaseUser | null;
+  activeAgent: string;
+  mode: AgentMode;
+  setMode: (mode: AgentMode) => void;
+  isAppBuilt: boolean;
+  theme: ThemeMode;
+  setTheme: (t: ThemeMode) => void;
+  messages: Message[];
+  input: string;
+  setInput: (v: string) => void;
+  setProInput: (v: string) => void;
+  isLoading: boolean;
+  activeIntent: string;
+  handleSendForTab: (tabId: ViewType) => void;
+  toggleTab: (view: ViewType) => void;
+  updatePreview: (files: any) => void;
+  addLog: (msg: string, level: string) => void;
+  addToast: (msg: string, type: string) => void;
+  handleAgentChange: (agent: string) => void;
+  githubToken: string;
+  githubUser: any;
+  githubRepoContext: any;
+  isGHSyncing: boolean;
+  pendingGHEdit: any;
+  handleGHConfirmPush: () => void;
+  isPushing: boolean;
+  connectGitHub: () => void;
+  disconnectGitHub: () => void;
+  pushToRepo: () => void;
+  firebaseToken: string;
+  firebaseUser: any;
+  connectFirebase: () => void;
+  disconnectFirebase: () => void;
+  sessions: ChatSession[];
+  currentSessionId: string;
+  togglePin: (id: string) => void;
+  currentProSessionId: string;
+  previewHistory: { id: string; label: string; ts: Date; html: string }[];
+  fileUploadConflict: { file: File; existingKey: string; isZip: boolean } | null;
+  resolveFileConflict: (choice: 'replace' | 'merge') => void;
+  handleFilesUpload: (file: File) => void;
+  downloadAppZip: (deployFiles: Record<string, string>, appName: string) => void;
+  setActiveFile: (path: string) => void;
+  wallet: any;
+  setShowVishwakarmaUnlockModal: (v: boolean) => void;
+  setShowAuth: (v: boolean) => void;
+  zipSizeModal: { variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null;
+  setZipSizeModal: (v: { variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null) => void;
+}
+
+export function ViewPanels({
+  activeView, generatedCode, setGeneratedCode, files, setFiles,
+  hasGeneratedCode, setIsAppBuilt, setHasGeneratedCode,
+  user, activeAgent, mode, setMode, isAppBuilt, theme, setTheme,
+  messages, input, setInput, setProInput, isLoading, activeIntent,
+  handleSendForTab, toggleTab, updatePreview, addLog, addToast,
+  handleAgentChange, githubToken, githubUser, githubRepoContext, isGHSyncing,
+  pendingGHEdit, handleGHConfirmPush, isPushing, connectGitHub, disconnectGitHub,
+  pushToRepo, firebaseToken, firebaseUser, connectFirebase, disconnectFirebase,
+  sessions, currentSessionId, togglePin, currentProSessionId,
+  previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
+  downloadAppZip, setActiveFile, wallet, setShowVishwakarmaUnlockModal, setShowAuth,
+  zipSizeModal, setZipSizeModal,
+}: ViewPanelsProps) {
+  return (
+    <>
+      {activeView === 'studio' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <CodeStudio
+            key={activeAgent}
+            activeAgent={activeAgent}
+            onAgentChange={handleAgentChange}
+            files={files}
+            onFilesChange={(newFiles: any) => setFiles(newFiles as any)}
+            onRun={(f: any) => updatePreview(f || files)}
+            generatedCode={generatedCode}
+            messages={messages}
+            chatInput={input}
+            onChatInputChange={setInput}
+            onChatSend={() => handleSendForTab(activeAgent.startsWith('vishwakarma') ? 'asc_chat' as ViewType : 'nbi_pro_chat' as ViewType)}
+            isChatLoading={isLoading}
+            activeIntent={activeIntent}
+            githubToken={githubToken}
+            githubUser={githubUser}
+            githubRepoContext={githubRepoContext}
+            isGHSyncing={isGHSyncing}
+            firebaseToken={firebaseToken}
+            firebaseUser={firebaseUser}
+            onFirebaseConnect={connectFirebase}
+            onFirebaseDisconnect={disconnectFirebase}
+            onGHConnect={connectGitHub}
+            onGHDisconnect={disconnectGitHub}
+            onGHPush={pushToRepo}
+            isPinned={sessions.find(s => s.id === currentSessionId)?.isPinned || false}
+            onTogglePin={() => togglePin(currentSessionId)}
+            isLoggedIn={!!user}
+            onShowLogin={() => setShowAuth(true)}
+            mode={mode}
+            onModeChange={setMode}
+            isAppBuilt={isAppBuilt}
+            onPreviewClick={() => toggleTab('preview')}
+            theme={theme}
+            onThemeChange={setTheme}
+            pendingGHEdit={pendingGHEdit}
+            onConfirmPush={handleGHConfirmPush}
+            isGHPushing={isPushing}
+            onGoToMain={() => {
+              toggleTab('nbi_pro_chat');
+              addLog('Cognitive memory layer successfully merged and redirected to main cockpit.', 'info');
+            }}
+            onOpenProChat={() => toggleTab('nbi_pro_chat')}
+            wallet={wallet}
+            onUnlockVishwakarma={() => setShowVishwakarmaUnlockModal(true)}
+          />
+        </div>
+      )}
+
+      {activeView === 'preview' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <PreviewPanel
+            files={files}
+            onRun={() => updatePreview(files)}
+            generatedCode={generatedCode}
+            previewHistory={previewHistory}
+            onRestoreHistory={(html: string) => setGeneratedCode(html)}
+            onHtmlChange={(html: string) => setGeneratedCode(html)}
+            onGoPro={() => toggleTab('nbi_pro_chat')}
+            onEditWithAI={(hint: string) => {
+              setMode('build');
+              if (hint) setProInput(hint);
+              toggleTab('nbi_pro_chat');
+            }}
+          />
+        </div>
+      )}
+
+      {/* ZIP size modal — appears regardless of active view */}
+      {zipSizeModal && (
+        <ZipSizeModal
+          variant={zipSizeModal.variant}
+          fileName={zipSizeModal.fileName}
+          fileSizeMB={zipSizeModal.fileSizeMB}
+          onClose={() => setZipSizeModal(null)}
+        />
+      )}
+
+      {activeView === 'files' && (
+        <FilesPanel
+          files={files}
+          hasGeneratedCode={hasGeneratedCode}
+          fileUploadConflict={fileUploadConflict}
+          onResolveConflict={resolveFileConflict}
+          onUpload={handleFilesUpload}
+          onDownloadZip={() => downloadAppZip(files as any, 'NavBharatApp')}
+          onOpenFile={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
+          sessionId={currentProSessionId}
+          onRestoreVersion={(restoredFiles: any, commitMsg: string) => {
+            setFiles(restoredFiles);
+            addLog(`Restored to: ${commitMsg}`, 'success');
+            toggleTab('studio');
+          }}
+        />
+      )}
+
+      {/* Phase 3 — Testing System */}
+      {activeView === 'testing' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <TestPanel generatedCode={generatedCode} files={files} />
+        </div>
+      )}
+
+      {/* Phase 3 — API Tester */}
+      {activeView === 'api' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <APITester />
+        </div>
+      )}
+
+      {/* Phase 3 — Diff Viewer */}
+      {activeView === 'diff' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <DiffViewer files={files} />
+        </div>
+      )}
+
+      {/* Phase 3 — Database UI */}
+      {activeView === 'database' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <DatabaseUI userId={user?.uid} userTier={activeAgent} />
+        </div>
+      )}
+
+      {/* Phase 4 — Voice to App */}
+      {activeView === 'voice' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <VoiceToApp onAppGenerated={(code: string, _prompt: string) => {
+            setGeneratedCode(code);
+            toggleTab('preview');
+          }} />
+        </div>
+      )}
+
+      {/* Phase 4 — Bot Builder */}
+      {activeView === 'botbuilder' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <BotBuilder />
+        </div>
+      )}
+
+      {/* Phase 4 — Cost Estimator */}
+      {activeView === 'cost' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <CostEstimator />
+        </div>
+      )}
+
+      {/* Phase 5 — Screenshot to Code */}
+      {activeView === 'screenshot' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <ScreenshotToCode onCodeGenerated={(code: string) => {
+            setGeneratedCode(code);
+            toggleTab('preview');
+          }} />
+        </div>
+      )}
+
+      {/* Phase 5 — Multi-Page Builder */}
+      {activeView === 'multipages' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <MultiPageBuilder
+            initialCode={generatedCode}
+            onExport={(pages: any) => {
+              const firstPage = Object.values(pages)[0];
+              if (firstPage) { setGeneratedCode(firstPage as string); toggleTab('preview'); }
+            }}
+          />
+        </div>
+      )}
+
+      {/* Phase 5 — Analytics */}
+      {activeView === 'analytics' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <AppAnalytics userId={user?.uid} />
+        </div>
+      )}
+
+      {/* Phase 6 — AI Debugger */}
+      {activeView === 'debugger' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <AIDebugger files={files} />
+        </div>
+      )}
+
+      {/* Phase 6 — Performance Analyzer */}
+      {activeView === 'performance' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <PerformanceAnalyzer generatedCode={generatedCode} />
+        </div>
+      )}
+
+      {/* Phase 6 — Component Library */}
+      {activeView === 'components' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <ComponentLibrary onInsert={(html: string) => {
+            setGeneratedCode(generatedCode ? generatedCode.replace('</body>', html + '\n</body>') : html);
+            toggleTab('preview');
+          }} />
+        </div>
+      )}
+
+      {/* Phase 6 — SEO Optimizer */}
+      {activeView === 'seo' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <SEOOptimizer generatedCode={generatedCode} appName="NavBharatAI App" onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+        </div>
+      )}
+
+      {/* Phase 7 — APK Builder */}
+      {activeView === 'apk' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <APKBuilder generatedCode={generatedCode} appName="NavBharatAI App" />
+        </div>
+      )}
+
+      {/* Phase 7 — Figma Importer */}
+      {activeView === 'figma' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <FigmaImporter onCodeGenerated={(code: string) => {
+            setGeneratedCode(code);
+            toggleTab('preview');
+          }} />
+        </div>
+      )}
+
+      {/* Phase 7 — Custom Domain */}
+      {activeView === 'domain' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <CustomDomain />
+        </div>
+      )}
+
+      {/* Phase 7 — Team Collaboration */}
+      {activeView === 'team' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <TeamCollaboration userId={user?.uid} projectName="NavBharatAI Project" />
+        </div>
+      )}
+
+      {/* Phase 8 — PWA Notifications */}
+      {activeView === 'pwa' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <PWANotifications generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+        </div>
+      )}
+
+      {/* Phase 8 — Code Minifier */}
+      {activeView === 'minifier' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <CodeMinifier generatedCode={generatedCode} onOptimized={(c: string) => { setGeneratedCode(c); toggleTab('preview'); }} />
+        </div>
+      )}
+
+      {/* Phase 8 — Dark Mode Generator */}
+      {activeView === 'darkmode' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <DarkModeGenerator generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+        </div>
+      )}
+
+      {/* Phase 8 — Monetization Wizard */}
+      {activeView === 'monetize' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <MonetizationWizard generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+        </div>
+      )}
+
+      {/* Phase 9 — AI Image Generator */}
+      {activeView === 'imagegen' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <AIImageGenerator onImageGenerated={(url: string, prompt: string) => {
+            setGeneratedCode(generatedCode + `\n<!-- Generated Image: ${prompt} -->\n<img src="${url}" alt="${prompt}" style="max-width:100%;border-radius:12px;" />`);
+          }} />
+        </div>
+      )}
+
+      {/* Phase 9 — Code Versioning */}
+      {activeView === 'versioning' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <CodeVersioning
+            generatedCode={generatedCode}
+            onRestore={(c: string) => setGeneratedCode(c)}
+            onRestoreFiles={(f: any) => { setFiles(f as any); updatePreview(f as any); setIsAppBuilt(true); setHasGeneratedCode(true); addToast('Version restored ✓', 'success'); }}
+          />
+        </div>
+      )}
+
+      {/* Phase 9 — API Marketplace */}
+      {activeView === 'apimarket' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <APIMarketplace onCodeInsert={(code: string) => setGeneratedCode(generatedCode + '\n\n' + code)} />
+        </div>
+      )}
+
+      {/* Phase 9 — App Store Publisher */}
+      {activeView === 'appstore' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <AppStorePublisher generatedCode={generatedCode} />
+        </div>
+      )}
+
+      {/* Phase 10 — Live Collaboration */}
+      {activeView === 'collab' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <LiveCollaboration
+            generatedCode={generatedCode}
+            onCodeUpdate={(c: string) => setGeneratedCode(c)}
+            userId={user?.uid}
+            userName={user?.displayName || user?.email?.split('@')[0]}
+          />
+        </div>
+      )}
+
+      {/* Phase 10 — AI Testing Suite */}
+      {activeView === 'aitesting' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <AITestingSuite generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+        </div>
+      )}
+
+      {/* Phase 10 — Localization Manager */}
+      {activeView === 'localization' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <LocalizationManager />
+        </div>
+      )}
+
+      {/* Phase 10 — AI Code Review */}
+      {activeView === 'codereview' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <AICodeReview generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+        </div>
+      )}
+
+      {activeView === 'dbstudio' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <DatabaseStudio />
+        </div>
+      )}
+
+      {activeView === 'cicd' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <CICDPipeline />
+        </div>
+      )}
+
+      {activeView === 'plugins' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <PluginSystem />
+        </div>
+      )}
+
+      {activeView === 'whitelabel' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <WhitelabelBranding />
+        </div>
+      )}
+
+      {activeView === 'projectmgr' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <AIProjectManager />
+        </div>
+      )}
+
+      {activeView === 'cloudeploy' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <MultiCloudDeploy generatedCode={generatedCode} />
+        </div>
+      )}
+
+      {activeView === 'designsys' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <DesignSystem generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+        </div>
+      )}
+
+      {activeView === 'healthmon' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <AppHealthMonitor />
+        </div>
+      )}
+    </>
+  );
+}

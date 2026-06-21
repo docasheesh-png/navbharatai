@@ -1296,3 +1296,17 @@ G4 closes four real security gaps (zero new infrastructure — all code changes)
 - secrets.ts: console.warn on missing SECRET_ENCRYPTION_KEY (fallback retained for existing data).
 - .github/workflows/ci.yml: npm audit --audit-level=high step added (continue-on-error:true).
 Gate: server tsc 0 · frontend tsc 0 · 307/307 tests pass. PR #117 open.
+
+### Milestone G4 — DONE (2026-06-21) — Security: Helmet + CORS fix + error sanitization + npm audit
+(See G4 IN PROGRESS entry above for details — PR #117 merged to main.)
+
+### Milestone G5 — IN PROGRESS (2026-06-21) — Testing+Quality: ProCodeReview wired as build quality gate
+G5 wires the existing ProCodeReview module as an automatic quality gate on every new Pro build:
+- build.ts (both agentic + legacy paths): reviewCode() called best-effort after each build
+  (12s timeout, never blocks). Result included in sendComplete as codeReview field.
+- buildService.ts: ReviewFinding + CodeReviewResult types added; codeReview? added to
+  BuildStreamEvent and BuildResponse.
+- App.tsx: codeReview captured in proBuildProgress state; shown in build summary message
+  (score badge + top critical/high findings with file:line + fix suggestion).
+- AppKnowledgeBase.ts: 'auto-code-review' entry added (mandatory per CLAUDE.md rule).
+Gate: server tsc 0 · frontend tsc 0 · 307/307 tests pass. PR #118 open.

@@ -655,7 +655,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
           <div className="mt-3 pt-3 border-t border-white/10">
             <button
               onClick={onPreviewClick}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-bold text-[12px] uppercase tracking-wider transition-all active:scale-95 hover:brightness-110 border border-indigo-500/30"
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-[12px] uppercase tracking-wider transition-all active:scale-95 hover:brightness-110 border border-indigo-500/30"
               style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: 'white' }}
             >
               <span>👁️</span>
@@ -696,12 +696,12 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
         {suggestions && suggestions.length > 0 && onSendSuggestion && (
           <div className="mt-3 pt-3 border-t border-white/10">
             <p className="text-[9px] font-black uppercase tracking-widest text-[#484f58] mb-2">💡 What to build next</p>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex overflow-x-auto no-scrollbar gap-2 pb-1">
               {suggestions.map((s, i) => (
                 <button
                   key={i}
                   onClick={() => onSendSuggestion(s)}
-                  className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600/15 hover:bg-indigo-600/30 border border-indigo-500/25 text-indigo-300 text-[10px] font-medium rounded-full transition-all active:scale-95"
+                  className="flex shrink-0 items-center gap-1 px-2.5 py-1.5 bg-indigo-600/15 hover:bg-indigo-600/30 border border-indigo-500/25 text-indigo-300 text-[10px] font-medium rounded-full transition-all active:scale-95"
                 >
                   <span className="text-indigo-400">+</span> {s}
                 </button>
@@ -798,16 +798,16 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
       {/* Play Button Header Popup */}
       <AnimatePresence>
         {isAppBuilt && (
-          <motion.div 
+          <motion.div
             drag
             dragMomentum={false}
-            dragConstraints={{ left: -300, right: 300, top: -400, bottom: 400 }}
+            dragConstraints={{ left: -300, right: 300, top: -400, bottom: 100 }}
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="absolute top-16 right-4 z-50 cursor-move"
+            className="absolute top-16 right-4 z-50 cursor-grab active:cursor-grabbing hidden sm:block"
           >
-            <button 
+            <button
               onClick={onPreviewClick}
               className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full shadow-2xl shadow-emerald-500/20 transition-all border border-emerald-400/30 group active:scale-95"
             >
@@ -1248,6 +1248,23 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
         )}
       </div>
 
+      {/* Mobile-only: "Preview ready" sticky banner above the input.
+          The desktop floating button is hidden on sm- screens — this replaces it. */}
+      {isAppBuilt && onPreviewClick && (
+        <div className="sm:hidden flex items-center justify-between gap-3 px-4 py-2.5 bg-emerald-950/40 border-t border-emerald-500/20 select-none">
+          <div className="flex items-center gap-2 min-w-0">
+            <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0 animate-pulse" />
+            <span className="text-emerald-400 text-[9px] font-black uppercase tracking-widest truncate">App ready!</span>
+          </div>
+          <button
+            onClick={onPreviewClick}
+            className="shrink-0 flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-lg"
+          >
+            View Preview →
+          </button>
+        </div>
+      )}
+
       <div
         className="p-4 border-t border-white/5 bg-[var(--theme-card)] backdrop-blur-xl select-none shadow-[0_-12px_40px_rgba(0,0,0,0.5)]"
         style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : 'max(16px, env(safe-area-inset-bottom, 16px))' }}
@@ -1309,7 +1326,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
                       title="Attach image or PDF"
-                      className="p-2 text-gray-500 hover:text-indigo-400 transition-colors"
+                      className="p-2.5 text-gray-500 hover:text-indigo-400 transition-colors"
                     >
                       <LinkIcon className="w-4 h-4" />
                     </button>
@@ -1317,7 +1334,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                       type="button"
                       onClick={isListening ? stopVoice : startVoice}
                       title={isListening ? 'Stop voice input' : 'Voice input (Chrome only)'}
-                      className={`p-2 transition-colors ${isListening ? 'text-red-400 animate-pulse' : 'text-gray-500 hover:text-blue-400'}`}
+                      className={`p-2.5 transition-colors ${isListening ? 'text-red-400 animate-pulse' : 'text-gray-500 hover:text-blue-400'}`}
                     >
                       {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                     </button>
@@ -1325,7 +1342,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                       <button
                         onClick={onStop}
                         title="Stop generation"
-                        className="p-2.5 bg-red-600 text-white rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95"
+                        className="p-3 bg-red-600 text-white rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95"
                       >
                         <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[11px]">■</span>
                       </button>
@@ -1333,7 +1350,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                       <button
                         onClick={() => { onSend(attachments); setAttachments([]); }}
                         disabled={(!input.trim() && attachments.length === 0) || isLoading}
-                        className="p-2.5 bg-indigo-600 text-white rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg"
+                        className="p-3 bg-indigo-600 text-white rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95"
                       >
                         <Send className="w-3.5 h-3.5" />
                       </button>

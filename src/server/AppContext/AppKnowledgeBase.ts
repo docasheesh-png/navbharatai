@@ -529,6 +529,21 @@ Also available on-demand via Settings → Pro → Code Review button.`,
     aiSurface: 'pro_chat',
     keywords: ['code review', 'security', 'quality', 'owasp', 'xss', 'injection', 'tech debt', 'accessibility', 'score', 'findings', 'auto review', 'code quality', 'security scan'],
   },
+  {
+    id: 'error-pattern-learning',
+    name: 'Error Pattern Learning — Builds Get Smarter After Failures',
+    path: 'Automatic — active on every Pro build (no user action needed)',
+    description: `Phase 5.4: NavBharatAI learns from build failures to prevent them from repeating.
+Two mechanisms:
+• Pre-build hints: before the agent starts coding, technology-specific pitfalls are injected based on keywords in your prompt (e.g. "Tailwind" triggers Tailwind v4 setup hints, "Supabase" triggers auth key hints). This prevents the most common first-build failures.
+• Session-level learning: when a build fails with a recognizable pattern (ERESOLVE, unclosed JSX, Cannot find module, React hooks violation, etc.), the specific fix hint is saved for that session. The next retry automatically receives these hints in the agent's context, so the agent corrects the issue without needing you to describe it.
+Patterns tracked: ERESOLVE peer deps, Cannot find module, named import errors, unclosed JSX, React hooks rules, TypeScript type errors, Vite config missing, Supabase env keys, null/undefined access.
+Hints are cleared after a successful build so they don't carry over to unrelated future work.`,
+    howToUse: 'Automatic — no user action needed. When a build fails, retry it and the agent will have the specific fix hints injected. Over time, NavBharatAI builds a knowledge base of common errors across all sessions.',
+    relatedFeatures: ['pro_chat', 'auto-dependency-sync', 'iterative-agent-build'],
+    aiSurface: 'pro_chat',
+    keywords: ['error', 'build fail', 'fix', 'retry', 'learn', 'pattern', 'cannot find module', 'eresolve', 'peer dep', 'jsx error', 'tailwind', 'supabase', 'smart build', 'auto fix', 'error detection', 'build smarter', 'galti', 'error fix', 'dobara banao'],
+  },
 ];
 
 /** Quick lookup by id. */

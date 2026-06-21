@@ -469,7 +469,7 @@ export class EngineerAgentLoop {
     dbContextBlock: string,
     signal?: AbortSignal,
   ): AsyncGenerator<EngineerAgentEvent> {
-    const { workspaceId, githubToken, proMemorySummary, proEditLog } = task;
+    const { workspaceId, githubToken, proMemorySummary, proEditLog, errorHints } = task;
 
     for (let localStep = 0; localStep < maxSteps; localStep++) {
       shared.globalStep++;
@@ -479,7 +479,7 @@ export class EngineerAgentLoop {
       if (Date.now() > deadline) { yield { type: 'max_steps_reached', steps: step - 1 }; shared.terminated = true; return; }
 
       yield { type: 'status', message: `Step ${step}: reading workspace…` };
-      const prompt = await this.buildPrompt(workspaceId, effectiveInstruction, shared.history, stepContextPrefix, proMemorySummary, proEditLog);
+      const prompt = await this.buildPrompt(workspaceId, effectiveInstruction, shared.history, stepContextPrefix, proMemorySummary, proEditLog, errorHints);
       yield { type: 'status', message: `Step ${step}: thinking…` };
 
       let rawResponse: string;
@@ -1289,6 +1289,7 @@ export class EngineerAgentLoop {
     stepContextPrefix?: string,
     proMemorySummary?: string,
     proEditLog?: string[],
+    errorHints?: string[],
   ): Promise<string> {
     // 1. Get full file list (paths only — always fast)
     const fileList = await this.actuator.listFiles(workspaceId);
@@ -1360,11 +1361,21 @@ export class EngineerAgentLoop {
       proMemSection = `[PRO CHAT CONTEXT — what was built in this session]\n${proMemorySummary.slice(0, 1500)}${editLogLines}`;
     }
 
+    // Phase 5.4 — error pattern learning: inject known-issue hints from previous
+    // failed attempts and pre-build technology hints into every prompt step.
+    // Capped to prevent context bloat. Injected before the file tree.
+    let errorHintsSection = '';
+    if (errorHints && errorHints.length > 0) {
+      const hintsText = errorHints.slice(0, 5).map((h, i) => `${i + 1}. ${h}`).join('\n');
+      errorHintsSection = `[KNOWN ISSUES — apply these fixes proactively]\n${hintsText}`;
+    }
+
     const taskSection = stepContextPrefix
       ? `[TASK]\n${instruction}\n\n${stepContextPrefix}`
       : `[TASK]\n${instruction}`;
     const parts: string[] = [taskSection];
     if (proMemSection) parts.push(proMemSection);
+    if (errorHintsSection) parts.push(errorHintsSection);
     if (memorySection) parts.push(memorySection);
     parts.push(
       `[WORKSPACE — FILE TREE (${fileList.length} files)]\n${fileTree}`,

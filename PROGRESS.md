@@ -355,13 +355,20 @@ One module per PR — never one giant PR. Frontend + server + all surviving arch
 - Coverage tracked in CI: fail if drops below baseline
 - E2E (Playwright): open Pro Chat → submit prompt → assert build progress fires correctly
 
-### 5.4 — Error pattern learning
-**Status: TODO**
+### 5.4 — Error pattern learning ✅ DONE (2026-06-21) — PR #140
+**Branch:** `claude/phase-5.4-error-learning`
 
-When build fails with recognizable pattern (ERESOLVE, unclosed JSX, Cannot find module):
-record pattern + fix in `error_patterns` Firestore collection.
-Next similar build: inject known fix into prompt context proactively.
-NavBharatAI Pro learns from its own failures — Claude Code does not do this.
+NavBharatAI now learns from build failures to prevent them repeating.
+
+**What shipped:**
+- NEW `src/server/project/ErrorPatternMatcher.ts` — pure, zero-I/O matcher: 14 error patterns (ERESOLVE, Cannot find module, named import, unclosed JSX, React hooks, TypeScript, null/undefined, missing vite.config, Supabase keys, tailwind, etc.) + 7 pre-build instruction hints (Tailwind v4, Supabase, Firebase, React Router v6, Zustand, Recharts, Framer Motion).
+- NEW `src/server/project/ErrorPatternStore.ts` — Firestore store (VITEST-skip, best-effort, never throws). Collections: `session_error_hints` (per-session hints), `error_pattern_stats` (aggregate learning).
+- `EngineerAITypes.ts` — added `errorHints?` to `EngineerTask`
+- `EngineerAgentLoop.ts` — `buildPrompt()` injects `[KNOWN ISSUES]` section when hints present
+- `ProEngineRunner.ts` — loads instruction hints + session hints before loop; after validation failure, records new hints best-effort; after success, clears stale hints
+- `AppKnowledgeBase.ts` — added `error-pattern-learning` entry
+- `tests/errorPatternMatcher.test.ts` — 16 unit tests (345/345 total green)
+- tsc x2 clean
 
 ### 5.5 — Offline / degraded mode
 **Status: TODO**

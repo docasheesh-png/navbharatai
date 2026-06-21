@@ -33,6 +33,13 @@ export interface EngineerTask {
    * the client; injected by the route so the agent can push to the user's repos.
    */
   githubToken?: string;
+  /**
+   * Phase 2.3 — unified memory: Pro Chat's rolling session summary + recent edit
+   * log. Injected by ProEngineRunner so the agent knows what Pro already built in
+   * this workspace. Prevents the agent from re-reasoning decisions Pro already made.
+   */
+  proMemorySummary?: string;
+  proEditLog?: string[];
 }
 
 /**

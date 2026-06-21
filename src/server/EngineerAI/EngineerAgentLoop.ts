@@ -241,7 +241,7 @@ export class EngineerAgentLoop {
   }
 
   async *run(task: EngineerTask, signal?: AbortSignal): AsyncGenerator<EngineerAgentEvent> {
-    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig, githubToken } = task;
+    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig, githubToken, proMemorySummary, proEditLog } = task;
     let effectiveInstruction = instruction;
     const deadline = Date.now() + DEADLINE_MS;
 
@@ -469,7 +469,7 @@ export class EngineerAgentLoop {
     dbContextBlock: string,
     signal?: AbortSignal,
   ): AsyncGenerator<EngineerAgentEvent> {
-    const { workspaceId, githubToken } = task;
+    const { workspaceId, githubToken, proMemorySummary, proEditLog } = task;
 
     for (let localStep = 0; localStep < maxSteps; localStep++) {
       shared.globalStep++;
@@ -479,7 +479,7 @@ export class EngineerAgentLoop {
       if (Date.now() > deadline) { yield { type: 'max_steps_reached', steps: step - 1 }; shared.terminated = true; return; }
 
       yield { type: 'status', message: `Step ${step}: reading workspace…` };
-      const prompt = await this.buildPrompt(workspaceId, effectiveInstruction, shared.history, stepContextPrefix);
+      const prompt = await this.buildPrompt(workspaceId, effectiveInstruction, shared.history, stepContextPrefix, proMemorySummary, proEditLog);
       yield { type: 'status', message: `Step ${step}: thinking…` };
 
       let rawResponse: string;
@@ -1285,6 +1285,8 @@ export class EngineerAgentLoop {
     instruction: string,
     history: { step: number; actionJson: string; observation: string }[],
     stepContextPrefix?: string,
+    proMemorySummary?: string,
+    proEditLog?: string[],
   ): Promise<string> {
     // 1. Get full file list (paths only — always fast)
     const fileList = await this.actuator.listFiles(workspaceId);
@@ -1334,10 +1336,21 @@ export class EngineerAgentLoop {
       }
     } catch { /* no memory file yet — first session */ }
 
+    // Phase 2.3 — unified memory: prepend Pro Chat's rolling summary + edit log so
+    // the agent doesn't re-reason decisions Pro already made in this workspace.
+    let proMemSection = '';
+    if (proMemorySummary && proMemorySummary.trim()) {
+      const editLogLines = proEditLog && proEditLog.length > 0
+        ? `\nRecent edits:\n${proEditLog.slice(-10).map(e => `  - ${e}`).join('\n')}`
+        : '';
+      proMemSection = `[PRO CHAT CONTEXT — what was built in this session]\n${proMemorySummary.slice(0, 1500)}${editLogLines}`;
+    }
+
     const taskSection = stepContextPrefix
       ? `[TASK]\n${instruction}\n\n${stepContextPrefix}`
       : `[TASK]\n${instruction}`;
     const parts: string[] = [taskSection];
+    if (proMemSection) parts.push(proMemSection);
     if (memorySection) parts.push(memorySection);
     parts.push(
       `[WORKSPACE — FILE TREE (${fileList.length} files)]\n${fileTree}`,

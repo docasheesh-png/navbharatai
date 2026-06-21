@@ -449,6 +449,16 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['version history', 'go back', 'restore', 'undo build', 'previous version', 'revert', 'old version', 'build history', 'checkpoint', 'purana version', 'version 3 pe wapas', 'rollback', 'undo changes', 'history', 'past builds'],
   },
   {
+    id: 'unified-memory',
+    name: 'Unified Memory — Pro Chat and Engineer AI Share Context',
+    path: 'Automatic — happens every time you build in Pro Chat then ask Engineer AI to edit',
+    description: `Phase 2.3: Pro Chat maintains a rolling memory of what was built (project summary + last 10 edits). When Engineer AI runs on the same workspace, it now receives this context at the start of every step — so the agent knows what Pro Chat already built, which decisions were made, and what the project contains. This eliminates the "fresh-start" problem where Engineer AI would re-reason decisions already established by Pro Chat. The memory is stored in Firestore (pro_memories collection) and loaded automatically by ProEngineRunner at the start of each agentic run.`,
+    howToUse: 'Automatic — no user action needed. Build in Pro Chat → the memory is saved. Then ask Engineer AI to edit → it picks up the context. Context includes: project summary, tech stack, last 10 edits.',
+    relatedFeatures: ['pro_chat', 'build-version-history', 'iterative-agent-build'],
+    aiSurface: 'engineer_ai',
+    keywords: ['memory', 'context', 'remember', 'remember project', 'forget', 'fresh start', 'context lost', 'yaad', 'bhool gaya', 'pichla kaam', 'previous build', 'project context', 'session memory', 'unified memory'],
+  },
+  {
     id: 'one-click-deploy',
     name: 'One-Click Deploy Button',
     path: 'Pro Chat → header bar → Deploy button (visible after app is built)',

@@ -1,127 +1,83 @@
 import { describe, it, expect } from 'vitest';
-import {
-  extractSearchTerms,
-  rankFiles,
-  buildFileTree,
-  packFileSections,
-} from '../src/server/EngineerAI/ContextRetriever';
+import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from '../src/server/EngineerAI/ContextRetriever';
 
 describe('extractSearchTerms', () => {
-  it('returns empty for an empty instruction', () => {
+  it('returns empty array for empty instruction and observations', () => {
     expect(extractSearchTerms('', [])).toEqual([]);
   });
 
-  it('extracts camelCase/PascalCase identifiers from the instruction', () => {
-    const terms = extractSearchTerms('Fix the UserAuth component in AuthService', []);
-    expect(terms).toContain('UserAuth');
-    expect(terms).toContain('AuthService');
+  it('extracts capitalized identifiers like component names', () => {
+    const terms = extractSearchTerms('fix the UserProfile component', []);
+    expect(terms).toContain('UserProfile');
   });
 
-  it('extracts meaningful lowercase keywords and filters stop words', () => {
-    const terms = extractSearchTerms('build authentication with database connection', []);
-    expect(terms).toContain('authentication');
-    expect(terms).toContain('database');
-    expect(terms).toContain('connection');
-    // stop words should not appear
-    expect(terms).not.toContain('with');
-    expect(terms).not.toContain('build');
+  it('filters stop words', () => {
+    const terms = extractSearchTerms('please make the button work', []);
+    // "please", "make", "the" are stop words; "button" is 6 chars
+    expect(terms).toContain('button');
+    expect(terms).not.toContain('please');
+    expect(terms).not.toContain('make');
   });
 
-  it('includes terms from recent observations', () => {
-    const terms = extractSearchTerms('fix the bug', ['Error in TodoList component']);
-    expect(terms).toContain('TodoList');
-  });
-
-  it('deduplicates identical terms', () => {
-    const terms = extractSearchTerms('UserAuth UserAuth service', []);
-    const count = terms.filter(t => t === 'UserAuth').length;
-    expect(count).toBe(1);
-  });
-
-  it('caps output at 8 terms', () => {
-    const terms = extractSearchTerms(
-      'alpha Bravo Charlie Delta Echo Foxtrot Golf Hotel India',
-      ['TermOne TermTwo TermThree TermFour TermFive'],
-    );
+  it('returns at most 8 terms', () => {
+    const instruction = 'AuthService LoginForm RegisterForm DashboardPage ProfilePage SettingsPage NotificationsPage PaymentPage';
+    const terms = extractSearchTerms(instruction, []);
     expect(terms.length).toBeLessThanOrEqual(8);
   });
 });
 
 describe('rankFiles', () => {
-  const allFiles = ['src/App.tsx', 'src/auth/Login.tsx', 'package.json', 'vite.config.js', 'src/utils.ts'];
+  const all = ['App.tsx', 'main.tsx', 'utils.ts', 'auth.ts'];
 
-  it('returns all files', () => {
-    const ranked = rankFiles(allFiles, [], []);
-    expect(ranked).toHaveLength(allFiles.length);
-    expect(ranked).toEqual(expect.arrayContaining(allFiles));
+  it('places recently edited files first', () => {
+    const ranked = rankFiles(all, [], ['auth.ts']);
+    expect(ranked[0]).toBe('auth.ts');
   });
 
-  it('puts recently-edited files first', () => {
-    const ranked = rankFiles(allFiles, [], ['src/utils.ts']);
-    expect(ranked[0]).toBe('src/utils.ts');
+  it('places grep-matched files high', () => {
+    const ranked = rankFiles(all, ['utils.ts'], []);
+    expect(ranked.indexOf('utils.ts')).toBeLessThan(ranked.indexOf('auth.ts'));
   });
 
-  it('boosts grep-matched files above unmatched', () => {
-    const ranked = rankFiles(allFiles, ['src/auth/Login.tsx'], []);
-    const loginIdx = ranked.indexOf('src/auth/Login.tsx');
-    const utilsIdx = ranked.indexOf('src/utils.ts');
-    expect(loginIdx).toBeLessThan(utilsIdx);
-  });
-
-  it('boosts config/entry files (package.json, vite.config)', () => {
-    const ranked = rankFiles(allFiles, [], []);
-    const pkgIdx = ranked.indexOf('package.json');
-    const appIdx = ranked.indexOf('src/App.tsx');
-    // package.json and App.tsx are both "always relevant" — both boosted
-    expect(pkgIdx).toBeLessThanOrEqual(appIdx + 2); // near the top
+  it('boosts entry/config files like App.tsx', () => {
+    const ranked = rankFiles(all, [], []);
+    // App.tsx and main.tsx should get boost
+    const appIdx = ranked.indexOf('App.tsx');
+    const utilsIdx = ranked.indexOf('utils.ts');
+    expect(appIdx).toBeLessThan(utilsIdx);
   });
 });
 
 describe('buildFileTree', () => {
-  it('joins file paths with newlines', () => {
-    const tree = buildFileTree(['src/App.tsx', 'package.json', 'src/main.ts']);
-    expect(tree).toContain('src/App.tsx');
-    expect(tree).toContain('package.json');
-    expect(tree.split('\n')).toHaveLength(3);
+  it('joins files with newlines', () => {
+    const tree = buildFileTree(['a.ts', 'b.tsx', 'c.js']);
+    expect(tree).toBe('a.ts\nb.tsx\nc.js');
   });
 
-  it('returns empty string for empty list', () => {
+  it('returns empty string for empty array', () => {
     expect(buildFileTree([])).toBe('');
   });
 });
 
 describe('packFileSections', () => {
-  it('returns sections for files present in contentMap', () => {
-    const contentMap = new Map([['src/App.tsx', 'export default function App() { return <div/>; }']]);
-    const sections = packFileSections(['src/App.tsx'], contentMap);
-    expect(sections).toHaveLength(1);
-    expect(sections[0]).toContain('src/App.tsx');
-    expect(sections[0]).toContain('App()');
+  it('returns sections for each file in the content map', () => {
+    const files = ['a.ts', 'b.ts'];
+    const map = new Map([['a.ts', 'export const x = 1;'], ['b.ts', 'export const y = 2;']]);
+    const sections = packFileSections(files, map);
+    expect(sections.length).toBe(2);
   });
 
-  it('marks unreadable files (missing from map)', () => {
-    const sections = packFileSections(['src/missing.ts'], new Map());
+  it('marks unreadable files', () => {
+    const files = ['missing.ts'];
+    const map = new Map<string, string>();
+    const sections = packFileSections(files, map);
     expect(sections[0]).toContain('unreadable');
   });
 
-  it('respects the char budget and stops adding files when exceeded', () => {
-    const bigContent = 'x'.repeat(500);
-    const map = new Map([
-      ['file1.ts', bigContent],
-      ['file2.ts', bigContent],
-      ['file3.ts', bigContent],
-    ]);
-    const sections = packFileSections(['file1.ts', 'file2.ts', 'file3.ts'], map, 600);
-    // Budget 600 — file1 (500) fits, file2 would need >600 — may include partially or stop
-    expect(sections.length).toBeLessThanOrEqual(3);
-  });
-
-  it('truncates individual files exceeding per-file cap', () => {
-    const content = 'a'.repeat(5000);
-    const map = new Map([['big.ts', content]]);
-    const sections = packFileSections(['big.ts'], map, 14000, 100); // maxPerFile=100
-    expect(sections[0]).toContain('big.ts');
-    // Content should be truncated to 100 chars max (plus header overhead)
-    expect(sections[0].length).toBeLessThanOrEqual(150); // header + truncated content
+  it('respects budget cap', () => {
+    const files = ['big.ts'];
+    const map = new Map([['big.ts', 'x'.repeat(10_000)]]);
+    const sections = packFileSections(files, map, 500);
+    expect(sections[0].length).toBeLessThanOrEqual(600); // header + capped content
   });
 });

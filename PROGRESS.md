@@ -1378,6 +1378,26 @@ Adds 8 example prompt cards to Pro Chat empty state (Bolt.new-style "blank page"
   injection on build instructions (prevents appContextInjector test regression).
 Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
 
+### Milestone G11 — Build Reliability + Real-Time File Display (2026-06-21)
+Root cause fix for "Build stream ended without a result" (reported by user after "photo editing app"):
+
+**Root cause**: Cloud Run kills requests at 300s hard limit. SOFT_DEADLINE_MS was 240s, but
+post-engine work had NO timeout: `summarizeForMemory` (unbounded AI call, up to 60s) +
+`previewService.startPreview` (unbounded, up to 30s) + code review (capped at 12s) =
+potentially 100s of additional time after the soft deadline, pushing past the 300s kill.
+
+**Fixes in build.ts**:
+- SOFT_DEADLINE_MS: 240,000ms → 200,000ms (3m20s, gives 100s buffer before 300s kill)
+- `summarizeForMemory`: add 8s Promise.race cap; falls back to existing summary on timeout
+- `previewService.startPreview`: add 8s Promise.race cap; preview omitted gracefully if slow
+- Max post-engine time: 8s + 8s + 12s = 28s. Total max: 200s + 28s = 228s (72s under limit)
+
+**UX improvement in App.tsx**:
+- Handle `files` events from the agent loop to show file names being written: "✏️ App.tsx, utils.ts"
+  Previously these events were silently dropped; now users see live coding progress.
+
+Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
+
 ### Milestone G10 — Iterative Agent Build + Retry Memory Fix (2026-06-21)
 Fixes two root-cause bugs reported by the user ("photo editing app" failure + "try again" amnesia):
 

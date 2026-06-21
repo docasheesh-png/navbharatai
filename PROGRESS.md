@@ -275,11 +275,17 @@ Systematic rename touches:
 - User-visible UI strings and error messages
 - AppKnowledgeBase entries updated
 
-### 3.5 — Remove all fake/stub features
-**Status: TODO**
+### 3.5 — Remove all fake/stub features ✅ DONE (2026-06-21)
+**Branch:** `claude/phase-2.5-validation-gates`
 
-Any button or route calling a mock/stub: audit → remove → replace with honest
-"coming soon" label or real implementation. Nothing fake visible in production.
+Full audit performed. Fake features fixed:
+- `MultiCloudDeploy.tsx` — `Math.random()` fake deployment simulation + fake URLs removed; replaced with honest CLI deploy instructions for each platform.
+- `AppHealthMonitor.tsx` — all metrics were `Math.random()` simulated; added prominent "Demo Data" badge.
+- `cloudsync.ts` — fake Firebase/Vercel project lists (hardcoded fake names); replaced with `not_available` responses — UI already falls back to templates gracefully.
+- `team.ts` — returned `ok: true, "Invite sent"` without sending any email; now returns `emailSent: false` + honest message; UI updated.
+- `firebaseAuth.ts` — 383-line fake OAuth flow that fabricated service-account JSON; replaced with honest "not available" page with real CLI instructions (75 lines). Sends `FIREBASE_AUTH_CANCELLED` postMessage to opener.
+- `audit.ts` — already returned `audit_not_available` (honest, no change needed).
+- Payment simulator — intentional fallback when credentials missing (`isSimulator: true` flag sent to client — client handles it). Acceptable.
 
 **Phase 3 DONE when:** One unified surface (chat IS the IDE). All legacy in ARCHIVE/.
 One editor. NavBharatAI Pro v2.0 brand live. Zero fake features.

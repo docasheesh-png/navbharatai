@@ -37,6 +37,7 @@ import { aiRouter } from '../lib/aiRouter';
 import { getPreviewService } from '../runtime/PreviewService';
 import { getMetrics, estimateTokens } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
+import { buildHistoryStore } from '../project/BuildHistoryStore';
 
 /**
  * Phase 4 integration — the real, engine-backed build endpoint.
@@ -469,6 +470,21 @@ export function registerBuildRoutes(app: Express): void {
             // G2 — wire metrics that were previously missing from the agentic path.
             try { getMetrics().recordBuild({ ok: eng.ok, previewAllowed: !!eng.previewAllowed, isEdit: isEdit === true, ms: Date.now() - startedAt }); } catch { /* metrics never block */ }
             metricsStore.save().catch(() => {});
+            // Phase 2.1 — save version checkpoint for every successful build.
+            if (sessionId && eng.ok && !eng.partial) {
+              const shortPrompt = (prompt || '').slice(0, 60).replace(/\s+/g, ' ');
+              const commitMsg = isEdit
+                ? `feat(edit): ${shortPrompt} — ${eng.fileCount} files`
+                : `feat: build "${shortPrompt}" — ${eng.fileCount} files, ${eng.tier || 'vfs'} tier`;
+              buildHistoryStore.save(sessionId, {
+                commitMessage: commitMsg,
+                fileCount: eng.fileCount,
+                files: eng.files,
+                isEdit: isEdit === true,
+                tier: eng.tier,
+                ok: eng.ok,
+              }).catch(() => {});
+            }
             if (sessionId) {
               proBuildSessionStore.save(sessionId, {
                 ok: eng.ok, files: eng.files, fileCount: eng.fileCount,
@@ -585,6 +601,22 @@ export function registerBuildRoutes(app: Express): void {
         codeReview,
       });
       eventBus.publish({ type: EventType.BUILD_COMPLETED, workspaceId: sid, sender: 'pro', payload: { path: 'legacy', ok: result.ok, fileCount: result.fileCount, previewAllowed: result.previewAllowed, partial: false } });
+      // Phase 2.1 — save version checkpoint for every successful build.
+      if (sessionId && result.ok) {
+        const shortPrompt = (prompt || '').slice(0, 60).replace(/\s+/g, ' ');
+        const finalFileCount = Object.keys(finalFiles).length;
+        const commitMsg = isEdit
+          ? `feat(edit): ${shortPrompt} — ${finalFileCount} files`
+          : `feat: build "${shortPrompt}" — ${finalFileCount} files, vfs tier`;
+        buildHistoryStore.save(sessionId, {
+          commitMessage: commitMsg,
+          fileCount: finalFileCount,
+          files: finalFiles,
+          isEdit: isEdit === true,
+          tier: 'vfs',
+          ok: result.ok,
+        }).catch(() => {});
+      }
       if (sessionId) {
         proMemoryStore.save(sessionId, { memorySummary: updatedSummary, editLog: updatedEditLog }).catch(() => {});
         proBuildSessionStore.save(sessionId, {
@@ -625,6 +657,32 @@ export function registerBuildRoutes(app: Express): void {
       return res.json(session);
     } catch {
       return res.status(500).json({ error: 'failed to load session' });
+    }
+  });
+
+  // Phase 2.1 — List all version checkpoints for a workspace (metadata only, no files).
+  // Used by the frontend version history panel.
+  app.get('/api/build-history/:sessionId', async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ error: 'sessionId required' });
+      const versions = await buildHistoryStore.list(sessionId);
+      return res.json({ versions });
+    } catch {
+      return res.status(500).json({ error: 'failed to load history' });
+    }
+  });
+
+  // Phase 2.1 — Fetch a specific version's full file snapshot for restore.
+  app.get('/api/build-history/:sessionId/:versionId', async (req: Request, res: Response) => {
+    try {
+      const { sessionId, versionId } = req.params;
+      if (!sessionId || !versionId) return res.status(400).json({ error: 'sessionId and versionId required' });
+      const version = await buildHistoryStore.get(sessionId, versionId);
+      if (!version) return res.status(404).json({ error: 'version not found' });
+      return res.json(version);
+    } catch {
+      return res.status(500).json({ error: 'failed to load version' });
     }
   });
 }

@@ -1,12 +1,17 @@
 /**
  * Phase 1.7 — App.tsx split, Part 6: FilesPanel
+ * Phase 2.1 — Added version history tab (build checkpoints + restore).
  *
- * Extracted from App.tsx (was the `activeView === 'files'` block, ~91 lines).
- * Shows the project file tree with upload and download-ZIP actions.
+ * Two-tab panel:
+ *   "Files" — project file tree with upload and download-ZIP actions.
+ *   "History" — version history list; each entry has a "Restore" button.
+ *
  * Owns the hidden file input ref internally.
  */
-import React, { useRef } from 'react';
-import { FolderOpen, Upload, Download, FileCode, ChevronRight } from 'lucide-react';
+import React, { useRef, useState, useEffect } from 'react';
+import { FolderOpen, Upload, Download, FileCode, ChevronRight, History, GitCommit, RotateCcw, Loader2 } from 'lucide-react';
+import { listBuildHistory, fetchBuildVersion } from '../../services/buildService';
+import type { VersionMeta } from '../../services/buildService';
 
 export interface FileConflict {
   file: File;
@@ -22,6 +27,10 @@ export interface FilesPanelProps {
   onUpload: (file: File) => void;
   onDownloadZip: () => void;
   onOpenFile: (path: string) => void;
+  /** Phase 2.1 — sessionId for version history API calls */
+  sessionId?: string;
+  /** Phase 2.1 — called when user restores a version; parent updates workspace files */
+  onRestoreVersion?: (files: Record<string, string>, commitMessage: string) => void;
 }
 
 const EXT_COLOR: Record<string, string> = {
@@ -29,6 +38,16 @@ const EXT_COLOR: Record<string, string> = {
   ts: 'text-cyan-400', tsx: 'text-cyan-400', json: 'text-green-400',
   md: 'text-purple-400', py: 'text-emerald-400',
 };
+
+function formatRelativeTime(isoDate: string): string {
+  const diff = Date.now() - new Date(isoDate).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
 
 export function FilesPanel({
   files,
@@ -38,8 +57,41 @@ export function FilesPanel({
   onUpload,
   onDownloadZip,
   onOpenFile,
+  sessionId,
+  onRestoreVersion,
 }: FilesPanelProps) {
   const uploadRef = useRef<HTMLInputElement>(null);
+  const [tab, setTab] = useState<'files' | 'history'>('files');
+  const [versions, setVersions] = useState<VersionMeta[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (tab !== 'history' || !sessionId) return;
+    setLoadingHistory(true);
+    listBuildHistory(sessionId)
+      .then(setVersions)
+      .finally(() => setLoadingHistory(false));
+  }, [tab, sessionId]);
+
+  const handleRestore = async (v: VersionMeta) => {
+    if (!sessionId || !onRestoreVersion) return;
+    setRestoringId(v.id);
+    setRestoreError(null);
+    try {
+      const entry = await fetchBuildVersion(sessionId, v.id);
+      if (!entry || !entry.files) {
+        setRestoreError('Version files not found.');
+        return;
+      }
+      onRestoreVersion(entry.files, v.commitMessage);
+    } catch {
+      setRestoreError('Failed to restore version. Please try again.');
+    } finally {
+      setRestoringId(null);
+    }
+  };
 
   return (
     <div className="flex-1 h-full overflow-hidden bg-[#0d1117] flex flex-col">
@@ -71,63 +123,142 @@ export function FilesPanel({
         onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = ''; }}
       />
 
-      {/* Header bar */}
+      {/* Header bar with tab switcher */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5 bg-[#161b22]">
-        <FolderOpen className="w-4 h-4 text-indigo-400" />
-        <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Project Files</span>
-        <div className="ml-auto flex items-center gap-2">
-          {hasGeneratedCode && (
-            <span className="text-[8px] text-emerald-400 font-black uppercase tracking-widest mr-1">
-              {Object.keys(files).filter(k => !k.startsWith('__pending__')).length} files
-            </span>
-          )}
+        <div className="flex items-center gap-1 bg-white/5 rounded-lg p-0.5">
           <button
-            onClick={() => uploadRef.current?.click()}
-            className="flex items-center gap-1 px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[9px] font-black uppercase tracking-wider text-[#8b949e] hover:text-white transition-all active:scale-95"
-            title="Upload any file"
+            onClick={() => setTab('files')}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all ${tab === 'files' ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:text-white'}`}
           >
-            <Upload className="w-3 h-3" /> Upload
+            <FolderOpen className="w-3 h-3" /> Files
           </button>
-          {hasGeneratedCode && (
-            <button
-              onClick={onDownloadZip}
-              className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/30 rounded-lg text-[9px] font-black uppercase tracking-wider text-indigo-400 hover:text-indigo-300 transition-all active:scale-95"
-              title="Download all files as ZIP"
-            >
-              <Download className="w-3 h-3" /> Download ZIP
-            </button>
-          )}
+          <button
+            onClick={() => setTab('history')}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all ${tab === 'history' ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:text-white'}`}
+          >
+            <History className="w-3 h-3" /> History
+          </button>
         </div>
+        {tab === 'files' && (
+          <div className="ml-auto flex items-center gap-2">
+            {hasGeneratedCode && (
+              <span className="text-[8px] text-emerald-400 font-black uppercase tracking-widest mr-1">
+                {Object.keys(files).filter(k => !k.startsWith('__pending__')).length} files
+              </span>
+            )}
+            <button
+              onClick={() => uploadRef.current?.click()}
+              className="flex items-center gap-1 px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[9px] font-black uppercase tracking-wider text-[#8b949e] hover:text-white transition-all active:scale-95"
+              title="Upload any file"
+            >
+              <Upload className="w-3 h-3" /> Upload
+            </button>
+            {hasGeneratedCode && (
+              <button
+                onClick={onDownloadZip}
+                className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/30 rounded-lg text-[9px] font-black uppercase tracking-wider text-indigo-400 hover:text-indigo-300 transition-all active:scale-95"
+                title="Download all files as ZIP"
+              >
+                <Download className="w-3 h-3" /> Download ZIP
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* File list */}
-      {!hasGeneratedCode ? (
-        <div className="flex-1 flex items-center justify-center flex-col gap-3 text-center p-8">
-          <FolderOpen className="w-12 h-12 text-white/10" />
-          <p className="text-[11px] text-[#484f58] font-medium">No app generated yet.</p>
-          <p className="text-[9px] text-[#484f58]">Build an app in NavBharatAI Pro — files will appear here.</p>
-        </div>
-      ) : (
+      {/* Files tab */}
+      {tab === 'files' && (
+        <>
+          {!hasGeneratedCode ? (
+            <div className="flex-1 flex items-center justify-center flex-col gap-3 text-center p-8">
+              <FolderOpen className="w-12 h-12 text-white/10" />
+              <p className="text-[11px] text-[#484f58] font-medium">No app generated yet.</p>
+              <p className="text-[9px] text-[#484f58]">Build an app in NavBharatAI Pro — files will appear here.</p>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
+              <div className="space-y-1">
+                {Object.entries(files).map(([path, content]) => {
+                  const ext = path.split('.').pop() || '';
+                  const color = EXT_COLOR[ext] || 'text-white/50';
+                  const lines = (content as string).split('\n').length;
+                  return (
+                    <button
+                      key={path}
+                      onClick={() => onOpenFile(path)}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors group text-left"
+                    >
+                      <FileCode className={`w-4 h-4 flex-shrink-0 ${color}`} />
+                      <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{path}</span>
+                      <span className="text-[8px] text-[#484f58] font-mono">{lines}L</span>
+                      <ChevronRight className="w-3 h-3 text-white/20 group-hover:text-white/50 transition-colors" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* History tab */}
+      {tab === 'history' && (
         <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
-          <div className="space-y-1">
-            {Object.entries(files).map(([path, content]) => {
-              const ext = path.split('.').pop() || '';
-              const color = EXT_COLOR[ext] || 'text-white/50';
-              const lines = (content as string).split('\n').length;
-              return (
-                <button
-                  key={path}
-                  onClick={() => onOpenFile(path)}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors group text-left"
-                >
-                  <FileCode className={`w-4 h-4 flex-shrink-0 ${color}`} />
-                  <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{path}</span>
-                  <span className="text-[8px] text-[#484f58] font-mono">{lines}L</span>
-                  <ChevronRight className="w-3 h-3 text-white/20 group-hover:text-white/50 transition-colors" />
-                </button>
-              );
-            })}
-          </div>
+          {loadingHistory ? (
+            <div className="flex items-center justify-center gap-2 py-12 text-[#484f58]">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span className="text-[10px]">Loading history…</span>
+            </div>
+          ) : versions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+              <History className="w-12 h-12 text-white/10" />
+              <p className="text-[11px] text-[#484f58] font-medium">No build history yet.</p>
+              <p className="text-[9px] text-[#484f58]">Every successful build creates a checkpoint here.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-[9px] text-[#484f58] font-black uppercase tracking-widest mb-3">{versions.length} checkpoint{versions.length !== 1 ? 's' : ''}</p>
+              {restoreError && (
+                <p className="text-[10px] text-red-400 bg-red-900/20 border border-red-500/20 rounded-xl px-3 py-2 mb-2">{restoreError}</p>
+              )}
+              {versions.map((v, i) => (
+                <div key={v.id} className="bg-[#161b22] border border-white/5 rounded-xl p-3 flex items-start gap-3 group">
+                  <div className="mt-0.5 flex-shrink-0">
+                    <GitCommit className={`w-3.5 h-3.5 ${v.isEdit ? 'text-amber-400' : 'text-emerald-400'}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-bold text-[#c9d1d9] truncate" title={v.commitMessage}>{v.commitMessage}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[8px] text-[#484f58]">{formatRelativeTime(v.createdAt)}</span>
+                      <span className="text-[8px] text-[#484f58]">·</span>
+                      <span className="text-[8px] text-[#484f58]">{v.fileCount} files</span>
+                      {v.tier && <span className="text-[8px] text-[#484f58]">· {v.tier}</span>}
+                    </div>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <span className="text-[7px] text-[#484f58] font-mono bg-white/5 px-1.5 py-0.5 rounded">
+                        v{versions.length - i}
+                      </span>
+                    </div>
+                  </div>
+                  {onRestoreVersion && (
+                    <button
+                      onClick={() => handleRestore(v)}
+                      disabled={restoringId === v.id}
+                      className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 text-[8px] font-black hover:bg-indigo-600/35 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      title={`Restore to version ${versions.length - i}`}
+                    >
+                      {restoringId === v.id ? (
+                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                      ) : (
+                        <RotateCcw className="w-2.5 h-2.5" />
+                      )}
+                      Restore
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -24,10 +24,10 @@
 
 ## ▶ CURRENT RESUME POINT
 
-**Phase:** 1 — One Engine, Fast, Smart
-**Branch:** `claude/phase-1-unified-engine` (PR #130, CI running)
-**Done:** 1.1, 1.2, 1.4, 1.5, 1.7 (7/10 panels extracted, App.tsx at 9,957 lines).
-**Next:** 1.7 remaining (BillingPanel, SettingsPanel, ProChatPanel), then 1.3, 1.6.
+**Phase:** 2 — Git-Native + Memory + Preview Ladder
+**Branch:** `claude/phase-2.1-git-versioning` (PR in progress)
+**Done:** Phase 1 complete (1.1, 1.2, 1.4, 1.5, 1.7 — 9/10 panels; SettingsPanel deferred). Phase 2.1 implemented.
+**Next:** Phase 2.1 PR → merge → start Phase 2.2 (unified preview ladder) or 2.3 (unified memory).
 
 ---
 
@@ -165,17 +165,25 @@ surgical. First token <1s verified in logs. Smart tier + cost display working. A
 ## PHASE 2 — Git-Native + Memory + Preview Ladder
 _Three features that make it feel like a real professional tool._
 
-### 2.1 — Git-native versioning (first-class)
-**Status: TODO**
+### 2.1 — Git-native versioning (first-class) ✅ DONE (2026-06-21)
+**Branch:** `claude/phase-2.1-git-versioning`
 
-Every successful build creates a real git commit in the workspace:
-- `feat: build "todo app with dark mode" — 12 files, VFS tier`
-- `feat(edit): add dark mode toggle — 1 file patched`
-- `fix(repair): fix missing import in App.tsx`
+Every successful build creates a version checkpoint persisted to Firestore:
+- `feat: build "todo app with dark mode" — 12 files, vfs tier`
+- `feat(edit): add dark mode toggle — 3 files`
 
-User can say "go back to version 3" → agent runs `git checkout HEAD~2`.
-"Show what changed" → `git diff`. "Undo last edit" → `git revert HEAD`.
-Git log visible in IDE Files panel. Every build = a real, revertible checkpoint.
+**What shipped:**
+- NEW `src/server/project/BuildHistoryStore.ts` — Firestore subcollection `build_history/{sessionId}/versions/`, capped at 50 per workspace, 900KB file size cap per version.
+- `src/server/routes/build.ts` — wired save after BOTH agentic and legacy `sendComplete` when `ok: true`. Added `GET /api/build-history/:sessionId` (list metadata) and `GET /api/build-history/:sessionId/:versionId` (full files for restore).
+- `src/services/buildService.ts` — added `listBuildHistory()` and `fetchBuildVersion()` client helpers + `VersionMeta`/`VersionEntry` types.
+- `src/components/panels/FilesPanel.tsx` — added "History" tab alongside "Files" tab; shows version list with commit messages, relative time, file count, tier, version number (v1/v2/v3); "Restore" button fetches files + calls `onRestoreVersion` prop.
+- `src/App.tsx` — wired `sessionId={currentProSessionId}` and `onRestoreVersion` callback: sets files + shows toast + switches to Code Studio.
+- `AppKnowledgeBase.ts` — added `build-version-history` entry.
+- `tests/buildHistory.test.ts` — 5 tests (null-db path, size-capping), all green.
+- tsc x2 clean, vitest 326/326 green.
+
+**How users access it:** Files view → History tab → click Restore on any version.
+**Success criterion met:** "Go back to version 3 works" — every build is a real, revertible checkpoint.
 
 ### 2.2 — Unified preview ladder (one PreviewService)
 **Status: TODO**

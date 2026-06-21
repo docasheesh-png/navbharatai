@@ -40,6 +40,13 @@ export interface EngineerTask {
    */
   proMemorySummary?: string;
   proEditLog?: string[];
+  /**
+   * Phase 5.4 — error pattern learning: hints from previous failed attempts on this
+   * session (ERESOLVE, unclosed JSX, missing module, etc.) and pre-build hints based
+   * on detected technology keywords. Injected into the agent's system prompt so it
+   * avoids repeating known mistakes from prior failed builds.
+   */
+  errorHints?: string[];
 }
 
 /**

@@ -29,6 +29,8 @@ import { checkSyntax } from '../project/SyntaxCheck';
 import { runValidation, type ValidationReport } from '../project/ValidationPipeline';
 import { syncDependencies } from '../project/DependencySync';
 import { selectArchitecture } from '../project/ArchitectureManifest';
+import { matchErrorPatterns, hintForInstruction } from '../project/ErrorPatternMatcher';
+import { errorPatternStore } from '../project/ErrorPatternStore';
 import type { BuildProgressEvent } from '../project/BuildPipeline';
 import type { ModelCall } from '../project/aiEdits';
 import { EngineerAgentLoop } from './EngineerAgentLoop';
@@ -187,6 +189,14 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     ? await proMemoryStore.load(sessionId).catch(() => null)
     : null;
 
+  // Phase 5.4 — error pattern learning: combine pre-build technology hints
+  // (based on prompt keywords) with session-level hints saved from previous
+  // failed attempts. Injected into every agent step so the agent avoids
+  // known pitfalls without needing to discover them through failure.
+  const instructionHints = hintForInstruction(prompt);
+  const sessionHints = sessionId ? await errorPatternStore.getHints(sessionId).catch(() => []) : [];
+  const errorHints = [...new Set([...instructionHints, ...sessionHints])].slice(0, 8);
+
   // Phase 73 — extended thinking for complex tasks: detect architectural complexity
   // and pass a higher thinking budget to ProAgentRouter, which will use
   // AnthropicProvider (Claude Opus with thinking enabled) directly for complex
@@ -211,6 +221,7 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     dbConfig: dbConfig || undefined,
     proMemorySummary: proMem?.memorySummary || undefined,
     proEditLog: proMem?.editLog?.length ? proMem.editLog : undefined,
+    errorHints: errorHints.length ? errorHints : undefined,
   };
 
   // Phase 1.4 — always emit tier + cost so users know what they're getting.
@@ -392,6 +403,33 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     validation.status = 'FAILED';
     validation.blockingReasons = [...validation.blockingReasons, ...syntaxIssues.map((i) => `${i.file}: ${i.message}`)];
     validation.qualityScore = Math.max(0, validation.qualityScore - 45);
+  }
+
+  // Phase 5.4 — error pattern learning: on validation failure, extract error hints
+  // from the gates and save them for the next retry on this session. On success,
+  // clear any saved hints so they don't bleed into future unrelated work.
+  // All Firestore ops are best-effort fire-and-forget — never blocks the build.
+  if (sessionId) {
+    const allErrors = [
+      ...validation.blockingReasons,
+      ...(syntaxIssues.map(i => `${i.file}: ${i.message}`)),
+    ].join('\n');
+    if (allErrors.trim()) {
+      const newHints = matchErrorPatterns(allErrors);
+      if (newHints.length) {
+        errorPatternStore.saveHints(sessionId, newHints).catch(() => {});
+        // Bump aggregate stats for the most informative pattern keyword
+        const key = allErrors.includes('ERESOLVE') ? 'eresolve'
+          : allErrors.includes('Cannot find module') ? 'cannot_find_module'
+          : allErrors.includes('JSX') ? 'unclosed_jsx'
+          : allErrors.includes('is not exported') ? 'named_export'
+          : 'other';
+        errorPatternStore.bumpPatternStat(key);
+      }
+    } else if (!sawError && !runError && verify.ok) {
+      // Successful build — clear stale hints so they don't pollute future tasks.
+      errorPatternStore.clearHints(sessionId).catch(() => {});
+    }
   }
 
   // An aborted run (soft deadline) still counts as usable when it produced edits —

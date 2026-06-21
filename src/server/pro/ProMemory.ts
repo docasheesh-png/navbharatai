@@ -82,10 +82,13 @@ class ProMemoryStore {
     const db = this.getDb();
     if (!db || !sessionId) return;
     try {
-      await db.collection('pro_memories').doc(sessionId).set(
-        { decisions: admin.firestore.FieldValue.arrayUnion(decision), updatedAt: Date.now() },
-        { merge: true },
-      );
+      const ref = db.collection('pro_memories').doc(sessionId);
+      await db.runTransaction(async tx => {
+        const snap = await tx.get(ref);
+        const existing: string[] = snap.exists ? (snap.data()?.decisions ?? []) : [];
+        const trimmed = [...existing, decision].slice(-50);
+        tx.set(ref, { decisions: trimmed, updatedAt: Date.now() }, { merge: true });
+      });
     } catch {}
   }
 
@@ -111,13 +114,13 @@ class ProMemoryStore {
     const db = this.getDb();
     if (!db || !sessionId) return;
     try {
-      await db.collection('pro_memories').doc(sessionId).set(
-        {
-          errorPatterns: admin.firestore.FieldValue.arrayUnion({ pattern, fix }),
-          updatedAt: Date.now(),
-        },
-        { merge: true },
-      );
+      const ref = db.collection('pro_memories').doc(sessionId);
+      await db.runTransaction(async tx => {
+        const snap = await tx.get(ref);
+        const existing: Array<{ pattern: string; fix: string }> = snap.exists ? (snap.data()?.errorPatterns ?? []) : [];
+        const trimmed = [...existing, { pattern, fix }].slice(-20);
+        tx.set(ref, { errorPatterns: trimmed, updatedAt: Date.now() }, { merge: true });
+      });
     } catch {}
   }
 }

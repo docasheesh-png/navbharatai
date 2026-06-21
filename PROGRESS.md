@@ -330,11 +330,14 @@ Metrics already persisted (G2 done). Add:
 - Cloud Trace spans on `/api/build-stream` (start → plan → code → preview → done)
 - Alerts: build error rate >10%, p95 latency >30s, E2B quota >80%
 
-### 4.4 — Cap unbounded Firestore growth
-**Status: TODO**
+### 4.4 — Cap unbounded Firestore growth ✅ DONE (2026-06-21)
+**Branch:** `claude/g6-dependency-sync`
 
-`job-log` arrayUnion grows unbounded. Cap at last 100 entries per workspace.
-Daily Cloud Function to trim old entries.
+Prevents Firestore documents from hitting the 1MB size limit on verbose/long builds.
+
+- `FirestoreJobStore.ts` — `updateJobStatus()` now uses a Firestore transaction to read logs, append the new entry, and trim to **last 100 entries** before writing. Replaces the unbounded `arrayUnion(log)` call.
+- `ProMemory.ts` — `logDecision()` and `logErrorPattern()` also switched to transactions with caps: **50 decisions** and **20 error patterns** per session. Prevents pro_memories documents from growing unbounded across long projects.
+- tsc x2 clean, vitest 350/350 green
 
 **Phase 4 DONE when:** Safe at 10 Cloud Run instances (no cross-instance corruption).
 Every build shows tier + cost. Alerts firing. Load test baseline documented.

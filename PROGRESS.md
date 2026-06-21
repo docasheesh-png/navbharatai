@@ -25,9 +25,9 @@
 ## ▶ CURRENT RESUME POINT
 
 **Phase:** 1 — One Engine, Fast, Smart
-**Branch:** `claude/phase-1-unified-engine` (PR open, CI running)
-**Done:** 1.1 (UnifiedBuildOrchestrator interface + async-generator wrapper), 1.2 (ENGINE=v2 flag in build-stream), 1.4 (tier cost display), 1.5 (first token <1s in build-stream).
-**Next:** 1.7 (App.tsx split — extract ProChatPanel, separate PR), then 1.3, 1.6.
+**Branch:** `claude/phase-1-unified-engine` (PR #130, CI running)
+**Done:** 1.1, 1.2, 1.4, 1.5, 1.7 (7/10 panels extracted, App.tsx at 9,957 lines).
+**Next:** 1.7 remaining (BillingPanel, SettingsPanel, ProChatPanel), then 1.3, 1.6.
 
 ---
 
@@ -136,17 +136,24 @@ Match model capability to task type:
 Cuts cost ~40%, improves output quality. Grok primary; fallback chain unchanged.
 
 ### 1.7 — App.tsx split (PARALLEL — starts Phase 1, completes Phase 5)
-**Status: TODO — start immediately, never defer to Phase 5**
+**Status: IN PROGRESS (2026-06-21) — 7 panels extracted, App.tsx now 9,957 lines (was 10,658)**
 
 App.tsx is ~10,000 lines. Must be split in parallel with all other work to prevent
 1000-line merge conflicts in Phase 2/3 PRs. One module extracted per PR, no behavior change:
-- `ProChatPanel` — Pro Chat UI, build state, event handlers
-- `EngineerPanel` — Engineer AI chat UI
-- `SettingsPanel` — all settings screens
-- `IDEPanel` — editor, file tree, terminal tabs
-- `BillingPanel` — wallet, plans, payment flow
-- `GalleryPanel` — Quick-Start Gallery
-- Shared hooks: `useProBuild`, `useEngineerSession`, `useFileSystem`
+
+**Extracted so far (all in `src/components/panels/`):**
+- ✅ `TemplatesPanel` — Project Blueprints gallery + My Templates (103 lines saved)
+- ✅ `GitViewPanel` — DevOps Engine header + GitPanel wrapper (82 lines saved)
+- ✅ `DeploySuccessPanel` — "App is Live!" screen (32 lines saved)
+- ✅ `AboutPanel` — About NavBharatAI page, admin-editable (118 lines saved)
+- ✅ `AdminLoginPanel` — Admin login gate + AdminDashboard mount (51 lines saved)
+- ✅ `FilesPanel` — Project file tree + upload/download (91 lines saved)
+- ✅ `DonationPanel` — Donation / support page, admin-editable (320 lines saved)
+
+**Still TODO:**
+- `SettingsPanel` — all settings screens (~992 lines — complex, settingsScreen state external)
+- `BillingPanel` — wallet, plans, payment flow (~638 lines)
+- `ProChatPanel` — Pro Chat UI + G8 deploy overlay (~229 lines)
 
 Each extraction: Read → Extract → tsc 0 → vitest green → merge.
 

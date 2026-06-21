@@ -309,6 +309,8 @@ export default function App() {
     part?: number;
     /** G3 — Execution tier reported by the agentic engine: 'vfs' | 'cloudrun' | 'e2b'. */
     tier?: 'vfs' | 'cloudrun' | 'e2b';
+    /** G5 — Code review result from the last completed build. */
+    codeReview?: import('./services/buildService').CodeReviewResult;
   }>({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
   // Bounds the automatic "continue" chain when the server returns a partial build.
   const proAutoContinueRef = useRef(0);
@@ -4393,6 +4395,10 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
           if (engineRes?.tier) {
             setProBuildProgress(prev => ({ ...prev, tier: engineRes.tier }));
           }
+          // G5 — store code review result for display in build summary.
+          if (engineRes?.codeReview) {
+            setProBuildProgress(prev => ({ ...prev, codeReview: (engineRes as any).codeReview }));
+          }
           if (engineRes && (typeof engineRes.memorySummary === 'string' || Array.isArray(engineRes.editLog))) {
             setSessions(prev => prev.map(s => s.id === currentProSessionId
               ? {
@@ -4411,9 +4417,13 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
               ? (val.gates.filter(g => g.status === 'fail').flatMap(g => g.messages).concat(
                   val.gates.filter(g => g.status === 'pending').map(g => `${g.name} — pending (infra)`)))
               : v.issues.map((i: any) => `${i.file}: ${i.message}`);
+            const cr = (engineRes as any).codeReview;
+            const crText = cr && typeof cr.score === 'number'
+              ? ` · Code Review ${cr.score >= 90 ? '🟢' : cr.score >= 70 ? '🟡' : '🔴'} ${cr.score}/100` + ((cr.findings || []).filter((f: any) => f.severity === 'critical' || f.severity === 'high').length > 0 ? ` (${(cr.findings || []).filter((f: any) => f.severity === 'critical' || f.severity === 'high').length} issue${(cr.findings || []).filter((f: any) => f.severity === 'critical' || f.severity === 'high').length > 1 ? 's' : ''})` : '')
+              : '';
             const replyText = val
-              ? `Build Status: ${val.status} · Quality ${score}/100${passed ? '' : ' — preview blocked, see diagnostics'}`
-              : (v.ok ? 'Built — verified clean.' : 'Built (with warnings).');
+              ? `Build Status: ${val.status} · Quality ${score}/100${passed ? '' : ' — preview blocked, see diagnostics'}${crText}`
+              : (v.ok ? `Built — verified clean.${crText}` : `Built (with warnings).${crText}`);
             finishBuild(engineRes.files, {
               reply: replyText,
               validationReport: { score, passed, repairsApplied: engineRes.repairAttempts, syntaxIssues: issues },
@@ -4608,6 +4618,20 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
                     ].join('\n');
                   }
 
+                  // G5 — code review section
+                  let codeReviewSection = '';
+                  const cr = (evt as any).codeReview;
+                  if (cr && typeof cr.score === 'number') {
+                    const crIcon = cr.score >= 90 ? '🟢' : cr.score >= 70 ? '🟡' : '🔴';
+                    const critical = (cr.findings || []).filter((f: any) => f.severity === 'critical' || f.severity === 'high');
+                    codeReviewSection = [
+                      ``,
+                      `**Code Review** ${crIcon} ${cr.score}/100`,
+                      `> ${cr.summary}`,
+                      ...(critical.length > 0 ? critical.slice(0, 3).map((f: any) => `> ⚠️ \`${f.file}\`: ${f.description}`) : ['> ✅ No critical issues found.']),
+                    ].join('\n');
+                  }
+
                   // Deploy prompt
                   const deployGuide = evt.deploymentGuide as string | undefined;
                   const deploySection = deployGuide
@@ -4623,6 +4647,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
                     `**Build Summary**`,
                     fileList.map((f: string) => `> \`${f}\` — ${isFileEdit ? 'updated' : 'created'}`).join('\n'),
                     validationSection,
+                    codeReviewSection,
                     ``,
                     `**App is live in Preview** →`,
                     deploySection,

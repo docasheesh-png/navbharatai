@@ -23,6 +23,23 @@ export interface VerifyReport {
   issues: ProjectIssue[];
 }
 
+/** G5 — Structured code review result returned alongside every new build. */
+export interface ReviewFinding {
+  file: string;
+  line?: number;
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  category: 'security' | 'quality' | 'performance' | 'tech_debt' | 'accessibility';
+  description: string;
+  fix: string;
+}
+
+export interface CodeReviewResult {
+  findings: ReviewFinding[];
+  summary: string;
+  score: number;
+  techDebt: string[];
+}
+
 export interface PreviewInfo {
   ok: boolean;
   target: 'static' | 'webcontainer' | 'server-container';
@@ -63,6 +80,8 @@ export interface BuildResponse {
   preview?: PreviewInfo;
   /** G3 — Which execution tier produced this build. */
   tier?: 'vfs' | 'cloudrun' | 'e2b';
+  /** G5 — AI code review: security, quality, and tech debt findings. */
+  codeReview?: CodeReviewResult;
 }
 
 export interface BuildRequest {
@@ -188,6 +207,8 @@ export interface BuildStreamEvent {
   partial?: boolean;
   /** G3 — Which execution tier ran this build: in-memory VFS, server container, or E2B cloud VM. */
   tier?: 'vfs' | 'cloudrun' | 'e2b';
+  /** G5 — AI code review: security, quality, and tech debt findings for new builds. */
+  codeReview?: CodeReviewResult;
 }
 
 /**

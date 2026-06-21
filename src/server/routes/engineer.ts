@@ -3,6 +3,7 @@ import { buildRateLimiter } from '../lib/authMiddleware';
 import { setCorsHeaders } from '../lib/cors';
 import { buildEngineerRouter } from '../EngineerAI/EngineerRouterFactory';
 import { EngineerAgentLoop } from '../EngineerAI/EngineerAgentLoop';
+import { WebAgentLoop } from '../EngineerAI/WebAgentLoop';
 import { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
@@ -237,6 +238,42 @@ export function registerEngineerRoutes(app: Express): void {
       res.json({ screenshot: result.screenshot, result: result.result });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Browser action failed.' });
+    }
+  });
+
+  // Computer-use Web Agent: given a goal ("play <song> on YouTube"), the agent
+  // drives the sandbox's real Chromium itself (screenshot → vision model → click/
+  // type/scroll → repeat), streaming a frame per step. Isolated from the app-build
+  // engine. Requires E2B (a real browser) → honest 503 otherwise.
+  app.post('/api/engineer-web-agent', async (req: Request, res: Response) => {
+    const { workspaceId, instruction } = req.body || {};
+    if (typeof workspaceId !== 'string' || !workspaceId || typeof instruction !== 'string' || !instruction.trim()) {
+      res.status(400).json({ error: 'workspaceId and instruction are required.' });
+      return;
+    }
+    if (!(actuator instanceof E2BActuator)) {
+      res.status(503).json({ error: 'The web agent needs a real cloud sandbox. Set E2B_API_KEY in production.' });
+      return;
+    }
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    const send = (d: unknown) => { if (!res.writableEnded) res.write(JSON.stringify(d) + '\n'); };
+    const ac = new AbortController();
+    req.on('close', () => ac.abort());
+    try {
+      const webAgent = new WebAgentLoop(router, actuator);
+      send({ type: 'status', message: 'Starting web agent…' });
+      for await (const ev of webAgent.run(workspaceId, instruction.trim(), ac.signal)) {
+        send(ev);
+      }
+    } catch (err: any) {
+      send({ type: 'error', message: err?.message || 'Web agent failed.' });
+    } finally {
+      if (!res.writableEnded) res.end();
     }
   });
 

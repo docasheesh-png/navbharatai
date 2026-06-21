@@ -3,7 +3,7 @@ import {
   HardHat, Loader2, Send, Square, Terminal, FolderOpen, Globe,
   CheckCircle2, AlertCircle, ChevronRight, Play, FileDiff, RotateCcw,
   ExternalLink, RefreshCw, History, Rocket, Copy, Check, Database,
-  ImagePlus, X, ChevronDown, ChevronUp,
+  ImagePlus, X, ChevronDown, ChevronUp, Bot,
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -130,6 +130,11 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
   const [browseBusy, setBrowseBusy] = useState(false);
   const [browseErr, setBrowseErr] = useState<string | null>(null);
   const [browseTypeInput, setBrowseTypeInput] = useState('');
+  // Computer-use web agent (AI drives the browser toward a goal).
+  const [agentGoal, setAgentGoal] = useState('');
+  const [agentRunning, setAgentRunning] = useState(false);
+  const [agentThought, setAgentThought] = useState<string | null>(null);
+  const [browseCursor, setBrowseCursor] = useState<{ x: number; y: number } | null>(null);
   // Phase 6.5 — Visible AI Cursor
   const [isDriving, setIsDriving] = useState(false);
   // Live frame during a drive action (replaces the screenshot array for instant streaming)
@@ -625,6 +630,59 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     }
   };
 
+  // Computer-use web agent: stream the agent driving the real browser toward a goal.
+  const runWebAgent = async () => {
+    const goal = agentGoal.trim();
+    if (!goal || agentRunning) return;
+    setAgentRunning(true);
+    setBrowseErr(null);
+    setIframeSrc(null);
+    setAgentThought('Starting…');
+    try {
+      const res = await fetch('/api/engineer-web-agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspaceIdRef.current, instruction: goal }),
+      });
+      if (!res.ok || !res.body) {
+        const d = await res.json().catch(() => ({}));
+        setBrowseErr(d?.error || 'Web agent failed to start.');
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let ev: any;
+          try { ev = JSON.parse(line); } catch { continue; }
+          if (ev.type === 'frame') {
+            if (ev.screenshot) setBrowseShot(ev.screenshot);
+            setBrowseCursor(ev.cursorX != null && ev.cursorY != null ? { x: ev.cursorX, y: ev.cursorY } : null);
+            setAgentThought(`Step ${ev.step}: ${ev.thought || ev.action}`);
+          } else if (ev.type === 'status') {
+            setAgentThought(ev.message);
+          } else if (ev.type === 'done') {
+            setAgentThought(`✓ ${ev.summary}`);
+            setBrowseCursor(null);
+          } else if (ev.type === 'error') {
+            setBrowseErr(ev.message);
+          }
+        }
+      }
+    } catch (e) {
+      setBrowseErr(e instanceof Error ? e.message : 'Network error.');
+    } finally {
+      setAgentRunning(false);
+    }
+  };
+
   const handleBrowseClick = (e: React.MouseEvent<HTMLImageElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = Math.round(((e.clientX - rect.left) / rect.width) * 1280);
@@ -675,6 +733,8 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     setBrowserUrlInput('');
     setBrowseShot(null);
     setBrowseErr(null);
+    setBrowseCursor(null);
+    setAgentThought(null);
     setScreenshots([]);
     setIsDriving(false);
     setLiveFrame(null);
@@ -1110,6 +1170,28 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
               )}
             </div>
 
+            {/* Computer-use web agent: tell the AI a goal and it drives the page itself. */}
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-indigo-500/5 shrink-0">
+              <Bot className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+              <input
+                type="text"
+                value={agentGoal}
+                onChange={e => setAgentGoal(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') runWebAgent(); }}
+                disabled={agentRunning}
+                placeholder='Tell the agent, e.g. "play lofi beats on YouTube"'
+                className="flex-1 min-w-0 bg-[#161b22] border border-white/10 rounded-lg px-3 py-1 text-xs text-white placeholder:text-[#586069] focus:outline-none focus:border-indigo-500/50 disabled:opacity-50"
+              />
+              <button
+                onClick={runWebAgent}
+                disabled={!agentGoal.trim() || agentRunning}
+                className="flex items-center gap-1 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-30 text-white text-xs rounded-lg transition-colors shrink-0"
+              >
+                {agentRunning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Bot className="w-3 h-3" />}
+                {agentRunning ? 'Running…' : 'Run'}
+              </button>
+            </div>
+
             {/* Phase 9B — Published URL banner */}
             {publishedUrl && (
               <div className="px-3 py-2 bg-green-500/10 border-b border-green-500/20 flex items-center gap-2 shrink-0">
@@ -1152,7 +1234,7 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
             {/* Interactive real-browser view (any site, via the sandbox's Chromium).
                 Active for external URLs; click the page to interact, type + Enter,
                 scroll. Falls back to an honest message + new-tab link if no sandbox. */}
-            {(browseShot || browseBusy || browseErr) && (
+            {(browseShot || browseBusy || browseErr || agentRunning) && (
               <div className="flex-1 flex flex-col min-h-0 bg-[#0a0e13]">
                 {browseErr ? (
                   <div className="flex-1 flex flex-col items-center justify-center text-center px-6 gap-3">
@@ -1186,9 +1268,15 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
                         placeholder="Click a field on the page, then type here + Enter"
                         className="flex-1 min-w-0 bg-[#161b22] border border-white/10 rounded-lg px-3 py-1 text-xs text-white placeholder:text-[#586069] focus:outline-none focus:border-indigo-500/50"
                       />
-                      {browseBusy && <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400 shrink-0" />}
+                      {(browseBusy || agentRunning) && <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400 shrink-0" />}
                       <span className="text-[10px] text-green-400 font-medium shrink-0">● Real browser</span>
                     </div>
+                    {agentThought && (
+                      <div className="px-3 py-1.5 border-b border-white/5 bg-indigo-500/5 shrink-0 flex items-center gap-2">
+                        <Bot className="w-3 h-3 text-indigo-400 shrink-0" />
+                        <span className="text-[11px] text-indigo-200/90 truncate">{agentThought}</span>
+                      </div>
+                    )}
                     <div className="flex-1 overflow-auto custom-scrollbar">
                       {browseShot ? (
                         <div className="relative cursor-pointer" onClick={handleBrowseClick} title="Click anywhere on the page to interact">
@@ -1196,6 +1284,22 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
                           {clickFlash && (
                             <div className="absolute pointer-events-none" style={{ left: `${clickFlash.x}%`, top: `${clickFlash.y}%`, transform: 'translate(-50%, -50%)', zIndex: 30 }}>
                               <div className="w-5 h-5 rounded-full border-2 border-yellow-400 animate-ping" />
+                            </div>
+                          )}
+                          {/* Agent's gliding cursor (Replit-style) while it drives the page. */}
+                          {browseCursor && (
+                            <div
+                              className="absolute pointer-events-none"
+                              style={{
+                                left: `${(browseCursor.x / 1280) * 100}%`,
+                                top: `${(browseCursor.y / 720) * 100}%`,
+                                transform: 'translate(-50%, -50%)',
+                                zIndex: 25,
+                                transition: 'left 0.45s cubic-bezier(0.22, 1, 0.36, 1), top 0.45s cubic-bezier(0.22, 1, 0.36, 1)',
+                              }}
+                            >
+                              <div className="absolute w-7 h-7 rounded-full border-2 border-indigo-400/70 animate-ping" style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }} />
+                              <div className="w-3 h-3 rounded-full bg-indigo-500 border-2 border-white shadow-lg shadow-indigo-500/50" />
                             </div>
                           )}
                         </div>

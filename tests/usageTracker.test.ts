@@ -1,90 +1,49 @@
-import { describe, it, expect } from 'vitest';
-import { UsageKind } from '../src/server/EngineerAI/UsageTracker';
+import { describe, it, expect, afterEach } from 'vitest';
+import { usageTracker } from '../src/server/EngineerAI/UsageTracker';
 
-// Import the class directly by constructing a fresh instance per test
-// (avoids sharing the module-level singleton across tests)
-class UsageTracker {
-  private map = new Map<string, any>();
-  private FIELD: Record<UsageKind, string> = {
-    sandbox: 'sandboxCreations', command: 'commands', build: 'builds',
-    screenshot: 'screenshots', aiCall: 'aiCalls',
-  };
-  record(workspaceId: string, kind: UsageKind): void {
-    if (!workspaceId) return;
-    const now = Date.now();
-    let u = this.map.get(workspaceId);
-    if (!u) {
-      u = { sandboxCreations: 0, commands: 0, builds: 0, screenshots: 0, aiCalls: 0, firstAt: now, lastAt: now };
-      this.map.set(workspaceId, u);
-    }
-    (u[this.FIELD[kind]] as number)++;
-    u.lastAt = now;
-  }
-  get(workspaceId: string) { return this.map.get(workspaceId) ?? null; }
-  clear(workspaceId: string) { this.map.delete(workspaceId); }
-}
+afterEach(() => {
+  usageTracker.clear('ws-1');
+  usageTracker.clear('ws-2');
+});
 
-describe('UsageTracker', () => {
-  it('returns null for an unknown workspace', () => {
-    const t = new UsageTracker();
-    expect(t.get('unknown-ws')).toBeNull();
+describe('usageTracker', () => {
+  it('returns null for unknown workspace', () => {
+    expect(usageTracker.get('unknown-ws')).toBeNull();
   });
 
-  it('creates a usage record on first record() call', () => {
-    const t = new UsageTracker();
-    t.record('ws-1', 'sandbox');
-    const u = t.get('ws-1');
-    expect(u).not.toBeNull();
-    expect(u!.sandboxCreations).toBe(1);
+  it('initializes counters to 0 on first record', () => {
+    usageTracker.record('ws-1', 'build');
+    const u = usageTracker.get('ws-1');
+    expect(u?.builds).toBe(1);
+    expect(u?.commands).toBe(0);
+    expect(u?.sandboxCreations).toBe(0);
   });
 
-  it('increments the correct counter for each kind', () => {
-    const t = new UsageTracker();
-    t.record('ws-2', 'sandbox');
-    t.record('ws-2', 'command');
-    t.record('ws-2', 'command');
-    t.record('ws-2', 'build');
-    t.record('ws-2', 'screenshot');
-    t.record('ws-2', 'aiCall');
-    const u = t.get('ws-2')!;
-    expect(u.sandboxCreations).toBe(1);
-    expect(u.commands).toBe(2);
-    expect(u.builds).toBe(1);
-    expect(u.screenshots).toBe(1);
-    expect(u.aiCalls).toBe(1);
+  it('increments the correct counter on each call', () => {
+    usageTracker.record('ws-1', 'command');
+    usageTracker.record('ws-1', 'command');
+    usageTracker.record('ws-1', 'screenshot');
+    const u = usageTracker.get('ws-1');
+    expect(u?.commands).toBe(2);
+    expect(u?.screenshots).toBe(1);
   });
 
-  it('does not create a record when workspaceId is empty', () => {
-    const t = new UsageTracker();
-    t.record('', 'build');
-    expect(t.get('')).toBeNull();
+  it('tracks separate workspaces independently', () => {
+    usageTracker.record('ws-1', 'build');
+    usageTracker.record('ws-2', 'aiCall');
+    expect(usageTracker.get('ws-1')?.builds).toBe(1);
+    expect(usageTracker.get('ws-2')?.aiCalls).toBe(1);
+    expect(usageTracker.get('ws-1')?.aiCalls).toBe(0);
   });
 
-  it('tracks first and last activity timestamps', () => {
-    const t = new UsageTracker();
-    const before = Date.now();
-    t.record('ws-3', 'command');
-    const after = Date.now();
-    const u = t.get('ws-3')!;
-    expect(u.firstAt).toBeGreaterThanOrEqual(before);
-    expect(u.lastAt).toBeLessThanOrEqual(after);
+  it('ignores record() with empty workspaceId', () => {
+    usageTracker.record('', 'build');
+    expect(usageTracker.get('')).toBeNull();
   });
 
-  it('clear() removes the workspace record', () => {
-    const t = new UsageTracker();
-    t.record('ws-4', 'build');
-    expect(t.get('ws-4')).not.toBeNull();
-    t.clear('ws-4');
-    expect(t.get('ws-4')).toBeNull();
-  });
-
-  it('tracks multiple workspaces independently', () => {
-    const t = new UsageTracker();
-    t.record('ws-a', 'build');
-    t.record('ws-a', 'build');
-    t.record('ws-b', 'command');
-    expect(t.get('ws-a')!.builds).toBe(2);
-    expect(t.get('ws-b')!.builds).toBe(0);
-    expect(t.get('ws-b')!.commands).toBe(1);
+  it('clears workspace data on clear()', () => {
+    usageTracker.record('ws-1', 'sandbox');
+    usageTracker.clear('ws-1');
+    expect(usageTracker.get('ws-1')).toBeNull();
   });
 });

@@ -25,9 +25,9 @@
 ## ▶ CURRENT RESUME POINT
 
 **Phase:** 2 — Git-Native + Memory + Preview Ladder
-**Branch:** `claude/phase-2.2-unified-memory` (PR open)
-**Done:** Phase 1 complete. Phase 2.1 (version history) merged. Phase 2.3 (unified memory) implemented.
-**Next:** 2.3 PR → merge → start Phase 2.2 (unified preview ladder) or 2.4 (context window intelligence).
+**Branch:** `claude/phase-2.2-preview-ladder` (PR open, CI running)
+**Done:** Phase 1 complete. 2.1 (version history) ✅ 2.2 (preview ladder) ✅ 2.3 (unified memory) ✅
+**Next:** 2.2 PR → merge → start Phase 2.4 (context window intelligence) or 2.5 (validation gates wrap Engineer AI).
 
 ---
 
@@ -185,15 +185,15 @@ Every successful build creates a version checkpoint persisted to Firestore:
 **How users access it:** Files view → History tab → click Restore on any version.
 **Success criterion met:** "Go back to version 3 works" — every build is a real, revertible checkpoint.
 
-### 2.2 — Unified preview ladder (one PreviewService)
-**Status: TODO**
+### 2.2 — Unified preview ladder (one PreviewService) ✅ DONE (2026-06-21)
+**Branch:** `claude/phase-2.2-preview-ladder`
 
-Single `PreviewService`, automatic tier routing:
-- Static/HTML → in-browser iframe (zero infra cost)
-- React/Vue/Svelte (no backend) → VFS server-rendered preview
-- Full-stack → E2B real dev server with live URL
+PreviewService was already unified across tiers (static → iframe, React/Vue → in-browser, server-container → dev server, webcontainer → honest ok:false). The build route had the same preview logic duplicated in both agentic and legacy paths with an inconsistency (legacy had no timeout).
 
-ValidationPipeline gates stay in force. No fake previews. One code path, not two.
+**What shipped:**
+- `build.ts` — extracted `startPreviewSafe()` helper: consistent 8s timeout on BOTH paths (was missing on legacy, could hang indefinitely), try/catch so preview failure never breaks build response, emits `preview_url` SSE event immediately when preview URL is ready (client can start loading iframe before `sendComplete` arrives).
+- Both `agentic` and `legacy` paths now call `startPreviewSafe(files, previewAllowed, !!preview, send)` — one code path, no drift.
+- tsc x2 clean, vitest 326/326 green.
 
 ### 2.3 — Unified memory store ✅ DONE (2026-06-21)
 **Branch:** `claude/phase-2.2-unified-memory`

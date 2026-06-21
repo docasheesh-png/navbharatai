@@ -4,6 +4,8 @@ import { runProEngine } from '../EngineerAI/ProEngineRunner';
 import { Guider, gradeAgainstSpec } from '../Guider/Guider';
 import { shouldConfirm } from '../Guider/GuiderGate';
 import type { GuiderSpec } from '../Guider/GuiderTypes';
+import { eventBus } from '../lib/eventBus';
+import { EventType } from '../AppMakerLab/eventbus/EventTypes';
 
 /** Compact textual view of the built files for the grader (tree + budgeted snippets). */
 function buildGradeContext(files: Record<string, string>): string {
@@ -259,6 +261,7 @@ export function registerBuildRoutes(app: Express): void {
     const deadline = new AbortController();
     const deadlineTimer = setTimeout(() => deadline.abort(), SOFT_DEADLINE_MS);
     let sentTerminal = false;
+    let sid = 'pro'; // correlation id for G1 lifecycle events (set from sessionId after parse)
     const sendComplete = (payload: Record<string, unknown>) => {
       if (sentTerminal) return;
       sentTerminal = true;
@@ -269,6 +272,10 @@ export function registerBuildRoutes(app: Express): void {
     try {
       const { prompt, files, userKey, preview, isEdit } = req.body || {};
       if (!prompt || typeof prompt !== 'string') { send({ type: 'error', message: 'prompt (string) is required' }); cleanup(); return res.end(); }
+
+      // Foundations (G1) — best-effort lifecycle events (never block the build).
+      sid = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : 'pro';
+      eventBus.publish({ type: EventType.BUILD_STARTED, workspaceId: sid, sender: 'pro', payload: { isEdit: isEdit === true } });
 
       const memory = parseMemory(req.body);
       const callModel: ModelCall = makeResilientModelCall(userKey);
@@ -327,6 +334,7 @@ export function registerBuildRoutes(app: Express): void {
               // deadline and can be auto-continued for a complete result.
               partial: eng.partial || deadline.signal.aborted,
             });
+            eventBus.publish({ type: EventType.BUILD_COMPLETED, workspaceId: sid, sender: 'pro', payload: { path: 'agentic', tier: eng.tier, usable: eng.usable, partial: eng.partial || deadline.signal.aborted, fileCount: eng.fileCount, previewAllowed: eng.previewAllowed } });
             cleanup();
             return res.end();
           }
@@ -399,12 +407,14 @@ export function registerBuildRoutes(app: Express): void {
         editLog: updatedEditLog,
         partial: false,
       });
+      eventBus.publish({ type: EventType.BUILD_COMPLETED, workspaceId: sid, sender: 'pro', payload: { path: 'legacy', ok: result.ok, fileCount: result.fileCount, previewAllowed: result.previewAllowed, partial: false } });
     } catch (err: any) {
       // Only surface an error if we haven't already given the user a result.
       if (!sentTerminal) {
         const safeMsg = (err?.message || 'Build failed').replace(/\/[^\s:]+\/[^\s:]+/g, '[path]').slice(0, 200);
         send({ type: 'error', message: safeMsg });
       }
+      eventBus.publish({ type: EventType.BUILD_FAILED, workspaceId: sid, sender: 'pro', payload: { message: (err?.message || 'error').slice(0, 200), alreadyAnswered: sentTerminal } });
     } finally {
       // Last-resort guarantee: if no terminal event went out (an unexpected exit
       // path), return the user's input files as a partial result rather than

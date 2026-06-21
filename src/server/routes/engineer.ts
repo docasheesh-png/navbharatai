@@ -12,6 +12,7 @@ import { backendScaffolder } from '../EngineerAI/BackendScaffolder';
 import { getSecretValue } from '../lib/secrets';
 import { Guider } from '../Guider/Guider';
 import { shouldConfirm } from '../Guider/GuiderGate';
+import { eventBus } from '../lib/eventBus';
 
 // Actuator selection (env-var driven):
 //   E2B_API_KEY set       → E2BActuator (real cloud sandbox, browser support, costs money)
@@ -130,6 +131,8 @@ export function registerEngineerRoutes(app: Express): void {
       send({ type: 'status', message: 'Connecting…' });
 
       for await (const event of agentLoop.run({ workspaceId, instruction, projectType, resumeSandboxId: resumeId, attachedImage: image, dbConfig: validatedDbConfig, githubToken }, abort.signal)) {
+        // Foundations (G1) — mirror each agent event onto the shared bus (best-effort).
+        eventBus.publish({ type: 'engineer:' + ((event as { type?: string })?.type || 'event'), workspaceId, sender: 'engineer', payload: {} });
         send(event);
         if (abort.signal.aborted) break;
       }

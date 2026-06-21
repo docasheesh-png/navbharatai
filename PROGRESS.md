@@ -1192,6 +1192,8 @@ KEY FINDINGS
 CAPABILITY CLUSTERS (25 → 8 actionable groups, dependency-ordered)
  G1 Foundations-wiring (2,9,20,21,22,24) — wire existing EventBus/Journal/Registry/
     Checkpoint/KnowledgeBase into Pro+Engineer + persist (Firestore) + refresh-safe state.
+    [STATUS: G1.1 ✅ shared persisted EventBus wired (Pro+Engineer publish + admin events
+    query). Remaining: G1.2 refresh-safe proBuildProgress, G1.3 capability registry.]
  G2 Observability (8,23) — persist metrics + structured logs + traces + alerts + dashboards.
  G3 Pro-unify (3,14,15 + 4,6) — Pro onto the EngineerAI agent loop, DEFAULT-ON. The heart
     of "Pro = Claude Code" (engine exists → just wire + rollout).
@@ -1214,3 +1216,24 @@ logs · screenshots · test reports · runtime proof · deployment URLs.
 ADMIN/INFRA-BLOCKED (cannot be unblocked by code): multi-target deploy tokens (G7) ·
 prod sandbox/E2B key/Docker host for browser QA gates (G5/G3) · Sentry account (G2) ·
 Pro-gating policy decision (G3 rollout).
+
+### Milestone G1.1 — DONE (2026-06-21) — shared persisted EventBus wired (Pro+Engineer)
+First slice of G1 (Foundations-wiring). The AppMakerLab event vocabulary existed but
+its bus was dormant (per-op, in-memory, never wired into the live server; local-disk
+persistence doesn't survive Cloud Run). Built the spine:
+- NEW src/server/lib/eventBus.ts — ONE process-wide bus singleton. publish() is
+  best-effort (NEVER throws/blocks): bounded in-memory ring + in-proc listeners +
+  fire-and-forget persistence sink. Reuses the EventType vocabulary (BUILD_STARTED/
+  COMPLETED/FAILED, etc.).
+- NEW src/server/lib/eventStore.ts — Firestore persistence (collection `build_events`)
+  modelled on WorkspaceMemoryStore (firebase-admin, self-init, VITEST-skip). append()
+  registered as the bus sink → every event durably stored; query() falls back to the
+  in-memory ring when Firestore is unavailable. All best-effort (never breaks a build).
+- routes/build.ts — publishes BUILD_STARTED / BUILD_COMPLETED (agentic+legacy paths,
+  with tier/partial/fileCount/previewAllowed) / BUILD_FAILED. Pure side-channel — no
+  behavior/SSE-contract change.
+- routes/engineer.ts — mirrors each streamed agent event to the bus (engineer:<type>).
+- routes/admin.ts — GET /api/admin/events (admin-auth) → audit-trail / replay surface.
+- tests/eventBus.test.ts (6). Gate: server tsc 0 · frontend tsc 0 · 307 tests · boot PASS.
+Roadmap G1 status: G1.1 done. Remaining: G1.2 refresh-safe proBuildProgress, G1.3
+capability registry.

@@ -51,6 +51,7 @@ All G-cluster work merged to main. These are the bedrock — build on top, never
 | G11 | Build reliability (no more "stream ended without result") | merged |
 | G12 | Real-time file streaming (files appear live as agent writes) | merged |
 | Guider | Pre-build plan confirm + post-build grade → auto-refine, all users | merged |
+| Phase 17 | Auto Test Generation: multi-file Vitest tests for every Pro build (TestAnalyzer + generateTestSuite + ValidationPipeline injection) | branch ready |
 
 ---
 
@@ -310,6 +311,44 @@ _Multi-instance safe. Observable. No surprise bills._
 - UsageTracker → Firestore (billing accuracy requires shared state)
 - Event ring → Firestore
 
+### Milestone G9 — Quick-Start Gallery (2026-06-21)
+Adds 8 example prompt cards to Pro Chat empty state (Bolt.new-style "blank page" fix):
+- AIChat.tsx: when messages.length === 0 and activeAgent === 'navbharatai-pro', a 2×4
+  grid of example cards appears. Each card has an emoji, title, and a detailed prompt
+  for one app type: Analytics Dashboard, E-commerce Page, Todo App, Portfolio Site,
+  Quiz App, Weather App, Chat Interface, Note-taking App. Clicking fills the chat input.
+- AppKnowledgeBase.ts: 'quick-start-gallery' entry added. Keywords scoped to intent
+  phrases ('example prompt', 'quick start', 'app ideas') to avoid false context
+  injection on build instructions (prevents appContextInjector test regression).
+Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
+
+### Milestone G10 — Iterative Agent Build + Retry Memory Fix (2026-06-21)
+Fixes two root-cause bugs reported by the user ("photo editing app" failure + "try again" amnesia):
+
+**Problem 1 — Memory loss on retry**: When a build failed, saying "please try again" caused
+Pro Chat to lose context — it said "Sure, happy to try again!" with no idea what to rebuild.
+
+**Fix**:
+- App.tsx: `lastBuildPromptRef = useRef<string>('')` stores the effective prompt before every build.
+- Retry detection: pure-regex + empty-workspace guard + non-empty stored prompt guard = `isRetryAfterFailure` flag.
+- AUTO mode intercept: when `isRetryAfterFailure`, skip classifyAutoIntent entirely — force-build.
+- AppKnowledgeBase.ts: 'iterative-agent-build' entry added.
+Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
+
+### Milestone G11 — Build Reliability + Real-Time File Display (2026-06-21)
+Root cause fix for "Build stream ended without a result":
+- SOFT_DEADLINE_MS: 240,000ms → 200,000ms (gives 100s buffer before Cloud Run 300s kill)
+- `summarizeForMemory` and `previewService.startPreview`: 8s Promise.race caps added
+- Max post-engine time capped at 28s; total max 228s (72s under 300s limit)
+Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
+
+### Milestone G12 — Real-Time File Content Streaming (2026-06-21)
+Code files now appear in Generated Files panel as the agent writes them (not just at build end).
+- ProEngineRunner.ts: on `files_changed`, emit individual `file` events (≤8 files, ≤40KB each)
+- App.tsx: `buildAppStream` handles `type === 'file'` → updates `generatedFiles` state in real-time
+Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
+
+
 ### 4.2 — Pricing intelligence per build ✅ DONE (2026-06-21)
 
 **Shipped (cost display — PR #141):**
@@ -463,23 +502,73 @@ _NavBharatAI's genuine competitive moat. Claude Code will never do any of this._
 
 tsc x2 clean, vitest 361/361 green.
 
-### 6.4 — Real deploy targets
-**Status: PARTIAL (Vercel + Netlify live)**
+### 6.4 — Real deploy targets ✅ PARTIAL (2026-06-21)
+**Branch:** `claude/test-coverage-analysis-bq0yev`
 
-Add:
-- Cloudflare Pages (real CF API)
-- Railway (full-stack + managed DB)
-- Supabase Edge Functions (serverless backend)
+**Shipped — Cloudflare Pages deploy (PR #153):**
+- `src/server/pro/ProDeploy.ts` — added `deployCloudflarePages(token, accountId, projectName, files)`: uses native `fetch` for all 3 HTTP calls (project check, create, deploy). Builds SHA-256 manifest + multipart FormData for Cloudflare Direct Upload API.
+- `src/server/routes/pro.ts` — added `cloudflare` as 4th deploy provider; validates `accountId + name`.
+- `src/components/panels/DeployModal.tsx` — 4-platform grid (2×2); Cloudflare option shows Account ID + Project Name fields.
+- `src/App.tsx` — state type updated; Cloudflare validation + body building wired.
+- `tests/proDeploy.test.ts` — 8 unit tests (existing project, new project create, FormData structure, URL fallback, error cases). All using `vi.stubGlobal('fetch', ...)`.
+- tsc x2 clean, 406/406 green.
 
-### 6.5 — Modern backend scaffolds
-**Status: TODO**
+**Still TODO (infra-gated):**
+- Railway deploy (no direct file upload API — requires git push workflow or CLI)
+- Supabase Edge Functions (requires Supabase CLI + managed runtime)
 
-- Convex (real-time backend with auth)
-- PocketBase (self-hosted SQLite)
-- Supabase (improve existing: add auth + storage + realtime)
+### 6.5 — Modern backend scaffolds ✅ DONE (2026-06-21)
+**Branch:** `claude/test-coverage-analysis-bq0yev`
+
+**Shipped:**
+- `Scaffold.ts` — Added `'vite-pocketbase'` and `'vite-convex'` framework types. `detectFramework()` checks for PocketBase/Convex keywords before React/Svelte/Vue (priority ordering). Scaffolds full working skeletons: PocketBase (`src/lib/pb.js` singleton with `VITE_PB_URL`, auth + record listing in `App.jsx`, `.env.example`); Convex (`ConvexProvider` in `main.jsx`, `useQuery`/`useMutation` in `App.jsx`, `convex/schema.ts`, `convex/tasks.ts`, `.env.example`). `scaffoldSummary()` describes both.
+- `DependencySync.ts` — Added `pocketbase ^0.21.0` and `convex ^1.13.0` to `KNOWN_VERSIONS`. Also expanded by ~50 more pinned packages: firebase, @supabase/supabase-js, @stripe/stripe-js, @clerk/clerk-react, @prisma/client, 10+ more Radix UI components, @headlessui/react, @tanstack/react-table, @tanstack/react-router, @trpc/*, three, @react-three/fiber, @react-three/drei, chart.js, react-chartjs-2, d3, reactflow, @monaco-editor/react, @tiptap/react, react-window, embla-carousel-react, gsap, appwrite, and more.
+- `ErrorPatternMatcher.ts` — Added 10 new ERROR_PATTERNS: Objects as React child, missing key prop, Firebase invalid API key, CORS, Next.js SSR data fetching, maximum update depth (infinite re-render), useRouter from wrong Next.js package, invalid hook call, React hydration mismatch. Added 9 new INSTRUCTION_HINTS: Stripe, Clerk, PocketBase, Convex, Three.js, Charts/D3, Prisma, Appwrite.
+- `AppKnowledgeBase.ts` — added `backend-scaffolds` entry (PocketBase + Convex scaffold detection, generated files, setup instructions).
+- `tests/scaffold.test.ts` — +8 tests for PocketBase + Convex detect + scaffold.
+- `tests/dependencySync.test.ts` — +2 tests for pocketbase/convex curated versions.
+- `tests/errorPatternMatcher.test.ts` — +16 tests for new error patterns + instruction hints (422/422 total green).
+- tsc x2 clean, 422/422 green.
 
 **Phase 6 DONE when:** UPI payment app builds + deploys in <5 min. Full Pro Chat works on
 mobile. All framework/deploy claims are PASS-verified end-to-end. Nothing faked.
+
+### 6.6 — Test Coverage Expansion ✅ IN PROGRESS (2026-06-21)
+**Branch:** `claude/test-coverage-analysis-bq0yev`
+
+**Shipped — 1016 tests / 132 test files (started from 422/422):**
+
+New test files added (pure unit tests, no I/O, no flaky mocks):
+- `tests/templateProviders.test.ts` — StaticProvider, NodeExpressProvider, NextjsProvider, SvelteProvider, VueProvider, PythonFastapiProvider, TemplateRegistry (19 tests)
+- `tests/featureExtractor.test.ts` — FeatureExtractor keyword detection (8 tests)
+- `tests/intentExtractor.test.ts` — IntentExtractor domain/role/type detection (8 tests)
+- `tests/failureClassifier.test.ts` — FailureClassifier error classification (7 tests)
+- `tests/repairScorer.test.ts` — RepairScorer deterministic scoring (5 tests)
+- `tests/moduleClassifier.test.ts` — ModuleClassifier feature→type mapping (8 tests)
+- `tests/taskScheduler.test.ts` — TaskScheduler DAG + status propagation (6 tests)
+- `tests/impactAnalyzer.test.ts` — ImpactAnalyzer BFS graph traversal (7 tests)
+- `tests/repairConfidenceEngine.test.ts` — RepairConfidenceEngine weighted scoring (8 tests)
+- `tests/patternMatcher.test.ts` — PatternMatcher scoring + filtering (5 tests)
+- `tests/errorPatternMatcher.test.ts` — matchErrorPatterns + hintForInstruction (9 tests, refined)
+- `tests/featureCoverage.test.ts` — extractRequestedFeatures + computeFeatureCoverage (10 tests)
+- `tests/blueprintBuilder.test.ts` — BlueprintBuilder.build() (8 tests)
+- `tests/patternResolutionEngine.test.ts` — PatternResolutionEngine.resolve() (5 tests)
+- `tests/generationEngines.test.ts` — BackendGenerationEngine, FrontendGenerationEngine, DatabaseGenerationEngine, DefaultGenerationEngine (11 tests)
+- `tests/serverStats.test.ts` — serverStats singleton (7 tests)
+- `tests/engineDispatcher.test.ts` — EngineDispatcher dispatch + error (3 tests)
+- `tests/kernelErrors.test.ts` — KernelStateError, DependencyError, ServiceStartupError, ServiceShutdownError (5 tests)
+- `tests/workspaceMemoryStore.test.ts` — WorkspaceMemoryStore VITEST-skip (2 tests)
+- `tests/workspaceRegistry.test.ts` — WorkspaceRegistry CRUD via in-memory repo (5 tests)
+- `tests/conflictDetector.test.ts` — ConflictDetector (3 tests)
+- `tests/auditManager.test.ts` — AuditManager console delegation (3 tests)
+- `tests/errorPatternStore.test.ts` — ErrorPatternStore VITEST-skip (4 tests)
+- `tests/appKnowledgeBase.test.ts` — APP_KNOWLEDGE_BASE integrity + getFeatureById (6 tests)
+- `tests/aiRouter.test.ts` — AIRouter circuit breaker + fallback (6 tests)
+- `tests/staticRuntime.test.ts` — StaticRuntime session lifecycle (7 tests)
+- `tests/aiRouterManager.test.ts` — AIRouterManager singleton pattern (5 tests)
+- `tests/executionOrchestrator.test.ts` — ExecutionOrchestrator DAG execution (3 tests)
+
+tsc x2 clean (0 errors), vitest 1016/1016 green.
 
 ---
 

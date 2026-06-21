@@ -9,7 +9,7 @@ import { aiRouter } from '../lib/aiRouter';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { reviewCode, formatReviewReport } from '../pro/ProCodeReview';
-import { deployVercel, deployNetlify, deployGitHubPages } from '../pro/ProDeploy';
+import { deployVercel, deployNetlify, deployGitHubPages, deployCloudflarePages } from '../pro/ProDeploy';
 
 /**
  * Pro engine routes extracted from the server.ts monolith (Phase 1, AI-core step d).
@@ -741,18 +741,19 @@ Response Format:
     }
   });
 
-  // ══ DEPLOY ENDPOINT — Vercel / Netlify / GitHub Pages ══
-  // Body: { provider: 'vercel'|'netlify'|'github', token, files, name?, siteId?, owner?, repo? }
+  // ══ DEPLOY ENDPOINT — Vercel / Netlify / GitHub Pages / Cloudflare Pages ══
+  // Body: { provider, token, files, name?, siteId?, owner?, repo?, accountId? }
   app.post('/api/pro/deploy', async (req: Request, res: Response) => {
     try {
-      const { provider, token, files, name, siteId, owner, repo } = req.body as {
-        provider: 'vercel' | 'netlify' | 'github';
+      const { provider, token, files, name, siteId, owner, repo, accountId } = req.body as {
+        provider: 'vercel' | 'netlify' | 'github' | 'cloudflare';
         token: string;
         files: Record<string, string>;
         name?: string;
         siteId?: string;
         owner?: string;
         repo?: string;
+        accountId?: string;
       };
 
       if (!provider || !token || !files || Object.keys(files).length === 0) {
@@ -769,6 +770,9 @@ Response Format:
       } else if (provider === 'github') {
         if (!owner || !repo) return res.status(400).json({ error: 'owner and repo required for GitHub Pages deploy.' });
         url = await deployGitHubPages(token, owner, repo, files);
+      } else if (provider === 'cloudflare') {
+        if (!accountId || !name) return res.status(400).json({ error: 'accountId and name required for Cloudflare Pages deploy.' });
+        url = await deployCloudflarePages(token, accountId, name, files);
       } else {
         return res.status(400).json({ error: `Unknown provider: ${provider}` });
       }

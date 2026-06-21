@@ -88,6 +88,96 @@ const KNOWN_VERSIONS: Record<string, string> = {
   '@hello-pangea/dnd': '^16.6.0',
   // Svelte runtime (plugin goes in devDeps — see KNOWN_DEV_VERSIONS)
   'svelte': '^4.2.19',
+  // Backend-as-a-service SDKs
+  'pocketbase': '^0.21.0',
+  'convex': '^1.13.0',
+  // Firebase client SDK
+  'firebase': '^10.13.0',
+  // Supabase client SDK
+  '@supabase/supabase-js': '^2.45.0',
+  // Stripe frontend
+  '@stripe/stripe-js': '^4.4.0',
+  '@stripe/react-stripe-js': '^2.8.0',
+  // Auth
+  '@clerk/clerk-react': '^5.7.0',
+  'next-auth': '^4.24.0',
+  // ORM / DB clients
+  '@prisma/client': '^5.19.0',
+  // More Radix UI components
+  '@radix-ui/react-accordion': '^1.2.0',
+  '@radix-ui/react-alert-dialog': '^1.1.0',
+  '@radix-ui/react-avatar': '^1.1.0',
+  '@radix-ui/react-checkbox': '^1.1.0',
+  '@radix-ui/react-label': '^2.1.0',
+  '@radix-ui/react-popover': '^1.1.0',
+  '@radix-ui/react-progress': '^1.1.0',
+  '@radix-ui/react-radio-group': '^1.2.0',
+  '@radix-ui/react-scroll-area': '^1.1.0',
+  '@radix-ui/react-separator': '^1.1.0',
+  '@radix-ui/react-sheet': '^1.1.0',
+  '@radix-ui/react-slider': '^1.2.0',
+  '@radix-ui/react-switch': '^1.1.0',
+  '@radix-ui/react-toggle': '^1.1.0',
+  // Headless UI (Tailwind-friendly)
+  '@headlessui/react': '^2.1.0',
+  // Data tables
+  '@tanstack/react-table': '^8.20.0',
+  // Virtualisation
+  '@tanstack/react-virtual': '^3.10.0',
+  // Full TanStack stack
+  '@tanstack/react-router': '^1.57.0',
+  // tRPC
+  '@trpc/client': '^11.0.0',
+  '@trpc/react-query': '^11.0.0',
+  '@trpc/server': '^11.0.0',
+  // 3D / WebGL
+  'three': '^0.168.0',
+  '@react-three/fiber': '^8.17.0',
+  '@react-three/drei': '^9.109.0',
+  // Charts
+  'chart.js': '^4.4.4',
+  'react-chartjs-2': '^5.2.0',
+  'd3': '^7.9.0',
+  // Flow diagrams
+  'reactflow': '^11.11.4',
+  // Code editor
+  '@monaco-editor/react': '^4.6.0',
+  // Rich text
+  '@tiptap/react': '^2.7.0',
+  '@tiptap/starter-kit': '^2.7.0',
+  'react-quill': '^2.0.0',
+  // Virtual scrolling
+  'react-window': '^1.8.10',
+  'react-virtualized': '^9.22.5',
+  // Carousel
+  'embla-carousel-react': '^8.3.0',
+  // File uploads
+  'react-dropzone': '^14.2.3',
+  // Camera / media
+  'react-webcam': '^7.2.0',
+  // Barcode / QR
+  'jsbarcode': '^3.11.6',
+  // PDF viewer
+  'react-pdf': '^9.1.0',
+  // Gesture / touch
+  '@use-gesture/react': '^10.3.1',
+  // Spring animation
+  '@react-spring/web': '^9.7.4',
+  // GSAP animation
+  'gsap': '^3.12.5',
+  // Confetti
+  'canvas-confetti': '^1.9.3',
+  // Country / timezone data
+  'country-list': '^2.3.0',
+  'countries-and-timezones': '^3.6.0',
+  // Currency formatting
+  'currency.js': '^2.0.4',
+  // Lottie animations
+  'lottie-react': '^2.4.0',
+  // Color pickers
+  'react-colorful': '^5.6.1',
+  // Appwrite
+  'appwrite': '^16.0.0',
 };
 
 /** Packages that belong in devDependencies (build tools, type declarations, test infra). */

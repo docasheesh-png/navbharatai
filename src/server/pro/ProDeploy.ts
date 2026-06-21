@@ -239,6 +239,87 @@ export async function deployGitHubPages(
 // Phase 91 — Custom Domain (Vercel)
 // ────────────────────────────────────────────────────────────────────────────
 
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 6.4 — Cloudflare Pages Deploy
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Deploy static files to Cloudflare Pages via the Direct Upload API.
+ * Creates the project if it does not exist yet.
+ * Returns the deployment URL (`https://{projectName}.pages.dev`).
+ *
+ * @param token        Cloudflare API token (needs Pages:Edit permission)
+ * @param accountId    Cloudflare account ID (from dashboard → top-right menu)
+ * @param projectName  Pages project slug (e.g. "my-app" → my-app.pages.dev)
+ * @param files        Record<relativePath, utf8 content>
+ */
+export async function deployCloudflarePages(
+  token: string,
+  accountId: string,
+  projectName: string,
+  files: Record<string, string>,
+): Promise<string> {
+  const authHeaders: Record<string, string> = { Authorization: `Bearer ${token}` };
+  const base = `https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects`;
+
+  // 1. Ensure the Pages project exists — create it if not (best-effort; deploy proceeds either way).
+  const checkResp = await fetch(`${base}/${projectName}`, { headers: authHeaders });
+  if (checkResp.status === 404) {
+    await fetch(base, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: projectName, production_branch: 'main' }),
+    });
+  }
+
+  // 2. Build multipart form-data: manifest (path→sha256) + one part per unique file hash.
+  const crypto = await import('crypto');
+  const manifest: Record<string, string> = {};
+  const hashToContent = new Map<string, string>();
+
+  for (const [path, content] of Object.entries(files)) {
+    const hash = crypto.createHash('sha256').update(content).digest('hex');
+    manifest[`/${path}`] = hash;
+    hashToContent.set(hash, content);
+  }
+
+  const form = new FormData();
+  form.append(
+    'manifest',
+    new Blob([JSON.stringify(manifest)], { type: 'application/json' }),
+    'manifest.json',
+  );
+  for (const [hash, content] of hashToContent.entries()) {
+    form.append(hash, new Blob([content]), hash);
+  }
+
+  // 3. POST the deployment — native fetch handles multipart Content-Type boundary automatically.
+  const deployResp = await fetch(`${base}/${projectName}/deployments`, {
+    method: 'POST',
+    headers: authHeaders,
+    body: form,
+  });
+
+  if (!deployResp.ok) {
+    const text = await deployResp.text().catch(() => '');
+    throw new Error(`Cloudflare Pages deploy failed (${deployResp.status}): ${text.slice(0, 300)}`);
+  }
+
+  const data = await deployResp.json() as {
+    success: boolean;
+    result?: { url?: string; latest_stage?: { status: string } };
+  };
+  if (!data.success) {
+    throw new Error(`Cloudflare Pages deploy failed: ${JSON.stringify(data).slice(0, 300)}`);
+  }
+
+  return data.result?.url ? `https://${data.result.url}` : `https://${projectName}.pages.dev`;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 91 — Custom Domain (Vercel)
+// ────────────────────────────────────────────────────────────────────────────
+
 /**
  * Assign a custom domain to a Vercel project.
  * Returns the domain when successfully added.

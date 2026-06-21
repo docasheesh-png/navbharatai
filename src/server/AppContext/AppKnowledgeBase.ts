@@ -447,6 +447,28 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['dependency', 'package.json', 'missing module', 'cannot find module', 'npm install', 'missing dependency', 'undeclared package', 'import error', 'module not found', 'package missing', 'auto install', 'dep sync'],
   },
   {
+    id: 'auto-test-generation',
+    name: 'Auto Test Generation (Phase 17)',
+    path: 'Pro Chat → Build any app → automatic (no user action needed)',
+    description: `Phase 17 — NavBharatAI Pro v2.0 feature. After every Pro build, NavBharatAI automatically generates Vitest test files for the most important parts of the generated app — exactly like Claude Code does for apps it builds. Key capabilities:
+• ANALYZES generated files by type: components, hooks, services, utilities, stores, pages, contexts — each gets a tailored test prompt.
+• SELECTS highest-value files to test first (hooks > services > stores > components > pages).
+• GENERATES multiple test files in parallel (up to 4 per build) using Promise.allSettled.
+• WRITES category-specific tests: component tests use @testing-library/react, hook tests use renderHook, service tests mock fetch/axios, utility tests cover edge cases.
+• UPDATES the validation report: the 'Automated Tests' gate changes from PENDING to PASS, showing which test files were generated.
+• TEST FILES are included in the downloaded app zip so users can run them locally with: npx vitest run.`,
+    howToUse: 'Automatic — no action needed. Build any app in Pro Chat. Test files (e.g. src/App.test.tsx, src/hooks/useAuth.test.ts) are automatically included in the result. Download the app and run: npm install && npx vitest run',
+    relatedFeatures: ['pro_chat', 'auto-dependency-sync', 'auto-code-review'],
+    aiSurface: 'pro_chat',
+    keywords: [
+      'auto test', 'test generation', 'vitest', 'unit test', 'testing library', 'react testing',
+      'test file', 'jest', 'coverage', 'test cases', 'automated tests', 'generate tests',
+      'test app', 'app test', 'test karo', 'test banana', 'unit testing', 'component test',
+      'hook test', 'service test', 'integration test', 'npx vitest', 'test suite',
+      'phase 17', 'claude code level', 'test selector',
+    ],
+  },
+  {
     id: 'quick-start-gallery',
     name: 'Quick-Start Gallery — Example Prompt Cards',
     path: 'Pro Chat → empty chat → example cards grid (visible before first message)',
@@ -455,6 +477,28 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     relatedFeatures: ['pro_chat'],
     aiSurface: 'pro_chat',
     keywords: ['example prompt', 'quick start', 'starter template', 'example cards', 'prompt gallery', 'what can you build', 'kya bana sakte ho', 'show examples', 'example apps', 'ideas for app', 'app ideas', 'upi', 'payment', 'hindi', 'gst', 'invoice', 'startup', 'bharat', 'india', 'razorpay', 'devanagari', 'rupee', 'msme', 'registration'],
+  },
+  {
+    id: 'backend-scaffolds',
+    name: 'Backend Scaffolds — PocketBase & Convex',
+    path: 'Pro Chat → describe a PocketBase or Convex app → auto-seeded skeleton',
+    description: `Phase 6.5: Two backend-as-a-service scaffolds are now supported alongside React/Vue/Svelte:
+
+PocketBase (vite-pocketbase):
+• Triggers on: "pocketbase app", "pocketbase dashboard", etc.
+• Files: package.json (react + pocketbase deps), vite.config.js, src/lib/pb.js (PocketBase singleton with VITE_PB_URL), src/App.jsx (auth + record listing example), .env.example
+• Self-hosted SQLite backend — user runs their own PocketBase server
+
+Convex (vite-convex):
+• Triggers on: "convex app", "convex todo", "build with convex", etc.
+• Files: package.json (react + convex deps), src/main.jsx (ConvexProvider), src/App.jsx (useQuery/useMutation), convex/schema.ts, convex/tasks.ts, .env.example
+• Real-time backend in the cloud — user runs npx convex dev to get VITE_CONVEX_URL
+
+Both scaffolds produce real, correctly wired code. The backend services (PocketBase server / Convex cloud) must be provisioned by the user separately.`,
+    howToUse: 'In Pro Chat, include "pocketbase" or "convex" in your prompt. NavBharatAI auto-detects and seeds the correct skeleton. For PocketBase: set VITE_PB_URL in .env to your server URL. For Convex: run npx convex dev in the project folder to provision the backend.',
+    relatedFeatures: ['pro_chat', 'auto-dependency-sync'],
+    aiSurface: 'pro_chat',
+    keywords: ['pocketbase', 'pocket base', 'convex', 'backend scaffold', 'self hosted', 'real time backend', 'baas', 'backend as a service', 'sqlite backend', 'pocketbase app', 'convex app', 'convex dev'],
   },
   {
     id: 'build-version-history',
@@ -480,15 +524,16 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     id: 'one-click-deploy',
     name: 'One-Click Deploy Button',
     path: 'Pro Chat → header bar → Deploy button (visible after app is built)',
-    description: `G8: A "Deploy" button appears in the Pro Chat header bar after any app is successfully built. Clicking it opens a deploy panel directly in the chat with three platform options:
+    description: `A "Deploy" button appears in the Pro Chat header bar after any app is successfully built. Clicking it opens a deploy panel with four platform options:
 • Vercel — enter token + project name → deploys to *.vercel.app
 • Netlify — enter token + optional site ID → deploys to *.netlify.app
+• Cloudflare Pages — enter API token + account ID + project name → deploys to {name}.pages.dev
 • GitHub Pages — enter token + owner + repo → deploys to username.github.io/repo/
 On success: navigates to the "App is Live!" screen with the live URL. No commands needed — pure GUI.`,
-    howToUse: 'Build an app in Pro Chat. When build completes, a green "Deploy" button appears in the top-right of the chat header. Click it, choose a platform, enter your API token, and click "Deploy Now".',
+    howToUse: 'Build an app in Pro Chat. When build completes, a green "Deploy" button appears in the top-right of the chat header. Click it, choose a platform, enter your API token, and click "Deploy Now". For Cloudflare, you also need your Account ID (found at dashboard.cloudflare.com → top-right).',
     relatedFeatures: ['pro_chat', 'pro_chat_multi_deploy'],
     aiSurface: 'pro_chat',
-    keywords: ['deploy button', 'one click deploy', 'deploy', 'vercel', 'netlify', 'github pages', 'publish', 'launch', 'go live', 'deploy karo', 'live karo', 'publish app', 'deploy app'],
+    keywords: ['deploy button', 'one click deploy', 'deploy', 'vercel', 'netlify', 'cloudflare', 'cloudflare pages', 'github pages', 'publish', 'launch', 'go live', 'deploy karo', 'live karo', 'publish app', 'deploy app', 'pages.dev'],
   },
   {
     id: 'iterative-agent-build',

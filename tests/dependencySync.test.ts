@@ -190,4 +190,26 @@ describe('syncDependencies', () => {
     const pkg = JSON.parse(vfs.readText('package.json')!);
     expect(pkg.devDependencies?.['@sveltejs/vite-plugin-svelte']).toBe('^3.1.2');
   });
+
+  it('adds pocketbase as a runtime dep with pinned version', () => {
+    const vfs = vfsFrom({
+      'package.json': JSON.stringify({ dependencies: { react: '^18' } }),
+      'src/lib/pb.js': "import PocketBase from 'pocketbase';",
+    });
+    const result = syncDependencies(vfs);
+    expect(result.added).toContain('pocketbase');
+    const pkg = JSON.parse(vfs.readText('package.json')!);
+    expect(pkg.dependencies.pocketbase).toBe('^0.21.0');
+  });
+
+  it('adds convex as a runtime dep with pinned version', () => {
+    const vfs = vfsFrom({
+      'package.json': JSON.stringify({ dependencies: { react: '^18' } }),
+      'src/main.jsx': "import { ConvexProvider, ConvexReactClient } from 'convex/react';",
+    });
+    const result = syncDependencies(vfs);
+    expect(result.added).toContain('convex');
+    const pkg = JSON.parse(vfs.readText('package.json')!);
+    expect(pkg.dependencies.convex).toBe('^1.13.0');
+  });
 });

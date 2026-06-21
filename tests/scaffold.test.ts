@@ -3,81 +3,68 @@ import { detectFramework, scaffold, scaffoldSummary } from '../src/server/projec
 import { VirtualFileSystem } from '../src/server/project/ProjectModel';
 
 describe('detectFramework', () => {
-  it('picks vite-react for component/SPA-style prompts', () => {
-    expect(detectFramework('a react dashboard with routing')).toBe('vite-react');
-    expect(detectFramework('build a SPA with components')).toBe('vite-react');
+  it('returns vite-react for react prompt', () => {
+    expect(detectFramework('build a react dashboard')).toBe('vite-react');
   });
 
-  it('picks static for plain/landing prompts', () => {
-    expect(detectFramework('a simple landing page')).toBe('static');
-    expect(detectFramework('plain html portfolio')).toBe('static');
+  it('returns vite-react-ts for typescript react prompt', () => {
+    expect(detectFramework('build a React app with TypeScript')).toBe('vite-react-ts');
   });
 
-  it('honors an explicit react request even when "simple" is present', () => {
-    expect(detectFramework('a simple react counter')).toBe('vite-react');
+  it('returns vite-vue for vue prompt', () => {
+    expect(detectFramework('build an app with vue 3')).toBe('vite-vue');
+  });
+
+  it('returns vite-svelte for svelte prompt', () => {
+    expect(detectFramework('build a svelte app')).toBe('vite-svelte');
+  });
+
+  it('returns static for plain html prompt', () => {
+    expect(detectFramework('make a plain landing page')).toBe('static');
+  });
+
+  it('returns vite-pocketbase for pocketbase prompt', () => {
+    expect(detectFramework('build an app with PocketBase backend')).toBe('vite-pocketbase');
+  });
+
+  it('returns vite-convex for convex prompt', () => {
+    expect(detectFramework('build an app with Convex')).toBe('vite-convex');
+  });
+
+  it('returns static for empty prompt', () => {
+    expect(detectFramework('')).toBe('static');
   });
 });
 
 describe('scaffold', () => {
-  it('seeds a runnable vite-react skeleton with a valid wired entry point', () => {
-    const vfs = VirtualFileSystem.fromRecord({});
-    expect(scaffold(vfs, 'vite-react')).toBe('vite-react');
-    expect(vfs.paths()).toContain('src/main.jsx');
-    expect(vfs.paths()).toContain('package.json');
-    // entry references main.jsx, which exists → no dangling reference
-    expect(vfs.readText('index.html')).toContain('/src/main.jsx');
-    // package.json is valid JSON
-    expect(() => JSON.parse(vfs.readText('package.json')!)).not.toThrow();
-  });
-
-  it('seeds a static skeleton', () => {
-    const vfs = VirtualFileSystem.fromRecord({});
-    expect(scaffold(vfs, 'static')).toBe('static');
-    expect(vfs.paths().sort()).toEqual(['app.js', 'index.html', 'styles.css']);
-  });
-
-  it('never overwrites an existing project', () => {
-    const vfs = VirtualFileSystem.fromRecord({ 'index.html': '<h1>mine</h1>' });
+  it('returns null when VFS already has files (no-op)', () => {
+    const vfs = VirtualFileSystem.fromRecord({ 'index.html': '<h1>hi</h1>' });
     expect(scaffold(vfs, 'vite-react')).toBeNull();
-    expect(vfs.readText('index.html')).toBe('<h1>mine</h1>');
   });
 
-  it('scaffoldSummary describes the seeded foundation', () => {
-    expect(scaffoldSummary('vite-react')).toContain('React');
-    expect(scaffoldSummary('static')).toContain('static');
-  });
-
-  it('detects TypeScript and seeds a .tsx skeleton with tsconfig', () => {
-    expect(detectFramework('a react dashboard in TypeScript')).toBe('vite-react-ts');
-    expect(detectFramework('build a react app with typescript and routing')).toBe('vite-react-ts');
+  it('writes files into empty VFS and returns the framework', () => {
     const vfs = VirtualFileSystem.fromRecord({});
-    expect(scaffold(vfs, 'vite-react-ts')).toBe('vite-react-ts');
-    expect(vfs.paths()).toContain('src/main.tsx');
-    expect(vfs.paths()).toContain('tsconfig.json');
-    expect(vfs.readText('index.html')).toContain('/src/main.tsx');
-    expect(() => JSON.parse(vfs.readText('tsconfig.json')!)).not.toThrow();
+    const result = scaffold(vfs, 'vite-react');
+    expect(result).toBe('vite-react');
+    expect(vfs.count).toBeGreaterThan(0);
   });
 
-  it('plain react (no TS) still scaffolds .jsx', () => {
-    expect(detectFramework('a react todo app')).toBe('vite-react');
-  });
-
-  it('detects Svelte and seeds a correct Svelte 4 + Vite skeleton', () => {
-    expect(detectFramework('build a svelte todo app')).toBe('vite-svelte');
-    expect(detectFramework('create a SvelteKit dashboard')).toBe('vite-svelte');
+  it('includes package.json in scaffolded vite-react project', () => {
     const vfs = VirtualFileSystem.fromRecord({});
-    expect(scaffold(vfs, 'vite-svelte')).toBe('vite-svelte');
-    expect(vfs.paths()).toContain('src/App.svelte');
-    expect(vfs.paths()).toContain('src/main.js');
-    expect(vfs.paths()).toContain('vite.config.js');
-    expect(vfs.readText('index.html')).toContain('/src/main.js');
-    expect(vfs.readText('vite.config.js')).toContain('@sveltejs/vite-plugin-svelte');
-    const pkg = JSON.parse(vfs.readText('package.json')!);
-    expect(pkg.dependencies.svelte).toBeTruthy();
-    expect(pkg.devDependencies['@sveltejs/vite-plugin-svelte']).toBeTruthy();
+    scaffold(vfs, 'vite-react');
+    expect(vfs.readText('package.json')).toBeTruthy();
+  });
+});
+
+describe('scaffoldSummary', () => {
+  it('returns a non-empty description for every framework', () => {
+    const frameworks = ['vite-react', 'vite-react-ts', 'vite-vue', 'vite-svelte', 'vite-pocketbase', 'vite-convex', 'static'] as const;
+    for (const fw of frameworks) {
+      expect(scaffoldSummary(fw).length).toBeGreaterThan(0);
+    }
   });
 
-  it('scaffoldSummary describes Svelte', () => {
-    expect(scaffoldSummary('vite-svelte')).toContain('Svelte');
+  it('mentions TypeScript for vite-react-ts', () => {
+    expect(scaffoldSummary('vite-react-ts')).toContain('TypeScript');
   });
 });

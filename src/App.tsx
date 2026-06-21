@@ -2,6 +2,13 @@ import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallbac
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { EngineBuilder } from './components/EngineBuilder';
+import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
+import { GitViewPanel } from './components/panels/GitViewPanel';
+import { DeploySuccessPanel } from './components/panels/DeploySuccessPanel';
+import { AboutPanel } from './components/panels/AboutPanel';
+import { AdminLoginPanel } from './components/panels/AdminLoginPanel';
+import { FilesPanel } from './components/panels/FilesPanel';
+import { DonationPanel } from './components/panels/DonationPanel';
 import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
@@ -5925,17 +5932,8 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     addLog(`Template "${name}" saved to marketplace ✓`, 'success');
   };
 
-  const templates = [
-    { id: 'intro', name: 'Introduction', icon: Sparkles, prompt: 'hey 👋 , tell me about yourself!' },
-    { id: 'analytics', name: 'Smart Analytics', icon: Activity, prompt: 'Create a high-performance Data Analytics Dashboard for a modern business. I want real-time visualization of key performance indicators (KPIs) including monthly revenue, user growth, and churn rate. Use a sophisticated dark-glassmorphism theme with SVG charts and interactive data tables. Ensure the UI is fully responsive and supports dynamic data filtering.' },
-    { id: 'calc', name: 'Simple Calculator', icon: Cpu, prompt: 'I want you to act as a World-Class Software Architect. Build a Professional High-Precision Scientific Calculator. \n\n### MANDATORY FUNCTIONAL REQUIREMENTS:\n1. **Core Logic**: You MUST implement a robust JavaScript evaluation engine in `script.js`. It should handle click events for all buttons, manage a screen buffer, and accurately calculate results for basic (+, -, *, /) and scientific (sqrt, sin, cos, tan, log) operations. Ensure the calculator works perfectly upon loading.\n2. **UI Architecture**: In `style.css`, create a premium "Space-Age Glass" design with deep shadows and tactile hover animations. Use a responsive grid layout.\n3. **History System**: Implement a history list that records the last 5 operations.\n4. **Checklist**: All button IDs in `index.html` must match the selectors used in `script.js`. Ensure NO empty functions.' },
-    { id: 'clock', name: 'Simple Clock', icon: Clock, prompt: 'Create a fully functional, production-grade analog clock/watch application for Android + Web (responsive mobile-first UI).\n\n### PRIMARY GOAL\nBuild an ultra-realistic, smooth, accurate analog watch application with professional mechanics, synchronized with the device time down to the millisecond. It must look and behave like a real luxury wristwatch.\n\n### CRITICAL FUNCTIONAL REQUIREMENTS\n1. **REAL TIME SYNC**: Automatically sync with device local time, hours, minutes, and seconds. The clock MUST NOT freeze or use hardcoded angles. Use `requestAnimationFrame` for continuous updates.\n2. **SMOOTH MOVEMENT**: Second hand must move smoothly every frame (not teleport). Minute and Hour hands must move proportionally as seconds progress.\n3. **HAND ALIGNMENT**: All hands MUST originate from EXACTLY the same center pivot point (0,0 center). No misaligned axes.\n4. **DESIGN**: Premium luxury watch face with metallic frame, realistic dial texture, and inner shadows. Include 12 hour markers and minute ticks.\n5. **GEOMETRY**: Perfectly circular (1:1 aspect ratio) and centered on all screens (Android/Desktop).\n6. **FORMULAS**:\n   - Seconds: `seconds * 6` degrees\n   - Minutes: `(minutes * 6) + (seconds * 0.1)` degrees\n   - Hours: `(hours % 12 * 30) + (minutes * 0.5)` degrees\n7. **TECHNICAL**: Use HTML/CSS/JS with SVG or Canvas for real-time rendering. Provide separate code for index.html, style.css, and script.js with NO placeholders.' },
-    // 9.6 — React Native / Mobile App generation template
-    { id: 'rn_app', name: 'React Native App', icon: Smartphone, isPro: true, prompt: 'Build a React Native (Expo) mobile app. Generate the complete project structure with:\n1. App.js entry point with React Navigation\n2. HomeScreen, DetailScreen components\n3. Bottom tab navigation\n4. StyleSheet with platform-specific styling (ios/android)\n5. Async storage for state persistence\n\nProvide separate files: App.js, screens/HomeScreen.js, screens/DetailScreen.js, package.json (Expo), README with run commands.\nApp theme: dark mode with indigo accent. Include sample data and list rendering.' },
-    { id: 'portfolio', name: 'Portfolio Site', icon: Globe, isPro: false, prompt: 'Build a stunning personal portfolio website with: hero section with animated gradient, about me, skills grid, projects showcase (3 cards), contact form with validation. Dark theme with glassmorphism cards, smooth scroll animations, mobile-first responsive. HTML/CSS/JS only.' },
-    { id: 'ecommerce', name: 'E-Commerce UI', icon: ShieldCheck, isPro: true, prompt: 'Build a modern e-commerce product listing page: navbar with cart counter, hero banner, product grid (8 items with images, prices, add-to-cart), cart sidebar with total calculation. Tailwind CSS style with indigo/white palette. Full JavaScript interactions.' },
-    { id: 'dashboard', name: 'Admin Dashboard', icon: LayoutDashboard, isPro: true, prompt: 'Build a professional admin dashboard: sidebar navigation, header with user info, metric cards (4 KPIs), recent activity table (10 rows), line chart using Chart.js CDN. Dark theme, responsive. All data should be realistic sample data.' },
-  ];
+  // Phase 1.7 — template list lives in TemplatesPanel.tsx (CURATED_TEMPLATES).
+  const templates = CURATED_TEMPLATES;
 
   const themeClasses = getThemeClasses(theme);
 
@@ -7769,174 +7767,25 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           )}
 
                     {activeView === 'about' && (
-            <div className="flex-1 bg-[#0d1117] overflow-y-auto custom-scrollbar p-6 sm:p-12 relative">
-               {isAdmin && (
-                 <div className="sticky top-0 right-0 z-50 flex justify-end pb-4">
-                    <div className="bg-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest text-white shadow-xl flex items-center gap-2">
-                       <Shield className="w-3.5 h-3.5 hover:rotate-12 transition-transform" />
-                       Admin Edit Mode Active
-                    </div>
-                 </div>
-               )}
-               <div className="max-w-4xl mx-auto space-y-12 pb-20">
-                  <motion.header 
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="text-center space-y-4 relative group/header"
-                  >
-                     <div className="inline-block p-4 bg-indigo-600/10 rounded-[2.5rem] border border-indigo-500/20 mb-4 relative">
-                        <Bot className="w-16 h-16 text-indigo-500" />
-                        {isAdmin && (
-                          <button 
-                            onClick={() => {
-                              const url = prompt('Enter Logo URL:', aboutData.logoUrl || '');
-                              if (url !== null) setAboutData({...aboutData, logoUrl: url});
-                            }}
-                            className="absolute -bottom-2 -right-2 p-2 bg-indigo-600 text-white rounded-xl shadow-lg hover:scale-110 transition-all opacity-0 group-hover/header:opacity-100"
-                          >
-                            <Camera className="w-3 h-3" />
-                          </button>
-                        )}
-                     </div>
-                     <div className="flex items-center justify-center gap-4">
-                        <h1 className="text-4xl sm:text-6xl font-black text-white tracking-tighter uppercase">{aboutData.headline}</h1>
-                        {isAdmin && (
-                          <button 
-                            onClick={() => {
-                              const val = prompt('Edit Headline:', aboutData.headline);
-                              if (val) setAboutData({...aboutData, headline: val});
-                            }}
-                            className="p-2 bg-white/5 hover:bg-indigo-600 rounded-xl text-indigo-400 hover:text-white transition-all opacity-0 group-hover/header:opacity-100"
-                          >
-                             <Edit2 className="w-4 h-4" />
-                          </button>
-                        )}
-                     </div>
-                     <div className="relative group/desc">
-                        <p className="text-[#8b949e] text-lg max-w-2xl mx-auto font-medium leading-relaxed">{aboutData.description}</p>
-                        {isAdmin && (
-                          <button 
-                            onClick={() => {
-                              const val = prompt('Edit Description:', aboutData.description);
-                              if (val) setAboutData({...aboutData, description: val});
-                            }}
-                            className="absolute -top-4 -right-4 p-2 bg-white/5 hover:bg-indigo-600 rounded-xl text-indigo-400 hover:text-white transition-all opacity-0 group-hover/desc:opacity-100"
-                          >
-                             <Edit2 className="w-4 h-4" />
-                          </button>
-                        )}
-                     </div>
-                  </motion.header>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-12">
-                     <motion.div 
-                       initial={{ opacity: 0, x: -20 }}
-                       animate={{ opacity: 1, x: 0 }}
-                       className="bg-[#161b22] border border-white/5 p-8 rounded-[2.5rem] space-y-4 shadow-2xl relative group/card1"
-                     >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                             <div className="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center">
-                                <User className="w-5 h-5 text-white" />
-                             </div>
-                             <h3 className="text-xl font-black text-white tracking-tight uppercase">Our Team</h3>
-                          </div>
-                          {isAdmin && (
-                            <button 
-                              onClick={() => {
-                                const val = prompt('Edit Team Info:', aboutData.team);
-                                if (val) setAboutData({...aboutData, team: val});
-                              }}
-                              className="p-2 bg-white/5 hover:bg-indigo-600 rounded-xl text-indigo-400 hover:text-white transition-all opacity-0 group-hover/card1:opacity-100"
-                            >
-                               <Edit2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                        <p className="text-[#8b949e] font-medium leading-relaxed">{aboutData.team}</p>
-                     </motion.div>
-
-                     <motion.div 
-                       initial={{ opacity: 0, x: 20 }}
-                       animate={{ opacity: 1, x: 0 }}
-                       className="bg-[#161b22] border border-white/5 p-8 rounded-[2.5rem] space-y-4 shadow-2xl relative group/card2"
-                     >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                             <div className="w-10 h-10 bg-emerald-600 rounded-2xl flex items-center justify-center">
-                                <Eye className="w-5 h-5 text-white" />
-                             </div>
-                             <h3 className="text-xl font-black text-white tracking-tight uppercase">Vision</h3>
-                          </div>
-                          {isAdmin && (
-                            <button 
-                              onClick={() => {
-                                const val = prompt('Edit Vision Info:', aboutData.vision);
-                                if (val) setAboutData({...aboutData, vision: val});
-                              }}
-                              className="p-2 bg-white/5 hover:bg-emerald-600 rounded-xl text-emerald-400 hover:text-white transition-all opacity-0 group-hover/card2:opacity-100"
-                            >
-                               <Edit2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                        <p className="text-[#8b949e] font-medium leading-relaxed">{aboutData.vision}</p>
-                     </motion.div>
-                  </div>
-               </div>
-            </div>
+            <AboutPanel
+              isAdmin={isAdmin}
+              aboutData={aboutData}
+              onAboutDataChange={setAboutData}
+            />
           )}
 
           {activeView === 'admin' && (
-            <div className="flex-1 bg-[#0d1117] flex flex-col items-center justify-center p-6">
-               {!isAdmin ? (
-                 <motion.div 
-                   initial={{ opacity: 0, scale: 0.95 }}
-                   animate={{ opacity: 1, scale: 1 }}
-                   className="w-full max-w-md bg-[#161b22] border border-white/10 p-8 rounded-[2.5rem] shadow-3xl space-y-8"
-                 >
-                    <div className="text-center space-y-2">
-                       <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-2xl mb-4">
-                          <Lock className="w-10 h-10 text-white" />
-                       </div>
-                       <h2 className="text-2xl font-black text-white tracking-tight uppercase">Admin Access</h2>
-                       <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Navbharat Enterprise Cloud Console</p>
-                    </div>
-
-                    <form onSubmit={handleAdminLogin} className="space-y-4">
-                       <div className="space-y-2">
-                          <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest ml-1">Username</label>
-                          <input 
-                             type="text"
-                             value={adminEmail}
-                             onChange={(e) => setAdminEmail(e.target.value)}
-                             className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-bold outline-none focus:border-indigo-500"
-                             placeholder="aashishcpmt09"
-                          />
-                       </div>
-                       <div className="space-y-2">
-                          <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest ml-1">Password</label>
-                          <input 
-                             type="password"
-                             value={adminPassword}
-                             onChange={(e) => setAdminPassword(e.target.value)}
-                             className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-bold outline-none focus:border-indigo-500"
-                             placeholder="••••••••••••"
-                          />
-                       </div>
-                       {adminError && <p className="text-[10px] text-red-500 font-bold uppercase tracking-widest text-center">{adminError}</p>}
-                       <button className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/30 transition-all active:scale-95">
-                          Authenticate
-                       </button>
-                    </form>
-                 </motion.div>
-               ) : (
-                 <AdminDashboard
-                   adminToken={sessionStorage.getItem('admin_token') || ''}
-                   onLogout={() => setIsAdmin(false)}
-                 />
-               )}
-            </div>
+            <AdminLoginPanel
+              isAdmin={isAdmin}
+              adminEmail={adminEmail}
+              adminPassword={adminPassword}
+              adminError={adminError}
+              onEmailChange={setAdminEmail}
+              onPasswordChange={setAdminPassword}
+              onSubmit={handleAdminLogin}
+              onLogout={() => setIsAdmin(false)}
+              adminToken={sessionStorage.getItem('admin_token') || ''}
+            />
          )}
 
           {activeView === 'billing' && (
@@ -8726,194 +8575,56 @@ ${pending.map(p => `  - ${p}`).join('\n')}
             )}
 
             {activeView === 'git' && (
-                <div className="flex-1 bg-[#0d1117] p-4 lg:p-6 text-left min-h-screen flex flex-col items-center">
-                  <div className="max-w-4xl w-full h-[88vh] flex flex-col bg-[#161b22] border border-white/10 rounded-3xl overflow-hidden shadow-2xl relative">
-                    <div className="p-4 bg-[#0d1117] border-b border-white/5 flex flex-col sm:flex-row sm:items-center justify-between shrink-0 gap-3">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 bg-indigo-600/10 border border-indigo-600/20 rounded-xl flex items-center justify-center">
-                          <Rocket className="w-4.5 h-4.5 text-indigo-400" />
-                        </div>
-                        <div>
-                          <h3 className="text-xs font-black text-white uppercase tracking-widest leading-none font-sans">navBharatAI DevOps Engine</h3>
-                          <p className="text-[9px] text-[#8b949e] font-serif uppercase tracking-widest mt-1">
-                            {selectedRepo ? `Active Repo: ${selectedRepo.name} (${currentBranch})` : 'Sandbox Simulator Mode (GitHub Unconnected)'}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                         {githubToken ? (
-                           <button
-                             onClick={() => {
-                               setActiveView('settings');
-                               setSettingsScreen('github_repos');
-                             }}
-                             className="px-3 py-1 bg-indigo-600/10 border border-indigo-500/25 hover:bg-indigo-600/20 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all text-indigo-400 flex items-center gap-1.5 cursor-pointer"
-                           >
-                             <List className="w-3 h-3" />
-                             {selectedRepo ? 'Switch Repo' : 'Select Repo'}
-                           </button>
-                         ) : (
-                           <button
-                             onClick={() => {
-                               setActiveView('settings');
-                               setSettingsScreen('connections');
-                             }}
-                             className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all text-white flex items-center gap-1.5 cursor-pointer"
-                           >
-                             <Github className="w-3 h-3 text-white" />
-                             Connect GitHub
-                           </button>
-                         )}
-                         {selectedRepo && (
-                           <button
-                             onClick={() => importRepo(selectedRepo, currentBranch)}
-                             disabled={isGHSyncing}
-                             className="px-3 py-1 bg-white/5 border border-white/5 hover:border-white/10 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all hover:bg-white/10 flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
-                           >
-                             {isGHSyncing ? <RefreshCw className="w-3 h-3 animate-spin text-white" /> : <Search className="w-3 h-3 text-white" />}
-                             Review Files
-                           </button>
-                         )}
-                      </div>
-                    </div>
-                    <div className="flex-1 overflow-hidden">
-                      <GitPanel 
-                        token={githubToken}
-                        user={githubUser}
-                        repoContext={githubRepoContext || (selectedRepo ? { owner: selectedRepo.owner.login, repo: selectedRepo.name, branch: currentBranch } : null)}
-                        isSyncing={isGHSyncing}
-                        isPushing={isPushing}
-                        onConnect={connectGitHub}
-                        onDisconnect={disconnectGitHub}
-                        onPush={selectedRepo ? pushToRepo : (msg) => {
-                          alert(`[Sandbox Commit] Committing files and starting deployment.\nCommit Message: "${msg || 'Update via navBharatAI'}"`);
-                        }}
-                        files={files}
-                        projectId={currentSessionId}
-                        projectName={sessions.find(s => s.id === currentSessionId)?.title}
-                        firebaseToken={firebaseToken}
-                        firebaseUser={firebaseUser}
-                        onFirebaseConnect={connectFirebase}
-                        onFirebaseDisconnect={disconnectFirebase}
-                        onFilesChange={(newFiles) => {
-                          setFiles(newFiles);
-                          updatePreview(newFiles);
-                        }}
-                        onAgentChange={handleAgentChange}
-                        onToggleView={toggleTab}
-                        onActivatePreview={handleTriggerPreviewBuild}
-                        onActivateWorkspace={handleActivateWorkspace}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
+              // Phase 1.7 — extracted to GitViewPanel component
+              <GitViewPanel
+                selectedRepo={selectedRepo}
+                currentBranch={currentBranch}
+                githubToken={githubToken}
+                githubUser={githubUser}
+                githubRepoContext={githubRepoContext}
+                isGHSyncing={isGHSyncing}
+                isPushing={isPushing}
+                firebaseToken={firebaseToken}
+                firebaseUser={firebaseUser}
+                files={files}
+                currentSessionId={currentSessionId}
+                sessions={sessions}
+                onNavigateToGitHubRepos={() => { setActiveView('settings'); setSettingsScreen('github_repos'); }}
+                onNavigateToConnections={() => { setActiveView('settings'); setSettingsScreen('connections'); }}
+                onImportRepo={importRepo}
+                onConnectGitHub={connectGitHub}
+                onDisconnectGitHub={disconnectGitHub}
+                onPushToRepo={selectedRepo ? pushToRepo : null}
+                onConnectFirebase={connectFirebase}
+                onDisconnectFirebase={disconnectFirebase}
+                onFilesChange={(newFiles) => { setFiles(newFiles); updatePreview(newFiles); }}
+                onAgentChange={handleAgentChange}
+                onToggleView={toggleTab}
+                onActivatePreview={handleTriggerPreviewBuild}
+                onActivateWorkspace={handleActivateWorkspace}
+              />
+            )}
 
 
 
           {activeView === 'templates' && (
-            <div className="flex-1 p-8 bg-[#0d1117] overflow-y-auto custom-scrollbar">
-              <div className="max-w-6xl mx-auto">
-                <div className="flex flex-col mb-10">
-                  <h3 className="text-2xl font-bold text-white mb-2">Project Blueprints</h3>
-                  <p className="text-sm text-[#8b949e]">Accelerate your development with AI-optimized templates</p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {templates.map(t => {
-                    const isLocked = (t as any).isPro && !user;
-                    return (
-                    <motion.button
-                      whileHover={{ y: -5 }}
-                      key={t.id}
-                      onClick={() => {
-                        if (isLocked) { setShowAuth(true); addToast('Sign in to use Pro templates', 'warning'); return; }
-                        setInput(t.prompt);
-                        toggleTab('nbi_chat');
-                      }}
-                      className={`flex flex-col items-start p-6 bg-[#161b22] border rounded-2xl transition-all text-left group shadow-xl relative overflow-hidden ${
-                        isLocked ? 'border-amber-500/20 hover:border-amber-500/40' : 'border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/5'
-                      }`}
-                    >
-                      {(t as any).isPro && (
-                        <span className="absolute top-3 right-3 text-[8px] font-black px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-amber-400 uppercase tracking-widest">
-                          {isLocked ? '🔒 Pro' : '⭐ Pro'}
-                        </span>
-                      )}
-                      <div className={`w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center mb-6 transition-colors ${isLocked ? 'group-hover:bg-amber-600' : 'group-hover:bg-indigo-600'}`}>
-                        <t.icon className={`w-6 h-6 ${isLocked ? 'text-amber-400 group-hover:text-white' : 'text-indigo-400 group-hover:text-white'}`} />
-                      </div>
-                      <h4 className="font-bold text-white mb-2">{t.name}</h4>
-                      <p className="text-[11px] text-[#8b949e] leading-relaxed mb-6 opacity-70">Pre-configured scaffolding for modern responsive web applications.</p>
-                      <div className="mt-auto w-full flex items-center justify-between">
-                         <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${isLocked ? 'text-amber-400 bg-amber-500/10' : 'text-indigo-400 bg-indigo-500/10'}`}>
-                           {isLocked ? 'Sign In to Use' : 'Fast Build'}
-                         </span>
-                      </div>
-                    </motion.button>
-                    );
-                  })}
-                </div>
-
-                {/* 9.4 — My Saved Templates (local marketplace) */}
-                <div className="mt-12">
-                  <div className="flex items-center justify-between mb-6">
-                    <div>
-                      <h3 className="text-xl font-bold text-white">My Templates</h3>
-                      <p className="text-sm text-[#8b949e]">Your saved apps — reuse, remix, and share</p>
-                    </div>
-                    {hasGeneratedCode && (
-                      <button
-                        onClick={saveCurrentAsTemplate}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95"
-                      >
-                        <Plus className="w-4 h-4" />
-                        Save Current App
-                      </button>
-                    )}
-                  </div>
-                  {savedTemplates.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-16 border border-dashed border-white/10 rounded-2xl text-center gap-3">
-                      <Package className="w-10 h-10 text-white/20" />
-                      <p className="text-[#484f58] text-sm font-medium">No saved templates yet</p>
-                      <p className="text-[10px] text-[#484f58]">Build an app and click "Save Current App" to save it here</p>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {savedTemplates.map(t => (
-                        <div key={t.id} className="flex flex-col bg-[#161b22] border border-white/5 rounded-2xl p-5 gap-3 hover:border-indigo-500/30 transition-all group">
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <h4 className="text-white font-bold text-sm">{t.name}</h4>
-                              <p className="text-[9px] text-[#484f58] mt-0.5">Saved {t.savedAt}</p>
-                            </div>
-                            <button
-                              onClick={() => setSavedTemplates(prev => prev.filter(x => x.id !== t.id))}
-                              className="p-1.5 hover:bg-red-500/10 rounded-lg text-[#484f58] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </div>
-                          <div className="text-[9px] text-[#8b949e] font-mono bg-black/30 rounded-lg p-2 truncate">
-                            {t.html.slice(0, 80)}...
-                          </div>
-                          <button
-                            onClick={() => {
-                              setGeneratedCode(t.html);
-                              setHasGeneratedCode(true);
-                              updatePreview({ 'index.html': t.html });
-                              toggleTab('preview');
-                            }}
-                            className="w-full py-2 bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/20 text-indigo-400 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
-                          >
-                            Load & Preview
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+            // Phase 1.7 — extracted to TemplatesPanel component
+            <TemplatesPanel
+              user={user}
+              templates={templates}
+              savedTemplates={savedTemplates}
+              hasGeneratedCode={hasGeneratedCode}
+              onSelectTemplate={(prompt) => { setInput(prompt); toggleTab('nbi_chat'); }}
+              onRequireAuth={() => { setShowAuth(true); addToast('Sign in to use Pro templates', 'warning'); }}
+              onSaveCurrentTemplate={saveCurrentAsTemplate}
+              onDeleteSavedTemplate={(id) => setSavedTemplates(prev => prev.filter(x => x.id !== id))}
+              onLoadSavedTemplate={(html) => {
+                setGeneratedCode(html);
+                setHasGeneratedCode(true);
+                updatePreview({ 'index.html': html });
+                toggleTab('preview');
+              }}
+            />
           )}
 
           {activeView === 'engine_builder' && (
@@ -8929,361 +8640,29 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           )}
 
           {activeView === 'donation' && (
-            <div className={cn("flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-8 relative min-h-screen transition-colors duration-500", themeClasses.bg)}>
-              {/* Master Edit Toggle */}
-              {isAdmin && (
-                <div className="sticky top-0 right-0 z-50 flex justify-end pb-4">
-                  <button 
-                    onClick={() => setIsDonationEditing(!isDonationEditing)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-xl active:scale-95 ${
-                      isDonationEditing 
-                      ? 'bg-emerald-600 shadow-emerald-500/20 text-white' 
-                      : 'bg-indigo-600 shadow-indigo-600/20 text-white'
-                    }`}
-                  >
-                    {isDonationEditing ? <Check className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
-                    {isDonationEditing ? 'Finish Editing' : 'Edit Page Content'}
-                  </button>
-                </div>
-              )}
-
-              <div className="max-w-3xl mx-auto space-y-8 pb-12">
-                {/* Hero section */}
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-[#161b22] border border-white/10 rounded-[2.5rem] p-8 sm:p-12 text-center shadow-3xl relative overflow-hidden group"
-                >
-                  <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-orange-500 via-white to-green-500"></div>
-                  <div className="absolute -top-24 -right-24 w-64 h-64 bg-indigo-600/5 rounded-full blur-[80px] group-hover:bg-indigo-600/10 transition-colors"></div>
-                  
-                  <div className="relative inline-block group/edit mb-8">
-                    {donationData.logoUrl ? (
-                      <div className="relative">
-                        <img 
-                          src={donationData.logoUrl} 
-                          alt="Creator" 
-                          className="w-24 h-24 rounded-3xl object-cover border-2 border-indigo-500 shadow-xl"
-                        />
-                        {isAdmin && isDonationEditing && (
-                          <label className="absolute -bottom-2 -right-2 p-2 bg-indigo-600 rounded-xl cursor-pointer shadow-lg hover:bg-indigo-700 transition-colors">
-                            <Camera className="w-3.5 h-3.5 text-white" />
-                            <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, 'logoUrl')} />
-                          </label>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="relative">
-                        <div className="w-20 h-20 bg-indigo-600/10 rounded-3xl flex items-center justify-center mx-auto border border-indigo-500/20 shadow-inner group-hover:rotate-12 transition-transform duration-500">
-                          <HeartHandshake className="w-10 h-10 text-indigo-500" />
-                        </div>
-                        {isAdmin && isDonationEditing && (
-                          <label className="absolute -bottom-2 -right-2 p-2 bg-indigo-600 rounded-xl cursor-pointer shadow-lg hover:bg-indigo-700 transition-colors">
-                            <Upload className="w-3.5 h-3.5 text-white" />
-                            <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, 'logoUrl')} />
-                          </label>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="relative group/edit">
-                    {isDonationEditing ? (
-                      <input 
-                        value={donationData.headline}
-                        onChange={(e) => setDonationData({...donationData, headline: e.target.value})}
-                        className="text-2xl sm:text-3xl font-black text-white mb-4 tracking-tighter leading-tight bg-white/5 border border-white/10 rounded-xl px-4 py-2 w-full text-center outline-none focus:border-indigo-500"
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center gap-4 mb-4">
-                        <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tighter leading-tight">
-                          {donationData.headline}
-                        </h2>
-                        {isAdmin && (
-                          <button 
-                            onClick={() => setIsDonationEditing(true)}
-                            className="p-2 opacity-0 group-hover/edit:opacity-100 bg-white/5 hover:bg-white/10 rounded-lg text-indigo-400 transition-all border border-white/10 shadow-lg"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="relative group/edit">
-                    {isDonationEditing ? (
-                      <input 
-                        value={donationData.subHeadline}
-                        onChange={(e) => setDonationData({...donationData, subHeadline: e.target.value})}
-                        className="text-sm font-bold text-indigo-400 uppercase tracking-[0.2em] mb-8 bg-white/5 border border-white/10 rounded-xl px-4 py-2 w-full text-center outline-none focus:border-indigo-500"
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center gap-4 mb-8">
-                        <p className="text-lg font-bold text-indigo-400 uppercase tracking-[0.2em]">{donationData.subHeadline}</p>
-                        {isAdmin && (
-                          <button 
-                            onClick={() => setIsDonationEditing(true)}
-                            className="p-1 px-2 opacity-0 group-hover/edit:opacity-100 bg-white/5 hover:bg-white/10 rounded-lg text-indigo-400 transition-all border border-white/10 shadow-lg flex items-center gap-1"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                            <span className="text-[8px] font-black uppercase">Edit</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="max-w-2xl mx-auto text-left space-y-6">
-                    <div className="relative group/edit">
-                      <div className="text-[#c9d1d9] text-base leading-relaxed font-medium">
-                        नमस्कार भारतीय भाइयों और बहनों,
-                        <br /><br />
-                        {isDonationEditing ? (
-                          <div className="space-y-4">
-                            <div className="flex gap-2 items-center">
-                              <span className="text-[10px] text-[#8b949e] font-bold uppercase">Name:</span>
-                              <input 
-                                value={donationData.name}
-                                onChange={(e) => setDonationData({...donationData, name: e.target.value})}
-                                className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white text-sm outline-none focus:border-indigo-500"
-                              />
-                            </div>
-                            <textarea 
-                              value={donationData.missionStatement}
-                              onChange={(e) => setDonationData({...donationData, missionStatement: e.target.value})}
-                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-[#c9d1d9] outline-none focus:border-indigo-500 min-h-[100px]"
-                            />
-                          </div>
-                        ) : (
-                          <div className="flex items-start gap-4">
-                            <span>मैं <span className="text-white font-bold underline decoration-indigo-500 decoration-2 underline-offset-4">{donationData.name}</span> हूँ। {donationData.missionStatement}</span>
-                        {isAdmin && (
-                          <button 
-                            onClick={() => setIsDonationEditing(true)}
-                            className="p-1 px-2 mt-1 bg-white/5 hover:bg-white/10 rounded-lg text-indigo-400 opacity-0 group-hover/edit:opacity-100 transition-all border border-white/10 shadow-lg flex items-center gap-1 shrink-0"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                          </button>
-                        )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    
-                    <div className="p-6 bg-white/5 rounded-3xl border border-white/10 backdrop-blur-sm relative group/edit">
-                      {isDonationEditing ? (
-                        <textarea 
-                          value={donationData.dreamStatement}
-                          onChange={(e) => setDonationData({...donationData, dreamStatement: e.target.value})}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-[#8b949e] italic text-center outline-none focus:border-indigo-500 min-h-[100px]"
-                        />
-                      ) : (
-                        <div className="flex flex-col items-center">
-                          <p className="text-sm text-[#8b949e] leading-relaxed italic text-center">
-                            {donationData.dreamStatement}
-                          </p>
-                          {isAdmin && (
-                            <button 
-                              onClick={() => setIsDonationEditing(true)}
-                              className="mt-4 p-1 px-2 bg-white/5 hover:bg-white/10 rounded-lg text-indigo-400 opacity-0 group-hover/edit:opacity-100 transition-all border border-white/10 shadow-lg flex items-center gap-1"
-                            >
-                              <Edit2 className="w-3 h-3" />
-                              <span className="text-[8px] font-black uppercase">Edit Dream</span>
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    <p className="text-[#8b949e] text-sm leading-relaxed">
-                      मैं चाहता हूँ कि भारत भी AI की दुनिया में अपनी एक अलग पहचान बनाए — एक ऐसा AI जो भारतीय लोगों की भाषा, सोच, संस्कृति और जरूरतों को वास्तव में समझे।
-                    </p>
-
-                    <div className="space-y-4">
-                      <div className="text-xs font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-2">
-                        <div className="w-1 h-3 bg-indigo-500 rounded-full"></div>
-                        मिशन के लिए आवश्यक संसाधन:
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                         {['बेहतर सर्वर', 'AI ट्रेनिंग', 'रिसर्च', 'डेवलपमेंट'].map(item => (
-                           <div key={item} className="flex items-center gap-2 text-xs text-white font-bold bg-white/5 p-3 rounded-xl border border-white/5">
-                             <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></div>
-                             {item}
-                           </div>
-                         ))}
-                      </div>
-                    </div>
-
-                    <p className="text-[#c9d1d9] text-sm leading-relaxed font-medium border-l-2 border-indigo-500 pl-4 py-1">
-                      इसके लिए मुझे आपकी मदद की आवश्यकता है। ❤️ <br />
-                      यदि आपको "नवभारत AI" का सपना अच्छा लगता है, तो कृपया अपनी इच्छा अनुसार छोटा या बड़ा कोई भी सहयोग करें।
-                    </p>
-
-                    <p className="text-center text-indigo-300 font-bold text-sm bg-indigo-500/10 py-3 rounded-2xl border border-indigo-500/20">
-                      आपका छोटा सा योगदान भी इस भारतीय AI मिशन को आगे बढ़ाने में बहुत बड़ी मदद करेगा। 🙏
-                    </p>
-                  </div>
-                </motion.div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* QR Code Section */}
-                  <motion.div 
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="bg-[#161b22] border border-white/10 rounded-[2.5rem] p-8 text-center flex flex-col items-center justify-center shadow-2xl relative group"
-                  >
-                    <div className="absolute top-4 right-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                      <QrCode className="w-12 h-12 text-white" />
-                    </div>
-                    <h4 className="text-sm font-black text-white uppercase tracking-widest mb-6">स्कैन करके सहयोग करें</h4>
-                    
-                    <div className="relative group/edit">
-                      <div className="w-48 h-48 bg-white p-3 rounded-2xl shadow-inner relative flex items-center justify-center">
-                        <img 
-                          src={donationData.qrUrl || `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${donationData.upiId}&pn=${encodeURIComponent(donationData.name)}&cu=INR`} 
-                          alt="Donation QR Code"
-                          className="w-full h-full object-contain"
-                        />
-                        {!isDonationEditing && (
-                          <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity bg-white/80 rounded-2xl pointer-events-none text-center p-4">
-                            <span className="text-[10px] font-bold text-black uppercase tracking-tight">{donationData.upiId}</span>
-                          </div>
-                        )}
-                        {isDonationEditing && (
-                          <label className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px] text-white opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl cursor-pointer">
-                            <Upload className="w-8 h-8 mb-2" />
-                            <span className="text-[10px] font-black uppercase">Upload QR Code</span>
-                            <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, 'qrUrl')} />
-                          </label>
-                        )}
-                      </div>
-                      {isDonationEditing && donationData.qrUrl && (
-                        <button 
-                          onClick={() => setDonationData({...donationData, qrUrl: ''})}
-                          className="mt-2 text-[8px] font-bold text-rose-500 uppercase flex items-center gap-1 mx-auto"
-                        >
-                          Reset to Auto-Generated QR
-                        </button>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-[#8b949e] mt-4 font-medium italic">Supports all UPI apps (GPay, PhonePe, Paytm)</p>
-                  </motion.div>
-
-                  {/* UPI & CTA Section */}
-                  <motion.div 
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="flex flex-col gap-6"
-                  >
-                    <div className="bg-[#161b22] border border-white/10 rounded-[2.5rem] p-8 shadow-2xl relative group/edit">
-                      <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">UPI IDENTITY</h4>
-                        {isAdmin && !isDonationEditing && (
-                          <button 
-                            onClick={() => setIsDonationEditing(true)}
-                            className="p-1 px-2 bg-white/5 hover:bg-white/10 rounded-lg text-indigo-400 opacity-0 group-hover/edit:opacity-100 transition-all border border-white/10 shadow-lg flex items-center gap-1"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                            <span className="text-[8px] font-black uppercase">Edit</span>
-                          </button>
-                        )}
-                      </div>
-                      <div className="relative group">
-                        <input 
-                          readOnly={!isDonationEditing}
-                          value={donationData.upiId}
-                          onChange={(e) => setDonationData({...donationData, upiId: e.target.value})}
-                          className={`w-full border rounded-2xl px-5 py-4 text-sm font-mono text-white outline-none transition-all shadow-inner ${
-                            isDonationEditing ? 'bg-white/5 border-indigo-500/50' : 'bg-[#0d1117] border-white/10 group-hover:border-indigo-500/50'
-                          }`}
-                        />
-                        {!isDonationEditing && (
-                          <button 
-                            onClick={() => {
-                              navigator.clipboard.writeText(donationData.upiId);
-                              addLog('UPI ID copied to clipboard.', 'success');
-                            }}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-all shadow-lg active:scale-95 flex items-center gap-2 group/btn"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                            <span className="text-[9px] font-black uppercase">Copy</span>
-                          </button>
-                        )}
-                      </div>
-                      <p className="text-[9px] text-[#484f58] mt-3 font-medium text-center">Verify the name displayed: <span className="text-white">{donationData.name}</span></p>
-                    </div>
-
-                    <div className="bg-indigo-600 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden group">
-                      <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent pointer-events-none"></div>
-                      <div className="relative z-10">
-                        <h4 className="text-xl font-black text-white mb-2 flex items-center gap-3">
-                          <Heart className="w-6 h-6 fill-rose-400 text-rose-400 animate-pulse" />
-                          दिल से Donate करें
-                        </h4>
-                        <p className="text-xs text-indigo-100 font-medium leading-relaxed mb-6">
-                          आपका सहयोग भारत के अपने AI को दुनिया के सबसे शानदार प्लेटफॉर्म्स में से एक बनाएगा। 🇮🇳
-                        </p>
-                        <button 
-                          onClick={() => window.open(`upi://pay?pa=${donationData.upiId}&pn=${encodeURIComponent(donationData.name)}&cu=INR`, '_blank')}
-                          className="w-full bg-white text-indigo-600 font-black py-4 rounded-2xl text-xs uppercase tracking-widest shadow-xl hover:bg-indigo-50 transition-all active:scale-95 flex items-center justify-center gap-2"
-                        >
-                          अंकदान / Donation (UPI)
-                          <ExternalLink className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </motion.div>
-                </div>
-
-                <motion.div 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="p-8 text-center border-t border-white/5"
-                >
-                  <p className="text-xs text-[#484f58] italic font-medium max-w-xl mx-auto leading-relaxed">
-                    "मैं वादा करता हूँ — एक दिन आपके सहयोग से नवभारत AI दुनिया के सबसे शानदार AI प्लेटफॉर्म्स में गिना जाएगा।" 🇮🇳
-                  </p>
-                </motion.div>
-              </div>
-            </div>
+            <DonationPanel
+              isAdmin={isAdmin}
+              isDonationEditing={isDonationEditing}
+              donationData={donationData}
+              bgClass={themeClasses.bg}
+              onToggleEditing={() => setIsDonationEditing(p => !p)}
+              onStartEditing={() => setIsDonationEditing(true)}
+              onDonationDataChange={setDonationData}
+              onFileUpload={handleFileUpload}
+              onCopySuccess={() => addLog('UPI ID copied to clipboard.', 'success')}
+            />
           )}
+
 
           {activeView === 'report' && <ReportsListView user={user} />}
           {activeView === 'history' && <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} />}
 
           {activeView === 'deploy' && (
-            <div className="flex-1 p-8 bg-[#0d1117] flex items-center justify-center">
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="max-w-md w-full bg-[#161b22] border border-white/10 rounded-3xl p-10 text-center shadow-3xl overflow-hidden relative"
-              >
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 animate-pulse"></div>
-                
-                <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-8 border border-emerald-500/20">
-                  <Rocket className="w-10 h-10 text-emerald-500" />
-                </div>
-                
-                <h3 className="text-2xl font-bold text-white mb-2">App is Live!</h3>
-                <p className="text-sm text-[#8b949e] mb-8">Your application has been deployed to the edge network.</p>
-                
-                <div className="bg-[#0d1117] border border-white/10 rounded-2xl p-4 flex items-center justify-between mb-8">
-                   <div className="text-xs font-mono text-indigo-400 truncate pr-4">{deployUrl}</div>
-                   <button 
-                    onClick={() => window.open(deployUrl, '_blank')}
-                    className="shrink-0 p-2 hover:bg-white/5 rounded-lg transition-colors"
-                  >
-                    <Globe className="w-4 h-4 text-[#8b949e] hover:text-white" />
-                   </button>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <button onClick={() => toggleTab('preview')} className="py-3 px-4 bg-white/5 hover:bg-white/10 text-white rounded-xl text-xs font-bold transition-all">Preview App</button>
-                  <button onClick={() => setIsDeployed(false)} className="py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/20">Back to Code</button>
-                </div>
-              </motion.div>
-            </div>
+            <DeploySuccessPanel
+              deployUrl={deployUrl}
+              onOpenPreview={() => toggleTab('preview')}
+              onBackToCode={() => setIsDeployed(false)}
+            />
           )}
 
           {activeView === 'studio' && (
@@ -9367,95 +8746,15 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           )}
 
           {activeView === 'files' && (
-            <div className="flex-1 h-full overflow-hidden bg-[#0d1117] flex flex-col">
-              {/* Upload conflict popup */}
-              {fileUploadConflict && (
-                <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" onClick={() => setFileUploadConflict(null)}>
-                  <div className="bg-[#161b22] border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl" onClick={e => e.stopPropagation()}>
-                    <p className="text-[13px] font-black text-white mb-1">
-                      {fileUploadConflict.isZip ? 'ZIP Upload' : `File Conflict: ${fileUploadConflict.file.name}`}
-                    </p>
-                    <p className="text-[11px] text-[#8b949e] mb-5">
-                      {fileUploadConflict.isZip
-                        ? 'Workspace already has files. Replace everything or merge new files alongside existing ones?'
-                        : `"${fileUploadConflict.existingKey}" already exists. Replace it or keep both versions?`}
-                    </p>
-                    <div className="flex gap-3">
-                      <button onClick={() => resolveFileConflict('replace')} className="flex-1 py-2.5 rounded-xl bg-red-600/20 border border-red-500/30 text-red-400 text-[11px] font-black hover:bg-red-600/30 transition-all active:scale-95">Replace</button>
-                      <button onClick={() => resolveFileConflict('merge')} className="flex-1 py-2.5 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 text-[11px] font-black hover:bg-indigo-600/30 transition-all active:scale-95">Merge</button>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {/* Hidden file input for upload */}
-              <input
-                ref={filesUploadRef}
-                type="file"
-                className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) handleFilesUpload(f); e.target.value = ''; }}
-              />
-              <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5 bg-[#161b22]">
-                <FolderOpen className="w-4 h-4 text-indigo-400" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Project Files</span>
-                <div className="ml-auto flex items-center gap-2">
-                  {hasGeneratedCode && (
-                    <span className="text-[8px] text-emerald-400 font-black uppercase tracking-widest mr-1">
-                      {Object.keys(files).filter(k => !k.startsWith('__pending__')).length} files
-                    </span>
-                  )}
-                  <button
-                    onClick={() => filesUploadRef.current?.click()}
-                    className="flex items-center gap-1 px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[9px] font-black uppercase tracking-wider text-[#8b949e] hover:text-white transition-all active:scale-95"
-                    title="Upload any file"
-                  >
-                    <Upload className="w-3 h-3" /> Upload
-                  </button>
-                  {hasGeneratedCode && (
-                    <button
-                      onClick={() => downloadAppZip(files as any, 'NavBharatApp')}
-                      className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/30 rounded-lg text-[9px] font-black uppercase tracking-wider text-indigo-400 hover:text-indigo-300 transition-all active:scale-95"
-                      title="Download all files as ZIP"
-                    >
-                      <Download className="w-3 h-3" /> Download ZIP
-                    </button>
-                  )}
-                </div>
-              </div>
-              {!hasGeneratedCode ? (
-                <div className="flex-1 flex items-center justify-center flex-col gap-3 text-center p-8">
-                  <FolderOpen className="w-12 h-12 text-white/10" />
-                  <p className="text-[11px] text-[#484f58] font-medium">No app generated yet.</p>
-                  <p className="text-[9px] text-[#484f58]">Build an app in NavBharatAI Pro — files will appear here.</p>
-                </div>
-              ) : (
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
-                  <div className="space-y-1">
-                    {Object.entries(files).map(([path, content]) => {
-                      const ext = path.split('.').pop() || '';
-                      const extColor: Record<string, string> = {
-                        html: 'text-orange-400', css: 'text-blue-400', js: 'text-yellow-400',
-                        ts: 'text-cyan-400', tsx: 'text-cyan-400', json: 'text-green-400',
-                        md: 'text-purple-400', py: 'text-emerald-400',
-                      };
-                      const color = extColor[ext] || 'text-white/50';
-                      const lines = (content as string).split('\n').length;
-                      return (
-                        <button
-                          key={path}
-                          onClick={() => { setActiveFile(path); toggleTab('studio'); }}
-                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors group text-left"
-                        >
-                          <FileCode className={`w-4 h-4 flex-shrink-0 ${color}`} />
-                          <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{path}</span>
-                          <span className="text-[8px] text-[#484f58] font-mono">{lines}L</span>
-                          <ChevronRight className="w-3 h-3 text-white/20 group-hover:text-white/50 transition-colors" />
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
+            <FilesPanel
+              files={files}
+              hasGeneratedCode={hasGeneratedCode}
+              fileUploadConflict={fileUploadConflict}
+              onResolveConflict={resolveFileConflict}
+              onUpload={handleFilesUpload}
+              onDownloadZip={() => downloadAppZip(files as any, 'NavBharatApp')}
+              onOpenFile={(path) => { setActiveFile(path); toggleTab('studio'); }}
+            />
           )}
 
           {/* Phase 3 — Testing System */}

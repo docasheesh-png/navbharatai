@@ -1,4 +1,5 @@
 import { AIProvider, AIProviderResponse, ProviderTelemetry } from './ProviderTypes';
+import { providerCooldownStore } from '../../lib/ProviderCooldownStore';
 
 // Per-provider cooldown tracker (module-level singleton — shared across all requests)
 const cooldownUntil = new Map<string, number>();
@@ -14,7 +15,26 @@ function setCooldown(name: string, seconds: number) {
   const until = Date.now() + seconds * 1000;
   cooldownUntil.set(name, until);
   console.log(`[CIRCUIT] ${name} on cooldown for ${seconds}s (until ${new Date(until).toISOString()})`);
+  // Phase 4.1 — share this cooldown with other Cloud Run instances (fire-and-forget).
+  void providerCooldownStore.write(name, until);
 }
+
+/**
+ * Phase 4.1 — merge cooldowns set by OTHER instances into our in-memory map.
+ * Called by the background sync loop. Keeps the later (max) deadline so a longer
+ * remote cooldown is honored; never shortens a local cooldown.
+ */
+function mergeRemoteCooldowns(remote: Record<string, number>) {
+  const now = Date.now();
+  for (const [name, until] of Object.entries(remote)) {
+    if (until <= now) continue; // expired remotely
+    const local = cooldownUntil.get(name) || 0;
+    if (until > local) cooldownUntil.set(name, until);
+  }
+}
+
+// Start the cross-instance cooldown sync once at module load (no-op under tests).
+providerCooldownStore.startSync(mergeRemoteCooldowns);
 
 function acquireSlot(name: string): boolean {
   const count = inFlight.get(name) || 0;

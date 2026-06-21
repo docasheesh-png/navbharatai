@@ -316,8 +316,12 @@ _Multi-instance safe. Observable. No surprise bills._
 - `tests/workspaceLock.test.ts` — 5 unit tests in VITEST-skip/fail-open mode (350/350 total)
 - tsc x2 clean
 
+**Shipped (AIRouter cooldown → Firestore, 2026-06-21):**
+- NEW `src/server/lib/ProviderCooldownStore.ts` — shares AI provider circuit-breaker cooldowns across Cloud Run instances via the `provider_cooldowns` Firestore collection. Latency-safe: the in-memory map stays the authoritative zero-latency fast path; `write()` is fire-and-forget on every cooldown; a background 20s `startSync()` loop (unref'd, VITEST-skip) pulls remote cooldowns. So a provider any instance marked down is skipped by all within one interval.
+- `AIRouter.ts` — `setCooldown()` now also `providerCooldownStore.write()`s (fire-and-forget); `mergeRemoteCooldowns()` merges remote deadlines (keeps the max, never shortens a local cooldown); sync started once at module load.
+- `tests/providerCooldownStore.test.ts` — 5 tests (VITEST-skip write/read/startSync no-op). tsc x2 clean, vitest green.
+
 **Still TODO:**
-- AIRouter cooldown → Firestore (shared across instances)
 - UsageTracker → Firestore (billing accuracy requires shared state)
 - Event ring → Firestore
 

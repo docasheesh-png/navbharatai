@@ -398,17 +398,19 @@ Degraded mode tested. No file over 500 lines.
 ## PHASE 6 — Bharat-First + Mobile-First + Real Breadth
 _NavBharatAI's genuine competitive moat. Claude Code will never do any of this._
 
-### 6.1 — Bharat-first integrations
-**Status: TODO**
+### 6.1 — Bharat-first integrations ✅ PARTIAL (2026-06-21)
+**Branch:** `claude/p1.7-prochat-panel`
 
-Pre-built, tested, actually-working scaffolds in Quick-Start Gallery:
-- UPI payment integration (Razorpay/PhonePe API, QR code, payment status)
-- Aadhaar/DigiLocker KYC flow scaffold (real API, not fake)
-- Hindi/regional language UI (Devanagari font, i18n setup, RTL-aware layout)
-- GST invoice generator (GSTIN validation, tax calculation)
-- Startup pack (MSME fields, PAN/TAN, state-wise tax rates)
+**Shipped — 4 Bharat-first Quick-Start templates in `TemplatesPanel.tsx`:**
+- **UPI Payment App** — complete Razorpay integration: dynamic SDK load, checkout modal, payment status (success/failure/pending), GST breakdown, paise conversion, `.env.example`. Needs VITE_RAZORPAY_KEY_ID.
+- **Hindi Language App** — bilingual Hindi/English job board with i18next, Noto Sans Devanagari font, language toggle, sample Indian job listings, Indian flag palette.
+- **GST Invoice Generator** — GSTIN validator (15-char format, state code map), CGST/SGST vs IGST auto-switch, HSN codes, amount-in-words (lakh/crore system), print CSS, no backend needed.
+- **Startup Registration Tracker** — 11-step registration checklist, compliance calendar (GSTR-1/3B deadlines), document vault, cost tracker, all in localStorage.
 
-Each scaffold: builds in gallery, preview works, real API documented, tested end-to-end.
+**Still TODO (require admin action/infra):**
+- Aadhaar/DigiLocker KYC (requires approved DigiLocker API access — not publicly available)
+- PhonePe integration (requires merchant approval + webhook server)
+- End-to-end verified with live Razorpay test key (needs admin to add test key)
 
 ### 6.2 — Mobile-first experience
 **Status: TODO**

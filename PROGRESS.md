@@ -1378,6 +1378,24 @@ Adds 8 example prompt cards to Pro Chat empty state (Bolt.new-style "blank page"
   injection on build instructions (prevents appContextInjector test regression).
 Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
 
+### Milestone G12 — Real-Time File Content Streaming (2026-06-21)
+Claude Code feel: code files now appear in the Generated Files panel as the agent writes them,
+instead of waiting until the entire build completes.
+
+Root insight: `files_changed` events from `EngineerAgentLoop` already carry `{ path, content }[]`
+for every `edit_file`/`patch_file` action — no extra VFS reads needed.
+
+Changes:
+- BuildPipeline.ts: added `{ type: 'file'; fileName: string; content: string }` to `BuildProgressEvent`
+- buildService.ts: added `'file'` to `BuildStreamEvent.type` union + `fileName?` field
+- ProEngineRunner.ts: on `files_changed`, emit individual `file` events (≤8 files, ≤40KB each)
+- App.tsx: `buildAppStream` callback handles `type === 'file'` → updates `generatedFiles` state
+  in real-time; files appear in the Generated Files panel as they're written
+
+Result: users watch code appearing file by file during the build — same interactive feel as
+Claude Code's live editing view.
+Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
+
 ### Milestone G11 — Build Reliability + Real-Time File Display (2026-06-21)
 Root cause fix for "Build stream ended without a result" (reported by user after "photo editing app"):
 

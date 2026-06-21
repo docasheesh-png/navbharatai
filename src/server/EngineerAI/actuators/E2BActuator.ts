@@ -131,6 +131,16 @@ function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+/** Guess the dev-server port from the launch command for health-check polling. */
+function extractDevPort(command: string): number {
+  const flag = command.match(/--port[=\s]+(\d+)/i);
+  if (flag) return parseInt(flag[1], 10);
+  const env = command.match(/\bPORT=(\d+)/);
+  if (env) return parseInt(env[1], 10);
+  if (/next|react-scripts/.test(command)) return 3000;
+  return 5173; // Vite default (most AI-generated React apps)
+}
+
 /**
  * Phase 2 actuator: each workspaceId gets its own real e2b.dev cloud sandbox
  * (separate VM, real OS-level isolation). Requires E2B_API_KEY.
@@ -159,6 +169,46 @@ export class E2BActuator implements IEngineerActuator {
   /** Build the e2b SDK options, injecting the per-user key when set. */
   private _opts(extra?: Record<string, unknown>): { timeoutMs: number; apiKey?: string } {
     return { timeoutMs: SANDBOX_TIMEOUT_MS, ...(this.apiKey ? { apiKey: this.apiKey } : {}), ...extra };
+  }
+
+  /**
+   * Install npm dependencies with automatic peer-dep fallback:
+   *   1. npm ci       — fastest, reproducible (requires package-lock.json)
+   *   2. npm install  — creates/updates lock, resolves new deps
+   *   3. npm install --legacy-peer-deps  — only when ERESOLVE is detected
+   * Never throws; returns success flag + combined log for the agent to read.
+   */
+  private async _npmInstall(sandbox: Sandbox): Promise<{ success: boolean; log: string }> {
+    // Step 1: npm ci when a lock file exists (clean, reproducible install)
+    const hasLock = await sandbox.files.exists(`${WORKSPACE_ROOT}/package-lock.json`).catch(() => false);
+    if (hasLock) {
+      const ci = await sandbox.commands.run('npm ci', {
+        cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
+      }).catch((err: any) => ({ exitCode: -1, stdout: '', stderr: err?.message || String(err) }));
+      if (ci.exitCode === 0) return { success: true, log: ci.stdout + ci.stderr };
+      // npm ci failed (stale lock, missing lock entry) — fall through to npm install
+    }
+
+    // Step 2: npm install (resolves all deps, creates/updates lock file)
+    const install = await sandbox.commands.run('npm install', {
+      cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
+    }).catch((err: any) => ({ exitCode: -1, stdout: '', stderr: err?.message || String(err) }));
+    const installLog = install.stdout + install.stderr;
+    if (install.exitCode === 0) return { success: true, log: installLog };
+
+    // Step 3: ERESOLVE peer-dep conflict — retry with --legacy-peer-deps
+    if (/ERESOLVE|peer dep(endenc)?/i.test(installLog)) {
+      const retry = await sandbox.commands.run('npm install --legacy-peer-deps', {
+        cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
+      }).catch((err: any) => ({ exitCode: -1, stdout: '', stderr: err?.message || String(err) }));
+      const retryLog = retry.stdout + retry.stderr;
+      return {
+        success: retry.exitCode === 0,
+        log: installLog + '\n[--legacy-peer-deps retry]\n' + retryLog,
+      };
+    }
+
+    return { success: false, log: installLog };
   }
 
   /** Pause sandboxes with no activity for IDLE_LIMIT_MS (abandoned sessions). */
@@ -324,15 +374,15 @@ export class E2BActuator implements IEngineerActuator {
         return { success: true, logs: '(no build step — static project)' };
       }
 
-      // Node/npm project: install if needed, then run build script.
+      // Node/npm project: install if needed (with peer-dep fallback), then build.
       let installLog = '';
       const hasModules = await sandbox.files.exists(`${WORKSPACE_ROOT}/node_modules`).catch(() => false);
       if (!hasModules) {
-        const install = await sandbox.commands.run('npm install', {
-          cwd: WORKSPACE_ROOT,
-          timeoutMs: COMMAND_TIMEOUT_MS,
-        });
-        installLog = install.stdout + install.stderr;
+        const installResult = await this._npmInstall(sandbox);
+        installLog = installResult.log;
+        if (!installResult.success) {
+          return { success: false, logs: installLog };
+        }
       }
       const build = await sandbox.commands.run('npm run build', {
         cwd: WORKSPACE_ROOT,
@@ -375,6 +425,32 @@ export class E2BActuator implements IEngineerActuator {
       });
       await new Promise(resolve => setTimeout(resolve, 20_000));
       await handle.disconnect().catch(() => {});
+
+      // Health check: confirm the dev server port is actually listening.
+      // If not, attempt one automatic restart so transient startup crashes self-heal.
+      const port = extractDevPort(command);
+      const portCheck = await sandbox.commands.run(
+        `nc -z localhost ${port} 2>/dev/null && echo PORT_UP || echo PORT_DOWN`,
+        { timeoutMs: 5000 },
+      ).catch(() => ({ stdout: 'PORT_DOWN' } as any));
+      if (portCheck.stdout.includes('PORT_DOWN')) {
+        stdout += `\n[health-check] port ${port} not responding — restarting…`;
+        await sandbox.commands.run(
+          `fuser -k ${port}/tcp 2>/dev/null; pkill -f "node.*${port}" 2>/dev/null || true`,
+          { timeoutMs: 5000 },
+        ).catch(() => {});
+        const retry = await sandbox.commands.run(command, {
+          cwd: WORKSPACE_ROOT,
+          background: true,
+          onStdout: s => { stdout += s; },
+          onStderr: s => { stderr += s; },
+        });
+        await new Promise(r => setTimeout(r, 15_000));
+        await retry.disconnect().catch(() => {});
+      } else {
+        stdout += `\n[health-check] port ${port} is UP`;
+      }
+
       return { exitCode: 0, stdout, stderr };
     }
 

@@ -628,9 +628,17 @@ Hard server-side enforcement. Free / Pro / BYOK E2B tiers defined and enforced.
 - OWASP ZAP scan on production endpoints
 - Manual: secrets endpoints, admin endpoints, E2B sandbox isolation
 
-### 7.5 — AppKnowledgeBase fully synced
-Audit every user-visible feature from Phase 0–6. Every feature has complete entry with
-correct navigation path + keywords that match how real users ask about it.
+### 7.5 — AppKnowledgeBase fully synced ✅ DONE (2026-06-21)
+**Branch:** `claude/test-coverage-analysis-bq0yev`
+
+Audited every user-facing view/feature against `AppKnowledgeBase.ts` (now 47 entries).
+All primary views are covered. Gaps found + filled this session:
+- `auto-test-generation` (Phase 17), `unified-workspace` (Phase 3.1) — added when shipped.
+- `code-testing-panel` (Code Studio → Testing tab), `api-tester` (Code Studio → API tab),
+  `project-templates` (Blueprints/Templates gallery, incl. Bharat-first templates) — added now.
+Each new entry has exact path, sub-capability description, howToUse, relatedFeatures, and
+English + Hindi/Hinglish keywords. `appKnowledgeBase.test.ts` integrity checks green.
+Ongoing rule (CLAUDE.md): any new user-facing feature adds its entry in the same PR.
 
 ### 7.6 — Runbooks + rollback drills (tested, not just written)
 - "ENGINE=v2 broken" → flip to v1 in <30 seconds

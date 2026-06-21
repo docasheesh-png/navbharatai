@@ -220,6 +220,33 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     relatedFeatures: ['ide', 'pro_chat'],
     keywords: ['preview', 'live preview', 'hot reload', 'browser preview', 'see app', 'run app', 'app dekho'],
   },
+  {
+    id: 'code-testing-panel',
+    name: 'Code Studio — Test Panel',
+    path: 'Code Studio → Testing tab',
+    description: 'Run a suite of automatic checks against the generated app (render checks, key element presence, basic interaction smoke tests) and see pass/fail status per test. Complements the auto-generated Vitest files by giving an in-browser quick check without leaving the IDE.',
+    howToUse: 'Open Code Studio, switch to the Testing tab, and run the checks. Green = pass, red = fail with the reason shown.',
+    relatedFeatures: ['ide', 'auto-test-generation', 'ide_preview'],
+    keywords: ['test panel', 'run tests', 'testing tab', 'check app', 'test cases', 'qa', 'verify app', 'test karo', 'app test'],
+  },
+  {
+    id: 'api-tester',
+    name: 'Code Studio — API Tester',
+    path: 'Code Studio → API tab',
+    description: 'A built-in HTTP client (like a mini Postman) to test your app\'s API endpoints: choose method (GET/POST/PUT/DELETE), set URL, headers and body, send the request, and inspect the response status, headers, and JSON body.',
+    howToUse: 'Open Code Studio → API tab. Enter the endpoint URL, pick the method, add any headers/body, then Send to see the live response.',
+    relatedFeatures: ['ide', 'ide_terminal', 'settings_database'],
+    keywords: ['api tester', 'http client', 'postman', 'test api', 'endpoint', 'rest', 'request', 'api call', 'fetch test', 'api test karo'],
+  },
+  {
+    id: 'project-templates',
+    name: 'Project Blueprints & Templates Gallery',
+    path: 'Sidebar → Templates  OR  Code Studio → Templates',
+    description: 'A gallery of ready-to-build Project Blueprints (including Bharat-first templates: UPI Payment App, Hindi Language App, GST Invoice Generator, Startup Registration Tracker) plus your own saved templates. Selecting a blueprint loads a detailed starter prompt so you can build it instantly.',
+    howToUse: 'Open Templates from the sidebar, browse the blueprint cards, and click one to start building from it. Save your own current project as a reusable template from the same panel.',
+    relatedFeatures: ['pro_chat', 'quick-start-gallery', 'engineer_ai'],
+    keywords: ['templates', 'blueprints', 'project templates', 'starter', 'examples', 'upi', 'gst', 'hindi app', 'startup', 'my templates', 'template gallery', 'readymade', 'banaya banaya'],
+  },
 
   // ─── PROFESSIONALS HUB ───────────────────────────────────────────────────
   {

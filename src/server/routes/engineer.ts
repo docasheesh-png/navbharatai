@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from 'express';
+import { buildRateLimiter } from '../lib/authMiddleware';
 import { setCorsHeaders } from '../lib/cors';
 import { buildEngineerRouter } from '../EngineerAI/EngineerRouterFactory';
 import { EngineerAgentLoop } from '../EngineerAI/EngineerAgentLoop';
@@ -60,7 +61,14 @@ export function registerEngineerRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/engineer-chat', async (req: Request, res: Response) => {
+  app.post('/api/engineer-chat', buildRateLimiter(), async (req: Request, res: Response) => {
+    // C5 (P0b): LocalActuator runs code in the server process itself — unsafe in production.
+    // Block the route if no isolated sandbox is configured (E2B or Docker).
+    if (process.env.NODE_ENV === 'production' && !process.env.E2B_API_KEY && process.env.DOCKER_ENABLED !== 'true') {
+      res.status(503).json({ error: 'Engineer AI requires a cloud sandbox in production. Please configure E2B_API_KEY.' });
+      return;
+    }
+
     const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig, userId } = req.body || {};
     if (typeof workspaceId !== 'string' || !workspaceId || typeof instruction !== 'string' || !instruction) {
       res.status(400).json({ error: 'workspaceId and instruction are required.' });

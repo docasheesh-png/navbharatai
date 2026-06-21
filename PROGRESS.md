@@ -1282,3 +1282,17 @@ are persisted to Firestore, and admin can inspect system health from a new setti
   when admin-logged-in; panel renders build stats + AI cost per provider breakdown.
 - AppKnowledgeBase.ts: 'admin-metrics' entry added.
 Gate: server tsc 0 · frontend tsc 0 · 307/307 tests pass. Branch: claude/g2-observability.
+
+### Milestone G4 — IN PROGRESS (2026-06-21) — Security: Helmet + CORS + error sanitization + npm audit
+G4 closes four real security gaps (zero new infrastructure — all code changes):
+- server.ts: helmet({contentSecurityPolicy, crossOriginEmbedderPolicy:false}) added after
+  express() init — adds CSP, X-Frame-Options:SAMEORIGIN, X-Content-Type-Options:nosniff,
+  HSTS, Referrer-Policy, X-XSS-Protection.
+- NEW src/server/lib/cors.ts: setCorsHeaders() helper replaces wildcard CORS on 3 routes.
+  Allows navbharatai.web.app, navbharatai.firebaseapp.com, APP_ORIGIN env; blocks unknown
+  origins in production.
+- engineer.ts / pro.ts / zip.ts: Access-Control-Allow-Origin:* replaced with setCorsHeaders().
+- admin.ts: 7 raw e.message 500 responses replaced with 'Internal server error.' + logging.
+- secrets.ts: console.warn on missing SECRET_ENCRYPTION_KEY (fallback retained for existing data).
+- .github/workflows/ci.yml: npm audit --audit-level=high step added (continue-on-error:true).
+Gate: server tsc 0 · frontend tsc 0 · 307/307 tests pass. PR #117 open.

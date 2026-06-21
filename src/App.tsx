@@ -1124,6 +1124,14 @@ export default function App() {
   const [isBuilding, setIsBuilding] = useState(false);
   const [isDeployed, setIsDeployed] = useState(false);
   const [deployUrl, setDeployUrl] = useState('');
+  const [showDeployPanel, setShowDeployPanel] = useState(false);
+  const [deployPlatform, setDeployPlatform] = useState<'vercel' | 'netlify' | 'github'>('vercel');
+  const [deployToken, setDeployToken] = useState('');
+  const [deployProjectName, setDeployProjectName] = useState('');
+  const [deployOwner, setDeployOwner] = useState('');
+  const [deployRepo, setDeployRepo] = useState('');
+  const [isDeploying, setIsDeploying] = useState(false);
+  const [deployPanelError, setDeployPanelError] = useState('');
   // logs, setLogs → from useDevLogs() hook
   const _initialCode = (() => {
     // 8.7 — restore last generated app for offline mode
@@ -4017,6 +4025,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     }
 
     // ── Mode is the single source of truth — forceBuild skips auto routing ──
+
     const isBuildMode = mode === 'build' || forceBuild;
     const isAutoMode  = mode === 'auto' && !forceBuild;
 
@@ -4789,6 +4798,37 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     proAbortControllerRef.current?.abort();
     proAbortControllerRef.current = null;
   };
+
+  const handleDeployApp = useCallback(async () => {
+    const deployFiles = files && Object.keys(files).length > 0 ? files : null;
+    if (!deployFiles) { setDeployPanelError('No files to deploy. Build an app first.'); return; }
+    if (!deployToken.trim()) { setDeployPanelError('Please enter your API token.'); return; }
+    if (deployPlatform === 'vercel' && !deployProjectName.trim()) { setDeployPanelError('Please enter a project name.'); return; }
+    if (deployPlatform === 'github' && (!deployOwner.trim() || !deployRepo.trim())) { setDeployPanelError('Please enter owner and repo.'); return; }
+    setIsDeploying(true);
+    setDeployPanelError('');
+    try {
+      const body: Record<string, string | Record<string, string>> = { provider: deployPlatform, token: deployToken, files: deployFiles };
+      if (deployPlatform === 'vercel') body.name = deployProjectName.trim();
+      else if (deployPlatform === 'netlify') body.siteId = deployProjectName.trim();
+      else if (deployPlatform === 'github') { body.owner = deployOwner.trim(); body.repo = deployRepo.trim(); }
+      const resp = await fetch('/api/pro/deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json().catch(() => ({})) as any;
+      if (!resp.ok) throw new Error(data?.error || `Deploy failed (${resp.status})`);
+      setShowDeployPanel(false);
+      setDeployUrl(data.url);
+      setIsDeployed(true);
+      toggleTab('deploy');
+    } catch (e: any) {
+      setDeployPanelError(e.message || 'Deploy failed. Please check your token and try again.');
+    } finally {
+      setIsDeploying(false);
+    }
+  }, [files, deployPlatform, deployToken, deployProjectName, deployOwner, deployRepo]);
 
   const downloadAppZip = useCallback(async (deployFiles: Record<string, string>, appName: string) => {
     try {
@@ -7471,6 +7511,16 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                            ⬇ Export PRD
                          </button>
                        )}
+                       {isAppBuilt && files && Object.keys(files).length > 0 && (
+                         <button
+                           onClick={() => { setDeployPanelError(''); setShowDeployPanel(true); }}
+                           title="Deploy your app to Vercel, Netlify, or GitHub Pages"
+                           className="flex items-center gap-1 px-2 py-0.5 bg-emerald-900/30 hover:bg-emerald-900/50 border border-emerald-600/30 rounded text-[8px] text-emerald-400 hover:text-emerald-300 transition-all"
+                         >
+                           <Rocket className="w-2.5 h-2.5" />
+                           Deploy
+                         </button>
+                       )}
                        <span className="font-mono text-indigo-400">{sessions.find(s => s.id === currentProSessionId)?.uci || ''}</span>
                      </div>
                   </div>
@@ -7541,6 +7591,117 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                     onStop={isProLoading ? handleStopPro : undefined}
                   />
                 </div>
+
+              {/* G8 — One-click Deploy Panel (modal overlay) */}
+              {showDeployPanel && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setShowDeployPanel(false); }}>
+                  <div className="w-full max-w-sm mx-4 bg-[#161b22] border border-white/10 rounded-3xl p-6 shadow-2xl space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Rocket className="w-4 h-4 text-emerald-400" />
+                        <h3 className="text-sm font-black text-white uppercase tracking-widest">Deploy App</h3>
+                      </div>
+                      <button onClick={() => setShowDeployPanel(false)} className="p-1 hover:bg-white/10 rounded-lg transition-colors">
+                        <X className="w-4 h-4 text-[#8b949e]" />
+                      </button>
+                    </div>
+
+                    {/* Platform selector */}
+                    <div className="grid grid-cols-3 gap-2">
+                      {(['vercel', 'netlify', 'github'] as const).map(p => (
+                        <button
+                          key={p}
+                          onClick={() => { setDeployPlatform(p); setDeployPanelError(''); }}
+                          className={cn(
+                            "py-2 px-3 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all",
+                            deployPlatform === p
+                              ? "bg-emerald-900/40 border-emerald-500/50 text-emerald-300"
+                              : "bg-white/5 border-white/10 text-[#8b949e] hover:border-white/20 hover:text-white"
+                          )}
+                        >
+                          {p === 'github' ? 'GitHub' : p.charAt(0).toUpperCase() + p.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Token input */}
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">
+                        {deployPlatform === 'vercel' ? 'Vercel Token' : deployPlatform === 'netlify' ? 'Netlify Token' : 'GitHub Token'}
+                      </label>
+                      <input
+                        type="password"
+                        value={deployToken}
+                        onChange={e => { setDeployToken(e.target.value); setDeployPanelError(''); }}
+                        placeholder={deployPlatform === 'vercel' ? 'Get at vercel.com/account/tokens' : deployPlatform === 'netlify' ? 'Get at app.netlify.com/user/applications' : 'github.com → Settings → Tokens'}
+                        className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-emerald-500/50"
+                      />
+                    </div>
+
+                    {/* Platform-specific fields */}
+                    {deployPlatform === 'vercel' && (
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">Project Name</label>
+                        <input
+                          type="text"
+                          value={deployProjectName}
+                          onChange={e => { setDeployProjectName(e.target.value); setDeployPanelError(''); }}
+                          placeholder="my-app"
+                          className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-emerald-500/50"
+                        />
+                      </div>
+                    )}
+                    {deployPlatform === 'netlify' && (
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">Site ID (optional)</label>
+                        <input
+                          type="text"
+                          value={deployProjectName}
+                          onChange={e => { setDeployProjectName(e.target.value); setDeployPanelError(''); }}
+                          placeholder="Leave blank to create new site"
+                          className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-emerald-500/50"
+                        />
+                      </div>
+                    )}
+                    {deployPlatform === 'github' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">Owner</label>
+                          <input
+                            type="text"
+                            value={deployOwner}
+                            onChange={e => { setDeployOwner(e.target.value); setDeployPanelError(''); }}
+                            placeholder="username"
+                            className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-emerald-500/50"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">Repo</label>
+                          <input
+                            type="text"
+                            value={deployRepo}
+                            onChange={e => { setDeployRepo(e.target.value); setDeployPanelError(''); }}
+                            placeholder="repo-name"
+                            className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-emerald-500/50"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {deployPanelError && (
+                      <p className="text-[10px] text-red-400 bg-red-900/20 border border-red-500/20 rounded-xl px-3 py-2">{deployPanelError}</p>
+                    )}
+
+                    <button
+                      onClick={handleDeployApp}
+                      disabled={isDeploying}
+                      className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20"
+                    >
+                      {isDeploying ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Deploying...</> : <><Rocket className="w-3.5 h-3.5" /> Deploy Now</>}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

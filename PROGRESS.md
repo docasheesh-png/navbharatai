@@ -1344,3 +1344,25 @@ E2B_API_KEY already set in Cloud Run (production-verified path). Changes in E2BA
 - extractDevPort() helper: guesses port from --port flag, PORT= env, or framework default.
 Gate: server tsc 0 · frontend tsc 0 · 321/321 tests pass. PR #120 open.
 Verify: merge -> Cloud Run deploy -> Pro build with peer-dep conflict -> logs show retry -> success.
+
+### Milestone G7 — DONE (2026-06-21) — Live Preview in Pro Chat
+Backend preview system was already complete (PreviewService, /preview/:id, gates). G7 wired the
+frontend: changed `preview: false` → `preview: true` in buildAppStream call; reads the returned
+preview info and sets proLivePreviewUrlRef so "App is live! [Open in new tab]" shows the real URL.
+Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass. PR #121 merged.
+
+### Milestone G8 — One-click Deploy GUI (2026-06-21)
+Backend was already complete (ProDeploy.ts + /api/pro/deploy + /deploy command in Pro Chat).
+G8 adds the GUI layer:
+- App.tsx: 8 new state vars for the deploy panel (showDeployPanel, deployPlatform, deployToken,
+  deployProjectName, deployOwner, deployRepo, isDeploying, deployPanelError).
+- handleDeployApp() useCallback: validates inputs, calls /api/pro/deploy with correct body per
+  platform, on success sets isDeployed+deployUrl and navigates to 'deploy' view (existing
+  "App is Live!" screen). Wraps the same REST path used by /deploy command.
+- Pro Chat header: "Deploy" button (Rocket icon, emerald, visible only when isAppBuilt && files
+  non-empty) — opens the deploy panel.
+- Deploy modal overlay (absolute inset-0 z-50) inside Pro Chat relative container:
+  platform selector (Vercel/Netlify/GitHub), token input, platform-specific fields (project
+  name / site ID / owner+repo), error display, "Deploy Now" button with spinner.
+- AppKnowledgeBase.ts: 'one-click-deploy' entry added (mandatory per CLAUDE.md rule).
+Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.

@@ -1,39 +1,37 @@
 import { describe, it, expect } from 'vitest';
 import { AppMakerError, NotFoundError, ValidationError, PersistenceError } from '../src/server/AppMakerLab/errors/AppMakerErrors';
 
-describe('AppMakerErrors', () => {
-  it('AppMakerError has name "AppMakerError"', () => {
-    const err = new AppMakerError('something failed', 'GENERIC');
+describe('AppMakerError', () => {
+  it('is an Error with name AppMakerError', () => {
+    const err = new AppMakerError('bad thing', 'SOME_CODE');
+    expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe('AppMakerError');
-    expect(err.message).toBe('something failed');
-    expect(err.code).toBe('GENERIC');
+    expect(err.message).toBe('bad thing');
+    expect(err.code).toBe('SOME_CODE');
   });
+});
 
-  it('NotFoundError has code "NOT_FOUND"', () => {
-    const err = new NotFoundError('workspace not found');
+describe('NotFoundError', () => {
+  it('has code NOT_FOUND', () => {
+    const err = new NotFoundError('missing item');
     expect(err.code).toBe('NOT_FOUND');
-    expect(err.message).toBe('workspace not found');
+    expect(err.message).toBe('missing item');
+    expect(err).toBeInstanceOf(AppMakerError);
   });
+});
 
-  it('ValidationError has code "VALIDATION_ERROR"', () => {
-    const err = new ValidationError('invalid input');
+describe('ValidationError', () => {
+  it('has code VALIDATION_ERROR', () => {
+    const err = new ValidationError('invalid field');
     expect(err.code).toBe('VALIDATION_ERROR');
+    expect(err).toBeInstanceOf(AppMakerError);
   });
+});
 
-  it('PersistenceError has code "PERSISTENCE_ERROR"', () => {
-    const err = new PersistenceError('db write failed');
+describe('PersistenceError', () => {
+  it('has code PERSISTENCE_ERROR', () => {
+    const err = new PersistenceError('write failed');
     expect(err.code).toBe('PERSISTENCE_ERROR');
-  });
-
-  it('all error classes are instances of Error', () => {
-    expect(new NotFoundError('x')).toBeInstanceOf(Error);
-    expect(new ValidationError('x')).toBeInstanceOf(Error);
-    expect(new PersistenceError('x')).toBeInstanceOf(Error);
-  });
-
-  it('all error classes are instances of AppMakerError', () => {
-    expect(new NotFoundError('x')).toBeInstanceOf(AppMakerError);
-    expect(new ValidationError('x')).toBeInstanceOf(AppMakerError);
-    expect(new PersistenceError('x')).toBeInstanceOf(AppMakerError);
+    expect(err).toBeInstanceOf(AppMakerError);
   });
 });

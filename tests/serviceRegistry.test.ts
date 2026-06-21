@@ -1,53 +1,72 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ServiceRegistry } from '../src/server/AppMakerLab/kernel/ServiceRegistry';
-import { DependencyError } from '../src/server/AppMakerLab/kernel/KernelErrors';
 import type { IKernelService, HealthReport } from '../src/server/AppMakerLab/kernel/IKernelService';
 import { ServiceState } from '../src/server/AppMakerLab/kernel/IKernelService';
+import { DependencyError } from '../src/server/AppMakerLab/kernel/KernelErrors';
 
-function stubService(name: string): IKernelService {
+function makeService(name: string, dependencies: string[] = []): IKernelService {
   return {
     name,
-    dependencies: [],
-    start: async () => {},
-    stop: async () => {},
-    healthCheck: async (): Promise<HealthReport> => ({ serviceName: name, serviceState: ServiceState.RUNNING, healthy: true }),
-    getState: () => ServiceState.RUNNING,
+    dependencies,
+    start: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue(undefined),
+    healthCheck: vi.fn().mockResolvedValue({ serviceName: name, serviceState: ServiceState.RUNNING, healthy: true } as HealthReport),
+    getState: vi.fn().mockReturnValue(ServiceState.RUNNING),
   };
 }
 
 describe('ServiceRegistry', () => {
-  it('isLocked() is false on a fresh registry', () => {
-    const r = new ServiceRegistry();
-    expect(r.isLocked()).toBe(false);
+  it('registers and retrieves a service', () => {
+    const registry = new ServiceRegistry();
+    const svc = makeService('auth');
+    registry.register(svc);
+    expect(registry.get('auth')).toBe(svc);
   });
 
-  it('lock() makes isLocked() return true', () => {
-    const r = new ServiceRegistry();
-    r.lock();
-    expect(r.isLocked()).toBe(true);
+  it('has() returns true for registered service', () => {
+    const registry = new ServiceRegistry();
+    registry.register(makeService('db'));
+    expect(registry.has('db')).toBe(true);
+    expect(registry.has('missing')).toBe(false);
   });
 
-  it('register() then get() returns the registered service', () => {
-    const r = new ServiceRegistry();
-    const svc = stubService('logger');
-    r.register(svc);
-    expect(r.get('logger')).toBe(svc);
+  it('throws DependencyError when registering duplicate service', () => {
+    const registry = new ServiceRegistry();
+    registry.register(makeService('auth'));
+    expect(() => registry.register(makeService('auth'))).toThrowError(DependencyError);
   });
 
-  it('get() throws DependencyError for an unregistered service', () => {
-    const r = new ServiceRegistry();
-    expect(() => r.get('nonexistent')).toThrow(DependencyError);
+  it('throws DependencyError when registering after lock', () => {
+    const registry = new ServiceRegistry();
+    registry.lock();
+    expect(() => registry.register(makeService('auth'))).toThrowError(DependencyError);
   });
 
-  it('register() throws DependencyError when registry is locked', () => {
-    const r = new ServiceRegistry();
-    r.lock();
-    expect(() => r.register(stubService('db'))).toThrow(DependencyError);
+  it('throws DependencyError when getting non-existent service', () => {
+    const registry = new ServiceRegistry();
+    expect(() => registry.get('missing')).toThrowError(DependencyError);
   });
 
-  it('register() throws DependencyError for a duplicate service name', () => {
-    const r = new ServiceRegistry();
-    r.register(stubService('cache'));
-    expect(() => r.register(stubService('cache'))).toThrow(DependencyError);
+  it('validateDependencies throws when dep is missing', () => {
+    const registry = new ServiceRegistry();
+    registry.register(makeService('auth', ['db'])); // db not registered
+    expect(() => registry.validateDependencies()).toThrowError(DependencyError);
+  });
+
+  it('getStartupOrder returns deps before dependents', () => {
+    const registry = new ServiceRegistry();
+    registry.register(makeService('db', []));
+    registry.register(makeService('auth', ['db']));
+    const order = registry.getStartupOrder();
+    const dbIdx = order.findIndex(s => s.name === 'db');
+    const authIdx = order.findIndex(s => s.name === 'auth');
+    expect(dbIdx).toBeLessThan(authIdx);
+  });
+
+  it('getAll returns all registered services', () => {
+    const registry = new ServiceRegistry();
+    registry.register(makeService('a'));
+    registry.register(makeService('b'));
+    expect(registry.getAll()).toHaveLength(2);
   });
 });

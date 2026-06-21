@@ -55,6 +55,19 @@ export function isVueApp(vfs: VirtualFileSystem): boolean {
   return vfs.paths().some((p) => /\.vue$/i.test(p));
 }
 
+/** Is this VFS a Svelte app? (svelte dep, or any .svelte source file). */
+export function isSvelteApp(vfs: VirtualFileSystem): boolean {
+  const pkg = vfs.readText('package.json');
+  if (pkg) {
+    try {
+      const j = JSON.parse(pkg);
+      const deps = { ...(j.dependencies || {}), ...(j.devDependencies || {}) };
+      if (deps.svelte) return true;
+    } catch { /* ignore */ }
+  }
+  return vfs.paths().some((p) => /\.svelte$/i.test(p));
+}
+
 /** Local (non-external) reference? */
 function isLocal(url: string): boolean {
   return !/^(https?:)?\/\//.test(url) && !url.startsWith('data:') && !url.startsWith('//');
@@ -121,11 +134,46 @@ export function validateArchitecture(vfs: VirtualFileSystem, manifest?: Architec
     const deps = readDeps(vfs);
     if (deps?.has('vue')) framework = 'vue';
     else if (deps?.has('react')) framework = 'react';
+    else if (deps?.has('svelte')) framework = 'svelte';
     else if (isVueApp(vfs)) framework = 'vue';
     else if (isReactApp(vfs)) framework = 'react';
+    else if (isSvelteApp(vfs)) framework = 'svelte';
     else framework = 'vanilla';
   }
   if (framework === 'vanilla') return issues; // nothing framework-specific to enforce
+
+  // Svelte: enforce forbidden-path and single-entry rules, but skip the
+  // createRoot/mount-id check (Svelte 4 uses `new App({target})`, not createRoot).
+  if (framework === 'svelte') {
+    const m = manifest ?? selectArchitecture('svelte app');
+    for (const pat of forbiddenPathPatterns(m)) {
+      const hit = vfs.paths().find((p) => pat.test(p));
+      if (hit) {
+        issues.push({
+          severity: 'error',
+          file: hit,
+          message: `Mixed architecture: "${hit}" does not belong in a Svelte app. Remove it — build the feature as a Svelte SFC (.svelte) under src/.`,
+        });
+      }
+    }
+    const html = vfs.readText('index.html') ?? vfs.readText('public/index.html');
+    if (!html) {
+      issues.push({ severity: 'error', file: '(project)', message: 'Svelte app has no index.html entry document.' });
+      return issues;
+    }
+    const tags = scriptTags(html);
+    const moduleEntries = tags.filter((t) => t.module && isLocal(t.src));
+    const legacyLocal = tags.filter((t) => !t.module && isLocal(t.src));
+    for (const t of legacyLocal) {
+      issues.push({ severity: 'error', file: 'index.html', message: `Mixed architecture: legacy <script src="${t.src}"> in a Svelte app. Load only <script type="module" src="/${m.entry}">.` });
+    }
+    if (moduleEntries.length === 0) {
+      issues.push({ severity: 'error', file: 'index.html', message: `Missing Svelte entry: index.html must load <script type="module" src="/${m.entry}">.` });
+    } else if (moduleEntries.length > 1) {
+      issues.push({ severity: 'error', file: 'index.html', message: 'Multiple module entries in index.html — there must be exactly one.' });
+    }
+    return issues;
+  }
 
   const isVue = framework === 'vue';
   const label = isVue ? 'Vue' : 'React';

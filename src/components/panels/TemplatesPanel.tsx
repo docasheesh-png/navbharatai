@@ -1,0 +1,189 @@
+/**
+ * Phase 1.7 — App.tsx split, Part 1: TemplatesPanel
+ *
+ * Extracted from App.tsx (was lines 8814–8917 + template data at 5928–5938).
+ * Renders the "Project Blueprints" gallery and the user's saved templates.
+ * All side effects remain in App.tsx — this component receives state via props.
+ */
+import React from 'react';
+import { motion } from 'motion/react';
+import {
+  Sparkles, Activity, Cpu, Clock, Smartphone, Globe, ShieldCheck, LayoutDashboard,
+  Package, Plus, X,
+} from 'lucide-react';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface TemplateDefinition {
+  id: string;
+  name: string;
+  icon: React.ComponentType<{ className?: string }>;
+  prompt: string;
+  isPro?: boolean;
+}
+
+export interface SavedTemplate {
+  id: string;
+  name: string;
+  html: string;
+  savedAt: string;
+}
+
+export interface TemplatesPanelProps {
+  user: { uid: string } | null;
+  templates: TemplateDefinition[];
+  savedTemplates: SavedTemplate[];
+  hasGeneratedCode: boolean;
+  onSelectTemplate: (prompt: string) => void;
+  onRequireAuth: () => void;
+  onSaveCurrentTemplate: () => void;
+  onDeleteSavedTemplate: (id: string) => void;
+  onLoadSavedTemplate: (html: string) => void;
+}
+
+// ─── Curated template list ────────────────────────────────────────────────────
+
+export const CURATED_TEMPLATES: TemplateDefinition[] = [
+  { id: 'intro', name: 'Introduction', icon: Sparkles, prompt: 'hey 👋 , tell me about yourself!' },
+  {
+    id: 'analytics', name: 'Smart Analytics', icon: Activity,
+    prompt: 'Create a high-performance Data Analytics Dashboard for a modern business. I want real-time visualization of key performance indicators (KPIs) including monthly revenue, user growth, and churn rate. Use a sophisticated dark-glassmorphism theme with SVG charts and interactive data tables. Ensure the UI is fully responsive and supports dynamic data filtering.',
+  },
+  {
+    id: 'calc', name: 'Simple Calculator', icon: Cpu,
+    prompt: 'I want you to act as a World-Class Software Architect. Build a Professional High-Precision Scientific Calculator. \n\n### MANDATORY FUNCTIONAL REQUIREMENTS:\n1. **Core Logic**: You MUST implement a robust JavaScript evaluation engine in `script.js`. It should handle click events for all buttons, manage a screen buffer, and accurately calculate results for basic (+, -, *, /) and scientific (sqrt, sin, cos, tan, log) operations. Ensure the calculator works perfectly upon loading.\n2. **UI Architecture**: In `style.css`, create a premium "Space-Age Glass" design with deep shadows and tactile hover animations. Use a responsive grid layout.\n3. **History System**: Implement a history list that records the last 5 operations.\n4. **Checklist**: All button IDs in `index.html` must match the selectors used in `script.js`. Ensure NO empty functions.',
+  },
+  {
+    id: 'clock', name: 'Simple Clock', icon: Clock,
+    prompt: 'Create a fully functional, production-grade analog clock/watch application for Android + Web (responsive mobile-first UI).\n\n### PRIMARY GOAL\nBuild an ultra-realistic, smooth, accurate analog watch application with professional mechanics, synchronized with the device time down to the millisecond. It must look and behave like a real luxury wristwatch.\n\n### CRITICAL FUNCTIONAL REQUIREMENTS\n1. **REAL TIME SYNC**: Automatically sync with device local time, hours, minutes, and seconds. The clock MUST NOT freeze or use hardcoded angles. Use `requestAnimationFrame` for continuous updates.\n2. **SMOOTH MOVEMENT**: Second hand must move smoothly every frame (not teleport). Minute and Hour hands must move proportionally as seconds progress.\n3. **HAND ALIGNMENT**: All hands MUST originate from EXACTLY the same center pivot point (0,0 center). No misaligned axes.\n4. **DESIGN**: Premium luxury watch face with metallic frame, realistic dial texture, and inner shadows. Include 12 hour markers and minute ticks.\n5. **GEOMETRY**: Perfectly circular (1:1 aspect ratio) and centered on all screens (Android/Desktop).\n6. **FORMULAS**:\n   - Seconds: `seconds * 6` degrees\n   - Minutes: `(minutes * 6) + (seconds * 0.1)` degrees\n   - Hours: `(hours % 12 * 30) + (minutes * 0.5)` degrees\n7. **TECHNICAL**: Use HTML/CSS/JS with SVG or Canvas for real-time rendering. Provide separate code for index.html, style.css, and script.js with NO placeholders.',
+  },
+  {
+    id: 'rn_app', name: 'React Native App', icon: Smartphone, isPro: true,
+    prompt: 'Build a React Native (Expo) mobile app. Generate the complete project structure with:\n1. App.js entry point with React Navigation\n2. HomeScreen, DetailScreen components\n3. Bottom tab navigation\n4. StyleSheet with platform-specific styling (ios/android)\n5. Async storage for state persistence\n\nProvide separate files: App.js, screens/HomeScreen.js, screens/DetailScreen.js, package.json (Expo), README with run commands.\nApp theme: dark mode with indigo accent. Include sample data and list rendering.',
+  },
+  {
+    id: 'portfolio', name: 'Portfolio Site', icon: Globe,
+    prompt: 'Build a stunning personal portfolio website with: hero section with animated gradient, about me, skills grid, projects showcase (3 cards), contact form with validation. Dark theme with glassmorphism cards, smooth scroll animations, mobile-first responsive. HTML/CSS/JS only.',
+  },
+  {
+    id: 'ecommerce', name: 'E-Commerce UI', icon: ShieldCheck, isPro: true,
+    prompt: 'Build a modern e-commerce product listing page: navbar with cart counter, hero banner, product grid (8 items with images, prices, add-to-cart), cart sidebar with total calculation. Tailwind CSS style with indigo/white palette. Full JavaScript interactions.',
+  },
+  {
+    id: 'dashboard', name: 'Admin Dashboard', icon: LayoutDashboard, isPro: true,
+    prompt: 'Build a professional admin dashboard: sidebar navigation, header with user info, metric cards (4 KPIs), recent activity table (10 rows), line chart using Chart.js CDN. Dark theme, responsive. All data should be realistic sample data.',
+  },
+];
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export function TemplatesPanel({
+  user,
+  templates,
+  savedTemplates,
+  hasGeneratedCode,
+  onSelectTemplate,
+  onRequireAuth,
+  onSaveCurrentTemplate,
+  onDeleteSavedTemplate,
+  onLoadSavedTemplate,
+}: TemplatesPanelProps) {
+  return (
+    <div className="flex-1 p-8 bg-[#0d1117] overflow-y-auto custom-scrollbar">
+      <div className="max-w-6xl mx-auto">
+        <div className="flex flex-col mb-10">
+          <h3 className="text-2xl font-bold text-white mb-2">Project Blueprints</h3>
+          <p className="text-sm text-[#8b949e]">Accelerate your development with AI-optimized templates</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {templates.map(t => {
+            const isLocked = t.isPro && !user;
+            return (
+              <motion.button
+                whileHover={{ y: -5 }}
+                key={t.id}
+                onClick={() => {
+                  if (isLocked) { onRequireAuth(); return; }
+                  onSelectTemplate(t.prompt);
+                }}
+                className={`flex flex-col items-start p-6 bg-[#161b22] border rounded-2xl transition-all text-left group shadow-xl relative overflow-hidden ${
+                  isLocked ? 'border-amber-500/20 hover:border-amber-500/40' : 'border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/5'
+                }`}
+              >
+                {t.isPro && (
+                  <span className="absolute top-3 right-3 text-[8px] font-black px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-amber-400 uppercase tracking-widest">
+                    {isLocked ? '🔒 Pro' : '⭐ Pro'}
+                  </span>
+                )}
+                <div className={`w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center mb-6 transition-colors ${isLocked ? 'group-hover:bg-amber-600' : 'group-hover:bg-indigo-600'}`}>
+                  <t.icon className={`w-6 h-6 ${isLocked ? 'text-amber-400 group-hover:text-white' : 'text-indigo-400 group-hover:text-white'}`} />
+                </div>
+                <h4 className="font-bold text-white mb-2">{t.name}</h4>
+                <p className="text-[11px] text-[#8b949e] leading-relaxed mb-6 opacity-70">Pre-configured scaffolding for modern responsive web applications.</p>
+                <div className="mt-auto w-full flex items-center justify-between">
+                  <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${isLocked ? 'text-amber-400 bg-amber-500/10' : 'text-indigo-400 bg-indigo-500/10'}`}>
+                    {isLocked ? 'Sign In to Use' : 'Fast Build'}
+                  </span>
+                </div>
+              </motion.button>
+            );
+          })}
+        </div>
+
+        {/* My Saved Templates */}
+        <div className="mt-12">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-xl font-bold text-white">My Templates</h3>
+              <p className="text-sm text-[#8b949e]">Your saved apps — reuse, remix, and share</p>
+            </div>
+            {hasGeneratedCode && (
+              <button
+                onClick={onSaveCurrentTemplate}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95"
+              >
+                <Plus className="w-4 h-4" />
+                Save Current App
+              </button>
+            )}
+          </div>
+          {savedTemplates.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 border border-dashed border-white/10 rounded-2xl text-center gap-3">
+              <Package className="w-10 h-10 text-white/20" />
+              <p className="text-[#484f58] text-sm font-medium">No saved templates yet</p>
+              <p className="text-[10px] text-[#484f58]">Build an app and click "Save Current App" to save it here</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {savedTemplates.map(t => (
+                <div key={t.id} className="flex flex-col bg-[#161b22] border border-white/5 rounded-2xl p-5 gap-3 hover:border-indigo-500/30 transition-all group">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h4 className="text-white font-bold text-sm">{t.name}</h4>
+                      <p className="text-[9px] text-[#484f58] mt-0.5">Saved {t.savedAt}</p>
+                    </div>
+                    <button
+                      onClick={() => onDeleteSavedTemplate(t.id)}
+                      className="p-1.5 hover:bg-red-500/10 rounded-lg text-[#484f58] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <div className="text-[9px] text-[#8b949e] font-mono bg-black/30 rounded-lg p-2 truncate">
+                    {t.html.slice(0, 80)}...
+                  </div>
+                  <button
+                    onClick={() => onLoadSavedTemplate(t.html)}
+                    className="w-full py-2 bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/20 text-indigo-400 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
+                  >
+                    Load & Preview
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

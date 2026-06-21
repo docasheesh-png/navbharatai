@@ -1272,6 +1272,8 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
                         top: `${(latestScreenshot.cursorY / 720) * 100}%`,
                         transform: 'translate(-50%, -50%)',
                         zIndex: 20,
+                        // Glide smoothly from the previous position (Replit-style) instead of jumping.
+                        transition: 'left 0.45s cubic-bezier(0.22, 1, 0.36, 1), top 0.45s cubic-bezier(0.22, 1, 0.36, 1)',
                       }}
                     >
                       {/* Ripple ring */}

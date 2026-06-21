@@ -814,6 +814,7 @@ export default function App() {
   const [billingLogs, setBillingLogs] = useState<any[]>([]);
   const [billingTransactions, setBillingTransactions] = useState<any[]>([]);
   const [loadingWallet, setLoadingWallet] = useState(false);
+  const [monthlyAiCost, setMonthlyAiCost] = useState<{ totalBuilds: number; totalCostUsd: number; month: string } | null>(null);
   const [isRecharging, setIsRecharging] = useState(false);
   const [paymentSession, setPaymentSession] = useState<any>(null);
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
@@ -912,6 +913,15 @@ export default function App() {
 
       const txsRes = await axios.get(`/api/wallet/${user.uid}/transactions`);
       setBillingTransactions(Array.isArray(txsRes.data) ? txsRes.data : []);
+
+      // Phase 4.2 — fetch monthly AI cost (best-effort, never blocks wallet load).
+      try {
+        const usageRes = await fetch(`/api/user/usage/${encodeURIComponent(user.uid)}`);
+        if (usageRes.ok) {
+          const usageData = await usageRes.json();
+          setMonthlyAiCost({ totalBuilds: usageData.totalBuilds ?? 0, totalCostUsd: usageData.totalCostUsd ?? 0, month: usageData.month ?? '' });
+        }
+      } catch { /* usage fetch never blocks wallet */ }
     } catch (err) {
       console.error('Failed to sync wallet data with Firestore:', err);
     } finally {
@@ -4375,6 +4385,8 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             agentic: true,
             // G1.2 — stable session ID so server can persist + restore this build.
             sessionId: currentProSessionId,
+            // Phase 4.2 — pass userId so server can record per-user monthly cost.
+            userId: user?.uid || undefined,
             // G3 — credentials: let the agentic engine use real execution tier.
             githubToken: githubToken || undefined,
             userE2bKey: userE2bKey || undefined,
@@ -7741,6 +7753,7 @@ ${pending.map(p => `  - ${p}`).join('\n')}
               onSetLimitError={setLimitError}
               onSetLimitSuccess={setLimitSuccess}
               onToast={addToast}
+              monthlyAiCost={monthlyAiCost}
             />
           )}
 

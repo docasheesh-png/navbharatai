@@ -117,6 +117,8 @@ export interface BuildRequest {
   dbConfig?: { provider: string; credentials: Record<string, string> };
   /** G1.2 — Stable session ID so the server can persist + restore build results. */
   sessionId?: string;
+  /** Phase 4.2 — Firebase UID of the authenticated user (for per-user cost tracking). */
+  userId?: string;
 }
 
 /**

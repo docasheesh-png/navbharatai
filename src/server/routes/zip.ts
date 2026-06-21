@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { setCorsHeaders } from '../lib/cors';
 import path from 'path';
 import crypto from 'crypto';
 import type { Express, Request, Response } from 'express';
@@ -70,7 +71,7 @@ export function registerZipRoutes(app: Express): void {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
-      res.setHeader('Access-Control-Allow-Origin', '*');
+      setCorsHeaders(req, res);
       res.flushHeaders();
       const send = (data: object) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`); };
 
@@ -217,7 +218,7 @@ export function registerZipRoutes(app: Express): void {
       const archive = new ZipStream({ level: 6 });
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', `attachment; filename="${safeName}.zip"`);
-      res.setHeader('Access-Control-Allow-Origin', '*');
+      setCorsHeaders(req, res);
       archive.pipe(res);
       const entries = Object.entries(files as Record<string, string>);
       for (const [filename, content] of entries) {

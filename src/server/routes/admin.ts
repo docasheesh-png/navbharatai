@@ -240,7 +240,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         failedLoginAttempts: serverStats.failedLoginIPs.slice(-20),
       });
     } catch (err: any) {
-      return res.status(500).json({ error: err.message });
+      console.error('[ADMIN] Internal error:', err?.message);
+      return res.status(500).json({ error: 'Internal server error.' });
     }
   });
 
@@ -283,7 +284,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         banned: u.banned || false,
         createdAt: u.updatedAt || u.createdAt || '',
       })));
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 
   // ── User token adjustment ─────────────────────────────────────────────────
@@ -305,7 +306,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       });
       audit('ADMIN_TOKEN_ADJUST', { userId, delta, reason, ip: req.ip });
       res.json({ ok: true, newBalance });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 
   // ── Ban / unban user ──────────────────────────────────────────────────────
@@ -318,7 +319,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       await setDoc(walletRef, { banned: !!banned, banReason: reason || '', bannedAt: new Date().toISOString() }, { merge: true });
       audit(banned ? 'ADMIN_USER_BANNED' : 'ADMIN_USER_UNBANNED', { userId, reason, ip: req.ip });
       res.json({ ok: true, banned: !!banned });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 
   // ── Grant / revoke Pro access ─────────────────────────────────────────────
@@ -331,7 +332,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       await setDoc(walletRef, { hasVishwakarmaPass: !!grant, vishwakarmaPassActivatedAt: grant ? new Date().toISOString() : null }, { merge: true });
       audit(grant ? 'ADMIN_PRO_GRANTED' : 'ADMIN_PRO_REVOKED', { userId, ip: req.ip });
       res.json({ ok: true, hasPro: !!grant });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 
   // ── Settings (pricing, feature flags, maintenance) ────────────────────────
@@ -383,7 +384,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       });
       audit('ADMIN_PROMO_CREATED', { code, ip: req.ip });
       res.json({ ok: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 
   app.get('/api/admin/promo', verifyAdminToken, async (_req: Request, res: Response) => {
@@ -391,6 +392,6 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       const snap = await getDocs(collection(db, 'promo_codes'));
       res.json(snap.docs.map((d: any) => ({ id: d.id, ...d.data() })));
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 }

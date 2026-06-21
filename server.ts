@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import helmet from 'helmet';
 import crypto from 'crypto';
 import net from 'net';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
@@ -196,6 +197,21 @@ setInterval(() => {
 
 (async () => {
   const app = express();
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        styleSrc:   ["'self'", "'unsafe-inline'"],
+        imgSrc:     ["'self'", "data:", "blob:", "https:"],
+        connectSrc: ["'self'", "https:", "wss:"],
+        fontSrc:    ["'self'", "data:", "https:"],
+        frameSrc:   ["'none'"],
+        objectSrc:  ["'none'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  }));
   app.use(traceMiddleware);
 
   // ── Rate Limiters (4.3) ──────────────────────────────────────────────────

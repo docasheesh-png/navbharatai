@@ -33,6 +33,7 @@ import { AnthropicProvider } from '../AI/Router/providers/AnthropicProvider';
 import { aiRouter } from '../lib/aiRouter';
 import { getPreviewService } from '../runtime/PreviewService';
 import { getMetrics, estimateTokens } from '../lib/metrics';
+import { metricsStore } from '../lib/metricsStore';
 
 /**
  * Phase 4 integration — the real, engine-backed build endpoint.
@@ -397,6 +398,9 @@ export function registerBuildRoutes(app: Express): void {
               partial: eng.partial || deadline.signal.aborted,
             });
             eventBus.publish({ type: EventType.BUILD_COMPLETED, workspaceId: sid, sender: 'pro', payload: { path: 'agentic', tier: eng.tier, usable: eng.usable, partial: eng.partial || deadline.signal.aborted, fileCount: eng.fileCount, previewAllowed: eng.previewAllowed } });
+            // G2 — wire metrics that were previously missing from the agentic path.
+            try { getMetrics().recordBuild({ ok: eng.ok, previewAllowed: !!eng.previewAllowed, isEdit: isEdit === true, ms: Date.now() - startedAt }); } catch { /* metrics never block */ }
+            metricsStore.save().catch(() => {});
             if (sessionId) {
               proBuildSessionStore.save(sessionId, {
                 ok: eng.ok, files: eng.files, fileCount: eng.fileCount,
@@ -449,6 +453,7 @@ export function registerBuildRoutes(app: Express): void {
       }
       const result = raced;
       try { getMetrics().recordBuild({ ok: result.ok, previewAllowed: result.previewAllowed, isEdit: isEdit === true, ms: Date.now() - t0, repairAttempts: result.repairAttempts }); } catch { /* metrics never block */ }
+      metricsStore.save().catch(() => {});
 
       // Refresh the rolling memory so the NEXT turn stays coherent (Claude-Code
       // style): append this turn, re-summarize, extend the edit log. Best-effort.

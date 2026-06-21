@@ -1266,3 +1266,19 @@ tier in the build progress widget:
 - AIChat.tsx: added tier? to BuildProgressState; shows colored tier badge in header
   (grey 'In-memory' / blue 'Server' / green 'E2B cloud').
 Gate: frontend tsc 0 · server tsc 0 · 307/307 tests pass. Branch: claude/g3-pro-unify.
+
+### Milestone G2 — DONE (2026-06-21) — Observability: persist metrics + structured logs + admin panel
+G2 fills the observability gap — builds metrics survive Cloud Run restarts, audit events
+are persisted to Firestore, and admin can inspect system health from a new settings panel:
+- NEW src/server/lib/metricsStore.ts — daily Firestore snapshots ('metrics_snapshots');
+  save() persists MetricsSnapshot on every build; list() returns last N days.
+- NEW src/server/lib/logStore.ts — structured log persistence ('server_logs');
+  append() fire-and-forget; query() with level/event/workspaceId/since filters.
+- audit.ts: logStore.append() added alongside stdout — audit trail now survives restarts.
+- build.ts: recordBuild() wired in agentic path (was only in legacy); metricsStore.save()
+  called best-effort after every build in both paths.
+- admin.ts: GET /api/admin/metrics/history (30-day history) + GET /api/admin/logs added.
+- App.tsx + types/index.ts: 'metrics' SettingsScreen; admin sidebar shows "Live Metrics"
+  when admin-logged-in; panel renders build stats + AI cost per provider breakdown.
+- AppKnowledgeBase.ts: 'admin-metrics' entry added.
+Gate: server tsc 0 · frontend tsc 0 · 307/307 tests pass. Branch: claude/g2-observability.

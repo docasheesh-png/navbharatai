@@ -885,6 +885,9 @@ export default function App() {
   // Platform SRE & Cost Analytics State (Admin Console)
   const [adminAnalytics, setAdminAnalytics] = useState<any>(null);
   const [loadingAdminAnalytics, setLoadingAdminAnalytics] = useState(false);
+  // G2 — live metrics snapshot for the admin metrics dashboard panel.
+  const [adminLiveMetrics, setAdminLiveMetrics] = useState<any>(null);
+  const [loadingAdminMetrics, setLoadingAdminMetrics] = useState(false);
 
   const fetchWallet = async () => {
     if (!user) return;
@@ -6494,6 +6497,15 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                         ))}
 
                         {/* Admin + Footer */}
+                        {isAdmin && (
+                          <button
+                            onClick={() => setSettingsScreen('metrics' as any)}
+                            className="w-full flex items-center gap-3 p-3 bg-[#161b22] border border-white/5 rounded-xl hover:border-indigo-500/20 transition-all group"
+                          >
+                            <BarChart2 className="w-4 h-4 text-[#484f58] group-hover:text-indigo-400 transition-colors" />
+                            <span className="text-xs font-bold text-[#8b949e] group-hover:text-white transition-colors">Live Metrics</span>
+                          </button>
+                        )}
                         <button
                           onClick={() => setSettingsScreen('admin' as any)}
                           className="w-full flex items-center gap-3 p-3 bg-[#161b22] border border-white/5 rounded-xl hover:border-red-500/20 transition-all group"
@@ -7221,6 +7233,92 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                             Open Git Panel
                           </button>
                         </div>
+                      </motion.div>
+                    )}
+
+                    {/* G2 — Admin Live Metrics Dashboard */}
+                    {settingsScreen === 'metrics' && (
+                      <motion.div
+                        key="metrics"
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        className="space-y-6"
+                        onViewportEnter={() => {
+                          if (!adminLiveMetrics && !loadingAdminMetrics) {
+                            setLoadingAdminMetrics(true);
+                            const token = sessionStorage.getItem('admin_token') || '';
+                            fetch('/api/admin/metrics', { headers: { Authorization: `Bearer ${token}` } })
+                              .then(r => r.json()).then(setAdminLiveMetrics).catch(() => {}).finally(() => setLoadingAdminMetrics(false));
+                          }
+                        }}
+                      >
+                        <div className="px-1 py-4">
+                          <h2 className="text-2xl font-black text-white tracking-tight">Live Metrics</h2>
+                          <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Build stats, AI cost & success rates</p>
+                        </div>
+                        {loadingAdminMetrics && (
+                          <div className="flex items-center justify-center py-12 text-[#484f58] text-sm">Loading metrics…</div>
+                        )}
+                        {adminLiveMetrics && (
+                          <div className="space-y-4">
+                            {/* Build Stats */}
+                            <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-6">
+                              <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Build Stats</h4>
+                              <div className="grid grid-cols-2 gap-4">
+                                {[
+                                  { label: 'Total Builds', value: adminLiveMetrics.builds?.total ?? 0, color: 'text-white' },
+                                  { label: 'Success Rate', value: `${Math.round((adminLiveMetrics.builds?.successRate ?? 0) * 100)}%`, color: (adminLiveMetrics.builds?.successRate ?? 0) >= 0.8 ? 'text-emerald-400' : 'text-amber-400' },
+                                  { label: 'Preview Rate', value: `${Math.round((adminLiveMetrics.builds?.previewRate ?? 0) * 100)}%`, color: 'text-indigo-400' },
+                                  { label: 'Avg Build Time', value: `${Math.round((adminLiveMetrics.builds?.avgMs ?? 0) / 1000)}s`, color: 'text-[#8b949e]' },
+                                ].map(({ label, value, color }) => (
+                                  <div key={label} className="bg-[#0d1117] rounded-2xl p-5 border border-white/5">
+                                    <div className={`text-2xl font-black ${color}`}>{value}</div>
+                                    <div className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest mt-1">{label}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            {/* AI Cost by Provider */}
+                            <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-4">
+                              <div className="flex items-center justify-between">
+                                <h4 className="text-[11px] font-black text-white uppercase tracking-widest">AI Cost by Provider</h4>
+                                <span className="text-[11px] font-black text-amber-400">${(adminLiveMetrics.totalCostUsd ?? 0).toFixed(4)} total</span>
+                              </div>
+                              {Object.entries(adminLiveMetrics.tokens || {}).length === 0 && (
+                                <p className="text-[10px] text-[#484f58]">No AI calls recorded yet.</p>
+                              )}
+                              {Object.entries(adminLiveMetrics.tokens || {}).map(([provider, usage]: [string, any]) => (
+                                <div key={provider} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                                  <div>
+                                    <div className="text-xs font-bold text-white capitalize">{provider}</div>
+                                    <div className="text-[9px] text-[#484f58]">{usage.requests} reqs · {(usage.inputTokens + usage.outputTokens).toLocaleString()} tokens</div>
+                                  </div>
+                                  <span className="text-[11px] font-black text-amber-400">${(usage.costUsd ?? 0).toFixed(4)}</span>
+                                </div>
+                              ))}
+                            </div>
+                            {/* Refresh */}
+                            <button
+                              onClick={() => {
+                                setLoadingAdminMetrics(true);
+                                const token = sessionStorage.getItem('admin_token') || '';
+                                fetch('/api/admin/metrics', { headers: { Authorization: `Bearer ${token}` } })
+                                  .then(r => r.json()).then(setAdminLiveMetrics).catch(() => {}).finally(() => setLoadingAdminMetrics(false));
+                              }}
+                              className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-[1.5rem] font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-2"
+                            >
+                              <BarChart2 className="w-4 h-4" />
+                              Refresh Metrics
+                            </button>
+                          </div>
+                        )}
+                        {!adminLiveMetrics && !loadingAdminMetrics && (
+                          <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex flex-col items-center text-center space-y-4">
+                            <BarChart2 className="w-10 h-10 text-[#484f58]" />
+                            <p className="text-[10px] text-[#484f58]">Admin login required to view metrics.</p>
+                          </div>
+                        )}
                       </motion.div>
                     )}
                   </AnimatePresence>

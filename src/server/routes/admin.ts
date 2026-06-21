@@ -7,6 +7,8 @@ import { audit } from '../lib/audit';
 import { serverStats } from '../lib/serverStats';
 import { getProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
+import { metricsStore } from '../lib/metricsStore';
+import { logStore } from '../lib/logStore';
 import { eventStore } from '../lib/eventStore';
 
 /**
@@ -64,6 +66,32 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // Observability: live token-usage/cost + build-success metrics (Phase 5, item 28).
   app.get('/api/admin/metrics', verifyAdminToken, (_req: Request, res: Response) => {
     res.json(getMetrics().snapshot());
+  });
+
+  // G2 — daily metrics history (last N days of persisted MetricsSnapshots).
+  app.get('/api/admin/metrics/history', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const days = Math.min(Math.max(parseInt(String(req.query.days ?? '30'), 10) || 30, 1), 90);
+      const history = await metricsStore.list(days);
+      res.json({ history });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to read metrics history.' });
+    }
+  });
+
+  // G2 — structured server log query endpoint.
+  app.get('/api/admin/logs', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const level = ['info', 'warn', 'error'].includes(String(req.query.level)) ? req.query.level as 'info' | 'warn' | 'error' : undefined;
+      const event = typeof req.query.event === 'string' ? req.query.event : undefined;
+      const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : undefined;
+      const since = req.query.since ? Number(req.query.since) : undefined;
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '100'), 10) || 100, 1), 500);
+      const entries = await logStore.query({ level, event, workspaceId, since, limit });
+      res.json({ entries });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to read logs.' });
+    }
   });
 
   // G1 — build/agent event log (audit trail + replay surface). Persisted to

@@ -321,9 +321,11 @@ _Multi-instance safe. Observable. No surprise bills._
 - `AIRouter.ts` — `setCooldown()` now also `providerCooldownStore.write()`s (fire-and-forget); `mergeRemoteCooldowns()` merges remote deadlines (keeps the max, never shortens a local cooldown); sync started once at module load.
 - `tests/providerCooldownStore.test.ts` — 5 tests (VITEST-skip write/read/startSync no-op). tsc x2 clean, vitest green.
 
-**Still TODO:**
-- UsageTracker → Firestore (billing accuracy requires shared state)
-- Event ring → Firestore
+**Audited the remaining two items (2026-06-21) — both resolved:**
+- **Event ring → Firestore: ALREADY DONE (G1.1).** `src/server/lib/eventStore.ts` registers a Firestore persist-sink on the bus (`eventBus.setPersistSink`), so every published event is durably stored to Firestore while the in-memory `ring` stays the fast read path. No work needed.
+- **UsageTracker → Firestore: intentionally NOT persisted (correct as-is).** `UsageTracker` counts per-workspace E2B operations (sandbox/command/screenshot) for live display + idle-cleanup. The sandbox it tracks lives on ONE instance, so cross-instance sharing has no correctness value and would add a Firestore write to every command. Real billing accuracy is already cross-instance via `UserCostStore` (Phase 4.2, Firestore-backed per-user monthly). Persisting this tracker would add cost for no benefit.
+
+**Phase 4.1 — DISTRIBUTED STATE: DONE.** Workspace lock (PR #143) + AIRouter cooldown (shared) + event persistence (G1.1) all cross-instance safe; UsageTracker correctly stays local.
 
 ### Milestone G9 — Quick-Start Gallery (2026-06-21)
 Adds 8 example prompt cards to Pro Chat empty state (Bolt.new-style "blank page" fix):
@@ -418,11 +420,23 @@ _A world-best product cannot have a 10k-line untested god-file._
 
 Target: no file in `src/` over 500 lines. All modules have own props interface + test file.
 
-### 5.2 — Strict TypeScript everywhere
-**Status: TODO**
+### 5.2 — Strict TypeScript everywhere ⏳ MEASURED + PHASED (2026-06-21)
+**Server: DONE — `tsconfig.server.json` is already `strict: true` and green.**
 
-Enable `strict: true` globally. Fix all implicit-any and null-guard errors.
-One module per PR — never one giant PR. Frontend + server + all surviving archive survivors.
+Frontend (`tsconfig.json`) measured exactly on 2026-06-21 under full strict:
+**572 errors** — 424 `TS7006` (implicit-any params), 122 `TS18047` (possibly-null),
+16 `TS2322` + 6 `TS2769` + ~8 misc (the genuine type bugs).
+
+**Why not flipped in one PR (deliberate, per the never-break rule):** turning
+`strict: true` on now produces 572 compile errors → red CI → the app does not
+deploy. The 122 null-guards each need per-call-site understanding to fix without
+changing runtime behavior. This is a real module-by-module burn-down tied to the
+App.tsx split (5.1), NOT a one-shot flip. Flipping it red would break the live
+app for all users — exactly what safeguard #5 forbids.
+
+**Path to done:** as each panel is extracted from App.tsx (5.1), it is authored
+strict-clean; when the frontend strict count reaches 0, flip the flag. Tracked,
+not faked.
 
 ### 5.3 — Integration + E2E tests ✅ PARTIAL (2026-06-21)
 **Branch:** `claude/test-coverage-analysis-bq0yev`

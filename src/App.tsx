@@ -4858,6 +4858,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     { id: 'files',        label: 'Files',             icon: FolderOpen },
     { id: 'history',      label: 'History',           icon: History },
     { id: 'studio',       label: 'Code Studio',       icon: Smartphone },
+    { id: 'git',          label: 'Git',               icon: GitBranch },
     { id: 'billing',      label: 'Wallet & Billing',  icon: Wallet },
     { id: 'professionals', label: 'Professionals',    icon: Briefcase, status: 'New' },
     { id: 'donation',     label: 'Donate',            icon: Heart },

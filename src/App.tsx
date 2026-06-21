@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallbac
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { EngineBuilder } from './components/EngineBuilder';
-import { buildApp, buildAppStream, isAgenticEngineEnabled } from './services/buildService';
+import { buildApp, buildAppStream, fetchBuildSession, isAgenticEngineEnabled } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
@@ -476,7 +476,42 @@ export default function App() {
   const [currentSessionId, setCurrentSessionId] = useState<string>(() => Date.now().toString());
   // Pro App Builder chat needs its own session id — it must never share/overwrite
   // the Free (NBI) chat's session document.
-  const [currentProSessionId, setCurrentProSessionId] = useState<string>(() => `pro-${Date.now()}`);
+  // G1.2: persist in localStorage so the same ID survives a browser refresh,
+  // enabling the server to restore the last completed build on reconnect.
+  const [currentProSessionId, setCurrentProSessionId] = useState<string>(() => {
+    try {
+      const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('pro_session_id') : null;
+      if (stored) return stored;
+    } catch { /* ignore */ }
+    const id = `pro-${Date.now()}`;
+    try { localStorage.setItem('pro_session_id', id); } catch { /* ignore */ }
+    return id;
+  });
+
+  // G1.2 — on mount, try to restore the last completed build for this session.
+  // Best-effort: any failure is silent so the normal empty-state UI shows instead.
+  useEffect(() => {
+    let cancelled = false;
+    fetchBuildSession(currentProSessionId).then((saved) => {
+      if (cancelled || !saved || !saved.files || Object.keys(saved.files).length === 0) return;
+      setFiles((prev: Record<string, string>) => {
+        if (Object.keys(prev).length > 0) return prev; // don't overwrite if already loaded
+        return saved.files;
+      });
+      setIsAppBuilt(true);
+      setHasGeneratedCode(true);
+      setProBuildProgress(prev => ({
+        ...prev,
+        percent: 100,
+        stage: '✅ App restored from last session',
+        generatedFiles: Object.fromEntries(
+          Object.entries(saved.files).map(([k, v]) => [k, { content: v as string, expanded: false }])
+        ),
+      }));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount only
 
   // Tracks whether the initial cloud load finished — guards the auto-save effect
   // so we never overwrite cloud data before we've pulled it in.
@@ -1516,7 +1551,9 @@ export default function App() {
       setProInput('');
       try { localStorage.removeItem('navbharat_pro_messages'); } catch {}
       // Fresh session id so the next conversation doesn't inherit this one's memory/UCI
-      setCurrentProSessionId(`pro-${Date.now()}`);
+      const newProSessionId = `pro-${Date.now()}`;
+      try { localStorage.setItem('pro_session_id', newProSessionId); } catch { /* ignore */ }
+      setCurrentProSessionId(newProSessionId);
       // Wipe workspace so next open starts with a blank canvas
       setFiles({});
       clearWorkspace().catch(() => {});
@@ -4278,6 +4315,8 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             editLog: proActiveSession?.editLog || [],
             // Internal-testing opt-in (per-session only; see isAgenticEngineEnabled).
             agentic: isAgenticEngineEnabled(),
+            // G1.2 — stable session ID so server can persist + restore this build.
+            sessionId: currentProSessionId,
           }, (ev) => {
             if (ev.type === 'status' && ev.message) {
               setProBuildProgress(prev => ({ ...prev, active: true, stage: `⚙️ ${ev.message}`, percent: Math.min(92, Math.max(prev.percent, (ev.coverage ?? 0))) }));

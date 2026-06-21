@@ -1235,5 +1235,21 @@ persistence doesn't survive Cloud Run). Built the spine:
 - routes/engineer.ts — mirrors each streamed agent event to the bus (engineer:<type>).
 - routes/admin.ts — GET /api/admin/events (admin-auth) → audit-trail / replay surface.
 - tests/eventBus.test.ts (6). Gate: server tsc 0 · frontend tsc 0 · 307 tests · boot PASS.
-Roadmap G1 status: G1.1 done. Remaining: G1.2 refresh-safe proBuildProgress, G1.3
-capability registry.
+Roadmap G1 status: G1.1 ✅ G1.2 ✅ G1.3 ✅ — G1 COMPLETE. Next: G2 (Observability).
+
+### Milestone — PR #113 merged (2026-06-21) — Pro upgrade: 23 commits of real working features
+Large batch merged to main. All verified: 0 tsc errors, 307/307 tests pass.
+- feat: Git added to main sidebar navigation (toggleTab('git') → GitPanel)
+- fix: Git settings content panel now shows proper UI instead of blank screen
+- feat(pro): Phase 17 — auto Vitest test generation after every build (ProTestGen.ts)
+- feat(pro): Phase 72 — Multi-agent orchestration: parallel frontend+backend generation
+- feat(pro): Phase 73 — Extended thinking for complex tasks (16k token budget)
+- feat(pro): Phases 74-78 — Cross-session memory via Firestore (ProMemory.ts)
+- feat(pro): Phases 70-71 — Self-review pass + build-fail diagnosis
+- feat(pro): Phases 79-84 — Screenshot/browser/drive events rendered in Pro UI
+- feat(pro): Phase 85 — Design-to-Code: base64 image → UI via Claude vision
+- feat(pro): Phases 87-93 — ProDeploy wired: Vercel/Netlify/GitHub Pages REST API
+- feat(pro): Phases 94-100 — ProCodeReview wired: OWASP + quality + tech debt scan
+- feat(pro): /code-review and /deploy commands in Pro chat
+- feat(pro): 5 new AppKnowledgeBase entries for Pro features
+Gate: server tsc 0 · frontend tsc 0 · 307 tests · CI green on PR #113.

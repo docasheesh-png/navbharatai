@@ -110,6 +110,27 @@ Also supports: file attachments (text, code), image analysis (vision), and PDF r
     keywords: ['pro chat', 'pro', 'build mode', 'canvas', 'app maker', 'make app', 'generate app', 'html app', 'generate code', 'app generate karo'],
   },
   {
+    id: 'unified-workspace',
+    name: 'Unified Workspace — Chat + Live Code + Preview (Phase 3.1)',
+    path: 'Pro Chat → build an app → live workspace docks on the right (desktop)',
+    description: `World-class "Chat IS the IDE" surface, like Cursor / Bolt / v0 / Lovable. Once an app exists, a live workspace panel docks to the RIGHT of the Pro Chat conversation so you never switch tabs while building:
+• PREVIEW tab — the running app, live, updating as the AI edits files.
+• CODE tab — a file list + full Monaco editor; edit any file directly, changes sync instantly.
+• STUDIO button — opens the full Code Studio IDE for power users.
+• DEPLOY button — one-click deploy straight from the workspace.
+• "Hide app" / "Show app" toggle in the chat header collapses or restores the workspace.
+On mobile the chat stays full-width and Preview/Code remain separate tabs (via the Preview-ready banner). The workspace appears automatically after the first successful build.`,
+    howToUse: 'Open Pro Chat and build any app. On desktop, the live workspace appears on the right automatically. Switch between Preview and Code tabs at the top of that panel. Edit files directly in the Code tab. Use "Hide app" in the chat header to focus on the conversation, "Show app" to bring it back.',
+    relatedFeatures: ['pro_chat', 'ide', 'auto-test-generation', 'build-version-history'],
+    aiSurface: 'pro_chat',
+    keywords: [
+      'workspace', 'split view', 'chat and code', 'live editor', 'side by side', 'ide',
+      'code editor', 'preview pane', 'cursor', 'bolt', 'v0', 'lovable', 'monaco',
+      'edit code', 'live preview', 'show app', 'hide app', 'split screen', 'two pane',
+      'code aur preview', 'ek saath', 'editor kahan', 'where is code', 'unified',
+    ],
+  },
+  {
     id: 'pro_chat_file_upload',
     name: 'Pro Chat — File & Image Upload',
     path: 'Pro Chat → paperclip / attachment icon in the chat input',

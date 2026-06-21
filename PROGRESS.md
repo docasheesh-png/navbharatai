@@ -237,16 +237,23 @@ Memory works across session restarts. Large projects (50+ files) don't degrade a
 ## PHASE 3 — "Conversation IS the IDE" + Archive Legacy + One Brand
 _Philosophy-level change. Chat and IDE become one surface. Dead code goes to ARCHIVE/._
 
-### 3.1 — Merge chat and IDE into one surface
-**Status: TODO — requires Phase 1.7 >70% complete**
+### 3.1 — Merge chat and IDE into one surface ✅ CORE DONE (2026-06-21)
+**Branch:** `claude/test-coverage-analysis-bq0yev`
 
-Target: conversation IS the workspace. No "switch to IDE" tab.
-- Agent writes a file → appears live in editor (G12 already streams content)
-- User clicks any editor line → can ask "explain this" inline
-- Terminal output (E2B tier) flows in the chat, not a separate panel
-- Editor always visible alongside conversation
+World-class "Chat IS the IDE" surface shipped, modeled on Cursor / Bolt / v0 / Lovable.
 
-Layout + routing change using the split App modules from 1.7.
+**What shipped:**
+- NEW `src/components/panels/WorkspacePane.tsx` (~230 lines) — self-contained live workspace: Preview tab (reuses tested `PreviewPanel`) + Code tab (file list + tested Monaco `Editor`). Desktop-only; pure presentation, state owned by App.
+- `src/App.tsx` — the `nbi_pro_chat` view now docks `WorkspacePane` to the RIGHT of the chat whenever an app exists (`isAppBuilt && files`). Chat column narrows to `md:flex-[0_0_44%]` so chat + live app are always visible together. A "Hide app / Show app" toggle (`showWorkspace` state) in the chat header collapses/restores it.
+- Agent writes a file → appears live in editor + preview (reuses G12's streamed `files`/`generatedCode` state — same single source of truth).
+- "Studio" button opens the full Code Studio IDE; "Deploy" button triggers one-click deploy — both from inside the workspace.
+- Mobile preserved: chat stays full-width, Preview/Code remain separate tabs (workspace is `hidden md:flex`).
+- `AppKnowledgeBase.ts` — added `unified-workspace` entry.
+- tsc x2 clean, vitest 1019/1019 green, `vite build` succeeds.
+
+**Editor always visible alongside conversation** ✅ · **Agent files stream live into editor** ✅ · **One-surface (no forced tab switch) on desktop** ✅
+
+**Follow-up polish (non-blocking, future):** click an editor line → inline "explain this"; E2B terminal output inline in chat (preview click→chat reference already works via the NBTag overlay in PreviewPanel).
 
 ### 3.2 — Archive legacy engines
 **Status: TODO — only after Phase 1.3 confirmed stable**

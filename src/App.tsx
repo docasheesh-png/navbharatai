@@ -11,6 +11,7 @@ import { FilesPanel } from './components/panels/FilesPanel';
 import { DonationPanel } from './components/panels/DonationPanel';
 import { BillingPanel } from './components/panels/BillingPanel';
 import { DeployModal } from './components/panels/DeployModal';
+import { WorkspacePane } from './components/panels/WorkspacePane';
 import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
@@ -251,6 +252,9 @@ export default function App() {
   // hinglishMode → from useSettings() hook
   const [loadingUser, setLoadingUser] = useState(true);
   const [activeView, setActiveView] = useState<ViewType>('home');
+  // Phase 3.1 — unified Chat+IDE: when an app exists, the live workspace (code +
+  // preview) docks to the right of the Pro Chat on desktop. User can collapse it.
+  const [showWorkspace, setShowWorkspace] = useState<boolean>(true);
   const [settingsScreen, setSettingsScreen] = useState<SettingsScreen>('root');
   const [githubRedirectingMessage, setGithubRedirectingMessage] = useState<string | null>(null);
   const [githubDebugData, setGithubDebugData] = useState<{
@@ -7531,10 +7535,17 @@ ${pending.map(p => `  - ${p}`).join('\n')}
             </div>
           )}
 
-          {(activeView === 'nbi_pro_chat') && (
+          {(activeView === 'nbi_pro_chat') && (() => {
+            // Phase 3.1 — the live workspace docks to the right when an app exists.
+            const hasWorkspaceApp = isAppBuilt && !!files && Object.keys(files).length > 0;
+            const workspaceVisible = hasWorkspaceApp && showWorkspace;
+            return (
             <div className={cn("flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-white/10", themeClasses.bg)}>
 
-              <div className="flex-1 flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0">
+              <div className={cn(
+                "flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0",
+                workspaceVisible ? "flex-1 md:flex-[0_0_44%] md:max-w-[640px]" : "flex-1",
+              )}>
                   <div className="flex items-center justify-between px-3 py-1 bg-indigo-950/20 border-b border-indigo-500/20 text-[9px] font-black uppercase tracking-widest text-[#8b949e]">
                      <div className="flex items-center gap-2">
                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping shrink-0" />
@@ -7576,6 +7587,21 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                          >
                            <Rocket className="w-2.5 h-2.5" />
                            Deploy
+                         </button>
+                       )}
+                       {hasWorkspaceApp && (
+                         <button
+                           onClick={() => setShowWorkspace(v => !v)}
+                           title={workspaceVisible ? 'Hide live workspace' : 'Show live workspace (code + preview)'}
+                           className={cn(
+                             "hidden md:flex items-center gap-1 px-2 py-0.5 rounded text-[8px] border transition-all",
+                             workspaceVisible
+                               ? "bg-indigo-900/40 border-indigo-600/40 text-indigo-300 hover:text-indigo-200"
+                               : "bg-white/5 border-white/10 text-[#8b949e] hover:text-white",
+                           )}
+                         >
+                           <Layout className="w-2.5 h-2.5" />
+                           {workspaceVisible ? 'Hide app' : 'Show app'}
                          </button>
                        )}
                        <span className="font-mono text-indigo-400">{sessions.find(s => s.id === currentProSessionId)?.uci || ''}</span>
@@ -7649,6 +7675,24 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                   />
                 </div>
 
+              {/* Phase 3.1 — live workspace (code + preview) docked to the right (desktop) */}
+              {workspaceVisible && (
+                <div className="flex-1 min-w-0 h-full min-h-0 max-h-full overflow-hidden">
+                  <WorkspacePane
+                    files={files as any}
+                    generatedCode={generatedCode}
+                    onFilesChange={(nf) => setFiles(nf as any)}
+                    onRun={(f) => updatePreview(f || (files as any))}
+                    onOpenStudio={() => toggleTab('studio')}
+                    onDeploy={() => { setDeployPanelError(''); setShowDeployPanel(true); }}
+                    canDeploy={isAppBuilt && !!files && Object.keys(files).length > 0}
+                    previewHistory={previewHistory}
+                    onRestoreHistory={(html) => setGeneratedCode(html)}
+                    onHtmlChange={(html) => setGeneratedCode(html)}
+                  />
+                </div>
+              )}
+
               {/* G8 — One-click Deploy Panel (modal overlay) */}
               {showDeployPanel && (
                 <DeployModal
@@ -7670,7 +7714,8 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                 />
               )}
             </div>
-          )}
+            );
+          })()}
 
           {/* ── Senior Doctor Assistant ── */}
           {activeView === 'sda_chat' && (

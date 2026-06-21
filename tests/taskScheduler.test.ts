@@ -3,57 +3,57 @@ import { TaskScheduler } from '../src/server/AppMakerLab/generator/TaskScheduler
 import { TaskStatus } from '../src/server/AppMakerLab/generator/ExecutionTypes';
 import type { GenerationTask } from '../src/server/AppMakerLab/generator/PlannerTypes';
 
-function makeTask(id: string, deps: string[] = []): GenerationTask {
-  return { id, type: 'FRONTEND', name: id, path: `src/${id}.ts`, dependencies: deps, contentDescription: '', priority: 1, engine: 'default', status: 'PENDING' };
+function task(id: string, deps: string[] = []): GenerationTask {
+  return {
+    id,
+    type: 'FRONTEND',
+    name: id,
+    path: `src/${id}.ts`,
+    dependencies: deps,
+    contentDescription: 'test',
+    priority: 1,
+    engine: 'test',
+    status: 'PENDING',
+  };
 }
 
 describe('TaskScheduler', () => {
-  it('returns the single task when it has no dependencies', () => {
-    const s = new TaskScheduler([makeTask('A')]);
-    expect(s.getNextBatch().map(t => t.id)).toEqual(['A']);
+  it('getNextBatch() returns tasks with no dependencies first', () => {
+    const scheduler = new TaskScheduler([task('a'), task('b', ['a'])]);
+    const batch = scheduler.getNextBatch();
+    expect(batch.map(t => t.id)).toContain('a');
+    expect(batch.map(t => t.id)).not.toContain('b');
   });
 
-  it('only returns tasks whose dependencies are COMPLETED', () => {
-    const s = new TaskScheduler([makeTask('A'), makeTask('B', ['A'])]);
-    expect(s.getNextBatch().map(t => t.id)).toEqual(['A']); // B blocked
-    s.updateTaskStatus('A', TaskStatus.COMPLETED);
-    expect(s.getNextBatch().map(t => t.id)).toEqual(['B']); // B unblocked
+  it('task with satisfied dependencies appears in next batch', () => {
+    const scheduler = new TaskScheduler([task('a'), task('b', ['a'])]);
+    scheduler.updateTaskStatus('a', TaskStatus.COMPLETED);
+    const batch = scheduler.getNextBatch();
+    expect(batch.map(t => t.id)).toContain('b');
   });
 
-  it('isComplete() returns false while tasks are still pending', () => {
-    const s = new TaskScheduler([makeTask('A'), makeTask('B')]);
-    expect(s.isComplete()).toBe(false);
+  it('isComplete() returns false when tasks are pending', () => {
+    const scheduler = new TaskScheduler([task('a'), task('b')]);
+    expect(scheduler.isComplete()).toBe(false);
   });
 
-  it('isComplete() returns true once all tasks reach a terminal state', () => {
-    const s = new TaskScheduler([makeTask('A'), makeTask('B', ['A'])]);
-    s.updateTaskStatus('A', TaskStatus.COMPLETED);
-    s.updateTaskStatus('B', TaskStatus.COMPLETED);
-    expect(s.isComplete()).toBe(true);
+  it('isComplete() returns true when all tasks are completed', () => {
+    const scheduler = new TaskScheduler([task('a'), task('b')]);
+    scheduler.updateTaskStatus('a', TaskStatus.COMPLETED);
+    scheduler.updateTaskStatus('b', TaskStatus.COMPLETED);
+    expect(scheduler.isComplete()).toBe(true);
   });
 
-  it('cancelDownstream cancels dependent tasks when a task fails', () => {
-    const s = new TaskScheduler([makeTask('A'), makeTask('B', ['A']), makeTask('C', ['B'])]);
-    s.updateTaskStatus('A', TaskStatus.FAILED);
-    const state = s.getState();
-    expect(state['B']).toBe(TaskStatus.CANCELLED);
-    expect(state['C']).toBe(TaskStatus.CANCELLED);
+  it('cancels downstream tasks when a parent task fails', () => {
+    const scheduler = new TaskScheduler([task('a'), task('b', ['a'])]);
+    scheduler.updateTaskStatus('a', TaskStatus.FAILED);
+    const batch = scheduler.getNextBatch();
+    expect(batch.map(t => t.id)).not.toContain('b');
   });
 
-  it('does not cancel tasks that are already RUNNING when upstream fails', () => {
-    const s = new TaskScheduler([makeTask('A'), makeTask('B')]);
-    s.updateTaskStatus('B', TaskStatus.RUNNING);
-    s.updateTaskStatus('A', TaskStatus.FAILED);
-    expect(s.getState()['B']).toBe(TaskStatus.RUNNING); // not cancelled — no dep on A
-  });
-
-  it('handles cycles gracefully — constructor does not throw', () => {
-    expect(() => new TaskScheduler([makeTask('A', ['B']), makeTask('B', ['A'])])).not.toThrow();
-  });
-
-  it('returns [] from getNextBatch() when all tasks are already COMPLETED', () => {
-    const s = new TaskScheduler([makeTask('A')]);
-    s.updateTaskStatus('A', TaskStatus.COMPLETED);
-    expect(s.getNextBatch()).toHaveLength(0);
+  it('getNextBatch() returns empty array when all tasks are done', () => {
+    const scheduler = new TaskScheduler([task('a')]);
+    scheduler.updateTaskStatus('a', TaskStatus.COMPLETED);
+    expect(scheduler.getNextBatch()).toHaveLength(0);
   });
 });

@@ -75,6 +75,30 @@ const ERROR_PATTERNS: ErrorPattern[] = [
     regex: /supabase.*client.*not.*initialized|supabase.*url|supabase.*anon/i,
     hint: "Supabase client needs VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables. Create a .env file and access them via import.meta.env.VITE_SUPABASE_URL in your code.",
   },
+  {
+    regex: /cannot find module ['"]@\//i,
+    hint: "Path alias '@/' not configured: add resolve.alias to vite.config.ts → { '@': path.resolve(__dirname, './src') } and add paths: { '@/*': ['./src/*'] } to tsconfig.json compilerOptions.",
+  },
+  {
+    regex: /process is not defined|global is not defined|__dirname is not defined/i,
+    hint: "Node.js globals (process, global, __dirname) are not available in browser code. Use import.meta.env for Vite env vars, or add define: { 'process.env': {} } to vite.config.ts as a shim.",
+  },
+  {
+    regex: /localStorage.*not defined|window.*not defined|document.*not defined/i,
+    hint: "Browser globals (localStorage, window, document) are not available during SSR/server-side rendering. Guard with 'typeof window !== \"undefined\"' or move usage inside useEffect().",
+  },
+  {
+    regex: /ERR_OSSL_EVP_UNSUPPORTED|digital envelope routines/i,
+    hint: "OpenSSL compatibility error (Node.js 17+): add NODE_OPTIONS=--openssl-legacy-provider before the start command, or upgrade webpack/babel to versions that support OpenSSL 3.",
+  },
+  {
+    regex: /postcss.*plugin.*tailwind|tailwind.*postcss|Unknown at rule @tailwind|Unknown word/i,
+    hint: "Tailwind v3 PostCSS setup: create postcss.config.js with { plugins: { tailwindcss: {}, autoprefixer: {} } } and ensure tailwindcss and autoprefixer are in devDependencies.",
+  },
+  {
+    regex: /Cannot find module.*react-dom\/client|react-dom.*client.*not found/i,
+    hint: "react-dom/client is available in React 18+. Ensure react and react-dom are pinned to ^18. For React 17 use ReactDOM.render() instead of createRoot().",
+  },
 ];
 
 /** Pre-build hints based on common keywords in the task instruction. */
@@ -111,6 +135,22 @@ const INSTRUCTION_HINTS: InstructionHint[] = [
   {
     keywords: /animation|framer.motion|animate/i,
     hint: "Framer Motion v11+: import motion from 'framer-motion'. Use <motion.div> for animated elements, AnimatePresence for exit animations. Keep animations subtle — users with prefers-reduced-motion should see simpler versions.",
+  },
+  {
+    keywords: /next\.?js|nextjs|next\/image|next\/link|app.?router/i,
+    hint: "Next.js App Router: put pages in app/ (not pages/). Use 'use client' directive at top of any component with useState/useEffect. Images: use <Image from 'next/image'>. No vite.config needed — next.config.js handles bundling.",
+  },
+  {
+    keywords: /drag.*drop|drag.and.drop|dnd|sortable/i,
+    hint: "Drag-and-drop: use '@dnd-kit/core' with useDraggable + useDroppable hooks, or 'react-beautiful-dnd' for sortable lists. Both require unique string 'id' props on every draggable item.",
+  },
+  {
+    keywords: /websocket|real.?time|socket\.io|live.?update/i,
+    hint: "Real-time with Socket.IO: install 'socket.io-client' on the frontend. Connect with io('http://localhost:3001') and clean up on component unmount. For Vite: add server.proxy in vite.config.ts to avoid CORS.",
+  },
+  {
+    keywords: /map|leaflet|mapbox|google.*map|geolocation/i,
+    hint: "Maps: for Leaflet use 'react-leaflet' + import its CSS ('leaflet/dist/leaflet.css'). Leaflet requires a fixed height on the map container (e.g. height: '400px'). Wrap in dynamic import in Next.js to avoid SSR issues.",
   },
 ];
 

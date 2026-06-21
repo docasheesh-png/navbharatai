@@ -66,6 +66,31 @@ describe('matchErrorPatterns', () => {
     const hints = matchErrorPatterns('Some completely unknown error XYZ123');
     expect(hints).toEqual([]);
   });
+
+  it("matches '@/' path alias not configured errors", () => {
+    const hints = matchErrorPatterns("Cannot find module '@/components/Button'");
+    expect(hints.length).toBeGreaterThan(0);
+    // The @/-specific hint should appear somewhere in the results
+    expect(hints.some(h => h.includes('@/'))).toBe(true);
+  });
+
+  it('matches Node.js global (process) not defined in browser', () => {
+    const hints = matchErrorPatterns('ReferenceError: process is not defined');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('process');
+  });
+
+  it('matches localStorage not defined (SSR)', () => {
+    const hints = matchErrorPatterns('ReferenceError: localStorage is not defined');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('localStorage');
+  });
+
+  it('matches PostCSS/Tailwind Unknown at rule error', () => {
+    const hints = matchErrorPatterns('Unknown at rule @tailwind');
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toContain('postcss.config');
+  });
 });
 
 describe('hintForInstruction', () => {

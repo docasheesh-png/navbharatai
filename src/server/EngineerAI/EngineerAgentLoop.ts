@@ -1291,6 +1291,18 @@ export class EngineerAgentLoop {
     // 1. Get full file list (paths only — always fast)
     const fileList = await this.actuator.listFiles(workspaceId);
 
+    // Phase 2.4 — adaptive context budget: scale down verbatim history tail and
+    // file budget when the session grows large (deep history OR many files).
+    // Prevents prompt overflow on long multi-step builds without losing the agent's
+    // view of the most recent steps (always keeps the last 6 verbatim).
+    const sessionLarge = history.length > 20 || fileList.length > 50;
+    const effectiveVerbatimTail = sessionLarge ? 6 : HISTORY_VERBATIM_TAIL;
+    const effectiveBudgetTotal = sessionLarge
+      ? Math.min(this.contextBudget?.total ?? 50_000, 60_000)
+      : this.contextBudget?.total;
+    const effectiveBudgetPerFile = sessionLarge ? 3_000 : this.contextBudget?.perFile;
+    const effectiveBudgetMaxFiles = sessionLarge ? 20 : (this.contextBudget?.maxFiles ?? 30);
+
     // 2. Extract search terms from instruction + recent observations
     const recentObs = history.slice(-5).map(h => h.observation);
     const terms = extractSearchTerms(instruction, recentObs);
@@ -1309,7 +1321,7 @@ export class EngineerAgentLoop {
 
     // 5. Read top-ranked files and pack within the context budget
     const contentMap = new Map<string, string>();
-    const maxToRead = this.contextBudget?.maxFiles ?? 30;
+    const maxToRead = effectiveBudgetMaxFiles;
     for (const filePath of ranked.slice(0, maxToRead)) {
       try {
         contentMap.set(filePath, await this.actuator.readFile(workspaceId, filePath));
@@ -1319,9 +1331,9 @@ export class EngineerAgentLoop {
     }
     const fileSections = packFileSections(
       ranked, contentMap,
-      this.contextBudget?.total,
-      this.contextBudget?.perFile,
-      this.contextBudget?.maxFiles,
+      effectiveBudgetTotal,
+      effectiveBudgetPerFile,
+      effectiveBudgetMaxFiles,
     );
 
     // 6. Full file tree (paths only) — gives the model the overall shape
@@ -1358,8 +1370,8 @@ export class EngineerAgentLoop {
     );
 
     if (history.length > 0) {
-      const verbatim = history.slice(-HISTORY_VERBATIM_TAIL);
-      const condensed = history.slice(0, history.length - HISTORY_VERBATIM_TAIL);
+      const verbatim = history.slice(-effectiveVerbatimTail);
+      const condensed = history.slice(0, history.length - effectiveVerbatimTail);
       const sections: string[] = [];
 
       if (condensed.length > 0) {

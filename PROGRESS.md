@@ -438,13 +438,24 @@ _NavBharatAI's genuine competitive moat. Claude Code will never do any of this._
 - Responsive editor usable without keyboard (Monaco is heavy on mobile)
 - Tested on real mobile device (requires manual QA)
 
-### 6.3 — Real framework breadth (verified, not faked)
-**Status: TODO**
+### 6.3 — Real framework breadth (verified, not faked) ✅ PARTIAL (2026-06-21)
+**Branch:** `claude/p6.3-svelte-framework`
 
-Each must pass full build → preview → edit cycle before marking done:
-- Svelte/SvelteKit — VFS preview
-- Astro — static output, in-browser preview
-- Vue 3 + Vite — complete existing partial support
+**Vue 3** — Already fully supported (VuePreview.ts + vue3-sfc-loader CDN). No work needed.
+
+**Svelte** — Build pipeline wired end-to-end:
+- `Scaffold.ts` — Added `'vite-svelte'` to `Framework` type; `wantsSvelte()` detection; `VITE_SVELTE_FILES` template (svelte 4.2.19, @sveltejs/vite-plugin-svelte 3.1.2, correct entry wiring); `scaffoldSummary()` for Svelte. Detection fires on "svelte", "sveltekit", "svelte kit", etc.
+- `ProjectVerifier.ts` — Added `.svelte` + `/index.svelte` to `MODULE_EXTS` — relative `.svelte` imports resolve without "broken import" warnings.
+- `DependencySync.ts` — `svelte` added to `KNOWN_VERSIONS` (runtime dep, pinned to `^4.2.19`); `@sveltejs/vite-plugin-svelte` added to `KNOWN_DEV_VERSIONS` (build-tool dep, pinned to `^3.1.2`).
+- `RuntimeRouter.ts` — Added `'svelte'` to `framework` union type; detection fires when `depSet.has('svelte')` OR `.svelte` files present in VFS.
+- `ArchitectureManifest.ts` — Added `'svelte'` to `FrameworkId`; `wantsSvelte()` detection; Svelte manifest in `selectArchitecture()`; Svelte rules in `forbiddenPathPatterns()` (no React/Vue SFCs); Svelte contract in `manifestContract()` (enforces Svelte 4 syntax, warns about no in-browser preview).
+- Tests: `scaffold.test.ts` +2 cases (detect Svelte, scaffold produces correct files + package.json); `projectVerifier.test.ts` +1 case (`.svelte` imports resolve). 361/361 green.
+
+**Svelte preview**: Honest "needs WebContainer" message (not faked). Users can Download ZIP + `npm install && npm run dev` locally. In-browser Svelte transpilation deferred (needs `svelte/compiler` in browser via esm.sh — complex, separate phase).
+
+**Astro**: Deferred — requires server-side build; no in-browser preview possible without full Vite pipeline. Will address in Phase 6.4 if needed.
+
+tsc x2 clean, vitest 361/361 green.
 
 ### 6.4 — Real deploy targets
 **Status: PARTIAL (Vercel + Netlify live)**

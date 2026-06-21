@@ -11,9 +11,12 @@ import Anthropic from '@anthropic-ai/sdk';
  * - `getXxx(userKey?)` factories return a ready provider client (or null).
  */
 
-// Legacy embedded API key (sentinel + historical fallback). SECURITY: rotate it
-// in Google Cloud and set GEMINI_API_KEY via env; override with LEGACY_EMBEDDED_API_KEY.
-export const LEGACY_EMBEDDED_API_KEY = process.env.LEGACY_EMBEDDED_API_KEY || 'AIzaSyDOIA2mdmdDyVh4hYhEsCMD3zOnqLQ0Nxg';
+// P0a C1 — hardcoded Gemini key removed. Set LEGACY_EMBEDDED_API_KEY env var in Cloud Run.
+// If unset the Gemini provider is simply unavailable (fallback chain: Groq → Anthropic → Vertex).
+if (!process.env.LEGACY_EMBEDDED_API_KEY) {
+  console.warn('[SECURITY] LEGACY_EMBEDDED_API_KEY is not set — Gemini legacy path unavailable. Set this env var in Cloud Run.');
+}
+export const LEGACY_EMBEDDED_API_KEY = process.env.LEGACY_EMBEDDED_API_KEY || '';
 
 // AI Clients Initialization (Lazy system-key singletons)
 let geminiClient: GoogleGenAI | null = null;
@@ -66,7 +69,7 @@ export const resolveApiKey = (provider: string, userKey?: string): { key: string
 
   console.log(`[DEBUG_AUTH] Provider: ${provider}. System key found: ${!!envKey}`);
 
-  if (envKey && (!isPlaceholder(envKey, true, provider) || envKey === LEGACY_EMBEDDED_API_KEY)) {
+  if (envKey && !isPlaceholder(envKey, true, provider)) {
     envKey = envKey.trim();
     const masked = envKey.substring(0, 6) + '...' + envKey.substring(envKey.length - 4);
     console.log(`[AUTH] Using SYSTEM ${p} key (Fallback): ${masked}`);

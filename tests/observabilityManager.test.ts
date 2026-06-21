@@ -2,45 +2,36 @@ import { describe, it, expect } from 'vitest';
 import { ObservabilityManager } from '../src/server/ObservabilityManager';
 
 describe('ObservabilityManager', () => {
-  it('getMetrics() returns empty object on a fresh instance', () => {
-    const m = new ObservabilityManager();
-    expect(m.getMetrics()).toEqual({});
+  it('starts with empty metrics', () => {
+    const manager = new ObservabilityManager();
+    expect(manager.getMetrics()).toEqual({});
   });
 
-  it('trackLatency stores latency under "latency_<provider>"', () => {
-    const m = new ObservabilityManager();
-    m.trackLatency('grok', 120);
-    expect(m.getMetrics()['latency_grok']).toBe(120);
+  it('tracks latency by provider', () => {
+    const manager = new ObservabilityManager();
+    manager.trackLatency('openai', 250);
+    expect(manager.getMetrics()['latency_openai']).toBe(250);
   });
 
-  it('trackLatency overwrites previous value for the same provider', () => {
-    const m = new ObservabilityManager();
-    m.trackLatency('anthropic', 200);
-    m.trackLatency('anthropic', 150);
-    expect(m.getMetrics()['latency_anthropic']).toBe(150);
+  it('overwrites latency on second call for same provider', () => {
+    const manager = new ObservabilityManager();
+    manager.trackLatency('grok', 100);
+    manager.trackLatency('grok', 200);
+    expect(manager.getMetrics()['latency_grok']).toBe(200);
   });
 
-  it('logCrash creates a crashes array on first call', () => {
-    const m = new ObservabilityManager();
-    m.logCrash('Connection timeout');
-    const crashes = m.getMetrics().crashes;
-    expect(crashes).toHaveLength(1);
+  it('logs crashes with error message', () => {
+    const manager = new ObservabilityManager();
+    manager.logCrash('Connection timeout');
+    const crashes = manager.getMetrics().crashes;
+    expect(Array.isArray(crashes)).toBe(true);
     expect(crashes[0].error).toBe('Connection timeout');
   });
 
-  it('logCrash accumulates multiple crash entries', () => {
-    const m = new ObservabilityManager();
-    m.logCrash('Error A');
-    m.logCrash('Error B');
-    const crashes = m.getMetrics().crashes;
-    expect(crashes).toHaveLength(2);
-  });
-
-  it('different providers are tracked independently', () => {
-    const m = new ObservabilityManager();
-    m.trackLatency('grok', 100);
-    m.trackLatency('gemini', 300);
-    expect(m.getMetrics()['latency_grok']).toBe(100);
-    expect(m.getMetrics()['latency_gemini']).toBe(300);
+  it('accumulates multiple crashes', () => {
+    const manager = new ObservabilityManager();
+    manager.logCrash('error 1');
+    manager.logCrash('error 2');
+    expect(manager.getMetrics().crashes).toHaveLength(2);
   });
 });

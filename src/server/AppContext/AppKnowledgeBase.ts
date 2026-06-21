@@ -33,6 +33,24 @@ export interface AppFeature {
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   // ─── ENGINEER AI ─────────────────────────────────────────────────────────
   {
+    id: 'connect_domain',
+    name: 'Connect my website (custom domain)',
+    path: 'Sidebar → More menu → Connect my website',
+    description: `Connect your own purchased domain (e.g. from Hostinger or GoDaddy) to a site you built on NavBharatAI.
+• Enter your domain (e.g. myshop.com).
+• Pick where you bought it / where its DNS is (Hostinger, GoDaddy, Cloudflare, Namecheap, BigRock, Google/Squarespace, Other).
+• Open that provider's DNS settings in one click.
+• Add the DNS records shown, and your site goes live on your own domain with automatic HTTPS/SSL.
+NOTE: the one-time connection backend is being finalized; the screen currently guides you to prepare your domain and never falsely reports a domain as connected.`,
+    howToUse: 'Open the sidebar More menu → Connect my website → enter your domain → choose your registrar → open its DNS page and add the records shown.',
+    relatedFeatures: ['engineer_ai', 'engineer_ai_deploy'],
+    keywords: [
+      'connect domain', 'custom domain', 'my website', 'apna domain', 'website connect',
+      'hostinger', 'godaddy', 'dns', 'point domain', 'live website', 'own domain',
+      'connect my website', 'domain jodo', 'website live karo',
+    ],
+  },
+  {
     id: 'engineer_ai',
     name: 'Engineer AI',
     path: 'Header → Engineer AI tab  OR  Sidebar → Professionals → Engineer AI',

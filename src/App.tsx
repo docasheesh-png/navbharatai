@@ -11,6 +11,7 @@ import { FilesPanel } from './components/panels/FilesPanel';
 import { DonationPanel } from './components/panels/DonationPanel';
 import { BillingPanel } from './components/panels/BillingPanel';
 import { DeployModal } from './components/panels/DeployModal';
+import { ConnectDomainPanel } from './components/panels/ConnectDomainPanel';
 import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
@@ -6401,6 +6402,16 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                   </button>
                   <button
                     onClick={() => {
+                        toggleTab('connect_domain');
+                        setIsMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group ${activeView === 'connect_domain' ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:bg-white/5 hover:text-white'}`}
+                  >
+                    <Globe className="w-4.5 h-4.5 text-indigo-400" />
+                    <span className="text-sm font-bold tracking-tight">Connect my website</span>
+                  </button>
+                  <button
+                    onClick={() => {
                         toggleTab('engine_builder');
                         setIsMenuOpen(false);
                     }}
@@ -7820,6 +7831,10 @@ ${pending.map(p => `  - ${p}`).join('\n')}
             <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0d1117] min-h-screen">
               <SocialHub />
             </div>
+          )}
+
+          {activeView === 'connect_domain' && (
+            <ConnectDomainPanel onBack={() => toggleTab('home')} />
           )}
 
           {activeView === 'donation' && (

@@ -5,6 +5,8 @@ import { EngineBuilder } from './components/EngineBuilder';
 import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
 import { GitViewPanel } from './components/panels/GitViewPanel';
 import { DeploySuccessPanel } from './components/panels/DeploySuccessPanel';
+import { AboutPanel } from './components/panels/AboutPanel';
+import { AdminLoginPanel } from './components/panels/AdminLoginPanel';
 import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
@@ -7763,174 +7765,25 @@ ${pending.map(p => `  - ${p}`).join('\n')}
           )}
 
                     {activeView === 'about' && (
-            <div className="flex-1 bg-[#0d1117] overflow-y-auto custom-scrollbar p-6 sm:p-12 relative">
-               {isAdmin && (
-                 <div className="sticky top-0 right-0 z-50 flex justify-end pb-4">
-                    <div className="bg-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest text-white shadow-xl flex items-center gap-2">
-                       <Shield className="w-3.5 h-3.5 hover:rotate-12 transition-transform" />
-                       Admin Edit Mode Active
-                    </div>
-                 </div>
-               )}
-               <div className="max-w-4xl mx-auto space-y-12 pb-20">
-                  <motion.header 
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="text-center space-y-4 relative group/header"
-                  >
-                     <div className="inline-block p-4 bg-indigo-600/10 rounded-[2.5rem] border border-indigo-500/20 mb-4 relative">
-                        <Bot className="w-16 h-16 text-indigo-500" />
-                        {isAdmin && (
-                          <button 
-                            onClick={() => {
-                              const url = prompt('Enter Logo URL:', aboutData.logoUrl || '');
-                              if (url !== null) setAboutData({...aboutData, logoUrl: url});
-                            }}
-                            className="absolute -bottom-2 -right-2 p-2 bg-indigo-600 text-white rounded-xl shadow-lg hover:scale-110 transition-all opacity-0 group-hover/header:opacity-100"
-                          >
-                            <Camera className="w-3 h-3" />
-                          </button>
-                        )}
-                     </div>
-                     <div className="flex items-center justify-center gap-4">
-                        <h1 className="text-4xl sm:text-6xl font-black text-white tracking-tighter uppercase">{aboutData.headline}</h1>
-                        {isAdmin && (
-                          <button 
-                            onClick={() => {
-                              const val = prompt('Edit Headline:', aboutData.headline);
-                              if (val) setAboutData({...aboutData, headline: val});
-                            }}
-                            className="p-2 bg-white/5 hover:bg-indigo-600 rounded-xl text-indigo-400 hover:text-white transition-all opacity-0 group-hover/header:opacity-100"
-                          >
-                             <Edit2 className="w-4 h-4" />
-                          </button>
-                        )}
-                     </div>
-                     <div className="relative group/desc">
-                        <p className="text-[#8b949e] text-lg max-w-2xl mx-auto font-medium leading-relaxed">{aboutData.description}</p>
-                        {isAdmin && (
-                          <button 
-                            onClick={() => {
-                              const val = prompt('Edit Description:', aboutData.description);
-                              if (val) setAboutData({...aboutData, description: val});
-                            }}
-                            className="absolute -top-4 -right-4 p-2 bg-white/5 hover:bg-indigo-600 rounded-xl text-indigo-400 hover:text-white transition-all opacity-0 group-hover/desc:opacity-100"
-                          >
-                             <Edit2 className="w-4 h-4" />
-                          </button>
-                        )}
-                     </div>
-                  </motion.header>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-12">
-                     <motion.div 
-                       initial={{ opacity: 0, x: -20 }}
-                       animate={{ opacity: 1, x: 0 }}
-                       className="bg-[#161b22] border border-white/5 p-8 rounded-[2.5rem] space-y-4 shadow-2xl relative group/card1"
-                     >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                             <div className="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center">
-                                <User className="w-5 h-5 text-white" />
-                             </div>
-                             <h3 className="text-xl font-black text-white tracking-tight uppercase">Our Team</h3>
-                          </div>
-                          {isAdmin && (
-                            <button 
-                              onClick={() => {
-                                const val = prompt('Edit Team Info:', aboutData.team);
-                                if (val) setAboutData({...aboutData, team: val});
-                              }}
-                              className="p-2 bg-white/5 hover:bg-indigo-600 rounded-xl text-indigo-400 hover:text-white transition-all opacity-0 group-hover/card1:opacity-100"
-                            >
-                               <Edit2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                        <p className="text-[#8b949e] font-medium leading-relaxed">{aboutData.team}</p>
-                     </motion.div>
-
-                     <motion.div 
-                       initial={{ opacity: 0, x: 20 }}
-                       animate={{ opacity: 1, x: 0 }}
-                       className="bg-[#161b22] border border-white/5 p-8 rounded-[2.5rem] space-y-4 shadow-2xl relative group/card2"
-                     >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                             <div className="w-10 h-10 bg-emerald-600 rounded-2xl flex items-center justify-center">
-                                <Eye className="w-5 h-5 text-white" />
-                             </div>
-                             <h3 className="text-xl font-black text-white tracking-tight uppercase">Vision</h3>
-                          </div>
-                          {isAdmin && (
-                            <button 
-                              onClick={() => {
-                                const val = prompt('Edit Vision Info:', aboutData.vision);
-                                if (val) setAboutData({...aboutData, vision: val});
-                              }}
-                              className="p-2 bg-white/5 hover:bg-emerald-600 rounded-xl text-emerald-400 hover:text-white transition-all opacity-0 group-hover/card2:opacity-100"
-                            >
-                               <Edit2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                        <p className="text-[#8b949e] font-medium leading-relaxed">{aboutData.vision}</p>
-                     </motion.div>
-                  </div>
-               </div>
-            </div>
+            <AboutPanel
+              isAdmin={isAdmin}
+              aboutData={aboutData}
+              onAboutDataChange={setAboutData}
+            />
           )}
 
           {activeView === 'admin' && (
-            <div className="flex-1 bg-[#0d1117] flex flex-col items-center justify-center p-6">
-               {!isAdmin ? (
-                 <motion.div 
-                   initial={{ opacity: 0, scale: 0.95 }}
-                   animate={{ opacity: 1, scale: 1 }}
-                   className="w-full max-w-md bg-[#161b22] border border-white/10 p-8 rounded-[2.5rem] shadow-3xl space-y-8"
-                 >
-                    <div className="text-center space-y-2">
-                       <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-2xl mb-4">
-                          <Lock className="w-10 h-10 text-white" />
-                       </div>
-                       <h2 className="text-2xl font-black text-white tracking-tight uppercase">Admin Access</h2>
-                       <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Navbharat Enterprise Cloud Console</p>
-                    </div>
-
-                    <form onSubmit={handleAdminLogin} className="space-y-4">
-                       <div className="space-y-2">
-                          <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest ml-1">Username</label>
-                          <input 
-                             type="text"
-                             value={adminEmail}
-                             onChange={(e) => setAdminEmail(e.target.value)}
-                             className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-bold outline-none focus:border-indigo-500"
-                             placeholder="aashishcpmt09"
-                          />
-                       </div>
-                       <div className="space-y-2">
-                          <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest ml-1">Password</label>
-                          <input 
-                             type="password"
-                             value={adminPassword}
-                             onChange={(e) => setAdminPassword(e.target.value)}
-                             className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-bold outline-none focus:border-indigo-500"
-                             placeholder="••••••••••••"
-                          />
-                       </div>
-                       {adminError && <p className="text-[10px] text-red-500 font-bold uppercase tracking-widest text-center">{adminError}</p>}
-                       <button className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/30 transition-all active:scale-95">
-                          Authenticate
-                       </button>
-                    </form>
-                 </motion.div>
-               ) : (
-                 <AdminDashboard
-                   adminToken={sessionStorage.getItem('admin_token') || ''}
-                   onLogout={() => setIsAdmin(false)}
-                 />
-               )}
-            </div>
+            <AdminLoginPanel
+              isAdmin={isAdmin}
+              adminEmail={adminEmail}
+              adminPassword={adminPassword}
+              adminError={adminError}
+              onEmailChange={setAdminEmail}
+              onPasswordChange={setAdminPassword}
+              onSubmit={handleAdminLogin}
+              onLogout={() => setIsAdmin(false)}
+              adminToken={sessionStorage.getItem('admin_token') || ''}
+            />
          )}
 
           {activeView === 'billing' && (

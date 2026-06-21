@@ -119,6 +119,22 @@ describe('runBuild', () => {
     expect(events.some((e) => e.type === 'status')).toBe(true);
   });
 
+  it('syncDependencies runs before validation and adds undeclared imports to package.json', async () => {
+    // Generate a file that imports 'axios' but package.json doesn't declare it.
+    // BuildPipeline should call syncDependencies and add it automatically.
+    const generate = async (): Promise<FileEdit[]> => [
+      { op: 'write', path: 'index.html', content: '<div id="root"></div><script type="module" src="/src/main.jsx"></script>' },
+      { op: 'write', path: 'src/main.jsx', content: "import axios from 'axios';\naxios.get('/');export default function App(){return null;}" },
+    ];
+    const vfs = { 'package.json': JSON.stringify({ name: 'test', dependencies: { react: '^18' } }) };
+    const r = await runBuild({
+      prompt: 'a react app', scaffold: false, generate, fix: async () => [],
+      files: vfs,
+    });
+    const pkg = JSON.parse(r.files['package.json'] || '{}');
+    expect(pkg.dependencies?.axios).toBeDefined();
+  });
+
   it('agentically completes missing features until coverage passes', async () => {
     const prompt = 'a react app with authentication, a dashboard, and dark mode';
     // Initial generation = a shell (no features) → coverage 0 → preview blocked.

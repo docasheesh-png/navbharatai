@@ -27,6 +27,7 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { verifyProject, type VerifyResult } from '../project/ProjectVerifier';
 import { checkSyntax } from '../project/SyntaxCheck';
 import { runValidation, type ValidationReport } from '../project/ValidationPipeline';
+import { syncDependencies } from '../project/DependencySync';
 import { selectArchitecture } from '../project/ArchitectureManifest';
 import type { BuildProgressEvent } from '../project/BuildPipeline';
 import type { ModelCall } from '../project/aiEdits';
@@ -361,6 +362,17 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
   for (const p of outVfs.paths()) {
     if (p === '.engineer' || p.startsWith('.engineer/')) outVfs.delete(p);
   }
+
+  // ── G6.1 — dependency auto-sync: declare every imported package in package.json
+  //    so `npm install` on the exported files actually resolves all imports.
+  //    Mirrors BuildPipeline.runBuild's dep-sync step. Best-effort, never throws.
+  try {
+    const depSync = syncDependencies(outVfs);
+    if (depSync.added.length) {
+      const count = depSync.added.length;
+      send({ type: 'status', message: `Declared ${count} missing dependenc${count > 1 ? 'ies' : 'y'}: ${depSync.added.join(', ')}` });
+    }
+  } catch { /* dep sync never blocks the build */ }
 
   // ── Finalize: run the same validation/preview gate the legacy pipeline uses
   //    (mirrors BuildPipeline.runBuild's tail) so `complete` is identical-shape.

@@ -3871,6 +3871,51 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     const proMemorySummary = proActiveSession?.memorySummary || undefined;
     const proHistoryForAPI = [...proRestoredMessages, ...proMessages];
 
+    // ── /code-review command — OWASP + quality + tech debt scan of current files ──
+    if (messageToSend.trim().toLowerCase() === '/code-review') {
+      const reviewFiles = files && Object.keys(files).length > 0 ? files : null;
+      if (!reviewFiles) {
+        setProMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          text: 'No files to review. Build or import an app first, then run `/code-review`.',
+          sender: 'ai' as const,
+          timestamp: new Date(),
+        }]);
+        setIsProLoading(false);
+        proAbortControllerRef.current = null;
+        return;
+      }
+      try {
+        const resp = await fetch('/api/pro/code-review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: abortController.signal,
+          body: JSON.stringify({ files: reviewFiles }),
+        });
+        const data = await resp.json().catch(() => ({})) as any;
+        if (!resp.ok) throw new Error(data?.error || `Review failed (${resp.status})`);
+        setProMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          text: data.report || 'Code review complete.',
+          sender: 'ai' as const,
+          timestamp: new Date(),
+        }]);
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          setProMessages(prev => [...prev, {
+            id: (Date.now() + 1).toString(),
+            text: `Code review failed: ${e.message}`,
+            sender: 'ai' as const,
+            timestamp: new Date(),
+          }]);
+        }
+      } finally {
+        setIsProLoading(false);
+        proAbortControllerRef.current = null;
+      }
+      return;
+    }
+
     // ── Mode is the single source of truth — forceBuild skips auto routing ──
     const isBuildMode = mode === 'build' || forceBuild;
     const isAutoMode  = mode === 'auto' && !forceBuild;

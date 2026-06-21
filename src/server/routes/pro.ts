@@ -6,6 +6,8 @@ import type { Express, Request, Response } from 'express';
 import { buildApp as buildAppEngine, editApp as editAppEngine, buildReactApp as buildReactAppEngine } from '../AppMakerLab/AppEngine';
 import { aiRouter } from '../lib/aiRouter';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
+import { VirtualFileSystem } from '../project/ProjectModel';
+import { reviewCode, formatReviewReport } from '../pro/ProCodeReview';
 
 /**
  * Pro engine routes extracted from the server.ts monolith (Phase 1, AI-core step d).
@@ -707,5 +709,33 @@ Response Format:
       send({ type: 'error', message: userFriendly, detail: msg, suggestion });
     }
     res.end();
+  });
+
+  // ══ CODE REVIEW ENDPOINT — OWASP security + quality + tech debt analysis ══
+  app.post('/api/pro/code-review', async (req: Request, res: Response) => {
+    try {
+      const { files } = req.body as { files?: Record<string, string> };
+      if (!files || typeof files !== 'object' || Object.keys(files).length === 0) {
+        return res.status(400).json({ error: 'No files provided for review.' });
+      }
+
+      // Build a VFS from the caller's file map
+      const vfs = new VirtualFileSystem();
+      for (const [path, content] of Object.entries(files)) {
+        if (typeof content === 'string') vfs.write(path, content);
+      }
+
+      // Use aiRouter as the ModelCall — works with any available provider
+      const callModel = (system: string, user: string) =>
+        aiRouter.route(user, [], 'navbharat' as any, undefined, system);
+
+      const result = await reviewCode(vfs, callModel);
+      const report = formatReviewReport(result);
+
+      res.json({ report, score: result.score, findings: result.findings, techDebt: result.techDebt });
+    } catch (err: any) {
+      console.error('[PRO/code-review] Error:', err?.message || err);
+      res.status(500).json({ error: err?.message || 'Code review failed.' });
+    }
   });
 }

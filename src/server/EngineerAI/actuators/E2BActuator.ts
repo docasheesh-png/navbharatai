@@ -107,7 +107,9 @@ const {chromium}=require('playwright');
     try{const el=await page.$(sel);if(el){const b=await el.boundingBox();if(b){return{x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)};}}return null;}catch(e){return null;}
   }
   try{
-    if(a.action==='navigate'){await page.goto(a.url,{waitUntil:'networkidle',timeout:15000});result='Navigated to '+a.url;}
+    if(a.action==='navigate'){await page.goto(a.url,{waitUntil:'networkidle',timeout:20000});result='Navigated to '+a.url;}
+    else if(a.action==='click_xy'){cursorX=a.x;cursorY=a.y;await page.mouse.click(a.x,a.y);await page.waitForLoadState('networkidle',{timeout:8000}).catch(()=>{});result='Clicked ('+a.x+','+a.y+')';}
+    else if(a.action==='type_text'){await page.keyboard.type(a.text||'');result='Typed text';}
     else if(a.action==='click'){const c=await elCenter(a.selector);if(c){cursorX=c.x;cursorY=c.y;}await page.click(a.selector,{timeout:8000});result='Clicked '+a.selector;}
     else if(a.action==='type'){const c=await elCenter(a.selector);if(c){cursorX=c.x;cursorY=c.y;}await page.fill(a.selector,a.text||'',{timeout:8000});result='Typed into '+a.selector;}
     else if(a.action==='scroll'){cursorX=640;cursorY=a.direction==='up'?200:520;await page.evaluate(d=>window.scrollBy(0,d==='up'?-700:700),a.direction||'down');result='Scrolled '+(a.direction||'down');}
@@ -577,8 +579,8 @@ const {chromium}=require('playwright');
 
   async browserAction(
     workspaceId: string,
-    action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option',
-    args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
+    action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option' | 'click_xy' | 'type_text',
+    args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down'; x?: number; y?: number },
   ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }> {
     const sandbox = await this.getSandbox(workspaceId);
 

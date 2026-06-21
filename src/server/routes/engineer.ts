@@ -194,6 +194,52 @@ export function registerEngineerRoutes(app: Express): void {
     res.json({ ok: true });
   });
 
+  // Interactive in-app browser: drives the sandbox's REAL Chromium so the user can
+  // open ANY website (incl. ones that block iframe embedding like google.com) and
+  // click / type / scroll. Each action returns a fresh screenshot of the live page.
+  // Requires E2B (a real browser); other actuators have no browser → honest 503.
+  app.post('/api/engineer-browse', async (req: Request, res: Response) => {
+    const { workspaceId, action, url, x, y, text, direction } = req.body || {};
+    if (typeof workspaceId !== 'string' || !workspaceId || typeof action !== 'string') {
+      res.status(400).json({ error: 'workspaceId and action are required.' });
+      return;
+    }
+    if (!(actuator instanceof E2BActuator)) {
+      res.status(503).json({ error: 'The interactive browser needs a real cloud sandbox. Set E2B_API_KEY in production.' });
+      return;
+    }
+    try {
+      let result;
+      switch (action) {
+        case 'navigate':
+        case 'reload': {
+          const target = typeof url === 'string' && url.trim() ? url.trim() : '';
+          if (!target) { res.status(400).json({ error: 'url required to navigate.' }); return; }
+          result = await actuator.browserAction(workspaceId, 'navigate', { url: target });
+          break;
+        }
+        case 'click':
+          result = await actuator.browserAction(workspaceId, 'click_xy', { x: Math.round(x), y: Math.round(y) });
+          break;
+        case 'type':
+          result = await actuator.browserAction(workspaceId, 'type_text', { text: String(text ?? '') });
+          break;
+        case 'press':
+          result = await actuator.browserAction(workspaceId, 'press', { text: String(text ?? 'Enter') });
+          break;
+        case 'scroll':
+          result = await actuator.browserAction(workspaceId, 'scroll', { direction: direction === 'up' ? 'up' : 'down' });
+          break;
+        default:
+          res.status(400).json({ error: `Unknown browse action: ${action}` });
+          return;
+      }
+      res.json({ screenshot: result.screenshot, result: result.result });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Browser action failed.' });
+    }
+  });
+
   // Phase 13 — Real persistent deploy: download dist/ from the E2B sandbox and
   // publish to Firebase Hosting. Returns a permanent HTTPS URL that survives
   // sandbox pause/restart/deletion. Replaces the Phase 9B live-preview-URL shortcut.

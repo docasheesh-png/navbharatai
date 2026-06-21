@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallbac
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { EngineBuilder } from './components/EngineBuilder';
-import { buildApp, buildAppStream, fetchBuildSession, isAgenticEngineEnabled, previewSrcFor } from './services/buildService';
+import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
@@ -4323,7 +4323,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
         // ── Guider (Hybrid): for a fresh/big request, propose a design and wait for
         //    the user's confirmation BEFORE building. Small edits skip this (gate on
         //    the server). Never blocks: any failure just proceeds to a normal build.
-        if (isAgenticEngineEnabled() && !guiderApproved && !isAutoContinue) {
+        if (!guiderApproved && !isAutoContinue) {
           try {
             const planResp: any = await fetch('/api/guider/plan', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4362,8 +4362,8 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             history: conversationHistory,
             memorySummary: proMemorySummary,
             editLog: proActiveSession?.editLog || [],
-            // Internal-testing opt-in (per-session only; see isAgenticEngineEnabled).
-            agentic: isAgenticEngineEnabled(),
+            // The agentic engine (runProEngine) is always on — always pass true.
+            agentic: true,
             // G1.2 — stable session ID so server can persist + restore this build.
             sessionId: currentProSessionId,
             // G3 — credentials: let the agentic engine use real execution tier.
@@ -4510,7 +4510,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
               // ── Guider grade→refine (Slice 3): the build fully finished (not partial).
               //    If this came from an approved guider plan, grade it against the spec
               //    and auto-refine the gaps (bounded), separate from auto-continue. ──
-              if (proGuiderSpecRef.current && isAgenticEngineEnabled()) {
+              if (proGuiderSpecRef.current) {
                 const ctx = proGuiderSpecRef.current;
                 try {
                   const gr: any = await fetch('/api/guider/grade', {
@@ -4524,7 +4524,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
                     const gapText = (grade.gaps || []).map((g: any) => `- ${g.issue}`).join('\n');
                     setProMessages(prev => [...prev, {
                       id: (Date.now() + 3).toString(),
-                      text: `🔁 Guider check: ${grade.score}/100 — kuch reh gaya, khud sudhaar raha hoon (round ${round})…`,
+                      text: `🔁 Guider check: ${grade.score}/100 — gaps found, auto-refining (round ${round})…`,
                       sender: 'ai', timestamp: new Date(),
                     }]);
                     setTimeout(() => {
@@ -4538,8 +4538,8 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
                       setProMessages(prev => [...prev, {
                         id: (Date.now() + 3).toString(),
                         text: grade.pass
-                          ? `✅ Guider: saari requirements poori (${grade.score}/100).`
-                          : `Guider: abhi tak ka best version ready hai (${grade.score}/100). Aur sudhaar chahiye to bata dena.`,
+                          ? `✅ Guider: all requirements met (${grade.score}/100).`
+                          : `Guider: best version ready (${grade.score}/100). Let me know if you'd like further improvements.`,
                         sender: 'ai', timestamp: new Date(),
                       }]);
                     }

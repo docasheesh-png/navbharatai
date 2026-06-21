@@ -453,6 +453,23 @@ On success: navigates to the "App is Live!" screen with the live URL. No command
     keywords: ['deploy button', 'one click deploy', 'deploy', 'vercel', 'netlify', 'github pages', 'publish', 'launch', 'go live', 'deploy karo', 'live karo', 'publish app', 'deploy app'],
   },
   {
+    id: 'iterative-agent-build',
+    name: 'Iterative Agent Build Engine',
+    path: 'Pro Chat → type any app description → send',
+    description: `G10: Pro Chat uses a multi-step agentic build engine (not a single AI call). How it works:
+• PLANS first: breaks the app into 3–8 named steps shown as a live progress list (scaffold → install → implement → verify).
+• BUILDS step-by-step: each step runs the ReAct loop (reason → act → verify → self-heal), building on the previous.
+• LIVE PROGRESS: every action is streamed in real time — status messages, step starts/completions, terminal output (E2B tier).
+• MEMORY: remembers what was built across turns; edits stay coherent across many conversation rounds.
+• RETRY FIX: if a build fails, say "try again" — Pro Chat automatically restores the original prompt so the agent knows what to rebuild (no context loss).
+• PARTIAL BUILDS: if the time limit is reached, partial work is saved and auto-continued in the next round.
+• TIERS: runs in-memory (VFS, always available), server container (Docker), or cloud VM (E2B, with user's API key).`,
+    howToUse: 'Open Pro Chat and type a detailed app description (e.g. "Build a photo editing app with filters, crop, and brightness controls"). Send. Watch the step-by-step progress. If build fails, type "try again" — the full original prompt is restored automatically.',
+    relatedFeatures: ['pro_chat', 'one-click-deploy', 'quick-start-gallery'],
+    aiSurface: 'pro_chat',
+    keywords: ['iterative build', 'step by step', 'agent build', 'build failed try again', 'try again', 'retry build', 'complex app', 'multi step', 'pro chat build', 'app build', 'build engine', 'photo editing app', 'phir se bana', 'dobara bana', 'memory', 'context', 'remember'],
+  },
+  {
     id: 'auto-code-review',
     name: 'Auto Code Review',
     path: 'Pro Chat → Build any app → review appears in build summary',

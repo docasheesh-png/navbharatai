@@ -160,23 +160,24 @@ Target: p50 < 500ms, p95 < 1000ms.
 - Net: coding accuracy improves; planning stays fast. Grok primary; fallback chain unchanged.
 
 ### 1.7 / 5.1 — App.tsx split ⏳ ONGOING LARGE REFACTOR (honest)
-**Status: IN PROGRESS — 11 panels extracted (App.tsx ~8,251 lines, down from 10,658).**
+**Status: IN PROGRESS — 15 panels extracted (App.tsx 6,610 lines, down from 10,658 = 38% reduction).**
 
 **Extracted so far (all in `src/components/panels/`):**
 - ✅ `TemplatesPanel`, `GitViewPanel`, `DeploySuccessPanel`, `AboutPanel`, `AdminLoginPanel`,
-  `FilesPanel`, `DonationPanel`, `BillingPanel`, `WorkspacePane` (Phase 3.1), `SettingsPanel`
-  (2026-06-21, 1,004 lines extracted, tsc x2 + vitest 1049/1049 green).
-- 🔄 `ProChatPanel` (in progress — extraction of nbi_pro_chat IIFE block, ~200 lines)
+  `FilesPanel`, `DonationPanel`, `BillingPanel`, `WorkspacePane` (Phase 3.1), `SettingsPanel`,
+  `ProChatPanel` (2026-06-21), `ViewPanels` (40 lazy-loaded tool views, 2026-06-21),
+  `SidebarNav` (desktop + mobile drawer, 2026-06-21), `TopNav` (tab bar + auth, 2026-06-21),
+  `AppModals` (11 overlay modals, 2026-06-21, 773 lines removed, tsc x2 + vitest 1059/1059 green).
 
 **Why this is NOT "just finish it" in one go (deliberate):** the goal "no file over 500
 lines" needs ~17 more extractions from a live 8,200-line file. The remaining big ones —
-`ProChatPanel` (wraps Phase 3.1 IIFE + WorkspacePane + retry countdown), main NBI chat
-column, sidebar navigation — each thread 30+ props. Proceeds safely one-panel-per-PR
-(Read → Extract → tsc x2 → vitest → build → push) rather than as a risky big-bang.
-Tracked honestly; not faked as done.
+main NBI chat column, content-views switcher — each thread 30+ props. Proceeds safely
+one-panel-per-PR (Read → Extract → tsc x2 → vitest → build → push) rather than a
+risky big-bang. Tracked honestly; not faked as done.
 
 **Phase 1 DONE when:** ENGINE=v2 stable in prod (one week shadow mode clean). Edits are
 surgical. First token <1s verified in logs. Smart tier + cost display working. App.tsx split >30% complete.
+✅ **>30% split criterion MET** (38% reduction achieved as of 2026-06-21).
 
 ---
 
@@ -604,7 +605,7 @@ mobile. All framework/deploy claims are PASS-verified end-to-end. Nothing faked.
 ### 6.6 — Test Coverage Expansion ✅ IN PROGRESS (2026-06-21)
 **Branch:** `claude/test-coverage-analysis-bq0yev`
 
-**Shipped — 1016 tests / 132 test files (started from 422/422):**
+**Shipped — 1059 tests / 144 test files (started from 422/422):**
 
 New test files added (pure unit tests, no I/O, no flaky mocks):
 - `tests/templateProviders.test.ts` — StaticProvider, NodeExpressProvider, NextjsProvider, SvelteProvider, VueProvider, PythonFastapiProvider, TemplateRegistry (19 tests)

@@ -61,6 +61,8 @@ export interface BuildResponse {
   /** Preview is a privilege — only true when critical gates pass. */
   previewAllowed?: boolean;
   preview?: PreviewInfo;
+  /** G3 — Which execution tier produced this build. */
+  tier?: 'vfs' | 'cloudrun' | 'e2b';
 }
 
 export interface BuildRequest {
@@ -86,6 +88,12 @@ export interface BuildRequest {
    * that matches the design layout and style.
    */
   designImages?: string[];
+  /** G3 — User's personal E2B API key; unlocks real cloud VM execution (billed to user). */
+  userE2bKey?: string;
+  /** G3 — GitHub token from Settings → Connections; lets the agent clone/push repos. */
+  githubToken?: string;
+  /** G3 — DB credentials from Settings → Database; injected into the agent sandbox. */
+  dbConfig?: { provider: string; credentials: Record<string, string> };
   /** G1.2 — Stable session ID so the server can persist + restore build results. */
   sessionId?: string;
 }
@@ -178,6 +186,8 @@ export interface BuildStreamEvent {
   /** True when the build was cut short by the server soft deadline — the files are
    *  real but incomplete, so the client can auto-continue for a full result. */
   partial?: boolean;
+  /** G3 — Which execution tier ran this build: in-memory VFS, server container, or E2B cloud VM. */
+  tier?: 'vfs' | 'cloudrun' | 'e2b';
 }
 
 /**

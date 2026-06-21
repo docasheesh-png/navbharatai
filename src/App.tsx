@@ -307,6 +307,8 @@ export default function App() {
     startedAt?: number;
     /** Auto-continue part number (1 = first pass) when a build is resumed after the soft deadline. */
     part?: number;
+    /** G3 — Execution tier reported by the agentic engine: 'vfs' | 'cloudrun' | 'e2b'. */
+    tier?: 'vfs' | 'cloudrun' | 'e2b';
   }>({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
   // Bounds the automatic "continue" chain when the server returns a partial build.
   const proAutoContinueRef = useRef(0);
@@ -638,6 +640,11 @@ export default function App() {
 
   const [errorContext, setErrorContext] = useState<ErrorContext | null>(null);
   const [githubToken, setGithubToken] = useState<string | null>(() => localStorage.getItem('gh_token'));
+  // G3 — User's personal E2B API key; stored in localStorage. Unlocks real cloud VM
+  // execution for Pro builds so npm install, browser actions, and deploys work.
+  const [userE2bKey, setUserE2bKey] = useState<string>(() => {
+    try { return localStorage.getItem('engineer_e2b_key') || ''; } catch { return ''; }
+  });
   const [firebaseToken, setFirebaseToken] = useState<string | null>(() => localStorage.getItem('fb_token'));
   const [firebaseUser, setFirebaseUser] = useState<any>(() => {
     try {
@@ -4317,6 +4324,16 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
             agentic: isAgenticEngineEnabled(),
             // G1.2 — stable session ID so server can persist + restore this build.
             sessionId: currentProSessionId,
+            // G3 — credentials: let the agentic engine use real execution tier.
+            githubToken: githubToken || undefined,
+            userE2bKey: userE2bKey || undefined,
+            dbConfig: (() => {
+              if (!user) return undefined;
+              try {
+                const raw = localStorage.getItem(`engineer_db_${user.uid}`);
+                return raw ? JSON.parse(raw) : undefined;
+              } catch { return undefined; }
+            })(),
           }, (ev) => {
             if (ev.type === 'status' && ev.message) {
               setProBuildProgress(prev => ({ ...prev, active: true, stage: `⚙️ ${ev.message}`, percent: Math.min(92, Math.max(prev.percent, (ev.coverage ?? 0))) }));
@@ -4369,6 +4386,10 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
           // Persist the refreshed Claude-Code-style memory onto the active session
           // so the NEXT edit gets the rolling summary + change log (kept across
           // turns; auto-saved to Firestore by the session effect).
+          // G3 — store the execution tier so the badge stays visible after build completes.
+          if (engineRes?.tier) {
+            setProBuildProgress(prev => ({ ...prev, tier: engineRes.tier }));
+          }
           if (engineRes && (typeof engineRes.memorySummary === 'string' || Array.isArray(engineRes.editLog))) {
             setSessions(prev => prev.map(s => s.id === currentProSessionId
               ? {
@@ -6875,6 +6896,34 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                                      )}
                                   </div>
                                )}
+                            </div>
+                         </div>
+
+                         {/* G3 — E2B API key: unlocks real cloud VM for Pro builds */}
+                         <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-5">
+                            <div className="flex items-center gap-5">
+                               <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border transition-all ${userE2bKey ? 'bg-green-600/10 border-green-500/30' : 'bg-white/5 border-white/5'}`}>
+                                  <Cpu className={`w-7 h-7 ${userE2bKey ? 'text-green-400' : 'text-[#484f58]'}`} />
+                               </div>
+                               <div>
+                                  <h4 className="text-[11px] font-black text-white uppercase tracking-widest">E2B Cloud Execution</h4>
+                                  <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">
+                                    {userE2bKey ? 'Real cloud VM active — npm, browser, deploy enabled' : 'Optional — unlocks real npm + browser in Pro builds'}
+                                  </p>
+                               </div>
+                            </div>
+                            <div className="space-y-2">
+                               <input
+                                 type="password"
+                                 value={userE2bKey}
+                                 onChange={e => {
+                                   setUserE2bKey(e.target.value);
+                                   try { localStorage.setItem('engineer_e2b_key', e.target.value); } catch {}
+                                 }}
+                                 placeholder="e2b_sk_…"
+                                 className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50 font-mono"
+                               />
+                               <p className="text-[9px] text-[#484f58]">Free tier available at <span className="text-indigo-400">e2b.dev</span>. Without a key, Pro runs in fast in-memory mode.</p>
                             </div>
                          </div>
 

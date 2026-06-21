@@ -83,7 +83,7 @@ export type ViewType =
 export type SettingsScreen =
   | 'root' | 'general' | 'modules' | 'secrets' | 'database' | 'connections'
   | 'github_repos' | 'sharing' | 'deploy' | 'access' | 'shell'
-  | 'git' | 'logs' | 'report';
+  | 'git' | 'logs' | 'report' | 'metrics';
 
 export type ErrorType = 'AUTH' | 'QUOTA' | 'NETWORK' | 'CONFIG' | 'UNKNOWN';
 

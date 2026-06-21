@@ -403,6 +403,21 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     aiSurface: 'pro_chat',
     keywords: ['vercel deploy', 'netlify deploy', 'github pages', 'deploy', 'hosting', 'custom domain', 'publish app', 'live url', 'deploy karo', 'production'],
   },
+  {
+    id: 'admin-metrics',
+    name: 'Live Metrics Dashboard',
+    path: 'Settings → App Settings → Live Metrics (admin only)',
+    description: `Admin-only real-time observability panel showing:
+• Total builds, success rate %, preview rate, average build time
+• AI cost breakdown by provider (Claude, Grok, Gemini, etc.) with token counts
+• Refresh button to pull the latest snapshot from the server
+• Backend: persisted daily to Firestore (metrics_snapshots) — survives Cloud Run restarts
+• Historical data available via GET /api/admin/metrics/history
+• Structured server logs queryable via GET /api/admin/logs`,
+    howToUse: 'Admin login required. Open Settings → App Settings → scroll to bottom → Live Metrics button (visible only when logged in as admin). Click Refresh Metrics to update.',
+    relatedFeatures: ['admin', 'engineer_ai', 'pro_chat'],
+    keywords: ['metrics', 'stats', 'cost', 'admin', 'dashboard', 'builds', 'usage', 'ai cost', 'success rate', 'observability', 'logs', 'monitoring'],
+  },
 ];
 
 /** Quick lookup by id. */

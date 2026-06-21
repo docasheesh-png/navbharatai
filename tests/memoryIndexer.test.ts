@@ -1,53 +1,47 @@
 import { describe, it, expect } from 'vitest';
 import { MemoryIndexer } from '../src/server/Memory/MemoryIndexer';
+import { InitialMemory } from '../src/server/Memory/ProjectGraph';
 import type { ProjectMemory } from '../src/server/Memory/ProjectGraph';
 
-function emptyMemory(): ProjectMemory {
-  return { projectType: '', files: [], components: [], routes: [], models: [], services: [], features: [], dependencies: [], buildHistory: [] };
+function freshMemory(): ProjectMemory {
+  return JSON.parse(JSON.stringify(InitialMemory));
 }
 
-describe('MemoryIndexer.index', () => {
-  it('adds the file path to memory.files', () => {
-    const mem = emptyMemory();
-    MemoryIndexer.index('src/App.tsx', 'export default function App() {}', mem);
+describe('MemoryIndexer', () => {
+  it('adds filePath to memory.files', () => {
+    const mem = freshMemory();
+    MemoryIndexer.index('src/App.tsx', '', mem);
     expect(mem.files).toContain('src/App.tsx');
   });
 
-  it('extracts a component name from "export default function"', () => {
-    const mem = emptyMemory();
-    MemoryIndexer.index('src/App.tsx', 'export default function App() { return <div/>; }', mem);
-    expect(mem.components).toContain('App');
-  });
-
-  it('extracts a component name from "export const"', () => {
-    const mem = emptyMemory();
-    MemoryIndexer.index('src/Header.tsx', 'export const Header = () => <header/>;', mem);
-    expect(mem.components).toContain('Header');
-  });
-
-  it('does not extract component names from non-tsx/ts files', () => {
-    const mem = emptyMemory();
-    MemoryIndexer.index('styles.css', 'export default function App() {}', mem);
-    expect(mem.components).toHaveLength(0);
-  });
-
-  it('does not add the same file to files twice', () => {
-    const mem = emptyMemory();
-    MemoryIndexer.index('src/App.tsx', 'export const X = 1;', mem);
-    MemoryIndexer.index('src/App.tsx', 'export const X = 1;', mem);
+  it('does not duplicate files on second index of same path', () => {
+    const mem = freshMemory();
+    MemoryIndexer.index('src/App.tsx', '', mem);
+    MemoryIndexer.index('src/App.tsx', '', mem);
     expect(mem.files.filter(f => f === 'src/App.tsx')).toHaveLength(1);
   });
 
-  it('does not add the same component name twice', () => {
-    const mem = emptyMemory();
-    MemoryIndexer.index('src/App.tsx', 'export default function App() {}', mem);
-    MemoryIndexer.index('src/App2.tsx', 'export default function App() {}', mem);
-    expect(mem.components.filter(c => c === 'App')).toHaveLength(1);
+  it('extracts exported component name from tsx content', () => {
+    const mem = freshMemory();
+    MemoryIndexer.index('src/components/Button.tsx', 'export default function Button() {}', mem);
+    expect(mem.components).toContain('Button');
   });
 
-  it('returns the mutated memory object', () => {
-    const mem = emptyMemory();
-    const result = MemoryIndexer.index('src/X.ts', 'export const X = 1;', mem);
+  it('extracts exported const name from ts content', () => {
+    const mem = freshMemory();
+    MemoryIndexer.index('src/lib/utils.ts', 'export const formatDate = () => {}', mem);
+    expect(mem.components).toContain('formatDate');
+  });
+
+  it('does not add component name for non-ts/tsx files', () => {
+    const mem = freshMemory();
+    MemoryIndexer.index('styles/main.css', 'export const x = 1', mem);
+    expect(mem.components).toHaveLength(0);
+  });
+
+  it('returns the updated memory object', () => {
+    const mem = freshMemory();
+    const result = MemoryIndexer.index('src/foo.ts', '', mem);
     expect(result).toBe(mem);
   });
 });

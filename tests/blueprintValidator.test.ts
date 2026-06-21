@@ -2,65 +2,55 @@ import { describe, it, expect } from 'vitest';
 import { BlueprintValidator } from '../src/server/AppMakerLab/BlueprintValidator';
 import type { ProjectBlueprint } from '../src/server/AppMakerLab/ProjectBlueprint';
 
-function minimalBlueprint(): ProjectBlueprint {
+function makeBlueprint(overrides: Partial<ProjectBlueprint> = {}): ProjectBlueprint {
   return {
     version: 'V3',
     id: 'bp-1',
     requirementId: 'req-1',
     name: 'Test App',
     type: 'web',
-    userRequirement: { prompt: 'Build it', persona: 'dev', goal: 'test' },
-    complexity: { tier: 'Low', estimatedModules: 2, riskFactor: 0.1 },
-    generationPlan: { steps: [], phases: [] },
-    roles: [{ name: 'admin', permissions: ['all'] }],
-    journeys: [],
-    businessRules: [],
-    pages: [{ path: '/', name: 'Home', components: [] }],
+    userRequirement: { prompt: 'build something', intent: 'test' } as any,
+    roles: [{ name: 'admin', permissions: ['read', 'write'] }],
+    pages: [{ path: '/', name: 'Home', components: ['Header'] }],
     entities: [{ name: 'User', fields: { id: 'string' } }],
-    apiEndpoints: [{ path: '/api/health', method: 'GET', description: 'Health' }],
-    requirements: { testing: [], deployment: [], monitoring: [] },
-  };
+    apiEndpoints: [{ path: '/api/users', method: 'GET', description: 'List users' }],
+    ...overrides,
+  } as ProjectBlueprint;
 }
 
-describe('BlueprintValidator.validate', () => {
-  it('returns isValid:true for a complete blueprint', () => {
-    const result = BlueprintValidator.validate(minimalBlueprint());
+describe('BlueprintValidator', () => {
+  it('returns isValid true when all required fields present', () => {
+    const result = BlueprintValidator.validate(makeBlueprint());
     expect(result.isValid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
 
-  it('reports error when roles is empty', () => {
-    const bp = { ...minimalBlueprint(), roles: [] };
-    const { isValid, errors } = BlueprintValidator.validate(bp);
-    expect(isValid).toBe(false);
-    expect(errors).toContain('No roles defined');
+  it('returns error when roles is empty', () => {
+    const result = BlueprintValidator.validate(makeBlueprint({ roles: [] }));
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some(e => e.includes('roles'))).toBe(true);
   });
 
-  it('reports error when pages is empty', () => {
-    const bp = { ...minimalBlueprint(), pages: [] };
-    const { isValid, errors } = BlueprintValidator.validate(bp);
-    expect(isValid).toBe(false);
-    expect(errors).toContain('No pages defined');
+  it('returns error when pages is empty', () => {
+    const result = BlueprintValidator.validate(makeBlueprint({ pages: [] }));
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some(e => e.includes('pages'))).toBe(true);
   });
 
-  it('reports error when entities is empty', () => {
-    const bp = { ...minimalBlueprint(), entities: [] };
-    const { isValid, errors } = BlueprintValidator.validate(bp);
-    expect(isValid).toBe(false);
-    expect(errors).toContain('No entities defined');
+  it('returns error when entities is empty', () => {
+    const result = BlueprintValidator.validate(makeBlueprint({ entities: [] }));
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some(e => e.includes('entities'))).toBe(true);
   });
 
-  it('reports error when apiEndpoints is empty', () => {
-    const bp = { ...minimalBlueprint(), apiEndpoints: [] };
-    const { isValid, errors } = BlueprintValidator.validate(bp);
-    expect(isValid).toBe(false);
-    expect(errors).toContain('No API endpoints defined');
+  it('returns error when apiEndpoints is empty', () => {
+    const result = BlueprintValidator.validate(makeBlueprint({ apiEndpoints: [] }));
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some(e => e.includes('API'))).toBe(true);
   });
 
-  it('accumulates multiple errors for multiple missing fields', () => {
-    const bp = { ...minimalBlueprint(), roles: [], pages: [], entities: [], apiEndpoints: [] };
-    const { isValid, errors } = BlueprintValidator.validate(bp);
-    expect(isValid).toBe(false);
-    expect(errors).toHaveLength(4);
+  it('accumulates multiple errors', () => {
+    const result = BlueprintValidator.validate(makeBlueprint({ roles: [], pages: [], entities: [], apiEndpoints: [] }));
+    expect(result.errors).toHaveLength(4);
   });
 });

@@ -38,6 +38,7 @@ import { getPreviewService } from '../runtime/PreviewService';
 import { getMetrics, estimateTokens } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
+import { workspaceLock } from '../project/WorkspaceLock';
 
 /**
  * Phase 4 integration — the real, engine-backed build endpoint.
@@ -394,6 +395,18 @@ export function registerBuildRoutes(app: Express): void {
       // Phase 6: agentic engine is ON by default — disable with PRO_AGENTIC_ENGINE=0
       const agenticEnabled = process.env.PRO_AGENTIC_ENGINE !== '0';
       if (agenticEnabled) {
+        // Phase 4.1 — distributed workspace lock: prevent two concurrent builds on
+        // the same workspace across Cloud Run instances (race condition guard).
+        // Fail-open: if Firestore is unreachable, the lock returns acquired:true so
+        // builds always proceed. The lock is released in the finally block below.
+        const lockResult = sid ? await workspaceLock.tryAcquire(sid) : { acquired: true, lockId: 'nosid' };
+        if (!lockResult.acquired) {
+          const existingFiles = files && typeof files === 'object' ? files : {};
+          send({ type: 'status', message: `Another build is already running for this workspace. ${lockResult.reason || ''}` });
+          send({ type: 'complete', ok: false, files: existingFiles, fileCount: Object.keys(existingFiles).length, previewAllowed: false, partial: true });
+          return;
+        }
+        const wsLockId = lockResult.lockId!;
         try {
           const enginePrompt = designImages && designImages.length > 0
             ? `[DESIGN IMAGE(S) PROVIDED — generate UI code that matches the visual design in the image(s)]\n${prompt}`
@@ -531,6 +544,9 @@ export function registerBuildRoutes(app: Express): void {
           send({ type: 'status', message: 'Refining with the standard build pipeline…' });
         } catch (e: any) {
           console.warn('[BUILD] Agentic engine error — falling back to runBuild:', e?.message || e);
+        } finally {
+          // Phase 4.1 — always release the workspace lock (success, failure, or fallback).
+          if (sid && wsLockId !== 'nosid') workspaceLock.release(sid, wsLockId).catch(() => {});
         }
       }
 

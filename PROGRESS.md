@@ -295,16 +295,20 @@ One editor. NavBharatAI Pro v2.0 brand live. Zero fake features.
 ## PHASE 4 — Scale + Reliability + Cost Intelligence
 _Multi-instance safe. Observable. No surprise bills._
 
-### 4.1 — Distributed state (workspace lock first)
-**Status: TODO**
+### 4.1 — Distributed state (workspace lock first) ✅ PARTIAL (2026-06-21) — PR #143
+**Branch:** `claude/phase-4.1-workspace-lock`
 
-In-process memory breaks at multiple Cloud Run instances. Fix in priority order:
-1. Distributed workspace lock — Firestore document lock with TTL (prevents race conditions)
-2. AIRouter cooldown → Firestore (shared across instances)
-3. UsageTracker → Firestore (billing accuracy requires shared state)
-4. Event ring → Firestore (Redis only if load test shows Firestore is too slow)
+**Shipped (workspace lock):**
+- NEW `src/server/project/WorkspaceLock.ts` — Firestore document lock with 60-min TTL. `tryAcquire()` uses a Firestore transaction to atomically check + write the lock. Returns `{ acquired: true, lockId }` or `{ acquired: false, reason, expiresInMs }`. **Fail-open**: if Firestore is unreachable, returns `{ acquired: true }` so builds always proceed.
+- `release()` uses a transaction to only delete if `lockId` matches — prevents a crashed instance from releasing a lock it no longer owns.
+- `build.ts` — acquires lock before `runProEngine`; releases in `finally` (success, failure, or fallback). If lock rejected, emits a 'Another build is running' status event and returns.
+- `tests/workspaceLock.test.ts` — 5 unit tests in VITEST-skip/fail-open mode (350/350 total)
+- tsc x2 clean
 
-Default: Firestore for all (zero new infra). Redis only if Phase 7 load test proves it's needed.
+**Still TODO:**
+- AIRouter cooldown → Firestore (shared across instances)
+- UsageTracker → Firestore (billing accuracy requires shared state)
+- Event ring → Firestore
 
 ### 4.2 — Pricing intelligence per build ✅ PARTIAL (2026-06-21) — PR #141
 **Branch:** `claude/phase-4.2-cost-display`

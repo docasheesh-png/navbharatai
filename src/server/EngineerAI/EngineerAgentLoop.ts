@@ -491,7 +491,9 @@ export class EngineerAgentLoop {
         const appCtx = AppContextInjector.getRelevantContext(effectiveInstruction, 'engineer_ai');
         let effectiveSystemPrompt = dbContextBlock ? SYSTEM_PROMPT + dbContextBlock : SYSTEM_PROMPT;
         if (appCtx) effectiveSystemPrompt += `\n\n${appCtx}`;
-        const { response, telemetry } = await this.router.route(prompt, effectiveSystemPrompt, images);
+        // Phase 1.6 — CoderAgent uses grok-3 (most capable) for accurate code generation;
+        // PlannerAgent keeps grok-3-fast (default) since it only needs structured JSON.
+        const { response, telemetry } = await this.router.route(prompt, effectiveSystemPrompt, images, 'grok-3');
         usageTracker.record(workspaceId, 'aiCall');
         if (!telemetry.success) {
           yield {

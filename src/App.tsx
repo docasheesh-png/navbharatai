@@ -13,6 +13,7 @@ import { BillingPanel } from './components/panels/BillingPanel';
 import { DeployModal } from './components/panels/DeployModal';
 import { WorkspacePane } from './components/panels/WorkspacePane';
 import { SettingsPanel } from './components/panels/SettingsPanel';
+import { ProChatPanel } from './components/panels/ProChatPanel';
 import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
@@ -118,6 +119,7 @@ import { useBuild } from './components/ide/BuildContext';
 import { ThemeMode, THEME_MODES, getThemeClasses } from './lib/theme';
 import { useDevLogs } from './hooks/useDevLogs';
 import { useSettings } from './hooks/useSettings';
+import { useNetworkStatus } from './hooks/useNetworkStatus';
 import { Agent, isVishwakarmaAgent } from './types/agents';
 import {
   Message, ChatSession, ApiKeys, AppSecret, BrainConfig,
@@ -310,6 +312,8 @@ export default function App() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   // 10.6 — Toast notifications
   const { toasts, addToast, removeToast } = useToast();
+  // Phase 6.2 — real-time network status for mobile UX.
+  const networkStatus = useNetworkStatus();
   // 10.1 — Onboarding
   const [proBuildProgress, setProBuildProgress] = useState<{
     active: boolean;
@@ -356,6 +360,14 @@ export default function App() {
   useEffect(() => {
     addLog(`STATE_TRACE: activeAgent=${activeAgent}, activeView=${activeView}`, 'info');
   }, [activeAgent, activeView]);
+
+  // Phase 6.2 — show toast when network goes offline/online (especially useful on mobile).
+  useEffect(() => {
+    if (!networkStatus.online) {
+      addToast('No internet connection — changes may not save', 'warning');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [networkStatus.online]);
   
   const setActiveAgent = useCallback((newAgent: string) => {
     addLog(`setActiveAgent called: ${newAgent}`, 'info');
@@ -6613,207 +6625,73 @@ ${pending.map(p => `  - ${p}`).join('\n')}
             </div>
           )}
 
-          {(activeView === 'nbi_pro_chat') && (() => {
-            // Phase 3.1 — the live workspace docks to the right when an app exists.
-            const hasWorkspaceApp = isAppBuilt && !!files && Object.keys(files).length > 0;
-            const workspaceVisible = hasWorkspaceApp && showWorkspace;
-            return (
-            <div className={cn("flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-white/10", themeClasses.bg)}>
-
-              <div className={cn(
-                "flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0",
-                workspaceVisible ? "flex-1 md:flex-[0_0_44%] md:max-w-[640px]" : "flex-1",
-              )}>
-                  <div className="flex items-center justify-between px-3 py-1 bg-indigo-950/20 border-b border-indigo-500/20 text-[9px] font-black uppercase tracking-widest text-[#8b949e]">
-                     <div className="flex items-center gap-2">
-                       <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping shrink-0" />
-                       <span>NAVBHARATAI-PRO</span>
-                       {mode === 'auto'     && <span className="px-1.5 py-0.5 bg-indigo-900/30 border border-indigo-600/30 text-indigo-400 rounded text-[8px]">AUTO</span>}
-                       {mode === 'planning' && <span className="px-1.5 py-0.5 bg-amber-900/30 border border-amber-600/30 text-amber-400 rounded text-[8px]">PLANNING</span>}
-                       {mode === 'build' && <span className="px-1.5 py-0.5 bg-orange-900/30 border border-orange-600/30 text-orange-400 rounded text-[8px]">BUILD</span>}
-                     </div>
-                     <div className="flex items-center gap-2">
-                       {buildVersionStack.length > 0 && (
-                         <button
-                           onClick={handleUndoBuild}
-                           title={`Undo: "${buildVersionStack[0].request}"`}
-                           className="flex items-center gap-1 px-2 py-0.5 bg-amber-900/30 hover:bg-amber-900/50 border border-amber-600/30 rounded text-[8px] text-amber-400 hover:text-amber-300 transition-all"
-                         >
-                           <RotateCcw className="w-2.5 h-2.5" />
-                           Undo ({buildVersionStack.length})
-                         </button>
-                       )}
-                       {mode === 'planning' && proMessages.length > 2 && (
-                         <button
-                           onClick={() => {
-                             const content = proMessages.map(m => `${m.sender === 'user' ? '👤 Doctor' : '🤖 NavBharatAI'}: ${m.text.replace(/__SWITCH_TO_BUILD__|__URGENT_BUILD__/g, '').trim()}`).join('\n\n---\n\n');
-                             const blob = new Blob([`# NavBharatAI — Product Requirements Document\nGenerated: ${new Date().toLocaleString('en-IN')}\n\n${content}`], { type: 'text/plain' });
-                             const url = URL.createObjectURL(blob);
-                             const a = document.createElement('a'); a.href = url; a.download = 'navbharat-prd.txt';
-                             document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-                           }}
-                           className="flex items-center gap-1 px-2 py-0.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded text-[8px] text-[#8b949e] hover:text-white transition-all"
-                         >
-                           ⬇ Export PRD
-                         </button>
-                       )}
-                       {isAppBuilt && files && Object.keys(files).length > 0 && (
-                         <button
-                           onClick={() => { setDeployPanelError(''); setShowDeployPanel(true); }}
-                           title="Deploy your app to Vercel, Netlify, or GitHub Pages"
-                           className="flex items-center gap-1 px-2 py-0.5 bg-emerald-900/30 hover:bg-emerald-900/50 border border-emerald-600/30 rounded text-[8px] text-emerald-400 hover:text-emerald-300 transition-all"
-                         >
-                           <Rocket className="w-2.5 h-2.5" />
-                           Deploy
-                         </button>
-                       )}
-                       {hasWorkspaceApp && (
-                         <button
-                           onClick={() => setShowWorkspace(v => !v)}
-                           title={workspaceVisible ? 'Hide live workspace' : 'Show live workspace (code + preview)'}
-                           className={cn(
-                             "hidden md:flex items-center gap-1 px-2 py-0.5 rounded text-[8px] border transition-all",
-                             workspaceVisible
-                               ? "bg-indigo-900/40 border-indigo-600/40 text-indigo-300 hover:text-indigo-200"
-                               : "bg-white/5 border-white/10 text-[#8b949e] hover:text-white",
-                           )}
-                         >
-                           <Layout className="w-2.5 h-2.5" />
-                           {workspaceVisible ? 'Hide app' : 'Show app'}
-                         </button>
-                       )}
-                       <span className="font-mono text-indigo-400">{sessions.find(s => s.id === currentProSessionId)?.uci || ''}</span>
-                     </div>
-                  </div>
-                  {/* Phase 5.5 — provider-down retry countdown banner */}
-                  {providerRetryCountdown !== null && (
-                    <div className="flex items-center justify-between gap-3 px-4 py-2 bg-amber-950/40 border-b border-amber-600/30 text-xs">
-                      <div className="flex items-center gap-2 text-amber-300">
-                        <span className="text-base">⏱</span>
-                        <span>AI providers temporarily unavailable — retry in <strong>{providerRetryCountdown}s</strong></span>
-                      </div>
-                      <button
-                        onClick={() => {
-                          if (providerRetryTimerRef.current) clearInterval(providerRetryTimerRef.current);
-                          setProviderRetryCountdown(null);
-                          const prompt = providerRetryPromptRef.current;
-                          if (prompt) { setProInput(prompt); handleSendForPro(prompt); }
-                        }}
-                        className="shrink-0 px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold text-[10px] uppercase tracking-widest transition-all"
-                      >
-                        Retry Now
-                      </button>
-                    </div>
-                  )}
-                  <AIChat
-                    messages={proMessages}
-                    input={proInput}
-                    onInputChange={setProInput}
-                    onSend={(files) => { handleSendForPro(files); }}
-                    isLoading={isProLoading}
-                    activeIntent={activeIntent}
-                    isPinned={sessions.find(s => s.id === currentProSessionId)?.isPinned || false}
-                    onTogglePin={() => togglePin(currentProSessionId)}
-                    isLoggedIn={!!user}
-                    onShowLogin={() => setShowAuth(true)}
-                    mode={mode}
-                    onModeChange={setMode}
-                    activeAgent={'navbharatai-pro'}
-                    pendingGHEdit={pendingGHEdit}
-                    onConfirmPush={handleGHConfirmPush}
-                    isPushing={isPushing}
-                    isAppBuilt={isAppBuilt}
-                    theme={theme}
-                    onPreviewClick={() => {
-                        toggleTab('preview');
-                        setIsMenuOpen(false);
-                    }}
-                    userId={user?.uid}
-                    activeUci={user ? (sessions.find(s => s.id === currentProSessionId)?.uci || '') : ''}
-                    onRestoreUci={user ? handleRestoreUci : undefined}
-                    restoredMessages={sessions.find(s => s.id === currentProSessionId)?.restoredMessages || []}
-                    memorySummary={sessions.find(s => s.id === currentProSessionId)?.memorySummary || ''}
-                    wallet={wallet}
-                    buildProgress={proBuildProgress}
-                    guiderPlan={proGuiderPlan?.plan || null}
-                    guiderReplanning={proGuiderReplanning}
-                    onGuiderApprove={() => {
-                      const p = proGuiderPlan;
-                      if (!p) return;
-                      // Arm the grade→refine loop with the approved spec for this build.
-                      proGuiderSpecRef.current = { spec: p.plan?.spec || null, prompt: p.prompt };
-                      proGuiderRefineRef.current = 0;
-                      setProGuiderPlan(null);
-                      void handleSendForPro(p.prompt, true, false, true);
-                    }}
-                    onGuiderSend={(refinement) => {
-                      const p = proGuiderPlan;
-                      if (!p || !refinement.trim()) return;
-                      const augmented = `${p.prompt}\n\n[User refinement to the plan]: ${refinement.trim()}`;
-                      setProGuiderReplanning(true);
-                      fetch('/api/guider/plan', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ prompt: augmented, files: {}, isEdit: false, agentic: true }),
-                      })
-                        .then(r => r.json())
-                        .then((pr: any) => {
-                          if (pr?.confirm && pr?.plan) setProGuiderPlan({ prompt: augmented, plan: pr.plan });
-                          else { setProGuiderPlan(null); void handleSendForPro(augmented, true, false, true); }
-                        })
-                        .catch(() => {/* keep the current card */})
-                        .finally(() => setProGuiderReplanning(false));
-                    }}
-                    onBuildStepToggle={(i) => setProBuildProgress(prev => ({
-                      ...prev,
-                      steps: prev.steps.map((s, idx) => idx === i ? { ...s, expanded: !s.expanded } : s),
-                    }))}
-                    onDownloadZip={downloadAppZip}
-                    onSendSuggestion={(text) => { setProInput(text); handleSendForPro(text); }}
-                    onStop={isProLoading ? handleStopPro : undefined}
-                  />
-                </div>
-
-              {/* Phase 3.1 — live workspace (code + preview) docked to the right (desktop) */}
-              {workspaceVisible && (
-                <div className="flex-1 min-w-0 h-full min-h-0 max-h-full overflow-hidden">
-                  <WorkspacePane
-                    files={files as any}
-                    generatedCode={generatedCode}
-                    onFilesChange={(nf) => setFiles(nf as any)}
-                    onRun={(f) => updatePreview(f || (files as any))}
-                    onOpenStudio={() => toggleTab('studio')}
-                    onDeploy={() => { setDeployPanelError(''); setShowDeployPanel(true); }}
-                    canDeploy={isAppBuilt && !!files && Object.keys(files).length > 0}
-                    previewHistory={previewHistory}
-                    onRestoreHistory={(html) => setGeneratedCode(html)}
-                    onHtmlChange={(html) => setGeneratedCode(html)}
-                  />
-                </div>
-              )}
-
-              {/* G8 — One-click Deploy Panel (modal overlay) */}
-              {showDeployPanel && (
-                <DeployModal
-                  platform={deployPlatform}
-                  token={deployToken}
-                  projectName={deployProjectName}
-                  owner={deployOwner}
-                  repo={deployRepo}
-                  error={deployPanelError}
-                  isDeploying={isDeploying}
-                  onClose={() => setShowDeployPanel(false)}
-                  onPlatformChange={setDeployPlatform}
-                  onTokenChange={setDeployToken}
-                  onProjectNameChange={setDeployProjectName}
-                  onOwnerChange={setDeployOwner}
-                  onRepoChange={setDeployRepo}
-                  onClearError={() => setDeployPanelError('')}
-                  onDeploy={handleDeployApp}
-                />
-              )}
-            </div>
-            );
-          })()}
+          {activeView === 'nbi_pro_chat' && (
+            <ProChatPanel
+              theme={theme}
+              themeClasses={themeClasses}
+              mode={mode}
+              setMode={setMode}
+              buildVersionStack={buildVersionStack}
+              handleUndoBuild={handleUndoBuild}
+              proMessages={proMessages}
+              proInput={proInput}
+              setProInput={setProInput}
+              isProLoading={isProLoading}
+              handleStopPro={handleStopPro}
+              showDeployPanel={showDeployPanel}
+              setShowDeployPanel={setShowDeployPanel}
+              deployPlatform={deployPlatform}
+              setDeployPlatform={setDeployPlatform}
+              deployToken={deployToken}
+              setDeployToken={setDeployToken}
+              deployProjectName={deployProjectName}
+              setDeployProjectName={setDeployProjectName}
+              deployOwner={deployOwner}
+              setDeployOwner={setDeployOwner}
+              deployRepo={deployRepo}
+              setDeployRepo={setDeployRepo}
+              deployPanelError={deployPanelError}
+              setDeployPanelError={setDeployPanelError}
+              isDeploying={isDeploying}
+              handleDeployApp={handleDeployApp}
+              showWorkspace={showWorkspace}
+              setShowWorkspace={setShowWorkspace}
+              files={files}
+              isAppBuilt={isAppBuilt}
+              generatedCode={generatedCode}
+              setFiles={(f) => setFiles(f as any)}
+              updatePreview={updatePreview}
+              toggleTab={toggleTab}
+              setIsMenuOpen={setIsMenuOpen}
+              previewHistory={previewHistory}
+              setGeneratedCode={setGeneratedCode}
+              proBuildProgress={proBuildProgress}
+              setProBuildProgress={setProBuildProgress}
+              proGuiderPlan={proGuiderPlan}
+              setProGuiderPlan={setProGuiderPlan}
+              proGuiderReplanning={proGuiderReplanning}
+              setProGuiderReplanning={setProGuiderReplanning}
+              proGuiderSpecRef={proGuiderSpecRef}
+              proGuiderRefineRef={proGuiderRefineRef}
+              providerRetryCountdown={providerRetryCountdown}
+              setProviderRetryCountdown={setProviderRetryCountdown}
+              providerRetryTimerRef={providerRetryTimerRef}
+              providerRetryPromptRef={providerRetryPromptRef}
+              handleSendForPro={handleSendForPro}
+              sessions={sessions}
+              currentProSessionId={currentProSessionId}
+              togglePin={togglePin}
+              user={user}
+              setShowAuth={setShowAuth}
+              handleRestoreUci={handleRestoreUci}
+              pendingGHEdit={pendingGHEdit}
+              handleGHConfirmPush={handleGHConfirmPush}
+              isPushing={isPushing}
+              wallet={wallet}
+              downloadAppZip={downloadAppZip}
+              activeIntent={activeIntent}
+            />
+          )}
 
           {/* ── Senior Doctor Assistant ── */}
           {activeView === 'sda_chat' && (

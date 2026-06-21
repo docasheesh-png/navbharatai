@@ -429,6 +429,20 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['dependency', 'package.json', 'missing module', 'cannot find module', 'npm install', 'missing dependency', 'undeclared package', 'import error', 'module not found', 'package missing', 'auto install', 'dep sync'],
   },
   {
+    id: 'one-click-deploy',
+    name: 'One-Click Deploy Button',
+    path: 'Pro Chat → header bar → Deploy button (visible after app is built)',
+    description: `G8: A "Deploy" button appears in the Pro Chat header bar after any app is successfully built. Clicking it opens a deploy panel directly in the chat with three platform options:
+• Vercel — enter token + project name → deploys to *.vercel.app
+• Netlify — enter token + optional site ID → deploys to *.netlify.app
+• GitHub Pages — enter token + owner + repo → deploys to username.github.io/repo/
+On success: navigates to the "App is Live!" screen with the live URL. No commands needed — pure GUI.`,
+    howToUse: 'Build an app in Pro Chat. When build completes, a green "Deploy" button appears in the top-right of the chat header. Click it, choose a platform, enter your API token, and click "Deploy Now".',
+    relatedFeatures: ['pro_chat', 'pro_chat_multi_deploy'],
+    aiSurface: 'pro_chat',
+    keywords: ['deploy button', 'one click deploy', 'deploy', 'vercel', 'netlify', 'github pages', 'publish', 'launch', 'go live', 'deploy karo', 'live karo', 'publish app', 'deploy app'],
+  },
+  {
     id: 'auto-code-review',
     name: 'Auto Code Review',
     path: 'Pro Chat → Build any app → review appears in build summary',

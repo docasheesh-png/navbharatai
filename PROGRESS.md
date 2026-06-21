@@ -661,6 +661,26 @@ Also fixed: SecurityEvaluator regex (now matches `KEY = "value"` with spaces aro
 
 tsc x2 clean (0 errors), vitest 1180/1180 green.
 
+**Extended — 1256 tests / 170 test files (continued 2026-06-21, session 3):**
+
+Additional test files (this session):
+- `tests/scaffoldGenerator.test.ts` — ScaffoldGenerator file generation via mock IWorkspaceManager (4 tests)
+- `tests/authMiddleware.test.ts` — verifyFirebaseToken, requireUserMatch, buildRateLimiter VITEST-skip (7 tests)
+- `tests/patchToWorkspaceBridge.test.ts` — PatchToWorkspaceBridge writeFile delegation (4 tests)
+- `tests/appMakerBlueprintBuilder.test.ts` — AppMakerLab/BlueprintBuilder.build() shape (8 tests)
+- `tests/dbModule.test.ts` — lib/db setDb/getDb contract (4 tests)
+- `tests/vcsProvider.test.ts` — VCSProvider commit/branch/tag/recover with full mocks (8 tests)
+- `tests/localGitProvider.test.ts` — LocalGitProvider pure validation (protocol/hostname/branch-name/author) (14 tests)
+- `tests/buildVerifier.test.ts` — BuildVerifier.verify() existence/forbidden-patterns/size (8 tests)
+- `tests/workspaceLauncher.test.ts` — WorkspaceLauncher detectPackageManager/installDependencies/getStartCommand (13 tests)
+- `tests/sandboxManager.test.ts` — SandboxManager no-op terminate/lifecycle on unknown workspace (3 tests)
+- `tests/repairEngine.test.ts` — BuildEngine/RepairEngine error classification (3 tests)
+
+Also: discovered 4 existing colocated src/*.test.ts files included by vitest (AIRouter, FileSanitizer,
+WorkspaceMutationEngine, TransactionCoordinator) — confirmed green.
+
+tsc x2 clean (0 errors), vitest 1256/1256 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

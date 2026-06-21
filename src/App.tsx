@@ -7395,6 +7395,23 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                         )}
                         {adminLiveMetrics && (
                           <div className="space-y-4">
+                            {/* Phase 4.3 — active health alerts (error rate / preview rate / latency) */}
+                            {Array.isArray(adminLiveMetrics.alerts) && adminLiveMetrics.alerts.length > 0 && (
+                              <div className="space-y-2">
+                                {adminLiveMetrics.alerts.map((al: any) => (
+                                  <div
+                                    key={al.id}
+                                    className={`rounded-2xl px-5 py-4 border flex items-start gap-3 ${al.severity === 'critical' ? 'bg-red-950/30 border-red-600/40' : 'bg-amber-950/30 border-amber-600/40'}`}
+                                  >
+                                    <span className={`text-lg leading-none ${al.severity === 'critical' ? 'text-red-400' : 'text-amber-400'}`}>{al.severity === 'critical' ? '⛔' : '⚠️'}</span>
+                                    <div>
+                                      <div className={`text-[10px] font-black uppercase tracking-widest ${al.severity === 'critical' ? 'text-red-400' : 'text-amber-400'}`}>{al.severity} · {al.id}</div>
+                                      <div className="text-xs text-white mt-0.5">{al.message}</div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             {/* Build Stats */}
                             <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-6">
                               <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Build Stats</h4>

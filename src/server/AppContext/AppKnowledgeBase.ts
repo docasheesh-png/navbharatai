@@ -458,6 +458,7 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     description: `Admin-only real-time observability panel showing:
 • Total builds, success rate %, preview rate, average build time
 • AI cost breakdown by provider (Claude, Grok, Gemini, etc.) with token counts
+• HEALTH ALERTS (Phase 4.3) — automatically flags high build-failure rate (>10%), low preview rate (<80%), or slow builds (avg >30s) as critical/warning banners at the top of the panel
 • Refresh button to pull the latest snapshot from the server
 • Backend: persisted daily to Firestore (metrics_snapshots) — survives Cloud Run restarts
 • Historical data available via GET /api/admin/metrics/history

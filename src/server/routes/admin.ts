@@ -8,6 +8,7 @@ import { serverStats } from '../lib/serverStats';
 import { getProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
+import { evaluateAlerts } from '../lib/metricsAlerts';
 import { logStore } from '../lib/logStore';
 import { eventStore } from '../lib/eventStore';
 
@@ -64,8 +65,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   };
 
   // Observability: live token-usage/cost + build-success metrics (Phase 5, item 28).
+  // Phase 4.3 — include triggered alerts (error rate / preview rate / latency) so
+  // the admin panel surfaces health issues, not just raw numbers.
   app.get('/api/admin/metrics', verifyAdminToken, (_req: Request, res: Response) => {
-    res.json(getMetrics().snapshot());
+    const snapshot = getMetrics().snapshot();
+    res.json({ ...snapshot, alerts: evaluateAlerts(snapshot) });
   });
 
   // G2 — daily metrics history (last N days of persisted MetricsSnapshots).

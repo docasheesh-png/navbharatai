@@ -384,12 +384,20 @@ Gate: frontend tsc 0 · server tsc 0 · 321/321 tests pass.
 **Deferred (hard quotas):**
 - Free: 3/day, Pro: 20/day — needs user-tier lookup wired to auth middleware
 
-### 4.3 — Metrics + traces + alerts
-**Status: TODO**
+### 4.3 — Metrics + traces + alerts ✅ CODE-COMPLETE (2026-06-21)
+**Branch:** `claude/test-coverage-analysis-bq0yev`
 
-Metrics already persisted (G2 done). Add:
-- Cloud Trace spans on `/api/build-stream` (start → plan → code → preview → done)
-- Alerts: build error rate >10%, p95 latency >30s, E2B quota >80%
+- **Metrics:** persisted to Firestore + admin panel (G2) ✅.
+- **Alerts (the code-completable half) — DONE:**
+  - NEW `src/server/lib/metricsAlerts.ts` — pure `evaluateAlerts(snapshot)` rules engine: high build-failure rate (>10%, min 10-build sample), low preview rate (<80%), slow builds (avg >30s). Returns typed `MetricAlert[]` with severity/message/value/threshold.
+  - `admin.ts` — `GET /api/admin/metrics` now returns `{ ...snapshot, alerts }`.
+  - `App.tsx` — Live Metrics panel renders critical/warning alert banners at the top.
+  - `AppKnowledgeBase.ts` — `admin-metrics` entry updated with the alerts capability.
+  - `tests/metricsAlerts.test.ts` — 7 tests (healthy, sample-size guard, each alert, boundary, multi-alert). tsc x2 clean, vitest green.
+
+**Infra-gated remainder (cannot be code-completed honestly):**
+- Cloud Trace distributed spans on `/api/build-stream` — needs `@google-cloud/trace-agent`/OpenTelemetry export to GCP; unverifiable without a GCP project, so not shipped as fake.
+- Alert NOTIFICATION delivery (email/Slack) + E2B-quota alert — the detection rules engine is in place; wiring a notifier/quota source needs external infra. Admin sees alerts live in the panel meanwhile.
 
 ### 4.4 + 5.4b — Firestore cap + dep-sync + error-pattern expansion ✅ DONE (2026-06-21)
 **Branch:** `claude/g6-dependency-sync`

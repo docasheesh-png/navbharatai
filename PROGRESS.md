@@ -1235,8 +1235,7 @@ persistence doesn't survive Cloud Run). Built the spine:
 - routes/engineer.ts — mirrors each streamed agent event to the bus (engineer:<type>).
 - routes/admin.ts — GET /api/admin/events (admin-auth) → audit-trail / replay surface.
 - tests/eventBus.test.ts (6). Gate: server tsc 0 · frontend tsc 0 · 307 tests · boot PASS.
-Roadmap G1 status: G1.1 done. G1.2 in progress (this session). Remaining: G1.3
-capability registry.
+Roadmap G1 status: G1.1 ✅ G1.2 ✅ G1.3 ✅ — G1 COMPLETE. Next: G2 (Observability).
 
 ### Milestone — PR #113 merged (2026-06-21) — Pro upgrade: 23 commits of real working features
 Large batch merged to main. All verified: 0 tsc errors, 307/307 tests pass.

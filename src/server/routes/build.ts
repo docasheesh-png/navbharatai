@@ -21,6 +21,7 @@ function buildGradeContext(files: Record<string, string>): string {
   }
   return `Files (${paths.length}):\n${paths.join('\n')}\n${body}`;
 }
+import { APP_KNOWLEDGE_BASE } from '../AppContext/AppKnowledgeBase';
 import { makeAiEditGenerator, summarizeForMemory, type ModelCall, type BuildMemory } from '../project/aiEdits';
 import { orchestrateGenerate } from '../pro/ProOrchestrator';
 import { proMemoryStore } from '../pro/ProMemory';
@@ -143,6 +144,13 @@ function editLogEntry(prompt: string, files: Record<string, string>, isEdit: boo
 }
 
 export function registerBuildRoutes(app: Express): void {
+  // G1.3 — Capability registry endpoint. Returns the full AppKnowledgeBase so AI
+  // assistants and tooling can programmatically discover what NavBharatAI can do.
+  // Public (no auth) — it's a feature list, not private data.
+  app.get('/api/capabilities', (_req: Request, res: Response) => {
+    res.json({ version: 1, features: APP_KNOWLEDGE_BASE });
+  });
+
   // ── Guider: propose a design + decide if user confirmation is needed (Hybrid).
   //    Flag-gated. The frontend calls this BEFORE a build; if `confirm` is false
   //    it builds straight away, otherwise it shows a confirmation card with the

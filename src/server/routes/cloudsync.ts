@@ -46,41 +46,13 @@ export function registerCloudsyncRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/cloudsync/firebase', async (req: Request, res: Response) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
-
-    try {
-      res.json({
-        status: 'success',
-        projects: [
-          { id: 'navbharat-sandbox-7729', name: 'navBharat Sandbox (Default)', hosting: 'navbharat-sandbox-7729.web.app', functions: ['api-gateway', 'telemetry-worker'] },
-          { id: 'navbharat-saas-enterprise', name: 'navBharat SaaS Enterprise (Production)', hosting: 'navbharat-saas-enterprise.web.app', functions: ['billing-service', 'user-provisioner'] },
-          { id: 'navbharat-ecom-99a3', name: 'navBharat E-Commerce Portal', hosting: 'navbharat-ecom-99a3.web.app', functions: ['cart-handler', 'checkout-listener'] },
-          { id: 'firebase-custom-build', name: 'Custom Firebase Target', hosting: 'firebase-custom-build.web.app', functions: ['webhook-receiver'] }
-        ]
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  // Firebase + Vercel real integration requires OAuth tokens and platform API keys —
+  // not yet implemented. Return not_available so the UI falls back to presetTemplates.
+  app.post('/api/cloudsync/firebase', (req: Request, res: Response) => {
+    res.json({ status: 'not_available', message: 'Firebase project listing coming soon. Use Firebase CLI: firebase deploy --only hosting' });
   });
 
-  app.post('/api/cloudsync/vercel', async (req: Request, res: Response) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
-
-    try {
-      res.json({
-        status: 'success',
-        deployments: [
-          { id: 'dep-44a1', name: 'my-ecommerce-app', url: 'https://my-ecommerce-app.vercel.app', repo: 'workspace/my-ecommerce-app', env: 'production' },
-          { id: 'dep-09b2', name: 'mitrify', url: 'https://mitrify-stream.vercel.app', repo: 'workspace/mitrify', env: 'production' },
-          { id: 'dep-77c8', name: 'navbharat-dashboard', url: 'https://navbharat-dash.vercel.app', repo: 'workspace/navbharat-dashboard', env: 'staging' },
-          { id: 'dep-88d9', name: 'portfolio-site', url: 'https://ashish-portfolio.vercel.app', repo: 'workspace/portfolio-site', env: 'production' }
-        ]
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  app.post('/api/cloudsync/vercel', (req: Request, res: Response) => {
+    res.json({ status: 'not_available', message: 'Vercel project listing coming soon. Use Vercel CLI: npx vercel --prod' });
   });
 }

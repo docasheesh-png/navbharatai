@@ -274,7 +274,8 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
         body: JSON.stringify({ email: inviteEmail, role: inviteRole, projectId, userId }),
       });
       if (!res.ok) throw new Error('API failed');
-      showToast(`Invite sent: ${inviteEmail}`);
+      const data = await res.json();
+      showToast(data.emailSent ? `Invite sent: ${inviteEmail}` : `Invite recorded — email delivery coming soon`);
     } catch {
       // Mock fallback
       showToast(`Invite sent (mock): ${inviteEmail}`);

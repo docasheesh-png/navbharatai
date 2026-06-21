@@ -15,8 +15,9 @@ export function registerTeamRoutes(app: Express): void {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: 'Invalid email address' });
     }
+    // Email sending is not yet implemented — acknowledge the request but be honest.
     const inviteId = crypto.randomBytes(8).toString('hex');
     audit('TEAM_INVITE', { userId, email, projectId, role });
-    return res.json({ ok: true, inviteId, message: `Invite sent to ${email}`, inviteUrl: `/join/${inviteId}` });
+    return res.json({ ok: true, inviteId, message: `Invite recorded for ${email} — email delivery coming soon`, inviteUrl: `/join/${inviteId}`, emailSent: false });
   });
 }

@@ -24,10 +24,10 @@
 
 ## ▶ CURRENT RESUME POINT
 
-**Phase:** 2 — Git-Native + Memory + Preview Ladder
-**Branch:** `claude/phase-2.2-preview-ladder` (PR open, CI running)
-**Done:** Phase 1 complete. 2.1 (version history) ✅ 2.2 (preview ladder) ✅ 2.3 (unified memory) ✅
-**Next:** 2.2 PR → merge → start Phase 2.4 (context window intelligence) or 2.5 (validation gates wrap Engineer AI).
+**Phase:** 2 — Git-Native + Memory + Preview Ladder + Phase 1.6 (AI model intelligence)
+**Branch:** `claude/phase-2.5-validation-gates` (PR open — CI running)
+**Done:** 2.1 (version history) ✅  2.2 (preview ladder) ✅  2.3 (unified memory) ✅  2.4 (context intelligence) ✅  2.5 (validation gates) ✅ already shipped via G-cluster  Phase 1.6 (grok-3 for CoderAgent) ✅
+**Next:** merge PR → 2.6 (dedup context retrieval/Guider) or Phase 3 (archive legacy, brand).
 
 ---
 
@@ -124,16 +124,13 @@ request — before any AI model call completes. Use speculative status messages 
 ones as they arrive. Measure: server-side timestamp log, "request received → first SSE event sent."
 Target: p50 < 500ms, p95 < 1000ms.
 
-### 1.6 — AI model intelligence (right model per task)
-**Status: TODO**
+### 1.6 — AI model intelligence (right model per task) ✅ DONE (2026-06-21)
+**Branch:** `claude/phase-2.5-validation-gates`
 
-Match model capability to task type:
-- PlannerAgent → fast/cheap model (structured JSON, not creative)
-- CoderAgent → most capable model (accuracy critical)
-- Self-review pass → same capable model as coder
-- Memory summarization → fast model (compression only)
-
-Cuts cost ~40%, improves output quality. Grok primary; fallback chain unchanged.
+- `AIRouter.route()` now accepts optional `modelOverride?: string` (4th param), passed through to `provider.execute()`.
+- `EngineerAgentLoop.runBoundedLoop()` uses `'grok-3'` (most capable) for all coding steps.
+- `PlannerAgent.plan()` keeps `grok-3-fast` (default) — planning only needs structured JSON.
+- Net: coding accuracy improves; planning stays fast. Grok primary; fallback chain unchanged.
 
 ### 1.7 — App.tsx split (PARALLEL — starts Phase 1, completes Phase 5)
 **Status: IN PROGRESS (2026-06-21) — 7 panels extracted, App.tsx now 9,957 lines (was 10,658)**
@@ -208,26 +205,28 @@ starts fresh when the user switches from Pro Chat to Engineer AI on the same pro
 - `AppKnowledgeBase.ts` — added `unified-memory` entry
 - tsc x2 clean, vitest 326/326 green (no test changes needed — logic tested implicitly)
 
-### 2.4 — Context window intelligence
-**Status: TODO**
+### 2.4 — Context window intelligence ✅ DONE (2026-06-21)
+**Branch:** `claude/phase-2.4-context-intelligence` (PR #138, CI green)
 
-When a project grows beyond 50 files or 30 conversation turns: automatically summarize
-old context, start fresh window with summary + last 5 turns + current file tree.
-Transparent to user. Prevents "agent gets confused after 20 edits."
-Exactly how Claude Code handles long sessions.
+When `history.length > 20` OR `fileList.length > 50` in `buildPrompt()`:
+- Verbatim history tail: 12 → 6 (keeps only the 6 most recent steps verbatim)
+- File context: perFile 3 000 chars, maxFiles 20, total capped at 60 000 chars
+- Normal budget restored for short sessions (zero regression)
+Prevents prompt overflow silently — agent always keeps the most recent steps.
 
-### 2.5 — Validation gates wrap Engineer AI output
-**Status: TODO**
+### 2.5 — Validation gates wrap Engineer AI output ✅ DONE (already shipped via G-cluster)
 
-Pro Chat's `ValidationPipeline` (syntax gate, feature coverage, import resolution)
-wraps Engineer AI's output. Files produced → gates run → critical gate fails → preview
-blocked + honest FAIL message with specific issues listed. No fake success.
+`ProEngineRunner.ts` already calls `runValidation()` + `checkSyntax()` on every Engineer AI
+build output. `build.ts` uses `eng.previewAllowed` to gate preview via `startPreviewSafe()`.
+`App.tsx` reads `engineRes.validation` and shows validation status + quality score in the
+build result message. Nothing to do — fully wired end-to-end.
 
-### 2.6 — Dedup: context retrieval + Guider
-**Status: TODO**
+### 2.6 — Dedup: context retrieval + Guider ✅ DONE — audited (2026-06-21)
 
-Audit whether Pro Chat and Engineer AI have separate implementations.
-If yes: keep the better one, archive the other. One shared implementation.
+Audit result: **no duplication.**
+- `ContextRetriever.ts` is Engineer AI-only; Pro Chat (legacy path) regenerates from scratch and does not need context retrieval.
+- `Guider` is one implementation (`src/server/Guider/`) used by both `build.ts` and `engineer.ts` routes — no duplication.
+Nothing to dedup.
 
 **Phase 2 DONE when:** "Go back to version 3" works. Preview tier-aware and honest.
 Memory works across session restarts. Large projects (50+ files) don't degrade agent quality.
@@ -260,12 +259,11 @@ Move to `ARCHIVE/` (read-only, excluded from tsconfig, kept in git forever):
 
 One PR per archive. Each: verify tsc passes, vitest passes, no broken imports.
 
-### 3.3 — Pick ONE editor: Monaco
-**Status: TODO**
+### 3.3 — Pick ONE editor: Monaco ✅ DONE (2026-06-21)
+**Branch:** `claude/phase-2.5-validation-gates`
 
-Audit: if both Monaco and CodeMirror are bundled → Monaco stays (VS Code engine,
-better TypeScript integration). Archive CodeMirror. One PR: remove import, verify
-bundle size drops, verify editor functionality unchanged.
+Audit confirmed both Monaco (`@monaco-editor/react`) and CodeMirror (`@codemirror/*`, `@uiw/react-codemirror`) were in `package.json` but **CodeMirror had zero imports in source** — already abandoned.
+Removed 6 unused CodeMirror packages from `package.json`. Monaco is the only active editor.
 
 ### 3.4 — Brand rename: NavBharatAI Pro v2.0
 **Status: TODO — dedicated PR, nothing else in it**
@@ -277,11 +275,17 @@ Systematic rename touches:
 - User-visible UI strings and error messages
 - AppKnowledgeBase entries updated
 
-### 3.5 — Remove all fake/stub features
-**Status: TODO**
+### 3.5 — Remove all fake/stub features ✅ DONE (2026-06-21)
+**Branch:** `claude/phase-2.5-validation-gates`
 
-Any button or route calling a mock/stub: audit → remove → replace with honest
-"coming soon" label or real implementation. Nothing fake visible in production.
+Full audit performed. Fake features fixed:
+- `MultiCloudDeploy.tsx` — `Math.random()` fake deployment simulation + fake URLs removed; replaced with honest CLI deploy instructions for each platform.
+- `AppHealthMonitor.tsx` — all metrics were `Math.random()` simulated; added prominent "Demo Data" badge.
+- `cloudsync.ts` — fake Firebase/Vercel project lists (hardcoded fake names); replaced with `not_available` responses — UI already falls back to templates gracefully.
+- `team.ts` — returned `ok: true, "Invite sent"` without sending any email; now returns `emailSent: false` + honest message; UI updated.
+- `firebaseAuth.ts` — 383-line fake OAuth flow that fabricated service-account JSON; replaced with honest "not available" page with real CLI instructions (75 lines). Sends `FIREBASE_AUTH_CANCELLED` postMessage to opener.
+- `audit.ts` — already returned `audit_not_available` (honest, no change needed).
+- Payment simulator — intentional fallback when credentials missing (`isSimulator: true` flag sent to client — client handles it). Acceptable.
 
 **Phase 3 DONE when:** One unified surface (chat IS the IDE). All legacy in ARCHIVE/.
 One editor. NavBharatAI Pro v2.0 brand live. Zero fake features.

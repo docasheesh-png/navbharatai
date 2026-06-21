@@ -418,6 +418,24 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     relatedFeatures: ['admin', 'engineer_ai', 'pro_chat'],
     keywords: ['metrics', 'stats', 'cost', 'admin', 'dashboard', 'builds', 'usage', 'ai cost', 'success rate', 'observability', 'logs', 'monitoring'],
   },
+  {
+    id: 'auto-code-review',
+    name: 'Auto Code Review',
+    path: 'Pro Chat → Build any app → review appears in build summary',
+    description: `G5 quality gate: after every new Pro build, an AI-powered code review runs automatically:
+• Security: OWASP Top 10 checks (injection, XSS, hardcoded credentials, CSRF)
+• Quality: unused imports, dead code, functions >50 lines, deep nesting
+• Performance: N+1 queries, missing React.memo, large bundle imports
+• Tech Debt: TODO/FIXME comments, deprecated APIs, TypeScript 'any' types
+• Accessibility: missing alt attributes, missing ARIA labels
+Returns a 0-100 score + prioritized findings with file:line + fix suggestion.
+Non-blocking: review never delays or fails the build (12s timeout, best-effort).
+Also available on-demand via Settings → Pro → Code Review button.`,
+    howToUse: 'Build any app in Pro Chat — code review score and top issues appear in the build summary message automatically. For on-demand review without rebuilding, use Settings → Pro → Code Review.',
+    relatedFeatures: ['pro_chat', 'engineer_ai', 'admin-metrics'],
+    aiSurface: 'pro_chat',
+    keywords: ['code review', 'security', 'quality', 'owasp', 'xss', 'injection', 'tech debt', 'accessibility', 'score', 'findings', 'auto review', 'code quality', 'security scan'],
+  },
 ];
 
 /** Quick lookup by id. */

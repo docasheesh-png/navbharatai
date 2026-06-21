@@ -27,6 +27,7 @@ import { orchestrateGenerate } from '../pro/ProOrchestrator';
 import { proMemoryStore } from '../pro/ProMemory';
 import { proBuildSessionStore } from '../pro/ProBuildSession';
 import { generateTests } from '../pro/ProTestGen';
+import { reviewCode } from '../pro/ProCodeReview';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
 import { AnthropicProvider } from '../AI/Router/providers/AnthropicProvider';
@@ -384,6 +385,17 @@ export function registerBuildRoutes(app: Express): void {
               previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
             }
 
+            // G5 — code review quality gate (best-effort, 12s cap, never blocks build).
+            let codeReview: unknown = undefined;
+            if (!isEdit) {
+              try {
+                codeReview = await Promise.race([
+                  reviewCode(VirtualFileSystem.fromRecord(eng.files), callModel),
+                  new Promise(resolve => setTimeout(() => resolve(undefined), 12000)),
+                ]);
+              } catch { /* review never blocks */ }
+            }
+
             sendComplete({
               ok: eng.ok,
               files: eng.files,
@@ -396,6 +408,7 @@ export function registerBuildRoutes(app: Express): void {
               editLog: updatedEditLog,
               tier: eng.tier,
               partial: eng.partial || deadline.signal.aborted,
+              codeReview,
             });
             eventBus.publish({ type: EventType.BUILD_COMPLETED, workspaceId: sid, sender: 'pro', payload: { path: 'agentic', tier: eng.tier, usable: eng.usable, partial: eng.partial || deadline.signal.aborted, fileCount: eng.fileCount, previewAllowed: eng.previewAllowed } });
             // G2 — wire metrics that were previously missing from the agentic path.
@@ -491,6 +504,18 @@ export function registerBuildRoutes(app: Express): void {
         previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
       }
 
+      // G5 — code review quality gate (best-effort, 12s cap, never blocks build).
+      let codeReview: unknown = undefined;
+      if (!isEdit) {
+        try {
+          send({ type: 'status', message: 'Running code review…' });
+          codeReview = await Promise.race([
+            reviewCode(VirtualFileSystem.fromRecord(finalFiles), callModel),
+            new Promise(resolve => setTimeout(() => resolve(undefined), 12000)),
+          ]);
+        } catch { /* review never blocks */ }
+      }
+
       sendComplete({
         ok: result.ok,
         files: finalFiles,
@@ -502,6 +527,7 @@ export function registerBuildRoutes(app: Express): void {
         memorySummary: updatedSummary,
         editLog: updatedEditLog,
         partial: false,
+        codeReview,
       });
       eventBus.publish({ type: EventType.BUILD_COMPLETED, workspaceId: sid, sender: 'pro', payload: { path: 'legacy', ok: result.ok, fileCount: result.fileCount, previewAllowed: result.previewAllowed, partial: false } });
       if (sessionId) {

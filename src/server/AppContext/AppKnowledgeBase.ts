@@ -470,6 +470,28 @@ On success: navigates to the "App is Live!" screen with the live URL. No command
     keywords: ['iterative build', 'step by step', 'agent build', 'build failed try again', 'try again', 'retry build', 'complex app', 'multi step', 'pro chat build', 'app build', 'build engine', 'photo editing app', 'phir se bana', 'dobara bana', 'memory', 'context', 'remember'],
   },
   {
+    id: 'guider-plan-confirm',
+    name: 'Guider — Pre-Build Design Confirmation + Post-Build Quality Grader',
+    path: 'Pro Chat → type any app description → Guider card appears before build starts',
+    description: `Guider is the Pro Chat quality layer that wraps every build with two checks:
+
+PRE-BUILD (Plan Confirmation):
+• For every fresh app request, Guider proposes a structured design spec (screens, features, tech stack) and shows it as a confirmation card BEFORE building.
+• User can Approve, Edit the spec, or ask a clarifying question.
+• Small edits and follow-up messages skip this step automatically (server-side gate).
+• On approval, the spec is stored; build starts immediately.
+
+POST-BUILD (Grade + Auto-Refine):
+• After the build completes, Guider grades the result against the confirmed spec (0–100 score).
+• If score < threshold and gaps are found, Guider auto-refines up to 2 rounds without any user action.
+• Each refine round targets only the specific gaps (e.g. "missing dark mode toggle", "no error handling in login") without removing working features.
+• Final score + pass/fail shown in chat message.`,
+    howToUse: 'Open Pro Chat and describe an app. A Guider design card will appear — review and click Approve (or edit it). Build starts. After it completes, watch for the Guider grade message — it will auto-fix gaps.',
+    relatedFeatures: ['iterative-agent-build', 'pro_chat', 'auto-code-review'],
+    aiSurface: 'pro_chat',
+    keywords: ['guider', 'design plan', 'plan confirmation', 'approve plan', 'build spec', 'quality check', 'grade', 'refine', 'auto refine', 'gaps', 'requirements', 'spec', 'confirmation card', 'before build', 'pre build', 'post build', 'quality score', 'plan approve karo', 'design confirm'],
+  },
+  {
     id: 'auto-code-review',
     name: 'Auto Code Review',
     path: 'Pro Chat → Build any app → review appears in build summary',

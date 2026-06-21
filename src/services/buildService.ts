@@ -86,6 +86,8 @@ export interface BuildRequest {
    * that matches the design layout and style.
    */
   designImages?: string[];
+  /** G1.2 — Stable session ID so the server can persist + restore build results. */
+  sessionId?: string;
 }
 
 /**
@@ -126,6 +128,18 @@ async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Pr
 /** Build or edit a multi-file app from a prompt via the real engine. */
 export function buildApp(req: BuildRequest, signal?: AbortSignal): Promise<BuildResponse> {
   return postJson<BuildResponse>('/api/build', req, signal);
+}
+
+/** G1.2 — Fetch the last completed build result for a sessionId (null if not found). */
+export async function fetchBuildSession(sessionId: string): Promise<BuildResponse | null> {
+  try {
+    const res = await fetch(`/api/build-session/${encodeURIComponent(sessionId)}`);
+    if (res.status === 404) return null;
+    if (!res.ok) return null;
+    return await res.json() as BuildResponse;
+  } catch {
+    return null;
+  }
 }
 
 /** A live progress event streamed from /api/build-stream. */

@@ -24,6 +24,7 @@ function buildGradeContext(files: Record<string, string>): string {
 import { makeAiEditGenerator, summarizeForMemory, type ModelCall, type BuildMemory } from '../project/aiEdits';
 import { orchestrateGenerate } from '../pro/ProOrchestrator';
 import { proMemoryStore } from '../pro/ProMemory';
+import { proBuildSessionStore } from '../pro/ProBuildSession';
 import { generateTests } from '../pro/ProTestGen';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
@@ -387,6 +388,15 @@ export function registerBuildRoutes(app: Express): void {
               partial: eng.partial || deadline.signal.aborted,
             });
             eventBus.publish({ type: EventType.BUILD_COMPLETED, workspaceId: sid, sender: 'pro', payload: { path: 'agentic', tier: eng.tier, usable: eng.usable, partial: eng.partial || deadline.signal.aborted, fileCount: eng.fileCount, previewAllowed: eng.previewAllowed } });
+            if (sessionId) {
+              proBuildSessionStore.save(sessionId, {
+                ok: eng.ok, files: eng.files, fileCount: eng.fileCount,
+                verify: eng.verify, validation: eng.validation,
+                previewAllowed: eng.previewAllowed, preview: previewInfo,
+                memorySummary: updatedSummary, editLog: updatedEditLog,
+                partial: eng.partial || deadline.signal.aborted,
+              }).catch(() => {});
+            }
             cleanup();
             return res.end();
           }
@@ -481,9 +491,12 @@ export function registerBuildRoutes(app: Express): void {
       });
       eventBus.publish({ type: EventType.BUILD_COMPLETED, workspaceId: sid, sender: 'pro', payload: { path: 'legacy', ok: result.ok, fileCount: result.fileCount, previewAllowed: result.previewAllowed, partial: false } });
       if (sessionId) {
-        proMemoryStore.save(sessionId, {
-          memorySummary: updatedSummary,
-          editLog: updatedEditLog,
+        proMemoryStore.save(sessionId, { memorySummary: updatedSummary, editLog: updatedEditLog }).catch(() => {});
+        proBuildSessionStore.save(sessionId, {
+          ok: result.ok, files: finalFiles, fileCount: Object.keys(finalFiles).length,
+          verify: result.verify, validation: result.validation,
+          previewAllowed: result.previewAllowed, preview: previewInfo,
+          memorySummary: updatedSummary, editLog: updatedEditLog, partial: false,
         }).catch(() => {});
       }
     } catch (err: any) {
@@ -503,6 +516,20 @@ export function registerBuildRoutes(app: Express): void {
       }
       cleanup();
       res.end();
+    }
+  });
+
+  // G1.2 — Refresh-safe build recovery. Client calls this on mount to restore
+  // the last completed build for a sessionId without re-running the build.
+  app.get('/api/build-session/:sessionId', async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ error: 'sessionId required' });
+      const session = await proBuildSessionStore.load(sessionId);
+      if (!session) return res.status(404).json({ error: 'not found' });
+      return res.json(session);
+    } catch {
+      return res.status(500).json({ error: 'failed to load session' });
     }
   });
 }

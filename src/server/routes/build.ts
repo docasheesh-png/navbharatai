@@ -24,6 +24,7 @@ function buildGradeContext(files: Record<string, string>): string {
 import { makeAiEditGenerator, summarizeForMemory, type ModelCall, type BuildMemory } from '../project/aiEdits';
 import { orchestrateGenerate } from '../pro/ProOrchestrator';
 import { proMemoryStore } from '../pro/ProMemory';
+import { generateTests } from '../pro/ProTestGen';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
 import { AnthropicProvider } from '../AI/Router/providers/AnthropicProvider';
@@ -442,9 +443,25 @@ export function registerBuildRoutes(app: Express): void {
       const updatedSummary = await summarizeForMemory(callModel, memory.summary, turnHistory);
       const updatedEditLog = [...(memory.editLog || []), thisEntry].slice(-30);
 
+      // Phase 17 — auto test generation: add a Vitest test file alongside the build.
+      // Best-effort, 8s cap — never blocks or fails the build.
+      let finalFiles = result.files;
+      if (!isEdit) {
+        try {
+          const testFiles = await Promise.race([
+            generateTests(result.files, callModel),
+            new Promise<Record<string, string>>((resolve) => setTimeout(() => resolve({}), 8000)),
+          ]);
+          if (Object.keys(testFiles).length > 0) {
+            finalFiles = { ...result.files, ...testFiles };
+            send({ type: 'status', message: `Generated ${Object.keys(testFiles).join(', ')}` });
+          }
+        } catch { /* test gen never blocks the build */ }
+      }
+
       let previewInfo: unknown = undefined;
       if (preview && result.previewAllowed) {
-        const vfs = VirtualFileSystem.fromRecord(result.files);
+        const vfs = VirtualFileSystem.fromRecord(finalFiles);
         previewInfo = await previewService.startPreview('build', vfs);
       } else if (preview && !result.previewAllowed) {
         previewInfo = { ok: false, target: 'static', reason: 'Preview blocked: critical validation gates failed. See validation report.' };
@@ -452,8 +469,8 @@ export function registerBuildRoutes(app: Express): void {
 
       sendComplete({
         ok: result.ok,
-        files: result.files,
-        fileCount: result.fileCount,
+        files: finalFiles,
+        fileCount: Object.keys(finalFiles).length,
         verify: result.verify,
         validation: result.validation,
         previewAllowed: result.previewAllowed,

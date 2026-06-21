@@ -340,6 +340,10 @@ export default function App() {
   const [sdaResetKey, setSdaResetKey] = useState(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isProLoading, setIsProLoading] = useState<boolean>(false);
+  // Phase 5.5 — provider-down retry countdown: seconds remaining, null when not counting.
+  const [providerRetryCountdown, setProviderRetryCountdown] = useState<number | null>(null);
+  const providerRetryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const providerRetryPromptRef = useRef<string>('');
   const [activeIntent, setActiveIntent] = useState<string>('social');
   const [activeAgent, _setActiveAgent] = useState<string>('navbharatai');
   
@@ -4464,6 +4468,22 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
               // Phase 79 — store latest E2B screenshot; finishBuild will include it
               // in the build summary if no live URL is available.
               proLiveScreenshotRef.current = ev.base64;
+            } else if (ev.type === 'providers_unavailable') {
+              // Phase 5.5 — all AI providers temporarily down. Start a visible countdown
+              // so the user knows the service will recover and when to retry.
+              const secs = Math.round((ev.retryAfterMs ?? 60000) / 1000);
+              setProviderRetryCountdown(secs);
+              providerRetryPromptRef.current = messageToSend;
+              if (providerRetryTimerRef.current) clearInterval(providerRetryTimerRef.current);
+              providerRetryTimerRef.current = setInterval(() => {
+                setProviderRetryCountdown(prev => {
+                  if (prev === null || prev <= 1) {
+                    if (providerRetryTimerRef.current) clearInterval(providerRetryTimerRef.current);
+                    return null;
+                  }
+                  return prev - 1;
+                });
+              }, 1000);
             }
           }, abortController.signal);
           // Persist the refreshed Claude-Code-style memory onto the active session
@@ -6665,6 +6685,26 @@ ${pending.map(p => `  - ${p}`).join('\n')}
                        <span className="font-mono text-indigo-400">{sessions.find(s => s.id === currentProSessionId)?.uci || ''}</span>
                      </div>
                   </div>
+                  {/* Phase 5.5 — provider-down retry countdown banner */}
+                  {providerRetryCountdown !== null && (
+                    <div className="flex items-center justify-between gap-3 px-4 py-2 bg-amber-950/40 border-b border-amber-600/30 text-xs">
+                      <div className="flex items-center gap-2 text-amber-300">
+                        <span className="text-base">⏱</span>
+                        <span>AI providers temporarily unavailable — retry in <strong>{providerRetryCountdown}s</strong></span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (providerRetryTimerRef.current) clearInterval(providerRetryTimerRef.current);
+                          setProviderRetryCountdown(null);
+                          const prompt = providerRetryPromptRef.current;
+                          if (prompt) { setProInput(prompt); handleSendForPro(prompt); }
+                        }}
+                        className="shrink-0 px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold text-[10px] uppercase tracking-widest transition-all"
+                      >
+                        Retry Now
+                      </button>
+                    </div>
+                  )}
                   <AIChat
                     messages={proMessages}
                     input={proInput}

@@ -1636,13 +1636,34 @@ export const AIChat: React.FC<AIChatProps> = ({
                   {sendOnEnter ? '↵ Send' : '⇧↵ Send'}
                 </button>
                 {messages.length > 0 && (
-                  <button
-                    onClick={() => { if (window.confirm('Clear conversation?')) { /* parent handles via onSend with special signal */ onSendSuggestion?.('__CLEAR_CHAT__'); } }}
-                    title="Clear conversation"
-                    className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
-                  >
-                    Clear
-                  </button>
+                  <>
+                    {/* B16: Export chat as markdown */}
+                    <button
+                      onClick={() => {
+                        const md = messages.map(m => {
+                          const role = m.sender === 'user' ? '**You**' : '**AI**';
+                          return `${role}\n\n${m.text || ''}\n`;
+                        }).join('\n---\n\n');
+                        const blob = new Blob([md], { type: 'text/markdown' });
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = `chat-${new Date().toISOString().slice(0, 10)}.md`;
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                      }}
+                      title="Export chat as Markdown"
+                      className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
+                    >
+                      Export
+                    </button>
+                    <button
+                      onClick={() => { if (window.confirm('Clear conversation?')) { onSendSuggestion?.('__CLEAR_CHAT__'); } }}
+                      title="Clear conversation"
+                      className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
+                    >
+                      Clear
+                    </button>
+                  </>
                 )}
               </div>
             </div>

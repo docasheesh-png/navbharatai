@@ -481,6 +481,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
       setIsSidebarOpen(prev => !prev);
     } else if (shortcutStr.includes('ctrl+j')) {
       setIsPanelOpen(prev => !prev);
+    } else if (shortcutStr.includes('ctrl+g')) {
+      // A15: Go to Line
+      editorInstance?.getAction('editor.action.gotoLine')?.run();
+    } else if (shortcutStr.includes('ctrl+d')) {
+      // A18: Select next occurrence (adds cursor to next match)
+      editorInstance?.getAction('editor.action.addSelectionToNextFindMatch')?.run();
     }
   };
 
@@ -820,6 +826,21 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
              className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-all"
            >
              <Maximize2 className="w-3 h-3" />
+           </button>
+           {/* A15/A16/A18: Quick-access shortcuts in toolbar */}
+           <button
+             onClick={() => editorInstance?.getAction('actions.find')?.run()}
+             title="Find (Ctrl+F)"
+             className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-all"
+           >
+             <Search className="w-3 h-3" />
+           </button>
+           <button
+             onClick={() => editorInstance?.getAction('editor.action.gotoLine')?.run()}
+             title="Go to Line (Ctrl+G)"
+             className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-all"
+           >
+             G
            </button>
          </div>
 

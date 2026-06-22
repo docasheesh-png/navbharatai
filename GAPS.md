@@ -37,10 +37,10 @@
 | A12 | No "Format on Save" toggle in settings | `[x]` | #167 |
 | A13 | No "Trim trailing whitespace" setting | `[x]` | #167 |
 | A14 | No "Insert final newline" setting | `[x]` | #167 |
-| A15 | Ctrl+G (Go to Line) not wired as keyboard shortcut | `[ ]` | |
-| A16 | Ctrl+F (Find) not visually highlighted as shortcut hint | `[ ]` | |
+| A15 | Ctrl+G (Go to Line) not wired as keyboard shortcut | `[x]` | #167 |
+| A16 | Ctrl+F (Find) not visually highlighted as shortcut hint | `[x]` | #167 |
 | A17 | Editor theme is always dark — no light theme option | `[x]` | #167 |
-| A18 | No "Select all occurrences" keyboard shortcut hint | `[ ]` | |
+| A18 | No "Select all occurrences" keyboard shortcut hint | `[x]` | #167 |
 | A19 | Monaco language not auto-detected for .mjs / .cjs / .mts / .cts | `[x]` | #166 |
 | A20 | Read-only file indicator missing (no lock icon on non-editable files) | `[ ]` | |
 | A21 | No snippet library / custom snippets | `[ ]` | |
@@ -75,14 +75,14 @@
 | B13 | Long AI messages have no "Collapse" toggle | `[x]` | existing |
 | B14 | No keyboard shortcut to focus input (Ctrl+K or /) | `[x]` | #166 |
 | B15 | Chat history scroll position lost when switching tabs | `[ ]` | |
-| B16 | No "Export chat" to markdown/PDF | `[ ]` | |
+| B16 | No "Export chat" to markdown/PDF | `[x]` | #167 |
 | B17 | No search within chat history | `[ ]` | |
 | B18 | No @-mention to reference a file in the prompt | `[ ]` | |
 | B19 | Markdown rendering missing: tables look unstyled | `[x]` | #167 |
 | B20 | Markdown rendering missing: task lists (- [ ]) not rendered | `[x]` | #167 |
 | B21 | No LaTeX / math rendering support | `[ ]` | |
 | B22 | No inline image rendering for AI-returned image URLs | `[x]` | #167 |
-| B23 | No "thumbs up / thumbs down" feedback per message | `[ ]` | |
+| B23 | No "thumbs up / thumbs down" feedback per message | `[x]` | #167 |
 | B24 | Chat session name is always "Untitled" — no auto-naming | `[x]` | #167 |
 | B25 | Session list shows raw UCI code, not human readable title | `[ ]` | |
 | B26 | No "pin to top" for important messages | `[ ]` | |
@@ -120,7 +120,7 @@
 | C21 | File open does not scroll editor to top | `[x]` | #167 |
 | C22 | Files panel does not show which files have unsaved changes | `[x]` | #167 |
 | C23 | No "Reveal in file tree" from open editor tab | `[ ]` | |
-| C24 | File tree does not auto-expand to show active file | `[ ]` | |
+| C24 | File tree does not auto-expand to show active file | `[x]` | #167 |
 | C25 | Uploaded files via upload button not announced as added | `[ ]` | |
 
 ---

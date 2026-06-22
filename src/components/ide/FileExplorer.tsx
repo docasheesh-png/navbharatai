@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FolderOpen, FileCode, Plus, FilePlus, FolderPlus,
   ChevronRight, ChevronDown, MoreVertical, Trash2,
@@ -50,6 +50,19 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
   const [recentFiles, setRecentFiles] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('ide_recent_files') || '[]'); } catch { return []; }
   });
+
+  // C24: Auto-expand parent directories when the active file changes
+  useEffect(() => {
+    if (!activeFile) return;
+    const parts = activeFile.split('/');
+    if (parts.length < 2) return;
+    const parentDirs = parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join('/'));
+    setExpandedDirs(prev => {
+      const next = new Set(prev);
+      parentDirs.forEach(d => next.add(d));
+      return next;
+    });
+  }, [activeFile]);
 
   const buildTree = (filePaths: string[]): FileNode => {
     const root: FileNode = { name: 'root', path: '', type: 'dir', children: {} };

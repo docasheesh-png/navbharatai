@@ -632,7 +632,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               id="ide-social-chat-trigger"
               onClick={() => onOpenProChat ? onOpenProChat() : (handleScreenChange('ai'), setIsSidebarOpen(true))}
               className="w-16 h-7 bg-indigo-600 hover:bg-indigo-700 rounded-l-lg flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-l border-indigo-400/20"
-              title="Open NavBharatAI Pro"
+              title="Open NavBharatAI v2.0"
             >
               <Bot className="w-4 h-4 mr-1" />
               <span className="text-[10px] font-bold">AI</span>

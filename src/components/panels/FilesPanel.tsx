@@ -173,7 +173,7 @@ export function FilesPanel({
             <div className="flex-1 flex items-center justify-center flex-col gap-3 text-center p-8">
               <FolderOpen className="w-12 h-12 text-white/10" />
               <p className="text-[11px] text-[#484f58] font-medium">No app generated yet.</p>
-              <p className="text-[9px] text-[#484f58]">Build an app in NavBharatAI Pro — files will appear here.</p>
+              <p className="text-[9px] text-[#484f58]">Build an app in NavBharatAI v2.0 — files will appear here.</p>
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto custom-scrollbar p-4">

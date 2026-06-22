@@ -270,6 +270,15 @@ function ScoreRing({ score }: { score: number }) {
   );
 }
 
+// D13: map score to letter grade
+function scoreToGrade(score: number): { grade: string; color: string; bg: string; border: string } {
+  if (score >= 90) return { grade: 'A', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' };
+  if (score >= 75) return { grade: 'B', color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30' };
+  if (score >= 60) return { grade: 'C', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30' };
+  if (score >= 40) return { grade: 'D', color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30' };
+  return { grade: 'F', color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30' };
+}
+
 export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
   const [issues, setIssues] = useState<ReviewIssue[]>([]);
   const [reviewing, setReviewing] = useState(false);
@@ -277,6 +286,8 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState('');
+  // D12: dismissed finding IDs
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
 
   const runReview = async () => {
     if (!generatedCode.trim()) return;
@@ -320,7 +331,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
     ...Object.entries(CAT_CONFIG).map(([k, v]) => ({ key: k, label: v.label })),
   ];
 
-  const filtered = issues.filter(i => selectedCategory === 'all' || i.category === selectedCategory);
+  const filtered = issues.filter(i => !dismissedIds.has(i.id) && (selectedCategory === 'all' || i.category === selectedCategory));
 
   const counts = {
     critical: issues.filter(i => i.severity === 'critical').length,
@@ -341,6 +352,12 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
           <p className="text-xs text-white/40">Analyze your code — bugs, security, and performance checks</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {/* D13: quality grade badge */}
+          {reviewed && (() => { const g = scoreToGrade(score); return (
+            <div className={`flex items-center gap-1 px-3 py-1.5 rounded-xl border font-black text-sm ${g.bg} ${g.border} ${g.color}`} title={`Code quality grade: ${g.grade}`}>
+              Grade {g.grade}
+            </div>
+          ); })()}
           {reviewed && (
             <button onClick={exportReport} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-[#0d1117] border border-white/10 rounded-lg text-white/50 hover:text-white transition-all">
               <Download className="w-3.5 h-3.5" /> Export Report
@@ -477,10 +494,19 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
                         </div>
                       </div>
                       <ChevronRight className={`w-3.5 h-3.5 text-white/20 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                      {/* D12: dismiss finding */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setDismissedIds(prev => new Set([...prev, issue.id])); }}
+                        title="Dismiss finding"
+                        className="p-1 rounded hover:bg-white/10 text-white/20 hover:text-white/60 shrink-0 ml-1"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
                     </button>
 
+                    {/* D10: stopPropagation prevents accidental collapse when clicking inside expanded content */}
                     {isExpanded && (
-                      <div className="border-t border-white/10 px-4 py-3 space-y-3">
+                      <div onClick={(e) => e.stopPropagation()} className="border-t border-white/10 px-4 py-3 space-y-3">
                         <p className="text-xs text-white/60">{issue.description}</p>
 
                         {issue.fix && (

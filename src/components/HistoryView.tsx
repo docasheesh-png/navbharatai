@@ -231,7 +231,12 @@ export const HistoryView = ({
                   <>
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-bold text-white text-base leading-snug">{session.title}</h3>
+                        {/* B25: fallback to first-message excerpt when title is blank */}
+                        <h3 className="font-bold text-white text-base leading-snug">
+                          {session.title && session.title !== 'New Conversation'
+                            ? session.title
+                            : session.messages?.find((m: any) => m.sender === 'user')?.text?.slice(0, 50) || 'New Conversation'}
+                        </h3>
                         <span className="inline-flex items-center px-2 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/25 rounded-md font-mono text-[10px] tracking-normal lowercase">
                           CUI: {session.uci || session.id}
                         </span>

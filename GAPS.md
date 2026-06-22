@@ -42,7 +42,7 @@
 | A17 | Editor theme is always dark — no light theme option | `[x]` | #167 |
 | A18 | No "Select all occurrences" keyboard shortcut hint | `[x]` | #167 |
 | A19 | Monaco language not auto-detected for .mjs / .cjs / .mts / .cts | `[x]` | #166 |
-| A20 | Read-only file indicator missing (no lock icon on non-editable files) | `[ ]` | |
+| A20 | Read-only file indicator missing (no lock icon on non-editable files) | `[x]` | #167 |
 | A21 | No snippet library / custom snippets | `[ ]` | |
 | A22 | No "Compare File" (diff against saved) option in file tree | `[ ]` | |
 | A23 | No "Open in Split" option for files | `[ ]` | |
@@ -84,7 +84,7 @@
 | B22 | No inline image rendering for AI-returned image URLs | `[x]` | #167 |
 | B23 | No "thumbs up / thumbs down" feedback per message | `[x]` | #167 |
 | B24 | Chat session name is always "Untitled" — no auto-naming | `[x]` | #167 |
-| B25 | Session list shows raw UCI code, not human readable title | `[ ]` | |
+| B25 | Session list shows raw UCI code, not human readable title | `[x]` | #167 |
 | B26 | No "pin to top" for important messages | `[ ]` | |
 | B27 | Paste image into chat not supported (clipboard paste) | `[x]` | #167 |
 | B28 | Voice input icon has no accessibility label | `[x]` | #166 |
@@ -106,7 +106,7 @@
 | C7 | No file size shown in file list | `[x]` | #166 |
 | C8 | No "Copy file path" button | `[x]` | #166 |
 | C9 | No multi-file selection for bulk delete/download | `[ ]` | |
-| C10 | No image preview for .png/.jpg/.svg files | `[ ]` | |
+| C10 | No image preview for .png/.jpg/.svg files | `[x]` | #167 |
 | C11 | No binary file warning (tries to show binary as text) | `[x]` | #167 |
 | C12 | Nested folder structure collapsed by default with no expand-all | `[x]` | #167 |
 | C13 | No recently-opened files section | `[x]` | #167 |
@@ -138,10 +138,10 @@
 | D7 | No estimated build time shown before starting | `[ ]` | |
 | D8 | Build cancellation has no confirm dialog | `[x]` | #167 |
 | D9 | Repair attempt failure shows generic "Please try again" | `[ ]` | |
-| D10 | Code review panel UI collapses too easily (accordion UX) | `[ ]` | |
+| D10 | Code review panel UI collapses too easily (accordion UX) | `[x]` | #167 |
 | D11 | Security findings in code review not linked to file/line | `[ ]` | |
-| D12 | No "Dismiss finding" option in code review panel | `[ ]` | |
-| D13 | No overall quality grade badge visible in header after build | `[ ]` | |
+| D12 | No "Dismiss finding" option in code review panel | `[x]` | #167 |
+| D13 | No overall quality grade badge visible in header after build | `[x]` | #167 |
 | D14 | Code review does not include accessibility (a11y) checks | `[ ]` | |
 | D15 | Generated comments sometimes in Hindi (violates CLAUDE.md) | `[ ]` | |
 | D16 | No "Export build report" (files + review + tests) as PDF/MD | `[ ]` | |

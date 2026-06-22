@@ -1,0 +1,228 @@
+import type { AgentEventStream } from './AgentEventStream';
+import type { WorkspaceState } from './WorkspaceState';
+import type { ToolUse } from './ClaudeClient';
+import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
+
+/**
+ * ActuatorPort — the narrow slice of the sandbox actuator the dispatcher needs.
+ * The real `IEngineerActuator` (E2B/Docker/Local) structurally satisfies this,
+ * and tests can implement just these four methods. Interface segregation keeps
+ * the dispatcher decoupled from the full actuator surface.
+ */
+export interface ActuatorPort {
+  readFile(workspaceId: string, filePath: string): Promise<string>;
+  writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
+  listFiles(workspaceId: string): Promise<string[]>;
+  runCommand(
+    workspaceId: string,
+    command: string,
+  ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+}
+
+/** The result of executing one tool — appended to the transcript as a tool_result. */
+export interface ToolResult {
+  tool_use_id: string;
+  content: string;
+  is_error: boolean;
+}
+
+const MAX_SUMMARY = 200;
+
+/**
+ * ToolDispatcher — maps a Claude `tool_use` block to a real action on the
+ * sandbox actuator, records the effect on WorkspaceState, broadcasts tool_call/
+ * tool_result/diff events to the surfaces, and returns a tool_result for the
+ * transcript. Every failure is returned as an honest is_error result (never a
+ * fake success), so the model can see and recover from it.
+ */
+export class ToolDispatcher {
+  constructor(
+    private readonly actuator: ActuatorPort,
+    private readonly workspaceId: string,
+    private readonly state?: WorkspaceState,
+    private readonly events?: AgentEventStream,
+  ) {}
+
+  async dispatch(call: ToolUse, agent: AgentRole = 'architect'): Promise<ToolResult> {
+    this.events?.emit({
+      type: 'tool_call',
+      agent,
+      tool: call.name as ToolName,
+      input: call.input,
+      callId: call.id,
+      ts: Date.now(),
+    });
+    try {
+      const content = await this.run(call, agent);
+      this.events?.emit({
+        type: 'tool_result',
+        agent,
+        callId: call.id,
+        ok: true,
+        summary: summarize(content),
+        ts: Date.now(),
+      });
+      return { tool_use_id: call.id, content, is_error: false };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.events?.emit({
+        type: 'tool_result',
+        agent,
+        callId: call.id,
+        ok: false,
+        summary: message,
+        ts: Date.now(),
+      });
+      return { tool_use_id: call.id, content: `Error: ${message}`, is_error: true };
+    }
+  }
+
+  private async run(call: ToolUse, agent: AgentRole): Promise<string> {
+    const input = call.input;
+    switch (call.name) {
+      case 'read_file':
+        return this.actuator.readFile(this.workspaceId, reqStr(input, 'path'));
+
+      case 'write_file': {
+        const path = reqStr(input, 'path');
+        const content = reqStr(input, 'content');
+        let kind: 'create' | 'modify' = 'create';
+        try {
+          await this.actuator.readFile(this.workspaceId, path);
+          kind = 'modify';
+        } catch {
+          kind = 'create';
+        }
+        await this.actuator.writeFile(this.workspaceId, path, content);
+        this.state?.recordFileChange({ path, kind }, agent);
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} (${content.length} bytes).`;
+      }
+
+      case 'edit_file': {
+        const path = reqStr(input, 'path');
+        const oldStr = reqStr(input, 'old_string');
+        const newStr = reqStr(input, 'new_string');
+        const existing = await this.actuator.readFile(this.workspaceId, path);
+        const occurrences = existing.split(oldStr).length - 1;
+        if (occurrences === 0) {
+          throw new Error(`edit_file: old_string not found in ${path}.`);
+        }
+        if (occurrences > 1) {
+          throw new Error(
+            `edit_file: old_string is not unique in ${path} (${occurrences} matches) — include more surrounding context.`,
+          );
+        }
+        const updated = existing.replace(oldStr, newStr);
+        await this.actuator.writeFile(this.workspaceId, path, updated);
+        this.state?.recordFileChange({ path, kind: 'modify' }, agent);
+        this.events?.emit({
+          type: 'diff',
+          agent,
+          diff: { path, patch: miniDiff(oldStr, newStr) },
+          ts: Date.now(),
+        });
+        return `Edited ${path}.`;
+      }
+
+      case 'bash': {
+        const command = reqStr(input, 'command');
+        const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, command);
+        const out =
+          `exit=${exitCode}\n${stdout}` + (stderr ? `\n[stderr]\n${stderr}` : '');
+        this.state?.appendTerminal(out);
+        return out;
+      }
+
+      case 'grep': {
+        const pattern = reqStr(input, 'pattern');
+        const path = optStr(input, 'path') ?? '.';
+        const { stdout } = await this.actuator.runCommand(
+          this.workspaceId,
+          `grep -rn ${shellQuote(pattern)} ${shellQuote(path)} || true`,
+        );
+        return stdout.trim() || '(no matches)';
+      }
+
+      case 'glob': {
+        const pattern = reqStr(input, 'pattern');
+        const files = await this.actuator.listFiles(this.workspaceId);
+        const re = globToRegExp(pattern);
+        const matched = files.filter((f) => re.test(f));
+        return matched.length ? matched.join('\n') : '(no files match)';
+      }
+
+      case 'update_todo': {
+        const todos = parseTodos(input);
+        this.state?.setTodos(todos);
+        return `Updated ${todos.length} todo(s).`;
+      }
+
+      default:
+        throw new Error(`Unknown tool: ${call.name}`);
+    }
+  }
+}
+
+function reqStr(input: Record<string, unknown>, key: string): string {
+  const v = input[key];
+  if (typeof v !== 'string') throw new Error(`Missing/invalid string argument: ${key}`);
+  return v;
+}
+
+function optStr(input: Record<string, unknown>, key: string): string | undefined {
+  const v = input[key];
+  return typeof v === 'string' ? v : undefined;
+}
+
+function parseTodos(input: Record<string, unknown>): TodoItem[] {
+  const raw = input.todos;
+  if (!Array.isArray(raw)) throw new Error('update_todo: todos must be an array.');
+  const valid: TodoStatus[] = ['pending', 'in_progress', 'done', 'blocked'];
+  return raw.map((item, i) => {
+    const obj = (item ?? {}) as Record<string, unknown>;
+    const id = typeof obj.id === 'string' ? obj.id : String(i + 1);
+    const title = typeof obj.title === 'string' ? obj.title : '';
+    if (!title) throw new Error(`update_todo: item ${i} is missing a title.`);
+    const status = valid.includes(obj.status as TodoStatus) ? (obj.status as TodoStatus) : 'pending';
+    const owner = typeof obj.owner === 'string' ? (obj.owner as AgentRole) : undefined;
+    return owner ? { id, title, status, owner } : { id, title, status };
+  });
+}
+
+function summarize(content: string): string {
+  const oneLine = content.replace(/\s+/g, ' ').trim();
+  return oneLine.length > MAX_SUMMARY ? oneLine.slice(0, MAX_SUMMARY) + '…' : oneLine;
+}
+
+function miniDiff(oldStr: string, newStr: string): string {
+  const minus = oldStr.split('\n').map((l) => `- ${l}`).join('\n');
+  const plus = newStr.split('\n').map((l) => `+ ${l}`).join('\n');
+  return `${minus}\n${plus}`;
+}
+
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+function globToRegExp(glob: string): RegExp {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*') {
+      if (glob[i + 1] === '*') {
+        re += '.*';
+        i++;
+        if (glob[i + 1] === '/') i++;
+      } else {
+        re += '[^/]*';
+      }
+    } else if (c === '?') {
+      re += '[^/]';
+    } else if ('.+^${}()|[]\\'.includes(c)) {
+      re += '\\' + c;
+    } else {
+      re += c;
+    }
+  }
+  return new RegExp(`^${re}$`);
+}

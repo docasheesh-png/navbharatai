@@ -1266,22 +1266,21 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
       )}
 
       <div
-        className="p-4 border-t border-white/5 bg-[var(--theme-card)] backdrop-blur-xl select-none shadow-[0_-12px_40px_rgba(0,0,0,0.5)]"
-        style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : 'max(16px, env(safe-area-inset-bottom, 16px))' }}
+        className="px-3 pt-2 border-t border-white/5 bg-[var(--theme-card)] backdrop-blur-xl select-none shadow-[0_-12px_40px_rgba(0,0,0,0.5)]"
+        style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : 'max(8px, env(safe-area-inset-bottom, 8px))' }}
       >
-        <div className="max-w-4xl mx-auto space-y-3">
-            {/* Fix 2: attachment chips above input, outside the flex row */}
-            <div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl shadow-inner focus-within:border-indigo-500 transition-all">
-                  {attachments.length > 0 && (
-                    <div className="px-3 pt-2 pb-1 flex flex-wrap gap-1.5 border-b border-white/5">
-                      {attachments.map((file, index) => (
-                        <div key={index} className="flex items-center gap-1 bg-[#161b22] border border-white/10 px-2 py-0.5 rounded-md text-[9px] text-[#8b949e] max-w-[160px]">
-                          <span className="truncate">{file.name}</span>
-                          <button onClick={() => removeAttachment(index)} className="hover:text-white ml-1 shrink-0 leading-none">×</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+        <div className="max-w-4xl mx-auto space-y-1.5">
+            {attachments.length > 0 && (
+              <div className="px-1 flex flex-wrap gap-1.5">
+                {attachments.map((file, index) => (
+                  <div key={index} className="flex items-center gap-1 bg-[#161b22] border border-white/10 px-2 py-0.5 rounded-md text-[9px] text-[#8b949e] max-w-[160px]">
+                    <span className="truncate">{file.name}</span>
+                    <button onClick={() => removeAttachment(index)} className="hover:text-white ml-1 shrink-0 leading-none">×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl focus-within:border-indigo-500 transition-all">
                   <div className="relative flex items-center">
                   <input
                     type="file"
@@ -1357,7 +1356,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                     )}
                   </div>
                   </div>{/* end inner flex row */}
-            </div>{/* end outer rounded container */}
+            </div>{/* end rounded input container */}
 
 {isPinned && (
             <div className="mt-2 flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">

@@ -1478,8 +1478,8 @@ export const AIChat: React.FC<AIChatProps> = ({
                   className="h-1.5 w-20 bg-white/5 rounded-full overflow-hidden"
                 >
                   <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{ width: `${buildProgress.percent}%`, background: 'linear-gradient(90deg,#f59e0b,#fbbf24)' }}
+                    className="h-full rounded-full transition-[width] duration-700 ease-in-out"
+                    style={{ width: `${Math.max(buildProgress.percent, buildProgress.active ? 3 : 0)}%`, background: 'linear-gradient(90deg,#f59e0b,#fbbf24)' }}
                   />
                 </div>
                 <span className="text-[8px] text-white/30 font-mono">{buildProgress.percent}%</span>

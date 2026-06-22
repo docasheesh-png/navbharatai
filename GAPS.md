@@ -121,7 +121,7 @@
 | C22 | Files panel does not show which files have unsaved changes | `[x]` | #167 |
 | C23 | No "Reveal in file tree" from open editor tab | `[x]` | #167 |
 | C24 | File tree does not auto-expand to show active file | `[x]` | #167 |
-| C25 | Uploaded files via upload button not announced as added | `[ ]` | |
+| C25 | Uploaded files via upload button not announced as added | `[x]` | #167 |
 
 ---
 
@@ -129,7 +129,7 @@
 
 | # | Gap | Status | PR |
 |---|-----|--------|----|
-| D1 | Build progress percent bar does not animate smoothly | `[ ]` | |
+| D1 | Build progress percent bar does not animate smoothly | `[x]` | #167 |
 | D2 | No "What changed?" diff view after an edit build | `[ ]` | |
 | D3 | Success notification disappears before user reads | `[x]` | #167 |
 | D4 | Failure messages mix Hindi/English inconsistently | `[x]` | #167 |
@@ -201,10 +201,10 @@
 | F1 | Error toasts disappear too quickly (3s on errors) | `[x]` | #167 |
 | F2 | Network errors and AI errors look identical in the UI | `[x]` | #167 |
 | F3 | No offline banner in the app header | `[x]` | #166 |
-| F4 | Session restore failures are silent | `[ ]` | |
+| F4 | Session restore failures are silent | `[x]` | #167 |
 | F5 | Preview runtime errors don't highlight the failing file in Files panel | `[ ]` | |
 | F6 | No error log / history panel (only see last error) | `[ ]` | |
-| F7 | API key missing gives cryptic "401 Unauthorized" to user | `[ ]` | |
+| F7 | API key missing gives cryptic "401 Unauthorized" to user | `[x]` | #167 |
 | F8 | Payment failures show raw Cashfree error codes | `[ ]` | |
 | F9 | Build timed out error has no "try again" button in the UI | `[ ]` | |
 | F10 | Large file upload failure gives no size feedback | `[x]` | #167 |

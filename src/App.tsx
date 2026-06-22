@@ -2050,6 +2050,7 @@ ${buildLanguageRule(preferredLanguage)}`;
       let errMsg = "AI request failed.";
 
       if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') errMsg = "Network connection failed. Please check your internet or the backend availability.";
+      else if (error.response?.status === 401) errMsg = "API key invalid or expired. Go to Settings → Secrets & Keys to update your key.";
       else if (error.response?.status === 500) errMsg = "Backend runtime failure detected.";
       else if (error.response?.status === 403) errMsg = "AI permission/authentication failure detected.";
       else if (error.message.includes('failed to fetch')) errMsg = "Frontend could not reach backend service.";
@@ -4364,10 +4365,14 @@ ${buildLanguageRule(preferredLanguage)}`;
         }
       } catch (err) {
         console.error('Error fetching session from Firestore:', err);
+        // F4: surface Firestore restore failures to the user
+        addToast('Failed to load session from cloud. Please try again.', 'error');
       }
     }
-    
+
     if (!targetSession) {
+      // F4: inform user when session is not found
+      addToast('Session not found. It may have been deleted or is from a different account.', 'error');
       return false;
     }
     

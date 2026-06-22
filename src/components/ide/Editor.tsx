@@ -46,6 +46,8 @@ interface EditorProps {
   onDebug?: () => void;
   /** Tabs with unsaved changes (shows a dot indicator) */
   dirtyTabs?: Set<string>;
+  /** A17: Monaco editor color theme */
+  editorTheme?: 'vs-dark' | 'vs';
   /** Override / extend Monaco editor options */
   editorOptions?: Record<string, unknown>;
 }
@@ -63,6 +65,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   onRun,
   onDebug,
   dirtyTabs,
+  editorTheme = 'vs-dark',
   editorOptions = {},
 }) => {
   const isBinaryFile = BINARY_EXTENSIONS.has(fileName.split('.').pop()?.toLowerCase() ?? '');
@@ -200,7 +203,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
           path={fileName}
           language={getLanguage(fileName)}
           value={content}
-          theme="vs-dark"
+          theme={editorTheme}
           loading={<div className="w-full h-full flex items-center justify-center bg-[#1e1e1e] text-[#8b949e] text-xs font-mono">Loading editor…</div>}
           onMount={handleEditorDidMount}
           onChange={(val) => onChange(val || '')}

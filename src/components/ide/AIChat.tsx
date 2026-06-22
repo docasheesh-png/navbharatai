@@ -664,6 +664,17 @@ export const AIChat: React.FC<AIChatProps> = ({
               input: ({ node, ...props }: any) => (
                 <input {...props} disabled className="mr-1.5 align-middle accent-indigo-500 cursor-default" />
               ),
+              // B22: Inline image rendering
+              img: ({ node, src, alt, ...props }: any) => (
+                <img
+                  src={src}
+                  alt={alt || ''}
+                  className="max-w-full rounded-xl my-2 border border-white/10"
+                  loading="lazy"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  {...props}
+                />
+              ),
             }}
           >
             {cleanText || ""}

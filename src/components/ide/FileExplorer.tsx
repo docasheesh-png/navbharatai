@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { 
-  FolderOpen, FileCode, Plus, FilePlus, FolderPlus, 
-  ChevronRight, ChevronDown, MoreVertical, Trash2, 
-  Edit2, HardDrive, Search
+import {
+  FolderOpen, FileCode, Plus, FilePlus, FolderPlus,
+  ChevronRight, ChevronDown, MoreVertical, Trash2,
+  Edit2, HardDrive, Search, ArrowUpDown, SortAsc
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -38,6 +38,8 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
   const [isAddingFile, setIsAddingFile] = useState(false);
   const [newFileName, setNewFileName] = useState('');
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']));
+  // C5: Sort mode (dirs-first by name is default)
+  const [sortMode, setSortMode] = useState<'name' | 'type'>('name');
 
   const buildTree = (filePaths: string[]): FileNode => {
     const root: FileNode = { name: 'root', path: '', type: 'dir', children: {} };
@@ -77,6 +79,12 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
     
     const sortedItems = Object.values(node.children).sort((a, b) => {
       if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+      if (sortMode === 'type') {
+        const extA = a.name.split('.').pop() || '';
+        const extB = b.name.split('.').pop() || '';
+        const extCmp = extA.localeCompare(extB);
+        if (extCmp !== 0) return extCmp;
+      }
       return a.name.localeCompare(b.name);
     });
 
@@ -145,6 +153,19 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
 
   const tree = buildTree(Object.keys(files));
 
+  // C12: Collect all directory paths for expand-all
+  const getAllDirPaths = (node: FileNode): string[] => {
+    if (!node.children) return [];
+    const dirs: string[] = [];
+    for (const child of Object.values(node.children)) {
+      if (child.type === 'dir') {
+        dirs.push(child.path);
+        dirs.push(...getAllDirPaths(child));
+      }
+    }
+    return dirs;
+  };
+
   const handleCreate = () => {
     if (newFileName.trim()) {
       onFileCreate(newFileName.trim());
@@ -161,13 +182,37 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50">Explorer</span>
         </div>
         <div className="flex items-center gap-1">
-           <button 
-             onClick={() => setIsAddingFile(true)}
-             className="p-1.5 hover:bg-white/5 rounded-md text-[#8b949e] hover:text-white transition-all"
-             title="New File"
-           >
-             <FilePlus className="w-3.5 h-3.5" />
-           </button>
+          {/* C12: Expand All / Collapse All */}
+          <button
+            onClick={() => {
+              const allDirs = getAllDirPaths(tree);
+              const allExpanded = allDirs.every(d => expandedDirs.has(d));
+              if (allExpanded) {
+                setExpandedDirs(new Set(['']));
+              } else {
+                setExpandedDirs(new Set([...allDirs, '']));
+              }
+            }}
+            className="p-1.5 hover:bg-white/5 rounded-md text-[#8b949e] hover:text-white transition-all"
+            title="Expand / Collapse All"
+          >
+            <FolderPlus className="w-3.5 h-3.5" />
+          </button>
+          {/* C5: Sort toggle */}
+          <button
+            onClick={() => setSortMode(m => m === 'name' ? 'type' : 'name')}
+            className={`p-1.5 rounded-md transition-all ${sortMode === 'type' ? 'text-indigo-400 bg-indigo-900/20' : 'text-[#8b949e] hover:text-white hover:bg-white/5'}`}
+            title={`Sort by: ${sortMode === 'name' ? 'name' : 'type'} (click to toggle)`}
+          >
+            <SortAsc className="w-3 h-3" />
+          </button>
+          <button
+            onClick={() => setIsAddingFile(true)}
+            className="p-1.5 hover:bg-white/5 rounded-md text-[#8b949e] hover:text-white transition-all"
+            title="New File"
+          >
+            <FilePlus className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 

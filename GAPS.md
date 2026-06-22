@@ -39,7 +39,7 @@
 | A14 | No "Insert final newline" setting | `[x]` | #167 |
 | A15 | Ctrl+G (Go to Line) not wired as keyboard shortcut | `[ ]` | |
 | A16 | Ctrl+F (Find) not visually highlighted as shortcut hint | `[ ]` | |
-| A17 | Editor theme is always dark — no light theme option | `[ ]` | |
+| A17 | Editor theme is always dark — no light theme option | `[x]` | #167 |
 | A18 | No "Select all occurrences" keyboard shortcut hint | `[ ]` | |
 | A19 | Monaco language not auto-detected for .mjs / .cjs / .mts / .cts | `[x]` | #166 |
 | A20 | Read-only file indicator missing (no lock icon on non-editable files) | `[ ]` | |
@@ -81,7 +81,7 @@
 | B19 | Markdown rendering missing: tables look unstyled | `[x]` | #167 |
 | B20 | Markdown rendering missing: task lists (- [ ]) not rendered | `[x]` | #167 |
 | B21 | No LaTeX / math rendering support | `[ ]` | |
-| B22 | No inline image rendering for AI-returned image URLs | `[ ]` | |
+| B22 | No inline image rendering for AI-returned image URLs | `[x]` | #167 |
 | B23 | No "thumbs up / thumbs down" feedback per message | `[ ]` | |
 | B24 | Chat session name is always "Untitled" — no auto-naming | `[ ]` | |
 | B25 | Session list shows raw UCI code, not human readable title | `[ ]` | |
@@ -101,14 +101,14 @@
 | C2 | No delete file option in Files panel | `[x]` | #165 |
 | C3 | No "New File" button in Files panel | `[x]` | #165 |
 | C4 | No "New Folder" button in Files panel | `[s]` | VFS flat namespace |
-| C5 | File list not sortable (by name, type, size, modified) | `[ ]` | |
+| C5 | File list not sortable (by name, type, size, modified) | `[x]` | #167 |
 | C6 | No search / filter input in Files panel | `[x]` | #165 |
 | C7 | No file size shown in file list | `[x]` | #166 |
 | C8 | No "Copy file path" button | `[x]` | #166 |
 | C9 | No multi-file selection for bulk delete/download | `[ ]` | |
 | C10 | No image preview for .png/.jpg/.svg files | `[ ]` | |
 | C11 | No binary file warning (tries to show binary as text) | `[x]` | #167 |
-| C12 | Nested folder structure collapsed by default with no expand-all | `[ ]` | |
+| C12 | Nested folder structure collapsed by default with no expand-all | `[x]` | #167 |
 | C13 | No recently-opened files section | `[ ]` | |
 | C14 | No file pinning (mark important files) | `[ ]` | |
 | C15 | ZIP download does not include .env.example | `[ ]` | |

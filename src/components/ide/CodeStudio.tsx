@@ -150,6 +150,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const [editorFormatOnSave, setEditorFormatOnSave] = useState<boolean>(() => localStorage.getItem('ide_formatOnSave') !== 'off');
   const [editorTrimWhitespace, setEditorTrimWhitespace] = useState<boolean>(() => localStorage.getItem('ide_trimWhitespace') !== 'off');
   const [editorFinalNewline, setEditorFinalNewline] = useState<boolean>(() => localStorage.getItem('ide_finalNewline') !== 'off');
+  // A17: Editor theme (dark/light)
+  const [editorTheme, setEditorTheme] = useState<'vs-dark' | 'vs'>(() => (localStorage.getItem('ide_theme') as 'vs-dark' | 'vs') || 'vs-dark');
   // A10: Track per-file "saved" snapshots so we can show an unsaved-changes dot
   const savedFilesRef = React.useRef<Record<string, string>>({});
   const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
@@ -777,6 +779,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            >
              <Code2 className="w-3 h-3" />
            </button>
+           {/* A17: Light/dark theme toggle */}
+           <button
+             onClick={() => { const v = editorTheme === 'vs-dark' ? 'vs' : 'vs-dark'; setEditorTheme(v); localStorage.setItem('ide_theme', v); }}
+             title={`Editor theme: ${editorTheme === 'vs-dark' ? 'Dark' : 'Light'} (click to toggle)`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorTheme === 'vs' ? 'text-amber-400 bg-amber-900/20' : 'text-[#484f58] hover:text-white'}`}
+           >{editorTheme === 'vs-dark' ? '🌙' : '☀️'}</button>
            {/* A12: Format on Save toggle */}
            <button
              onClick={() => { const v = !editorFormatOnSave; setEditorFormatOnSave(v); localStorage.setItem('ide_formatOnSave', v ? 'on' : 'off'); }}
@@ -941,6 +949,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 onRun={() => onRun(files)}
                 onDebug={() => setIsPanelOpen(true)}
                 dirtyTabs={dirtyTabs}
+                editorTheme={editorTheme}
                 editorOptions={{
                   wordWrap: editorWordWrap ? 'on' : 'off',
                   minimap: { enabled: editorMinimap },

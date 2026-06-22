@@ -28,8 +28,8 @@ export function useToast() {
 
   const addToast = useCallback((message: string, type: ToastType = 'info') => {
     const id = Math.random().toString(36).slice(2);
-    // F1: Error/warning toasts stay longer so the user has time to read them
-    const duration = type === 'error' ? 8000 : type === 'warning' ? 6000 : 4000;
+    // F1/D3: Error/warning toasts stay longer; success also gets 5s to be readable
+    const duration = type === 'error' ? 8000 : type === 'warning' ? 6000 : type === 'success' ? 5000 : 4000;
     setToasts(prev => [...prev, { id, message, type }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
   }, []);

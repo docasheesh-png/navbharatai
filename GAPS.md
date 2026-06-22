@@ -131,7 +131,7 @@
 |---|-----|--------|----|
 | D1 | Build progress percent bar does not animate smoothly | `[ ]` | |
 | D2 | No "What changed?" diff view after an edit build | `[ ]` | |
-| D3 | Success notification disappears before user reads | `[ ]` | |
+| D3 | Success notification disappears before user reads | `[x]` | #167 |
 | D4 | Failure messages mix Hindi/English inconsistently | `[ ]` | |
 | D5 | No total lines-of-code counter in success state | `[x]` | #167 |
 | D6 | No file count breakdown by language in success | `[x]` | #167 |
@@ -207,7 +207,7 @@
 | F7 | API key missing gives cryptic "401 Unauthorized" to user | `[ ]` | |
 | F8 | Payment failures show raw Cashfree error codes | `[ ]` | |
 | F9 | Build timed out error has no "try again" button in the UI | `[ ]` | |
-| F10 | Large file upload failure gives no size feedback | `[ ]` | |
+| F10 | Large file upload failure gives no size feedback | `[x]` | #167 |
 | F11 | Session sync failure is not communicated to user | `[ ]` | |
 | F12 | Rate-limit error (429) shows "Please try again" — no countdown | `[ ]` | |
 | F13 | Preview errors show URL instead of readable component name | `[ ]` | |
@@ -228,7 +228,7 @@
 | G1 | No dark/light theme toggle in main header (quick access) | `[ ]` | |
 | G2 | User profile photo not shown anywhere in the UI | `[ ]` | |
 | G3 | No app version number shown in settings | `[x]` | existing |
-| G4 | No "Reset all settings" button | `[ ]` | |
+| G4 | No "Reset all settings" button | `[x]` | #167 |
 | G5 | No keyboard shortcuts reference panel | `[x]` | existing |
 | G6 | No "What's new" / changelog panel | `[ ]` | |
 | G7 | No onboarding tour for first-time users | `[ ]` | |
@@ -238,8 +238,8 @@
 | G11 | No "Export all my data" option (GDPR) | `[ ]` | |
 | G12 | No "Delete my account" option | `[ ]` | |
 | G13 | No API key health check (validate key before saving) | `[ ]` | |
-| G14 | API key fields don't show masked last 4 chars after save | `[ ]` | |
-| G15 | No "Copy session ID" for support purposes | `[ ]` | |
+| G14 | API key fields don't show masked last 4 chars after save | `[x]` | #167 |
+| G15 | No "Copy session ID" for support purposes | `[x]` | #167 |
 | G16 | No referral code generator | `[ ]` | |
 | G17 | Wallet top-up amounts are fixed — no custom amount | `[ ]` | |
 | G18 | No usage breakdown (tokens by feature: chat, build, engineer) | `[ ]` | |
@@ -256,7 +256,7 @@
 | H2 | No reload button visible in WorkspacePane preview header | `[x]` | #165 |
 | H3 | No zoom in/out controls for preview | `[x]` | #166 |
 | H4 | No device frame simulation (iPhone/Android frame toggle) | `[ ]` | |
-| H5 | Preview URL not shown / copyable | `[ ]` | |
+| H5 | Preview URL not shown / copyable | `[x]` | #167 |
 | H6 | Preview does not persist after page reload | `[ ]` | |
 | H7 | No "Open in new tab" button for preview | `[x]` | #165 |
 | H8 | Preview doesn't respect system dark/light preference | `[ ]` | |

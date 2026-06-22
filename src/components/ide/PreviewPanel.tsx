@@ -95,6 +95,28 @@ function injectTagOverlay(html: string): string {
     : html + NBT_OVERLAY_SCRIPT;
 }
 
+const PreviewUrlBar: React.FC<{ url: string; hotReloadFlash: boolean; tagMode: boolean }> = ({ url, hotReloadFlash, tagMode }) => {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className={cn(
+      "flex-1 max-w-xl h-8 bg-black/40 border rounded-full px-4 flex items-center gap-2 group transition-all",
+      hotReloadFlash ? "border-emerald-500/50" : tagMode ? "border-violet-500/50" : "border-white/10 focus-within:border-indigo-500/50"
+    )}>
+      <Shield className={cn("w-3.5 h-3.5 flex-shrink-0", tagMode ? "text-violet-400" : "text-emerald-500")} />
+      <span className="flex-1 text-[11px] text-[#8b949e] font-mono truncate select-all cursor-text">{url}</span>
+      {hotReloadFlash && <Zap className="w-3 h-3 text-emerald-400 flex-shrink-0 animate-pulse" />}
+      {tagMode && !hotReloadFlash && <Tag className="w-3 h-3 text-violet-400 flex-shrink-0 animate-pulse" />}
+      <button
+        onClick={() => { navigator.clipboard.writeText(url).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+        className="text-[#484f58] hover:text-white transition-colors flex-shrink-0"
+        title="Copy preview URL"
+      >
+        {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+      </button>
+    </div>
+  );
+};
+
 export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, generatedCode, previewHistory = [], onRestoreHistory, onHtmlChange, onGoPro, onEditWithAI }) => {
   const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
   const [device, setDevice] = useState<'laptop' | 'mobile' | 'full'>(isMobileScreen ? 'full' : 'laptop');
@@ -309,17 +331,8 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           <button onClick={onRun} className="p-2 hover:bg-indigo-600/20 rounded-full text-indigo-400"><RefreshCcw className="w-4 h-4" /></button>
         </div>
 
-        <div className={cn(
-          "flex-1 max-w-xl h-8 bg-black/40 border rounded-full px-4 flex items-center gap-2 group transition-all",
-          hotReloadFlash ? "border-emerald-500/50" : tagMode ? "border-violet-500/50" : "border-white/10 focus-within:border-indigo-500/50"
-        )}>
-          <Shield className={cn("w-3.5 h-3.5 flex-shrink-0", tagMode ? "text-violet-400" : "text-emerald-500")} />
-          <span className="flex-1 text-[11px] text-[#8b949e] font-mono truncate select-all cursor-text">
-            {url}
-          </span>
-          {hotReloadFlash && <Zap className="w-3 h-3 text-emerald-400 flex-shrink-0 animate-pulse" />}
-          {tagMode && !hotReloadFlash && <Tag className="w-3 h-3 text-violet-400 flex-shrink-0 animate-pulse" />}
-        </div>
+        {/* H5: Preview URL bar with copy button */}
+        <PreviewUrlBar url={url} hotReloadFlash={hotReloadFlash} tagMode={tagMode} />
 
         <div className="flex items-center gap-1 bg-black/20 p-1 rounded-xl border border-white/5">
           {devices.map((d) => (

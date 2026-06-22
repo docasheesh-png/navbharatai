@@ -7,7 +7,7 @@ import {
   Figma, Rocket, Smartphone, CloudUpload, Package, IndianRupee, Users2, Palette, TrendingUp,
   BarChart2, Cpu, Sparkles, Eye, EyeOff, Github, List, LogOut, GitBranch as GitBranchIcon,
   Folder, Check, Search, RefreshCw, Box, Zap, Globe as GlobeIcon, Search as SearchIcon,
-  Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink,
+  Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { SettingsScreen, ViewType, ApiKeys, PROVIDER_CONFIG } from '../../types';
@@ -434,6 +434,34 @@ export function SettingsPanel({
                        <p className="text-[9px] text-[#484f58]">Code is always generated in English regardless of this setting.</p>
                      </div>
                   </div>
+
+                  {/* G15: Copy user/session ID for support */}
+                  {user && (
+                    <div className="p-4 bg-[#0d1117] border border-white/5 rounded-2xl space-y-2">
+                      <p className="text-[9px] font-black text-[#484f58] uppercase tracking-widest">Support ID</p>
+                      <div className="flex items-center gap-2">
+                        <span className="flex-1 text-[10px] font-mono text-[#484f58] truncate">{user.uid}</span>
+                        <button
+                          onClick={() => { navigator.clipboard.writeText(user.uid).catch(() => {}); }}
+                          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[#484f58] hover:text-white transition-colors"
+                          title="Copy user ID"
+                        >
+                          <Copy className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* G4: Reset all editor settings */}
+                  <button
+                    onClick={() => {
+                      ['ide_wordWrap','ide_minimap','ide_fontSize','ide_tabSize','ide_formatOnSave','ide_trimWhitespace','ide_finalNewline'].forEach(k => localStorage.removeItem(k));
+                      window.location.reload();
+                    }}
+                    className="w-full py-3 bg-transparent border border-white/10 hover:border-red-500/30 hover:text-red-400 text-[#484f58] rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                  >
+                    Reset Editor Settings to Default
+                  </button>
 
                   <button className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[1.5rem] text-xs font-black uppercase tracking-[0.2em] shadow-2xl shadow-indigo-600/30 active:scale-[0.98] transition-all">
                      Update Preferences

@@ -370,9 +370,21 @@ export const AIChat: React.FC<AIChatProps> = ({
     onAttachmentsChange?.(attachments);
   }, [attachments, onAttachmentsChange]);
 
+  const [uploadError, setUploadError] = useState<string>('');
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      setAttachments(prev => [...prev, ...Array.from(e.target.files!)] as File[]);
+      const MAX_BYTES = 10 * 1024 * 1024; // F10: 10 MB limit
+      const allFiles: File[] = Array.from(e.target.files) as File[];
+      const tooBig = allFiles.filter((f: File) => f.size > MAX_BYTES);
+      if (tooBig.length > 0) {
+        const names = tooBig.map((f: File) => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`).join(', ');
+        setUploadError(`File too large (max 10 MB): ${names}`);
+        setTimeout(() => setUploadError(''), 5000);
+        const allowed = allFiles.filter((f: File) => f.size <= MAX_BYTES);
+        if (allowed.length > 0) setAttachments(prev => [...prev, ...allowed]);
+      } else {
+        setAttachments(prev => [...prev, ...allFiles]);
+      }
     }
     e.target.value = '';
   };
@@ -1451,6 +1463,11 @@ export const AIChat: React.FC<AIChatProps> = ({
         style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : 'max(8px, env(safe-area-inset-bottom, 8px))' }}
       >
         <div className="max-w-4xl mx-auto space-y-1.5">
+            {uploadError && (
+              <div className="px-1">
+                <p className="text-[9px] text-red-400 font-medium py-0.5">{uploadError}</p>
+              </div>
+            )}
             {attachments.length > 0 && (
               <div className="px-1 flex flex-wrap gap-1.5">
                 {attachments.map((file, index) => (

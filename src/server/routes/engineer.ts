@@ -13,6 +13,7 @@ import { usageTracker } from '../EngineerAI/UsageTracker';
 import { DbProviderConfig } from '../EngineerAI/EngineerAITypes';
 import { backendScaffolder } from '../EngineerAI/BackendScaffolder';
 import { getSecretValue } from '../lib/secrets';
+import { consumeEngineerQuota } from '../lib/engineerQuota';
 import { Guider } from '../Guider/Guider';
 import { shouldConfirm } from '../Guider/GuiderGate';
 import { eventBus } from '../lib/eventBus';
@@ -74,6 +75,16 @@ export function registerEngineerRoutes(app: Express): void {
     if (typeof workspaceId !== 'string' || !workspaceId || typeof instruction !== 'string' || !instruction) {
       res.status(400).json({ error: 'workspaceId and instruction are required.' });
       return;
+    }
+
+    // Cost guard — enforce a per-user daily build quota (shared across instances
+    // via Firestore). Fails open on infra errors; anon users still hit the IP limiter.
+    if (typeof userId === 'string' && userId) {
+      const quota = await consumeEngineerQuota(userId);
+      if (!quota.allowed) {
+        res.status(429).json({ error: `Daily build limit reached (${quota.limit}/day). Please try again tomorrow or upgrade your plan.` });
+        return;
+      }
     }
     const resumeId = typeof resumeSandboxId === 'string' && resumeSandboxId ? resumeSandboxId : undefined;
 
@@ -289,7 +300,20 @@ export function registerEngineerRoutes(app: Express): void {
     try {
       const files = await actuator.downloadDistFiles(workspaceId);
       const url = await deploymentService.deployStatic(workspaceId, files);
-      res.json({ url, deployed: true });
+      // Honest warning: Firebase Hosting serves the STATIC frontend only. If this
+      // app has a Node/Python backend, that backend is NOT deployed here and will
+      // stop when the sandbox pauses — so tell the user instead of pretending.
+      let warning: string | undefined;
+      try {
+        const pkg = await actuator.readFile(workspaceId, 'package.json').catch(() => '');
+        const hasBackend = /\b(express|fastify|koa|@nestjs|next start|nodemon|"start":)/i.test(pkg || '')
+          || (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
+              .some((f) => /(^|\/)(server|index|app)\.(js|ts)$|(^|\/)api\//i.test(f));
+        if (hasBackend) {
+          warning = 'Only the static frontend was deployed. This app appears to have a backend/server — that part is NOT hosted here and stops when the sandbox pauses. Use a managed database (Supabase/Neon) and a persistent backend host for full-stack apps.';
+        }
+      } catch { /* detection is best-effort */ }
+      res.json({ url, deployed: true, ...(warning ? { warning } : {}) });
     } catch (err: any) {
       const msg = err?.message || 'Deploy failed.';
       // Surface actionable IAM hint when Firebase returns 403.

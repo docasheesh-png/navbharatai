@@ -1,8 +1,9 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Menu, Search, X, RotateCcw, LogOut } from 'lucide-react';
+import { Menu, Search, X, RotateCcw, LogOut, Sun, Moon } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { ViewType } from '../../types';
+import type { ThemeMode } from '../../lib/theme';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { signOut } from 'firebase/auth';
 
@@ -33,13 +34,16 @@ export interface TopNavProps {
   setShowAuth: (v: boolean) => void;
   setShowCommandPalette: (v: boolean) => void;
   auth: any;
+  /** G1: quick dark/light theme toggle */
+  theme?: ThemeMode;
+  setTheme?: (t: ThemeMode) => void;
 }
 
 export function TopNav({
   themeClasses, effectiveDeviceMode, isSidebarCollapsed, setIsSidebarCollapsed,
   setIsMenuOpen, openTabs, activeView, setActiveView, toggleTab, closeTab,
   menuItems, hasGeneratedCode, canUndo, canRedo, undoCode, redoCode,
-  user, setShowAuth, setShowCommandPalette, auth,
+  user, setShowAuth, setShowCommandPalette, auth, theme, setTheme,
 }: TopNavProps) {
   return (
     <nav className={cn(
@@ -152,6 +156,16 @@ export function TopNav({
               <RotateCcw className="w-3.5 h-3.5 scale-x-[-1]" />
             </button>
           </div>
+        )}
+        {/* G1: quick dark/light theme toggle */}
+        {setTheme && (
+          <button
+            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+            title={theme === 'light' ? 'Switch to Dark mode' : 'Switch to Light mode'}
+            className="p-2 hover:bg-white/5 rounded-lg text-[#484f58] hover:text-white transition-all border border-white/5"
+          >
+            {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+          </button>
         )}
         {!user ? (
           <button

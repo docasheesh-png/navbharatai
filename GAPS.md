@@ -151,14 +151,14 @@
 | D20 | Build steps collapse after build — no way to re-expand | `[ ]` | |
 | D21 | Generated app name defaults to "App" — no smart naming | `[ ]` | |
 | D22 | No copy-to-clipboard button on generated code blocks | `[x]` | #167 |
-| D23 | No build history count shown in UI (e.g. "Build #7") | `[ ]` | |
+| D23 | No build history count shown in UI (e.g. "Build #7") | `[x]` | #167 |
 | D24 | No diff between current build and last build (file-level diff) | `[ ]` | |
 | D25 | Build stops on first error without reporting all errors | `[ ]` | |
 | D26 | No option to re-run code review separately (post-build) | `[ ]` | |
 | D27 | AI model fallback not shown to user ("using Grok instead of Claude") | `[ ]` | |
 | D28 | Guider plan card does not allow editing the plan text | `[ ]` | |
 | D29 | No "Save this build as template" option | `[ ]` | |
-| D30 | No size warning for very large generated apps (>100 files) | `[ ]` | |
+| D30 | No size warning for very large generated apps (>100 files) | `[x]` | #167 |
 
 ---
 
@@ -215,9 +215,9 @@
 | F15 | Git push failure message is raw git error string | `[ ]` | |
 | F16 | No "Help" link on common error messages | `[ ]` | |
 | F17 | Admin errors leak internal field names (partially fixed, verify) | `[ ]` | |
-| F18 | Empty state for "no sessions" not helpful (no CTA) | `[ ]` | |
+| F18 | Empty state for "no sessions" not helpful (no CTA) | `[x]` | #167 |
 | F19 | Wallet insufficient funds doesn't show required vs. available | `[ ]` | |
-| F20 | Build log not exportable (can't copy full error log) | `[ ]` | |
+| F20 | Build log not exportable (can't copy full error log) | `[x]` | #167 |
 
 ---
 
@@ -225,7 +225,7 @@
 
 | # | Gap | Status | PR |
 |---|-----|--------|----|
-| G1 | No dark/light theme toggle in main header (quick access) | `[ ]` | |
+| G1 | No dark/light theme toggle in main header (quick access) | `[x]` | #167 |
 | G2 | User profile photo not shown anywhere in the UI | `[ ]` | |
 | G3 | No app version number shown in settings | `[x]` | existing |
 | G4 | No "Reset all settings" button | `[x]` | #167 |

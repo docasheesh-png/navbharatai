@@ -457,6 +457,19 @@ export const AIChat: React.FC<AIChatProps> = ({
   const [showReport, setShowReport] = useState<Record<string, boolean>>({});
   const [reportText, setReportText] = useState<Record<string, string>>({});
   const [progressCollapsed, setProgressCollapsed] = useState(false);
+  // D23: build counter — increments on each new build start
+  const [currentBuildCount, setCurrentBuildCount] = useState(() => {
+    try { return parseInt(localStorage.getItem('nba_build_count') || '0', 10); } catch { return 0; }
+  });
+  useEffect(() => {
+    if (buildProgress?.active) {
+      const next = parseInt(localStorage.getItem('nba_build_count') || '0', 10) + 1;
+      try { localStorage.setItem('nba_build_count', String(next)); } catch {}
+      setCurrentBuildCount(next);
+    }
+  // Only fire when build starts (active flips to true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildProgress?.active]);
   // Live clock for the build elapsed-time display — ticks only while a build runs.
   const [nowTs, setNowTs] = useState(() => Date.now());
   useEffect(() => {
@@ -1402,6 +1415,10 @@ export const AIChat: React.FC<AIChatProps> = ({
             <div className="flex items-center gap-2 px-4 py-2.5 bg-[#0d1117] border-b border-white/5">
               <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
               <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">NavBharatAI v2.0 — Building</span>
+              {/* D23: build count badge */}
+              {currentBuildCount > 0 && (
+                <span className="text-[8px] font-black text-white/25 font-mono">#{currentBuildCount}</span>
+              )}
               {buildProgress.part && buildProgress.part > 1 && (
                 <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[8px] font-black uppercase tracking-wider text-amber-300">Part {buildProgress.part}</span>
               )}
@@ -1483,13 +1500,29 @@ export const AIChat: React.FC<AIChatProps> = ({
                   ))}
                 </div>
                 {/* Footer */}
-                <div className="px-4 py-2 border-t border-white/5 flex items-center justify-between">
+                <div className="px-4 py-2 border-t border-white/5 flex items-center justify-between gap-2">
                   <span className="text-[8px] text-white/25 font-mono">
                     {Object.keys(buildProgress.generatedFiles).length > 0
                       ? `${Object.keys(buildProgress.generatedFiles).length} file(s) generated`
                       : 'Working...'}
                   </span>
-                  <span className="text-[8px] text-white/15 font-mono">navBharatAI Pro Builder</span>
+                  {/* D30: size warning for very large apps */}
+                  {Object.keys(buildProgress.generatedFiles).length > 100 && (
+                    <span className="text-[8px] font-black text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full" title="Large app: over 100 files generated. ZIP download may be slow.">
+                      ⚠ Large app
+                    </span>
+                  )}
+                  {/* F20: copy full build log */}
+                  <button
+                    onClick={() => {
+                      const log = buildProgress.steps.map(s => `[${s.status}] ${s.label}${s.sub ? ` — ${s.sub}` : ''}${s.code ? '\n' + s.code : ''}`).join('\n');
+                      navigator.clipboard.writeText(log).catch(() => {});
+                    }}
+                    title="Copy build log"
+                    className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors ml-auto"
+                  >
+                    Copy Log
+                  </button>
                 </div>
               </>
             )}

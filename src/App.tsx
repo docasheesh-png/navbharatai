@@ -5070,6 +5070,8 @@ ${buildLanguageRule(preferredLanguage)}`;
         setShowAuth={setShowAuth}
         setShowCommandPalette={setShowCommandPalette}
         auth={auth}
+        theme={theme}
+        setTheme={setTheme}
       />
 
       {/* Main Content Area */}

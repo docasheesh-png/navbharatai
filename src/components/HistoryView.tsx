@@ -177,8 +177,29 @@ export const HistoryView = ({
       {/* Session list */}
       <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar">
         {filteredSessions.length === 0 ? (
-          <div className="text-center py-20 text-[#8b949e] font-black uppercase tracking-widest text-sm">
-            {searchQuery ? `No sessions found for "${searchQuery}"` : 'No sessions found.'}
+          /* F18: helpful empty state with CTA */
+          <div className="flex flex-col items-center justify-center py-20 gap-6">
+            <div className="w-20 h-20 bg-indigo-600/10 border border-indigo-600/20 rounded-[2rem] flex items-center justify-center">
+              <MessageSquare className="w-10 h-10 text-indigo-400/50" />
+            </div>
+            <div className="text-center space-y-2">
+              <p className="text-sm font-black text-white uppercase tracking-widest">
+                {searchQuery ? `No results for "${searchQuery}"` : 'No sessions yet'}
+              </p>
+              <p className="text-[11px] text-[#484f58] max-w-xs mx-auto leading-relaxed">
+                {searchQuery
+                  ? 'Try a different search term or clear the filter.'
+                  : 'Start a conversation in the Pro Chat or ask the AI to build an app — your sessions will appear here.'}
+              </p>
+            </div>
+            {!searchQuery && (
+              <button
+                onClick={() => onRestoreSession?.('new')}
+                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg"
+              >
+                Start a New Chat
+              </button>
+            )}
           </div>
         ) : (
           filteredSessions.map((session) => {

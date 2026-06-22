@@ -84,6 +84,10 @@ import {
   Message, ChatSession, ApiKeys, AppSecret, BrainConfig,
   ViewType, SettingsScreen, FileSystem, ErrorType, ErrorContext, Log, PROVIDER_CONFIG,
 } from './types';
+import {
+  detectFrameworkFromFiles, detectAppType, isClassicVanillaWeb,
+  buildLanguageRule, classifyError,
+} from './lib/appUtils';
 
 // AuthComponent → moved to AppModals
 // ReportProblemComponent → lazy above
@@ -357,36 +361,7 @@ export default function App() {
   const [previewBuildStage, setPreviewBuildStage] = useState<'preparing' | 'installing' | 'building' | 'starting' | 'ready'>('preparing');
   const [detectedFramework, setDetectedFramework] = useState<string>('Static HTML Site');
 
-  const detectFrameworkFromFiles = (currentFiles: Record<string, string>) => {
-    if (!currentFiles || Object.keys(currentFiles).length === 0) {
-      return 'Static HTML Site';
-    }
-    const packageJsonContent = currentFiles['package.json'] || '';
-    if (!packageJsonContent) {
-      if (currentFiles['index.html']) {
-        return 'Vanilla JS / Static HTML';
-      }
-      return 'Static HTML Site';
-    }
-    
-    try {
-      const pkg = JSON.parse(packageJsonContent);
-      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-      
-      if (deps['next']) return 'Next.js Framework';
-      if (deps['nuxt'] || deps['vue']) return 'Vue.js App';
-      if (deps['react'] && deps['vite']) return 'React + Vite SPA';
-      if (deps['express']) return 'Node.js Express backend';
-      if (deps['react']) return 'React SPA';
-      return 'Node.js Application';
-    } catch (e) {
-      if (packageJsonContent.includes('"next"')) return 'Next.js Framework';
-      if (packageJsonContent.includes('"vue"')) return 'Vue.js App';
-      if (packageJsonContent.includes('"vite"')) return 'React + Vite SPA';
-      if (packageJsonContent.includes('"express"')) return 'Node.js Express backend';
-      return 'Static HTML Site';
-    }
-  };
+  // detectFrameworkFromFiles → imported from src/lib/appUtils.ts
 
   const handleTriggerPreviewBuild = async () => {
     incrementDailyUsage('build');
@@ -1827,30 +1802,7 @@ export default function App() {
     addLog('Navigation history mapping enabled for all routes.', 'info');
   }, []);
 
-  const buildLanguageRule = (lang: string | null): string => {
-    const convRules: Record<string, string> = {
-      hindi:    'CONVERSATION LANGUAGE: Always reply in Hindi (Devanagari or Roman script, whichever the user uses).',
-      hinglish: 'CONVERSATION LANGUAGE: Always reply in Hinglish — natural mix of Hindi words (Roman script) + English technical terms.',
-      english:  'CONVERSATION LANGUAGE: Always reply in English.',
-      auto:     'CONVERSATION LANGUAGE: Automatically match the exact language, dialect, and tone the user writes in.',
-    };
-    const conv = convRules[lang || 'auto'] ?? convRules.auto;
-    return `==================================================
-🔒 LANGUAGE & CODING RULES (PERMANENT — NEVER OVERRIDE)
-==================================================
-${conv}
-
-CODE LANGUAGE (ABSOLUTE RULE — NO EXCEPTIONS):
-- ALL code you write MUST use English-only identifiers.
-- Variable names, function names, class names, constants → English.
-- Code comments → English.
-- console.log / error messages / string literals inside code → English.
-- API field names, database column names → English.
-- This rule applies regardless of the conversation language.
-- WRONG: \`const userName = "नमस्ते"\` or \`function kaamKaro()\`
-- RIGHT: \`const userName = "Hello"\` or \`function processTask()\`
-==================================================`;
-  };
+  // buildLanguageRule → imported from src/lib/appUtils.ts
 
   const getBharatContext = (appMode: 'chat' | 'build', intent: string = 'general', target?: string, currentFiles?: FileSystem, forceHinglish?: boolean) => {
     const now = new Date();
@@ -2106,25 +2058,7 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
 ${buildLanguageRule(preferredLanguage)}`;
   };
 
-  const classifyError = (error: any): ErrorType => {
-    let errString: string;
-    if (typeof error === 'string') {
-      errString = error;
-    } else if (error instanceof Error) {
-      errString = error.message;
-    } else if (error && typeof error === 'object' && 'message' in error) {
-      errString = String(error.message);
-    } else {
-      errString = JSON.stringify(error);
-    }
-    const err = errString.toLowerCase();
-    if (err.includes('401') || err.includes('403')) return 'AUTH';
-    if (err.includes('400') && (err.includes('key') || err.includes('auth') || err.includes('api_key_invalid'))) return 'AUTH';
-    if (err.includes('auth') || err.includes('key')) return 'AUTH';
-    if (err.includes('429') || err.includes('quota') || err.includes('billing') || err.includes('too many requests')) return 'QUOTA';
-    if (err.includes('fetch') || err.includes('network') || err.includes('connect')) return 'NETWORK';
-    return 'UNKNOWN';
-  };
+  // classifyError → imported from src/lib/appUtils.ts
 
   const handleRetry = () => {
     setErrorContext(null);
@@ -2525,33 +2459,9 @@ ${buildLanguageRule(preferredLanguage)}`;
 })();`;
 
   // Detect whether the app is a React/TS source app (needs transpilation) vs a static app.
-  const detectAppType = (f: FileSystem): 'react' | 'vue' | 'static' => {
-    const keys = Object.keys(f);
-    if (keys.some(k => /\.(tsx|jsx)$/i.test(k))) return 'react';
-    const pkg = f['package.json'];
-    if (pkg && /"react"\s*:/.test(pkg)) return 'react';
-    // Vue: .vue SFCs or a vue dep (and not React) → in-browser Vue compiler path.
-    if (keys.some(k => /\.vue$/i.test(k)) || (pkg && /"vue"\s*:/.test(pkg))) return 'vue';
-    // Vite-style entry pointing at a TS/JS module under src/
-    const html = f['index.html'] || '';
-    if (/<script[^>]+type=["']module["'][^>]+src=["']\/?(src\/)?[^"']+\.(ts|jsx|tsx)["']/i.test(html)) return 'react';
-    // BUG A1 FIX: Vanilla ES module apps (multi-file with import/export) must go through
-    // buildSourceAppPreview which has a full Babel + require() bundler. Without this,
-    // their import statements can't resolve in a standalone HTML doc.
-    const jsFiles = keys.filter(k => /\.(js|mjs|ts)$/i.test(k) && !k.includes('node_modules'));
-    if (jsFiles.some(k => /^\s*(import\s+[\w{*"'`]|export\s+(default|class|function|const|let|var)\b)/m.test(f[k] || ''))) return 'react';
-    return 'static';
-  };
+  // detectAppType → imported from src/lib/appUtils.ts
 
-  // A "classic vanilla web app" has no index.html but is meant to RUN (only .js/.css/.json
-  // files, with at least one script). These keep the legacy auto-shell so they don't regress.
-  // Any other file set (docs, data, media, code) with no index.html → universal viewer.
-  const isClassicVanillaWeb = (f: FileSystem): boolean => {
-    const ks = Object.keys(f).filter(k => f[k] != null && !k.includes('node_modules'));
-    const allWeb = ks.length > 0 && ks.every(k => /\.(js|mjs|cjs|css|json)$/i.test(k));
-    const hasJs = ks.some(k => /\.(js|mjs|cjs)$/i.test(k));
-    return allWeb && hasJs;
-  };
+  // isClassicVanillaWeb → imported from src/lib/appUtils.ts
 
   // Build a runnable in-iframe document for source/framework apps.
   const buildSourceAppPreview = (f: FileSystem): string => {

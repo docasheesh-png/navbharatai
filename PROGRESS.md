@@ -681,6 +681,21 @@ WorkspaceMutationEngine, TransactionCoordinator) — confirmed green.
 
 tsc x2 clean (0 errors), vitest 1256/1256 green.
 
+**Extended — 1263 tests / 171 test files (continued 2026-06-22, session 4):**
+
+Additional test files (this session):
+- `tests/appMakerRepairEngine.test.ts` — AppMakerLab/repair/AutoRepairEngine with injected mock deps (7 tests): no-error path (0 attempts/repaired=false), repaired=true when patches generated, attempt count, mutate called, repaired=false/3-attempts-exhausted when no patches returned.
+
+tsc x2 clean (0 errors), vitest 1263/1263 green.
+
+**Extended — 1310 tests / 172 test files (2026-06-22, session 5):**
+
+Additional test files (this session):
+- `tests/appUtils.test.ts` — 5 pure utility functions extracted from App.tsx (47 tests): detectFrameworkFromFiles (12), detectAppType (8), isClassicVanillaWeb (6), buildLanguageRule (7), classifyError (14).
+- Refactor: removed 4 inline function bodies from App.tsx (buildLanguageRule, classifyError, detectAppType, isClassicVanillaWeb); all 5 now imported from `src/lib/appUtils.ts`.
+
+tsc x2 clean (0 errors), vitest 1310/1310 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

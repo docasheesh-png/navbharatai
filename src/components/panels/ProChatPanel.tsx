@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Rocket, RotateCcw, Layout } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { WorkspacePane } from './WorkspacePane';
@@ -134,13 +134,47 @@ export const ProChatPanel: React.FC<ProChatPanelProps> = (props) => {
   const hasWorkspaceApp = props.isAppBuilt && !!props.files && Object.keys(props.files).length > 0;
   const workspaceVisible = hasWorkspaceApp && props.showWorkspace;
 
-  return (
-    <div className={cn("flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-white/10", props.themeClasses.bg)}>
+  // Resizable split: chat pane width as percentage (20–80, default 44)
+  const [chatWidthPct, setChatWidthPct] = useState(44);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartWidthPct = useRef(44);
 
-      <div className={cn(
-        "flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0",
-        workspaceVisible ? "flex-1 md:flex-[0_0_44%] md:max-w-[640px]" : "flex-1",
-      )}>
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDragging.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const deltaPct = ((e.clientX - dragStartX.current) / rect.width) * 100;
+      setChatWidthPct(Math.min(80, Math.max(20, dragStartWidthPct.current + deltaPct)));
+    };
+    const onMouseUp = () => { isDragging.current = false; };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
+
+  // Auto-open workspace on build complete (desktop only)
+  const prevBuildActive = useRef(false);
+  useEffect(() => {
+    const justFinished = prevBuildActive.current && !props.proBuildProgress.active;
+    const hasFiles = props.isAppBuilt && !!props.files && Object.keys(props.files).length > 0;
+    if (justFinished && hasFiles && window.innerWidth >= 768) {
+      props.setShowWorkspace(true);
+    }
+    prevBuildActive.current = props.proBuildProgress.active;
+  }, [props.proBuildProgress.active]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div ref={containerRef} className={cn("flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row divide-y md:divide-y-0", props.themeClasses.bg)}>
+
+      <div
+        className="flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0"
+        style={workspaceVisible ? { flexBasis: `${chatWidthPct}%`, flexGrow: 0, flexShrink: 0 } : { flex: '1 1 0%' }}
+      >
           <div className="flex items-center justify-between px-3 py-1 bg-indigo-950/20 border-b border-indigo-500/20 text-[9px] font-black uppercase tracking-widest text-[#8b949e]">
              <div className="flex items-center gap-2">
                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping shrink-0" />
@@ -289,6 +323,30 @@ export const ProChatPanel: React.FC<ProChatPanelProps> = (props) => {
             onStop={props.isProLoading ? props.handleStopPro : undefined}
           />
         </div>
+
+      {/* Drag handle — hidden on mobile, visible on desktop when workspace is open */}
+      {workspaceVisible && (
+        <div
+          className="hidden md:flex w-[5px] shrink-0 relative items-center justify-center cursor-col-resize bg-white/5 hover:bg-indigo-500/40 active:bg-indigo-500/60 transition-colors select-none z-10 group/handle"
+          onMouseDown={(e) => {
+            isDragging.current = true;
+            dragStartX.current = e.clientX;
+            dragStartWidthPct.current = chatWidthPct;
+            e.preventDefault();
+          }}
+        >
+          {/* wider invisible hit area */}
+          <div className="absolute inset-y-0 -left-1.5 -right-1.5" />
+          {/* visual grip dots */}
+          <div className="flex flex-col gap-1 opacity-0 group-hover/handle:opacity-100 transition-opacity pointer-events-none">
+            <span className="w-[3px] h-[3px] rounded-full bg-white/50" />
+            <span className="w-[3px] h-[3px] rounded-full bg-white/50" />
+            <span className="w-[3px] h-[3px] rounded-full bg-white/50" />
+            <span className="w-[3px] h-[3px] rounded-full bg-white/50" />
+            <span className="w-[3px] h-[3px] rounded-full bg-white/50" />
+          </div>
+        </div>
+      )}
 
       {/* Phase 3.1 — live workspace (code + preview) docked to the right (desktop) */}
       {workspaceVisible && (

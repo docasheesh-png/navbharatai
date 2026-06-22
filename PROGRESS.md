@@ -24,6 +24,14 @@
 
 ## ▶ CURRENT RESUME POINT
 
+**Session 2026-06-22 — v2.0 rebranding + 5 bug fixes (PRs #158–#161, all merged to main):**
+- Issue #1 — v2.0 rebranding: All "NavBharatAI Pro" labels → "NavBharatAI v2.0" across App.tsx, index.html, FilesPanel, AIChat, CodeStudio ✅
+- Issue #2 — Code Studio (IDE) not opening on mobile: Added Studio to mobile bottom navigation bar ✅
+- Issue #3 — App generation failing: Fixed wrong Gemini model name (gemini-3.5-flash → gemini-2.5-flash), added Grok to resilient build chain ✅
+- Issue #4 — Progress UI green tick: Separated reset setTimeout to 2000ms delay so tick stays visible ✅
+- Issue #5 — ZIP upload preview: Honest classification for framework apps (no fake preview), shows clear message instead ✅
+- Cloud Build for commit 4dbbc14 failed transiently; this commit re-triggers deploy of correct code ✅
+
 **Branch:** `claude/test-coverage-analysis-bq0yev`
 **Session 2026-06-21 (b) — shipped this branch, all tsc x2 + vitest 1049/1049 green:**
 - Phase 17 — Auto Test Generation (multi-file Vitest for generated apps) ✅

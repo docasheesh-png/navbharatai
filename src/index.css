@@ -148,3 +148,25 @@ html, body {
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* E12: Prevent iOS modal scroll from propagating to body (body lock) */
+.modal-scroll-lock {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* K11: GPU-composited animations — promote key animated elements to their own
+   compositing layer so CSS transforms and opacity run on the GPU, not the main thread.
+   Applied narrowly to avoid excessive memory use from over-promotion. */
+.animate-spin,
+.animate-pulse,
+.animate-bounce,
+[class*="transition-"] {
+  will-change: transform;
+  transform: translateZ(0);
+}
+/* After animation completes, reset will-change to avoid persistent memory cost */
+.motion-safe\:animate-none {
+  will-change: auto;
+  transform: none;
+}

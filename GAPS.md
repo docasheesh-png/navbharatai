@@ -177,7 +177,7 @@
 | E9 | No dark/light toggle in mobile header | `[x]` | #167 |
 | E10 | Virtual keyboard causes layout jumps on some Android | `[ ]` | |
 | E11 | iOS bottom safe area not always respected in chat input | `[ ]` | |
-| E12 | Scrolling inside a modal on iOS causes page scroll (body lock) | `[ ]` | |
+| E12 | Scrolling inside a modal on iOS causes page scroll (body lock) | `[x]` | #167 |
 | E13 | No PWA install prompt shown to eligible users | `[ ]` | |
 | E14 | Back gesture (iOS swipe-from-left) conflicts with sidebar | `[ ]` | |
 | E15 | Deploy modal not scrollable on small screens | `[ ]` | |
@@ -338,7 +338,7 @@
 | K8 | ZIP download blocks main thread (no worker) | `[ ]` | |
 | K9 | No request deduplication for repeated API calls | `[ ]` | |
 | K10 | Images loaded without lazy loading (layout shifts) | `[x]` | #167 |
-| K11 | CSS animations not GPU-composited on mobile | `[ ]` | |
+| K11 | CSS animations not GPU-composited on mobile | `[x]` | #167 |
 | K12 | Firestore listeners not cleaned up on component unmount | `[ ]` | |
 | K13 | No service worker for offline caching | `[ ]` | |
 | K14 | No code splitting for large settings panels | `[ ]` | |

@@ -165,6 +165,14 @@ Every phase is graded against these, because they are what makes the difference:
   GET /api/agentv3/status (`team`). 1634 tests green. Phase 1 remaining: parallel
   coordination polish + surface the team health in the AI-team UI.
 - 2026-06-22: Phase 1 merged to main (#205) → deployed.
+- 2026-06-22: Phase 2 + 2.4 merged (#206, #207) → deployed.
+- 2026-06-22: Phase 4 (Engines) start — native architecture analysis. The legacy
+  QualityEngine evaluators assume a host path/the wrong repo, so they cannot
+  serve v3.0; built ArchitectureAnalysis instead: real import-cycle detection,
+  unresolved-local-import detection and front-end→back-end layering checks over
+  the indexed project graph (no sandbox needed). New `evaluate` tool wired into
+  the catalog/dispatcher, granted to the whole team, and the Architect is told to
+  evaluate-and-fix before declaring done. 1649 tests green (+7).
 - 2026-06-22: Phase 2 (Memory & Artifact Intelligence) — built a real per-
   workspace WorkspaceMemory: artifact index / project graph (files → exported
   symbols, React components, routes, import edges, external dependencies) updated

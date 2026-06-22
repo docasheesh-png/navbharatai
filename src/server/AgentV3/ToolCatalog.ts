@@ -113,6 +113,18 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'evaluate',
+      description:
+        'Statically analyse the project for structural defects from the indexed ' +
+        'project graph: unresolved local imports (which break the build), import ' +
+        'cycles, and front-end→back-end layering violations. Use it to check your ' +
+        'work before declaring it done, then fix what it reports.',
+      input_schema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    {
       name: 'update_todo',
       description: 'Replace the build todo list shown to the user. Use this to plan and track progress.',
       input_schema: {
@@ -150,6 +162,7 @@ export const CATALOG_TOOL_NAMES = [
   'update_todo',
   'update_preview',
   'recall',
+  'evaluate',
 ] as const;
 
 /**

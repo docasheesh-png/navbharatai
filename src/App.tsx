@@ -7,10 +7,18 @@ import { GitViewPanel } from './components/panels/GitViewPanel';
 import { DeploySuccessPanel } from './components/panels/DeploySuccessPanel';
 import { AboutPanel } from './components/panels/AboutPanel';
 import { AdminLoginPanel } from './components/panels/AdminLoginPanel';
-import { FilesPanel } from './components/panels/FilesPanel';
+// FilesPanel → moved to ViewPanels.tsx
 import { DonationPanel } from './components/panels/DonationPanel';
 import { BillingPanel } from './components/panels/BillingPanel';
 import { DeployModal } from './components/panels/DeployModal';
+import { WorkspacePane } from './components/panels/WorkspacePane';
+import { SettingsPanel } from './components/panels/SettingsPanel';
+import { ProChatPanel } from './components/panels/ProChatPanel';
+import { NBIChatPanel } from './components/panels/NBIChatPanel';
+import { ViewPanels } from './components/panels/ViewPanels';
+import { SidebarNav } from './components/panels/SidebarNav';
+import { TopNav } from './components/panels/TopNav';
+import { AppModals } from './components/panels/AppModals';
 import { ConnectDomainPanel } from './components/panels/ConnectDomainPanel';
 import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
@@ -52,63 +60,17 @@ export const db = getFirestore(app, firebaseConfig.firestoreDbId);
 
 // ── Eager imports — always needed on first render ───────────────────────────
 import { AIChat } from './components/ide/AIChat';
-import { PreviewPanel } from './components/ide/PreviewPanel';
 
-// ── Task 2.2: React.lazy code-splitting — 44 view-only components ────────────
+// ── Lazy imports still used directly in App.tsx ──────────────────────────────
 // Helper: wraps a named export into the {default} shape lazy() requires
 const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
   lazy(() => fn().then(m => ({ default: m[k] as React.ComponentType<any> })));
 
-const CodeStudio       = _lz(() => import('./components/ide/CodeStudio'),       'CodeStudio');
-const GitPanel         = _lz(() => import('./components/ide/GitPanel'),         'GitPanel');
-const SecurityScan     = _lz(() => import('./components/ide/SecurityScan'),     'SecurityScan');
-const TestPanel        = _lz(() => import('./components/ide/TestPanel'),        'TestPanel');
-const DiffViewer       = _lz(() => import('./components/ide/DiffViewer'),       'DiffViewer');
-const DatabaseUI       = _lz(() => import('./components/ide/DatabaseUI'),       'DatabaseUI');
-const VoiceToApp       = _lz(() => import('./components/ide/VoiceToApp'),       'VoiceToApp');
-const BotBuilder       = _lz(() => import('./components/ide/BotBuilder'),       'BotBuilder');
-const CostEstimator    = _lz(() => import('./components/ide/CostEstimator'),    'CostEstimator');
-const ScreenshotToCode = _lz(() => import('./components/ide/ScreenshotToCode'),'ScreenshotToCode');
-const MultiPageBuilder = _lz(() => import('./components/ide/MultiPageBuilder'), 'MultiPageBuilder');
-const AppAnalytics     = _lz(() => import('./components/ide/AppAnalytics'),     'AppAnalytics');
-const AIDebugger       = _lz(() => import('./components/ide/AIDebugger'),       'AIDebugger');
-const PerformanceAnalyzer = _lz(() => import('./components/ide/PerformanceAnalyzer'), 'PerformanceAnalyzer');
-const ComponentLibrary = _lz(() => import('./components/ide/ComponentLibrary'), 'ComponentLibrary');
-const SEOOptimizer     = _lz(() => import('./components/ide/SEOOptimizer'),     'SEOOptimizer');
-const APKBuilder       = _lz(() => import('./components/ide/APKBuilder'),       'APKBuilder');
-const FigmaImporter    = _lz(() => import('./components/ide/FigmaImporter'),    'FigmaImporter');
-const CustomDomain     = _lz(() => import('./components/ide/CustomDomain'),     'CustomDomain');
-const TeamCollaboration= _lz(() => import('./components/ide/TeamCollaboration'),'TeamCollaboration');
-const PWANotifications = _lz(() => import('./components/ide/PWANotifications'), 'PWANotifications');
-const CodeMinifier     = _lz(() => import('./components/ide/CodeMinifier'),     'CodeMinifier');
-const DarkModeGenerator= _lz(() => import('./components/ide/DarkModeGenerator'),'DarkModeGenerator');
-const MonetizationWizard= _lz(() => import('./components/ide/MonetizationWizard'),'MonetizationWizard');
-const AIImageGenerator = _lz(() => import('./components/ide/AIImageGenerator'), 'AIImageGenerator');
-const CodeVersioning   = _lz(() => import('./components/ide/CodeVersioning'),   'CodeVersioning');
-const APIMarketplace   = _lz(() => import('./components/ide/APIMarketplace'),   'APIMarketplace');
-const AppStorePublisher= _lz(() => import('./components/ide/AppStorePublisher'),'AppStorePublisher');
-const LiveCollaboration= _lz(() => import('./components/ide/LiveCollaboration'),'LiveCollaboration');
-const AITestingSuite   = _lz(() => import('./components/ide/AITestingSuite'),   'AITestingSuite');
-const LocalizationManager = _lz(() => import('./components/ide/LocalizationManager'), 'LocalizationManager');
-const AICodeReview     = _lz(() => import('./components/ide/AICodeReview'),     'AICodeReview');
-const DatabaseStudio   = _lz(() => import('./components/ide/DatabaseStudio'),   'DatabaseStudio');
-const CICDPipeline     = _lz(() => import('./components/ide/CICDPipeline'),     'CICDPipeline');
-const PluginSystem     = _lz(() => import('./components/ide/PluginSystem'),     'PluginSystem');
-const WhitelabelBranding= _lz(() => import('./components/ide/WhitelabelBranding'),'WhitelabelBranding');
-const AIProjectManager = _lz(() => import('./components/ide/AIProjectManager'), 'AIProjectManager');
-const MultiCloudDeploy = _lz(() => import('./components/ide/MultiCloudDeploy'), 'MultiCloudDeploy');
-const DesignSystem     = _lz(() => import('./components/ide/DesignSystem'),     'DesignSystem');
-const AppHealthMonitor = _lz(() => import('./components/ide/AppHealthMonitor'), 'AppHealthMonitor');
-const AISuggestions    = _lz(() => import('./components/ide/AISuggestions'),    'AISuggestions');
 const SecretManager    = _lz(() => import('./components/SecretManager'),        'SecretManager');
 const DatabaseSettings = _lz(() => import('./components/settings/DatabaseSettings'), 'DatabaseSettings');
 const SocialHub        = _lz(() => import('./components/social/SocialHub'),     'SocialHub');
 const ReportsListView  = _lz(() => import('./components/ReportsListView'),      'ReportsListView');
 const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
-const ReportProblemComponent = _lz(() => import('./components/ReportProblemComponent'), 'ReportProblemComponent');
-
-// APITester has a default export
-const APITester = lazy(() => import('./components/ide/APITester'));
 import { motion, AnimatePresence } from 'motion/react';
 import axios from 'axios';
 
@@ -117,20 +79,57 @@ import { useBuild } from './components/ide/BuildContext';
 import { ThemeMode, THEME_MODES, getThemeClasses } from './lib/theme';
 import { useDevLogs } from './hooks/useDevLogs';
 import { useSettings } from './hooks/useSettings';
+import { useNetworkStatus } from './hooks/useNetworkStatus';
 import { Agent, isVishwakarmaAgent } from './types/agents';
 import {
   Message, ChatSession, ApiKeys, AppSecret, BrainConfig,
   ViewType, SettingsScreen, FileSystem, ErrorType, ErrorContext, Log, PROVIDER_CONFIG,
 } from './types';
+import {
+  detectFrameworkFromFiles, detectAppType, isClassicVanillaWeb,
+  buildLanguageRule, classifyError,
+} from './lib/appUtils';
+import {
+  generateUCI, getRandomElement, generateSmartHeuristicSummary,
+  extractCode, classifyBuildIntent, classifyAutoIntent, dedupAndSortMessages,
+} from './lib/chatUtils';
+import {
+  stripFences, buildSourceAppPreview, buildUniversalPreview, injectHarness,
+} from './lib/previewUtils';
+import { sanitizeFirestoreData } from './lib/firestoreUtils';
+// Re-exported for SDAChat.tsx which imports sanitizeFirestoreData from App
+export { sanitizeFirestoreData };
 
-import { AuthComponent } from './components/AuthComponent';
+// AuthComponent → moved to AppModals
 // ReportProblemComponent → lazy above
 import { MessageContent } from './components/MessageContent';
 import { HomeView } from './components/home/HomeView';
 import { GitHubService } from './lib/githubService';
 import { trackEvent } from './lib/analytics';
 import { saveFile, saveAllFiles, loadAllFiles, clearWorkspace } from './lib/storage';
-import { ZipSizeModal } from './components/ide/ZipSizeModal';
+import {
+  type ApnapanProfile,
+  APNAPAN_DEFAULT_PROFILE,
+  loadApnapanProfile,
+  saveApnapanProfile,
+  updateApnapanProfile,
+} from './lib/apnapanEngine';
+import {
+  type VersionSnapshot,
+  buildVersionSnapshot,
+  appendVersionSnapshot,
+} from './lib/versionSnapshot';
+import { pickGreetingForAgent } from './lib/agentGreetings';
+import { validateDeployInput, buildDeployBody } from './lib/deployRequest';
+import { isZipFile, isTextFile, classifyZipSize } from './lib/uploadClassify';
+import { resolveSessionSurface } from './lib/sessionRouting';
+import {
+  DEFAULT_HOME_DATA,
+  DEFAULT_ABOUT_DATA,
+  DEFAULT_DONATION_DATA,
+  loadPersistedContent,
+} from './config/defaultContent';
+// ZipSizeModal component → moved to ViewPanels.tsx
 import type { ZipSizeModalVariant } from './components/ide/ZipSizeModal';
 // AgentMode → re-exported from ./types
 
@@ -163,19 +162,7 @@ function safeLS(key: string, value: string): void {
   }
 }
 
-// Recursively replaces `undefined` with `null` (Firestore rejects `undefined`).
-// Shared by every chat surface (Free / Pro / SDA) that syncs sessions to `chat_sessions`.
-export function sanitizeFirestoreData(data: any): any {
-  const sanitized = { ...data };
-  Object.keys(sanitized).forEach(key => {
-    if (sanitized[key] === undefined) {
-      sanitized[key] = null;
-    } else if (typeof sanitized[key] === 'object' && sanitized[key] !== null) {
-      sanitized[key] = sanitizeFirestoreData(sanitized[key]);
-    }
-  });
-  return sanitized;
-}
+// sanitizeFirestoreData → imported from src/lib/firestoreUtils.ts (re-exported below imports)
 
 export default function App() {
   // ── Phase 1 hooks ──────────────────────────────────────────────────────
@@ -252,6 +239,9 @@ export default function App() {
   // hinglishMode → from useSettings() hook
   const [loadingUser, setLoadingUser] = useState(true);
   const [activeView, setActiveView] = useState<ViewType>('home');
+  // Phase 3.1 — unified Chat+IDE: when an app exists, the live workspace (code +
+  // preview) docks to the right of the Pro Chat on desktop. User can collapse it.
+  const [showWorkspace, setShowWorkspace] = useState<boolean>(true);
   const [settingsScreen, setSettingsScreen] = useState<SettingsScreen>('root');
   const [githubRedirectingMessage, setGithubRedirectingMessage] = useState<string | null>(null);
   const [githubDebugData, setGithubDebugData] = useState<{
@@ -306,6 +296,8 @@ export default function App() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   // 10.6 — Toast notifications
   const { toasts, addToast, removeToast } = useToast();
+  // Phase 6.2 — real-time network status for mobile UX.
+  const networkStatus = useNetworkStatus();
   // 10.1 — Onboarding
   const [proBuildProgress, setProBuildProgress] = useState<{
     active: boolean;
@@ -336,6 +328,10 @@ export default function App() {
   const [sdaResetKey, setSdaResetKey] = useState(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isProLoading, setIsProLoading] = useState<boolean>(false);
+  // Phase 5.5 — provider-down retry countdown: seconds remaining, null when not counting.
+  const [providerRetryCountdown, setProviderRetryCountdown] = useState<number | null>(null);
+  const providerRetryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const providerRetryPromptRef = useRef<string>('');
   const [activeIntent, setActiveIntent] = useState<string>('social');
   const [activeAgent, _setActiveAgent] = useState<string>('navbharatai');
   
@@ -348,6 +344,14 @@ export default function App() {
   useEffect(() => {
     addLog(`STATE_TRACE: activeAgent=${activeAgent}, activeView=${activeView}`, 'info');
   }, [activeAgent, activeView]);
+
+  // Phase 6.2 — show toast when network goes offline/online (especially useful on mobile).
+  useEffect(() => {
+    if (!networkStatus.online) {
+      addToast('No internet connection — changes may not save', 'warning');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [networkStatus.online]);
   
   const setActiveAgent = useCallback((newAgent: string) => {
     addLog(`setActiveAgent called: ${newAgent}`, 'info');
@@ -378,36 +382,7 @@ export default function App() {
   const [previewBuildStage, setPreviewBuildStage] = useState<'preparing' | 'installing' | 'building' | 'starting' | 'ready'>('preparing');
   const [detectedFramework, setDetectedFramework] = useState<string>('Static HTML Site');
 
-  const detectFrameworkFromFiles = (currentFiles: Record<string, string>) => {
-    if (!currentFiles || Object.keys(currentFiles).length === 0) {
-      return 'Static HTML Site';
-    }
-    const packageJsonContent = currentFiles['package.json'] || '';
-    if (!packageJsonContent) {
-      if (currentFiles['index.html']) {
-        return 'Vanilla JS / Static HTML';
-      }
-      return 'Static HTML Site';
-    }
-    
-    try {
-      const pkg = JSON.parse(packageJsonContent);
-      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-      
-      if (deps['next']) return 'Next.js Framework';
-      if (deps['nuxt'] || deps['vue']) return 'Vue.js App';
-      if (deps['react'] && deps['vite']) return 'React + Vite SPA';
-      if (deps['express']) return 'Node.js Express backend';
-      if (deps['react']) return 'React SPA';
-      return 'Node.js Application';
-    } catch (e) {
-      if (packageJsonContent.includes('"next"')) return 'Next.js Framework';
-      if (packageJsonContent.includes('"vue"')) return 'Vue.js App';
-      if (packageJsonContent.includes('"vite"')) return 'React + Vite SPA';
-      if (packageJsonContent.includes('"express"')) return 'Node.js Express backend';
-      return 'Static HTML Site';
-    }
-  };
+  // detectFrameworkFromFiles → imported from src/lib/appUtils.ts
 
   const handleTriggerPreviewBuild = async () => {
     incrementDailyUsage('build');
@@ -703,29 +678,8 @@ export default function App() {
     return () => { active = false; clearTimeout(timeoutId); };
   }, [setBuildSteps]);
   const [isDonationEditing, setIsDonationEditing] = useState(false);
-  const [donationData, setDonationData] = useState(() => {
-      const saved = localStorage.getItem('navbharat_donation_v1');
-      return saved ? JSON.parse(saved) : {
-          headline: '🇮🇳 नवभारत AI के लिए आपका सहयोग',
-          subHeadline: 'Empowering Bharat with Intelligence',
-          upiId: 'doc.asheesh@oksbi',
-          name: 'Dr. Asheesh',
-          missionStatement: 'मैंने अकेले मेहनत करके नवbharat AI बनाने की शुरुआत की है।',
-          dreamStatement: 'मेरा सपना है कि एक दिन "नवभारत AI" भारत का ही नहीं, बल्कि दुनिया का सबसे शक्तिशाली, सबसे बुद्धिमान और सबसे उपयोगी AI बने।',
-          qrUrl: '',
-          logoUrl: ''
-      };
-  });
-  const [aboutData, setAboutData] = useState(() => {
-    const saved = localStorage.getItem('navbharat_about_v1');
-    return saved ? JSON.parse(saved) : {
-        logoUrl: '',
-        headline: 'Bharat ka Apna AI - navBharat',
-        description: 'Navbharat AI is a mission to empower every Indian with the power of Artificial Intelligence.',
-        team: 'Built with ❤️ by a passionate developer.',
-        vision: 'To make Bharat a global leader in AI.'
-    };
-  });
+  const [donationData, setDonationData] = useState(() => loadPersistedContent('navbharat_donation_v1', DEFAULT_DONATION_DATA));
+  const [aboutData, setAboutData] = useState(() => loadPersistedContent('navbharat_about_v1', DEFAULT_ABOUT_DATA));
 
   useEffect(() => {
     localStorage.setItem('navbharat_about_v1', JSON.stringify(aboutData));
@@ -1208,106 +1162,14 @@ export default function App() {
     } catch {}
   }, [proMessages]);
 
-  // ── Apnapan Engine — user personalization profile ──────────────────────────
-  interface ApnapanProfile {
-    greetingFrequency: Record<string, number>;
-    preferredGreeting: string | null;
-    preferredLanguage: string;
-    conversationStyle: 'formal' | 'friendly' | 'professional' | 'unknown';
-    preferredTitle: string | null;
-    topics: string[];
-    projects: string[];
-    interactionCount: number;
-  }
-
-  const GREETINGS: Array<{ key: string; patterns: RegExp }> = [
-    { key: 'राम-राम',        patterns: /\b(ram[- ]?ram|राम[- ]?राम)\b/i },
-    { key: 'राधे-राधे',      patterns: /\b(radhe[- ]?radhe|राधे[- ]?राधे)\b/i },
-    { key: 'जय श्री राम',    patterns: /\b(jai\s+shri\s+ram|जय\s+श्री\s+राम)\b/i },
-    { key: 'जय हिन्द',       patterns: /\b(jai\s+hind|जय\s+हिन्द|जय\s+हिंद)\b/i },
-    { key: 'नमस्ते',          patterns: /\b(namaste|नमस्ते)\b/i },
-    { key: 'नमस्कार',         patterns: /\b(namaskar|नमस्कार)\b/i },
-    { key: 'प्रणाम',          patterns: /\b(pranam|प्रणाम)\b/i },
-    { key: 'आदाब',            patterns: /\b(adaab|आदाब)\b/i },
-    { key: 'अस्सलामुअलैकुम', patterns: /\b(assalam|salaam|salam|अस्सलाम)\b/i },
-    { key: 'सत श्री अकाल',   patterns: /\b(sat\s+sri\s+akal|waheguru|सत\s+श्री\s+अकाल)\b/i },
-    { key: 'जय भीम',          patterns: /\b(jai\s+bhi[me]m?|जय\s+भीम)\b/i },
-    { key: 'केम छो',           patterns: /\b(kem\s+cho|केम\s+छो)\b/i },
-    { key: 'வணக்கம்',          patterns: /வணக்கம்|vanakkam/i },
-    { key: 'Hello',            patterns: /^\s*(hello|hi|hey)\b/i },
-    { key: 'Good Morning',     patterns: /\bgood\s+morning\b/i },
-    { key: 'Good Evening',     patterns: /\bgood\s+evening\b/i },
-  ];
-
-  const FORMAL_MARKERS    = /\b(aap|आप|kripya|कृपया|dhanyawad|धन्यवाद|sir|madam|sahab)\b/i;
-  const FRIENDLY_MARKERS  = /\b(yaar|यार|bhai|भाई|dost|दोस्त|bro)\b/i;
-  const PROF_MARKERS      = /\b(doctor|dr\.|डॉक्टर|डॉ\.|professor|prof\.|advocate|eng\.)\b/i;
-  const TITLE_PATTERN     = /\b(doctor\s+sahab|dr\.\s*ji|डॉक्टर\s+साहब|डॉ\.\s*जी|sir|madam|mitra|bhai\s+sahab|भाई\s+साहब)\b/i;
-  const PROJECT_KEYWORDS  = /\b(navbharatai|navbharat|hospital|clinic|school|startup|app|website|project)\b/i;
-  const DEVANAGARI        = /[ऀ-ॿ]/;
-  const SOUTH_ASIAN_ALPHA = /[஀-௿ఀ-౿ಀ-೿ഀ-ൿঀ-৿਀-੿]/;
-
-  const loadApnapanProfile = (): ApnapanProfile => {
-    try {
-      const s = localStorage.getItem('navbharat_apnapan');
-      if (s) return JSON.parse(s) as ApnapanProfile;
-    } catch {}
-    return { greetingFrequency: {}, preferredGreeting: null, preferredLanguage: 'Hinglish', conversationStyle: 'unknown', preferredTitle: null, topics: [], projects: [], interactionCount: 0 };
-  };
-
-  const saveApnapanProfile = (p: ApnapanProfile) => {
-    try { localStorage.setItem('navbharat_apnapan', JSON.stringify(p)); } catch {}
-  };
-
+  // ── Apnapan Engine — user personalization profile (logic in src/lib/apnapanEngine.ts) ──
   const [apnapanProfile, setApnapanProfile] = useState<ApnapanProfile>(loadApnapanProfile);
 
-  // Learn from each user message in the free chat
   const learnFromMessage = (text: string) => {
     setApnapanProfile(prev => {
-      const p = { ...prev, greetingFrequency: { ...prev.greetingFrequency }, topics: [...prev.topics], projects: [...prev.projects] };
-      p.interactionCount++;
-
-      // Greeting detection
-      for (const g of GREETINGS) {
-        if (g.patterns.test(text)) {
-          p.greetingFrequency[g.key] = (p.greetingFrequency[g.key] || 0) + 1;
-          // preferred = most frequent
-          p.preferredGreeting = Object.entries(p.greetingFrequency).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
-          break;
-        }
-      }
-
-      // Language detection
-      if (DEVANAGARI.test(text)) {
-        const latinWords = text.split(/\s+/).filter(w => /[a-z]/i.test(w)).length;
-        const totalWords = text.split(/\s+/).length;
-        p.preferredLanguage = latinWords / totalWords > 0.3 ? 'Hinglish' : 'Hindi';
-      } else if (SOUTH_ASIAN_ALPHA.test(text)) {
-        p.preferredLanguage = 'Regional Indian';
-      } else {
-        p.preferredLanguage = 'English';
-      }
-
-      // Conversation style
-      if (PROF_MARKERS.test(text)) p.conversationStyle = 'professional';
-      else if (FORMAL_MARKERS.test(text) && p.conversationStyle === 'unknown') p.conversationStyle = 'formal';
-      else if (FRIENDLY_MARKERS.test(text)) p.conversationStyle = 'friendly';
-
-      // Title detection
-      const titleMatch = TITLE_PATTERN.exec(text);
-      if (titleMatch) p.preferredTitle = titleMatch[0].trim();
-
-      // Project keywords
-      const projMatches = text.match(new RegExp(PROJECT_KEYWORDS.source, 'gi'));
-      if (projMatches) {
-        for (const m of projMatches) {
-          const kw = m.toLowerCase();
-          if (!p.projects.includes(kw)) p.projects = [kw, ...p.projects].slice(0, 8);
-        }
-      }
-
-      saveApnapanProfile(p);
-      return p;
+      const next = updateApnapanProfile(text, prev);
+      saveApnapanProfile(next);
+      return next;
     });
   };
 
@@ -1380,46 +1242,7 @@ export default function App() {
     }
   };
 
-  const [homeData, setHomeData] = useState(() => {
-    const saved = localStorage.getItem('navbharat_home_v1');
-    return saved ? JSON.parse(saved) : {
-      heroTitle: 'navBharatAI Architect',
-      heroSubtitle: 'Enterprise-grade ecosystem for building complex, scalable, and production-ready applications with Bharat-first precision.',
-      welcomeText: 'Enterprise Architect Mode Active',
-      ctaText: 'Assemble System Architecture',
-      features: [
-        {
-          title: "Senior Architect Protocol",
-          subtitle: "15+ Years of Industry Expertise",
-          description: "Not just a chatbot. navBharatAI follows a strict 8-phase senior architect workflow from Discovery to DevOps.",
-          icon: 'ShieldCheck',
-          color: "from-indigo-600 to-blue-700"
-        },
-        {
-          title: "Scale-First Architecture",
-          subtitle: "Designed for Millions of Users",
-          description: "High-level guidance on Monorepos, Microservices, and TB-level data complexity management.",
-          icon: 'Zap',
-          color: "from-amber-500 to-orange-600"
-        },
-        {
-          title: "Modular Code Standards",
-          subtitle: "Production-Ready TypeScript",
-          description: "Clean, well-commented, and modular implementation plans that follow enterprise coding standards.",
-          icon: 'Code',
-          color: "from-emerald-500 to-teal-600"
-        },
-        {
-          title: "End-to-End Governance",
-          subtitle: "Security, Compliance & DevOps",
-          description: "Integrated RBAC, OWASP audits, and professional CI/CD strategy recommendations.",
-          icon: 'Shield',
-          color: "from-purple-500 to-pink-500",
-          status: "Enterprise"
-        }
-      ]
-    };
-  });
+  const [homeData, setHomeData] = useState(() => loadPersistedContent('navbharat_home_v1', DEFAULT_HOME_DATA));
 
   useEffect(() => {
     localStorage.setItem('navbharat_home_v1', JSON.stringify(homeData));
@@ -1848,30 +1671,7 @@ export default function App() {
     addLog('Navigation history mapping enabled for all routes.', 'info');
   }, []);
 
-  const buildLanguageRule = (lang: string | null): string => {
-    const convRules: Record<string, string> = {
-      hindi:    'CONVERSATION LANGUAGE: Always reply in Hindi (Devanagari or Roman script, whichever the user uses).',
-      hinglish: 'CONVERSATION LANGUAGE: Always reply in Hinglish — natural mix of Hindi words (Roman script) + English technical terms.',
-      english:  'CONVERSATION LANGUAGE: Always reply in English.',
-      auto:     'CONVERSATION LANGUAGE: Automatically match the exact language, dialect, and tone the user writes in.',
-    };
-    const conv = convRules[lang || 'auto'] ?? convRules.auto;
-    return `==================================================
-🔒 LANGUAGE & CODING RULES (PERMANENT — NEVER OVERRIDE)
-==================================================
-${conv}
-
-CODE LANGUAGE (ABSOLUTE RULE — NO EXCEPTIONS):
-- ALL code you write MUST use English-only identifiers.
-- Variable names, function names, class names, constants → English.
-- Code comments → English.
-- console.log / error messages / string literals inside code → English.
-- API field names, database column names → English.
-- This rule applies regardless of the conversation language.
-- WRONG: \`const userName = "नमस्ते"\` or \`function kaamKaro()\`
-- RIGHT: \`const userName = "Hello"\` or \`function processTask()\`
-==================================================`;
-  };
+  // buildLanguageRule → imported from src/lib/appUtils.ts
 
   const getBharatContext = (appMode: 'chat' | 'build', intent: string = 'general', target?: string, currentFiles?: FileSystem, forceHinglish?: boolean) => {
     const now = new Date();
@@ -2127,25 +1927,7 @@ You still maintain your Indian personality and friendly tone.${hinglishSuffix}${
 ${buildLanguageRule(preferredLanguage)}`;
   };
 
-  const classifyError = (error: any): ErrorType => {
-    let errString: string;
-    if (typeof error === 'string') {
-      errString = error;
-    } else if (error instanceof Error) {
-      errString = error.message;
-    } else if (error && typeof error === 'object' && 'message' in error) {
-      errString = String(error.message);
-    } else {
-      errString = JSON.stringify(error);
-    }
-    const err = errString.toLowerCase();
-    if (err.includes('401') || err.includes('403')) return 'AUTH';
-    if (err.includes('400') && (err.includes('key') || err.includes('auth') || err.includes('api_key_invalid'))) return 'AUTH';
-    if (err.includes('auth') || err.includes('key')) return 'AUTH';
-    if (err.includes('429') || err.includes('quota') || err.includes('billing') || err.includes('too many requests')) return 'QUOTA';
-    if (err.includes('fetch') || err.includes('network') || err.includes('connect')) return 'NETWORK';
-    return 'UNKNOWN';
-  };
+  // classifyError → imported from src/lib/appUtils.ts
 
   const handleRetry = () => {
     setErrorContext(null);
@@ -2339,546 +2121,27 @@ ${buildLanguageRule(preferredLanguage)}`;
     };
   };
 
-  // ── Preview harness: injected into EVERY preview so it can never silently go blank ──
-  // Catches runtime errors + detects empty render → shows a friendly overlay instead of a white page.
-  const PREVIEW_HARNESS = `<style>
-.__nb_overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;background:#0d1117;font-family:system-ui,-apple-system,sans-serif;z-index:2147483647}
-.__nb_card{max-width:520px;width:100%;background:#161b22;border:1px solid rgba(245,158,11,0.25);border-radius:16px;padding:24px;color:#c9d1d9;box-sizing:border-box}
-.__nb_h{font-weight:800;color:#f59e0b;font-size:13px;margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em}
-.__nb_card pre{white-space:pre-wrap;word-break:break-word;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px;font-size:11px;line-height:1.5;color:#ff7b72;max-height:180px;overflow:auto;margin:0}
-.__nb_s{margin-top:12px;font-size:12px;color:#8b949e;line-height:1.5}
-.__nb_btn{margin-top:14px;display:inline-block;padding:9px 16px;border-radius:8px;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit}
-.__nb_btn_ai{background:#2ea043;color:#fff}
-.__nb_btn_ai:hover{background:#3fb950}
-.__nb_btn_code{background:#30363d;color:#c9d1d9;border:1px solid #484f58}
-.__nb_btn_code:hover{background:#3a414b}
-</style>
-<script>
-(function(){
-  function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");}
-  function classifyBug(kind,msg){
-    var m=String(msg||'');
-    var sysPatterns=[/Could not load the preview compiler/i,/Failed to load React from CDN/i,/network blocked/i,/CORS/i,/Failed to fetch dynamically imported module/i,/ChunkLoadError/i,/Loading chunk/i,/NetworkError/i,/ERR_INTERNET_DISCONNECTED/i,/ERR_CONNECTION/i,/insecure/i];
-    for(var i=0;i<sysPatterns.length;i++){if(sysPatterns[i].test(m))return 'coding';}
-    return 'ai';
-  }
-  function buildAiPrompt(kind,msg){
-    return 'Preview me ek bug aaya hai. Root-cause audit karo aur SIRF is specific bug ko fix karo — kisi bhi dusri working feature ya unrelated file ko mat todna/change karna.\\n\\nError type: '+kind+'\\nError message: '+msg+'\\n\\nInstructions:\\n1. Exact file aur line dhundo jo is error ki wajah hai.\\n2. Root cause identify karo (sirf symptom nahi).\\n3. Minimal fix apply karo jo zaroori hai.\\n4. App ke kisi aur part ko modify/remove/refactor mat karo.\\n5. Fix ke baad preview bina error ke render hona chahiye.';
-  }
-  function buildCodeReport(kind,msg){
-    return '=== NavBharatAI Preview Bug Report ===\\nType: Coding/System issue (manual fix needed)\\nKind: '+kind+'\\nMessage: '+msg+'\\nURL: '+location.href+'\\nUserAgent: '+navigator.userAgent+'\\nTime: '+new Date().toISOString();
-  }
-  function copyText(text){
-    var ok=false;
-    try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text);ok=true;}}catch(e){}
-    if(!ok){
-      try{
-        var ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.left='-9999px';
-        document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);ok=true;
-      }catch(e){}
-    }
-    return ok;
-  }
-  function show(kind,msg){
-    if(document.getElementById('__nb_err'))return;
-    var cls=classifyBug(kind,msg);
-    var btnHtml=cls==='ai'
-      ? '<button id="__nb_fixbtn" class="__nb_btn __nb_btn_ai">Fix Bug</button>'
-      : '<button id="__nb_fixbtn" class="__nb_btn __nb_btn_code">Coding Bug</button>';
-    var o=document.createElement('div');o.id='__nb_err';o.className='__nb_overlay';
-    o.innerHTML='<div class="__nb_card"><div class="__nb_h">'+esc(kind)+'</div>'+(msg?('<pre>'+esc(msg)+'</pre>'):'')+'<div class="__nb_s">All files are loaded in Code Studio. Ask the AI to fix or convert this app and the preview will update.</div>'+btnHtml+'<div id="__nb_fixmsg" class="__nb_s" style="display:none"></div></div>';
-    (document.body||document.documentElement).appendChild(o);
-    var btn=document.getElementById('__nb_fixbtn');
-    if(!btn)return;
-    btn.addEventListener('click',function(){
-      var fm=document.getElementById('__nb_fixmsg');
-      if(cls==='ai'){
-        var prompt=buildAiPrompt(kind,msg);
-        try{window.parent.postMessage({type:'nb-ai-fix',prompt:prompt},'*');}catch(e){}
-        if(fm){fm.style.display='block';fm.textContent='Prompt chat box me bhar diya gaya — Send dabao fix karne ke liye.';}
-      }else{
-        var report=buildCodeReport(kind,msg);
-        var copied=copyText(report);
-        try{window.parent.postMessage({type:'nb-code-bug',report:report},'*');}catch(e){}
-        if(fm){fm.style.display='block';fm.textContent=copied?'Bug report clipboard me copy ho gaya.':'Auto-copy nahi hua — manually copy karein.';}
-      }
-    });
-  }
-  window.__nbShowError=function(m){show('Preview Error',m);};
-  window.addEventListener('error',function(e){show('Preview Error',(e&&e.message)||(e&&e.error&&e.error.message)||'Script error');});
-  window.addEventListener('unhandledrejection',function(e){show('Preview Error',(e&&e.reason&&e.reason.message)||(e&&e.reason)||'Promise rejected');});
-  function isEmpty(){
-    if(window.__nbLoading)return false;
-    var t=(document.body&&document.body.innerText||'').trim();
-    var v=document.querySelector('canvas,svg,img,video,input,button,#root *,#app *,[data-reactroot] *');
-    return !t&&!v;
-  }
-  // Check at 4s then 7s — React+CDN can take 4-6s on slow connections; don't show false "empty" while loading.
-  setTimeout(function(){
-    if(document.getElementById('__nb_err')||!isEmpty())return;
-    setTimeout(function(){
-      if(!document.getElementById('__nb_err')&&isEmpty())show('Preview is empty','The app rendered nothing — it may need a build step, or hit a runtime error.');
-    },3000);
-  },4000);
-})();
-</script>`;
+  // PREVIEW_HARNESS → exported from src/lib/previewUtils.ts
 
-  // In-iframe mini-bundler: transpiles JSX/TSX with Babel, resolves relative imports,
-  // and loads ALL bare deps via esm.sh (importmap from package.json). Failures surface via the harness.
-  const PREVIEW_BOOTSTRAP = `
-(function(){
-  var FILES=window.__FILES||{};var ENTRY=window.__ENTRY||'';var IMAP=window.__IMAP||{};var ESM='https://esm.sh/';
-  // Polyfill import.meta.env (Vite) and process.env (Node/CRA) so apps don't throw on startup
-  if(typeof process==='undefined')window.process={env:{NODE_ENV:'production'}};
-  window.__importMetaEnv__=window.__importMetaEnv__||{};
-  function fail(m){if(window.__nbShowError)window.__nbShowError(m);}
-  function loadScript(url){return new Promise(function(res){var s=document.createElement('script');s.src=url;s.onload=res;s.onerror=res;document.head.appendChild(s);});}
-  function dirname(p){var i=p.lastIndexOf('/');return i<0?'':p.slice(0,i);}
-  function normalize(p){var a=p.split('/'),o=[];for(var i=0;i<a.length;i++){var s=a[i];if(s===''||s==='.')continue;if(s==='..')o.pop();else o.push(s);}return o.join('/');}
-  function resolve(importer,spec){
-    var base=spec.charAt(0)==='/'?spec.slice(1):normalize((dirname(importer)?dirname(importer)+'/':'')+spec);
-    var t=[base,base+'.tsx',base+'.ts',base+'.jsx',base+'.js',base+'.mjs',base+'.json',base+'.css',base+'/index.tsx',base+'/index.ts',base+'/index.jsx',base+'/index.js'];
-    for(var i=0;i<t.length;i++){if(Object.prototype.hasOwnProperty.call(FILES,t[i]))return t[i];}
-    return base;
-  }
-  function injectCss(src){var s=document.createElement('style');s.textContent=src;document.head.appendChild(s);}
-  function interop(ns){
-    if(!ns)return{__esModule:true,default:ns};
-    var m={__esModule:true};
-    // Object.assign copies enumerable own props (works for most modules)
-    try{Object.assign(m,ns);}catch(e){}
-    // getOwnPropertyNames also catches non-enumerable own props on ES module namespace objects
-    try{Object.getOwnPropertyNames(ns).forEach(function(k){if(k==='__esModule')return;try{if(m[k]==null)m[k]=ns[k];}catch(e){}});}catch(e){}
-    if(m.default===undefined)m.default=ns;
-    return m;
-  }
-  var bareCache={},cache={};
-  function requireMod(path){
-    if(cache[path])return cache[path].exports;
-    var src=FILES[path];
-    if(src==null)throw new Error('Module not found: '+path);
-    if(/\\.css$/.test(path)){injectCss(src);cache[path]={exports:{}};return cache[path].exports;}
-    if(/\\.json$/.test(path)){cache[path]={exports:JSON.parse(src)};return cache[path].exports;}
-    if(/\\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/.test(path)){cache[path]={exports:{default:src,__esModule:true}};return cache[path].exports;}
-    var isTs=/\\.tsx?$/.test(path),isTsx=/\\.tsx$/.test(path);
-    var presets=isTs?[['react',{runtime:'automatic'}],['typescript',{isTSX:isTsx,allExtensions:true}]]:[['react',{runtime:'automatic'}]];
-    // Replace import.meta.* — not valid inside new Function() (non-module context)
-    src=src.replace(/import\\.meta\\.env\\b/g,'(window.__importMetaEnv__||{})');
-    src=src.replace(/import\\.meta\\.url\\b/g,'location.href');
-    src=src.replace(/import\\.meta\\b/g,'{env:(window.__importMetaEnv__||{}),url:location.href}');
-    var code;
-    try{code=Babel.transform(src,{filename:path,presets:presets,plugins:['transform-modules-commonjs'],sourceType:'module'}).code;}
-    catch(e){throw new Error('Compile '+path+': '+e.message);}
-    var module={exports:{}};cache[path]=module;
-    var req=function(spec){
-      // Vite/shadcn-style @/ alias (e.g. @/components/ui/button) → resolve under src/
-      if(spec.length>2&&spec.charAt(0)==='@'&&spec.charAt(1)==='/'){return requireMod(resolve(path,'/src/'+spec.slice(2)));}
-      if(spec.charAt(0)!=='.'&&spec.charAt(0)!=='/'){if(bareCache[spec])return bareCache[spec];throw new Error('Missing dependency: '+spec);}
-      return requireMod(resolve(path,spec));
-    };
-    try{(new Function('require','module','exports',code))(req,module,module.exports);}
-    catch(e){throw new Error('Run '+path+': '+e.message);}
-    return module.exports;
-  }
-  function collectBare(){
-    var found={},re=/(?:from|import|require\\(|import\\()\\s*['"]([^'"]+)['"]/g;
-    Object.keys(FILES).forEach(function(p){var src=FILES[p]||'',m;re.lastIndex=0;while((m=re.exec(src))){var s=m[1];if(s&&s.charAt(0)!=='.'&&s.charAt(0)!=='/'&&!(s.charAt(0)==='@'&&s.charAt(1)==='/'))found[s]=true;}});
-    return Object.keys(found);
-  }
-  // Resolve a bare import spec to CDN URL: importmap first, then esm.sh
-  function specUrl(spec){
-    // Already a full URL (https://) or protocol-relative (//) — use as-is
-    if(spec.indexOf('://')>0||spec.slice(0,2)==='//')return spec;
-    if(IMAP[spec])return IMAP[spec];
-    var root=spec.charAt(0)==='@'?spec.split('/').slice(0,2).join('/'):spec.split('/')[0];
-    if(IMAP[root]){
-      // Insert the subpath BEFORE any query string, else "zustand/middleware"
-      // becomes ".../zustand@4?external=react,react-dom/middleware" (subpath
-      // swallowed into the query) → wrong module → "persist is not a function".
-      var b=IMAP[root],q='',qi=b.indexOf('?');
-      if(qi>=0){q=b.slice(qi);b=b.slice(0,qi);}
-      return b+spec.slice(root.length)+q;
-    }
-    return ESM+spec;
-  }
-  var forced=['react','react-dom','react-dom/client','react/jsx-runtime','react/jsx-dev-runtime'];
-  window.__nbLoading=true;
-  (async function(){
-    try{
-      // Load Babel if primary CDN (<script src>) failed — try unpkg fallback
-      if(typeof Babel==='undefined'){await loadScript('https://unpkg.com/@babel/standalone@7.26.4/babel.min.js');}
-      if(typeof Babel==='undefined'){window.__nbLoading=false;fail('Could not load the preview compiler (network blocked?). Check internet connection.');return;}
-      var bare;try{bare=collectBare();}catch(ce){bare=[];}
-      forced.forEach(function(s){if(bare.indexOf(s)<0)bare.push(s);});
-      var failedDeps=[];
-      await Promise.all(bare.map(async function(spec){
-        try{bareCache[spec]=interop(await import(specUrl(spec)));}
-        catch(e){failedDeps.push(spec);console.warn('[preview] failed to load',spec,e&&e.message);}
-      }));
-      // BUG A2 FIX: Only hard-fail on React load error if the app actually imports React.
-      // Vanilla ES module apps don't need React — killing them here was wrong.
-      var needsReact=bare.indexOf('react')>=0||bare.indexOf('react-dom')>=0;
-      if(needsReact&&(!bareCache['react']||!bareCache['react-dom/client'])){
-        window.__nbLoading=false;
-        fail('Failed to load React from CDN'+(failedDeps.length?' (blocked: '+failedDeps.slice(0,3).join(', ')+')':'')+'. Check internet connection.');
-        return;
-      }
-      if(!ENTRY){window.__nbLoading=false;fail('No runnable entry file found in this app.');return;}
-      var mod=requireMod(ENTRY);
-      // Auto-mount: if the entry only exports a React component (no ReactDOM.render call),
-      // mount it automatically so component-only entry files work without a separate main.jsx.
-      if(mod&&!document.getElementById('__nb_err')){
-        var rootEl=document.getElementById('root')||document.getElementById('app');
-        if(rootEl&&rootEl.childElementCount===0){
-          var Comp=mod.default||(typeof mod==='function'?mod:null);
-          if(Comp&&typeof Comp==='function'){
-            var rdc=bareCache['react-dom/client'],jsx=bareCache['react/jsx-runtime'],rc=bareCache['react'];
-            try{
-              var el=(jsx&&jsx.jsx)?jsx.jsx(Comp,{}):(rc&&rc.createElement)?rc.createElement(Comp,null):null;
-              if(el){if(rdc&&rdc.createRoot)rdc.createRoot(rootEl).render(el);else if(rdc&&rdc.render)rdc.render(el,rootEl);}
-            }catch(ae){}
-          }
-        }
-      }
-    }catch(e){fail((e&&e.message)||String(e));}
-    finally{window.__nbLoading=false;}
-  })();
-})();`;
+  // PREVIEW_BOOTSTRAP → exported from src/lib/previewUtils.ts
 
   // Detect whether the app is a React/TS source app (needs transpilation) vs a static app.
-  const detectAppType = (f: FileSystem): 'react' | 'vue' | 'static' => {
-    const keys = Object.keys(f);
-    if (keys.some(k => /\.(tsx|jsx)$/i.test(k))) return 'react';
-    const pkg = f['package.json'];
-    if (pkg && /"react"\s*:/.test(pkg)) return 'react';
-    // Vue: .vue SFCs or a vue dep (and not React) → in-browser Vue compiler path.
-    if (keys.some(k => /\.vue$/i.test(k)) || (pkg && /"vue"\s*:/.test(pkg))) return 'vue';
-    // Vite-style entry pointing at a TS/JS module under src/
-    const html = f['index.html'] || '';
-    if (/<script[^>]+type=["']module["'][^>]+src=["']\/?(src\/)?[^"']+\.(ts|jsx|tsx)["']/i.test(html)) return 'react';
-    // BUG A1 FIX: Vanilla ES module apps (multi-file with import/export) must go through
-    // buildSourceAppPreview which has a full Babel + require() bundler. Without this,
-    // their import statements can't resolve in a standalone HTML doc.
-    const jsFiles = keys.filter(k => /\.(js|mjs|ts)$/i.test(k) && !k.includes('node_modules'));
-    if (jsFiles.some(k => /^\s*(import\s+[\w{*"'`]|export\s+(default|class|function|const|let|var)\b)/m.test(f[k] || ''))) return 'react';
-    return 'static';
-  };
+  // detectAppType → imported from src/lib/appUtils.ts
 
-  // A "classic vanilla web app" has no index.html but is meant to RUN (only .js/.css/.json
-  // files, with at least one script). These keep the legacy auto-shell so they don't regress.
-  // Any other file set (docs, data, media, code) with no index.html → universal viewer.
-  const isClassicVanillaWeb = (f: FileSystem): boolean => {
-    const ks = Object.keys(f).filter(k => f[k] != null && !k.includes('node_modules'));
-    const allWeb = ks.length > 0 && ks.every(k => /\.(js|mjs|cjs|css|json)$/i.test(k));
-    const hasJs = ks.some(k => /\.(js|mjs|cjs)$/i.test(k));
-    return allWeb && hasJs;
-  };
+  // isClassicVanillaWeb → imported from src/lib/appUtils.ts
 
-  // Build a runnable in-iframe document for source/framework apps.
-  const buildSourceAppPreview = (f: FileSystem): string => {
-    const rawHtml = f['index.html'] || '';
-    const srcExtRe = /\.(jsx|tsx|ts|js|mjs|cjs|css|json|png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i;
-    const srcFiles: Record<string, string> = {};
-    Object.keys(f).forEach(k => { if (srcExtRe.test(k) && !k.includes('node_modules')) srcFiles[k] = f[k]; });
+  // buildSourceAppPreview → imported from src/lib/previewUtils.ts
 
-    // Preview-only: react-router's BrowserRouter needs real History/URL which the
-    // sandboxed iframe doesn't have → blank screen. Rewrite to HashRouter so routed
-    // apps actually render in the preview. (The saved project files are untouched.)
-    for (const k of Object.keys(srcFiles)) {
-      if (/\.(jsx|tsx|js|ts|mjs)$/i.test(k) && typeof srcFiles[k] === 'string' && srcFiles[k].includes('BrowserRouter')) {
-        srcFiles[k] = srcFiles[k]
-          .replace(/createBrowserRouter/g, 'createHashRouter')
-          .replace(/\bBrowserRouter\b/g, 'HashRouter');
-      }
-    }
-
-    // Resolve the entry module
-    let entry = '';
-    const m = rawHtml.match(/<script[^>]+type=["']module["'][^>]+src=["']([^"']+)["']/i);
-    if (m) entry = m[1].replace(/^\//, '').replace(/^\.\//, '');
-    if (!entry || !srcFiles[entry]) {
-      const cands = ['src/main.tsx','src/main.jsx','src/main.ts','src/index.tsx','src/index.jsx','src/index.ts','main.tsx','main.jsx','index.tsx','index.jsx','src/App.tsx','src/App.jsx','App.tsx','App.jsx'];
-      // Prefer candidates that contain actual JSX/rendering code (not just re-exports)
-      const hasRendering = (k: string) => {
-        const v = srcFiles[k] || '';
-        return /createRoot|ReactDOM|render\s*\(|ReactMount|hydrateRoot/.test(v) || /<[A-Z][A-Za-z]*[\s/>]/.test(v);
-      };
-      entry = cands.find(c => srcFiles[c] && hasRendering(c))
-        || cands.find(c => srcFiles[c])
-        || Object.keys(srcFiles).find(k => /\.(tsx|jsx)$/i.test(k) && hasRendering(k))
-        || Object.keys(srcFiles).find(k => /\.(tsx|jsx)$/i.test(k))
-        // Additive fallback: a React app authored entirely in plain .js/.ts/.mjs
-        // (no .tsx/.jsx files) would otherwise resolve to no entry and render the
-        // "No runnable entry file found" error. Only reached when nothing above matched.
-        || Object.keys(srcFiles).find(k => /\.(js|mjs|ts)$/i.test(k) && hasRendering(k))
-        || '';
-    }
-
-    // Reuse the app's <body> markup (minus module/external scripts) so #root etc. survive
-    let bodyInner = '<div id="root"></div>';
-    const bm = rawHtml.match(/<body[^>]*>([\s\S]*?)<\/body\s*>/i);
-    if (bm) {
-      bodyInner = bm[1]
-        .replace(/<script[^>]*type=["']module["'][^>]*>[\s\S]*?<\/script>/gi, '')
-        .replace(/<script[^>]+src=["'][^"']+["'][^>]*>\s*<\/script>/gi, '');
-      if (!/id=["'](root|app)["']/.test(bodyInner)) bodyInner += '<div id="root"></div>';
-    }
-
-    // Build importmap from package.json dependencies + always-needed React packages
-    const ESM = 'https://esm.sh/';
-    const pkgDeps: Record<string, string> = {};
-    try {
-      const pkg = JSON.parse(f['package.json'] || '{}');
-      Object.assign(pkgDeps, pkg.dependencies || {}, pkg.devDependencies || {});
-    } catch {}
-    // Strip semver prefix (^1.2.3 → 1.2.3)
-    const ver = (name: string) => {
-      const v = pkgDeps[name];
-      return v ? '@' + v.replace(/^[\^~>=<\s]*/,'').split(/\s/)[0] : '';
-    };
-    const reactVer = ver('react') || '@18.3.1';
-    const rdVer = ver('react-dom') || '@18.3.1';
-    const imapEntries: Record<string, string> = {
-      'react': ESM + 'react' + reactVer,
-      'react-dom': ESM + 'react-dom' + rdVer,
-      'react-dom/client': ESM + 'react-dom' + rdVer + '/client',
-      'react/jsx-runtime': ESM + 'react' + reactVer + '/jsx-runtime',
-      'react/jsx-dev-runtime': ESM + 'react' + reactVer + '/jsx-dev-runtime',
-    };
-    // Add all package.json deps to importmap with version pins.
-    // `?external=react,react-dom` makes esm.sh import (not bundle) React, so every
-    // dep (react-router-dom, zustand, etc.) shares the ONE React instance from the
-    // importmap. Without this, libs bundle their own React → "Invalid hook call" /
-    // duplicate-React "Script error" in the preview.
-    Object.keys(pkgDeps).forEach(pkg => {
-      if (!imapEntries[pkg]) imapEntries[pkg] = ESM + pkg + ver(pkg) + '?external=react,react-dom';
-    });
-
-    const importmap = JSON.stringify({ imports: imapEntries });
-    // Safe JSON for embedding in <script> tags: escape </ to prevent </script> from
-    // closing the tag early when file content contains that string.
-    const sj = (v: unknown) => JSON.stringify(v).replace(/<\//g, '<\\/');
-
-    return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-      + PREVIEW_HARNESS
-      + '<script type="importmap">' + importmap + '</' + 'script>'
-      + '<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js"></' + 'script>'
-      + '</head><body>' + bodyInner
-      + '<script>window.__FILES=' + sj(srcFiles) + ';window.__ENTRY=' + sj(entry) + ';window.__IMAP=' + sj(imapEntries) + ';</' + 'script>'
-      + '<script>' + PREVIEW_BOOTSTRAP + '</' + 'script>'
-      + '</body></html>';
-  };
-
-  // ── Universal multi-format file viewer ───────────────────────────────────────
-  // Renders ANY file type when a workspace has no index.html: markdown, source code
-  // (syntax-highlighted), JSON, CSV/TSV tables, images, SVG, PDF, audio, video, HTML
-  // and plain text. Self-contained doc with a file sidebar; CDN libs degrade gracefully.
-  const UNIVERSAL_VIEWER_CSS = `
-:root{color-scheme:dark}*{box-sizing:border-box}
-body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9}
-.nbv-app{display:flex;height:100vh;width:100vw;overflow:hidden}
-.nbv-side{width:248px;min-width:248px;background:#161b22;border-right:1px solid #21262d;display:flex;flex-direction:column;overflow:hidden}
-.nbv-brand{padding:13px 14px;font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#8b949e;border-bottom:1px solid #21262d;display:flex;align-items:center;gap:6px}
-.nbv-cnt{margin-left:auto;font-weight:600;color:#6e7681;font-size:10px}
-.nbv-list{overflow:auto;flex:1;padding:6px}
-.nbv-fileitem{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;color:#adbac7;text-align:left;padding:7px 9px;border-radius:8px;cursor:pointer;font-size:12.5px;font-family:inherit}
-.nbv-fileitem:hover{background:#1c2330}
-.nbv-fileitem.active{background:rgba(31,111,235,.22);color:#fff}
-.nbv-ico{flex:0 0 auto;font-size:13px;width:16px;text-align:center}
-.nbv-ftxt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.nbv-main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
-.nbv-topbar{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid #21262d;background:#0d1117;flex:0 0 auto}
-.nbv-mobilesel{display:none;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:8px;padding:6px 10px;font-size:12px;max-width:60%}
-.nbv-head{display:flex;align-items:center;gap:10px;min-width:0}
-.nbv-fname{font-weight:700;font-size:13px;color:#e6edf3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.nbv-badge{font-size:9px;font-weight:800;letter-spacing:.08em;background:rgba(31,111,235,.13);color:#58a6ff;border:1px solid rgba(31,111,235,.27);padding:2px 6px;border-radius:6px;flex:0 0 auto}
-.nbv-size{font-size:10px;color:#6e7681;flex:0 0 auto}
-.nbv-content{flex:1;overflow:auto;position:relative;min-height:0}
-.nbv-md{max-width:880px;margin:0 auto;padding:28px 36px;line-height:1.65;font-size:15px}
-.nbv-md h1,.nbv-md h2{border-bottom:1px solid #21262d;padding-bottom:.3em}
-.nbv-md h1,.nbv-md h2,.nbv-md h3,.nbv-md h4{color:#e6edf3;margin-top:1.4em}
-.nbv-md a{color:#58a6ff;text-decoration:none}.nbv-md a:hover{text-decoration:underline}
-.nbv-md code{background:#161b22;border:1px solid #21262d;border-radius:5px;padding:.15em .4em;font-size:.88em}
-.nbv-md pre{background:#161b22;border:1px solid #21262d;border-radius:10px;padding:14px;overflow:auto}
-.nbv-md pre code{background:transparent;border:0;padding:0}
-.nbv-md table{border-collapse:collapse;width:100%;margin:1em 0}
-.nbv-md th,.nbv-md td{border:1px solid #30363d;padding:6px 12px}
-.nbv-md img{max-width:100%}
-.nbv-md blockquote{border-left:3px solid #30363d;margin:1em 0;padding:0 1em;color:#8b949e}
-.nbv-codewrap{display:flex;min-height:100%}
-.nbv-gutter{user-select:none;text-align:right;padding:16px 10px;color:#484f58;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0d1117;border-right:1px solid #21262d;white-space:pre;flex:0 0 auto}
-.nbv-code{margin:0;flex:1;padding:16px;overflow:auto;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0d1117!important}
-.nbv-code code{font:inherit;background:transparent;white-space:pre}
-.nbv-pre{margin:0;padding:18px;white-space:pre-wrap;word-break:break-word;font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#c9d1d9}
-.nbv-tablewrap{padding:16px;overflow:auto}
-.nbv-tablemeta{font-size:11px;color:#6e7681;margin-bottom:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
-.nbv-table{border-collapse:collapse;font-size:12.5px}
-.nbv-table th{position:sticky;top:0;background:#1b2433;color:#58a6ff;font-weight:700}
-.nbv-table th,.nbv-table td{border:1px solid #21262d;padding:6px 12px;text-align:left;white-space:nowrap}
-.nbv-table tbody tr:nth-child(even){background:#0f141b}
-.nbv-media{display:flex;align-items:center;justify-content:center;min-height:100%;padding:24px}
-.nbv-checker{background-image:linear-gradient(45deg,#161b22 25%,transparent 25%),linear-gradient(-45deg,#161b22 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#161b22 75%),linear-gradient(-45deg,transparent 75%,#161b22 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}
-.nbv-img{max-width:100%;max-height:88vh;object-fit:contain;box-shadow:0 8px 40px rgba(0,0,0,.5);border-radius:4px}
-.nbv-svg{max-width:90%;max-height:80vh}
-.nbv-pdf{width:100%;height:100%;border:0;position:absolute;inset:0}
-.nbv-htmlframe{width:100%;height:100%;border:0;background:#fff;position:absolute;inset:0}
-.nbv-audio{width:80%;max-width:520px}
-.nbv-video{max-width:100%;max-height:85vh;border-radius:6px}
-.nbv-note{padding:18px;margin:24px;background:#161b22;border:1px solid rgba(245,158,11,.27);border-radius:10px;color:#d29922;font-size:13px;max-width:600px}
-.nbv-single .nbv-side{display:none}
-@media(max-width:680px){.nbv-side{display:none}.nbv-mobilesel{display:block}}`;
-
-  const UNIVERSAL_VIEWER_JS = `
-(function(){
-  var V=window.__NBV||{};var FILES=V.files||{};
-  var paths=Object.keys(FILES).filter(function(p){return FILES[p]!=null;});
-  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-  function base(p){return p.split('/').pop();}
-  function extOf(p){var b=base(p),i=b.lastIndexOf('.');return i>0?b.slice(i+1).toLowerCase():'';}
-  function bytes(s){try{return new Blob([s]).size;}catch(e){return (s||'').length;}}
-  function human(n){return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(2)+' MB';}
-  function mimeFor(e){var m={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',bmp:'image/bmp',ico:'image/x-icon',avif:'image/avif',svg:'image/svg+xml',pdf:'application/pdf',mp3:'audio/mpeg',wav:'audio/wav',ogg:'audio/ogg',m4a:'audio/mp4',aac:'audio/aac',flac:'audio/flac',mp4:'video/mp4',webm:'video/webm',mov:'video/quicktime',mkv:'video/x-matroska'};return m[e]||'application/octet-stream';}
-  function typeOf(p){var e=extOf(p);
-    if(/^(md|markdown|mdx)$/.test(e))return 'md';
-    if(/^(png|jpg|jpeg|gif|webp|bmp|ico|avif|apng)$/.test(e))return 'img';
-    if(e==='svg')return 'svg';
-    if(e==='pdf')return 'pdf';
-    if(/^(mp3|wav|ogg|m4a|aac|flac)$/.test(e))return 'audio';
-    if(/^(mp4|webm|mov|mkv|avi|m4v)$/.test(e))return 'video';
-    if(/^(csv|tsv)$/.test(e))return 'csv';
-    if(/^(json|jsonc|geojson|map|json5)$/.test(e))return 'json';
-    if(/^(html|htm)$/.test(e))return 'html';
-    if(/^(txt|text|log)$/.test(e)||e==='')return 'text';
-    return 'code';}
-  var ICON={md:'📝',img:'🖼️',svg:'🖼️',pdf:'📕',audio:'🎵',video:'🎬',csv:'📊',json:'🔧',html:'🌐',text:'📄',code:'❮❯'};
-  var LANG={js:'javascript',mjs:'javascript',cjs:'javascript',jsx:'javascript',ts:'typescript',tsx:'typescript',py:'python',rb:'ruby',go:'go',rs:'rust',java:'java',c:'c',h:'c',cpp:'cpp',cc:'cpp',hpp:'cpp',cs:'csharp',php:'php',swift:'swift',kt:'kotlin',kts:'kotlin',scala:'scala',sh:'bash',bash:'bash',zsh:'bash',sql:'sql',yaml:'yaml',yml:'yaml',toml:'ini',ini:'ini',cfg:'ini',conf:'ini',xml:'xml',vue:'xml',svelte:'xml',css:'css',scss:'scss',less:'less',dart:'dart',lua:'lua',r:'r',pl:'perl',ex:'elixir',exs:'elixir',clj:'clojure',hs:'haskell',gradle:'gradle',dockerfile:'dockerfile',makefile:'makefile',json:'json'};
-  function srcFor(p,c,t){c=c||'';var s=c.trim();
-    if(/^(data:|https?:\\/\\/|blob:)/.test(s))return s;
-    if(t==='svg')return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(c);
-    var b=c.replace(/\\s+/g,'');
-    if(/^[A-Za-z0-9+/=]+$/.test(b)&&b.length>16)return 'data:'+mimeFor(extOf(p))+';base64,'+b;
-    return s;}
-  function parseDelim(c,d){var rows=[],row=[],cur='',q=false,i=0,ch;
-    for(;i<c.length;i++){ch=c[i];
-      if(q){if(ch==='"'){if(c[i+1]==='"'){cur+='"';i++;}else q=false;}else cur+=ch;}
-      else{if(ch==='"')q=true;else if(ch===d){row.push(cur);cur='';}else if(ch==='\\n'){row.push(cur);rows.push(row);row=[];cur='';}else if(ch==='\\r'){}else cur+=ch;}}
-    if(cur!==''||row.length){row.push(cur);rows.push(row);}
-    return rows;}
-  function rMd(c){var d=document.createElement('article');d.className='nbv-md';
-    try{if(window.marked&&window.DOMPurify){var mk=window.marked.parse(c,{breaks:true,gfm:true});d.innerHTML=window.DOMPurify.sanitize(mk);if(window.hljs)d.querySelectorAll('pre code').forEach(function(b){try{window.hljs.highlightElement(b);}catch(e){}});return d;}}catch(e){}
-    var pre=document.createElement('pre');pre.className='nbv-pre';pre.textContent=c;d.appendChild(pre);return d;}
-  function rCode(c,lang){var wrap=document.createElement('div');wrap.className='nbv-codewrap';
-    var gut=document.createElement('div');gut.className='nbv-gutter';var n=c.split('\\n').length;var g='';for(var k=1;k<=n;k++)g+=k+'\\n';gut.textContent=g;
-    var pre=document.createElement('pre');pre.className='nbv-code hljs';var code=document.createElement('code');
-    try{if(window.hljs){var r=(lang&&window.hljs.getLanguage(lang))?window.hljs.highlight(c,{language:lang}):window.hljs.highlightAuto(c);code.innerHTML=r.value;}else code.textContent=c;}catch(e){code.textContent=c;}
-    pre.appendChild(code);wrap.appendChild(gut);wrap.appendChild(pre);return wrap;}
-  function rJson(c){var t=c;try{t=JSON.stringify(JSON.parse(c),null,2);}catch(e){}return rCode(t,'json');}
-  function rCsv(c,d){var rows=parseDelim(c,d);var wrap=document.createElement('div');wrap.className='nbv-tablewrap';
-    if(!rows.length){wrap.textContent='(empty)';return wrap;}
-    var meta=document.createElement('div');meta.className='nbv-tablemeta';meta.textContent=rows.length+' rows × '+(rows[0]?rows[0].length:0)+' cols';wrap.appendChild(meta);
-    var t=document.createElement('table');t.className='nbv-table';var thead=document.createElement('thead');var htr=document.createElement('tr');
-    rows[0].forEach(function(h){var th=document.createElement('th');th.textContent=h;htr.appendChild(th);});thead.appendChild(htr);t.appendChild(thead);
-    var tb=document.createElement('tbody');for(var r=1;r<rows.length;r++){var tr=document.createElement('tr');rows[r].forEach(function(cell){var td=document.createElement('td');td.textContent=cell;tr.appendChild(td);});tb.appendChild(tr);}
-    t.appendChild(tb);wrap.appendChild(t);return wrap;}
-  function rImg(p,c,t){var d=document.createElement('div');d.className='nbv-media nbv-checker';var img=document.createElement('img');img.className='nbv-img';img.alt=base(p);
-    img.onerror=function(){d.innerHTML='';var note=document.createElement('div');note.className='nbv-note';note.textContent='Cannot display this image. Showing raw content:';d.appendChild(note);d.appendChild(rCode(c,'xml'));};
-    img.src=srcFor(p,c,t);d.appendChild(img);return d;}
-  function rSvg(p,c){var d=document.createElement('div');d.className='nbv-media nbv-checker';
-    try{if(window.DOMPurify){d.innerHTML=window.DOMPurify.sanitize(c,{USE_PROFILES:{svg:true,svgFilters:true}});var s=d.querySelector('svg');if(s)s.classList.add('nbv-svg');return d;}}catch(e){}
-    var img=document.createElement('img');img.className='nbv-img';img.src=srcFor(p,c,'svg');d.appendChild(img);return d;}
-  function rPdf(p,c){var s=srcFor(p,c,'pdf');if(!/^(data:|https?:|blob:)/.test(s)){var note=document.createElement('div');note.className='nbv-note';note.textContent='PDF preview needs a data: URL or http(s) link; this file has no renderable PDF data.';return note;}var o=document.createElement('iframe');o.className='nbv-pdf';o.src=s;return o;}
-  function rMedia(p,c,t){var d=document.createElement('div');d.className='nbv-media';var el=document.createElement(t==='audio'?'audio':'video');el.className='nbv-'+t;el.controls=true;el.src=srcFor(p,c,t);d.appendChild(el);return d;}
-  function rHtml(c){var f=document.createElement('iframe');f.className='nbv-htmlframe';f.setAttribute('sandbox','allow-scripts allow-forms allow-popups allow-modals');f.srcdoc=c;return f;}
-  function rText(c){var pre=document.createElement('pre');pre.className='nbv-pre';pre.textContent=c;return pre;}
-  function render(p){var c=FILES[p]||'';var t=typeOf(p);
-    if(t==='md')return rMd(c);
-    if(t==='img')return rImg(p,c,t);
-    if(t==='svg')return rSvg(p,c);
-    if(t==='pdf')return rPdf(p,c);
-    if(t==='audio'||t==='video')return rMedia(p,c,t);
-    if(t==='csv')return rCsv(c,extOf(p)==='tsv'?'\\t':',');
-    if(t==='json')return rJson(c);
-    if(t==='html')return rHtml(c);
-    if(t==='text')return rText(c);
-    return rCode(c,LANG[extOf(p)]||null);}
-  function select(p){
-    var items=document.querySelectorAll('.nbv-fileitem');for(var i=0;i<items.length;i++)items[i].classList.toggle('active',items[i].getAttribute('data-p')===p);
-    var sel=document.getElementById('nbv-select');if(sel)sel.value=p;
-    var c=FILES[p]||'',t=typeOf(p);
-    var head=document.getElementById('nbv-head');head.innerHTML='';
-    var name=document.createElement('span');name.className='nbv-fname';name.textContent=ICON[t]+' '+p;
-    var badge=document.createElement('span');badge.className='nbv-badge';badge.textContent=t.toUpperCase();
-    var size=document.createElement('span');size.className='nbv-size';size.textContent=human(bytes(c));
-    head.appendChild(name);head.appendChild(badge);head.appendChild(size);
-    var body=document.getElementById('nbv-body');body.innerHTML='';
-    try{body.appendChild(render(p));}catch(e){var er=document.createElement('pre');er.className='nbv-pre';er.textContent='Render error: '+((e&&e.message)||e);body.appendChild(er);}}
-  function pickPrimary(){
-    if(V.primary&&FILES[V.primary]!=null)return V.primary;
-    var pri=['README.md','readme.md','Readme.md','index.md','index.html','index.htm'];
-    for(var i=0;i<pri.length;i++)if(FILES[pri[i]]!=null)return pri[i];
-    var md=paths.filter(function(p){return typeOf(p)==='md';});if(md.length)return md[0];
-    var docs=paths.filter(function(p){return typeOf(p)!=='code';});if(docs.length)return docs[0];
-    return paths[0];}
-  if(paths.length===0){document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#6e7681;font-family:system-ui;text-align:center"><div><div style="font-size:42px">📂</div><div style="margin-top:10px;font-size:14px">No files to preview yet.</div></div></div>';return;}
-  paths.sort();
-  var sb=document.getElementById('nbv-files');var selEl=document.getElementById('nbv-select');
-  paths.forEach(function(p){var t=typeOf(p);
-    var it=document.createElement('button');it.className='nbv-fileitem';it.setAttribute('data-p',p);
-    it.innerHTML='<span class="nbv-ico">'+ICON[t]+'</span><span class="nbv-ftxt">'+esc(p)+'</span>';
-    it.onclick=function(){select(p);};sb.appendChild(it);
-    var op=document.createElement('option');op.value=p;op.textContent=p;selEl.appendChild(op);});
-  document.getElementById('nbv-count').textContent=paths.length+(paths.length===1?' file':' files');
-  selEl.onchange=function(e){select(e.target.value);};
-  if(paths.length<=1)document.body.classList.add('nbv-single');
-  select(pickPrimary());
-})();`;
-
-  const buildUniversalPreview = (f: FileSystem): string => {
-    const sj = (v: unknown) => JSON.stringify(v).replace(/<\//g, '<\\/');
-    const viewFiles: Record<string, string> = {};
-    Object.keys(f).forEach(k => { if (f[k] != null && !k.includes('node_modules')) viewFiles[k] = f[k]; });
-    return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-      + PREVIEW_HARNESS
-      + '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">'
-      + '<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></' + 'script>'
-      + '<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></' + 'script>'
-      + '<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></' + 'script>'
-      + '<style>' + UNIVERSAL_VIEWER_CSS + '</style></head><body>'
-      + '<div class="nbv-app">'
-      + '<aside class="nbv-side"><div class="nbv-brand">📁 Files <span id="nbv-count" class="nbv-cnt"></span></div><div id="nbv-files" class="nbv-list"></div></aside>'
-      + '<main class="nbv-main"><div class="nbv-topbar"><select id="nbv-select" class="nbv-mobilesel"></select><div id="nbv-head" class="nbv-head"></div></div><div id="nbv-body" class="nbv-content"></div></main>'
-      + '</div>'
-      + '<script>window.__NBV=' + sj({ files: viewFiles, primary: '' }) + ';</' + 'script>'
-      + '<script>' + UNIVERSAL_VIEWER_JS + '</' + 'script>'
-      + '</body></html>';
-  };
-
-  // Inject the never-blank harness into a static HTML document
-  const injectHarness = (doc: string): string => {
-    if (doc.includes('id="__nb_err"') || doc.includes("id='__nb_err'") || doc.includes('__nbShowError')) return doc;
-    if (/<\/head>/i.test(doc)) return doc.replace(/<\/head>/i, PREVIEW_HARNESS + '</head>');
-    if (/<body[^>]*>/i.test(doc)) return doc.replace(/(<body[^>]*>)/i, '$1' + PREVIEW_HARNESS);
-    return PREVIEW_HARNESS + doc;
-  };
+  // UNIVERSAL_VIEWER_CSS → exported from src/lib/previewUtils.ts
+  // UNIVERSAL_VIEWER_JS → exported from src/lib/previewUtils.ts
+  // buildUniversalPreview → imported from src/lib/previewUtils.ts
+  // injectHarness → imported from src/lib/previewUtils.ts
 
   const updatePreview = (currentFiles: FileSystem) => {
     // BUG A4 FIX: Wrap entire function in try-catch so any exception doesn't crash silently.
     try {
+    // stripFences → imported from src/lib/previewUtils.ts
     // Strip markdown code fences the AI accidentally wraps file content in (```lang\n...\n```)
-    // Line-by-line: strip only the first and last fence lines, never touching inner content.
-    const stripFences = (s: string): string => {
-      const trimmed = s.trimStart();
-      if (!trimmed.startsWith('```')) return s;
-      const lines = s.split(/\r?\n/);
-      // Find first fence line (```lang) and last fence line (```)
-      const first = lines.findIndex(l => /^```/.test(l.trim()));
-      if (first === -1) return s;
-      // Find matching closing fence after the opening line (scan from end for safety)
-      let last = -1;
-      for (let i = lines.length - 1; i > first; i--) { if (/^```\s*$/.test(lines[i].trim())) { last = i; break; } }
-      if (last === -1) return lines.slice(first + 1).join('\n'); // no closing fence — strip opener only
-      return lines.slice(first + 1, last).join('\n');
-    };
     currentFiles = Object.fromEntries(
       Object.entries(currentFiles).map(([k, v]) => [k, typeof v === 'string' ? stripFences(v) : v])
     ) as FileSystem;
@@ -3114,51 +2377,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
       toggleTab('deploy');
     }, 2000);
   };
-  const extractCode = (text: string) => {
-    // Look for HTML, then JS, then CSS
-    const htmlMatch = text.match(/```html\s+([\s\S]*?)?```/) || text.match(/<html>\s+([\s\S]*?)?<\/html>/i);
-    const jsMatch = text.match(/```(?:javascript|js)\s+([\s\S]*?)?```/);
-    const cssMatch = text.match(/```css\s+([\s\S]*?)?```/);
-
-    if (!htmlMatch && !jsMatch && !cssMatch) return null;
-
-    let html = htmlMatch ? (htmlMatch[1] || htmlMatch[0]) : '';
-    const js = jsMatch ? jsMatch[1] : '';
-    const css = cssMatch ? cssMatch[1] : '';
-
-    // If no HTML but we have JS or CSS, wrap them
-    // Inject Error Tracking & Viewport
-    const errorTracker = `
-      <script>
-        window.onerror = function(msg, url, lineNo, columnNo, error) {
-          window.parent.postMessage({ type: 'SANDBOX_ERROR', message: msg + " at line " + lineNo }, '*');
-          return false;
-        };
-        console.error = (function(oldError) {
-          return function(msg) {
-            window.parent.postMessage({ type: 'SANDBOX_ERROR', message: msg }, '*');
-            oldError.apply(console, arguments);
-          }
-        })(console.error);
-      </script>
-    `;
-
-    if (html) {
-      if (html.includes('</head>')) {
-        html = html.replace('</head>', errorTracker + '</head>');
-      } else if (html.includes('<head>')) {
-        html = html.replace('<head>', '<head>' + errorTracker);
-      }
-      
-      if (!html.toLowerCase().includes('viewport')) {
-        if (html.includes('</head>')) {
-          html = html.replace('</head>', '<meta name="viewport" content="width=device-width, initial-scale=1.0"></head>');
-        }
-      }
-    }
-
-    return html;
-  };
+  // extractCode → imported from src/lib/chatUtils.ts
 
   const handleSendForTab = async (tabId: ViewType, overrideMessage?: string, files: File[] = []) => {
       // ... (existing logic, maybe add files to messages)
@@ -3662,65 +2881,8 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     ));
 
   // Intent classifier — prevents build engine from firing on greetings/questions
-  const classifyBuildIntent = (message: string): 'build' | 'chat' => {
-    const lower = message.trim().toLowerCase();
-    const wordCount = lower.split(/\s+/).length;
-
-    // Greetings and affirmations (up to 4 words)
-    if (wordCount <= 4 && /^(hi|hello|hey|hii|helo|ok|okay|thanks|thank you|thx|shukriya|acha|accha|theek hai|theek|samjha|samajh|haan|nahi|sure|great|nice|good|perfect|kya haal|kaise ho|namaste|bye|good morning|good night|test)\s*[!.?]*$/.test(lower)) {
-      return 'chat';
-    }
-
-    // Clear app/build keywords → always build
-    if (/\b(app|game|website|web app|tool|bana[od]?|create|make|build|generate|develop|design|calculator|todo|quiz|login|dashboard|social|blog|portfolio|ecommerce|landing page|chat app|music player|weather|notes|timer|calendar|survey|banao|banana|chahiye)\b/i.test(lower)) {
-      return 'build';
-    }
-
-    // Short questions without build keywords → chat
-    if (wordCount < 12 && (/\?$/.test(message.trim()) || /^(what|how|why|when|where|who|explain|kya|batao|bata|samjhao|tell me|kaise|kyun|kab|kaisa)\b/i.test(lower))) {
-      return 'chat';
-    }
-
-    // Default: treat as build request
-    return 'build';
-  };
-
-  // Auto mode: classify what the user wants — chat, clarify, or which kind of build
-  const classifyAutoIntent = (message: string, history: Message[]): 'chat' | 'clarify' | 'direct_build' | 'plan_build' => {
-    const msg = message.trim();
-    const lower = msg.toLowerCase();
-
-    // Explicit "no coding / no build" signal — just converse
-    if (/\b(coding nahi|build nahi|mat bana|don't build|no code|no build|sirf bata|sirf samjha|just (tell|explain|discuss)|without (building|coding)|abhi nahi|bas batao)\b/i.test(lower)) return 'chat';
-
-    // Pure question with no build verb
-    const isQuestion = /\?$/.test(msg) || /^(kya|kaise|kyun|what|how|why|explain|batao|samjhao|tell me|describe)\b/i.test(lower);
-    const hasBuildVerb = /\b(bana|banao|banana|build|create|make|generate|develop|chahiye|chahie|design|kar do|karo)\b/i.test(lower);
-    if (isQuestion && !hasBuildVerb) return 'chat';
-
-    // User confirming after AI asked "Banau kya?" — build directly
-    const lastAi = [...history].reverse().find(m => m.sender === 'ai');
-    const aiWasAsking = !!(lastAi && /\?/.test(lastAi.text) && /\b(bana|build|banau|shall i|chahiye)\b/i.test(lastAi.text.toLowerCase()));
-    const isConfirm = /^(haan|yes|ok|sure|bilkul|karo|go ahead|ha\b|👍|theek|kar do|bana do)\s*[!.]*$/i.test(msg.trim());
-    if (isConfirm && aiWasAsking) return 'direct_build';
-
-    const hasAppNoun = /\b(app|application|game|website|tool|dashboard|calculator|quiz|generator|system|platform|portal|page|form|tracker|timer|clock|todo|chat|login|signup|landing)\b/i.test(lower);
-
-    // Has no app noun and no build verb → just chat
-    if (!hasBuildVerb && !hasAppNoun) return 'chat';
-
-    // Has app noun but no clear build verb → clarify
-    if (hasAppNoun && !hasBuildVerb && msg.length < 60) return 'clarify';
-
-    // Complex build: long message OR many features → show plan first
-    const isComplex = msg.length > 120 ||
-      (lower.match(/\b(aur|and|with|plus|bhi|also)\b/g) || []).length >= 3 ||
-      (msg.match(/^\d+\./gm) || []).length >= 2 ||
-      /\b(auth|login|database|api|dark mode|responsive|animation|filter|search|sort|registration|profile|payment|categories|multiple)\b/i.test(lower);
-
-    if (hasBuildVerb && isComplex) return 'plan_build';
-    return 'direct_build';
-  };
+  // classifyBuildIntent → imported from src/lib/chatUtils.ts
+  // classifyAutoIntent → imported from src/lib/chatUtils.ts
 
   // ── ZIP Import: stream raw binary → SSE extraction → real-time Code Studio load ──
   const handleZipImport = async (zipFile: File, extraMessage?: string) => {
@@ -4460,6 +3622,22 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
               // Phase 79 — store latest E2B screenshot; finishBuild will include it
               // in the build summary if no live URL is available.
               proLiveScreenshotRef.current = ev.base64;
+            } else if (ev.type === 'providers_unavailable') {
+              // Phase 5.5 — all AI providers temporarily down. Start a visible countdown
+              // so the user knows the service will recover and when to retry.
+              const secs = Math.round((ev.retryAfterMs ?? 60000) / 1000);
+              setProviderRetryCountdown(secs);
+              providerRetryPromptRef.current = messageToSend;
+              if (providerRetryTimerRef.current) clearInterval(providerRetryTimerRef.current);
+              providerRetryTimerRef.current = setInterval(() => {
+                setProviderRetryCountdown(prev => {
+                  if (prev === null || prev <= 1) {
+                    if (providerRetryTimerRef.current) clearInterval(providerRetryTimerRef.current);
+                    return null;
+                  }
+                  return prev - 1;
+                });
+              }, 1000);
             }
           }, abortController.signal);
           // Persist the refreshed Claude-Code-style memory onto the active session
@@ -4866,19 +4044,17 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
 
   const handleDeployApp = useCallback(async () => {
     const deployFiles = files && Object.keys(files).length > 0 ? files : null;
-    if (!deployFiles) { setDeployPanelError('No files to deploy. Build an app first.'); return; }
-    if (!deployToken.trim()) { setDeployPanelError('Please enter your API token.'); return; }
-    if (deployPlatform === 'vercel' && !deployProjectName.trim()) { setDeployPanelError('Please enter a project name.'); return; }
-    if (deployPlatform === 'github' && (!deployOwner.trim() || !deployRepo.trim())) { setDeployPanelError('Please enter owner and repo.'); return; }
-    if (deployPlatform === 'cloudflare' && (!deployOwner.trim() || !deployProjectName.trim())) { setDeployPanelError('Please enter Account ID and project name.'); return; }
+    const validationError = validateDeployInput({
+      platform: deployPlatform, token: deployToken, projectName: deployProjectName,
+      owner: deployOwner, repo: deployRepo, hasFiles: !!deployFiles,
+    });
+    if (validationError) { setDeployPanelError(validationError); return; }
     setIsDeploying(true);
     setDeployPanelError('');
     try {
-      const body: Record<string, string | Record<string, string>> = { provider: deployPlatform, token: deployToken, files: deployFiles };
-      if (deployPlatform === 'vercel') body.name = deployProjectName.trim();
-      else if (deployPlatform === 'netlify') body.siteId = deployProjectName.trim();
-      else if (deployPlatform === 'github') { body.owner = deployOwner.trim(); body.repo = deployRepo.trim(); }
-      else if (deployPlatform === 'cloudflare') { body.accountId = deployOwner.trim(); body.name = deployProjectName.trim(); }
+      const body = buildDeployBody(deployPlatform, deployToken, deployFiles as Record<string, string>, {
+        projectName: deployProjectName, owner: deployOwner, repo: deployRepo,
+      });
       const resp = await fetch('/api/pro/deploy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4921,17 +4097,14 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
   }, [addToast]);
 
   const handleFilesUpload = useCallback(async (selectedFile: File) => {
-    const isZip = selectedFile.name.toLowerCase().endsWith('.zip') ||
-      selectedFile.type === 'application/zip' ||
-      selectedFile.type === 'application/x-zip-compressed';
-
-    if (isZip) {
+    if (isZipFile(selectedFile.name, selectedFile.type)) {
       const sizeMB = selectedFile.size / (1024 * 1024);
-      if (sizeMB > 500) {
+      const bucket = classifyZipSize(selectedFile.size);
+      if (bucket === 'too-large') {
         setZipSizeModal({ variant: 'too-large', fileName: selectedFile.name, fileSizeMB: sizeMB });
         return;
       }
-      if (sizeMB > 50) {
+      if (bucket === 'github') {
         setZipSizeModal({ variant: 'github', fileName: selectedFile.name, fileSizeMB: sizeMB });
         return;
       }
@@ -4947,7 +4120,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
 
     // Non-ZIP: read as text or base64, then check for conflict
     const existingKey = Object.keys(files).find(k => k === selectedFile.name || k.endsWith('/' + selectedFile.name));
-    const isText = /\.(html|htm|css|scss|js|ts|jsx|tsx|json|md|txt|xml|svg|yaml|yml|py|php|vue|svelte)$/i.test(selectedFile.name);
+    const isText = isTextFile(selectedFile.name);
 
     const readFile = (): Promise<string> => new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -5028,25 +4201,12 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
   }, [buildVersionStack, updatePreview, addToast]);
 
   const saveVersionSnapshot = useCallback((buildRequest: string, builtFiles: Record<string, string>) => {
-    if (!builtFiles || Object.keys(builtFiles).length === 0) return;
+    const snapshot = buildVersionSnapshot(buildRequest, builtFiles);
+    if (!snapshot) return;
     try {
       const saved = localStorage.getItem('navbharat_versions');
-      const existing: any[] = saved ? JSON.parse(saved) : [];
-      const allContent = Object.values(builtFiles).join('');
-      // Strip base64 image data-URLs from files before storing to keep versions lean
-      const strippedFiles = Object.fromEntries(
-        Object.entries(builtFiles).map(([k, v]) => [k, v.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '(image)')])
-      );
-      const snapshot = {
-        id: Date.now().toString(),
-        name: `Build: ${buildRequest.slice(0, 40)}`,
-        code: (builtFiles['index.html'] || allContent).slice(0, 5000),
-        files: strippedFiles,
-        timestamp: Date.now(),
-        label: 'build',
-        size: allContent.length,
-      };
-      const updated = [snapshot, ...existing].slice(0, 10);
+      const existing: VersionSnapshot[] = saved ? JSON.parse(saved) : [];
+      const updated = appendVersionSnapshot(snapshot, existing);
       safeLS('navbharat_versions', JSON.stringify(updated));
     } catch {}
   }, []);
@@ -5069,95 +4229,11 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
 
   // --- UNIVERSAL CHAT CONTINUATION SYSTEM (UCI) HELPERS & IMPLEMENTATION ---
   
-  const NBI_GREETINGS = [
-    "Welcome to navBharatAI Workspace! What advanced platform shall we design today?",
-    "navBharatAI orchestrator is live. General queries or full-stack builds — let's innovate!",
-    "navBharatAI core cognitive system is active. Your enterprise specifications are welcome here.",
-    "navBharatAI online. Let's craft scalable architectures with deep, robust logic today."
-  ];
+  // Agent greetings (NBI/Basic/Pro/VIP) → imported from src/lib/agentGreetings.ts
 
-  const BASIC_GREETINGS = [
-    "Vishwakarma Basic active. Security audit protocols loaded and ready for code analysis.",
-    "Vishwakarma Basic online. Let's identify structural vulnerabilities and build secure pages.",
-    "Vishwakarma Basic analysis engine is fully operational. Ready for your coding needs."
-  ];
-
-  const PRO_GREETINGS = [
-    "Vishwakarma Pro ready. Previous architecture context restored. Ready to build highly optimized premium SaaS workflows!",
-    "Welcome back. Continuing your last high-fidelity development session with Vishwakarma Pro configurations.",
-    "Pro level authorized. Let's design premium microservices, database structures, and high-performance assets."
-  ];
-
-  const VIP_GREETINGS = [
-    "VIP orchestration initialized. Sovereign multi-model cognitive routing is actively online.",
-    "Sovereign VIP Agent active. Enterprise platforms, AI scaling, and zero-trust security matrices initialized.",
-    "Welcome to VIP Workspace! Highly tuned LLM orchestrators and stateful agents are ready to assist you."
-  ];
-
-  const generateUCI = (): string => {
-    const uppers = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    const lowers = 'abcdefghijklmnopqrstuvwxyz';
-    const digits = '0123456789';
-    const symbols = '!@#$%^&*';
-    const allChars = uppers + lowers + digits + symbols;
-    
-    // Choose randomized lengths between 10 and 16 characters
-    const len = Math.floor(Math.random() * (16 - 10 + 1)) + 10;
-    
-    let result = '';
-    // Guarantee characters from all necessary classes to prevent bypasses
-    result += uppers[Math.floor(Math.random() * uppers.length)];
-    result += lowers[Math.floor(Math.random() * lowers.length)];
-    result += digits[Math.floor(Math.random() * digits.length)];
-    result += symbols[Math.floor(Math.random() * symbols.length)];
-    
-    for (let i = 4; i < len; i++) {
-      result += allChars[Math.floor(Math.random() * allChars.length)];
-    }
-    
-    // Perform thorough randomized fisher-yates shuffle
-    const arr = result.split('');
-    for (let j = arr.length - 1; j > 0; j--) {
-      const k = Math.floor(Math.random() * (j + 1));
-      const temp = arr[j];
-      arr[j] = arr[k];
-      arr[k] = temp;
-    }
-    return arr.join('');
-  };
-
-  const getRandomElement = <T,>(arr: T[]): T => {
-    return arr[Math.floor(Math.random() * arr.length)];
-  };
-
-  const generateSmartHeuristicSummary = (history: Message[]): string => {
-    const userMessages = history.filter(m => m.sender === 'user');
-    if (userMessages.length === 0) return 'Initialized default sandbox environment';
-    
-    const completed: string[] = [];
-    const pending: string[] = [];
-    
-    userMessages.forEach(m => {
-      const txt = m.text.toLowerCase();
-      if (txt.includes('build') || txt.includes('create') || txt.includes('make') || txt.includes('banao')) {
-         completed.push(`Feature build: "${m.text.slice(0, 35)}..."`);
-      } else if (txt.includes('fix') || txt.includes('bug') || txt.includes('correct') || txt.includes('error')) {
-         completed.push(`Debugging session: "${m.text.slice(0, 35)}..."`);
-      } else {
-         pending.push(`Pending item: "${m.text.slice(0, 35)}..."`);
-      }
-    });
-
-    if (completed.length === 0) completed.push('Workspace initiation under UCI protocol');
-    if (pending.length === 0) pending.push('Dynamic continuous prompt analysis');
-
-    return `### 🧠 COMPRESSED INTELLECTUAL WORKSPACE MEMORY
-- **Completed Milestones**:
-${completed.map(c => `  - ${c}`).join('\n')}
-- **Pending Actions**:
-${pending.map(p => `  - ${p}`).join('\n')}
-`;
-  };
+  // generateUCI → imported from src/lib/chatUtils.ts
+  // getRandomElement → imported from src/lib/chatUtils.ts
+  // generateSmartHeuristicSummary → imported from src/lib/chatUtils.ts
 
   const resumeSession = (session: ChatSession) => {
     setCurrentSessionId(session.id);
@@ -5235,26 +4311,15 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     const targetAgent = targetSession.agent || 'navbharatai';
     const isVishwakarma = targetAgent.startsWith('vishwakarma');
     
-    // Build combined list of old messages to collapse
-    const combinedHistory = [...(targetSession.restoredMessages || []), ...targetSession.messages];
-    const uniqueHistoryMap: Record<string, Message> = {};
-    combinedHistory.forEach(msg => {
-      if (msg && msg.id) uniqueHistoryMap[msg.id] = msg;
-    });
-    const uniqueHistory = Object.values(uniqueHistoryMap).sort((a, b) => {
-      return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-    });
+    // Build combined list of old messages to collapse (dedup by id + sort by time)
+    const uniqueHistory = dedupAndSortMessages([...(targetSession.restoredMessages || []), ...targetSession.messages]);
 
     let memSummary = targetSession.memorySummary || '';
     if (!memSummary && uniqueHistory.length > 0) {
       memSummary = generateSmartHeuristicSummary(uniqueHistory);
     }
     
-    let greetingText = '';
-    if (targetAgent === 'vishwakarma_vip') greetingText = getRandomElement(VIP_GREETINGS);
-    else if (targetAgent === 'vishwakarma_pro') greetingText = getRandomElement(PRO_GREETINGS);
-    else if (targetAgent === 'vishwakarma_basic') greetingText = getRandomElement(BASIC_GREETINGS);
-    else greetingText = getRandomElement(NBI_GREETINGS);
+    const greetingText = pickGreetingForAgent(targetAgent, getRandomElement);
     
     const continuationGreeting: Message = {
       id: `continuation-greeting-${Date.now()}`,
@@ -5288,11 +4353,8 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     
     // Detect target tab — use saved tab field first, then broad agent/mode detection
     const savedTab = (targetSession as any).meta?.tab as ViewType | undefined;
-    const isProAgent = targetAgent === 'navbharatai-pro' || targetAgent.includes('pro');
     const isVishwakarmaAgent = targetAgent.startsWith('vishwakarma');
-    const isProSession = savedTab === 'nbi_pro_chat' || isProAgent;
-    const isAscSession = savedTab === 'asc_chat' || isVishwakarmaAgent;
-    const isSdaSession = savedTab === 'sda_chat' || targetAgent === 'sda';
+    const { isProSession, isAscSession, isSdaSession, targetTab } = resolveSessionSurface(targetAgent, savedTab);
 
     // Show the last 40 messages from previous conversation so user can scroll up and see context,
     // then append the continuation greeting at the bottom.
@@ -5324,9 +4386,6 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     }
 
     // Navigate to the correct chat tab — never open preview
-    const targetTab: ViewType = savedTab && ['nbi_chat', 'nbi_pro_chat', 'asc_chat', 'sda_chat'].includes(savedTab)
-      ? savedTab
-      : isAscSession ? 'asc_chat' : isProSession ? 'nbi_pro_chat' : isSdaSession ? 'sda_chat' : 'nbi_chat';
     toggleTab(targetTab);
 
     // Restore activeAgent to match the session
@@ -5441,12 +4500,6 @@ ${pending.map(p => `  - ${p}`).join('\n')}
     const newId = Date.now().toString();
     const newUci = user ? generateUCI() : '';
     
-    // Choose starting dynamic welcomes
-    const pNbi = getRandomElement(NBI_GREETINGS);
-    const pBasic = getRandomElement(BASIC_GREETINGS);
-    const pPro = getRandomElement(PRO_GREETINGS);
-    const pVip = getRandomElement(VIP_GREETINGS);
-
     setCurrentSessionId(newId);
     setMessages([]);
     
@@ -5965,484 +5018,55 @@ ${pending.map(p => `  - ${p}`).join('\n')}
         '--theme-card': themeClasses.raw.card
       }}
     >
-      {/* Top Header */}
-      <nav className={cn("h-10 border-b flex items-center justify-between px-4 shrink-0 transition-all z-[100] gap-4 select-none w-full", themeClasses.card, themeClasses.border)}>
-         <div className="flex items-center gap-3 min-w-0 flex-1">
-            {effectiveDeviceMode !== 'desktop' && (
-              <button 
-                onClick={() => setIsMenuOpen(true)}
-                className="p-2 hover:bg-white/5 rounded-lg text-indigo-400 transition-all shrink-0 border border-white/5"
-              >
-                  <Menu className="w-5 h-5" />
-              </button>
-            )}
-
-            {effectiveDeviceMode === 'desktop' && (
-              <button 
-                onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-                className="p-2 hover:bg-white/5 rounded-lg text-indigo-400 transition-all shrink-0 border border-white/5"
-                title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
-              >
-                  <Menu className="w-5 h-5" />
-              </button>
-            )}
-
-
-          <button 
-            onClick={() => toggleTab('home')}
-            className="flex items-center gap-2 hover:opacity-80 transition-opacity shrink-0 mr-2"
-          >
-            <img 
-              src="/logo.png" 
-              alt="navBharatAI" 
-              className="w-7 h-7 object-contain drop-shadow-md select-none pointer-events-none" 
-              referrerPolicy="no-referrer"
-            />
-            <h1 className="text-sm font-bold tracking-tighter text-white hidden sm:block italic">navBharatAI</h1>
-          </button>
-
-          {/* 10.5 — Command Palette trigger (Ctrl+K) */}
-          <button
-            onClick={() => setShowCommandPalette(true)}
-            className="hidden md:flex items-center gap-2 h-7 px-3 bg-white/5 hover:bg-white/8 border border-white/5 hover:border-white/15 rounded-lg text-[#484f58] hover:text-white transition-all shrink-0 mr-1"
-            title="Command Palette (Ctrl+K)"
-          >
-            <Search className="w-3 h-3" />
-            <span className="text-[10px] text-[#484f58]">Search commands...</span>
-            <kbd className="text-[8px] font-black bg-white/5 border border-white/10 px-1 rounded">⌘K</kbd>
-          </button>
-
-          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-2 select-none">
-            <AnimatePresence mode="popLayout">
-              {openTabs.filter(id => id !== 'home').map((tabId) => {
-                const item = menuItems.find(m => m.id === tabId);
-                if (!item) return null;
-                const Icon = item.icon;
-                return (
-                  <motion.div
-                    layout
-                    initial={{ opacity: 0, scale: 0.8, x: -10 }}
-                    animate={{ opacity: 1, scale: 1, x: 0 }}
-                    exit={{ opacity: 0, scale: 0.8, x: 10 }}
-                    key={tabId}
-                    className={`flex items-center shrink-0 h-9 rounded-xl px-3 gap-2 border transition-all cursor-pointer group ${
-                      activeView === tabId 
-                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/20' 
-                      : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20'
-                    }`}
-                    onClick={() => setActiveView(tabId)}
-                  >
-                    <Icon className={`w-3.5 h-3.5 ${activeView === tabId ? 'text-white' : 'text-indigo-400'}`} />
-                    <span className="text-[11px] font-bold whitespace-nowrap">{item.label}</span>
-                    <button 
-                      onClick={(e) => closeTab(e, tabId)}
-                      className={`p-0.5 rounded-md transition-all ${
-                        activeView === tabId 
-                        ? 'hover:bg-white/20 text-white/60 hover:text-white' 
-                        : 'hover:bg-white/10 text-white/20 hover:text-white'
-                      }`}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </motion.div>
-                );
-              })}
-            </AnimatePresence>
-          </div>
-        </div>
-
-        {/* Action Controls */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* 9.1 — Undo/Redo buttons (shown when app is built) */}
-          {hasGeneratedCode && (
-            <div className="hidden sm:flex items-center gap-1 border border-white/5 rounded-xl overflow-hidden">
-              <button
-                onClick={undoCode}
-                disabled={!canUndo}
-                title="Undo (Ctrl+Z)"
-                className="p-2 hover:bg-white/5 text-[#484f58] hover:text-white transition-all disabled:opacity-25 disabled:cursor-not-allowed"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-              </button>
-              <div className="w-px h-5 bg-white/10" />
-              <button
-                onClick={redoCode}
-                disabled={!canRedo}
-                title="Redo (Ctrl+Y)"
-                className="p-2 hover:bg-white/5 text-[#484f58] hover:text-white transition-all disabled:opacity-25 disabled:cursor-not-allowed"
-              >
-                <RotateCcw className="w-3.5 h-3.5 scale-x-[-1]" />
-              </button>
-            </div>
-          )}
-          {!user ? (
-            <button 
-              onClick={() => setShowAuth(true)} 
-              className="py-2.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/20 active:scale-95"
-            >
-              Login
-            </button>
-          ) : (
-            <div className="flex items-center gap-2">
-              <div className="hidden sm:flex flex-col items-end mr-1">
-                <span className="text-[9px] font-black text-white uppercase tracking-tighter truncate max-w-[80px]">{user.email?.split('@')[0]}</span>
-                <span className="text-[7px] font-bold text-emerald-400 uppercase tracking-widest">Active</span>
-              </div>
-              <button 
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  if (confirm('Logout from NavBharat?')) {
-                    try {
-                      await signOut(auth);
-                      window.location.reload();
-;
-                    } catch (error) {
-                      console.error('Logout failed:', error);
-                    }
-                  }
-                }}
-                className="w-10 h-10 bg-white/5 hover:bg-red-500/10 rounded-xl flex items-center justify-center text-[#484f58] hover:text-red-500 transition-all border border-white/5 active:scale-90"
-                title="Logout"
-              >
-                <LogOut className="w-5 h-5" />
-              </button>
-            </div>
-          )}
-        </div>
-      </nav>
+      <TopNav
+        themeClasses={themeClasses}
+        effectiveDeviceMode={effectiveDeviceMode}
+        isSidebarCollapsed={isSidebarCollapsed}
+        setIsSidebarCollapsed={setIsSidebarCollapsed}
+        setIsMenuOpen={setIsMenuOpen}
+        openTabs={openTabs}
+        activeView={activeView}
+        setActiveView={setActiveView}
+        toggleTab={toggleTab}
+        closeTab={closeTab}
+        menuItems={menuItems as any}
+        hasGeneratedCode={hasGeneratedCode}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        undoCode={undoCode}
+        redoCode={redoCode}
+        user={user}
+        setShowAuth={setShowAuth}
+        setShowCommandPalette={setShowCommandPalette}
+        auth={auth}
+      />
 
       {/* Main Content Area */}
       <div className={`flex flex-1 w-full min-h-0`}>
 
-      {/* Persistent Desktop Sidebar */}
-      {effectiveDeviceMode === 'desktop' && (
-        <aside className={cn("bg-[#161b22] border-r border-white/10 hidden lg:flex flex-col h-full shadow-3xl flex-shrink-0 transition-all duration-300 ease-in-out overflow-hidden", isSidebarCollapsed ? 'w-0' : 'w-72')}>
-          {/* Sidebar content remains here */}
-          <div className="p-6 border-b border-white/10 flex items-center justify-between bg-[#0d1117]/30">
-            <button 
-              onClick={() => setActiveView('home')}
-              className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left"
-            >
-              <img 
-                src="/logo.png" 
-                alt="NAVBHARAT navBharat-AI" 
-                className="w-8 h-8 object-contain drop-shadow-md select-none pointer-events-none" 
-                referrerPolicy="no-referrer"
-              />
-              <div>
-                <h2 className="font-black text-sm text-white tracking-tighter">NAVBHARAT <span className="text-indigo-500">navBharat-AI</span></h2>
-                <p className="text-[10px] text-[#8b949e] font-medium">Enterprise AI Workspace</p>
-              </div>
-            </button>
-          </div>
-          {/* Side Nav Content */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-8 custom-scrollbar">
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-black text-indigo-500 uppercase tracking-widest px-3 mb-4 flex items-center gap-2">
-                <div className="w-1 h-3 bg-indigo-500 rounded-full"></div>
-                Core Navigation
-              </div>
-              {menuItems.filter(item => enabledModules[item.id] !== false).map((item) => {
-                const isPreview = item.id === 'preview';
-                const isFiles = item.id === 'files';
-                const isLoginGated = (item.id === 'nbi_pro_chat' || item.id === 'sda_chat') && !user;
-                const isDisabled = (isPreview || isFiles) && !hasGeneratedCode;
-                const isActive = activeView === item.id;
-
-                return (
-                  <button
-                    key={item.id}
-                    disabled={isDisabled}
-                    title={isLoginGated ? 'Sign in to access this feature' : isDisabled ? 'Generate an app to enable this' : ''}
-                    onClick={() => {
-                      if (isPreview) { toggleTab('preview'); return; }
-                      if (item.id === 'asc_chat') { toggleTab('asc_chat'); return; }
-                      if (item.id === 'history' && !user) {
-                        setShowAuth(true);
-                        addLog('Chat history requires an active session. Please login.', 'warn');
-                        return;
-                      }
-                      toggleTab(item.id as ViewType);
-                    }}
-                    className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all group ${
-                      isActive
-                        ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20'
-                        : isDisabled
-                          ? 'opacity-40 grayscale cursor-not-allowed'
-                          : 'text-[#8b949e] hover:bg-white/5 hover:text-white'
-                    }`}
-                  >
-                    <item.icon className={`w-4.5 h-4.5 transition-transform group-hover:scale-110 ${
-                      isActive ? 'text-white' : isPreview && hasGeneratedCode ? 'text-emerald-500' : 'text-indigo-400'
-                    }`} />
-                    <span className="text-sm font-bold tracking-tight">{item.label}</span>
-                    {isLoginGated && (
-                      <span className="ml-auto flex items-center gap-1 text-[9px] font-black uppercase tracking-widest bg-amber-500/15 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">
-                        <Lock className="w-2.5 h-2.5" /> Login
-                      </span>
-                    )}
-                    {isActive && !isLoginGated && (
-                      <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </aside>
-      )}
-
-
-
-      {/* Main Content Component Area */}
-
-      {/* Unified Sidebar Navigation Drawer */}
-      <AnimatePresence>
-        {isMenuOpen && (
-          <div className="absolute inset-0 z-[200]">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsMenuOpen(false)}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            />
-            <motion.aside 
-              initial={{ x: '-100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '-100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className={cn("absolute left-0 top-0 bottom-0 w-[300px] border-r flex flex-col shadow-3xl select-none transition-colors duration-500", themeClasses.card, themeClasses.border, themeClasses.text)}
-            >
-              <div className={cn("p-6 border-b flex items-center justify-between", themeClasses.border)}>
-                <button 
-                  onClick={() => {
-                    setActiveView('home');
-                    setIsMenuOpen(false);
-                  }}
-                  className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left"
-                >
-                  <img 
-                    src="/logo.png" 
-                    alt="NAVBHARAT navBharat-AI" 
-                    className="w-8 h-8 object-contain drop-shadow-md select-none pointer-events-none" 
-                    referrerPolicy="no-referrer"
-                  />
-                  <div>
-                    <h2 className="font-black text-sm text-white tracking-tighter">NAVBHARAT <span className="text-indigo-500">navBharat-AI</span></h2>
-                    <p className="text-[10px] text-[#8b949e] font-medium">Enterprise AI Workspace</p>
-                  </div>
-                </button>
-                <button 
-                  onClick={() => setIsMenuOpen(false)} 
-                  className="p-2 hover:bg-white/5 rounded-xl text-[#8b949e] hover:text-white transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-4 space-y-8 custom-scrollbar">
-                <div className="space-y-1.5">
-                  <div className="text-[10px] font-black text-indigo-500 uppercase tracking-widest px-3 mb-4 flex items-center gap-2">
-                    <div className="w-1 h-3 bg-indigo-500 rounded-full"></div>
-                    Core Navigation
-                  </div>
-                  {menuItems.filter(item => enabledModules[item.id] !== false).map((item) => {
-                    const isPreview = item.id === 'preview';
-                    const isFiles = item.id === 'files';
-                    const isLoginGated = (item.id === 'nbi_pro_chat' || item.id === 'sda_chat') && !user;
-                    const isDisabled = (isPreview || isFiles) && !hasGeneratedCode;
-                    const isActive = activeView === item.id;
-
-                    return (
-                      <button
-                        key={item.id}
-                        disabled={isDisabled}
-                        title={isLoginGated ? 'Sign in to access this feature' : isDisabled ? 'Generate an app to enable this' : ''}
-                        onClick={() => {
-                          if (isPreview) { toggleTab('preview'); setIsMenuOpen(false); return; }
-                          if (item.id === 'asc_chat') { setShowVishwakarmaChooser(true); setIsMenuOpen(false); return; }
-                          if (item.id === 'history' && !user) {
-                            setShowAuth(true); setIsMenuOpen(false);
-                            addLog('Chat history requires an active session. Please login.', 'warn');
-                            return;
-                          }
-                          toggleTab(item.id as ViewType);
-                          setIsMenuOpen(false);
-                        }}
-                        className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all group ${
-                          isActive
-                            ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20'
-                            : isDisabled
-                              ? 'opacity-40 grayscale cursor-not-allowed'
-                              : 'text-[#8b949e] hover:bg-white/5 hover:text-white'
-                        }`}
-                      >
-                        <item.icon className={`w-4.5 h-4.5 transition-transform group-hover:scale-110 ${
-                          isActive ? 'text-white' : isPreview && hasGeneratedCode ? 'text-emerald-500' : 'text-indigo-400'
-                        }`} />
-                        <span className="text-sm font-bold tracking-tight">{item.label}</span>
-                        {isLoginGated && (
-                          <span className="ml-auto flex items-center gap-1 text-[9px] font-black uppercase tracking-widest bg-amber-500/15 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">
-                            <Lock className="w-2.5 h-2.5" /> Login
-                          </span>
-                        )}
-                        {!isLoginGated && (item as any).status && !isActive && (
-                          <div className={`ml-auto px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest border ${(item as any).status === 'Beta' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
-                            {(item as any).status}
-                          </div>
-                        )}
-                        {isActive && !isLoginGated && (
-                          <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>
-                        )}
-                        {isPreview && hasGeneratedCode && !isActive && (
-                          <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]"></div>
-                        )}
-                      </button>
-                    );
-                  })}
-
-                  {/* Theme Selector right below "Other" */}
-                  <div className="space-y-2 mt-2 px-1">
-                    <button
-                      onClick={() => setIsThemePickerOpen(!isThemePickerOpen)}
-                      className={cn(
-                        "w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all group border hover:bg-white/5 text-left",
-                        isThemePickerOpen 
-                          ? "bg-indigo-600/15 border-indigo-500/30 text-white" 
-                          : "border-transparent text-[#8b949e] hover:text-white"
-                      )}
-                    >
-                      <div className="flex items-center gap-3">
-                        <Palette className="w-4.5 h-4.5 text-indigo-400 group-hover:scale-110 transition-transform" />
-                        <span className="text-sm font-bold tracking-tight">Theme</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] font-semibold text-indigo-400 capitalize bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
-                          {theme === 'dim' ? 'Dim Light' : theme === 'comfort' ? 'Comfort' : theme === 'contrast' ? 'Contrast' : theme === 'light' ? 'Light' : 'Dark'}
-                        </span>
-                      </div>
-                    </button>
-
-                    {isThemePickerOpen && (
-                      <div className="grid grid-cols-2 gap-2 p-2 bg-black/25 rounded-2xl border border-white/5">
-                        {THEME_MODES.map((t) => {
-                          const isSelected = theme === t.value;
-                          return (
-                            <button
-                              key={t.value}
-                              onClick={() => {
-                                setTheme(t.value);
-                                addLog(`Theme changed to ${t.label}`, 'success');
-                              }}
-                              className={cn(
-                                "flex items-center gap-1.5 px-3 py-2 rounded-xl text-left text-[10px] font-bold uppercase tracking-wider transition-all border",
-                                isSelected 
-                                  ? "bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-600/10" 
-                                  : "bg-white/5 border-transparent text-[#8b949e] hover:bg-white/10 hover:text-white"
-                              )}
-                            >
-                              <div className={cn(
-                                "w-2 h-2 rounded-full shrink-0",
-                                t.value === 'light' ? 'bg-white border border-gray-400' :
-                                t.value === 'dark' ? 'bg-[#0d1117]' :
-                                t.value === 'dim' ? 'bg-[#15202b]' :
-                                t.value === 'comfort' ? 'bg-[#fdf6e3]' :
-                                'bg-[#ffff00]'
-                              )} />
-                              <span className="truncate">{t.label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-4 pt-4 border-t border-white/5">
-                  <div className="text-[10px] font-black text-emerald-500 uppercase tracking-widest px-3 flex items-center gap-2">
-                    <div className="w-1 h-3 bg-emerald-500 rounded-full"></div>
-                    System Matrix
-                  </div>
-                  <div className="px-1 space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
-                      <button 
-                        onClick={() => {
-                          toggleTab('settings');
-                          setIsMenuOpen(false);
-                          setErrorContext(null);
-                        }}
-                        className={`flex flex-col items-center justify-center gap-2 border py-5 rounded-2xl transition-all group shadow-lg ${activeView === 'settings' ? 'bg-indigo-600 border-indigo-500' : 'bg-[#161b22] border-white/10 hover:border-indigo-500/50'}`}
-                      >
-                        <Settings className="w-6 h-6 text-indigo-400 group-hover:rotate-90 transition-transform duration-500" />
-                        <span className={`text-[10px] font-black uppercase tracking-widest ${activeView === 'settings' ? 'text-white' : 'text-[#8b949e]'}`}>Settings</span>
-                      </button>
-                      <button 
-                        onClick={() => {
-                          toggleTab('donation');
-                          setIsMenuOpen(false);
-                        }}
-                        className="flex flex-col items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 py-5 rounded-2xl transition-all shadow-xl shadow-indigo-600/30 group"
-                      >
-                        <Heart className="w-6 h-6 text-white group-hover:scale-110 transition-transform" />
-                        <span className="text-[10px] font-black text-white uppercase tracking-widest">Donate</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5 pt-4 border-t border-white/5">
-                   <button
-                    onClick={() => {
-                        toggleTab('about');
-                        setIsMenuOpen(false);
-                    }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group ${activeView === 'about' ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:bg-white/5 hover:text-white'}`}
-                  >
-                    <Info className="w-4.5 h-4.5 text-indigo-400" />
-                    <span className="text-sm font-bold tracking-tight">About Us</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                        toggleTab('connect_domain');
-                        setIsMenuOpen(false);
-                    }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group ${activeView === 'connect_domain' ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:bg-white/5 hover:text-white'}`}
-                  >
-                    <Globe className="w-4.5 h-4.5 text-indigo-400" />
-                    <span className="text-sm font-bold tracking-tight">Connect my website</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                        toggleTab('engine_builder');
-                        setIsMenuOpen(false);
-                    }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group ${activeView === 'engine_builder' ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:bg-white/5 hover:text-white'}`}
-                  >
-                    <Info className="w-4.5 h-4.5 text-indigo-400" />
-                    <span className="text-sm font-bold tracking-tight">App Builder (New Engine)</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                        toggleTab('admin');
-                        setIsMenuOpen(false);
-                    }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group ${activeView === 'admin' ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:bg-white/5 hover:text-white'}`}
-                  >
-                    <Lock className="w-4.5 h-4.5 text-indigo-400" />
-                    <span className="text-sm font-bold tracking-tight">{isAdmin ? 'Admin Dashboard' : 'Admin Login'}</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-6 border-t border-white/5 bg-[#0d1117]">
-                 <p className="text-[9px] text-[#484f58] text-center font-medium">Navbharat Terminal v2.4.0 • Building Future</p>
-              </div>
-            </motion.aside>
-          </div>
-        )}
-      </AnimatePresence>
-
+      <SidebarNav
+        themeClasses={themeClasses}
+        effectiveDeviceMode={effectiveDeviceMode}
+        isSidebarCollapsed={isSidebarCollapsed}
+        isMenuOpen={isMenuOpen}
+        setIsMenuOpen={setIsMenuOpen}
+        menuItems={menuItems as any}
+        enabledModules={enabledModules}
+        activeView={activeView}
+        toggleTab={toggleTab}
+        setActiveView={setActiveView}
+        hasGeneratedCode={hasGeneratedCode}
+        user={user}
+        setShowAuth={setShowAuth}
+        addLog={addLog}
+        theme={theme}
+        setTheme={setTheme}
+        isThemePickerOpen={isThemePickerOpen}
+        setIsThemePickerOpen={setIsThemePickerOpen}
+        isAdmin={isAdmin}
+        setShowVishwakarmaChooser={setShowVishwakarmaChooser}
+        setErrorContext={setErrorContext}
+      />
       {/* Workspace */}
       <main className="flex flex-1 relative min-h-0 min-w-0">
 
@@ -6480,1207 +5104,150 @@ ${pending.map(p => `  - ${p}`).join('\n')}
              />
           )}
           {activeView === 'settings' && (
-            <div className={cn("flex-1 flex flex-col h-full overflow-y-auto custom-scrollbar animate-in fade-in zoom-in duration-300", themeClasses.bg)}>
-              {/* Settings Header */}
-              <div className={cn("h-14 border-b flex items-center px-4 gap-4 sticky top-0 z-20 select-none", themeClasses.card, themeClasses.border)}>
-                {settingsScreen !== 'root' && (
-                  <button 
-                    onClick={() => setSettingsScreen('root')}
-                    className="p-2 hover:bg-white/5 rounded-xl text-[#8b949e] hover:text-white transition-all border border-white/5"
-                  >
-                    <ChevronRight className="w-5 h-5 rotate-180" />
-                  </button>
-                )}
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-indigo-600 rounded-lg">
-                    <Settings className="w-4 h-4 text-white" />
-                  </div>
-                  <h3 className="font-bold text-white text-sm">
-                    {settingsScreen === 'root' ? 'Settings' : settingsScreen.charAt(0).toUpperCase() + settingsScreen.slice(1).replace(/_/g, ' ')}
-                  </h3>
-                </div>
-                <button 
-                  onClick={() => toggleTab('nbi_chat')}
-                  className="ml-auto p-2 hover:bg-white/5 rounded-xl text-[#8b949e] transition-all"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Settings Content Area */}
-              <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0d1117]">
-                <div className="max-w-xl mx-auto p-4 sm:p-6 pb-20">
-                  <AnimatePresence mode="wait">
-                    {settingsScreen === 'root' && (
-                      <motion.div
-                        key="root"
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        className="space-y-4"
-                      >
-                        {/* View Mode */}
-                        <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
-                          <div className="flex items-center gap-3 mb-3">
-                            <Monitor className="w-4 h-4 text-indigo-400" />
-                            <h4 className="text-xs font-bold text-white uppercase tracking-widest">View Mode</h4>
-                          </div>
-                          <div className="grid grid-cols-3 gap-2">
-                            {['auto', 'mobile', 'desktop'].map(m => (
-                              <button key={m} onClick={() => setDeviceMode(m as any)}
-                                className={`py-2 rounded-xl text-xs font-bold transition-all border ${deviceMode === m ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20'}`}>
-                                {m.charAt(0).toUpperCase() + m.slice(1)}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        {/* 6 grouped sections */}
-                        {[
-                          {
-                            title: 'App Settings',
-                            color: 'text-blue-400',
-                            icon: Settings,
-                            items: [
-                              { id: 'general', label: 'General', icon: LayoutDashboard },
-                              { id: 'secrets', label: 'Secrets & Keys', icon: Lock },
-                              { id: 'database', label: 'Database', icon: Database },
-                              { id: 'connections', label: 'Connections', icon: GitFork },
-                              { id: 'shell', label: 'Terminal', icon: Terminal },
-                              { id: 'logs', label: 'Logs', icon: Activity },
-                              { id: 'git', label: 'Git', icon: GitBranch },
-                            ],
-                          },
-                          {
-                            title: 'AI Tools',
-                            color: 'text-violet-400',
-                            icon: Bot,
-                            items: [
-                              { id: 'sda_chat', label: 'Doctor AI', icon: Activity, tab: true },
-                              { id: 'voice', label: 'Voice to App', icon: Mic, tab: true },
-                              { id: 'botbuilder', label: 'Bot Builder', icon: MessageSquare, tab: true },
-                              { id: 'imagegen', label: 'AI Image Gen', icon: Wand2, tab: true },
-                              { id: 'debugger', label: 'AI Debugger', icon: Bug, tab: true },
-                              { id: 'codereview', label: 'Code Review', icon: Code, tab: true },
-                            ],
-                          },
-                          {
-                            title: 'Developer Tools',
-                            color: 'text-emerald-400',
-                            icon: Code,
-                            items: [
-                              { id: 'testing', label: 'Test Runner', icon: TestTube, tab: true },
-                              { id: 'api', label: 'API Tester', icon: Globe, tab: true },
-                              { id: 'diff', label: 'Diff Viewer', icon: GitMerge, tab: true },
-                              { id: 'versioning', label: 'Versioning', icon: GitBranch, tab: true },
-                              { id: 'performance', label: 'Performance', icon: Gauge, tab: true },
-                              { id: 'minifier', label: 'Minifier', icon: Minimize2, tab: true },
-                            ],
-                          },
-                          {
-                            title: 'Design & Build',
-                            color: 'text-pink-400',
-                            icon: Palette,
-                            items: [
-                              { id: 'screenshot', label: 'Screenshot→Code', icon: Camera, tab: true },
-                              { id: 'multipages', label: 'Multi-Page', icon: Layout, tab: true },
-                              { id: 'components', label: 'Components', icon: Puzzle, tab: true },
-                              { id: 'designsys', label: 'Design System', icon: LayoutTemplate, tab: true },
-                              { id: 'darkmode', label: 'Dark Mode Gen', icon: Moon, tab: true },
-                              { id: 'figma', label: 'Figma Import', icon: Figma, tab: true },
-                            ],
-                          },
-                          {
-                            title: 'Publish & Deploy',
-                            color: 'text-cyan-400',
-                            icon: Rocket,
-                            items: [
-                              { id: 'apk', label: 'APK Builder', icon: Smartphone, tab: true },
-                              { id: 'cicd', label: 'CI/CD Pipeline', icon: Rocket, tab: true },
-                              { id: 'cloudeploy', label: 'Multi-Cloud', icon: CloudUpload, tab: true },
-                              { id: 'domain', label: 'Custom Domain', icon: GlobeIcon, tab: true },
-                              { id: 'seo', label: 'SEO Optimizer', icon: SearchIcon, tab: true },
-                              { id: 'appstore', label: 'App Store', icon: Package, tab: true },
-                            ],
-                          },
-                          {
-                            title: 'Monetization & Team',
-                            color: 'text-amber-400',
-                            icon: IndianRupee,
-                            items: [
-                              { id: 'monetize', label: 'Monetize', icon: IndianRupee, tab: true },
-                              { id: 'team', label: 'Team', icon: Users2, tab: true },
-                              { id: 'collab', label: 'Live Collab', icon: Users2, tab: true },
-                              { id: 'whitelabel', label: 'Whitelabel', icon: Palette, tab: true },
-                              { id: 'analytics', label: 'Analytics', icon: TrendingUp, tab: true },
-                              { id: 'database', label: 'Database', icon: Database, tab: true },
-                            ],
-                          },
-                        ].map(group => (
-                          <div key={group.title} className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
-                            <div className="flex items-center gap-2 mb-3">
-                              <group.icon className={`w-3.5 h-3.5 ${group.color}`} />
-                              <span className={`text-[10px] font-black uppercase tracking-widest ${group.color}`}>{group.title}</span>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              {group.items.map(item => (
-                                <button
-                                  key={item.id}
-                                  onClick={() => (item as any).tab ? toggleTab(item.id as any) : setSettingsScreen(item.id as any)}
-                                  className="flex items-center gap-2 p-2.5 bg-[#0d1117] border border-white/5 rounded-xl hover:border-indigo-500/30 hover:bg-indigo-600/10 transition-all group text-left"
-                                >
-                                  <item.icon className="w-3.5 h-3.5 text-[#484f58] group-hover:text-indigo-400 transition-colors flex-shrink-0" />
-                                  <span className="text-[10px] font-bold text-[#8b949e] group-hover:text-white transition-colors truncate">{item.label}</span>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-
-                        {/* Admin + Footer */}
-                        {isAdmin && (
-                          <button
-                            onClick={() => setSettingsScreen('metrics' as any)}
-                            className="w-full flex items-center gap-3 p-3 bg-[#161b22] border border-white/5 rounded-xl hover:border-indigo-500/20 transition-all group"
-                          >
-                            <BarChart2 className="w-4 h-4 text-[#484f58] group-hover:text-indigo-400 transition-colors" />
-                            <span className="text-xs font-bold text-[#8b949e] group-hover:text-white transition-colors">Live Metrics</span>
-                          </button>
-                        )}
-                        <button
-                          onClick={() => setSettingsScreen('admin' as any)}
-                          className="w-full flex items-center gap-3 p-3 bg-[#161b22] border border-white/5 rounded-xl hover:border-red-500/20 transition-all group"
-                        >
-                          <Lock className="w-4 h-4 text-[#484f58] group-hover:text-red-400 transition-colors" />
-                          <span className="text-xs font-bold text-[#8b949e] group-hover:text-white transition-colors">Admin Login</span>
-                        </button>
-
-                        <div className="pt-4 border-t border-white/5 flex flex-col items-center">
-                          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-3">
-                            <span className="text-white font-black text-xs">NB</span>
-                          </div>
-                          <p className="text-[9px] text-[#484f58] font-black uppercase tracking-[0.3em]">Navbharat AI v5.0.0</p>
-                        </div>
-                      </motion.div>
-                    )}
-
-                    {settingsScreen === 'general' && (
-                      <motion.div 
-                        key="general"
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        className="space-y-6"
-                      >
-                        <div className="px-1 py-4">
-                           <h2 className="text-2xl font-black text-white tracking-tight">General</h2>
-                           <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Application Identity & Preferences</p>
-                        </div>
-
-                        <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 shadow-2xl space-y-8">
-                          <div className="flex flex-col items-center text-center space-y-4">
-                             <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center shadow-2xl relative group cursor-pointer overflow-hidden">
-                                <Bot className="w-10 h-10 text-white group-hover:scale-110 transition-transform" />
-                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                   <Plus className="w-6 h-6 text-white" />
-                                </div>
-                             </div>
-                             <div>
-                               <h3 className="text-sm font-black text-white uppercase tracking-widest">Navbharat AI</h3>
-                               <p className="text-[10px] text-[#484f58] font-bold uppercase tracking-widest mt-1">Workspace v2.4.0</p>
-                             </div>
-                          </div>
-
-                          <div className="space-y-6 pt-4">
-                             <div className="space-y-3">
-                               <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1 block pl-1">Application Name</label>
-                               <input 
-                                 defaultValue="Navbharat AI"
-                                 className="w-full bg-[#0d1117] border border-white/10 rounded-[1.5rem] px-6 py-4 text-sm font-bold text-white outline-none focus:border-indigo-500 transition-all shadow-inner"
-                               />
-                             </div>
-                             
-                             <div className="space-y-3 pt-6 border-t border-white/10">
-                                <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block pl-1">Device Mode</label>
-                                <div className="grid grid-cols-4 gap-2">
-                                  {[
-                                      {id: 'auto', label: 'Auto'},
-                                      {id: 'mobile', label: '📱'},
-                                      {id: 'tablet', label: '📟'},
-                                      {id: 'desktop', label: '💻'}
-                                  ].map(mode => (
-                                   <button 
-                                      key={mode.id}
-                                      onClick={() => setDeviceMode(mode.id as any)}
-                                      className={`p-3 rounded-xl border border-white/5 font-black text-[10px] uppercase tracking-widest ${deviceMode === mode.id ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-[#0d1117] text-[#8b949e]'}`}
-                                   >
-                                      {mode.label}
-                                   </button>
-                                  ))}
-                                </div>
-                             </div>
-
-                             <div className="space-y-3 pt-6 border-t border-white/10">
-                               <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1 block pl-1">Description</label>
-                               <textarea 
-                                 defaultValue="The ultimate specialized AI developer workspace for Bharat."
-                                 className="w-full bg-[#0d1117] border border-white/10 rounded-[1.5rem] px-6 py-5 text-sm font-medium text-[#8b949e] outline-none focus:border-indigo-500 transition-all min-h-[120px] resize-none shadow-inner"
-                               />
-                             </div>
-                             <div className="flex items-center justify-between p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
-                               <div className="flex items-center gap-4">
-                                 <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center">
-                                   <Terminal className="w-5 h-5 text-indigo-400" />
-                                 </div>
-                                 <div>
-                                   <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Developer Mode</h4>
-                                   <p className="text-[9px] text-[#484f58] font-bold uppercase">Advanced debug tools</p>
-                                 </div>
-                               </div>
-                               <button className="w-12 h-6 bg-indigo-600 rounded-full p-1 flex items-center justify-end transition-all">
-                                 <div className="w-4 h-4 bg-white rounded-full shadow-lg"></div>
-                               </button>
-                             </div>
-
-                             <div className="p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner space-y-3">
-                               <div className="flex items-center gap-3 mb-2">
-                                 <div className="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
-                                   <Languages className="w-5 h-5 text-amber-400" />
-                                 </div>
-                                 <div>
-                                   <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Chat Language</h4>
-                                   <p className="text-[9px] text-[#484f58] font-bold uppercase">AI conversation language preference</p>
-                                 </div>
-                               </div>
-                               <div className="grid grid-cols-2 gap-2">
-                                 {(['hindi','hinglish','english','auto'] as const).map(lang => {
-                                   const labels = { hindi: '🇮🇳 Hindi', hinglish: '🔀 Hinglish', english: '🇬🇧 English', auto: '🌐 Auto' };
-                                   const isActive = (preferredLanguage || 'auto') === lang;
-                                   return (
-                                     <button
-                                       key={lang}
-                                       onClick={() => setPreferredLanguage(lang)}
-                                       className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${isActive ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'bg-white/5 border-white/10 text-[#8b949e] hover:border-amber-500/30'}`}
-                                     >
-                                       {labels[lang]}
-                                     </button>
-                                   );
-                                 })}
-                               </div>
-                               <p className="text-[9px] text-[#484f58]">Code is always generated in English regardless of this setting.</p>
-                             </div>
-                          </div>
-
-                          <button className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[1.5rem] text-xs font-black uppercase tracking-[0.2em] shadow-2xl shadow-indigo-600/30 active:scale-[0.98] transition-all">
-                             Update Preferences
-                          </button>
-                        </div>
-                      </motion.div>
-                    )}
-
-                    {settingsScreen === 'modules' && (
-                      <motion.div 
-                        key="modules"
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        className="space-y-6"
-                      >
-                        {/* Section Header */}
-                        <div className="px-1 py-4">
-                           <h2 className="text-2xl font-black text-white tracking-tight">Active Modules</h2>
-                           <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Control Navbharat's Core Intelligence</p>
-                        </div>
-
-                        {/* Brain Engine Card */}
-                        <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-6 shadow-2xl overflow-hidden relative">
-                          <div className="flex items-center gap-4 mb-6">
-                            <div className="w-12 h-12 bg-indigo-600/10 rounded-2xl flex items-center justify-center">
-                               <Cpu className="w-6 h-6 text-indigo-400" />
-                            </div>
-                            <div>
-                               <h3 className="font-black text-white text-sm uppercase tracking-wider">Brain Engine</h3>
-                               <p className="text-[10px] text-[#8b949e] font-medium italic">Internal reasoning & generation engine</p>
-                            </div>
-                          </div>
-                          
-                          <div className="bg-[#0d1117]/60 border border-white/5 rounded-3xl p-5 flex items-start gap-4">
-                            <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 flex items-center justify-center flex-shrink-0">
-                              <Sparkles className="w-5 h-5 text-indigo-400" />
-                            </div>
-                            <div>
-                              <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-1.5">Sovereign Autopilot Engaged</h4>
-                              <p className="text-[11px] text-[#8b949e] leading-relaxed">
-                                Navbharat AI incorporates a fully autonomous routing core. API requests are dynamically optimized, balanced, and auto-routed over resilient premium cognitive channels based on complexity, security profile, and operational load to ensure maximum up-times and absolute privacy.
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="mt-8 pt-8 border-t border-white/5">
-                            <h4 className="text-[10px] font-black text-white uppercase tracking-widest mb-4">Brain API Credentials</h4>
-                            <div className="space-y-4">
-                              {Object.entries(PROVIDER_CONFIG).map(([id, provider]) => (
-                                <div key={id} className="space-y-2">
-                                  <div className="flex items-center justify-between px-1">
-                                    <span className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">{provider.label}</span>
-                                    <a href={provider.link} target="_blank" rel="noreferrer" className="text-[9px] text-indigo-400 font-black uppercase hover:text-white transition-colors">Get API Key</a>
-                                  </div>
-                                  <div className="relative group">
-                                    <input 
-                                      type={showKeyStates[id] ? "text" : "password"}
-                                      value={(keys as any)[id] || ''}
-                                      onChange={(e) => setKeys(prev => ({ ...prev, [id]: e.target.value }))}
-                                      placeholder={`Enter ${id} key...`}
-                                      className="w-full bg-black/40 border border-white/5 rounded-2xl px-5 py-4 text-xs font-mono text-indigo-400 outline-none focus:border-indigo-500/50 transition-all"
-                                    />
-                                    <button 
-                                      onClick={() => setShowKeyStates(prev => ({ ...prev, [id]: !prev[id] }))}
-                                      className="absolute right-4 top-1/2 -translate-y-1/2 text-[#484f58] hover:text-white transition-colors"
-                                    >
-                                      {showKeyStates[id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Workspace Panels Toggle */}
-                        <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-6 shadow-2xl">
-                           <div className="flex items-center gap-4 mb-6">
-                              <div className="w-12 h-12 bg-emerald-600/10 rounded-2xl flex items-center justify-center">
-                                 <Monitor className="w-6 h-6 text-emerald-400" />
-                              </div>
-                              <div>
-                                 <h3 className="font-black text-white text-sm uppercase tracking-wider">Workspace Panels</h3>
-                                 <p className="text-[10px] text-[#8b949e] font-medium italic">Toggle active navigation modules</p>
-                              </div>
-                           </div>
-
-                           <div className="grid gap-2">
-                              {menuItems.map(item => (
-                                <button 
-                                  key={item.id}
-                                  onClick={() => setEnabledModules(prev => ({ ...prev, [item.id]: !prev[item.id] }))}
-                                  className={`flex items-center gap-4 p-4 rounded-[1.5rem] border transition-all active:scale-[0.97] ${enabledModules[item.id] !== false ? 'bg-[#0d1117] border-white/10' : 'bg-transparent border-white/5 opacity-50'}`}
-                                >
-                                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${enabledModules[item.id] !== false ? 'bg-indigo-500/20 text-indigo-400' : 'bg-white/5 text-[#484f58]'}`}>
-                                    <item.icon className="w-5 h-5" />
-                                  </div>
-                                  <span className="flex-1 text-[11px] font-black uppercase tracking-widest text-left text-white">{item.label}</span>
-                                  <div className={`w-12 h-6 rounded-full p-1 flex items-center transition-all ${enabledModules[item.id] !== false ? 'bg-emerald-500/20 justify-end border border-emerald-500/30' : 'bg-black/40 justify-start border border-white/5'}`}>
-                                    <div className={`w-4 h-4 rounded-full shadow-lg transition-transform ${enabledModules[item.id] !== false ? 'bg-emerald-400' : 'bg-[#484f58]'}`}></div>
-                                  </div>
-                                </button>
-                              ))}
-                           </div>
-                        </div>
-                      </motion.div>
-                    )}
-
-                    {settingsScreen === 'secrets' && (
-                      <motion.div
-                        key="secrets"
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        className="space-y-6"
-                      >
-                        {user ? (
-                           <SecretManager userId={user.uid} />
-                        ) : (
-                           <div className="p-6 text-white text-center">Please log in to manage secrets</div>
-                        )}
-                      </motion.div>
-                    )}
-
-                    {settingsScreen === 'database' && (
-                      <motion.div
-                        key="database"
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        className="space-y-6"
-                      >
-                        {user ? (
-                          <DatabaseSettings userId={user.uid} />
-                        ) : (
-                          <div className="p-6 text-white text-center">Please log in to configure your database</div>
-                        )}
-                      </motion.div>
-                    )}
-
-                    {settingsScreen === 'connections' && (
-                      <motion.div 
-                        key="connections"
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        className="space-y-6"
-                      >
-                         <div className="px-1 py-4">
-                           <h2 className="text-2xl font-black text-white tracking-tight">Connections</h2>
-                           <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Sync your external services</p>
-                         </div>
-
-                        <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex flex-col items-center text-center space-y-8 shadow-2xl relative overflow-hidden group hover:border-indigo-500/30 transition-all">
-                            <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
-                              <Github className="w-24 h-24 text-white" />
-                            </div>
-                            
-                            <div className="w-20 h-20 bg-white/5 rounded-[2rem] flex items-center justify-center border border-white/10 shadow-3xl relative overflow-hidden group z-10">
-                               <Github className="w-10 h-10 text-white group-hover:scale-110 transition-transform" />
-                               {githubToken && (
-                                 <div className="absolute top-2 right-2 w-4 h-4 bg-emerald-500 rounded-full border-2 border-[#161b22]"></div>
-                               )}
-                            </div>
-                            <div className="space-y-2 z-10">
-                               <h3 className="text-sm font-black text-white uppercase tracking-widest">GitHub Integration</h3>
-                               <p className="text-[10px] text-[#8b949e] max-w-[240px] mx-auto leading-relaxed font-medium">
-                                  {githubToken 
-                                    ? `Logged in as ${githubUser?.login}. GitHub Connected.`
-                                    : "Authorize Navbharat to import repos and push code updates."}
-                               </p>
-                            </div>
-                            <div className="flex flex-col gap-3 w-full z-10">
-                               {!githubToken ? (
-                                  <div className="space-y-4 w-full">
-                                    <button 
-                                      onClick={connectGitHub}
-                                      className="w-full py-5 bg-white text-black rounded-[1.5rem] font-black uppercase tracking-widest transition-all hover:scale-[1.02] shadow-2xl active:scale-[0.98] flex items-center justify-center gap-3"
-                                    >
-                                       <Github className="w-4 h-4" />
-                                       Connect with GitHub
-                                    </button>
-                                    
-                                    <div className="flex items-center gap-4 py-2 opacity-30">
-                                      <div className="flex-1 h-px bg-white/10"></div>
-                                      <span className="text-[8px] font-black uppercase text-[#484f58]">OR USE TOKEN</span>
-                                      <div className="flex-1 h-px bg-white/10"></div>
-                                    </div>
-
-                                    <div className="space-y-3 text-left">
-                                      <a 
-                                        href="https://github.com/settings/tokens/new?scopes=repo,read:user,user:email&description=Navbharat%20AI%20Access"
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="flex items-center justify-center gap-2 w-full py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-[#8b949e] hover:text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
-                                      >
-                                         <Github className="w-3.5 h-3.5" />
-                                         Generate PAT Token
-                                         <ExternalLink className="w-3 h-3" />
-                                      </a>
-
-                                      <div className="relative group/mini-input flex items-center gap-2">
-                                        <div className="relative flex-1">
-                                          <input 
-                                            type="password"
-                                            placeholder="Enter ghp_xxxxxxxx..."
-                                            value={patInputValue}
-                                            onChange={(e) => setPatInputValue(e.target.value)}
-                                            className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 text-[10px] text-white outline-none focus:border-indigo-500/50 transition-all font-mono"
-                                            onKeyDown={(e) => {
-                                              if (e.key === 'Enter') {
-                                                const val = patInputValue.trim();
-                                                if (val && val.startsWith('ghp_')) {
-                                                  setGithubToken(val);
-                                                  localStorage.setItem('gh_token', val);
-                                                  fetchGitHubUser(val);
-                                                  setPatInputValue('');
-                                                }
-                                              }
-                                            }}
-                                          />
-                                        </div>
-                                        <button 
-                                          onClick={() => {
-                                            const val = patInputValue.trim();
-                                            if (val && val.startsWith('ghp_')) {
-                                              setGithubToken(val);
-                                              localStorage.setItem('gh_token', val);
-                                              fetchGitHubUser(val);
-                                              setPatInputValue('');
-                                            } else {
-                                              addLog('Invalid token format', 'error');
-                                            }
-                                          }}
-                                          className="p-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-all shadow-lg active:scale-95"
-                                        >
-                                          <ChevronRight className="w-4 h-4" />
-                                        </button>
-                                      </div>
-                                      <p className="text-[8px] text-[#484f58] font-bold uppercase tracking-widest text-center italic">Paste Token & Click Connect</p>
-                                    </div>
-                                  </div>
-                               ) : (
-                                  <div className="flex flex-col gap-3">
-                                     <div className="flex gap-2">
-                                       <button 
-                                         onClick={() => setSettingsScreen('github_repos')}
-                                         className="flex-1 py-5 bg-indigo-600 text-white rounded-[1.5rem] font-black uppercase tracking-widest transition-all hover:bg-indigo-700 shadow-2xl flex items-center justify-center gap-3"
-                                       >
-                                          <List className="w-4 h-4" />
-                                          Manage Repos
-                                       </button>
-                                       <button 
-                                         onClick={disconnectGitHub}
-                                         className="p-5 bg-red-500/10 hover:bg-red-500 text-[#f85149] hover:text-white rounded-[1.5rem] transition-all border border-red-500/20 shadow-xl"
-                                       >
-                                          <LogOut className="w-5 h-5" />
-                                       </button>
-                                     </div>
-                                     {selectedRepo && (
-                                       <div className="p-4 bg-black/40 rounded-2xl border border-white/5 flex items-center gap-4">
-                                          <div className="w-10 h-10 bg-indigo-500/20 rounded-xl flex items-center justify-center">
-                                            <GitFork className="w-4 h-4 text-indigo-400" />
-                                          </div>
-                                          <div className="flex-1 text-left">
-                                            <div className="text-[10px] font-black text-white uppercase tracking-tighter">Active Sync</div>
-                                            <div className="text-[11px] font-bold text-indigo-400 truncate">{selectedRepo.full_name}</div>
-                                          </div>
-                                          <button 
-                                            onClick={() => setActiveView('git')}
-                                            className="px-4 py-2 bg-indigo-600/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-lg text-[9px] font-black uppercase transition-all"
-                                          >
-                                            Go to Git
-                                          </button>
-                                       </div>
-                                     )}
-                                  </div>
-                               )}
-                            </div>
-                         </div>
-
-                         {/* G3 — E2B API key: unlocks real cloud VM for Pro builds */}
-                         <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-5">
-                            <div className="flex items-center gap-5">
-                               <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border transition-all ${userE2bKey ? 'bg-green-600/10 border-green-500/30' : 'bg-white/5 border-white/5'}`}>
-                                  <Cpu className={`w-7 h-7 ${userE2bKey ? 'text-green-400' : 'text-[#484f58]'}`} />
-                               </div>
-                               <div>
-                                  <h4 className="text-[11px] font-black text-white uppercase tracking-widest">E2B Cloud Execution</h4>
-                                  <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">
-                                    {userE2bKey ? 'Real cloud VM active — npm, browser, deploy enabled' : 'Optional — unlocks real npm + browser in Pro builds'}
-                                  </p>
-                               </div>
-                            </div>
-                            <div className="space-y-2">
-                               <input
-                                 type="password"
-                                 value={userE2bKey}
-                                 onChange={e => {
-                                   setUserE2bKey(e.target.value);
-                                   try { localStorage.setItem('engineer_e2b_key', e.target.value); } catch {}
-                                 }}
-                                 placeholder="e2b_sk_…"
-                                 className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50 font-mono"
-                               />
-                               <p className="text-[9px] text-[#484f58]">Free tier available at <span className="text-indigo-400">e2b.dev</span>. Without a key, Pro runs in fast in-memory mode.</p>
-                            </div>
-                         </div>
-
-                         <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex items-center justify-between opacity-50 grayscale pointer-events-none group">
-                            <div className="flex items-center gap-5">
-                               <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center border border-white/5">
-                                  <Database className="w-7 h-7 text-indigo-400" />
-                               </div>
-                               <div>
-                                  <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Firebase Sync</h4>
-                                  <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Enterprise Beta</p>
-                               </div>
-                            </div>
-                            <div className="px-3 py-1 bg-white/5 rounded-full text-[8px] font-black uppercase text-[#484f58]">Soon</div>
-                         </div>
-                      </motion.div>
-                    )}
-
-                    {settingsScreen === 'github_repos' && (
-                      <motion.div 
-                        key="github_repos"
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        className="space-y-6"
-                      >
-                         <div className="flex items-center gap-4 px-1 py-4">
-                            <button 
-                              onClick={() => setSettingsScreen('connections')}
-                              className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center border border-white/10 hover:bg-white/10 transition-all"
-                            >
-                               <ChevronLeft className="w-5 h-5 text-white" />
-                            </button>
-                            <div>
-                               <h2 className="text-2xl font-black text-white tracking-tight">GitHub Repositories</h2>
-                               <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Select a repository to sync</p>
-                            </div>
-                         </div>
-
-                         <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] overflow-hidden shadow-2xl">
-                            <div className="p-6 border-b border-white/5 bg-white/2 flex items-center gap-4">
-                               <Search className="w-4 h-4 text-[#484f58]" />
-                               <input 
-                                 type="text"
-                                 placeholder="Search your repositories..."
-                                 value={ghSearchQuery}
-                                 onChange={(e) => setGHSearchQuery(e.target.value)}
-                                 className="bg-transparent border-none focus:outline-none text-sm text-white w-full placeholder:text-[#484f58] font-medium"
-                               />
-                               <button 
-                                 onClick={() => githubToken && fetchUserRepos(githubToken)}
-                                 className="p-2 bg-white/5 hover:bg-white/10 rounded-lg transition-all"
-                                 title="Refresh List"
-                               >
-                                  <RefreshCw className="w-4 h-4 text-[#484f58]" />
-                               </button>
-                            </div>
-                            <div className="max-h-[500px] overflow-y-auto divide-y divide-white/5 scrollbar-hide">
-                               {repositories.length === 0 ? (
-                                 <div className="p-12 text-center flex flex-col items-center gap-4">
-                                   <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center">
-                                      <Box className="w-8 h-8 text-[#484f58]" />
-                                   </div>
-                                   <p className="text-[10px] text-[#484f58] font-black uppercase tracking-widest">No Repositories Found</p>
-                                 </div>
-                               ) : (
-                                 repositories
-                                   .filter(r => r.name.toLowerCase().includes(ghSearchQuery.toLowerCase()))
-                                   .map((repo) => (
-                                   <div 
-                                     key={repo.id}
-                                     onClick={() => setSelectedRepo(repo)}
-                                     className={`p-6 flex items-center justify-between cursor-pointer transition-all group ${selectedRepo?.id === repo.id ? 'bg-indigo-600/10' : 'hover:bg-white/5'}`}
-                                   >
-                                      <div className="flex items-center gap-5">
-                                         <div className={`w-12 h-12 rounded-xl flex items-center justify-center border transition-all ${selectedRepo?.id === repo.id ? 'bg-indigo-600 border-indigo-600' : 'bg-white/5 border-white/5'}`}>
-                                            <Folder className={`w-5 h-5 ${selectedRepo?.id === repo.id ? 'text-white' : 'text-[#484f58] group-hover:text-white'}`} />
-                                         </div>
-                                         <div>
-                                            <h4 className="text-[12px] font-black text-white uppercase tracking-tight mb-1">{repo.name}</h4>
-                                            <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest">{repo.private ? 'Private' : 'Public'} • Updated {new Date(repo.updated_at).toLocaleDateString()}</p>
-                                         </div>
-                                      </div>
-                                      {selectedRepo?.id === repo.id && (
-                                         <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center border-4 border-[#161b22]">
-                                            <Check className="w-3 h-3 text-white stroke-[4]" />
-                                         </div>
-                                      )}
-                                   </div>
-                                 ))
-                               )}
-                            </div>
-                         </div>
-
-                         {selectedRepo && (
-                           <motion.div 
-                             initial={{ opacity: 0, y: 20 }}
-                             animate={{ opacity: 1, y: 0 }}
-                             className="bg-indigo-600 border border-white/20 rounded-[2.5rem] p-8 space-y-6 shadow-3xl relative overflow-hidden"
-                           >
-                              <div className="absolute top-0 right-0 p-8 opacity-10">
-                                <GitBranch className="w-24 h-24 text-white" />
-                              </div>
-                              <div className="space-y-2 relative z-10">
-                                 <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">Repository Settings</h3>
-                                 <p className="text-[10px] text-white/70 font-medium tracking-wide">Configure sync parameters for {selectedRepo.name}</p>
-                              </div>
-                              
-                              <div className="space-y-4 relative z-10">
-                                 <div className="space-y-2">
-                                    <label className="text-[8px] font-black text-white uppercase tracking-widest ml-1">Default Branch</label>
-                                    <div className="flex bg-black/20 rounded-2xl p-1 border border-white/10">
-                                       <button className="flex-1 py-3 bg-white text-indigo-600 text-[10px] font-black uppercase tracking-widest rounded-xl shadow-xl transition-all">main</button>
-                                       <button className="flex-1 py-3 text-white/50 text-[10px] font-black uppercase tracking-widest rounded-xl hover:text-white transition-all">master</button>
-                                       <button className="flex-1 py-3 text-white/50 text-[10px] font-black uppercase tracking-widest rounded-xl hover:text-white transition-all">develop</button>
-                                    </div>
-                                 </div>
-                                 <button 
-                                   onClick={() => {
-                                      setActiveView('git');
-                                      setSettingsScreen('root');
-                                   }}
-                                   className="w-full py-5 bg-white text-indigo-600 rounded-[1.5rem] font-black uppercase tracking-widest transition-all hover:scale-[1.02] shadow-2xl active:scale-[0.98] flex items-center justify-center gap-3"
-                                 >
-                                    <Zap className="w-4 h-4 fill-indigo-600" />
-                                    Confirm & Go to Git
-                                 </button>
-                              </div>
-                           </motion.div>
-                         )}
-                      </motion.div>
-                    )}
-
-                    {settingsScreen === 'sharing' && (
-                      <motion.div 
-                        key="sharing"
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        className="space-y-6"
-                      >
-                         <div className="px-1 py-4">
-                           <h2 className="text-2xl font-black text-white tracking-tight">Share & Publish</h2>
-                           <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Collaborate with the world</p>
-                        </div>
-
-                         <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-8 shadow-2xl">
-                            <div className="flex items-center gap-5">
-                               <div className="w-16 h-16 bg-indigo-600/10 rounded-[2rem] flex items-center justify-center border border-indigo-600/20">
-                                  <Globe className="w-8 h-8 text-indigo-400" />
-                               </div>
-                               <div>
-                                  <h4 className="text-sm font-black text-white uppercase tracking-widest mb-1">Public Hub</h4>
-                                  <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest leading-relaxed">Unique deployment identifier</p>
-                               </div>
-                            </div>
-                            
-                            <div className="p-2 bg-[#0d1117] border border-white/10 rounded-[2rem] flex items-center h-[72px] shadow-inner">
-                               <span className="flex-1 text-[11px] font-mono text-indigo-400 truncate px-6">navbharat.ai/s/project-592</span>
-                               <button className="h-full px-8 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded-[1.8rem] transition-all shadow-2xl active:scale-95 group overflow-hidden relative">
-                                  <div className="relative z-10">Copy Link</div>
-                                  <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform"></div>
-                                </button>
-                            </div>
-
-                            <button className="w-full py-5 bg-[#0d1117] border border-indigo-500/30 text-indigo-400 hover:text-white hover:bg-indigo-600 rounded-[1.5rem] text-[10px] font-black uppercase tracking-[0.3em] transition-all shadow-xl active:scale-95">
-                               Publish to Community Store
-                            </button>
-                         </div>
-                      </motion.div>
-                    )}
-
-                    {settingsScreen === 'deploy' && (
-                      <motion.div 
-                        key="deploy"
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        className="space-y-6"
-                      >
-                         <div className="px-1 py-4">
-                           <h2 className="text-2xl font-black text-white tracking-tight">Support Us</h2>
-                           <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Contribute to the project</p>
-                        </div>
-
-                        <div className="bg-[radial-gradient(circle_at_top_right,#1e1b4b,transparent)] bg-[#161b22] border border-indigo-500/20 rounded-[3rem] p-10 space-y-10 text-center relative overflow-hidden group shadow-3xl">
-                           <div className="w-20 h-20 bg-indigo-600/20 rounded-[2rem] flex items-center justify-center border border-indigo-500/30 shadow-2xl mx-auto group-hover:scale-110 transition-all duration-700">
-                             <Heart className="w-10 h-10 text-indigo-400 group-hover:animate-bounce-slow" />
-                           </div>
-                           <div className="space-y-3">
-                             <h3 className="text-xl font-black text-white uppercase tracking-wider">Support Our Mission</h3>
-                             <p className="text-[10px] text-[#484f58] font-black uppercase tracking-[0.15em] max-w-[260px] mx-auto leading-relaxed">Your support fuels the future of AI in Bharat</p>
-                           </div>
-                           <button 
-                             onClick={() => setActiveView('donation')}
-                             className="w-full py-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[2rem] font-black uppercase tracking-[0.3em] shadow-[0_20px_50px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center gap-4 group active:scale-95"
-                           >
-                             <Heart className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                             Donate Now
-                           </button>
-                        </div>
-                        
-                        <div className="grid grid-cols-2 gap-4">
-                           <button className="p-6 bg-[#161b22] border border-white/5 rounded-[2.5rem] text-left group hover:border-emerald-500/30 transition-all shadow-xl active:scale-95">
-                             <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-emerald-600 transition-colors">
-                                <HardDrive className="w-6 h-6 text-emerald-400 group-hover:text-white" />
-                             </div>
-                             <h4 className="text-[10px] font-black text-white uppercase tracking-widest">ZIP Export</h4>
-                             <p className="text-[9px] text-[#484f58] mt-1 font-bold uppercase">Source Files</p>
-                           </button>
-                           <button className="p-6 bg-[#161b22] border border-white/5 rounded-[2.5rem] text-left group hover:border-amber-500/30 transition-all shadow-xl active:scale-95">
-                             <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-amber-600 transition-colors">
-                                <Smartphone className="w-6 h-6 text-amber-500 group-hover:text-white" />
-                             </div>
-                             <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Android Build</h4>
-                             <p className="text-[9px] text-[#484f58] mt-1 font-bold uppercase">Native (BETA)</p>
-                           </button>
-                        </div>
-                      </motion.div>
-                    )}
-
-                    {settingsScreen === 'access' && (
-                      <motion.div 
-                        key="access"
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        className="space-y-6"
-                      >
-                         <div className="px-1 py-4">
-                           <h2 className="text-2xl font-black text-white tracking-tight">Permissions</h2>
-                           <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Manage team access & safety</p>
-                        </div>
-
-                         <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-8 shadow-2xl">
-                            <div className="flex items-center justify-between">
-                               <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Collaborators</h4>
-                               <button className="text-[10px] font-black text-indigo-400 hover:text-white uppercase tracking-widest transition-colors border-b border-indigo-500/20 pb-0.5">+ Invite Pro</button>
-                            </div>
-                            
-                            <div className="grid gap-3">
-                               <div className="p-5 bg-[#0d1117] rounded-[1.5rem] border border-white/5 flex items-center justify-between group hover:border-indigo-500/30 transition-all">
-                                  <div className="flex items-center gap-4">
-                                     <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center font-black text-xs text-white shadow-lg">AD</div>
-                                     <div>
-                                        <div className="text-xs font-bold text-white">doc.asheesh@icloud.com</div>
-                                        <div className="text-[9px] text-emerald-500 uppercase font-black tracking-widest mt-0.5">Admin / Owner</div>
-                                     </div>
-                                  </div>
-                                  <div className="w-8 h-8 flex items-center justify-center text-[#484f58]">
-                                     <ShieldCheck className="w-4 h-4" />
-                                  </div>
-                               </div>
-                            </div>
-
-                            <div className="bg-amber-500/5 border border-amber-500/20 p-6 rounded-[1.5rem] flex gap-4 items-start shadow-inner">
-                               <div className="p-2 bg-amber-500/20 rounded-lg">
-                                  <Zap className="w-4 h-4 text-amber-500" />
-                                </div>
-                               <p className="text-[10px] text-amber-600 font-bold uppercase leading-relaxed tracking-wider">Multi-user real-time collaboration requires specialized Navbharat Enterprise seat.</p>
-                            </div>
-                         </div>
-                      </motion.div>
-                    )}
-
-                    {settingsScreen === 'git' && (
-                      <motion.div
-                        key="git"
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        className="space-y-6"
-                      >
-                        <div className="px-1 py-4">
-                          <h2 className="text-2xl font-black text-white tracking-tight">Git & Version Control</h2>
-                          <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Manage branches, commits and deployments</p>
-                        </div>
-                        <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex flex-col items-center text-center space-y-6 shadow-2xl">
-                          <div className="w-20 h-20 bg-indigo-600/10 border border-indigo-600/20 rounded-[2rem] flex items-center justify-center">
-                            <GitBranch className="w-10 h-10 text-indigo-400" />
-                          </div>
-                          <div>
-                            <h3 className="text-sm font-black text-white uppercase tracking-widest">Git Panel</h3>
-                            <p className="text-[10px] text-[#8b949e] max-w-[240px] mx-auto mt-2 leading-relaxed">
-                              {selectedRepo
-                                ? `Active: ${selectedRepo.full_name} (${currentBranch})`
-                                : 'Connect GitHub first to use Git features'}
-                            </p>
-                          </div>
-                          <button
-                            onClick={() => { setActiveView('git'); setSettingsScreen('root'); }}
-                            className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[1.5rem] font-black uppercase tracking-widest transition-all shadow-2xl flex items-center justify-center gap-3"
-                          >
-                            <GitBranch className="w-4 h-4" />
-                            Open Git Panel
-                          </button>
-                        </div>
-                      </motion.div>
-                    )}
-
-                    {/* G2 — Admin Live Metrics Dashboard */}
-                    {settingsScreen === 'metrics' && (
-                      <motion.div
-                        key="metrics"
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        className="space-y-6"
-                        onViewportEnter={() => {
-                          if (!adminLiveMetrics && !loadingAdminMetrics) {
-                            setLoadingAdminMetrics(true);
-                            const token = sessionStorage.getItem('admin_token') || '';
-                            fetch('/api/admin/metrics', { headers: { Authorization: `Bearer ${token}` } })
-                              .then(r => r.json()).then(setAdminLiveMetrics).catch(() => {}).finally(() => setLoadingAdminMetrics(false));
-                          }
-                        }}
-                      >
-                        <div className="px-1 py-4">
-                          <h2 className="text-2xl font-black text-white tracking-tight">Live Metrics</h2>
-                          <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Build stats, AI cost & success rates</p>
-                        </div>
-                        {loadingAdminMetrics && (
-                          <div className="flex items-center justify-center py-12 text-[#484f58] text-sm">Loading metrics…</div>
-                        )}
-                        {adminLiveMetrics && (
-                          <div className="space-y-4">
-                            {/* Build Stats */}
-                            <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-6">
-                              <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Build Stats</h4>
-                              <div className="grid grid-cols-2 gap-4">
-                                {[
-                                  { label: 'Total Builds', value: adminLiveMetrics.builds?.total ?? 0, color: 'text-white' },
-                                  { label: 'Success Rate', value: `${Math.round((adminLiveMetrics.builds?.successRate ?? 0) * 100)}%`, color: (adminLiveMetrics.builds?.successRate ?? 0) >= 0.8 ? 'text-emerald-400' : 'text-amber-400' },
-                                  { label: 'Preview Rate', value: `${Math.round((adminLiveMetrics.builds?.previewRate ?? 0) * 100)}%`, color: 'text-indigo-400' },
-                                  { label: 'Avg Build Time', value: `${Math.round((adminLiveMetrics.builds?.avgMs ?? 0) / 1000)}s`, color: 'text-[#8b949e]' },
-                                ].map(({ label, value, color }) => (
-                                  <div key={label} className="bg-[#0d1117] rounded-2xl p-5 border border-white/5">
-                                    <div className={`text-2xl font-black ${color}`}>{value}</div>
-                                    <div className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest mt-1">{label}</div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                            {/* AI Cost by Provider */}
-                            <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-4">
-                              <div className="flex items-center justify-between">
-                                <h4 className="text-[11px] font-black text-white uppercase tracking-widest">AI Cost by Provider</h4>
-                                <span className="text-[11px] font-black text-amber-400">${(adminLiveMetrics.totalCostUsd ?? 0).toFixed(4)} total</span>
-                              </div>
-                              {Object.entries(adminLiveMetrics.tokens || {}).length === 0 && (
-                                <p className="text-[10px] text-[#484f58]">No AI calls recorded yet.</p>
-                              )}
-                              {Object.entries(adminLiveMetrics.tokens || {}).map(([provider, usage]: [string, any]) => (
-                                <div key={provider} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-                                  <div>
-                                    <div className="text-xs font-bold text-white capitalize">{provider}</div>
-                                    <div className="text-[9px] text-[#484f58]">{usage.requests} reqs · {(usage.inputTokens + usage.outputTokens).toLocaleString()} tokens</div>
-                                  </div>
-                                  <span className="text-[11px] font-black text-amber-400">${(usage.costUsd ?? 0).toFixed(4)}</span>
-                                </div>
-                              ))}
-                            </div>
-                            {/* Refresh */}
-                            <button
-                              onClick={() => {
-                                setLoadingAdminMetrics(true);
-                                const token = sessionStorage.getItem('admin_token') || '';
-                                fetch('/api/admin/metrics', { headers: { Authorization: `Bearer ${token}` } })
-                                  .then(r => r.json()).then(setAdminLiveMetrics).catch(() => {}).finally(() => setLoadingAdminMetrics(false));
-                              }}
-                              className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-[1.5rem] font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-2"
-                            >
-                              <BarChart2 className="w-4 h-4" />
-                              Refresh Metrics
-                            </button>
-                          </div>
-                        )}
-                        {!adminLiveMetrics && !loadingAdminMetrics && (
-                          <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex flex-col items-center text-center space-y-4">
-                            <BarChart2 className="w-10 h-10 text-[#484f58]" />
-                            <p className="text-[10px] text-[#484f58]">Admin login required to view metrics.</p>
-                          </div>
-                        )}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              </div>
-            </div>
+            <SettingsPanel
+              themeClasses={themeClasses}
+              settingsScreen={settingsScreen}
+              setSettingsScreen={setSettingsScreen}
+              toggleTab={toggleTab}
+              setActiveView={setActiveView}
+              deviceMode={deviceMode}
+              setDeviceMode={setDeviceMode}
+              preferredLanguage={preferredLanguage}
+              setPreferredLanguage={setPreferredLanguage}
+              enabledModules={enabledModules}
+              setEnabledModules={setEnabledModules}
+              menuItems={menuItems}
+              keys={keys}
+              setKeys={setKeys}
+              showKeyStates={showKeyStates}
+              setShowKeyStates={setShowKeyStates}
+              githubToken={githubToken}
+              setGithubToken={setGithubToken}
+              githubUser={githubUser}
+              repositories={repositories}
+              selectedRepo={selectedRepo}
+              setSelectedRepo={setSelectedRepo}
+              ghSearchQuery={ghSearchQuery}
+              setGHSearchQuery={setGHSearchQuery}
+              currentBranch={currentBranch}
+              connectGitHub={connectGitHub}
+              disconnectGitHub={disconnectGitHub}
+              fetchGitHubUser={fetchGitHubUser}
+              fetchUserRepos={fetchUserRepos}
+              patInputValue={patInputValue}
+              setPatInputValue={setPatInputValue}
+              userE2bKey={userE2bKey}
+              setUserE2bKey={setUserE2bKey}
+              isAdmin={isAdmin}
+              adminLiveMetrics={adminLiveMetrics}
+              setAdminLiveMetrics={setAdminLiveMetrics}
+              loadingAdminMetrics={loadingAdminMetrics}
+              setLoadingAdminMetrics={setLoadingAdminMetrics}
+              user={user}
+              addLog={addLog}
+            />
           )}
 
           {(activeView === 'nbi_chat') && (
-            <div className={cn("flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-white/10", themeClasses.bg)}>
-              
-              {/* NBI Chat column */}
-              {activeView === 'nbi_chat' && (
-                <div className="flex-1 flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0">
-                  <div className="flex items-center justify-between px-3 py-1 bg-indigo-950/20 border-b border-indigo-500/20 text-[9px] font-black uppercase tracking-widest text-[#8b949e]">
-                     <div className="flex items-center gap-2">
-                       <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping shrink-0" />
-                       <span>NAVBHARATAI</span>
-                     </div>
-                     <div className="flex items-center gap-2">
-                       {/* 9.5 — Teaching Mode toggle */}
-                       <button
-                         onClick={() => setTeachMode(p => !p)}
-                         title={teachMode ? 'Teaching Mode ON — click to turn off' : 'Teaching Mode OFF — click to enable beginner explanations'}
-                         className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[8px] font-black uppercase tracking-widest transition-all ${
-                           teachMode ? 'bg-amber-500/20 border-amber-500/40 text-amber-400' : 'bg-white/5 border-white/10 text-[#484f58] hover:text-white'
-                         }`}
-                       >
-                         <span>{teachMode ? '📚' : '🎓'}</span>
-                         <span className="hidden sm:inline">Teach</span>
-                       </button>
-                       <span className="font-mono text-indigo-400 hidden sm:inline">{sessions.find(s => s.id === currentSessionId)?.uci || ''}</span>
-                     </div>
-                  </div>
-                  <AIChat
-                    messages={messages}
-                    input={input}
-                    onInputChange={setInput}
-                    onSend={(files) => { handleSendForTab('nbi_chat', undefined, files); }}
-                    isLoading={isLoading}
-                    activeIntent={activeIntent}
-                    isPinned={sessions.find(s => s.id === currentSessionId)?.isPinned || false}
-                    onTogglePin={() => togglePin(currentSessionId)}
-                    isLoggedIn={!!user}
-                    onShowLogin={() => setShowAuth(true)}
-                    mode={mode}
-                    onModeChange={setMode}
-                    activeAgent={activeAgent}
-                    pendingGHEdit={pendingGHEdit}
-                    onConfirmPush={handleGHConfirmPush}
-                    isPushing={isPushing}
-                    isAppBuilt={isAppBuilt}
-                    theme={theme}
-                    onPreviewClick={() => {
-                       toggleTab('preview');
-                       setIsMenuOpen(false);
-                    }}
-                    userId={user?.uid}
-                    activeUci={user ? (sessions.find(s => s.id === currentSessionId)?.uci || '') : ''}
-                    onRestoreUci={user ? handleRestoreUci : undefined}
-                    restoredMessages={sessions.find(s => s.id === currentSessionId)?.restoredMessages || []}
-                    memorySummary={sessions.find(s => s.id === currentSessionId)?.memorySummary || ''}
-                    wallet={wallet}
-                    onLanguagePick={(lang) => {
-                      setPreferredLanguage(lang as any);
-                      setMessages(prev => [
-                        ...prev.filter(m => m.id !== 'lang-picker'),
-                        { id: 'lang-confirmed', text: `✅ Language set! I'll now communicate with you in **${lang === 'hindi' ? '🇮🇳 Hindi' : lang === 'hinglish' ? '🔀 Hinglish' : lang === 'english' ? '🇬🇧 English' : '🌐 your language (auto-detect)'}**.\n\nCode will always be written in professional English.\n\nHow can I help you?`, sender: 'ai', timestamp: new Date(), modelUsed: 'navBharatAI' },
-                      ]);
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* 7.7 — AI Copilot Suggestions */}
-              <AISuggestions
-                generatedCode={generatedCode}
-                onSendSuggestion={(prompt) => handleSend(prompt)}
-              />
-
-            </div>
+            <NBIChatPanel
+              themeClasses={themeClasses}
+              teachMode={teachMode}
+              setTeachMode={setTeachMode}
+              sessions={sessions}
+              currentSessionId={currentSessionId}
+              messages={messages}
+              input={input}
+              setInput={setInput}
+              onSend={(files) => handleSendForTab('nbi_chat', undefined, files)}
+              isLoading={isLoading}
+              activeIntent={activeIntent}
+              togglePin={togglePin}
+              user={user}
+              setShowAuth={setShowAuth}
+              mode={mode}
+              setMode={setMode}
+              activeAgent={activeAgent}
+              pendingGHEdit={pendingGHEdit}
+              onConfirmPush={handleGHConfirmPush}
+              isPushing={isPushing}
+              isAppBuilt={isAppBuilt}
+              theme={theme}
+              onPreviewClick={() => { toggleTab('preview'); setIsMenuOpen(false); }}
+              onRestoreUci={handleRestoreUci}
+              wallet={wallet}
+              setPreferredLanguage={setPreferredLanguage}
+              setMessages={setMessages}
+              generatedCode={generatedCode}
+              onSendSuggestion={(prompt) => handleSend(prompt)}
+            />
           )}
 
-          {(activeView === 'nbi_pro_chat') && (
-            <div className={cn("flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-white/10", themeClasses.bg)}>
-
-              <div className="flex-1 flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0">
-                  <div className="flex items-center justify-between px-3 py-1 bg-indigo-950/20 border-b border-indigo-500/20 text-[9px] font-black uppercase tracking-widest text-[#8b949e]">
-                     <div className="flex items-center gap-2">
-                       <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping shrink-0" />
-                       <span>NAVBHARATAI-PRO</span>
-                       {mode === 'auto'     && <span className="px-1.5 py-0.5 bg-indigo-900/30 border border-indigo-600/30 text-indigo-400 rounded text-[8px]">AUTO</span>}
-                       {mode === 'planning' && <span className="px-1.5 py-0.5 bg-amber-900/30 border border-amber-600/30 text-amber-400 rounded text-[8px]">PLANNING</span>}
-                       {mode === 'build' && <span className="px-1.5 py-0.5 bg-orange-900/30 border border-orange-600/30 text-orange-400 rounded text-[8px]">BUILD</span>}
-                     </div>
-                     <div className="flex items-center gap-2">
-                       {buildVersionStack.length > 0 && (
-                         <button
-                           onClick={handleUndoBuild}
-                           title={`Undo: "${buildVersionStack[0].request}"`}
-                           className="flex items-center gap-1 px-2 py-0.5 bg-amber-900/30 hover:bg-amber-900/50 border border-amber-600/30 rounded text-[8px] text-amber-400 hover:text-amber-300 transition-all"
-                         >
-                           <RotateCcw className="w-2.5 h-2.5" />
-                           Undo ({buildVersionStack.length})
-                         </button>
-                       )}
-                       {mode === 'planning' && proMessages.length > 2 && (
-                         <button
-                           onClick={() => {
-                             const content = proMessages.map(m => `${m.sender === 'user' ? '👤 Doctor' : '🤖 NavBharatAI'}: ${m.text.replace(/__SWITCH_TO_BUILD__|__URGENT_BUILD__/g, '').trim()}`).join('\n\n---\n\n');
-                             const blob = new Blob([`# NavBharatAI — Product Requirements Document\nGenerated: ${new Date().toLocaleString('en-IN')}\n\n${content}`], { type: 'text/plain' });
-                             const url = URL.createObjectURL(blob);
-                             const a = document.createElement('a'); a.href = url; a.download = 'navbharat-prd.txt';
-                             document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-                           }}
-                           className="flex items-center gap-1 px-2 py-0.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded text-[8px] text-[#8b949e] hover:text-white transition-all"
-                         >
-                           ⬇ Export PRD
-                         </button>
-                       )}
-                       {isAppBuilt && files && Object.keys(files).length > 0 && (
-                         <button
-                           onClick={() => { setDeployPanelError(''); setShowDeployPanel(true); }}
-                           title="Deploy your app to Vercel, Netlify, or GitHub Pages"
-                           className="flex items-center gap-1 px-2 py-0.5 bg-emerald-900/30 hover:bg-emerald-900/50 border border-emerald-600/30 rounded text-[8px] text-emerald-400 hover:text-emerald-300 transition-all"
-                         >
-                           <Rocket className="w-2.5 h-2.5" />
-                           Deploy
-                         </button>
-                       )}
-                       <span className="font-mono text-indigo-400">{sessions.find(s => s.id === currentProSessionId)?.uci || ''}</span>
-                     </div>
-                  </div>
-                  <AIChat
-                    messages={proMessages}
-                    input={proInput}
-                    onInputChange={setProInput}
-                    onSend={(files) => { handleSendForPro(files); }}
-                    isLoading={isProLoading}
-                    activeIntent={activeIntent}
-                    isPinned={sessions.find(s => s.id === currentProSessionId)?.isPinned || false}
-                    onTogglePin={() => togglePin(currentProSessionId)}
-                    isLoggedIn={!!user}
-                    onShowLogin={() => setShowAuth(true)}
-                    mode={mode}
-                    onModeChange={setMode}
-                    activeAgent={'navbharatai-pro'}
-                    pendingGHEdit={pendingGHEdit}
-                    onConfirmPush={handleGHConfirmPush}
-                    isPushing={isPushing}
-                    isAppBuilt={isAppBuilt}
-                    theme={theme}
-                    onPreviewClick={() => {
-                        toggleTab('preview');
-                        setIsMenuOpen(false);
-                    }}
-                    userId={user?.uid}
-                    activeUci={user ? (sessions.find(s => s.id === currentProSessionId)?.uci || '') : ''}
-                    onRestoreUci={user ? handleRestoreUci : undefined}
-                    restoredMessages={sessions.find(s => s.id === currentProSessionId)?.restoredMessages || []}
-                    memorySummary={sessions.find(s => s.id === currentProSessionId)?.memorySummary || ''}
-                    wallet={wallet}
-                    buildProgress={proBuildProgress}
-                    guiderPlan={proGuiderPlan?.plan || null}
-                    guiderReplanning={proGuiderReplanning}
-                    onGuiderApprove={() => {
-                      const p = proGuiderPlan;
-                      if (!p) return;
-                      // Arm the grade→refine loop with the approved spec for this build.
-                      proGuiderSpecRef.current = { spec: p.plan?.spec || null, prompt: p.prompt };
-                      proGuiderRefineRef.current = 0;
-                      setProGuiderPlan(null);
-                      void handleSendForPro(p.prompt, true, false, true);
-                    }}
-                    onGuiderSend={(refinement) => {
-                      const p = proGuiderPlan;
-                      if (!p || !refinement.trim()) return;
-                      const augmented = `${p.prompt}\n\n[User refinement to the plan]: ${refinement.trim()}`;
-                      setProGuiderReplanning(true);
-                      fetch('/api/guider/plan', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ prompt: augmented, files: {}, isEdit: false, agentic: true }),
-                      })
-                        .then(r => r.json())
-                        .then((pr: any) => {
-                          if (pr?.confirm && pr?.plan) setProGuiderPlan({ prompt: augmented, plan: pr.plan });
-                          else { setProGuiderPlan(null); void handleSendForPro(augmented, true, false, true); }
-                        })
-                        .catch(() => {/* keep the current card */})
-                        .finally(() => setProGuiderReplanning(false));
-                    }}
-                    onBuildStepToggle={(i) => setProBuildProgress(prev => ({
-                      ...prev,
-                      steps: prev.steps.map((s, idx) => idx === i ? { ...s, expanded: !s.expanded } : s),
-                    }))}
-                    onDownloadZip={downloadAppZip}
-                    onSendSuggestion={(text) => { setProInput(text); handleSendForPro(text); }}
-                    onStop={isProLoading ? handleStopPro : undefined}
-                  />
-                </div>
-
-              {/* G8 — One-click Deploy Panel (modal overlay) */}
-              {showDeployPanel && (
-                <DeployModal
-                  platform={deployPlatform}
-                  token={deployToken}
-                  projectName={deployProjectName}
-                  owner={deployOwner}
-                  repo={deployRepo}
-                  error={deployPanelError}
-                  isDeploying={isDeploying}
-                  onClose={() => setShowDeployPanel(false)}
-                  onPlatformChange={setDeployPlatform}
-                  onTokenChange={setDeployToken}
-                  onProjectNameChange={setDeployProjectName}
-                  onOwnerChange={setDeployOwner}
-                  onRepoChange={setDeployRepo}
-                  onClearError={() => setDeployPanelError('')}
-                  onDeploy={handleDeployApp}
-                />
-              )}
-            </div>
+          {activeView === 'nbi_pro_chat' && (
+            <ProChatPanel
+              theme={theme}
+              themeClasses={themeClasses}
+              mode={mode}
+              setMode={setMode}
+              buildVersionStack={buildVersionStack}
+              handleUndoBuild={handleUndoBuild}
+              proMessages={proMessages}
+              proInput={proInput}
+              setProInput={setProInput}
+              isProLoading={isProLoading}
+              handleStopPro={handleStopPro}
+              showDeployPanel={showDeployPanel}
+              setShowDeployPanel={setShowDeployPanel}
+              deployPlatform={deployPlatform}
+              setDeployPlatform={setDeployPlatform}
+              deployToken={deployToken}
+              setDeployToken={setDeployToken}
+              deployProjectName={deployProjectName}
+              setDeployProjectName={setDeployProjectName}
+              deployOwner={deployOwner}
+              setDeployOwner={setDeployOwner}
+              deployRepo={deployRepo}
+              setDeployRepo={setDeployRepo}
+              deployPanelError={deployPanelError}
+              setDeployPanelError={setDeployPanelError}
+              isDeploying={isDeploying}
+              handleDeployApp={handleDeployApp}
+              showWorkspace={showWorkspace}
+              setShowWorkspace={setShowWorkspace}
+              files={files}
+              isAppBuilt={isAppBuilt}
+              generatedCode={generatedCode}
+              setFiles={(f) => setFiles(f as any)}
+              updatePreview={updatePreview}
+              toggleTab={toggleTab}
+              setIsMenuOpen={setIsMenuOpen}
+              previewHistory={previewHistory}
+              setGeneratedCode={setGeneratedCode}
+              proBuildProgress={proBuildProgress}
+              setProBuildProgress={setProBuildProgress}
+              proGuiderPlan={proGuiderPlan}
+              setProGuiderPlan={setProGuiderPlan}
+              proGuiderReplanning={proGuiderReplanning}
+              setProGuiderReplanning={setProGuiderReplanning}
+              proGuiderSpecRef={proGuiderSpecRef}
+              proGuiderRefineRef={proGuiderRefineRef}
+              providerRetryCountdown={providerRetryCountdown}
+              setProviderRetryCountdown={setProviderRetryCountdown}
+              providerRetryTimerRef={providerRetryTimerRef}
+              providerRetryPromptRef={providerRetryPromptRef}
+              handleSendForPro={handleSendForPro}
+              sessions={sessions}
+              currentProSessionId={currentProSessionId}
+              togglePin={togglePin}
+              user={user}
+              setShowAuth={setShowAuth}
+              handleRestoreUci={handleRestoreUci}
+              pendingGHEdit={pendingGHEdit}
+              handleGHConfirmPush={handleGHConfirmPush}
+              isPushing={isPushing}
+              wallet={wallet}
+              downloadAppZip={downloadAppZip}
+              activeIntent={activeIntent}
+            />
           )}
 
           {/* ── Senior Doctor Assistant ── */}
@@ -7865,390 +5432,64 @@ ${pending.map(p => `  - ${p}`).join('\n')}
             />
           )}
 
-          {activeView === 'studio' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <CodeStudio 
-                key={activeAgent}
-                activeAgent={activeAgent}
-                onAgentChange={handleAgentChange}
-                files={files}
-                onFilesChange={(newFiles) => setFiles(newFiles as any)}
-                onRun={(f) => updatePreview(f || files)}
-                generatedCode={generatedCode}
-                messages={messages}
-                chatInput={input}
-                onChatInputChange={setInput}
-                onChatSend={() => handleSendForTab(activeAgent.startsWith('vishwakarma') ? 'asc_chat' : 'nbi_pro_chat')}
-                isChatLoading={isLoading}
-                activeIntent={activeIntent}
-                githubToken={githubToken}
-                githubUser={githubUser}
-                githubRepoContext={githubRepoContext}
-                isGHSyncing={isGHSyncing}
-                firebaseToken={firebaseToken}
-                firebaseUser={firebaseUser}
-                onFirebaseConnect={connectFirebase}
-                onFirebaseDisconnect={disconnectFirebase}
-                onGHConnect={connectGitHub}
-                onGHDisconnect={disconnectGitHub}
-                onGHPush={pushToRepo}
-                isPinned={sessions.find(s => s.id === currentSessionId)?.isPinned || false}
-                onTogglePin={() => togglePin(currentSessionId)}
-                isLoggedIn={!!user}
-                onShowLogin={() => setShowAuth(true)}
-                mode={mode}
-                onModeChange={setMode}
-                isAppBuilt={isAppBuilt}
-                onPreviewClick={() => toggleTab('preview')}
-                theme={theme}
-                onThemeChange={setTheme}
-                pendingGHEdit={pendingGHEdit}
-                onConfirmPush={handleGHConfirmPush}
-                isGHPushing={isPushing}
-                onGoToMain={() => {
-                  toggleTab('nbi_pro_chat');
-                  addLog('Cognitive memory layer successfully merged and redirected to main cockpit.', 'info');
-                }}
-                onOpenProChat={() => toggleTab('nbi_pro_chat')}
-                wallet={wallet}
-                onUnlockVishwakarma={() => setShowVishwakarmaUnlockModal(true)}
-              />
-            </div>
-          )}
-
-          {activeView === 'preview' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <PreviewPanel
-                files={files}
-                onRun={() => updatePreview(files)}
-                generatedCode={generatedCode}
-                previewHistory={previewHistory}
-                onRestoreHistory={(html) => setGeneratedCode(html)}
-                onHtmlChange={(html) => setGeneratedCode(html)}
-                onGoPro={() => toggleTab('nbi_pro_chat')}
-                onEditWithAI={(hint) => {
-                  setMode('build');
-                  if (hint) setProInput(hint);
-                  toggleTab('nbi_pro_chat');
-                }}
-              />
-            </div>
-          )}
-
-          {/* ZIP size modal — global so it appears regardless of active view */}
-          {zipSizeModal && (
-            <ZipSizeModal
-              variant={zipSizeModal.variant}
-              fileName={zipSizeModal.fileName}
-              fileSizeMB={zipSizeModal.fileSizeMB}
-              onClose={() => setZipSizeModal(null)}
-            />
-          )}
-
-          {activeView === 'files' && (
-            <FilesPanel
-              files={files}
-              hasGeneratedCode={hasGeneratedCode}
-              fileUploadConflict={fileUploadConflict}
-              onResolveConflict={resolveFileConflict}
-              onUpload={handleFilesUpload}
-              onDownloadZip={() => downloadAppZip(files as any, 'NavBharatApp')}
-              onOpenFile={(path) => { setActiveFile(path); toggleTab('studio'); }}
-              sessionId={currentProSessionId}
-              onRestoreVersion={(restoredFiles, commitMsg) => {
-                setFiles(restoredFiles);
-                addLog(`Restored to: ${commitMsg}`, 'success');
-                toggleTab('studio');
-              }}
-            />
-          )}
-
-          {/* Phase 3 — Testing System */}
-          {activeView === 'testing' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <TestPanel generatedCode={generatedCode} files={files} />
-            </div>
-          )}
-
-          {/* Phase 3 — API Tester */}
-          {activeView === 'api' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <APITester />
-            </div>
-          )}
-
-          {/* Phase 3 — Diff Viewer */}
-          {activeView === 'diff' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <DiffViewer files={files} />
-            </div>
-          )}
-
-          {/* Phase 3 — Database UI */}
-          {activeView === 'database' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <DatabaseUI userId={user?.uid} userTier={activeAgent} />
-            </div>
-          )}
-
-          {/* Phase 4 — Voice to App */}
-          {activeView === 'voice' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <VoiceToApp onAppGenerated={(code, _prompt) => {
-                setGeneratedCode(code);
-                toggleTab('preview');
-              }} />
-            </div>
-          )}
-
-          {/* Phase 4 — Bot Builder */}
-          {activeView === 'botbuilder' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <BotBuilder />
-            </div>
-          )}
-
-          {/* Phase 4 — Cost Estimator */}
-          {activeView === 'cost' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <CostEstimator />
-            </div>
-          )}
-
-          {/* Phase 5 — Screenshot to Code */}
-          {activeView === 'screenshot' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <ScreenshotToCode onCodeGenerated={(code) => {
-                setGeneratedCode(code);
-                toggleTab('preview');
-              }} />
-            </div>
-          )}
-
-          {/* Phase 5 — Multi-Page Builder */}
-          {activeView === 'multipages' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <MultiPageBuilder
-                initialCode={generatedCode}
-                onExport={(pages) => {
-                  const firstPage = Object.values(pages)[0];
-                  if (firstPage) { setGeneratedCode(firstPage as string); toggleTab('preview'); }
-                }}
-              />
-            </div>
-          )}
-
-          {/* Phase 5 — Analytics */}
-          {activeView === 'analytics' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AppAnalytics userId={user?.uid} />
-            </div>
-          )}
-
-          {/* Phase 6 — AI Debugger */}
-          {activeView === 'debugger' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AIDebugger files={files} />
-            </div>
-          )}
-
-          {/* Phase 6 — Performance Analyzer */}
-          {activeView === 'performance' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <PerformanceAnalyzer generatedCode={generatedCode} />
-            </div>
-          )}
-
-          {/* Phase 6 — Component Library */}
-          {activeView === 'components' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <ComponentLibrary onInsert={(html) => {
-                setGeneratedCode(generatedCode ? generatedCode.replace('</body>', html + '\n</body>') : html);
-                toggleTab('preview');
-              }} />
-            </div>
-          )}
-
-          {/* Phase 6 — SEO Optimizer */}
-          {activeView === 'seo' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <SEOOptimizer generatedCode={generatedCode} appName="NavBharatAI App" onCodeUpdate={(c) => setGeneratedCode(c)} />
-            </div>
-          )}
-
-          {/* Phase 7 — APK Builder */}
-          {activeView === 'apk' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <APKBuilder generatedCode={generatedCode} appName="NavBharatAI App" />
-            </div>
-          )}
-
-          {/* Phase 7 — Figma Importer */}
-          {activeView === 'figma' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <FigmaImporter onCodeGenerated={(code) => {
-                setGeneratedCode(code);
-                toggleTab('preview');
-              }} />
-            </div>
-          )}
-
-          {/* Phase 7 — Custom Domain */}
-          {activeView === 'domain' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <CustomDomain />
-            </div>
-          )}
-
-          {/* Phase 7 — Team Collaboration */}
-          {activeView === 'team' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <TeamCollaboration userId={user?.uid} projectName="NavBharatAI Project" />
-            </div>
-          )}
-
-          {/* Phase 8 — PWA Notifications */}
-          {activeView === 'pwa' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <PWANotifications generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
-            </div>
-          )}
-
-          {/* Phase 8 — Code Minifier */}
-          {activeView === 'minifier' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <CodeMinifier generatedCode={generatedCode} onOptimized={(c) => { setGeneratedCode(c); toggleTab('preview'); }} />
-            </div>
-          )}
-
-          {/* Phase 8 — Dark Mode Generator */}
-          {activeView === 'darkmode' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <DarkModeGenerator generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
-            </div>
-          )}
-
-          {/* Phase 8 — Monetization Wizard */}
-          {activeView === 'monetize' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <MonetizationWizard generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
-            </div>
-          )}
-
-          {/* Phase 9 — AI Image Generator */}
-          {activeView === 'imagegen' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AIImageGenerator onImageGenerated={(url, prompt) => {
-                setGeneratedCode(generatedCode + `\n<!-- Generated Image: ${prompt} -->\n<img src="${url}" alt="${prompt}" style="max-width:100%;border-radius:12px;" />`);
-              }} />
-            </div>
-          )}
-
-          {/* Phase 9 — Code Versioning */}
-          {activeView === 'versioning' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <CodeVersioning
-                generatedCode={generatedCode}
-                onRestore={(c) => setGeneratedCode(c)}
-                onRestoreFiles={(f) => { setFiles(f as any); updatePreview(f as any); setIsAppBuilt(true); setHasGeneratedCode(true); addToast('Version restored ✓', 'success'); }}
-              />
-            </div>
-          )}
-
-          {/* Phase 9 — API Marketplace */}
-          {activeView === 'apimarket' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <APIMarketplace onCodeInsert={(code) => setGeneratedCode(generatedCode + '\n\n' + code)} />
-            </div>
-          )}
-
-          {/* Phase 9 — App Store Publisher */}
-          {activeView === 'appstore' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AppStorePublisher generatedCode={generatedCode} />
-            </div>
-          )}
-
-          {/* Phase 10 — Live Collaboration */}
-          {activeView === 'collab' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <LiveCollaboration
-                generatedCode={generatedCode}
-                onCodeUpdate={(c) => setGeneratedCode(c)}
-                userId={user?.uid}
-                userName={user?.displayName || user?.email?.split('@')[0]}
-              />
-            </div>
-          )}
-
-          {/* Phase 10 — AI Testing Suite */}
-          {activeView === 'aitesting' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AITestingSuite generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
-            </div>
-          )}
-
-          {/* Phase 10 — Localization Manager */}
-          {activeView === 'localization' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <LocalizationManager />
-            </div>
-          )}
-
-          {/* Phase 10 — AI Code Review */}
-          {activeView === 'codereview' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AICodeReview generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
-            </div>
-          )}
-
-          {activeView === 'dbstudio' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <DatabaseStudio />
-            </div>
-          )}
-
-          {activeView === 'cicd' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <CICDPipeline />
-            </div>
-          )}
-
-          {activeView === 'plugins' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <PluginSystem />
-            </div>
-          )}
-
-          {activeView === 'whitelabel' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <WhitelabelBranding />
-            </div>
-          )}
-
-          {activeView === 'projectmgr' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AIProjectManager />
-            </div>
-          )}
-
-          {activeView === 'cloudeploy' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <MultiCloudDeploy generatedCode={generatedCode} />
-            </div>
-          )}
-
-          {activeView === 'designsys' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <DesignSystem generatedCode={generatedCode} onCodeUpdate={(c) => setGeneratedCode(c)} />
-            </div>
-          )}
-
-          {activeView === 'healthmon' && (
-            <div className="flex-1 h-full overflow-hidden">
-              <AppHealthMonitor />
-            </div>
-          )}
+          <ViewPanels
+            activeView={activeView}
+            generatedCode={generatedCode}
+            setGeneratedCode={setGeneratedCode}
+            files={files}
+            setFiles={setFiles as any}
+            hasGeneratedCode={hasGeneratedCode}
+            setIsAppBuilt={setIsAppBuilt}
+            setHasGeneratedCode={setHasGeneratedCode}
+            user={user}
+            activeAgent={activeAgent}
+            mode={mode}
+            setMode={setMode}
+            isAppBuilt={isAppBuilt}
+            theme={theme}
+            setTheme={setTheme}
+            messages={messages}
+            input={input}
+            setInput={setInput}
+            setProInput={setProInput}
+            isLoading={isLoading}
+            activeIntent={activeIntent}
+            handleSendForTab={handleSendForTab}
+            toggleTab={toggleTab}
+            updatePreview={updatePreview}
+            addLog={addLog}
+            addToast={addToast}
+            handleAgentChange={handleAgentChange}
+            githubToken={githubToken}
+            githubUser={githubUser}
+            githubRepoContext={githubRepoContext}
+            isGHSyncing={isGHSyncing}
+            pendingGHEdit={pendingGHEdit}
+            handleGHConfirmPush={handleGHConfirmPush}
+            isPushing={isPushing}
+            connectGitHub={connectGitHub}
+            disconnectGitHub={disconnectGitHub}
+            pushToRepo={pushToRepo}
+            firebaseToken={firebaseToken}
+            firebaseUser={firebaseUser}
+            connectFirebase={connectFirebase}
+            disconnectFirebase={disconnectFirebase}
+            sessions={sessions}
+            currentSessionId={currentSessionId}
+            togglePin={togglePin}
+            currentProSessionId={currentProSessionId}
+            previewHistory={previewHistory}
+            fileUploadConflict={fileUploadConflict}
+            resolveFileConflict={resolveFileConflict}
+            handleFilesUpload={handleFilesUpload}
+            downloadAppZip={downloadAppZip}
+            setActiveFile={setActiveFile}
+            wallet={wallet}
+            setShowVishwakarmaUnlockModal={setShowVishwakarmaUnlockModal}
+            setShowAuth={setShowAuth}
+            zipSizeModal={zipSizeModal}
+            setZipSizeModal={setZipSizeModal}
+          />
 
         </div>
         </Suspense>
@@ -8260,832 +5501,58 @@ ${pending.map(p => `  - ${p}`).join('\n')}
               </div>
  
               
-      {/* Auth Modal */}
-
-      {/* Auth Modal */}
-      <AnimatePresence>
-        {showAuth && (
-          <AuthComponent 
-            auth={auth} 
-            setUser={setUser} 
-            onClose={() => setShowAuth(false)} 
-          />
-        )}
-      </AnimatePresence>
-
-      {/* GitHub Redirect Diagnostics Overlay */}
-      <AnimatePresence>
-        {githubRedirectingMessage && (
-          <div className="fixed inset-0 bg-[#0d1117]/90 backdrop-blur-md flex items-center justify-center p-4 z-[99999]">
-            <motion.div
-              initial={{ scale: 0.95, y: 15, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.95, y: 15, opacity: 0 }}
-              className="w-full max-w-md bg-[#161b22] border border-indigo-500/30 rounded-3xl p-6 space-y-4 shadow-2xl relative"
-            >
-              <div className="flex items-center gap-3 border-b border-white/5 pb-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/35 flex items-center justify-center text-indigo-400 shrink-0">
-                  <Github className="w-5 h-5 animate-pulse" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-black uppercase tracking-wider text-white">GitHub OAuth Shield</h4>
-                  <p className="text-[9px] text-[#8b949e] font-sans uppercase tracking-widest font-black">navBharat AI Authentication Diagnostics</p>
-                </div>
-              </div>
-
-              <div className="space-y-3.5">
-                <div className="flex items-center gap-2.5 bg-indigo-500/5 border border-indigo-500/10 p-3 rounded-2xl">
-                  <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping" />
-                  <p className="text-[11px] font-bold text-indigo-300 leading-snug">{githubRedirectingMessage}</p>
-                </div>
-
-                <div className="space-y-2 text-left bg-black/40 border border-white/5 rounded-2xl p-4 font-mono text-[10px]">
-                  <div className="flex justify-between border-b border-white/5 pb-1.5 mb-1.5 font-sans">
-                    <span className="text-[#8b949e] font-bold uppercase text-[9px]">Diagnostic Key</span>
-                    <span className="text-[#8b949e] font-bold uppercase text-[9px]">Configured Status</span>
-                  </div>
-                  
-                  <div className="space-y-1">
-                    <span className="text-[#8b949e] block text-[9px] uppercase tracking-wider font-extrabold font-sans">Current Domain Origin</span>
-                    <span className="text-white block truncate">{githubDebugData?.currentDomain || window.location.origin}</span>
-                  </div>
-
-                  <div className="space-y-1 pt-1.5">
-                    <span className="text-[#8b949e] block text-[9px] uppercase tracking-wider font-extrabold font-sans">Assigned Callback URL</span>
-                    <span className="text-indigo-400 block truncate">{githubDebugData?.redirectUri || 'Determining...'}</span>
-                  </div>
-
-                  <div className="space-y-1 pt-1.5">
-                    <span className="text-[#8b949e] block text-[9px] uppercase tracking-wider font-extrabold font-sans">Final Safe Redirection Link</span>
-                    <span className="text-emerald-400 block break-all leading-normal max-h-16 overflow-y-auto pr-1">
-                      {githubDebugData?.oauthUrl || 'Awaiting API Handshake...'}
-                    </span>
-                  </div>
-                </div>
-
-                <p className="text-[10px] text-[#8b949e] leading-relaxed text-center font-medium">
-                  We use the official native URL() parsing engine to prevent address parsing conflicts. Under mobile browser boundaries, check pop-up allowances.
-                </p>
-
-                <div className="flex items-center gap-2.5 pt-1">
-                  <button
-                    onClick={() => {
-                      if (githubDebugData?.oauthUrl) {
-                        window.open(githubDebugData.oauthUrl, 'GitHub Auth', 'width=600,height=700');
-                      }
-                    }}
-                    className="flex-1 py-3 bg-[#1f6feb] hover:bg-[#388bfd] hover:scale-[1.01] active:scale-95 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/10"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    Launch Popup Directly
-                  </button>
-                  <button
-                    onClick={() => {
-                      setGithubRedirectingMessage(null);
-                    }}
-                    className="px-4 py-3 bg-white/5 hover:bg-white/10 active:scale-95 border border-white/10 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Agent Vishwakarma Premium Access Modal */}
-      <AnimatePresence>
-        {showVishwakarmaUnlockModal && (
-          <div className="fixed inset-0 bg-[#0d1117]/95 backdrop-blur-md flex items-start md:items-center justify-center p-3 pt-24 md:pt-4 z-[9999] overflow-y-auto">
-            <motion.div
-              initial={{ scale: 0.96, y: 15, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.96, y: 15, opacity: 0 }}
-              className="w-full max-w-md md:max-w-[400px] bg-[#161b22] border border-amber-500/35 rounded-2xl p-4 sm:p-5 space-y-4 shadow-2xl relative max-h-[85vh] sm:max-h-[90vh] flex flex-col overflow-hidden"
-            >
-              {/* Header section with explicit interactive close */}
-              <div className="flex justify-between items-center shrink-0 border-b border-white/5 pb-2.5">
-                <div className="flex items-center gap-1.5 text-amber-500 font-bold uppercase tracking-wider text-[9px] sm:text-[10px] font-mono">
-                  <ShieldCheck className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
-                  Premium Sec-Ops Active Workspace
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowVishwakarmaUnlockModal(false)}
-                  className="p-1 px-2 bg-white/5 hover:bg-amber-500 hover:text-black rounded-lg text-[#8b949e] border border-white/10 hover:border-amber-500 transition-all font-mono text-[9px] sm:text-[10px] uppercase font-bold flex items-center gap-1 cursor-pointer select-none"
-                >
-                  <X className="w-3.5 h-3.5 shrink-0" />
-                  Close
-                </button>
-              </div>
-
-              {/* Scrollable container to maintain perfect layout on shorter screens */}
-              <div className="flex-1 overflow-y-auto space-y-4 scrollbar-thin scrollbar-thumb-white/10 pr-0.5">
-                {/* Horizontal Modern Hero Row */}
-                <div className="flex gap-3 items-center bg-amber-500/5 hover:bg-amber-500/10 border border-amber-500/15 p-3 rounded-xl transition-all">
-                  <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg border border-amber-500/20 shrink-0">
-                    <Sparkles className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black text-white tracking-tight uppercase leading-none">
-                      🔥 Unlock Agent Vishwakarma
-                    </h3>
-                    <p className="text-[10px] text-[#8b949e] mt-1 leading-normal">
-                      Your portal is locked. Complete checkout to activate dynamic modeling access.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Access Benefits Checklist */}
-                <div className="bg-white/5 rounded-xl p-3 border border-white/5 space-y-1.5">
-                  <h4 className="text-[9px] font-mono font-bold text-amber-400 tracking-wider uppercase mb-0.5">
-                    ✓ Core System Capabilities
-                  </h4>
-                  <div className="space-y-1 text-[11px] text-[#8b949e]">
-                    <div className="flex items-center gap-2 text-white">
-                      <span className="text-emerald-400 font-extrabold">✓</span>
-                      <span>Full Codebase Creations & Visual Design</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-white">
-                      <span className="text-emerald-400 font-extrabold">✓</span>
-                      <span>OWASP Defenses & Exploit Scanning</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-white">
-                      <span className="text-emerald-400 font-extrabold">✓</span>
-                      <span>Sovereign Multi-Model Reasoning Layers</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between p-3 bg-white/5 border border-white/5 rounded-xl">
-                    <div>
-                      <span className="text-[11px] font-bold text-white block uppercase tracking-wide">
-                        Lifetime Entry Pass
-                      </span>
-                      <span className="text-[9px] text-[#8b949e]">
-                        Mandatory one-time gateway fee
-                      </span>
-                    </div>
-                    <div className="text-right">
-                      {wallet?.hasVishwakarmaPass ? (
-                        <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/10">
-                          Activated
-                        </span>
-                      ) : (
-                        <span className="text-xs font-mono font-black text-amber-500 block">
-                          ₹{(vkMode === 'pro' ? 100 : 50).toFixed(2)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Promo Code Input */}
-                  {!wallet?.hasVishwakarmaPass && (
-                    <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-xl">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          placeholder="Have a promo code?"
-                          value={vkPromoCode}
-                          onChange={(e) => setVkPromoCode(e.target.value)}
-                          className="flex-1 bg-[#0d1117] border border-blue-500/30 rounded-lg p-1.5 px-2 text-xs font-mono text-white placeholder:text-[#484f58] focus:border-blue-400 outline-none transition-all"
-                        />
-                        <button
-                          onClick={redeemVishwakarmaPromo}
-                          disabled={isRedeemingVkPromo}
-                          className="text-blue-400 hover:text-blue-300 text-[10px] uppercase font-bold tracking-wider transition-colors"
-                        >
-                          {isRedeemingVkPromo ? '...' : 'Apply'}
-                        </button>
-                      </div>
-                      {couponError && <p className="text-[9px] text-red-500 mt-1">{couponError}</p>}
-                      {couponSuccess && <p className="text-[9px] text-emerald-400 mt-1">{couponSuccess}</p>}
-                    </div>
-                  )}
-
-                  {/* 2. Advance Token purchase input */}
-                  <div className="space-y-1 p-3 bg-white/5 border border-white/5 rounded-xl relative">
-                    <label className="text-[11px] font-bold text-white block uppercase tracking-wide">
-                      Advance AI Tokens (₹)
-                    </label>
-                    <span className="text-[9px] text-[#8b949e] block leading-none font-mono">
-                      Formula: ₹1.00 = 100 AI Tokens (Min: ₹10)
-                    </span>
-                    
-                    <div className="flex items-center gap-1.5 mt-1">
-                      <span className="text-white font-mono font-bold text-xs">₹</span>
-                      <input
-                        type="number"
-                        placeholder="Enter amount (e.g. 50)"
-                        value={vkTokenInput}
-                        onChange={(e) => setVkTokenInput(e.target.value)}
-                        className="w-full bg-[#0d1117] border border-white/10 rounded-lg p-1.5 px-2 text-xs font-mono text-white placeholder:text-[#484f58] focus:border-amber-500 outline-none transition-all shadow-inner"
-                      />
-                    </div>
-
-                    <div className="mt-1 text-right">
-                      <span className="text-[9px] font-mono text-amber-400 bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 rounded-full">
-                        Estimated: {(parseFloat(vkTokenInput) ? Math.floor(parseFloat(vkTokenInput) * 100) : 0).toLocaleString()} Tokens
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* 3. Total calculation display */}
-                  <div className="p-3 bg-[#0d1117] border border-white/5 rounded-xl space-y-1 text-[11px]">
-                    <div className="flex justify-between text-[#8b949e]">
-                      <span>Entry Pass Fee:</span>
-                      <span>{wallet?.hasVishwakarmaPass ? '₹0.00 (Owned)' : `₹${(vkMode === 'pro' ? 100 : 50).toFixed(2)}`}</span>
-                    </div>
-                    <div className="flex justify-between text-[#8b949e]">
-                      <span>Tokens Purchase Amount:</span>
-                      <span>₹{parseFloat(vkTokenInput) ? parseFloat(vkTokenInput).toFixed(2) : '0.00'}</span>
-                    </div>
-                    <div className="border-t border-white/5 pt-1.5 flex justify-between text-xs font-black text-white tracking-tight">
-                      <span>TOTAL PAYABLE AMOUNT:</span>
-                      <span className="text-amber-500 font-mono">
-                        ₹{((wallet?.hasVishwakarmaPass ? 0 : (vkMode === 'pro' ? 100 : 50)) + (parseFloat(vkTokenInput) || 0)).toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Checkout CTA Footer Component - Always sticky/visible at bottom of modal viewport */}
-              <div className="shrink-0 space-y-2 border-t border-white/5 pt-3">
-                <button
-                  type="button"
-                  disabled={isRecharging || (
-                    wallet?.hasVishwakarmaPass 
-                      ? !(parseFloat(vkTokenInput) >= 10 && parseFloat(vkTokenInput) <= 999999)
-                      : (vkTokenInput.trim() !== '' && !(parseFloat(vkTokenInput) >= 10 && parseFloat(vkTokenInput) <= 999999))
-                  )}
-                  onClick={() => {
-                    const buyPass = !wallet?.hasVishwakarmaPass;
-                    const tokens = parseFloat(vkTokenInput) || 0;
-                    createVishwakarmaOrder(buyPass, tokens);
-                  }}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 hover:from-amber-400 hover:to-amber-500 text-black font-black uppercase text-[11px] tracking-[0.1em] transition-all duration-200 active:scale-[0.98] shadow-lg shadow-amber-500/10 disabled:opacity-30 disabled:pointer-events-none flex items-center justify-center gap-2 cursor-pointer relative overflow-hidden group"
-                >
-                  <span className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-                  {isRecharging ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      Connecting Gateway...
-                    </>
-                  ) : wallet?.hasVishwakarmaPass ? (
-                    <>
-                      <CreditCard className="w-4 h-4" />
-                      Recharge Tokens (₹{(parseFloat(vkTokenInput) || 0).toFixed(2)})
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4 animate-bounce" />
-                      Buy Pass & Activate Vishwakarma (₹{((vkMode === 'pro' ? 100 : 50) + (parseFloat(vkTokenInput) || 0)).toFixed(2)})
-                    </>
-                  )}
-                </button>
-              </div>
-
-              <div className="text-[8px] text-center text-[#8b949e] font-mono leading-relaxed select-none shrink-0 border-t border-white/5 pt-2">
-                By purchasing, you accept our sovereign pay-and-use SLA terms.
-                <br />
-                Secured dynamically by navBharat SRE billing stack.
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* UCI Continuation Modal */}
-      <AnimatePresence>
-        {showContinueModal && (
-          <div className="absolute inset-0 bg-[#0d1117]/85 backdrop-blur-md flex items-center justify-center p-4 z-50">
-            <motion.div 
-              initial={{ scale: 0.95, y: 15, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.95, y: 15, opacity: 0 }}
-              className="w-full max-w-sm bg-[#161b22] border border-indigo-500/15 rounded-3xl p-6 space-y-4 shadow-3xl relative select-none"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-indigo-400 animate-pulse" />
-                  <span className="text-[10px] font-black uppercase tracking-[0.15em] text-white">Restore Previous Session</span>
-                </div>
-                <button 
-                  onClick={() => {
-                    setShowContinueModal(false);
-                    setRestoreUciError('');
-                    setResumeUciInputState('');
-                  }}
-                  className="p-1.5 hover:bg-white/5 rounded-lg text-[#8b949e] hover:text-white transition-all text-sm font-bold"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div className="space-y-1.5">
-                <p className="text-[9px] text-[#8b949e] leading-relaxed">
-                  Enter your encrypted representation chat ID. This restores complete historic context, matching memory parameters, and file configurations in an instant.
-                </p>
-              </div>
-
-              <div className="space-y-3">
-                <input 
-                  type="text"
-                  placeholder="Paste Universal Chat ID (UCI) ..."
-                  value={resumeUciInputState}
-                  onChange={(e) => setResumeUciInputState(e.target.value)}
-                  className="w-full bg-[#0d1117] border border-white/5 rounded-xl p-3 text-xs font-mono text-indigo-300 placeholder:text-[#484f58] focus:border-indigo-500 outline-none transition-all shadow-inner"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleRestoreByUci();
-                  }}
-                  autoFocus
-                />
-                
-                {restoreUciError && (
-                  <p className="text-[9px] text-red-500 font-bold tracking-wide animate-pulse flex items-center gap-1">
-                    ⚠️ {restoreUciError}
-                  </p>
-                )}
-
-                <div className="flex items-center justify-end gap-2 pt-2">
-                  <button 
-                    onClick={() => {
-                      setShowContinueModal(false);
-                      setRestoreUciError('');
-                      setResumeUciInputState('');
-                    }}
-                    className="px-3.5 py-2 hover:bg-white/5 text-[#8b949e] hover:text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
-                  >
-                    Cancel
-                  </button>
-                  <button 
-                    onClick={handleRestoreByUci}
-                    disabled={isRestoringUci || !resumeUciInputState.trim()}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-30 disabled:pointer-events-none active:scale-95 flex items-center gap-1"
-                  >
-                    {isRestoringUci ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LinkIcon className="w-3.5 h-3.5" />}
-                    Restore Workspace
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* GCP/FIREBASE OAUTH ERROR INTERVENTION MODAL */}
-      <AnimatePresence>
-        {firebaseOauthError && (
-          <div className="absolute inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center p-4 z-[9999] animate-in fade-in duration-200">
-            <motion.div
-              initial={{ scale: 0.9, y: 30, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.9, y: 30, opacity: 0 }}
-              className="w-full max-w-md bg-[#161b22] border border-red-500/30 rounded-3xl p-6 space-y-4 shadow-[0_0_50px_rgba(239,68,68,0.25)] relative text-left"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-500 shrink-0">
-                  <AlertCircle className="w-6 h-6 animate-pulse" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <span className="text-[9px] font-extrabold uppercase tracking-widest text-[#ff8080] block">
-                    GCP/Firebase Auth Interrupted
-                  </span>
-                  <h4 className="text-sm font-black uppercase tracking-tight text-white leading-tight truncate">
-                    {firebaseOauthError.errorType}
-                  </h4>
-                </div>
-              </div>
-
-              <div className="p-3.5 bg-red-950/20 border border-red-500/15 rounded-xl space-y-1">
-                <span className="text-[8px] font-extrabold text-[#fda4af] uppercase tracking-wider block">OAuth Failure Context:</span>
-                <p className="text-[11px] text-red-200/90 font-mono leading-relaxed break-words font-medium">
-                  {firebaseOauthError.message}
-                </p>
-              </div>
-
-              <div className="p-3.5 bg-zinc-950/40 border border-white/5 rounded-xl space-y-1">
-                <span className="text-[8px] font-extrabold text-[#a1a1aa] uppercase tracking-wider block flex items-center gap-1">
-                  <Settings className="w-3 h-3 text-indigo-400" />
-                  Recommended Correction Procedure:
-                </span>
-                <p className="text-[11px] text-zinc-300 leading-normal font-medium">
-                  {firebaseOauthError.suggestions}
-                </p>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  onClick={() => setFirebaseOauthError(null)}
-                  className="px-5 py-2.5 bg-zinc-900 hover:bg-[#21262d] border border-white/10 text-white rounded-xl text-[10px] font-extrabold uppercase tracking-widest transition-all cursor-pointer text-center"
-                >
-                  Dismiss Error
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* API Key Required Intervention Modal */}
-      <AnimatePresence>
-        {pendingProvider && (
-           <div className="absolute inset-0 z-[1000] flex items-center justify-center p-4">
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setPendingProvider(null)}
-                className="absolute inset-0 bg-black/80 backdrop-blur-md"
-              />
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.9, y: 30 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: 30 }}
-                className="bg-[#161b22] border border-white/10 rounded-3xl shadow-3xl w-full max-w-sm relative z-[1001] overflow-hidden"
-              >
-                <div className="p-8 text-center">
-                  <div className="w-20 h-20 bg-indigo-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-indigo-500/20">
-                     <ShieldCheck className="w-10 h-10 text-indigo-500" />
-                  </div>
-                  
-                  <h3 className="text-xl font-bold text-white mb-2">Key Required</h3>
-                  <p className="text-sm text-[#8b949e] mb-8">
-                    To use <span className="text-white font-bold">{pendingProvider.toUpperCase()}</span>, you must provide your own API key.
-                  </p>
-
-                  <div className="space-y-4">
-                    <div className="relative">
-                      <input 
-                        autoFocus
-                        type="password"
-                        value={pendingKey}
-                        onChange={(e) => setPendingKey(e.target.value)}
-                        placeholder={`Enter ${pendingProvider.toUpperCase()} key`}
-                        className="w-full bg-[#0d1117] border border-white/10 rounded-2xl px-5 py-4 text-sm font-mono text-indigo-400 outline-none focus:border-indigo-500 transition-all placeholder:opacity-50"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleKeySave(pendingProvider, pendingKey);
-                            setPendingKey('');
-                          }
-                        }}
-                      />
-                      <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-20">
-                        <Lock className="w-4 h-4" />
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-3">
-                      <button 
-                        onClick={() => {
-                          handleKeySave(pendingProvider, pendingKey);
-                          setPendingKey('');
-                        }}
-                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-sm font-black uppercase tracking-widest transition-all shadow-xl shadow-indigo-600/20"
-                      >
-                        Save & Continue
-                      </button>
-                      <button 
-                        onClick={() => window.open(PROVIDER_CONFIG[pendingProvider]?.link, '_blank')}
-                        className="w-full py-3 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2"
-                      >
-                        <Globe className="w-4 h-4" />
-                        Get API Key
-                      </button>
-                      <button 
-                        onClick={() => setPendingProvider(null)}
-                        className="text-[11px] font-bold text-[#484f58] hover:text-white transition-colors py-2"
-                      >
-                        Cancel Selection
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-           </div>
-        )}
-      </AnimatePresence>
-
-
-      {/* Secure Cashfree Simulator / Status Modal */}
-      <AnimatePresence>
-        {showCheckoutModal && paymentSession && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowCheckoutModal(false)}
-              className="absolute inset-0 bg-black/85 backdrop-blur-md"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 30 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 30 }}
-              className="bg-[#161b22] border border-white/10 rounded-[2.5rem] shadow-3xl w-full max-w-md relative z-[1001] overflow-hidden p-6 sm:p-8"
-            >
-              {/* Premium top gradient line */}
-              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-indigo-600"></div>
-
-              {/* Header */}
-              <div className="flex justify-between items-start mb-6">
-                <div>
-                  <div className="flex items-center gap-2 text-indigo-400 font-mono text-[10px] font-bold uppercase tracking-wider mb-1">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                    {paymentSession.isSimulator ? "Development Simulation Gateway" : "Cashfree Secure Gateway"}
-                  </div>
-                  <h3 className="text-xl font-black text-white uppercase tracking-tight">
-                    {paymentSession.isSimulator ? "Simulate Payment Integration" : "Cashfree Order Active"}
-                  </h3>
-                </div>
-                <button 
-                  onClick={() => setShowCheckoutModal(false)}
-                  className="p-1.5 hover:bg-white/5 rounded-xl text-[#8b949e] hover:text-white transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Order Info */}
-              <div className="bg-black/30 border border-white/5 rounded-2xl p-5 mb-6 space-y-3">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="text-[#8b949e] font-semibold">Order ID:</span>
-                  <span className="text-white font-mono font-bold">#{paymentSession.orderId}</span>
-                </div>
-                <div className="flex justify-between items-center text-xs">
-                  <span className="text-[#8b949e] font-semibold">Customer ID:</span>
-                  <span className="text-white font-mono">{user?.uid?.substring(0, 8)}...</span>
-                </div>
-                <div className="border-t border-white/5 pt-3 flex justify-between items-center">
-                  <span className="text-xs text-[#8b949e] font-semibold">Recharge Amount:</span>
-                  <span className="text-emerald-400 font-mono font-black text-lg">₹{parseFloat(paymentSession.orderAmount || paymentSession.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                </div>
-              </div>
-
-              {paymentSession.isSimulator ? (
-                <div className="space-y-4">
-                  <p className="text-xs text-[#8b949e] leading-relaxed">
-                    You are running without client or secret keys. We have loaded the NavBharat simulated gateway so that you can verify transactions, credit user wallets, and inspect telemetry.
-                  </p>
-                  
-                  <div className="space-y-2.5 pt-2">
-                    <button
-                      onClick={() => verifyBillingPayment('SUCCESS')}
-                      className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white rounded-xl font-bold uppercase tracking-widest text-xs shadow-lg shadow-emerald-600/15 transition-all text-center"
-                    >
-                      👍 Simulate PASS (Credit ₹{paymentSession.orderAmount})
-                    </button>
-                    <button
-                      onClick={() => verifyBillingPayment('FAILED')}
-                      className="w-full py-3 bg-[#0d1117] border border-red-500/20 text-red-400 hover:bg-red-500/10 rounded-xl font-bold uppercase tracking-widest text-xs transition-all text-center"
-                    >
-                      👎 Simulate FAIL (Decline)
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4 text-center">
-                  <p className="text-xs text-[#8b949e] leading-relaxed">
-                    The payment gateway script is initializing. You are being redirected to Cashfree's secure site where you can finalize the recharge transaction securely.
-                  </p>
-                  
-                  <div className="py-2.5 flex items-center justify-center space-x-2.5">
-                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
-
-                  <button
-                    onClick={() => triggerCashfreeCheckout(paymentSession.paymentSessionId, paymentSession.environment)}
-                    className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold uppercase tracking-widest text-xs shadow-lg shadow-indigo-600/15 transition-all"
-                  >
-                    🚀 If not redirected, click here
-                  </button>
-                </div>
-              )}
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-
-      {/* Premium AI Workspace Builder Overlay */}
-      <AnimatePresence>
-        {isWorkspacePreparing && (
-          <div className="fixed inset-0 bg-[#0d1117]/95 backdrop-blur-md flex items-center justify-center p-4 z-[999999]">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-sm bg-[#161b22] border border-indigo-500/40 rounded-3xl p-6 space-y-6 text-center shadow-3xl relative overflow-hidden"
-            >
-              {/* Spinning progress outer ring / glow */}
-              <div className="absolute top-0 left-0 w-full h-[3px] bg-indigo-500 animate-pulse shadow-[0_0_15px_rgba(99,102,241,0.5)]"></div>
-              
-              <div className="flex flex-col items-center justify-center space-y-4 pt-4">
-                <div className="relative">
-                  {/* Glowing background circle */}
-                  <div className="absolute inset-0 bg-indigo-500/25 rounded-full blur-xl animate-pulse" />
-                  <div className="relative w-16 h-16 rounded-2xl bg-indigo-600/10 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
-                    <Sparkles className="w-8 h-8 animate-spin" style={{ animationDuration: '4s' }} />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <h4 className="text-white text-base font-black uppercase tracking-wider font-sans">🔥 Opening AI Workspace</h4>
-                  <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest font-mono font-black">Cognitive Pipeline Authorization</p>
-                </div>
-              </div>
-
-              <div className="bg-black/45 border border-white/5 rounded-2xl p-4 text-center">
-                <div className="flex items-center justify-center space-x-2.5 mb-2">
-                  <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-                <p className="text-[#8b949e] text-[11px] font-semibold leading-relaxed">
-                  Preparing synced project context for <span className="text-white font-black">navBharatAI</span>...
-                </p>
-              </div>
-
-              <p className="text-[8.5px] text-[#484f58] font-bold uppercase tracking-wider font-mono">
-                Sovereign Model Intercept active • Do not refresh
-              </p>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* AI Workspace Binding Error Popup */}
-      <AnimatePresence>
-        {workspacePrepError && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-[999999]">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 10 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 10 }}
-              className="w-full max-w-sm bg-[#161b22] border border-red-500/30 rounded-3xl p-6 space-y-4 shadow-3xl text-center relative"
-            >
-              <div className="absolute top-0 left-0 w-full h-[3px] bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]"></div>
-              
-              <div className="flex flex-col items-center justify-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/35 flex items-center justify-center text-red-500 font-bold text-xl font-mono">
-                  ✕
-                </div>
-                <div>
-                  <h4 className="text-white text-sm font-black uppercase tracking-wider font-sans">❌ Failed to open AI Workspace</h4>
-                  <p className="text-[9px] text-red-400 font-bold uppercase tracking-widest font-mono font-black">Workspace session error</p>
-                </div>
-              </div>
-
-              <div className="p-3.5 bg-black/40 border border-white/5 rounded-2xl text-[11px] text-[#8b949e] leading-relaxed text-left space-y-1.5">
-                <div className="font-sans font-bold text-[10px] uppercase text-red-400 font-extrabold">Detailed Reason:</div>
-                <p className="font-mono text-red-200 block text-[10px] break-words">{workspacePrepError}</p>
-              </div>
-
-              <div className="flex flex-col gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setWorkspacePrepError(null)}
-                  className="w-full py-2.5 bg-white/5 hover:bg-white/10 active:scale-95 border border-white/10 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer"
-                >
-                  Dismiss / Rectify Error
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Premium Real-Time Preview Builder Overlay */}
-      <AnimatePresence>
-        {isPreviewBuilding && (
-          <div className="fixed inset-0 bg-[#0d1117]/95 backdrop-blur-md flex items-center justify-center p-4 z-[999999]">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-md bg-[#161b22] border border-indigo-500/35 rounded-3xl p-6 space-y-5 shadow-3xl relative"
-            >
-              <div 
-                className="absolute top-0 left-0 h-[3px] bg-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)] transition-all duration-500" 
-                style={{
-                  width: previewBuildStage === 'preparing' ? '20%' :
-                         previewBuildStage === 'installing' ? '45%' :
-                         previewBuildStage === 'building' ? '70%' :
-                         previewBuildStage === 'starting' ? '90%' : '100%'
-                }}
-              />
-              
-              <div className="flex items-center gap-3.5 border-b border-white/5 pb-4">
-                <div className="w-12 h-12 rounded-xl bg-indigo-600/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 relative">
-                  <Globe className="w-6 h-6 animate-spin" style={{ animationDuration: '6s' }} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-white text-sm font-black uppercase tracking-wider font-sans">Building Preview</h4>
-                  </div>
-                  <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest font-mono font-black">
-                    Runtime: <span className="text-slate-200 font-extrabold">{detectedFramework}</span>
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-2.5">
-                {[
-                  { key: 'preparing', label: 'Validating workspace files' },
-                  { key: 'installing', label: 'Checking dependencies & file structure' },
-                  { key: 'building', label: 'Bundling HTML + CSS + JS assets' },
-                  { key: 'starting', label: 'Launching preview' },
-                ].map((step, idx) => {
-                  const stages = ['preparing', 'installing', 'building', 'starting', 'ready'];
-                  const stageIdx = stages.indexOf(previewBuildStage);
-                  const stepIdx = stages.indexOf(step.key);
-                  const isFinished = stageIdx > stepIdx;
-                  const isActive = previewBuildStage === step.key;
-                  
-                  return (
-                    <div 
-                      key={step.key}
-                      className={cn(
-                        "flex items-center gap-3 p-2.5 rounded-xl border transition-all text-xs font-semibold",
-                        isFinished ? "bg-emerald-500/5 border-emerald-500/15 text-emerald-400" :
-                        isActive ? "bg-indigo-600/10 border-indigo-500/25 text-white animate-pulse" :
-                        "bg-black/30 border-white/5 opacity-40 text-neutral-400"
-                      )}
-                    >
-                      <div className="shrink-0">
-                        {isFinished ? (
-                          <div className="w-4 h-4 rounded-full bg-emerald-500/10 border border-emerald-500 flex items-center justify-center text-[10px] text-emerald-400 font-black">
-                            ✓
-                          </div>
-                        ) : isActive ? (
-                          <div className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-[9px] font-black animate-spin">
-                            ⏳
-                          </div>
-                        ) : (
-                          <div className="w-4 h-4 rounded-full bg-stone-900 border border-white/10 flex items-center justify-center text-[9px] font-mono text-neutral-400">
-                            {idx + 1}
-                          </div>
-                        )}
-                      </div>
-                      <p className="flex-1 min-w-0 truncate">{step.label}</p>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="text-center font-mono text-[9px] text-[#484f58] uppercase font-bold tracking-widest leading-none pt-1">
-                NavBharat Preview Runtime • Static HTML + CSS + JS
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Real-Time Preview Failure Popup */}
-      <AnimatePresence>
-        {previewBuildError && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-[999999]">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 10 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 10 }}
-              className="w-full max-w-sm bg-[#161b22] border border-red-500/30 rounded-3xl p-6 space-y-4 shadow-3xl text-center relative"
-            >
-              <div className="absolute top-0 left-0 w-full h-[3px] bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]"></div>
-              
-              <div className="flex flex-col items-center justify-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/35 flex items-center justify-center text-red-500 font-mono text-xl font-bold">
-                  ✕
-                </div>
-                <div>
-                  <h4 className="text-white text-sm font-black uppercase tracking-wider font-sans">❌ Preview Failed</h4>
-                  <p className="text-[9px] text-red-400 font-bold uppercase tracking-widest font-mono font-black font-black">Development build halted</p>
-                </div>
-              </div>
-
-              <div className="p-3.5 bg-black/40 border border-white/5 rounded-2xl text-[11px] text-[#8b949e] leading-relaxed text-left space-y-1.5">
-                <div className="font-sans font-bold text-[10px] uppercase text-red-400 font-extrabold">Error Exception Logs:</div>
-                <p className="font-mono text-red-200 block text-[10px] break-words">{previewBuildError}</p>
-              </div>
-
-              <div className="flex flex-col gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setPreviewBuildError(null)}
-                  className="w-full py-2.5 bg-white/5 hover:bg-white/10 active:scale-95 border border-white/10 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer"
-                >
-                  Dismiss Error / Repair Code
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* Auth Modal + all overlay modals → AppModals */}
+      <AppModals
+        showAuth={showAuth}
+        auth={auth}
+        setUser={setUser}
+        onCloseAuth={() => setShowAuth(false)}
+        githubRedirectingMessage={githubRedirectingMessage}
+        githubDebugData={githubDebugData}
+        setGithubRedirectingMessage={setGithubRedirectingMessage}
+        showVishwakarmaUnlockModal={showVishwakarmaUnlockModal}
+        setShowVishwakarmaUnlockModal={setShowVishwakarmaUnlockModal}
+        wallet={wallet}
+        vkMode={vkMode}
+        vkPromoCode={vkPromoCode}
+        setVkPromoCode={setVkPromoCode}
+        redeemVishwakarmaPromo={redeemVishwakarmaPromo}
+        isRedeemingVkPromo={isRedeemingVkPromo}
+        couponError={couponError}
+        couponSuccess={couponSuccess}
+        vkTokenInput={vkTokenInput}
+        setVkTokenInput={setVkTokenInput}
+        isRecharging={isRecharging}
+        createVishwakarmaOrder={createVishwakarmaOrder}
+        showContinueModal={showContinueModal}
+        setShowContinueModal={setShowContinueModal}
+        setRestoreUciError={setRestoreUciError}
+        setResumeUciInputState={setResumeUciInputState}
+        resumeUciInputState={resumeUciInputState}
+        restoreUciError={restoreUciError}
+        handleRestoreByUci={handleRestoreByUci}
+        isRestoringUci={isRestoringUci}
+        firebaseOauthError={firebaseOauthError}
+        setFirebaseOauthError={setFirebaseOauthError}
+        pendingProvider={pendingProvider}
+        setPendingProvider={setPendingProvider}
+        pendingKey={pendingKey}
+        setPendingKey={setPendingKey}
+        handleKeySave={handleKeySave}
+        showCheckoutModal={showCheckoutModal}
+        setShowCheckoutModal={setShowCheckoutModal}
+        paymentSession={paymentSession}
+        user={user}
+        verifyBillingPayment={verifyBillingPayment}
+        isWorkspacePreparing={isWorkspacePreparing}
+        workspacePrepError={workspacePrepError}
+        setWorkspacePrepError={setWorkspacePrepError}
+        isPreviewBuilding={isPreviewBuilding}
+        previewBuildStage={previewBuildStage}
+        detectedFramework={detectedFramework}
+        previewBuildError={previewBuildError}
+        setPreviewBuildError={setPreviewBuildError}
+      />
 
 
       {/* 8.1 — Mobile bottom navigation bar (hidden on desktop) */}

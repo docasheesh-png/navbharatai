@@ -175,7 +175,7 @@ export async function fetchBuildSession(sessionId: string): Promise<BuildRespons
 
 /** A live progress event streamed from /api/build-stream. */
 export interface BuildStreamEvent {
-  type: 'status' | 'module' | 'files' | 'file' | 'complete' | 'error' | 'terminal' | 'preview_url' | 'plan' | 'plan_step_start' | 'plan_step_done' | 'thinking' | 'screenshot';
+  type: 'status' | 'module' | 'files' | 'file' | 'complete' | 'error' | 'terminal' | 'preview_url' | 'plan' | 'plan_step_start' | 'plan_step_done' | 'thinking' | 'screenshot' | 'providers_unavailable';
   message?: string;
   name?: string;
   state?: 'start' | 'done' | 'failed';
@@ -217,6 +217,8 @@ export interface BuildStreamEvent {
   codeReview?: CodeReviewResult;
   /** Phase 4.2 — estimated AI cost for this build (Grok rate-card estimate). */
   costUsd?: number;
+  /** Phase 5.5 — when all AI providers are down, how long to wait before retrying (ms). */
+  retryAfterMs?: number;
 }
 
 /**

@@ -505,6 +505,12 @@ export class EngineerAgentLoop {
           yield { type: 'status', message: `⚠️ Primary AI provider unavailable — using ${telemetry.provider} (${telemetry.retries} provider${telemetry.retries > 1 ? 's' : ''} tried first). Build continues normally.` };
         }
         if (!telemetry.success) {
+          // Phase 5.5 — emit a typed event so clients can show a countdown retry UI.
+          yield {
+            type: 'providers_unavailable',
+            retryAfterMs: 60000,
+            message: 'All AI providers are temporarily unavailable. The service will recover automatically — please retry in about 1 minute.',
+          };
           yield {
             type: 'error',
             message:

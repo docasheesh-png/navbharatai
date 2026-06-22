@@ -124,4 +124,27 @@ describe('EngineerAgentLoop', () => {
       { type: 'aborted' },
     ]);
   });
+
+  it('emits providers_unavailable then error when all AI providers fail during the ReAct loop', async () => {
+    // A router that reports healthy (so the loop starts) but returns !telemetry.success on every call.
+    const downRouter = {
+      route: async () => ({
+        response: { content: '', latencyMs: 0, provider: 'NONE', model: 'fallback' },
+        telemetry: { success: false, provider: 'NONE', retries: 4, latency: 0 },
+      }),
+      hasHealthyProvider: async () => true,
+    } as unknown as import('../src/server/AI/Router/AIRouter').AIRouter;
+
+    const events = await collect(new EngineerAgentLoop(downRouter, fakeActuator()));
+
+    // Must emit providers_unavailable before the terminal error.
+    const unavailIdx = events.findIndex(e => e.type === 'providers_unavailable');
+    const errorIdx   = events.findIndex(e => e.type === 'error');
+    expect(unavailIdx).toBeGreaterThanOrEqual(0);
+    expect(errorIdx).toBeGreaterThan(unavailIdx);
+
+    const unavail = events[unavailIdx] as any;
+    expect(unavail.retryAfterMs).toBe(60000);
+    expect(typeof unavail.message).toBe('string');
+  });
 });

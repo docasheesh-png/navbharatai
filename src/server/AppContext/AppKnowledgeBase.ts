@@ -128,6 +128,27 @@ Also supports: file attachments (text, code), image analysis (vision), and PDF r
     keywords: ['pro chat', 'pro', 'build mode', 'canvas', 'app maker', 'make app', 'generate app', 'html app', 'generate code', 'app generate karo'],
   },
   {
+    id: 'unified-workspace',
+    name: 'Unified Workspace — Chat + Live Code + Preview (Phase 3.1)',
+    path: 'Pro Chat → build an app → live workspace docks on the right (desktop)',
+    description: `World-class "Chat IS the IDE" surface, like Cursor / Bolt / v0 / Lovable. Once an app exists, a live workspace panel docks to the RIGHT of the Pro Chat conversation so you never switch tabs while building:
+• PREVIEW tab — the running app, live, updating as the AI edits files.
+• CODE tab — a file list + full Monaco editor; edit any file directly, changes sync instantly.
+• STUDIO button — opens the full Code Studio IDE for power users.
+• DEPLOY button — one-click deploy straight from the workspace.
+• "Hide app" / "Show app" toggle in the chat header collapses or restores the workspace.
+On mobile the chat stays full-width and Preview/Code remain separate tabs (via the Preview-ready banner). The workspace appears automatically after the first successful build.`,
+    howToUse: 'Open Pro Chat and build any app. On desktop, the live workspace appears on the right automatically. Switch between Preview and Code tabs at the top of that panel. Edit files directly in the Code tab. Use "Hide app" in the chat header to focus on the conversation, "Show app" to bring it back.',
+    relatedFeatures: ['pro_chat', 'ide', 'auto-test-generation', 'build-version-history'],
+    aiSurface: 'pro_chat',
+    keywords: [
+      'workspace', 'split view', 'chat and code', 'live editor', 'side by side', 'ide',
+      'code editor', 'preview pane', 'cursor', 'bolt', 'v0', 'lovable', 'monaco',
+      'edit code', 'live preview', 'show app', 'hide app', 'split screen', 'two pane',
+      'code aur preview', 'ek saath', 'editor kahan', 'where is code', 'unified',
+    ],
+  },
+  {
     id: 'pro_chat_file_upload',
     name: 'Pro Chat — File & Image Upload',
     path: 'Pro Chat → paperclip / attachment icon in the chat input',
@@ -216,6 +237,33 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     howToUse: 'After starting a dev server (e.g. npm run dev), open IDE → Preview tab to see the live app.',
     relatedFeatures: ['ide', 'pro_chat'],
     keywords: ['preview', 'live preview', 'hot reload', 'browser preview', 'see app', 'run app', 'app dekho'],
+  },
+  {
+    id: 'code-testing-panel',
+    name: 'Code Studio — Test Panel',
+    path: 'Code Studio → Testing tab',
+    description: 'Run a suite of automatic checks against the generated app (render checks, key element presence, basic interaction smoke tests) and see pass/fail status per test. Complements the auto-generated Vitest files by giving an in-browser quick check without leaving the IDE.',
+    howToUse: 'Open Code Studio, switch to the Testing tab, and run the checks. Green = pass, red = fail with the reason shown.',
+    relatedFeatures: ['ide', 'auto-test-generation', 'ide_preview'],
+    keywords: ['test panel', 'run tests', 'testing tab', 'check app', 'test cases', 'qa', 'verify app', 'test karo', 'app test'],
+  },
+  {
+    id: 'api-tester',
+    name: 'Code Studio — API Tester',
+    path: 'Code Studio → API tab',
+    description: 'A built-in HTTP client (like a mini Postman) to test your app\'s API endpoints: choose method (GET/POST/PUT/DELETE), set URL, headers and body, send the request, and inspect the response status, headers, and JSON body.',
+    howToUse: 'Open Code Studio → API tab. Enter the endpoint URL, pick the method, add any headers/body, then Send to see the live response.',
+    relatedFeatures: ['ide', 'ide_terminal', 'settings_database'],
+    keywords: ['api tester', 'http client', 'postman', 'test api', 'endpoint', 'rest', 'request', 'api call', 'fetch test', 'api test karo'],
+  },
+  {
+    id: 'project-templates',
+    name: 'Project Blueprints & Templates Gallery',
+    path: 'Sidebar → Templates  OR  Code Studio → Templates',
+    description: 'A gallery of ready-to-build Project Blueprints (including Bharat-first templates: UPI Payment App, Hindi Language App, GST Invoice Generator, Startup Registration Tracker) plus your own saved templates. Selecting a blueprint loads a detailed starter prompt so you can build it instantly.',
+    howToUse: 'Open Templates from the sidebar, browse the blueprint cards, and click one to start building from it. Save your own current project as a reusable template from the same panel.',
+    relatedFeatures: ['pro_chat', 'quick-start-gallery', 'engineer_ai'],
+    keywords: ['templates', 'blueprints', 'project templates', 'starter', 'examples', 'upi', 'gst', 'hindi app', 'startup', 'my templates', 'template gallery', 'readymade', 'banaya banaya'],
   },
 
   // ─── PROFESSIONALS HUB ───────────────────────────────────────────────────
@@ -428,6 +476,7 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     description: `Admin-only real-time observability panel showing:
 • Total builds, success rate %, preview rate, average build time
 • AI cost breakdown by provider (Claude, Grok, Gemini, etc.) with token counts
+• HEALTH ALERTS (Phase 4.3) — automatically flags high build-failure rate (>10%), low preview rate (<80%), or slow builds (avg >30s) as critical/warning banners at the top of the panel
 • Refresh button to pull the latest snapshot from the server
 • Backend: persisted daily to Firestore (metrics_snapshots) — survives Cloud Run restarts
 • Historical data available via GET /api/admin/metrics/history

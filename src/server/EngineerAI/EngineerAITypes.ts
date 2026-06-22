@@ -112,4 +112,6 @@ export type EngineerAgentEvent =
   | { type: 'complete'; summary: string; steps: number }
   | { type: 'max_steps_reached'; steps: number }
   | { type: 'aborted' }
+  /** Phase 5.5 — all AI providers unavailable; client should show retry UI. */
+  | { type: 'providers_unavailable'; retryAfterMs: number; message: string }
   | { type: 'error'; message: string };

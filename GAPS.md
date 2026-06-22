@@ -33,7 +33,7 @@
 | A8 | Sticky scroll not enabled (function signature context line) | `[x]` | #166 |
 | A9 | Code folding buttons (Fold All / Unfold All) missing from toolbar | `[x]` | #166 |
 | A10 | Unsaved-changes dot not shown on file tab when content differs from saved | `[ ]` | |
-| A11 | File extension icons missing from editor tabs (all show same icon) | `[ ]` | |
+| A11 | File extension icons missing from editor tabs (all show same icon) | `[x]` | #167 |
 | A12 | No "Format on Save" toggle in settings | `[ ]` | |
 | A13 | No "Trim trailing whitespace" setting | `[ ]` | |
 | A14 | No "Insert final newline" setting | `[ ]` | |
@@ -78,8 +78,8 @@
 | B16 | No "Export chat" to markdown/PDF | `[ ]` | |
 | B17 | No search within chat history | `[ ]` | |
 | B18 | No @-mention to reference a file in the prompt | `[ ]` | |
-| B19 | Markdown rendering missing: tables look unstyled | `[ ]` | |
-| B20 | Markdown rendering missing: task lists (- [ ]) not rendered | `[ ]` | |
+| B19 | Markdown rendering missing: tables look unstyled | `[x]` | #167 |
+| B20 | Markdown rendering missing: task lists (- [ ]) not rendered | `[x]` | #167 |
 | B21 | No LaTeX / math rendering support | `[ ]` | |
 | B22 | No inline image rendering for AI-returned image URLs | `[ ]` | |
 | B23 | No "thumbs up / thumbs down" feedback per message | `[ ]` | |
@@ -354,7 +354,7 @@
 | L2 | Modal dialogs do not trap focus | `[ ]` | |
 | L3 | No skip-to-main-content link | `[ ]` | |
 | L4 | Color contrast <4.5:1 in several dark-mode text areas | `[ ]` | |
-| L5 | Toasts not announced via aria-live region | `[ ]` | |
+| L5 | Toasts not announced via aria-live region | `[x]` | #167 |
 | L6 | Tab order broken in sidebar navigation | `[ ]` | |
 | L7 | No keyboard shortcut to close modals (Escape should work everywhere) | `[ ]` | |
 | L8 | No high-contrast mode | `[ ]` | |

@@ -1,10 +1,26 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MonacoEditor, { loader } from '@monaco-editor/react';
 import { cn } from '../../lib/utils';
-import { 
-  X, Play, Bug, Save, FileCode, Check, 
-  ChevronRight, MoreVertical, Layout
+import {
+  X, Play, Bug, Save, FileCode, Check,
+  ChevronRight, MoreVertical, Layout,
+  Globe, Paintbrush, Braces, FileText, Image
 } from 'lucide-react';
+import type { FC, SVGProps } from 'react';
+
+type IconComponent = FC<SVGProps<SVGSVGElement> & { className?: string }>;
+
+function iconForFile(path: string): IconComponent {
+  const ext = path.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'html': case 'htm': return Globe;
+    case 'css': case 'scss': case 'sass': return Paintbrush;
+    case 'json': return Braces;
+    case 'md': case 'mdx': return FileText;
+    case 'svg': case 'png': case 'jpg': case 'jpeg': case 'gif': case 'webp': return Image;
+    default: return FileCode;
+  }
+}
 import { Tab } from '../../types/ide';
 
 // Configure Monaco to load from a faster CDN or local if possible, 
@@ -82,6 +98,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
       <div className="h-9 bg-[#252526] flex items-center overflow-x-auto no-scrollbar shrink-0 select-none">
         {openTabs.map((tab) => {
           const isActive = tab.path === activeTab;
+          const TabIcon = iconForFile(tab.path);
           return (
             <div
               key={tab.path}
@@ -91,7 +108,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
                 isActive ? "bg-[#1e1e1e] text-white" : "bg-[#2d2d2d] text-[#969696] hover:bg-[#2a2d2e]"
               )}
             >
-              <FileCode className={cn("w-3.5 h-3.5", isActive ? "text-indigo-400" : "text-[#858585]")} />
+              <TabIcon className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-indigo-400" : "text-[#858585]")} />
               <span className={cn("text-[11px] truncate flex-1", isActive ? "font-medium" : "")}>
                 {tab.path}
               </span>

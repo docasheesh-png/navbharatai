@@ -619,6 +619,19 @@ export const AIChat: React.FC<AIChatProps> = ({
                 return <ChatCodeBlock lang={lang} code={code} />;
               },
               pre: ({ node, children, ...props }: any) => <>{children}</>,
+              // B19: Styled markdown tables
+              table: ({ node, children, ...props }: any) => (
+                <div className="overflow-x-auto my-2 rounded-xl border border-white/10">
+                  <table className="w-full text-[11px] border-collapse" {...props}>{children}</table>
+                </div>
+              ),
+              thead: ({ node, children, ...props }: any) => <thead className="bg-[#0d1117]" {...props}>{children}</thead>,
+              th: ({ node, children, ...props }: any) => <th className="px-3 py-2 text-left font-black text-[#8b949e] uppercase tracking-widest text-[9px] border-b border-white/10" {...props}>{children}</th>,
+              td: ({ node, children, ...props }: any) => <td className="px-3 py-2 border-b border-white/5 text-[#c9d1d9]" {...props}>{children}</td>,
+              // B20: Task list checkboxes (GFM - [ ] / [x])
+              input: ({ node, ...props }: any) => (
+                <input {...props} disabled className="mr-1.5 align-middle accent-indigo-500 cursor-default" />
+              ),
             }}
           >
             {cleanText || ""}

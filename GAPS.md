@@ -350,7 +350,7 @@
 
 | # | Gap | Status | PR |
 |---|-----|--------|----|
-| L1 | Icon-only buttons missing aria-label (Upload, Download, etc.) | `[ ]` | |
+| L1 | Icon-only buttons missing aria-label (Upload, Download, etc.) | `[x]` | #167 |
 | L2 | Modal dialogs do not trap focus | `[ ]` | |
 | L3 | No skip-to-main-content link | `[ ]` | |
 | L4 | Color contrast <4.5:1 in several dark-mode text areas | `[ ]` | |
@@ -358,7 +358,7 @@
 | L6 | Tab order broken in sidebar navigation | `[ ]` | |
 | L7 | No keyboard shortcut to close modals (Escape should work everywhere) | `[ ]` | |
 | L8 | No high-contrast mode | `[ ]` | |
-| L9 | Animated elements not paused with prefers-reduced-motion | `[ ]` | |
+| L9 | Animated elements not paused with prefers-reduced-motion | `[x]` | #167 |
 | L10 | Input placeholder text contrast insufficient | `[ ]` | |
 | L11 | File upload button not keyboard accessible | `[ ]` | |
 | L12 | Code editor not announced to screen readers | `[~]` | Monaco limit |
@@ -404,18 +404,18 @@
 | N3 | No inline comment/explain on selected text | `[x]` | #167 |
 | N4 | No "Write tests for this function" button | `[x]` | #167 |
 | N5 | No "Add JSDoc / docstring" generator | `[x]` | #167 |
-| N6 | No "Convert to TypeScript" action | `[ ]` | |
-| N7 | No "Simplify this function" action | `[ ]` | |
+| N6 | No "Convert to TypeScript" action | `[x]` | #167 |
+| N7 | No "Simplify this function" action | `[x]` | #167 |
 | N8 | No "Find bugs in this file" action | `[x]` | #167 |
 | N9 | No "Security scan this file" button | `[x]` | #167 |
 | N10 | No "Generate README" from project structure | `[x]` | #167 |
 | N11 | No "Generate .env.example" from code | `[x]` | #167 |
 | N12 | No "Generate API documentation" | `[x]` | #167 |
 | N13 | No "Generate data model diagram" | `[ ]` | |
-| N14 | No "Convert to dark mode" one-click action | `[ ]` | |
+| N14 | No "Convert to dark mode" one-click action | `[x]` | #167 |
 | N15 | No "Add i18n / translations" action | `[ ]` | |
-| N16 | No "Make accessible" auto-fix action | `[ ]` | |
-| N17 | No "Optimize for mobile" auto-fix | `[ ]` | |
+| N16 | No "Make accessible" auto-fix action | `[x]` | #167 |
+| N17 | No "Optimize for mobile" auto-fix | `[x]` | #167 |
 | N18 | No "Add loading states" to async operations | `[ ]` | |
 | N19 | No "Add error boundaries" action | `[ ]` | |
 | N20 | No "Add authentication guard" to routes | `[ ]` | |
@@ -423,7 +423,7 @@
 | N22 | No "Replace useState with Zustand" action | `[ ]` | |
 | N23 | No "Add Tailwind to existing app" migration | `[ ]` | |
 | N24 | No "Convert class component to functional" | `[ ]` | |
-| N25 | No "Generate mock data" for components | `[ ]` | |
+| N25 | No "Generate mock data" for components | `[x]` | #167 |
 | N26 | No "Write Storybook stories" action | `[ ]` | |
 | N27 | No "Generate Cypress E2E tests" | `[~]` | needs E2B |
 | N28 | No "Add Lighthouse CI" to project | `[ ]` | |

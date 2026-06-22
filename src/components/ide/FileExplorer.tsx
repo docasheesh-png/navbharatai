@@ -193,6 +193,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
                 setExpandedDirs(new Set([...allDirs, '']));
               }
             }}
+            aria-label="Expand or collapse all folders"
             className="p-1.5 hover:bg-white/5 rounded-md text-[#8b949e] hover:text-white transition-all"
             title="Expand / Collapse All"
           >
@@ -201,6 +202,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
           {/* C5: Sort toggle */}
           <button
             onClick={() => setSortMode(m => m === 'name' ? 'type' : 'name')}
+            aria-label={`Sort files by ${sortMode === 'name' ? 'file type' : 'name'}`}
             className={`p-1.5 rounded-md transition-all ${sortMode === 'type' ? 'text-indigo-400 bg-indigo-900/20' : 'text-[#8b949e] hover:text-white hover:bg-white/5'}`}
             title={`Sort by: ${sortMode === 'name' ? 'name' : 'type'} (click to toggle)`}
           >
@@ -208,6 +210,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
           </button>
           <button
             onClick={() => setIsAddingFile(true)}
+            aria-label="Create new file"
             className="p-1.5 hover:bg-white/5 rounded-md text-[#8b949e] hover:text-white transition-all"
             title="New File"
           >

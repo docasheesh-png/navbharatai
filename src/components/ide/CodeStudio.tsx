@@ -21,7 +21,7 @@ import {
   ChevronUp, ChevronDown, Rocket, Command, Search, Keyboard,
   Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2,
   MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck,
-  BookOpen, Key, Layers
+  BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces
 } from 'lucide-react';
 
 interface CodeStudioProps {
@@ -899,7 +899,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                {isMobile && (
                   <div className="h-12 border-b border-white/5 flex items-center justify-between px-4 shrink-0 bg-[#0d1117]">
                      <span className="text-xs font-black uppercase tracking-widest text-white">{activeScreen}</span>
-                     <button onClick={() => setIsSidebarOpen(false)} className="p-2 bg-white/5 rounded-xl"><X className="w-4 h-4" /></button>
+                     <button onClick={() => setIsSidebarOpen(false)} aria-label="Close sidebar" className="p-2 bg-white/5 rounded-xl"><X className="w-4 h-4" /></button>
                   </div>
                )}
                {renderSidebarContent()}
@@ -990,6 +990,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                   { label: 'JSDoc', icon: FileText, instruction: 'Add JSDoc documentation to this code' },
                   { label: 'Find Bugs', icon: Bug, instruction: 'Find and fix bugs in this code' },
                   { label: 'Security', icon: ShieldCheck, instruction: 'Do a security review of this code and identify vulnerabilities' },
+                  { label: 'To TS', icon: Braces, instruction: 'Convert this code to TypeScript with proper type annotations and interfaces' },
+                  { label: 'Simplify', icon: Layers, instruction: 'Simplify and reduce the complexity of this code while preserving its behavior' },
+                  { label: 'Dark Mode', icon: Moon, instruction: 'Add dark mode support to this component using CSS variables or Tailwind dark: classes' },
+                  { label: 'Accessible', icon: Accessibility, instruction: 'Improve accessibility: add aria-labels, roles, keyboard navigation, and fix contrast issues' },
+                  { label: 'Mobile', icon: Smartphone, instruction: 'Optimize this component for mobile: responsive layout, touch targets ≥44px, mobile-friendly interactions' },
+                  { label: 'Mock Data', icon: Database, instruction: 'Generate realistic mock data and sample fixtures for this component or function' },
                 ] as const).map(({ label, icon: Icon, instruction }) => (
                   <button
                     key={label}
@@ -1048,8 +1054,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
           
           {/* Panel Toggle Handle */}
           {!isPanelOpen && activeScreen !== 'preview' && (
-             <button 
+             <button
                onClick={() => setIsPanelOpen(true)}
+               aria-label="Open terminal panel"
                className="absolute bottom-4 right-4 z-[45] w-10 h-10 bg-[#333] hover:bg-[#444] rounded-lg border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all shadow-2xl"
              >
                 <ChevronUp className="w-5 h-5" />

@@ -5564,11 +5564,11 @@ ${buildLanguageRule(preferredLanguage)}`;
             { id: 'home' as ViewType,      icon: menuItems.find(m => m.id === 'home')?.icon      ?? Bot,         label: 'Home' },
             { id: (activeAgent === 'navbharatai-pro' ? 'nbi_pro_chat' : 'nbi_chat') as ViewType, icon: activeAgent === 'navbharatai-pro' ? (menuItems.find(m => m.id === 'nbi_pro_chat')?.icon ?? Zap) : (menuItems.find(m => m.id === 'nbi_chat')?.icon ?? MessageSquare), label: 'AI' },
             { id: 'preview' as ViewType,   icon: menuItems.find(m => m.id === 'preview')?.icon   ?? Monitor,     label: 'Preview' },
-            { id: 'files' as ViewType,     icon: menuItems.find(m => m.id === 'files')?.icon     ?? FolderOpen,  label: 'Files' },
+            { id: 'studio' as ViewType,    icon: menuItems.find(m => m.id === 'studio')?.icon    ?? Smartphone,  label: 'Studio' },
             { id: 'settings' as ViewType,  icon: menuItems.find(m => m.id === 'settings')?.icon  ?? Settings,    label: 'More' },
           ].map(({ id, icon: Icon, label }) => {
             const isActive = activeView === id;
-            const isDisabled = (id === 'preview' || id === 'files') && !hasGeneratedCode;
+            const isDisabled = (id === 'preview' || id === 'studio') && !hasGeneratedCode;
             return (
               <button
                 key={id}

@@ -450,18 +450,39 @@ export function registerBuildRoutes(app: Express): void {
             if (!doneResult) throw new Error('UnifiedBuildOrchestrator: no result received');
             eng = doneResult;
           } else {
-            eng = await runProEngine({
-              prompt: enginePrompt,
-              files: engineFiles,
-              callModel,
-              isEdit: isEdit === true,
-              sessionId,
-              userE2bKey: engineUserE2bKey,
-              githubToken: engineGithubToken,
-              dbConfig: engineDbConfig,
-              send: (ev) => send(ev),
-              signal: deadline.signal,
+            // Race the engine against the soft deadline.  When the deadline fires
+            // we immediately resolve with a sentinel so the route can emit a partial
+            // result without waiting for an in-flight AI HTTP call to finish.  The
+            // engine promise continues in the background and is silently abandoned
+            // (the AI call will finish, but no further SSE events are sent).
+            const DEADLINE_SENTINEL = '__deadline__' as const;
+            const deadlineRace = new Promise<typeof DEADLINE_SENTINEL>((resolve) => {
+              if (deadline.signal.aborted) { resolve(DEADLINE_SENTINEL); return; }
+              deadline.signal.addEventListener('abort', () => resolve(DEADLINE_SENTINEL), { once: true });
             });
+            const engineResult = await Promise.race([
+              runProEngine({
+                prompt: enginePrompt,
+                files: engineFiles,
+                callModel,
+                isEdit: isEdit === true,
+                sessionId,
+                userE2bKey: engineUserE2bKey,
+                githubToken: engineGithubToken,
+                dbConfig: engineDbConfig,
+                send: (ev) => send(ev),
+                signal: deadline.signal,
+              }),
+              deadlineRace,
+            ]);
+            if (engineResult === DEADLINE_SENTINEL) {
+              // Deadline fired while the AI was mid-call — emit partial immediately.
+              const inputFiles = engineFiles && typeof engineFiles === 'object' ? engineFiles : {};
+              sendComplete({ ok: false, files: inputFiles, fileCount: Object.keys(inputFiles).length, previewAllowed: false, partial: true });
+              cleanup();
+              return res.end();
+            }
+            eng = engineResult;
           }
           // Emit a terminal result when the engine produced usable files OR the soft
           // deadline fired (so the user always gets what was built — never "no result").

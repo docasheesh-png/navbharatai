@@ -19,7 +19,10 @@ import { cn } from '../../lib/utils';
 import {
   Menu as MenuIcon, X, Maximize2, Minimize2,
   ChevronUp, ChevronDown, Rocket, Command, Search, Keyboard,
-  Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2
+  Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2,
+  MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck,
+  BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces,
+  RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle
 } from 'lucide-react';
 
 interface CodeStudioProps {
@@ -68,6 +71,8 @@ interface CodeStudioProps {
   onOpenProChat?: () => void;
   wallet?: any;
   onUnlockVishwakarma: () => void;
+  /** N1-N9: Send a message directly to AI (bypasses controlled input state). */
+  onSendDirect?: (text: string) => void;
 }
 
 export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
@@ -113,6 +118,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   onOpenProChat,
   wallet,
   onUnlockVishwakarma,
+  onSendDirect,
 }) => {
   const themeClasses = getThemeClasses(theme);
   const [activeScreen, setActiveScreen] = useState<IDEScreen>(() => {
@@ -141,8 +147,19 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const [editorMinimap, setEditorMinimap] = useState<boolean>(() => localStorage.getItem('ide_minimap') !== 'off');
   const [editorFontSize, setEditorFontSize] = useState<number>(() => Number(localStorage.getItem('ide_fontSize') || 14));
   const [editorTabSize, setEditorTabSize] = useState<number>(() => Number(localStorage.getItem('ide_tabSize') || 2));
+  // A12: Format on Save; A13: Trim trailing whitespace; A14: Insert final newline
+  const [editorFormatOnSave, setEditorFormatOnSave] = useState<boolean>(() => localStorage.getItem('ide_formatOnSave') !== 'off');
+  const [editorTrimWhitespace, setEditorTrimWhitespace] = useState<boolean>(() => localStorage.getItem('ide_trimWhitespace') !== 'off');
+  const [editorFinalNewline, setEditorFinalNewline] = useState<boolean>(() => localStorage.getItem('ide_finalNewline') !== 'off');
+  // A17: Editor theme (dark/light)
+  const [editorTheme, setEditorTheme] = useState<'vs-dark' | 'vs'>(() => (localStorage.getItem('ide_theme') as 'vs-dark' | 'vs') || 'vs-dark');
+  // A10: Track per-file "saved" snapshots so we can show an unsaved-changes dot
+  const savedFilesRef = React.useRef<Record<string, string>>({});
+  const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
   // A24: Cursor position shown in status bar
   const [cursorPos, setCursorPos] = useState<{ line: number; col: number }>({ line: 1, col: 1 });
+  // N1-N9: Selected code for AI action toolbar
+  const [selectedCode, setSelectedCode] = useState<string>('');
 
   const handleScreenChange = (screen: IDEScreen) => {
     if (screen === 'shortcuts') {
@@ -202,11 +219,42 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     }
   }, [activeFile]);
 
+  // A10: Snapshot file content when a tab is first opened (establishes the "saved" baseline)
+  useEffect(() => {
+    for (const tab of openTabs) {
+      if (!(tab.path in savedFilesRef.current)) {
+        savedFilesRef.current[tab.path] = files[tab.path] ?? '';
+      }
+    }
+  }, [openTabs]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // C21: Scroll editor to top whenever the active file changes
+  useEffect(() => {
+    if (editorInstance) {
+      editorInstance.revealLine(1);
+      editorInstance.setScrollPosition({ scrollTop: 0, scrollLeft: 0 });
+    }
+  }, [activeFile]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // A24: subscribe to Monaco cursor position changes
   useEffect(() => {
     if (!editorInstance) return;
     const disposable = editorInstance.onDidChangeCursorPosition((e: any) => {
       setCursorPos({ line: e.position.lineNumber, col: e.position.column });
+    });
+    return () => disposable.dispose();
+  }, [editorInstance]);
+
+  // N1-N9: Track selected text for AI code action toolbar
+  useEffect(() => {
+    if (!editorInstance) return;
+    const disposable = editorInstance.onDidChangeCursorSelection(() => {
+      const selection = editorInstance.getSelection();
+      if (selection && !selection.isEmpty()) {
+        setSelectedCode(editorInstance.getModel()?.getValueInRange(selection) || '');
+      } else {
+        setSelectedCode('');
+      }
     });
     return () => disposable.dispose();
   }, [editorInstance]);
@@ -221,6 +269,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const handleFileChange = (content: string) => {
     const nextFiles = { ...files, [activeFile]: content };
     onFilesChange(nextFiles);
+    // A10: mark tab dirty if content differs from snapshot
+    const savedContent = savedFilesRef.current[activeFile] ?? content;
+    setDirtyTabs(prev => {
+      const next = new Set(prev);
+      if (content !== savedContent) { next.add(activeFile); } else { next.delete(activeFile); }
+      return next;
+    });
     if (autoRunTimer.current) clearTimeout(autoRunTimer.current);
     autoRunTimer.current = setTimeout(() => { onRun(nextFiles); }, 900);
   };
@@ -243,6 +298,31 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     delete newFiles[path];
     onFilesChange(newFiles);
     handleTabClose(path);
+  };
+
+  // N10-N12: Send a project-level AI action (no selection needed — whole project context)
+  const sendProjectAction = (prompt: string) => {
+    if (onSendDirect) {
+      onSendDirect(prompt);
+    } else {
+      onChatInputChange(prompt);
+    }
+    handleScreenChange('ai');
+    setIsSidebarOpen(true);
+  };
+
+  // N1-N9: Send selected code + action label to AI chat
+  const sendCodeAction = (label: string, instruction: string) => {
+    if (!selectedCode.trim()) return;
+    const lang = activeFile.split('.').pop() || 'code';
+    const prompt = `${instruction}:\n\n\`\`\`${lang}\n${selectedCode}\n\`\`\``;
+    if (onSendDirect) {
+      onSendDirect(prompt);
+    } else {
+      onChatInputChange(prompt);
+    }
+    handleScreenChange('ai');
+    setIsSidebarOpen(true);
   };
 
   const handleRenameFile = (oldPath: string, newName: string) => {
@@ -372,9 +452,23 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
           // Cannot open Chrome dev tools via JS, but can log guidance
           console.log('Press F12 or Ctrl+Shift+I to open DevTools');
           break;
-        case 'base.action.save':
-          console.log('File Saved');
+        case 'base.action.save': {
+          let finalContent = files[activeFile] || '';
+          // A13: Trim trailing whitespace
+          if (editorTrimWhitespace) finalContent = finalContent.replace(/[^\S\n]+$/gm, '');
+          // A14: Insert final newline
+          if (editorFinalNewline && finalContent.length > 0 && !finalContent.endsWith('\n')) finalContent += '\n';
+          if (finalContent !== (files[activeFile] || '')) {
+            onFilesChange({ ...files, [activeFile]: finalContent });
+            editorInstance?.setValue(finalContent);
+          }
+          // A12: Format on Save
+          if (editorFormatOnSave) editorInstance?.getAction('editor.action.formatDocument')?.run();
+          // A10: mark file as saved
+          savedFilesRef.current[activeFile] = finalContent;
+          setDirtyTabs(prev => { const next = new Set(prev); next.delete(activeFile); return next; });
           break;
+        }
       }
     }
 
@@ -409,7 +503,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     switch (activeScreen) {
       case 'files':
         return (
-          <FileExplorer 
+          <FileExplorer
             files={files}
             activeFile={activeFile}
             onFileSelect={(f) => {
@@ -419,6 +513,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
             onFileCreate={handleCreateFile}
             onFileDelete={handleDeleteFile}
             onFileRename={handleRenameFile}
+            dirtyTabs={dirtyTabs}
+            githubRepoUrl={githubRepoContext?.html_url}
+            githubBranch={githubRepoContext?.default_branch || 'main'}
           />
         );
       case 'search': {
@@ -685,6 +782,30 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            >
              <Code2 className="w-3 h-3" />
            </button>
+           {/* A17: Light/dark theme toggle */}
+           <button
+             onClick={() => { const v = editorTheme === 'vs-dark' ? 'vs' : 'vs-dark'; setEditorTheme(v); localStorage.setItem('ide_theme', v); }}
+             title={`Editor theme: ${editorTheme === 'vs-dark' ? 'Dark' : 'Light'} (click to toggle)`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorTheme === 'vs' ? 'text-amber-400 bg-amber-900/20' : 'text-[#484f58] hover:text-white'}`}
+           >{editorTheme === 'vs-dark' ? '🌙' : '☀️'}</button>
+           {/* A12: Format on Save toggle */}
+           <button
+             onClick={() => { const v = !editorFormatOnSave; setEditorFormatOnSave(v); localStorage.setItem('ide_formatOnSave', v ? 'on' : 'off'); }}
+             title={`Format on Save: ${editorFormatOnSave ? 'on' : 'off'} (Ctrl+S)`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorFormatOnSave ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+           >Fmt</button>
+           {/* A13: Trim whitespace toggle */}
+           <button
+             onClick={() => { const v = !editorTrimWhitespace; setEditorTrimWhitespace(v); localStorage.setItem('ide_trimWhitespace', v ? 'on' : 'off'); }}
+             title={`Trim trailing whitespace on Save: ${editorTrimWhitespace ? 'on' : 'off'}`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorTrimWhitespace ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+           >Trim</button>
+           {/* A14: Final newline toggle */}
+           <button
+             onClick={() => { const v = !editorFinalNewline; setEditorFinalNewline(v); localStorage.setItem('ide_finalNewline', v ? 'on' : 'off'); }}
+             title={`Insert final newline on Save: ${editorFinalNewline ? 'on' : 'off'}`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorFinalNewline ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+           >↵</button>
            {/* A9: Code folding */}
            <button
              onClick={() => editorInstance?.getAction('editor.foldAll')?.run()}
@@ -700,6 +821,25 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            >
              <Maximize2 className="w-3 h-3" />
            </button>
+         </div>
+
+         {/* N10-N12: Project-level AI actions */}
+         <div className="hidden lg:flex items-center gap-0.5 border-l border-white/10 pl-2 ml-1">
+           {([
+             { label: 'README', icon: BookOpen, prompt: 'Generate a comprehensive README.md for this project based on the code. Include: project description, features, installation steps, usage examples, and tech stack.' },
+             { label: '.env', icon: Key, prompt: 'Generate a .env.example file listing all environment variables needed by this project with placeholder values and brief comments.' },
+             { label: 'API Docs', icon: Layers, prompt: 'Generate API documentation for all the backend routes and endpoints in this project. Include method, path, request body, and response format for each endpoint.' },
+           ] as const).map(({ label, icon: Icon, prompt }) => (
+             <button
+               key={label}
+               onClick={() => sendProjectAction(prompt)}
+               title={`AI: Generate ${label}`}
+               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black text-[#484f58] hover:text-emerald-400 hover:bg-emerald-900/20 transition-all uppercase tracking-widest"
+             >
+               <Icon className="w-3 h-3" />
+               {label}
+             </button>
+           ))}
          </div>
 
          <div className="flex-1 flex justify-center mx-4">
@@ -762,7 +902,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                {isMobile && (
                   <div className="h-12 border-b border-white/5 flex items-center justify-between px-4 shrink-0 bg-[#0d1117]">
                      <span className="text-xs font-black uppercase tracking-widest text-white">{activeScreen}</span>
-                     <button onClick={() => setIsSidebarOpen(false)} className="p-2 bg-white/5 rounded-xl"><X className="w-4 h-4" /></button>
+                     <button onClick={() => setIsSidebarOpen(false)} aria-label="Close sidebar" className="p-2 bg-white/5 rounded-xl"><X className="w-4 h-4" /></button>
                   </div>
                )}
                {renderSidebarContent()}
@@ -811,24 +951,84 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 onMount={setEditorInstance}
                 onRun={() => onRun(files)}
                 onDebug={() => setIsPanelOpen(true)}
+                dirtyTabs={dirtyTabs}
+                editorTheme={editorTheme}
                 editorOptions={{
                   wordWrap: editorWordWrap ? 'on' : 'off',
                   minimap: { enabled: editorMinimap },
                   fontSize: editorFontSize,
                   tabSize: editorTabSize,
                   stickyScroll: { enabled: true },
+                  trimAutoWhitespace: editorTrimWhitespace,
                 }}
               />
           )}
 
           <AnimatePresence>
             {isCursorPopupOpen && editorInstance && (
-              <CursorPopup 
-                editor={editorInstance} 
-                onClose={() => setIsCursorPopupOpen(false)} 
+              <CursorPopup
+                editor={editorInstance}
+                onClose={() => setIsCursorPopupOpen(false)}
                 onToggleKeyboard={() => setIsShortcutsOpen(!isShortcutsOpen)}
                 isKeyboardOpen={isShortcutsOpen}
               />
+            )}
+          </AnimatePresence>
+
+          {/* N1-N9: AI code action toolbar — appears when text is selected in editor */}
+          <AnimatePresence>
+            {selectedCode.trim() && activeScreen !== 'preview' && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.12 }}
+                className="absolute top-10 right-2 z-[52] flex items-center gap-0.5 bg-[#0d1117] border border-white/15 rounded-xl shadow-2xl px-1.5 py-1 shadow-black/40"
+              >
+                <span className="text-[8px] font-black text-[#484f58] uppercase tracking-widest px-1 border-r border-white/10 mr-0.5">AI Actions</span>
+                {([
+                  { label: 'Explain', icon: MessageSquare, instruction: 'Explain this code' },
+                  { label: 'Improve', icon: Sparkles, instruction: 'Improve and optimize this code' },
+                  { label: 'Tests', icon: TestTube, instruction: 'Write unit tests for this code' },
+                  { label: 'JSDoc', icon: FileText, instruction: 'Add JSDoc documentation to this code' },
+                  { label: 'Find Bugs', icon: Bug, instruction: 'Find and fix bugs in this code' },
+                  { label: 'Security', icon: ShieldCheck, instruction: 'Do a security review of this code and identify vulnerabilities' },
+                  { label: 'To TS', icon: Braces, instruction: 'Convert this code to TypeScript with proper type annotations and interfaces' },
+                  { label: 'Simplify', icon: Layers, instruction: 'Simplify and reduce the complexity of this code while preserving its behavior' },
+                  { label: 'Dark Mode', icon: Moon, instruction: 'Add dark mode support to this component using CSS variables or Tailwind dark: classes' },
+                  { label: 'Accessible', icon: Accessibility, instruction: 'Improve accessibility: add aria-labels, roles, keyboard navigation, and fix contrast issues' },
+                  { label: 'Mobile', icon: Smartphone, instruction: 'Optimize this component for mobile: responsive layout, touch targets ≥44px, mobile-friendly interactions' },
+                  { label: 'Mock Data', icon: Database, instruction: 'Generate realistic mock data and sample fixtures for this component or function' },
+                  { label: 'Loading', icon: RefreshCw, instruction: 'Add loading states and skeleton placeholders to all async operations in this code' },
+                  { label: 'Error Boundary', icon: Shield, instruction: 'Wrap this component with a React ErrorBoundary and add appropriate error fallback UI' },
+                  { label: 'Auth Guard', icon: Lock, instruction: 'Add authentication guard to these routes: redirect to /login if the user is not authenticated' },
+                  { label: 'React 19', icon: Package, instruction: 'Migrate this code to React 19 patterns: use() hook, server components, new form actions where applicable' },
+                  { label: 'Zustand', icon: Users, instruction: 'Replace useState/useReducer in this component with a Zustand store for global state management' },
+                  { label: 'Tailwind', icon: Type, instruction: 'Add Tailwind CSS to this project: install it, create config files, and migrate any existing CSS classes to Tailwind utilities' },
+                  { label: 'To Func', icon: Cpu, instruction: 'Convert this class component to a React functional component using hooks (useState, useEffect, useRef, etc.)' },
+                  { label: 'Storybook', icon: BookOpen, instruction: 'Write Storybook stories for this component: Default, Loading, Error, and interactive variant stories with argTypes' },
+                  { label: 'Bundle', icon: BarChart2, instruction: 'Analyze this code for bundle size impact: identify heavy imports, suggest lazy loading, and tree-shaking opportunities' },
+                  { label: 'Audit', icon: AlertTriangle, instruction: 'Run a dependency audit: identify outdated packages, security vulnerabilities, and suggest safe upgrade paths' },
+                  { label: 'Perf', icon: Activity, instruction: 'Add Lighthouse CI configuration and performance budget to this project for automated performance testing in CI/CD' },
+                ] as const).map(({ label, icon: Icon, instruction }) => (
+                  <button
+                    key={label}
+                    onClick={() => sendCodeAction(label, instruction)}
+                    title={instruction}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[8px] font-black text-[#8b949e] hover:text-white hover:bg-indigo-600/80 transition-all"
+                  >
+                    <Icon className="w-2.5 h-2.5 shrink-0" />
+                    {label}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setSelectedCode('')}
+                  title="Dismiss"
+                  className="ml-0.5 p-0.5 rounded text-[#484f58] hover:text-white transition-colors"
+                >
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </motion.div>
             )}
           </AnimatePresence>
 
@@ -868,8 +1068,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
           
           {/* Panel Toggle Handle */}
           {!isPanelOpen && activeScreen !== 'preview' && (
-             <button 
+             <button
                onClick={() => setIsPanelOpen(true)}
+               aria-label="Open terminal panel"
                className="absolute bottom-4 right-4 z-[45] w-10 h-10 bg-[#333] hover:bg-[#444] rounded-lg border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all shadow-2xl"
              >
                 <ChevronUp className="w-5 h-5" />

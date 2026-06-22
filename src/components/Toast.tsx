@@ -28,8 +28,10 @@ export function useToast() {
 
   const addToast = useCallback((message: string, type: ToastType = 'info') => {
     const id = Math.random().toString(36).slice(2);
+    // F1/D3: Error/warning toasts stay longer; success also gets 5s to be readable
+    const duration = type === 'error' ? 8000 : type === 'warning' ? 6000 : type === 'success' ? 5000 : 4000;
     setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
   }, []);
 
   const removeToast = useCallback((id: string) => {
@@ -45,7 +47,8 @@ interface ToastContainerProps {
 }
 
 export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onRemove }) => (
-  <div className="fixed bottom-20 right-4 z-[500] flex flex-col gap-2 max-w-xs w-full pointer-events-none lg:bottom-6">
+  // L5: aria-live so screen readers announce new toasts
+  <div role="status" aria-live="polite" aria-atomic="false" className="fixed bottom-20 right-4 z-[500] flex flex-col gap-2 max-w-xs w-full pointer-events-none lg:bottom-6">
     <AnimatePresence>
       {toasts.map(t => (
         <motion.div

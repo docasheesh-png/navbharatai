@@ -32,14 +32,14 @@
 | A7 | Bracket pair colorization not enabled (Monaco supports it natively) | `[x]` | #166 |
 | A8 | Sticky scroll not enabled (function signature context line) | `[x]` | #166 |
 | A9 | Code folding buttons (Fold All / Unfold All) missing from toolbar | `[x]` | #166 |
-| A10 | Unsaved-changes dot not shown on file tab when content differs from saved | `[ ]` | |
-| A11 | File extension icons missing from editor tabs (all show same icon) | `[ ]` | |
-| A12 | No "Format on Save" toggle in settings | `[ ]` | |
-| A13 | No "Trim trailing whitespace" setting | `[ ]` | |
-| A14 | No "Insert final newline" setting | `[ ]` | |
+| A10 | Unsaved-changes dot not shown on file tab when content differs from saved | `[x]` | #167 |
+| A11 | File extension icons missing from editor tabs (all show same icon) | `[x]` | #167 |
+| A12 | No "Format on Save" toggle in settings | `[x]` | #167 |
+| A13 | No "Trim trailing whitespace" setting | `[x]` | #167 |
+| A14 | No "Insert final newline" setting | `[x]` | #167 |
 | A15 | Ctrl+G (Go to Line) not wired as keyboard shortcut | `[ ]` | |
 | A16 | Ctrl+F (Find) not visually highlighted as shortcut hint | `[ ]` | |
-| A17 | Editor theme is always dark — no light theme option | `[ ]` | |
+| A17 | Editor theme is always dark — no light theme option | `[x]` | #167 |
 | A18 | No "Select all occurrences" keyboard shortcut hint | `[ ]` | |
 | A19 | Monaco language not auto-detected for .mjs / .cjs / .mts / .cts | `[x]` | #166 |
 | A20 | Read-only file indicator missing (no lock icon on non-editable files) | `[ ]` | |
@@ -65,30 +65,30 @@
 | B3 | No "Regenerate response" button on last AI message | `[x]` | #165 |
 | B4 | No character count / token estimate shown as input grows | `[x]` | #165 |
 | B5 | No "Clear conversation" button | `[x]` | #165 |
-| B6 | Starter suggestions not visible when chat is empty | `[ ]` | |
+| B6 | Starter suggestions not visible when chat is empty | `[x]` | #167 |
 | B7 | No model name badge showing which AI answered | `[x]` | #166 |
 | B8 | No typing indicator (three-dots animation) during generation | `[x]` | #166 |
-| B9 | No "Edit prompt" option on user messages | `[ ]` | |
-| B10 | Code blocks in chat have no file name header | `[ ]` | |
-| B11 | Code blocks in chat have no line numbers | `[ ]` | |
-| B12 | Code blocks in chat not syntax-highlighted in all languages | `[ ]` | |
+| B9 | No "Edit prompt" option on user messages | `[x]` | #167 |
+| B10 | Code blocks in chat have no file name header | `[x]` | #167 |
+| B11 | Code blocks in chat have no line numbers | `[x]` | #167 |
+| B12 | Code blocks in chat not syntax-highlighted in all languages | `[x]` | #167 |
 | B13 | Long AI messages have no "Collapse" toggle | `[x]` | existing |
 | B14 | No keyboard shortcut to focus input (Ctrl+K or /) | `[x]` | #166 |
 | B15 | Chat history scroll position lost when switching tabs | `[ ]` | |
 | B16 | No "Export chat" to markdown/PDF | `[ ]` | |
 | B17 | No search within chat history | `[ ]` | |
 | B18 | No @-mention to reference a file in the prompt | `[ ]` | |
-| B19 | Markdown rendering missing: tables look unstyled | `[ ]` | |
-| B20 | Markdown rendering missing: task lists (- [ ]) not rendered | `[ ]` | |
+| B19 | Markdown rendering missing: tables look unstyled | `[x]` | #167 |
+| B20 | Markdown rendering missing: task lists (- [ ]) not rendered | `[x]` | #167 |
 | B21 | No LaTeX / math rendering support | `[ ]` | |
-| B22 | No inline image rendering for AI-returned image URLs | `[ ]` | |
+| B22 | No inline image rendering for AI-returned image URLs | `[x]` | #167 |
 | B23 | No "thumbs up / thumbs down" feedback per message | `[ ]` | |
-| B24 | Chat session name is always "Untitled" — no auto-naming | `[ ]` | |
+| B24 | Chat session name is always "Untitled" — no auto-naming | `[x]` | #167 |
 | B25 | Session list shows raw UCI code, not human readable title | `[ ]` | |
 | B26 | No "pin to top" for important messages | `[ ]` | |
-| B27 | Paste image into chat not supported (clipboard paste) | `[ ]` | |
+| B27 | Paste image into chat not supported (clipboard paste) | `[x]` | #167 |
 | B28 | Voice input icon has no accessibility label | `[x]` | #166 |
-| B29 | No multiline paste indicator (large pastes not warned) | `[ ]` | |
+| B29 | No multiline paste indicator (large pastes not warned) | `[x]` | #167 |
 | B30 | No "Send on Enter / Shift+Enter" preference toggle | `[x]` | #166 |
 
 ---
@@ -101,15 +101,15 @@
 | C2 | No delete file option in Files panel | `[x]` | #165 |
 | C3 | No "New File" button in Files panel | `[x]` | #165 |
 | C4 | No "New Folder" button in Files panel | `[s]` | VFS flat namespace |
-| C5 | File list not sortable (by name, type, size, modified) | `[ ]` | |
+| C5 | File list not sortable (by name, type, size, modified) | `[x]` | #167 |
 | C6 | No search / filter input in Files panel | `[x]` | #165 |
 | C7 | No file size shown in file list | `[x]` | #166 |
 | C8 | No "Copy file path" button | `[x]` | #166 |
 | C9 | No multi-file selection for bulk delete/download | `[ ]` | |
 | C10 | No image preview for .png/.jpg/.svg files | `[ ]` | |
-| C11 | No binary file warning (tries to show binary as text) | `[ ]` | |
-| C12 | Nested folder structure collapsed by default with no expand-all | `[ ]` | |
-| C13 | No recently-opened files section | `[ ]` | |
+| C11 | No binary file warning (tries to show binary as text) | `[x]` | #167 |
+| C12 | Nested folder structure collapsed by default with no expand-all | `[x]` | #167 |
+| C13 | No recently-opened files section | `[x]` | #167 |
 | C14 | No file pinning (mark important files) | `[ ]` | |
 | C15 | ZIP download does not include .env.example | `[ ]` | |
 | C16 | ZIP download includes __pycache__, node_modules stubs if present | `[ ]` | |
@@ -117,8 +117,8 @@
 | C18 | File name with spaces causes preview issues | `[ ]` | |
 | C19 | No drag-and-drop to reorder files | `[s]` | VFS has no order |
 | C20 | No "Move file" option (cut/paste across folders) | `[ ]` | |
-| C21 | File open does not scroll editor to top | `[ ]` | |
-| C22 | Files panel does not show which files have unsaved changes | `[ ]` | |
+| C21 | File open does not scroll editor to top | `[x]` | #167 |
+| C22 | Files panel does not show which files have unsaved changes | `[x]` | #167 |
 | C23 | No "Reveal in file tree" from open editor tab | `[ ]` | |
 | C24 | File tree does not auto-expand to show active file | `[ ]` | |
 | C25 | Uploaded files via upload button not announced as added | `[ ]` | |
@@ -131,12 +131,12 @@
 |---|-----|--------|----|
 | D1 | Build progress percent bar does not animate smoothly | `[ ]` | |
 | D2 | No "What changed?" diff view after an edit build | `[ ]` | |
-| D3 | Success notification disappears before user reads | `[ ]` | |
+| D3 | Success notification disappears before user reads | `[x]` | #167 |
 | D4 | Failure messages mix Hindi/English inconsistently | `[ ]` | |
-| D5 | No total lines-of-code counter in success state | `[ ]` | |
-| D6 | No file count breakdown by language in success | `[ ]` | |
+| D5 | No total lines-of-code counter in success state | `[x]` | #167 |
+| D6 | No file count breakdown by language in success | `[x]` | #167 |
 | D7 | No estimated build time shown before starting | `[ ]` | |
-| D8 | Build cancellation has no confirm dialog | `[ ]` | |
+| D8 | Build cancellation has no confirm dialog | `[x]` | #167 |
 | D9 | Repair attempt failure shows generic "Please try again" | `[ ]` | |
 | D10 | Code review panel UI collapses too easily (accordion UX) | `[ ]` | |
 | D11 | Security findings in code review not linked to file/line | `[ ]` | |
@@ -147,10 +147,10 @@
 | D16 | No "Export build report" (files + review + tests) as PDF/MD | `[ ]` | |
 | D17 | Build steps list does not show actual file being generated | `[ ]` | |
 | D18 | No "Continue partial build" option on timeout | `[ ]` | |
-| D19 | Provider used for build not shown in completion badge | `[ ]` | |
+| D19 | Provider used for build not shown in completion badge | `[x]` | #167 |
 | D20 | Build steps collapse after build — no way to re-expand | `[ ]` | |
 | D21 | Generated app name defaults to "App" — no smart naming | `[ ]` | |
-| D22 | No copy-to-clipboard button on generated code blocks | `[ ]` | |
+| D22 | No copy-to-clipboard button on generated code blocks | `[x]` | #167 |
 | D23 | No build history count shown in UI (e.g. "Build #7") | `[ ]` | |
 | D24 | No diff between current build and last build (file-level diff) | `[ ]` | |
 | D25 | Build stops on first error without reporting all errors | `[ ]` | |
@@ -168,9 +168,9 @@
 |---|-----|--------|----|
 | E1 | Bottom nav labels cut off on very small screens (<360px) | `[ ]` | |
 | E2 | Touch targets below 44px in several places | `[ ]` | |
-| E3 | No haptic feedback on key actions (vibration API) | `[ ]` | |
-| E4 | Code blocks in chat overflow horizontally (no scroll) | `[ ]` | |
-| E5 | Long filenames in Files panel overflow without ellipsis | `[ ]` | |
+| E3 | No haptic feedback on key actions (vibration API) | `[x]` | #167 |
+| E4 | Code blocks in chat overflow horizontally (no scroll) | `[x]` | #167 |
+| E5 | Long filenames in Files panel overflow without ellipsis | `[x]` | existing |
 | E6 | Pinch-to-zoom on preview iframe (should allow) | `[ ]` | |
 | E7 | No landscape orientation optimization | `[ ]` | |
 | E8 | Sidebar animation not smooth on low-end devices | `[ ]` | |
@@ -198,7 +198,7 @@
 
 | # | Gap | Status | PR |
 |---|-----|--------|----|
-| F1 | Error toasts disappear too quickly (3s on errors) | `[ ]` | |
+| F1 | Error toasts disappear too quickly (3s on errors) | `[x]` | #167 |
 | F2 | Network errors and AI errors look identical in the UI | `[ ]` | |
 | F3 | No offline banner in the app header | `[x]` | #166 |
 | F4 | Session restore failures are silent | `[ ]` | |
@@ -207,7 +207,7 @@
 | F7 | API key missing gives cryptic "401 Unauthorized" to user | `[ ]` | |
 | F8 | Payment failures show raw Cashfree error codes | `[ ]` | |
 | F9 | Build timed out error has no "try again" button in the UI | `[ ]` | |
-| F10 | Large file upload failure gives no size feedback | `[ ]` | |
+| F10 | Large file upload failure gives no size feedback | `[x]` | #167 |
 | F11 | Session sync failure is not communicated to user | `[ ]` | |
 | F12 | Rate-limit error (429) shows "Please try again" — no countdown | `[ ]` | |
 | F13 | Preview errors show URL instead of readable component name | `[ ]` | |
@@ -227,9 +227,9 @@
 |---|-----|--------|----|
 | G1 | No dark/light theme toggle in main header (quick access) | `[ ]` | |
 | G2 | User profile photo not shown anywhere in the UI | `[ ]` | |
-| G3 | No app version number shown in settings | `[ ]` | |
-| G4 | No "Reset all settings" button | `[ ]` | |
-| G5 | No keyboard shortcuts reference panel | `[ ]` | |
+| G3 | No app version number shown in settings | `[x]` | existing |
+| G4 | No "Reset all settings" button | `[x]` | #167 |
+| G5 | No keyboard shortcuts reference panel | `[x]` | existing |
 | G6 | No "What's new" / changelog panel | `[ ]` | |
 | G7 | No onboarding tour for first-time users | `[ ]` | |
 | G8 | Language preference not persisted across devices | `[ ]` | |
@@ -238,12 +238,12 @@
 | G11 | No "Export all my data" option (GDPR) | `[ ]` | |
 | G12 | No "Delete my account" option | `[ ]` | |
 | G13 | No API key health check (validate key before saving) | `[ ]` | |
-| G14 | API key fields don't show masked last 4 chars after save | `[ ]` | |
-| G15 | No "Copy session ID" for support purposes | `[ ]` | |
+| G14 | API key fields don't show masked last 4 chars after save | `[x]` | #167 |
+| G15 | No "Copy session ID" for support purposes | `[x]` | #167 |
 | G16 | No referral code generator | `[ ]` | |
 | G17 | Wallet top-up amounts are fixed — no custom amount | `[ ]` | |
 | G18 | No usage breakdown (tokens by feature: chat, build, engineer) | `[ ]` | |
-| G19 | No session count shown in settings | `[ ]` | |
+| G19 | No session count shown in settings | `[x]` | #167 |
 | G20 | No "Preferred AI model" selector for Pro builds | `[ ]` | |
 
 ---
@@ -255,8 +255,8 @@
 | H1 | Preview shows blank white flash before app loads | `[ ]` | |
 | H2 | No reload button visible in WorkspacePane preview header | `[x]` | #165 |
 | H3 | No zoom in/out controls for preview | `[x]` | #166 |
-| H4 | No device frame simulation (iPhone/Android frame toggle) | `[ ]` | |
-| H5 | Preview URL not shown / copyable | `[ ]` | |
+| H4 | No device frame simulation (iPhone/Android frame toggle) | `[x]` | #167 |
+| H5 | Preview URL not shown / copyable | `[x]` | #167 |
 | H6 | Preview does not persist after page reload | `[ ]` | |
 | H7 | No "Open in new tab" button for preview | `[x]` | #165 |
 | H8 | Preview doesn't respect system dark/light preference | `[ ]` | |
@@ -264,13 +264,13 @@
 | H10 | No preview screenshot download | `[ ]` | |
 | H11 | Preview iframe has no title (accessibility) | `[x]` | existing |
 | H12 | Preview doesn't show dimensions (width x height) | `[x]` | #166 |
-| H13 | Preview refresh animation is abrupt (no fade) | `[ ]` | |
+| H13 | Preview refresh animation is abrupt (no fade) | `[x]` | #167 |
 | H14 | No "responsive" breakpoint preview (mobile/tablet/desktop) | `[x]` | #166 |
 | H15 | Preview panel header takes too much vertical space on mobile | `[ ]` | |
 | H16 | Preview error overlay doesn't show which file caused the error | `[ ]` | |
 | H17 | Preview doesn't handle loading fonts (flash of unstyled text) | `[ ]` | |
-| H18 | No "Rotate device" button (landscape/portrait simulation) | `[ ]` | |
-| H19 | Preview doesn't scroll to top after rebuild | `[ ]` | |
+| H18 | No "Rotate device" button (landscape/portrait simulation) | `[x]` | #167 |
+| H19 | Preview doesn't scroll to top after rebuild | `[x]` | #167 |
 | H20 | "Fix Bug" in preview overlay sends wrong context sometimes | `[ ]` | |
 
 ---
@@ -279,7 +279,7 @@
 
 | # | Gap | Status | PR |
 |---|-----|--------|----|
-| I1 | Deploy success URL not clickable / no copy button | `[ ]` | |
+| I1 | Deploy success URL not clickable / no copy button | `[x]` | #167 |
 | I2 | No redeploy button after first deployment | `[ ]` | |
 | I3 | No deployment history panel | `[ ]` | |
 | I4 | Deploy modal does not show step-by-step progress | `[ ]` | |
@@ -301,12 +301,12 @@
 
 | # | Gap | Status | PR |
 |---|-----|--------|----|
-| J1 | No AI-suggested commit messages | `[ ]` | |
+| J1 | No AI-suggested commit messages | `[x]` | #167 |
 | J2 | No git log / commit history view | `[ ]` | |
 | J3 | Staged vs unstaged files not visually distinct | `[ ]` | |
-| J4 | No create-branch button in Git panel | `[ ]` | |
+| J4 | No create-branch button in Git panel | `[x]` | #167 |
 | J5 | No "Ahead / behind remote" indicator | `[ ]` | |
-| J6 | Empty commit message gives no error before submit | `[ ]` | |
+| J6 | Empty commit message gives no error before submit | `[x]` | #167 |
 | J7 | No .gitignore file editor | `[ ]` | |
 | J8 | No stash push/pop | `[ ]` | |
 | J9 | No cherry-pick | `[~]` | complex git |
@@ -315,11 +315,11 @@
 | J12 | No merge conflict resolution UI | `[~]` | complex git |
 | J13 | No tag creation | `[ ]` | |
 | J14 | No git blame view | `[ ]` | |
-| J15 | Commit message has no character limit warning (50/72 chars) | `[ ]` | |
-| J16 | No "Sync with remote" (pull + push in one click) | `[ ]` | |
-| J17 | PR creation link not shown after push | `[ ]` | |
+| J15 | Commit message has no character limit warning (50/72 chars) | `[x]` | #167 |
+| J16 | No "Sync with remote" (pull + push in one click) | `[x]` | #167 |
+| J17 | PR creation link not shown after push | `[x]` | #167 |
 | J18 | No GitHub PR list view in Git panel | `[ ]` | |
-| J19 | No "Open file in GitHub" link | `[ ]` | |
+| J19 | No "Open file in GitHub" link | `[x]` | #167 |
 | J20 | No SSH key setup guide | `[ ]` | |
 
 ---
@@ -350,26 +350,26 @@
 
 | # | Gap | Status | PR |
 |---|-----|--------|----|
-| L1 | Icon-only buttons missing aria-label (Upload, Download, etc.) | `[ ]` | |
+| L1 | Icon-only buttons missing aria-label (Upload, Download, etc.) | `[x]` | #167 |
 | L2 | Modal dialogs do not trap focus | `[ ]` | |
 | L3 | No skip-to-main-content link | `[ ]` | |
 | L4 | Color contrast <4.5:1 in several dark-mode text areas | `[ ]` | |
-| L5 | Toasts not announced via aria-live region | `[ ]` | |
+| L5 | Toasts not announced via aria-live region | `[x]` | #167 |
 | L6 | Tab order broken in sidebar navigation | `[ ]` | |
 | L7 | No keyboard shortcut to close modals (Escape should work everywhere) | `[ ]` | |
 | L8 | No high-contrast mode | `[ ]` | |
-| L9 | Animated elements not paused with prefers-reduced-motion | `[ ]` | |
+| L9 | Animated elements not paused with prefers-reduced-motion | `[x]` | #167 |
 | L10 | Input placeholder text contrast insufficient | `[ ]` | |
 | L11 | File upload button not keyboard accessible | `[ ]` | |
 | L12 | Code editor not announced to screen readers | `[~]` | Monaco limit |
 | L13 | No alt text generation for uploaded images | `[ ]` | |
-| L14 | Form labels not associated with inputs via htmlFor | `[ ]` | |
+| L14 | Form labels not associated with inputs via htmlFor | `[x]` | #167 |
 | L15 | Dropdowns (theme, mode selectors) have no keyboard navigation | `[ ]` | |
-| L16 | "Loading..." states have no aria-busy | `[ ]` | |
+| L16 | "Loading..." states have no aria-busy | `[x]` | #167 |
 | L17 | Error messages not associated with their input fields | `[ ]` | |
 | L18 | No focus-visible outline on interactive elements | `[ ]` | |
 | L19 | Session list has no accessible name | `[ ]` | |
-| L20 | Progress bars have no aria-valuenow/valuemin/valuemax | `[ ]` | |
+| L20 | Progress bars have no aria-valuenow/valuemin/valuemax | `[x]` | #167 |
 
 ---
 
@@ -399,36 +399,36 @@
 
 | # | Gap | Status | PR |
 |---|-----|--------|----|
-| N1 | No "Explain this code" right-click action in editor | `[ ]` | |
-| N2 | No "Improve this code" inline suggestion | `[ ]` | |
-| N3 | No inline comment/explain on selected text | `[ ]` | |
-| N4 | No "Write tests for this function" button | `[ ]` | |
-| N5 | No "Add JSDoc / docstring" generator | `[ ]` | |
-| N6 | No "Convert to TypeScript" action | `[ ]` | |
-| N7 | No "Simplify this function" action | `[ ]` | |
-| N8 | No "Find bugs in this file" action | `[ ]` | |
-| N9 | No "Security scan this file" button | `[ ]` | |
-| N10 | No "Generate README" from project structure | `[ ]` | |
-| N11 | No "Generate .env.example" from code | `[ ]` | |
-| N12 | No "Generate API documentation" | `[ ]` | |
+| N1 | No "Explain this code" right-click action in editor | `[x]` | #167 |
+| N2 | No "Improve this code" inline suggestion | `[x]` | #167 |
+| N3 | No inline comment/explain on selected text | `[x]` | #167 |
+| N4 | No "Write tests for this function" button | `[x]` | #167 |
+| N5 | No "Add JSDoc / docstring" generator | `[x]` | #167 |
+| N6 | No "Convert to TypeScript" action | `[x]` | #167 |
+| N7 | No "Simplify this function" action | `[x]` | #167 |
+| N8 | No "Find bugs in this file" action | `[x]` | #167 |
+| N9 | No "Security scan this file" button | `[x]` | #167 |
+| N10 | No "Generate README" from project structure | `[x]` | #167 |
+| N11 | No "Generate .env.example" from code | `[x]` | #167 |
+| N12 | No "Generate API documentation" | `[x]` | #167 |
 | N13 | No "Generate data model diagram" | `[ ]` | |
-| N14 | No "Convert to dark mode" one-click action | `[ ]` | |
+| N14 | No "Convert to dark mode" one-click action | `[x]` | #167 |
 | N15 | No "Add i18n / translations" action | `[ ]` | |
-| N16 | No "Make accessible" auto-fix action | `[ ]` | |
-| N17 | No "Optimize for mobile" auto-fix | `[ ]` | |
-| N18 | No "Add loading states" to async operations | `[ ]` | |
-| N19 | No "Add error boundaries" action | `[ ]` | |
-| N20 | No "Add authentication guard" to routes | `[ ]` | |
-| N21 | No "Migrate to latest React 19 patterns" | `[ ]` | |
-| N22 | No "Replace useState with Zustand" action | `[ ]` | |
-| N23 | No "Add Tailwind to existing app" migration | `[ ]` | |
-| N24 | No "Convert class component to functional" | `[ ]` | |
-| N25 | No "Generate mock data" for components | `[ ]` | |
-| N26 | No "Write Storybook stories" action | `[ ]` | |
+| N16 | No "Make accessible" auto-fix action | `[x]` | #167 |
+| N17 | No "Optimize for mobile" auto-fix | `[x]` | #167 |
+| N18 | No "Add loading states" to async operations | `[x]` | #167 |
+| N19 | No "Add error boundaries" action | `[x]` | #167 |
+| N20 | No "Add authentication guard" to routes | `[x]` | #167 |
+| N21 | No "Migrate to latest React 19 patterns" | `[x]` | #167 |
+| N22 | No "Replace useState with Zustand" action | `[x]` | #167 |
+| N23 | No "Add Tailwind to existing app" migration | `[x]` | #167 |
+| N24 | No "Convert class component to functional" | `[x]` | #167 |
+| N25 | No "Generate mock data" for components | `[x]` | #167 |
+| N26 | No "Write Storybook stories" action | `[x]` | #167 |
 | N27 | No "Generate Cypress E2E tests" | `[~]` | needs E2B |
-| N28 | No "Add Lighthouse CI" to project | `[ ]` | |
-| N29 | No "Bundle size analysis" report | `[ ]` | |
-| N30 | No "Dependency audit" (npm outdated / security) | `[ ]` | |
+| N28 | No "Add Lighthouse CI" to project | `[x]` | #167 |
+| N29 | No "Bundle size analysis" report | `[x]` | #167 |
+| N30 | No "Dependency audit" (npm outdated / security) | `[x]` | #167 |
 
 ---
 

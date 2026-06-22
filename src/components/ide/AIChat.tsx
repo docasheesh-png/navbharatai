@@ -10,6 +10,36 @@ import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import { ThemeMode } from '../../lib/theme';
 import { useBuild } from './BuildContext';
 
+// B10/B12: Standalone code block with language header and copy button
+const ChatCodeBlock: React.FC<{ lang: string; code: string }> = ({ lang, code }) => {
+  const [copied, setCopied] = useState(false);
+  const lines = code.split('\n');
+  const displayLines = lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
+  return (
+    <div className="rounded-xl overflow-hidden border border-white/10 my-2 text-[11px]">
+      <div className="flex items-center justify-between px-3 py-1 bg-[#0d1117] border-b border-white/10">
+        <span className="text-[9px] font-mono font-black text-[#484f58] uppercase tracking-widest">{lang || 'code'}</span>
+        <button
+          onClick={() => { navigator.clipboard.writeText(code).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+          className="text-[8px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-colors flex items-center gap-1"
+        >
+          {copied ? <><Check className="w-2.5 h-2.5 text-emerald-400" /> Copied</> : <><Copy className="w-2.5 h-2.5" /> Copy</>}
+        </button>
+      </div>
+      <div className="bg-[#0d1117] overflow-x-auto">
+        <code className="font-mono text-[#c9d1d9] leading-relaxed block">
+          {displayLines.map((line, i) => (
+            <div key={i} className="flex hover:bg-white/[0.03]">
+              <span className="select-none text-right pr-3 pl-2 text-[#484f58] text-[9px] min-w-[2rem] shrink-0 leading-[1.6]">{i + 1}</span>
+              <span className="pl-1 pr-3 whitespace-pre leading-[1.6]">{line}</span>
+            </div>
+          ))}
+        </code>
+      </div>
+    </div>
+  );
+};
+
 interface Message {
   id: string;
   text: string;
@@ -325,13 +355,46 @@ export const AIChat: React.FC<AIChatProps> = ({
     }
   }, [input]);
 
+  // B29: Multiline paste indicator
+  const [pasteLineCount, setPasteLineCount] = useState<number>(0);
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    // B27: Image paste from clipboard
+    const items = Array.from(e.clipboardData.items) as DataTransferItem[];
+    const imageItem = items.find((item: DataTransferItem) => item.type.startsWith('image/'));
+    if (imageItem) {
+      const file = imageItem.getAsFile();
+      if (file) {
+        setAttachments(prev => [...prev, file]);
+        return;
+      }
+    }
+    const text = e.clipboardData.getData('text');
+    const lines = (text.match(/\n/g) || []).length + 1;
+    if (lines > 20) {
+      setPasteLineCount(lines);
+      setTimeout(() => setPasteLineCount(0), 4000);
+    }
+  };
+
   useEffect(() => {
     onAttachmentsChange?.(attachments);
   }, [attachments, onAttachmentsChange]);
 
+  const [uploadError, setUploadError] = useState<string>('');
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      setAttachments(prev => [...prev, ...Array.from(e.target.files!)] as File[]);
+      const MAX_BYTES = 10 * 1024 * 1024; // F10: 10 MB limit
+      const allFiles: File[] = Array.from(e.target.files) as File[];
+      const tooBig = allFiles.filter((f: File) => f.size > MAX_BYTES);
+      if (tooBig.length > 0) {
+        const names = tooBig.map((f: File) => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`).join(', ');
+        setUploadError(`File too large (max 10 MB): ${names}`);
+        setTimeout(() => setUploadError(''), 5000);
+        const allowed = allFiles.filter((f: File) => f.size <= MAX_BYTES);
+        if (allowed.length > 0) setAttachments(prev => [...prev, ...allowed]);
+      } else {
+        setAttachments(prev => [...prev, ...allFiles]);
+      }
     }
     e.target.value = '';
   };
@@ -383,6 +446,8 @@ export const AIChat: React.FC<AIChatProps> = ({
   const [showModeDropdown, setShowModeDropdown] = useState(false);
   const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  // B9: Edit user message — fill input with message text for re-editing
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [liked, setLiked] = useState<Record<string, boolean>>({});
   const [disliked, setDisliked] = useState<Record<string, boolean>>({});
   const [showReport, setShowReport] = useState<Record<string, boolean>>({});
@@ -585,6 +650,41 @@ export const AIChat: React.FC<AIChatProps> = ({
           <ReactMarkdown
             components={{
               a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5" />,
+              // B10/B12: Code blocks with language header and copy button
+              code: ({ node, className, children, ...props }: any) => {
+                const isInline = !className;
+                if (isInline) {
+                  return <code className="bg-white/10 px-1 py-0.5 rounded text-[11px] font-mono text-indigo-300" {...props}>{children}</code>;
+                }
+                const lang = (className || '').replace('language-', '');
+                const code = String(children).replace(/\n$/, '');
+                return <ChatCodeBlock lang={lang} code={code} />;
+              },
+              pre: ({ node, children, ...props }: any) => <>{children}</>,
+              // B19: Styled markdown tables
+              table: ({ node, children, ...props }: any) => (
+                <div className="overflow-x-auto my-2 rounded-xl border border-white/10">
+                  <table className="w-full text-[11px] border-collapse" {...props}>{children}</table>
+                </div>
+              ),
+              thead: ({ node, children, ...props }: any) => <thead className="bg-[#0d1117]" {...props}>{children}</thead>,
+              th: ({ node, children, ...props }: any) => <th className="px-3 py-2 text-left font-black text-[#8b949e] uppercase tracking-widest text-[9px] border-b border-white/10" {...props}>{children}</th>,
+              td: ({ node, children, ...props }: any) => <td className="px-3 py-2 border-b border-white/5 text-[#c9d1d9]" {...props}>{children}</td>,
+              // B20: Task list checkboxes (GFM - [ ] / [x])
+              input: ({ node, ...props }: any) => (
+                <input {...props} disabled className="mr-1.5 align-middle accent-indigo-500 cursor-default" />
+              ),
+              // B22: Inline image rendering
+              img: ({ node, src, alt, ...props }: any) => (
+                <img
+                  src={src}
+                  alt={alt || ''}
+                  className="max-w-full rounded-xl my-2 border border-white/10"
+                  loading="lazy"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  {...props}
+                />
+              ),
             }}
           >
             {cleanText || ""}
@@ -777,6 +877,13 @@ export const AIChat: React.FC<AIChatProps> = ({
           No internet connection — messages may not send
         </div>
       )}
+      {/* B9: Editing message indicator */}
+      {editingMsgId && (
+        <div className="shrink-0 bg-indigo-600/20 border-b border-indigo-500/30 px-3 py-1 flex items-center justify-between gap-2 text-[9px] font-black uppercase tracking-widest text-indigo-300">
+          <span className="flex items-center gap-1.5"><MessageSquare className="w-3 h-3" /> Editing message — modify and send</span>
+          <button onClick={() => { setEditingMsgId(null); onInputChange(''); }} className="text-indigo-400 hover:text-white transition-colors"><X className="w-3 h-3" /></button>
+        </div>
+      )}
       {/* In-chat image lightbox */}
       {lightbox && (
         <div
@@ -967,33 +1074,47 @@ export const AIChat: React.FC<AIChatProps> = ({
               <p className={cn("text-[10px] font-black uppercase tracking-widest text-[#8b949e]")}>Ready to architect and build.</p>
             </div>
 
-            {/* G9 — Quick-Start Gallery: example prompts for Pro Chat */}
-            {activeAgent === 'navbharatai-pro' && (
-              <div className="px-3 pb-3 space-y-2">
-                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-[#484f58] text-center">Try one of these</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { icon: '📊', title: 'Analytics Dashboard', prompt: 'Build a modern analytics dashboard with sales charts, user metrics, revenue trends, and KPI cards. Use dark theme with gradient accents.' },
-                    { icon: '🛒', title: 'E-commerce Page', prompt: 'Create a product landing page with hero section, features grid, pricing table, customer reviews, and a buy-now button.' },
-                    { icon: '✅', title: 'Todo App', prompt: 'Build a todo app with categories, due dates, priority levels, drag-to-reorder, and localStorage persistence. Dark, minimal design.' },
-                    { icon: '🎨', title: 'Portfolio Site', prompt: 'Create a developer portfolio with animated hero section, projects grid with tech tags, skills section, and contact form.' },
-                    { icon: '🧠', title: 'Quiz App', prompt: 'Build an interactive quiz with 5 trivia questions, countdown timer, progress bar, score tracking, and a celebratory results screen.' },
-                    { icon: '☁️', title: 'Weather App', prompt: 'Create a weather dashboard with current conditions, hourly forecast, 5-day outlook, and animated weather icons. Use a glassmorphism card layout.' },
-                    { icon: '💬', title: 'Chat Interface', prompt: 'Build a real-time-style chat UI with message bubbles, timestamp, emoji reactions, typing indicator, and a message input with file attach.' },
-                    { icon: '📝', title: 'Note-taking App', prompt: 'Create a Notion-inspired note-taking app with rich text editor, tags, search, sidebar navigation, and localStorage sync.' },
-                  ].map(({ icon, title, prompt }) => (
-                    <button
-                      key={title}
-                      onClick={() => onInputChange(prompt)}
-                      className="text-left p-2.5 bg-[#161b22] hover:bg-[#1c2430] border border-white/5 hover:border-indigo-500/30 rounded-2xl transition-all group active:scale-95"
-                    >
-                      <span className="text-base leading-none">{icon}</span>
-                      <p className="text-[10px] font-black text-white mt-1.5 group-hover:text-indigo-300 transition-colors">{title}</p>
-                    </button>
-                  ))}
+            {/* B6/G9 — Quick-Start Gallery: example prompts, adapts per agent */}
+            {(() => {
+              const isPro = activeAgent === 'navbharatai-pro';
+              const isIde = activeAgent === 'navbharatai' || !activeAgent?.includes('pro');
+              const proStarters = [
+                { icon: '📊', title: 'Analytics Dashboard', prompt: 'Build a modern analytics dashboard with sales charts, user metrics, revenue trends, and KPI cards. Use dark theme with gradient accents.' },
+                { icon: '🛒', title: 'E-commerce Page', prompt: 'Create a product landing page with hero section, features grid, pricing table, customer reviews, and a buy-now button.' },
+                { icon: '✅', title: 'Todo App', prompt: 'Build a todo app with categories, due dates, priority levels, drag-to-reorder, and localStorage persistence. Dark, minimal design.' },
+                { icon: '🎨', title: 'Portfolio Site', prompt: 'Create a developer portfolio with animated hero section, projects grid with tech tags, skills section, and contact form.' },
+                { icon: '🧠', title: 'Quiz App', prompt: 'Build an interactive quiz with 5 trivia questions, countdown timer, progress bar, score tracking, and a celebratory results screen.' },
+                { icon: '☁️', title: 'Weather App', prompt: 'Create a weather dashboard with current conditions, hourly forecast, 5-day outlook, and animated weather icons. Use a glassmorphism card layout.' },
+                { icon: '💬', title: 'Chat Interface', prompt: 'Build a real-time-style chat UI with message bubbles, timestamp, emoji reactions, typing indicator, and a message input with file attach.' },
+                { icon: '📝', title: 'Note-taking App', prompt: 'Create a Notion-inspired note-taking app with rich text editor, tags, search, sidebar navigation, and localStorage sync.' },
+              ];
+              const ideStarters = [
+                { icon: '🔍', title: 'Explain this file', prompt: 'Explain what this file does and how it works.' },
+                { icon: '🐛', title: 'Find bugs', prompt: 'Review this code for bugs, edge cases, and potential issues. List each problem with a fix.' },
+                { icon: '⚡', title: 'Improve performance', prompt: 'Identify and fix performance bottlenecks in this code.' },
+                { icon: '🛡️', title: 'Security review', prompt: 'Do a security audit of this code. Identify vulnerabilities and suggest fixes.' },
+                { icon: '🧪', title: 'Write tests', prompt: 'Write comprehensive unit tests for the functions in this file.' },
+                { icon: '📚', title: 'Generate README', prompt: 'Generate a comprehensive README.md for this project based on the code.' },
+              ];
+              const starters = isPro ? proStarters : (isIde ? ideStarters : proStarters);
+              return (
+                <div className="px-3 pb-3 space-y-2">
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-[#484f58] text-center">Try one of these</p>
+                  <div className={`grid gap-2 ${isPro ? 'grid-cols-2' : 'grid-cols-2'}`}>
+                    {starters.map(({ icon, title, prompt }) => (
+                      <button
+                        key={title}
+                        onClick={() => onInputChange(prompt)}
+                        className="text-left p-2.5 bg-[#161b22] hover:bg-[#1c2430] border border-white/5 hover:border-indigo-500/30 rounded-2xl transition-all group active:scale-95"
+                      >
+                        <span className="text-base leading-none">{icon}</span>
+                        <p className="text-[10px] font-black text-white mt-1.5 group-hover:text-indigo-300 transition-colors">{title}</p>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             <div className="flex items-center justify-center py-4 border-t border-white/5 mt-4">
                <button
@@ -1102,6 +1223,20 @@ export const AIChat: React.FC<AIChatProps> = ({
                     <span className="text-[7px] text-[#30363d] font-mono">{formatMsgTime(msg.timestamp)}</span>
                   )}
                   {msg.sender === 'user' && <User className="w-2.5 h-2.5 text-indigo-400" />}
+                  {/* B9: Edit user message button */}
+                  {msg.sender === 'user' && (
+                    <button
+                      onClick={() => {
+                        onInputChange(msg.text || '');
+                        setEditingMsgId(msg.id);
+                        setTimeout(() => textareaRef.current?.focus(), 50);
+                      }}
+                      title="Edit and resend this message"
+                      className="opacity-0 group-hover/msg:opacity-100 transition-opacity p-0.5 hover:bg-white/10 rounded text-[#484f58] hover:text-indigo-400"
+                    >
+                      <MessageSquare className="w-2.5 h-2.5" />
+                    </button>
+                  )}
                   {/* Copy message button — appears on hover */}
                   <button
                     onClick={() => {
@@ -1133,7 +1268,12 @@ export const AIChat: React.FC<AIChatProps> = ({
 
         {/* B8: Typing indicator — three-dot bounce animation */}
         {isLoading && (
-          <div className="flex items-start gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
+          <div
+            role="status"
+            aria-busy="true"
+            aria-label="AI is generating a response"
+            className="flex items-start gap-2 animate-in fade-in slide-in-from-left-2 duration-300"
+          >
             <div className="w-6 h-6 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
               <Bot className="w-3 h-3 text-indigo-400" />
             </div>
@@ -1258,7 +1398,14 @@ export const AIChat: React.FC<AIChatProps> = ({
                     {buildElapsedLabel}
                   </span>
                 )}
-                <div className="h-1.5 w-20 bg-white/5 rounded-full overflow-hidden">
+                <div
+                  role="progressbar"
+                  aria-valuenow={buildProgress.percent}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`Build progress: ${buildProgress.percent}%`}
+                  className="h-1.5 w-20 bg-white/5 rounded-full overflow-hidden"
+                >
                   <div
                     className="h-full rounded-full transition-all duration-500"
                     style={{ width: `${buildProgress.percent}%`, background: 'linear-gradient(90deg,#f59e0b,#fbbf24)' }}
@@ -1349,6 +1496,11 @@ export const AIChat: React.FC<AIChatProps> = ({
         style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : 'max(8px, env(safe-area-inset-bottom, 8px))' }}
       >
         <div className="max-w-4xl mx-auto space-y-1.5">
+            {uploadError && (
+              <div className="px-1">
+                <p className="text-[9px] text-red-400 font-medium py-0.5">{uploadError}</p>
+              </div>
+            )}
             {attachments.length > 0 && (
               <div className="px-1 flex flex-wrap gap-1.5">
                 {attachments.map((file, index) => (
@@ -1382,8 +1534,10 @@ export const AIChat: React.FC<AIChatProps> = ({
                         e.preventDefault();
                         onSend(attachments);
                         setAttachments([]);
+                        setEditingMsgId(null);
                       }
                     }}
+                    onPaste={handlePaste}
                     placeholder="Ask NavBharatAI..."
                     rows={1}
                     className={cn(
@@ -1392,6 +1546,11 @@ export const AIChat: React.FC<AIChatProps> = ({
                     )}
                     style={{ maxHeight: '240px', overflowY: 'auto' }}
                   />
+                  {pasteLineCount > 20 && (
+                    <div className="absolute left-2 top-2 bg-amber-500/20 border border-amber-500/40 rounded-lg px-2 py-0.5 text-[9px] font-black text-amber-400 pointer-events-none z-10">
+                      {pasteLineCount} lines pasted
+                    </div>
+                  )}
                   {( (input || '').length > 300 || (((input || '').match(/\n/g) || []).length > 4)) && (
                     <button
                       type="button"
@@ -1426,7 +1585,9 @@ export const AIChat: React.FC<AIChatProps> = ({
                     </button>
                     {isLoading && onStop ? (
                       <button
-                        onClick={onStop}
+                        onClick={() => {
+                          if (window.confirm('Stop the current AI generation?')) onStop?.();
+                        }}
                         title="Stop generation"
                         className="p-3 bg-red-600 text-white rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95"
                       >
@@ -1434,7 +1595,12 @@ export const AIChat: React.FC<AIChatProps> = ({
                       </button>
                     ) : (
                       <button
-                        onClick={() => { onSend(attachments); setAttachments([]); }}
+                        onClick={() => {
+                          navigator.vibrate?.(30);
+                          onSend(attachments);
+                          setAttachments([]);
+                          setEditingMsgId(null);
+                        }}
                         disabled={(!input.trim() && attachments.length === 0) || isLoading}
                         className="p-3 bg-indigo-600 text-white rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95"
                       >

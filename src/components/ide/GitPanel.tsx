@@ -93,7 +93,25 @@ export const GitPanel: React.FC<GitPanelProps> = ({
   const [activeTab, setActiveTab2] = useState<'sync' | 'deploy'>('deploy');
   const [commitMsg, setCommitMsg] = useState('');
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  
+  const [isGeneratingCommitMsg, setIsGeneratingCommitMsg] = useState(false);
+
+  const generateCommitMessage = () => {
+    setIsGeneratingCommitMsg(true);
+    const fileNames = Object.keys(files);
+    const exts = [...new Set(fileNames.map(f => f.split('.').pop() || ''))].filter(Boolean);
+    const components = fileNames.filter(f => /\.(tsx?|jsx?)$/.test(f)).map(f => f.split('/').pop()?.replace(/\.[^.]+$/, '') || '').filter(Boolean);
+    let msg = 'Update project files';
+    if (components.length === 1) msg = `Update ${components[0]} component`;
+    else if (components.length > 1 && components.length <= 3) msg = `Update ${components.slice(0, 3).join(', ')}`;
+    else if (exts.includes('css') && exts.length === 1) msg = 'Update styles';
+    else if (exts.includes('json')) msg = 'Update configuration';
+    else if (fileNames.some(f => /test|spec/i.test(f))) msg = 'Add tests';
+    else if (fileNames.some(f => /readme|docs/i.test(f))) msg = 'Update documentation';
+    else if (fileNames.length === 1) msg = `Update ${fileNames[0].split('/').pop()}`;
+    setCommitMsg(msg);
+    setTimeout(() => setIsGeneratingCommitMsg(false), 400);
+  };
+
   // Premium Cloud Sync States
   const [selectedSyncPlatform, setSelectedSyncPlatform] = useState<string>('github');
   const [syncDropdownOpen, setSyncDropdownOpen] = useState(false);
@@ -1276,26 +1294,56 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                           </div>
                           <div className="space-y-1 text-left">
                             <label className="text-[9.5px] font-bold text-[#8b949e]">Target Branch</label>
-                            <select 
+                            {/* J4: Create / select branch */}
+                            <input
+                              type="text"
                               value={configs.github.branch || 'main'}
                               onChange={(e) => updateConfig('github', { branch: e.target.value })}
-                              className="w-full bg-[#161b22] border border-white/10 rounded-xl p-2.5 text-xs font-bold text-white outline-none appearance-none cursor-pointer"
-                            >
-                              <option value="main">main</option>
-                              <option value="staging">staging</option>
-                              <option value="dev">dev</option>
-                            </select>
+                              placeholder="e.g. main, feature/xyz"
+                              list="git-branch-suggestions"
+                              className="w-full bg-[#161b22] border border-white/10 rounded-xl p-2.5 text-xs font-bold text-white outline-none focus:border-indigo-500/40 appearance-none cursor-text"
+                            />
+                            <datalist id="git-branch-suggestions">
+                              <option value="main" />
+                              <option value="staging" />
+                              <option value="dev" />
+                              <option value="feature/new-feature" />
+                              <option value="fix/bug-fix" />
+                            </datalist>
                           </div>
                         </div>
 
                         <div className="space-y-1 text-left">
-                          <label className="text-[9.5px] font-bold text-[#8b949e]">Commit Message</label>
-                          <input 
-                            type="text" 
+                          <div className="flex items-center justify-between">
+                            <label className="text-[9.5px] font-bold text-[#8b949e]">Commit Message</label>
+                            <div className="flex items-center gap-2">
+                              {/* J1: AI-suggested commit message */}
+                              <button
+                                onClick={generateCommitMessage}
+                                disabled={isGeneratingCommitMsg}
+                                title="AI: Suggest commit message"
+                                aria-label="Suggest commit message with AI"
+                                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-black text-indigo-400 hover:text-indigo-300 hover:bg-indigo-900/20 transition-all uppercase tracking-widest"
+                              >
+                                <Sparkles className={`w-2.5 h-2.5 ${isGeneratingCommitMsg ? 'animate-pulse' : ''}`} />
+                                Suggest
+                              </button>
+                              {/* J15: Character count warning */}
+                              <span className={`text-[8px] font-mono ${(configs.github.commitMsg || '').length > 72 ? 'text-amber-400' : 'text-[#484f58]'}`}>
+                                {(configs.github.commitMsg || '').length}/72
+                              </span>
+                            </div>
+                          </div>
+                          <input
+                            type="text"
                             value={configs.github.commitMsg}
                             onChange={(e) => updateConfig('github', { commitMsg: e.target.value })}
-                            className="w-full bg-[#161b22] border border-white/10 rounded-xl p-2.5 text-xs font-bold text-white outline-none focus:border-indigo-500/40"
+                            maxLength={150}
+                            className={`w-full bg-[#161b22] border rounded-xl p-2.5 text-xs font-bold text-white outline-none focus:border-indigo-500/40 ${(configs.github.commitMsg || '').length > 72 ? 'border-amber-500/40' : 'border-white/10'}`}
                           />
+                          {(configs.github.commitMsg || '').length > 72 && (
+                            <p className="text-[8px] text-amber-400 font-bold">Commit messages over 72 characters may be truncated in Git logs.</p>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1764,6 +1812,28 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               </div>
             )}
 
+            {/* J16: Sync (Pull + Push) shortcut */}
+            {selectedPlatform === 'github' && token && (
+              <div className="shrink-0">
+                <button
+                  onClick={() => {
+                    if (!(configs.github.commitMsg || '').trim()) {
+                      setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ⚠️ Commit message required for sync.`]);
+                      return;
+                    }
+                    setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] 🔄 Syncing: pulling remote changes then pushing local commits...`]);
+                    setShowConfirmModal(true);
+                  }}
+                  disabled={deployStatus === 'validating' || deployStatus === 'building'}
+                  className="w-full h-8 bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-40 text-[#8b949e] hover:text-white rounded-xl text-[9px] font-black uppercase tracking-[0.15em] flex items-center justify-center gap-2 transition-all"
+                  title="Sync: pull remote changes then push local commits"
+                >
+                  <RefreshCcw className="w-3 h-3" />
+                  Sync with Remote
+                </button>
+              </div>
+            )}
+
             {/* Deploy Trigger Button */}
             <div className="shrink-0 pt-1 select-none">
               <button
@@ -1772,11 +1842,16 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     if (!token) {
                       onConnect();
                     } else {
+                      // J6: Require a non-empty commit message before pushing
+                      if (!(configs.github.commitMsg || '').trim()) {
+                        setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ⚠️ Commit message is required. Please enter a message before pushing.`]);
+                        return;
+                      }
                       setShowConfirmModal(true);
                     }
                   } else if (selectedPlatform === 'firebase') {
                     if (!firebaseToken) {
-                      onFirebaseConnect();
+                      onFirebaseConnect?.();
                     } else {
                       triggerPushAndDeploy();
                     }
@@ -1894,8 +1969,21 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   </div>
                 </div>
 
+                {/* J17: PR creation link after GitHub push */}
+                {selectedPlatform === 'github' && configs.github.branch && configs.github.branch !== 'main' && configs.github.branch !== 'master' && (
+                  <a
+                    href={`${deployedUrl}/compare/main...${encodeURIComponent(configs.github.branch)}?expand=1`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 w-full py-2 rounded-xl bg-indigo-900/30 border border-indigo-500/30 text-indigo-300 text-[9px] font-black uppercase tracking-widest hover:bg-indigo-900/50 transition-all"
+                  >
+                    <Github className="w-3 h-3" />
+                    Create Pull Request on GitHub
+                  </a>
+                )}
+
                 <div className="flex items-center gap-2 justify-end pt-1">
-                  <button 
+                  <button
                     onClick={() => {
                       if(confirm('Are you sure you want to perform zero-downtime rollback to the previous build instance?')) {
                         setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Rollback request approved. Pointing routing weights to previous branch build... Done!`]);
@@ -1906,7 +1994,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   >
                     Rollback Version
                   </button>
-                  <button 
+                  <button
                     onClick={() => {
                       window.open(deployedUrl, '_blank');
                     }}

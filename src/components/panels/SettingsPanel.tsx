@@ -7,7 +7,7 @@ import {
   Figma, Rocket, Smartphone, CloudUpload, Package, IndianRupee, Users2, Palette, TrendingUp,
   BarChart2, Cpu, Sparkles, Eye, EyeOff, Github, List, LogOut, GitBranch as GitBranchIcon,
   Folder, Check, Search, RefreshCw, Box, Zap, Globe as GlobeIcon, Search as SearchIcon,
-  Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink,
+  Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { SettingsScreen, ViewType, ApiKeys, PROVIDER_CONFIG } from '../../types';
@@ -357,8 +357,9 @@ export function SettingsPanel({
 
                   <div className="space-y-6 pt-4">
                      <div className="space-y-3">
-                       <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1 block pl-1">Application Name</label>
+                       <label htmlFor="settings-app-name" className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1 block pl-1">Application Name</label>
                        <input
+                         id="settings-app-name"
                          defaultValue="Navbharat AI"
                          className="w-full bg-[#0d1117] border border-white/10 rounded-[1.5rem] px-6 py-4 text-sm font-bold text-white outline-none focus:border-indigo-500 transition-all shadow-inner"
                        />
@@ -385,8 +386,9 @@ export function SettingsPanel({
                      </div>
 
                      <div className="space-y-3 pt-6 border-t border-white/10">
-                       <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1 block pl-1">Description</label>
+                       <label htmlFor="settings-app-desc" className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1 block pl-1">Description</label>
                        <textarea
+                         id="settings-app-desc"
                          defaultValue="The ultimate specialized AI developer workspace for Bharat."
                          className="w-full bg-[#0d1117] border border-white/10 rounded-[1.5rem] px-6 py-5 text-sm font-medium text-[#8b949e] outline-none focus:border-indigo-500 transition-all min-h-[120px] resize-none shadow-inner"
                        />
@@ -434,6 +436,47 @@ export function SettingsPanel({
                        <p className="text-[9px] text-[#484f58]">Code is always generated in English regardless of this setting.</p>
                      </div>
                   </div>
+
+                  {/* G15: Copy user/session ID for support */}
+                  {user && (
+                    <div className="p-4 bg-[#0d1117] border border-white/5 rounded-2xl space-y-2">
+                      <p className="text-[9px] font-black text-[#484f58] uppercase tracking-widest">Support ID</p>
+                      <div className="flex items-center gap-2">
+                        <span className="flex-1 text-[10px] font-mono text-[#484f58] truncate">{user.uid}</span>
+                        <button
+                          onClick={() => { navigator.clipboard.writeText(user.uid).catch(() => {}); }}
+                          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[#484f58] hover:text-white transition-colors"
+                          title="Copy user ID"
+                        >
+                          <Copy className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* G19: Session count */}
+                  <div className="p-4 bg-[#0d1117] border border-white/5 rounded-2xl space-y-2">
+                    <p className="text-[9px] font-black text-[#484f58] uppercase tracking-widest">Session Stats</p>
+                    <div className="flex items-center gap-3">
+                      <div className="flex flex-col">
+                        <span className="text-[18px] font-black text-white leading-none">
+                          {(() => { try { return JSON.parse(localStorage.getItem('navbharat_sessions') || '[]').length; } catch { return 0; } })()}
+                        </span>
+                        <span className="text-[8px] text-[#484f58] font-bold uppercase tracking-widest">Total Sessions</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* G4: Reset all editor settings */}
+                  <button
+                    onClick={() => {
+                      ['ide_wordWrap','ide_minimap','ide_fontSize','ide_tabSize','ide_formatOnSave','ide_trimWhitespace','ide_finalNewline'].forEach(k => localStorage.removeItem(k));
+                      window.location.reload();
+                    }}
+                    className="w-full py-3 bg-transparent border border-white/10 hover:border-red-500/30 hover:text-red-400 text-[#484f58] rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                  >
+                    Reset Editor Settings to Default
+                  </button>
 
                   <button className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[1.5rem] text-xs font-black uppercase tracking-[0.2em] shadow-2xl shadow-indigo-600/30 active:scale-[0.98] transition-all">
                      Update Preferences
@@ -504,6 +547,12 @@ export function SettingsPanel({
                               {showKeyStates[id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                             </button>
                           </div>
+                          {/* G14: Show masked last-4 chars when key is saved and hidden */}
+                          {!showKeyStates[id] && (keys as any)[id] && (keys as any)[id].length > 4 && (
+                            <p className="text-[8px] font-mono text-[#484f58] px-1 mt-1">
+                              Saved: ••••••••{((keys as any)[id] as string).slice(-4)}
+                            </p>
+                          )}
                         </div>
                       ))}
                     </div>

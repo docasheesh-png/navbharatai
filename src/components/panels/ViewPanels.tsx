@@ -74,7 +74,7 @@ export interface ViewPanelsProps {
   setProInput: (v: string) => void;
   isLoading: boolean;
   activeIntent: string;
-  handleSendForTab: (tabId: ViewType) => void;
+  handleSendForTab: (tabId: ViewType, overrideMessage?: string) => void;
   toggleTab: (view: ViewType) => void;
   updatePreview: (files: any) => void;
   addLog: (msg: string, level: string) => void;
@@ -174,6 +174,10 @@ export function ViewPanels({
             onOpenProChat={() => toggleTab('nbi_pro_chat')}
             wallet={wallet}
             onUnlockVishwakarma={() => setShowVishwakarmaUnlockModal(true)}
+            onSendDirect={(text: string) => handleSendForTab(
+              activeAgent.startsWith('vishwakarma') ? 'asc_chat' as ViewType : 'nbi_pro_chat' as ViewType,
+              text
+            )}
           />
         </div>
       )}

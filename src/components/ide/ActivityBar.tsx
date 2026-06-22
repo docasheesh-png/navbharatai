@@ -78,6 +78,7 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
         >
           <button
             onClick={() => onScreenChange(item.id)}
+            aria-label={item.label}
             className={cn(
               "p-2.5 transition-colors",
               isItemActive(item.id) ? "text-white" : "text-[#858585] group-hover:text-white"
@@ -95,8 +96,10 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
       ))}
 
       <div className="mt-auto pb-4 flex flex-col items-center gap-4">
-        <button 
+        <button
            onClick={() => onScreenChange('settings')}
+           aria-label="Settings"
+           title="Settings"
            className={cn(
              "p-2.5 transition-colors",
              activeScreen === 'settings' ? "text-white" : "text-[#858585] hover:text-white"

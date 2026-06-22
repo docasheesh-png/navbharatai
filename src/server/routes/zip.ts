@@ -2,7 +2,10 @@ import fs from 'fs';
 import { setCorsHeaders } from '../lib/cors';
 import path from 'path';
 import crypto from 'crypto';
-import type { Express, Request, Response } from 'express';
+import type { Express, Request, Response, RequestHandler } from 'express';
+
+/** No-op middleware used when no rate limiter is injected (e.g. unit tests). */
+const passthrough: RequestHandler = (_req, _res, next) => next();
 
 /**
  * ZIP import/export routes extracted from the server.ts monolith (Phase 1).
@@ -12,8 +15,8 @@ import type { Express, Request, Response } from 'express';
  * - POST /api/extract-zip  — stream-extract an uploaded ZIP into a file map (SSE)
  * - POST /api/download-zip — package a file map into a downloadable ZIP
  */
-export function registerZipRoutes(app: Express): void {
-  app.post('/api/extract-zip', async (req: Request, res: Response) => {
+export function registerZipRoutes(app: Express, limiter: RequestHandler = passthrough): void {
+  app.post('/api/extract-zip', limiter, async (req: Request, res: Response) => {
     const fileName = req.headers['x-file-name']
       ? decodeURIComponent(String(req.headers['x-file-name']))
       : 'upload.zip';
@@ -207,7 +210,7 @@ export function registerZipRoutes(app: Express): void {
   });
 
   // ── One-click download: package app files as ZIP ─────────────────────────────
-  app.post('/api/download-zip', async (req: Request, res: Response) => {
+  app.post('/api/download-zip', limiter, async (req: Request, res: Response) => {
     const { files, appName } = req.body;
     if (!files || typeof files !== 'object' || Object.keys(files).length === 0) {
       return res.status(400).json({ error: 'No files provided' });
@@ -222,8 +225,16 @@ export function registerZipRoutes(app: Express): void {
       archive.pipe(res);
       const entries = Object.entries(files as Record<string, string>);
       for (const [filename, content] of entries) {
+        // Sanitize the entry name so the produced archive can never carry a zip-slip path
+        // (e.g. "../../etc/passwd") that escapes the extraction dir on the consumer's machine.
+        const safeEntry = String(filename)
+          .replace(/\\/g, '/')
+          .split('/')
+          .filter(seg => seg && seg !== '.' && seg !== '..')
+          .join('/');
+        if (!safeEntry) continue;
         await new Promise<void>((resolve, reject) => {
-          archive.entry(content, { name: filename }, (err: any) => err ? reject(err) : resolve());
+          archive.entry(content, { name: safeEntry }, (err: any) => err ? reject(err) : resolve());
         });
       }
       archive.finish();

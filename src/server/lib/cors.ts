@@ -10,7 +10,12 @@ export function setCorsHeaders(
 ): void {
   const origin = req.headers.origin;
   if (!origin) return;
-  if (process.env.NODE_ENV !== 'production' || ALLOWED_ORIGINS.has(origin)) {
+  // Reflect only allow-listed origins. In non-production we additionally permit localhost
+  // for local dev — but NEVER reflect an arbitrary attacker origin, even outside production
+  // (the old `NODE_ENV !== 'production'` blanket reflection was a CORS hole if NODE_ENV was unset).
+  const isLocalDev = process.env.NODE_ENV !== 'production' &&
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  if (ALLOWED_ORIGINS.has(origin) || isLocalDev) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }

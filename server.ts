@@ -218,8 +218,10 @@ setInterval(() => {
   // ── Rate Limiters (4.3) ──────────────────────────────────────────────────
   const chatLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 20,   // 20 req/min per user — generous for normal chat, tight for abuse
-    keyGenerator: (req) => (req.headers['x-user-id'] as string) || ipKeyGenerator(req as any),
+    max: 20,   // 20 req/min per IP — generous for normal chat, tight for abuse
+    // Key on IP only. The client-supplied x-user-id header is spoofable — rotating it let an
+    // attacker bypass the limit entirely and burn NavBharatAI's own AI budget.
+    keyGenerator: (req) => ipKeyGenerator(req as any),
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests. Please wait a moment before sending again.' },
@@ -400,9 +402,9 @@ setInterval(() => {
   registerAdminRoutes(app, adminLimiter);
   registerSecretsRoutes(app);
   registerAnthropicRoutes(app);
-  registerZipRoutes(app);
+  registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
-  registerPreviewRoutes(app);
+  registerPreviewRoutes(app, chatLimiter);
   // Engine-backed build route (Phase 4 — VFS + EditEngine + Verifier + RepairLoop + preview).
   registerBuildRoutes(app);
 

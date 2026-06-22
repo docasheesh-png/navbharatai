@@ -16,6 +16,14 @@ import { eventStore } from '../lib/eventStore';
  * Admin dashboard routes extracted from the server.ts monolith (Phase 1).
  * Behavior unchanged. All routes are gated by the HMAC day-token middleware.
  */
+/** Constant-time comparison for secret material (sha256/HMAC hex digests, tokens). */
+function safeStrEqual(a: string, b: string): boolean {
+  const ba = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
 export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequestHandler): void {
   // Admin server-side login — issues the daily HMAC token used by verifyAdminToken.
   app.post('/api/admin/login', adminLimiter, (req: Request, res: Response) => {
@@ -32,9 +40,10 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const passHash    = crypto.createHash('sha256').update(password).digest('hex');
     const expectedHash = crypto.createHash('sha256').update(validPass).digest('hex');
 
-    console.log(`[ADMIN_LOGIN] user="${username}" validUser="${validUser}" match=${username === validUser} passLen=${password.length} validPassLen=${validPass.length}`);
+    // Do NOT log the admin username or password length — both narrow a brute-force search.
+    console.log('[ADMIN_LOGIN] login attempt received');
 
-    if (username === validUser && passHash === expectedHash) {
+    if (username === validUser && safeStrEqual(passHash, expectedHash)) {
       const token = crypto.createHmac('sha256', validPass)
         .update(`admin:${Math.floor(Date.now() / 86400000)}:${username}`)
         .digest('hex');
@@ -57,7 +66,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const expected = crypto.createHmac('sha256', validPass)
       .update(`admin:${Math.floor(Date.now() / 86400000)}:${process.env.ADMIN_USERNAME || 'aashishcpmt09'}`)
       .digest('hex');
-    if (token !== expected) {
+    if (!safeStrEqual(token, expected)) {
       audit('ADMIN_ACCESS_DENIED', { ip: req.ip, path: req.path });
       return res.status(403).json({ error: 'Forbidden.' });
     }

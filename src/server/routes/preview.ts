@@ -1,4 +1,7 @@
-import type { Express, Request, Response } from 'express';
+import type { Express, Request, Response, RequestHandler } from 'express';
+
+/** No-op middleware used when no rate limiter is injected (e.g. unit tests). */
+const previewPassthrough: RequestHandler = (_req, _res, next) => next();
 import { build as esbuild } from 'esbuild';
 import path from 'path';
 import os from 'os';
@@ -37,7 +40,13 @@ const MINI_HARNESS = `<script>(function(){
 })();</script>`;
 
 function safePath(p: string): string {
-  return p.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\.\./g, '');
+  // Segment-wise filtering: a single-pass /\.\./g strip is bypassable ("....//" → "../").
+  // Splitting and dropping traversal/empty segments guarantees nothing escapes the temp dir.
+  return p
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(seg => seg && seg !== '.' && seg !== '..')
+    .join('/');
 }
 
 function detectBundleEntry(files: Record<string, string>): string {
@@ -215,9 +224,9 @@ export async function bundleForPreview(files: Record<string, string>): Promise<s
  */
 const previewService = getPreviewService();
 
-export function registerPreviewRoutes(app: Express): void {
+export function registerPreviewRoutes(app: Express, limiter: RequestHandler = previewPassthrough): void {
   // Server-side esbuild bundle → self-contained HTML (eliminates browser Babel CDN).
-  app.post('/api/preview-bundle', async (req: Request, res: Response) => {
+  app.post('/api/preview-bundle', limiter, async (req: Request, res: Response) => {
     try {
       const { files } = req.body || {};
       if (!files || typeof files !== 'object') return res.status(400).json({ error: 'files required' });
@@ -231,7 +240,7 @@ export function registerPreviewRoutes(app: Express): void {
 
   // Vue preview → self-contained HTML compiled in-browser (vue3-sfc-loader). The
   // .vue SFCs can't go through the React/esbuild path, so Vue apps use this.
-  app.post('/api/preview-vue', (req: Request, res: Response) => {
+  app.post('/api/preview-vue', limiter, (req: Request, res: Response) => {
     try {
       const { files } = req.body || {};
       if (!files || typeof files !== 'object') return res.status(400).json({ error: 'files required' });
@@ -243,7 +252,7 @@ export function registerPreviewRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/preview', async (req: Request, res: Response) => {
+  app.post('/api/preview', limiter, async (req: Request, res: Response) => {
     try {
       const { projectId, files } = req.body || {};
       if (!files || typeof files !== 'object') {

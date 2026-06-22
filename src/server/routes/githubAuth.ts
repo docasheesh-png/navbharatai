@@ -5,6 +5,37 @@ import type { Express, Request, Response } from 'express';
 const GITHUB_REDIRECT_URI = 'https://navbharatai.com/api/github/callback';
 const GITHUB_SCOPE = 'repo workflow read:user user:email';
 
+// Origins the OAuth flow may hand the (repo+workflow scope) token back to. The token must
+// NEVER be redirected to an attacker-controlled origin supplied via the OAuth `state` param.
+const ALLOWED_RETURN_ORIGINS = new Set<string>([
+  'https://navbharatai.com',
+  'https://www.navbharatai.com',
+  'https://navbharatai.web.app',
+  'https://navbharatai.firebaseapp.com',
+  ...(process.env.APP_ORIGIN ? [process.env.APP_ORIGIN] : []),
+]);
+
+/** Returns the URL only if its origin is allow-listed; otherwise null (blocks open-redirect token exfil). */
+function safeReturnUrl(raw: string | null | undefined): string | null {
+  if (!raw || !raw.startsWith('http')) return null;
+  try {
+    return ALLOWED_RETURN_ORIGINS.has(new URL(raw).origin) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Encode a value as a safe JS string literal for embedding inside an inline <script>. */
+function jsLiteral(s: string): string {
+  return JSON.stringify(String(s ?? ''));
+}
+
+/** Escape a value for an HTML text context. */
+function htmlEscape(s: string): string {
+  return String(s ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+}
+
 /**
  * GitHub OAuth routes (authorize URL, redirect, token-exchange callback, user
  * profile) extracted from the server.ts monolith (Phase 1). Self-contained —
@@ -79,13 +110,13 @@ export function registerGithubAuthRoutes(app: Express): void {
       const { access_token, error, error_description } = response.data;
       if (error) throw new Error(error_description || error);
 
-      // If state is a URL, we might be in a full redirect flow
-      const returnUrl = (state as string)?.startsWith('http') ? state as string : null;
+      // Only honour an allow-listed return URL — a crafted `state=https://evil.com` must not
+      // be able to exfiltrate the token via redirect.
+      const returnUrl = safeReturnUrl(state as string);
 
       if (returnUrl) {
-        // Full redirect flow: redirect back to app with token in fragment or query
-        // fragment is safer for tokens
-        return res.redirect(`${returnUrl}#gh_token=${access_token}`);
+        // Full redirect flow: token in fragment (fragment is safer for tokens), URL-encoded.
+        return res.redirect(`${returnUrl}#gh_token=${encodeURIComponent(access_token)}`);
       }
 
       // Popup flow with dual local storage sync + opener postMessage
@@ -114,8 +145,8 @@ export function registerGithubAuthRoutes(app: Express): void {
             </style>
 
             <script>
-              const token = '${access_token}';
-              const returnUrl = '${returnUrl || "https://navbharatai.com/"}';
+              const token = ${jsLiteral(access_token)};
+              const returnUrl = ${jsLiteral(returnUrl || "https://navbharatai.com/")};
 
               function handleReturnToApp() {
                 try {
@@ -180,7 +211,7 @@ export function registerGithubAuthRoutes(app: Express): void {
                 </svg>
               </div>
               <h2 style="color:#f85149;margin-top:0;margin-bottom:8px;font-size:22px;font-weight:600;">GitHub Connection Failed</h2>
-              <p style="font-size:14px;color:#8b949e;margin-bottom:24px;line-height:1.5;word-break:break-word;">Error: ${err.message}</p>
+              <p style="font-size:14px;color:#8b949e;margin-bottom:24px;line-height:1.5;word-break:break-word;">Error: ${htmlEscape(err.message)}</p>
 
               <button onclick="window.close()" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:12px 24px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;width:100%;transition:background-color 0.2s;">
                 Close Window
@@ -190,7 +221,7 @@ export function registerGithubAuthRoutes(app: Express): void {
             <script>
               try {
                 if (window.opener) {
-                  window.opener.postMessage({ type: 'GITHUB_AUTH_ERROR', error: '${err.message}' }, '*');
+                  window.opener.postMessage({ type: 'GITHUB_AUTH_ERROR', error: ${jsLiteral(err.message)} }, '*');
                 }
               } catch(e) {}
             </script>

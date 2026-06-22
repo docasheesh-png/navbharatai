@@ -1260,18 +1260,21 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: adminEmail, password: adminPassword }),
       });
-      const data = await res.json();
+      const raw = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(raw); } catch { /* non-JSON response (rate-limit text, HTML error, etc.) */ }
       if (res.ok && data.ok) {
         sessionStorage.setItem('admin_token', data.token);
         setIsAdmin(true);
         toggleTab('home');
         addLog('Admin: Access Granted.', 'success');
       } else {
-        setAdminError(data.error || 'Invalid credentials.');
+        // Surface the REAL reason: server JSON error, or the raw status + body.
+        setAdminError(data.error || `HTTP ${res.status}: ${raw.slice(0, 200) || '(empty response)'}`);
         addLog('Admin: Access Denied.', 'error');
       }
-    } catch {
-      setAdminError('Server error. Please try again.');
+    } catch (err: any) {
+      setAdminError(`Network error: ${err?.message ?? String(err)}`);
     }
   };
 

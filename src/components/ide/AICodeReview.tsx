@@ -227,6 +227,42 @@ function analyzeCode(code: string): ReviewIssue[] {
     });
   }
 
+  // D14: additional accessibility checks
+  const hasLabelWithoutHtmlFor = /<label(?![^>]*htmlFor\s*=)(?![^>]*for\s*=)[^>]*>/i.test(code) && code.includes('<label');
+  if (hasLabelWithoutHtmlFor) {
+    issues.push({
+      id: String(id++), severity: 'warning', category: 'accessibility',
+      title: 'Label missing htmlFor / for attribute',
+      description: '<label> elements must be programmatically linked to their input using htmlFor (React) or for (HTML). Screen readers announce the label when the input is focused.',
+      fix: 'Link label to input with htmlFor',
+      fixCode: `<label htmlFor="email">Email address</label>\n<input id="email" type="email" />`,
+    });
+  }
+
+  const hasDivOnClick = /<div[^>]*onClick/i.test(code);
+  const hasDivRole = /<div[^>]*role\s*=/.test(code);
+  if (hasDivOnClick && !hasDivRole) {
+    issues.push({
+      id: String(id++), severity: 'warning', category: 'accessibility',
+      title: 'Clickable <div> without role or keyboard support',
+      description: '<div> elements with onClick are not accessible to keyboard or screen-reader users. Use <button> or add role="button" + tabIndex={0} + onKeyDown.',
+      fix: 'Use <button> or add ARIA role',
+      fixCode: `{/* Preferred: use a button */}\n<button onClick={handleClick}>Click me</button>\n\n{/* Or: make div keyboard-accessible */}\n<div\n  role="button"\n  tabIndex={0}\n  onClick={handleClick}\n  onKeyDown={e => e.key === 'Enter' && handleClick()}\n>Click me</div>`,
+    });
+  }
+
+  const hasColorOnlyError = /text-red|color:\s*red|color:\s*#[Ee]|className.*error.*text-/.test(code) &&
+    !code.includes('aria-invalid') && !code.includes('aria-describedby') && code.includes('error');
+  if (hasColorOnlyError) {
+    issues.push({
+      id: String(id++), severity: 'suggestion', category: 'accessibility',
+      title: 'Error state indicated by color only',
+      description: 'Using red color alone to indicate an error fails WCAG for users with color blindness. Pair color with aria-invalid and a descriptive message.',
+      fix: 'Use aria-invalid + error message text',
+      fixCode: `<input\n  aria-invalid={hasError}\n  aria-describedby="email-error"\n/>\n{hasError && (\n  <span id="email-error" className="text-red-400 text-xs">\n    ⚠ Email is required {/* icon + text, not color only */}\n  </span>\n)}`,
+    });
+  }
+
   // Positive feedback if no major issues
   if (issues.filter(i => i.severity === 'critical').length === 0) {
     issues.push({

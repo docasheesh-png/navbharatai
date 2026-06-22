@@ -4,7 +4,7 @@ import {
   ExternalLink, Maximize2, Shield, Globe,
   Search, ChevronLeft, ChevronRight, Download, Package,
   Share2, Copy, Check, X, Wifi, Pen, Eye, ChevronDown, ChevronUp,
-  Zap, Tag
+  Zap, Tag, Camera
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { VisualEditor } from './VisualEditor';
@@ -415,6 +415,19 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           className="p-2 hover:bg-white/5 rounded-full text-[#484f58] hover:text-white ml-2 disabled:opacity-30 transition-colors"
         >
           <ExternalLink className="w-4 h-4" />
+        </button>
+
+        {/* H10: Print / Save as PDF / Screenshot */}
+        <button
+          onClick={() => {
+            const iframe = document.querySelector('iframe[title="App Preview"]') as HTMLIFrameElement | null;
+            try { iframe?.contentWindow?.print(); } catch { window.print(); }
+          }}
+          title="Print / Save as PDF (screenshot)"
+          disabled={!generatedCode}
+          className="p-2 hover:bg-white/5 rounded-full text-[#484f58] hover:text-white disabled:opacity-30 transition-colors"
+        >
+          <Camera className="w-4 h-4" />
         </button>
 
         <button

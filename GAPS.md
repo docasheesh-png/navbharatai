@@ -135,20 +135,20 @@
 | D4 | Failure messages mix Hindi/English inconsistently | `[x]` | #167 |
 | D5 | No total lines-of-code counter in success state | `[x]` | #167 |
 | D6 | No file count breakdown by language in success | `[x]` | #167 |
-| D7 | No estimated build time shown before starting | `[ ]` | |
+| D7 | No estimated build time shown before starting | `[x]` | #167 |
 | D8 | Build cancellation has no confirm dialog | `[x]` | #167 |
 | D9 | Repair attempt failure shows generic "Please try again" | `[ ]` | |
 | D10 | Code review panel UI collapses too easily (accordion UX) | `[x]` | #167 |
 | D11 | Security findings in code review not linked to file/line | `[ ]` | |
 | D12 | No "Dismiss finding" option in code review panel | `[x]` | #167 |
 | D13 | No overall quality grade badge visible in header after build | `[x]` | #167 |
-| D14 | Code review does not include accessibility (a11y) checks | `[ ]` | |
+| D14 | Code review does not include accessibility (a11y) checks | `[x]` | #167 |
 | D15 | Generated comments sometimes in Hindi (violates CLAUDE.md) | `[ ]` | |
 | D16 | No "Export build report" (files + review + tests) as PDF/MD | `[ ]` | |
 | D17 | Build steps list does not show actual file being generated | `[ ]` | |
 | D18 | No "Continue partial build" option on timeout | `[ ]` | |
 | D19 | Provider used for build not shown in completion badge | `[x]` | #167 |
-| D20 | Build steps collapse after build — no way to re-expand | `[ ]` | |
+| D20 | Build steps collapse after build — no way to re-expand | `[x]` | #167 |
 | D21 | Generated app name defaults to "App" — no smart naming | `[ ]` | |
 | D22 | No copy-to-clipboard button on generated code blocks | `[x]` | #167 |
 | D23 | No build history count shown in UI (e.g. "Build #7") | `[x]` | #167 |
@@ -261,7 +261,7 @@
 | H7 | No "Open in new tab" button for preview | `[x]` | #165 |
 | H8 | Preview doesn't respect system dark/light preference | `[ ]` | |
 | H9 | Console errors from preview not surfaced in chat | `[ ]` | |
-| H10 | No preview screenshot download | `[ ]` | |
+| H10 | No preview screenshot download | `[x]` | #167 |
 | H11 | Preview iframe has no title (accessibility) | `[x]` | existing |
 | H12 | Preview doesn't show dimensions (width x height) | `[x]` | #166 |
 | H13 | Preview refresh animation is abrupt (no fade) | `[x]` | #167 |

@@ -457,6 +457,11 @@ export const AIChat: React.FC<AIChatProps> = ({
   const [showReport, setShowReport] = useState<Record<string, boolean>>({});
   const [reportText, setReportText] = useState<Record<string, string>>({});
   const [progressCollapsed, setProgressCollapsed] = useState(false);
+  // D20: keep build widget visible after completion until user dismisses it
+  const [buildProgressDismissed, setBuildProgressDismissed] = useState(false);
+  useEffect(() => {
+    if (buildProgress?.active) setBuildProgressDismissed(false);
+  }, [buildProgress?.active]);
   // D23: build counter — increments on each new build start
   const [currentBuildCount, setCurrentBuildCount] = useState(() => {
     try { return parseInt(localStorage.getItem('nba_build_count') || '0', 10); } catch { return 0; }
@@ -1405,19 +1410,35 @@ export const AIChat: React.FC<AIChatProps> = ({
         )}
 
         {/* ── Inline Build Progress Widget ── */}
-        {buildProgress?.active && (
+        {buildProgress && (buildProgress.active || (buildProgress.steps.length > 0 && !buildProgressDismissed)) && (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-[#161b22] border border-amber-500/20 rounded-2xl overflow-hidden shadow-xl"
+            className={`border rounded-2xl overflow-hidden shadow-xl ${buildProgress.active ? 'bg-[#161b22] border-amber-500/20' : 'bg-[#161b22] border-white/10'}`}
           >
             {/* Header */}
             <div className="flex items-center gap-2 px-4 py-2.5 bg-[#0d1117] border-b border-white/5">
-              <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">NavBharatAI v2.0 — Building</span>
+              <div className={`w-2 h-2 rounded-full ${buildProgress.active ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+              <span className={`text-[9px] font-black uppercase tracking-widest ${buildProgress.active ? 'text-amber-400' : 'text-emerald-400'}`}>
+                {buildProgress.active ? 'NavBharatAI v2.0 — Building' : 'Build Completed'}
+              </span>
+              {/* D7: estimated build time hint */}
+              {buildProgress.active && !buildProgress.startedAt && (
+                <span className="text-[8px] text-white/20 font-mono">~30–90s</span>
+              )}
               {/* D23: build count badge */}
               {currentBuildCount > 0 && (
                 <span className="text-[8px] font-black text-white/25 font-mono">#{currentBuildCount}</span>
+              )}
+              {/* D20: dismiss completed build widget */}
+              {!buildProgress.active && (
+                <button
+                  onClick={() => setBuildProgressDismissed(true)}
+                  title="Dismiss build log"
+                  className="ml-auto p-1 text-white/20 hover:text-white/60 rounded"
+                >
+                  <X className="w-3 h-3" />
+                </button>
               )}
               {buildProgress.part && buildProgress.part > 1 && (
                 <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[8px] font-black uppercase tracking-wider text-amber-300">Part {buildProgress.part}</span>

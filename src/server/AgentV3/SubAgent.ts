@@ -8,6 +8,7 @@ import { AgentRunner } from './AgentRunner';
 import { roleConfig } from './AgentRegistry';
 import { catalogForTools } from './ToolCatalog';
 import { agentLifecycle } from './AgentLifecycle';
+import { getWorkspaceMemory } from './WorkspaceMemory';
 import type { AgentRole } from './types';
 
 /**
@@ -57,10 +58,18 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       maxBudgetUsd: deps.maxBudgetUsd,
       agentRole: role,
     });
+    // Give the specialist the live project map (Phase 2) so it knows the codebase
+    // the Architect has built so far — what files/components/routes exist and what
+    // has failed — instead of working blind. Empty early in a build (no-op then).
+    const projectMap = getWorkspaceMemory(deps.workspaceId).projectMap();
+    const fullInstruction = projectMap
+      ? `Current project context:\n${projectMap}\n\n---\nYour task: ${instruction}`
+      : instruction;
+
     // Record the real lifecycle of this delegated run (Agent Health Monitor).
     const token = agentLifecycle.start(role);
     try {
-      const result = await runner.run(instruction);
+      const result = await runner.run(fullInstruction);
       agentLifecycle.finish(token, result.ok);
       return { ok: result.ok, summary: result.summary };
     } catch (err) {

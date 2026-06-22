@@ -722,6 +722,12 @@ Refactor: extracted NBI chat inline JSX from App.tsx → `src/components/panels/
 
 tsc x2 clean (0 errors), vitest 1366/1366 green.
 
+**Extended — 1370 tests / 175 test files (2026-06-22, session 7 continued):**
+
+- `tests/routesAdmin.test.ts` — +4 tests: GET /api/admin/metrics (snapshot+alerts shape), GET /api/admin/announcements (returns array), announcements list includes posted item, POST /api/admin/promo 400 on missing code.
+
+tsc x2 clean (0 errors), vitest 1370/1370 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

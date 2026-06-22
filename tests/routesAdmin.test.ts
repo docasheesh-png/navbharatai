@@ -156,3 +156,73 @@ describe('Admin routes — provider status', () => {
     expect(res.body).toBeDefined();
   });
 });
+
+describe('Admin routes — metrics endpoint', () => {
+  it('GET /api/admin/metrics returns snapshot with alerts array', async () => {
+    const register = await importAdminRoutes();
+    const routes = captureRoutes(register, fakeLimiter);
+    const handler = routes.get('GET /api/admin/metrics');
+    expect(handler).toBeDefined();
+
+    const req = mockReq({});
+    const res = mockRes();
+    await handler!(req, res);
+    expect(res.statusCode).toBe(200);
+    // snapshot must have top-level builds object
+    expect(res.body).toHaveProperty('builds');
+    // evaluateAlerts must have been called → alerts array present
+    expect(Array.isArray(res.body?.alerts)).toBe(true);
+  });
+});
+
+describe('Admin routes — announcements list', () => {
+  it('GET /api/admin/announcements returns an array', async () => {
+    const register = await importAdminRoutes();
+    const routes = captureRoutes(register, fakeLimiter);
+    const handler = routes.get('GET /api/admin/announcements');
+    expect(handler).toBeDefined();
+
+    const req = mockReq({});
+    const res = mockRes();
+    await handler!(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+  });
+
+  it('GET /api/admin/announcements includes previously posted announcement', async () => {
+    const register = await importAdminRoutes();
+    const routes = captureRoutes(register, fakeLimiter);
+    const postHandler = routes.get('POST /api/admin/announcement');
+    const getHandler = routes.get('GET /api/admin/announcements');
+
+    // Post an announcement
+    const postReq = mockReq({ body: { message: 'Test notice for list', target: 'all' } });
+    const postRes = mockRes();
+    await postHandler!(postReq, postRes);
+    expect(postRes.statusCode).toBe(200);
+
+    // List should include it
+    const getReq = mockReq({});
+    const getRes = mockRes();
+    await getHandler!(getReq, getRes);
+    expect(getRes.statusCode).toBe(200);
+    const found = getRes.body.find((a: any) => a.message === 'Test notice for list');
+    expect(found).toBeDefined();
+    expect(found?.target).toBe('all');
+  });
+});
+
+describe('Admin routes — promo code validation', () => {
+  it('POST /api/admin/promo returns 400 when code is missing', async () => {
+    const register = await importAdminRoutes();
+    const routes = captureRoutes(register, fakeLimiter);
+    const handler = routes.get('POST /api/admin/promo');
+    expect(handler).toBeDefined();
+
+    const req = mockReq({ body: { discountPct: 10 } });
+    const res = mockRes();
+    await handler!(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body?.error).toMatch(/code required/i);
+  });
+});

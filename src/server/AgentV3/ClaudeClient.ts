@@ -123,9 +123,18 @@ export class ClaudeClient implements TurnRunner {
 
   private getClient(): MessagesCreateClient {
     if (!this.client) {
+      // AgentV3 talks to the NATIVE Anthropic API (messages.create with tools)
+      // and authenticates with the platform's own ANTHROPIC_API_KEY via the
+      // x-api-key header. It must NOT inherit the shared ANTHROPIC_BASE_URL:
+      // that points at an OpenAI-compatible proxy (aicredits.in — Bearer auth,
+      // OpenAI format, no native tool-use), which rejects the SDK's x-api-key
+      // request with "401 Missing or invalid Authorization header". Only an
+      // explicit, Anthropic-compatible AgentV3 override is honoured (e.g. a
+      // real Anthropic gateway); otherwise we use the SDK default endpoint.
+      const override = process.env.AGENTV3_ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
       this.client = new Anthropic({
         apiKey: process.env.ANTHROPIC_API_KEY,
-        baseURL: process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, ''),
+        ...(override ? { baseURL: override } : {}),
       }) as unknown as MessagesCreateClient;
     }
     return this.client;

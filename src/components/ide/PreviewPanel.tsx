@@ -99,7 +99,7 @@ const PreviewUrlBar: React.FC<{ url: string; hotReloadFlash: boolean; tagMode: b
   const [copied, setCopied] = useState(false);
   return (
     <div className={cn(
-      "flex-1 max-w-xl h-8 bg-black/40 border rounded-full px-4 flex items-center gap-2 group transition-all",
+      "flex-1 min-w-[10rem] max-w-xl h-8 bg-black/40 border rounded-full px-4 flex items-center gap-2 group transition-all",
       hotReloadFlash ? "border-emerald-500/50" : tagMode ? "border-violet-500/50" : "border-white/10 focus-within:border-indigo-500/50"
     )}>
       <Shield className={cn("w-3.5 h-3.5 flex-shrink-0", tagMode ? "text-violet-400" : "text-emerald-500")} />
@@ -344,8 +344,12 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
 
   return (
     <div className="flex flex-col h-full bg-[#0d1117]">
-      {/* Browser-like Header */}
-      <div className="h-12 bg-[#161b22] border-b border-white/5 flex items-center px-4 gap-4 shrink-0 transition-all">
+      {/* Browser-like Header — horizontally swipe-scrollable so every control
+          stays reachable on mobile instead of being cropped off-screen. */}
+      <div
+        className="h-12 bg-[#161b22] border-b border-white/5 flex items-center px-4 gap-4 shrink-0 transition-all overflow-x-auto no-scrollbar [&>*]:shrink-0"
+        style={{ WebkitOverflowScrolling: 'touch' }}
+      >
         <div className="flex items-center gap-1">
           <button className="p-2 hover:bg-white/5 rounded-full text-[#484f58]"><ChevronLeft className="w-4 h-4" /></button>
           <button className="p-2 hover:bg-white/5 rounded-full text-[#484f58]"><ChevronRight className="w-4 h-4" /></button>

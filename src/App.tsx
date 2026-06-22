@@ -3430,9 +3430,11 @@ ${buildLanguageRule(preferredLanguage)}`;
             setFiles((prev: any) => ({ ...prev, ...builtFiles }));
             setIsAppBuilt(true);
             setHasGeneratedCode(true);
-            // Take the user to the now-ready live preview (the build message says
-            // "App is live in Preview →" but nothing navigated there before).
-            toggleTab('preview');
+            // In Pro Chat, WorkspacePane shows the preview inline — don't navigate away.
+            // Only auto-navigate to the Preview tab when the user is on a different view.
+            if (activeView !== 'nbi_pro_chat') {
+              toggleTab('preview');
+            }
             saveVersionSnapshot(messageToSend, builtFiles);
 
             const fileList = Object.keys(builtFiles);
@@ -3489,7 +3491,10 @@ ${buildLanguageRule(preferredLanguage)}`;
               timestamp: new Date(),
               meta: { deployFiles: builtFiles, appName: meta.appName || 'NavBharatAI-App', suggestions: meta.followUpSuggestions || [] } as any,
             }]);
-            setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+            // Keep the green tick visible for 2 seconds before hiding the progress bar.
+            setTimeout(() => {
+              setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+            }, 2000);
             setIsProLoading(false);
           }, 1200);
         };

@@ -49,6 +49,8 @@ export { WorkspaceMemory, getWorkspaceMemory, extractFacts } from './WorkspaceMe
 export type { ProjectGraph, SymbolInfo, Episode, MemorySnapshot, RecallHit } from './WorkspaceMemory';
 export { analyzeArchitecture, architectureSummary, resolveLocalImport } from './ArchitectureAnalysis';
 export type { ArchitectureReport } from './ArchitectureAnalysis';
+export { scanSecurity, securitySummary } from './SecurityAnalysis';
+export type { SecurityFinding, Severity } from './SecurityAnalysis';
 export { makeSubAgentSpawn } from './SubAgent';
 export type { SubAgentDeps } from './SubAgent';
 export { GitManager } from './GitManager';

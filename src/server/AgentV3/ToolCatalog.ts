@@ -115,10 +115,11 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'evaluate',
       description:
-        'Statically analyse the project for structural defects from the indexed ' +
-        'project graph: unresolved local imports (which break the build), import ' +
-        'cycles, and front-end→back-end layering violations. Use it to check your ' +
-        'work before declaring it done, then fix what it reports.',
+        'Statically analyse the project for real defects from the indexed code: ' +
+        'unresolved local imports (which break the build), import cycles, ' +
+        'front-end→back-end layering violations, plus security issues (hardcoded ' +
+        'secrets, eval, dangerouslySetInnerHTML, insecure http). Use it to check ' +
+        'your work before declaring it done, then fix what it reports.',
       input_schema: {
         type: 'object',
         properties: {},

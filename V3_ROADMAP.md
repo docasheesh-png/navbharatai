@@ -173,6 +173,13 @@ Every phase is graded against these, because they are what makes the difference:
   the indexed project graph (no sandbox needed). New `evaluate` tool wired into
   the catalog/dispatcher, granted to the whole team, and the Architect is told to
   evaluate-and-fix before declaring done. 1649 tests green (+7).
+- 2026-06-22: Phase 4.1 merged (#208) → deployed.
+- 2026-06-22: Phase 8.1 (Security) — native security scanner. scanSecurity()
+  detects hardcoded secrets/credentials, AWS keys, private keys, eval(),
+  dangerouslySetInnerHTML and insecure http:// over real indexed content
+  (placeholder/env-based values ignored). Findings are computed at index time
+  (only findings kept, not file bodies) and folded into the `evaluate` tool
+  alongside architecture analysis. 1655 tests green (+6).
 - 2026-06-22: Phase 2 (Memory & Artifact Intelligence) — built a real per-
   workspace WorkspaceMemory: artifact index / project graph (files → exported
   symbols, React components, routes, import edges, external dependencies) updated

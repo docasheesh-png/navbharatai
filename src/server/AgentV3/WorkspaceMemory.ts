@@ -16,6 +16,8 @@
 // is unsafe for v3.0's multi-workspace/multi-user model — this replaces it for
 // the v3.0 engine. A durable backend can swap the Map without changing callers.
 
+import { scanSecurity, type SecurityFinding } from './SecurityAnalysis';
+
 export type SymbolKind = 'function' | 'class' | 'const' | 'interface' | 'type' | 'enum' | 'component';
 
 export interface SymbolInfo {
@@ -66,6 +68,7 @@ interface FileFacts {
   routes: string[];
   imports: string[];
   dependencies: string[];
+  security: SecurityFinding[];
 }
 
 const MAX_EPISODES = 500;
@@ -133,6 +136,8 @@ export function extractFacts(file: string, content: string): FileFacts {
     routes: [...routes],
     imports: [...new Set(imports)],
     dependencies: [...depSet],
+    // Security scanning runs on ALL files (secrets live in config/.env too).
+    security: scanSecurity(file, content),
   };
 }
 
@@ -182,6 +187,13 @@ export class WorkspaceMemory {
       imports,
       dependencies: [...deps].sort(),
     };
+  }
+
+  /** All security findings across the indexed files (cat 16). */
+  securityFindings(): SecurityFinding[] {
+    const out: SecurityFinding[] = [];
+    for (const facts of this.fileFacts.values()) out.push(...facts.security);
+    return out;
   }
 
   snapshot(): MemorySnapshot {

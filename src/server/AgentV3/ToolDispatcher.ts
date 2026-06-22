@@ -6,6 +6,7 @@ import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { analyzeArchitecture, architectureSummary } from './ArchitectureAnalysis';
+import { securitySummary } from './SecurityAnalysis';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -199,8 +200,10 @@ export class ToolDispatcher {
       }
 
       case 'evaluate': {
-        const graph = getWorkspaceMemory(this.workspaceId).graph();
-        return architectureSummary(analyzeArchitecture(graph));
+        const mem = getWorkspaceMemory(this.workspaceId);
+        const arch = architectureSummary(analyzeArchitecture(mem.graph()));
+        const security = securitySummary(mem.securityFindings());
+        return `${arch}\n\n${security}`;
       }
 
       case 'update_todo': {

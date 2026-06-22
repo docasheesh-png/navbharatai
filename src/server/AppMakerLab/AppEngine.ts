@@ -280,6 +280,53 @@ function buildCdnJsHints(cdnNeeded: string[]): string {
 // Top 2 providers race simultaneously; winner's AbortController cancels the loser.
 // Falls through to Gemini → Vertex sequentially only if both racers fail.
 
+/**
+ * Strip a single wrapping markdown code fence from AI-generated code.
+ * Models routinely wrap output in ```lang ... ``` despite "no markdown" instructions;
+ * a leaked fence inside index.html / script.js / style.css is a hard syntax error that
+ * silently breaks the generated app. Only strips when BOTH a leading fence line and a
+ * trailing fence exist, so code that legitimately contains backticks is never corrupted.
+ */
+function stripCodeFences(s: string): string {
+  if (!s) return s;
+  let t = s.trim();
+  const leading = /^```[a-zA-Z0-9_+-]*[ \t]*\r?\n?/;
+  const trailing = /\r?\n?```[ \t]*$/;
+  if (leading.test(t) && trailing.test(t)) {
+    t = t.replace(leading, '').replace(trailing, '').trim();
+  }
+  return t;
+}
+
+/**
+ * Extract the first balanced JSON object/array from a string, ignoring braces that
+ * appear inside string literals. Robust replacement for a greedy /\{[\s\S]*\}/ match,
+ * which over-captures trailing prose containing a stray closing brace and breaks JSON.parse.
+ */
+function extractBalancedJson(input: string): string | null {
+  if (!input) return null;
+  const o = input.indexOf('{');
+  const a = input.indexOf('[');
+  const startIdx = o === -1 ? a : a === -1 ? o : Math.min(o, a);
+  if (startIdx === -1) return null;
+  const open = input[startIdx];
+  const close = open === '{' ? '}' : ']';
+  let depth = 0, inStr = false, escape = false;
+  for (let i = startIdx; i < input.length; i++) {
+    const ch = input[i];
+    if (inStr) {
+      if (escape) escape = false;
+      else if (ch === '\\') escape = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === open) depth++;
+    else if (ch === close) { depth--; if (depth === 0) return input.slice(startIdx, i + 1); }
+  }
+  return null;
+}
+
 async function callAI(prompt: string, systemPrompt: string, maxTokens = 6000): Promise<string> {
   const msgs = [
     { role: 'system' as const, content: systemPrompt },
@@ -429,8 +476,8 @@ Return ONLY the JSON:`;
   try {
     // Robust JSON extraction: handle code fences, trailing commas, extra text
     let clean = raw.replace(/```(?:json)?\s*/gi, '').replace(/```/g, '').trim();
-    const jsonMatch = clean.match(/\{[\s\S]*\}/);
-    if (jsonMatch) clean = jsonMatch[0];
+    const balanced = extractBalancedJson(clean);
+    if (balanced) clean = balanced;
     clean = clean.replace(/,\s*([\}\]])/g, '$1'); // remove trailing commas
     const parsed = JSON.parse(clean) as Partial<AppBlueprint>;
 
@@ -653,7 +700,7 @@ This module covers: all event listeners, DOM updates, page transitions, renderin
 
 EXACT HTML:
 \`\`\`html
-${htmlContent.slice(0, 20000)}
+${htmlContent.slice(0, 50000)}
 \`\`\`
 
 ALL SCREENS — wire navigation for ALL of them: ${bp.screens.map(s => `${s.id} (${s.purpose})`).join(' | ')}
@@ -683,11 +730,15 @@ ${showPageFn}
 Output ONLY the UI module JavaScript:`;
 
   console.log('[AppEngine] Split generation: 3 modules in parallel...');
-  const [stateJs, logicJs, uiJs] = await Promise.all([
+  const [stateJsRaw, logicJsRaw, uiJsRaw] = await Promise.all([
     callAI(statePrompt, sys, 4000),
     callAI(logicPrompt, sys, 5000),
     callAI(uiPrompt,    sys, 6000),
   ]);
+  // Strip any leaked markdown fences before merging — a stray ``` mid-file is a syntax error
+  const stateJs = stripCodeFences(stateJsRaw);
+  const logicJs = stripCodeFences(logicJsRaw);
+  const uiJs    = stripCodeFences(uiJsRaw);
 
   // Cross-validate: find variables used in logic/ui but not declared in state
   const stateDeclarations = new Set<string>();
@@ -775,10 +826,18 @@ function validateDOMConsistency(html: string, js: string): ValidationResult {
     }
   }
 
-  // Basic syntax: unclosed braces (rough check, ±3 tolerance)
-  const opens  = (js.match(/\{/g) || []).length;
-  const closes = (js.match(/\}/g) || []).length;
-  if (Math.abs(opens - closes) > 3) result.syntaxIssues.push(`brace mismatch: ${opens} { vs ${closes} }`);
+  // Basic syntax: unclosed braces. Strip comments and string/template literals first so
+  // braces inside them aren't miscounted, then require an exact match — this catches the
+  // common 1-2 missing-brace error that the old ±3 tolerance silently let through.
+  const codeOnly = js
+    .replace(/\/\*[\s\S]*?\*\//g, '')        // block comments
+    .replace(/\/\/[^\n]*/g, '')              // line comments
+    .replace(/`(?:\\.|[^`\\])*`/g, '``')     // template literals
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')     // double-quoted strings
+    .replace(/'(?:\\.|[^'\\])*'/g, "''");    // single-quoted strings
+  const opens  = (codeOnly.match(/\{/g) || []).length;
+  const closes = (codeOnly.match(/\}/g) || []).length;
+  if (opens !== closes) result.syntaxIssues.push(`brace mismatch: ${opens} { vs ${closes} }`);
 
   result.valid = result.brokenIds.length === 0 && result.missingWires.length === 0 && result.syntaxIssues.length === 0;
   return result;
@@ -790,6 +849,16 @@ async function autoRepairJS(
   validation: ValidationResult,
   appName: string,
 ): Promise<string> {
+  // Guard: the repair call returns the model's rewrite as the ENTIRE new JS. The model
+  // only sees a bounded slice of the input, so for large files its output would silently
+  // amputate everything past the cap. Skipping repair (keeping the original intact) is
+  // strictly safer than shipping a truncated file.
+  const REPAIR_MAX_CHARS = 12000;
+  if (js.length > REPAIR_MAX_CHARS) {
+    console.warn(`[AppEngine] Skipping AI auto-repair: JS is ${js.length} chars (> ${REPAIR_MAX_CHARS}); refusing to risk truncation.`);
+    return js;
+  }
+
   const issues: string[] = [];
   if (validation.brokenIds.length)    issues.push(`Broken getElementById IDs (not in HTML): ${validation.brokenIds.join(', ')}`);
   if (validation.missingWires.length) issues.push(`Button IDs in HTML with no addEventListener: ${validation.missingWires.join(', ')}`);
@@ -814,7 +883,14 @@ ${js.slice(0, 12000)}
 Return ONLY the corrected JavaScript — same logic, only broken references/missing wires fixed:`;
 
   try {
-    return await callAI(prompt, sys, 10000);
+    const repaired = stripCodeFences(await callAI(prompt, sys, 10000));
+    // Refuse a repair result that looks truncated vs the input — never ship a shorter,
+    // amputated file as a "fix". Fall back to the original instead.
+    if (repaired.trim().length < js.trim().length * 0.6) {
+      console.warn('[AppEngine] Auto-repair output suspiciously short — keeping original JS');
+      return js;
+    }
+    return repaired;
   } catch {
     console.warn('[AppEngine] Auto-repair AI call failed, returning original JS');
     return js;
@@ -960,7 +1036,7 @@ ${cdnTags}
 
 Output ONLY the raw HTML:`;
 
-  return callAI(prompt, sys, 7000);
+  return stripCodeFences(await callAI(prompt, sys, 7000));
 }
 
 // ─── Step 3: Generate JS (template-aware, knows HTML structure) ───────────────
@@ -984,7 +1060,7 @@ Description: ${bp.description}
 
 EXACT HTML STRUCTURE (use these exact IDs):
 \`\`\`html
-${htmlContent.slice(0, 20000)}
+${htmlContent.slice(0, 50000)}
 \`\`\`
 
 ALL SCREENS TO WIRE NAVIGATION FOR: ${bp.screens.map(s => `${s.id} (${s.purpose})`).join(' | ')}
@@ -1023,7 +1099,7 @@ UNIVERSAL RULES (ALL MANDATORY):
 
 Output ONLY the raw JavaScript:`;
 
-  return callAI(prompt, sys, 10000);
+  return stripCodeFences(await callAI(prompt, sys, 10000));
 }
 
 // ─── Step 4: Generate CSS (template-aware, knows HTML + dynamic elements) ────
@@ -1073,7 +1149,7 @@ UNIVERSAL RULES:
 
 Output ONLY the raw CSS:`;
 
-  return callAI(prompt, sys, 7000);
+  return stripCodeFences(await callAI(prompt, sys, 7000));
 }
 
 // ─── Step 5: Assemble preview ─────────────────────────────────────────────────
@@ -1142,11 +1218,11 @@ RULES:
 
 Output ONLY the <div id="${screen.id}"> element:`;
 
-  return callAI(
+  return stripCodeFences(await callAI(
     prompt,
     'You are a world-class frontend developer. Output ONLY the HTML div element — no markdown, no extra text.',
     3000,
-  );
+  ));
 }
 
 async function generateHTMLScreenByScreen(bp: AppBlueprint): Promise<string> {
@@ -1341,9 +1417,18 @@ export async function buildApp(
         : `JavaScript — ${bp.complexity} logic`,
     }));
 
+    // Honest reply: never claim "✅ ready" when the build's own validator found unresolved
+    // issues. The files are still returned (usable as a starting point), but the message
+    // must reflect reality — no fake success.
+    const remainingIssues =
+      validationReport.brokenIds.length + validationReport.missingWires.length + validationReport.syntaxIssues.length;
+    const honestReply = validationReport.passed
+      ? `✅ ${bp.appName} ready! ${bp.description}`
+      : `⚠️ ${bp.appName} built, but ${remainingIssues} issue(s) remain after auto-repair (quality score ${validationReport.score}/100) — preview may have problems. ${bp.description}`;
+
     return {
       success: true,
-      reply: `✅ ${bp.appName} ready! ${bp.description}`,
+      reply: honestReply,
       files: generatedFiles,
       fileList,
       previewHtml,
@@ -1422,7 +1507,7 @@ Requirements:
 Return only the complete firebase.js file content.`,
     sys, 4000
   );
-  return code;
+  return stripCodeFences(code);
 }
 
 // Detect if app needs backend data persistence
@@ -1640,7 +1725,7 @@ ALL identifiers and comments in English. Return ONLY CSS, no markdown.`;
 
     const featuresText = keyFeatures.length > 0 ? `\nKey features to implement:\n${keyFeatures.map(f => `- ${f}`).join('\n')}` : '';
 
-    const [appJsx, styleCss] = await Promise.all([
+    const [appJsxRaw, styleCssRaw] = await Promise.all([
       callAI(
         `Build a complete React app for: "${userPrompt}"${featuresText}\n\nApp name: ${appName}\nComplexity: ${complexity}\n\nWrite the complete App.jsx file. Include ALL components in this single file. Make it fully functional and beautiful.`,
         reactSys, 10000
@@ -1650,6 +1735,9 @@ ALL identifiers and comments in English. Return ONLY CSS, no markdown.`;
         cssSys, 4000
       ),
     ]);
+    // Strip leaked markdown fences — a ```jsx wrapper breaks the Babel-compiled preview
+    const appJsx = stripCodeFences(appJsxRaw);
+    const styleCss = stripCodeFences(styleCssRaw);
 
     onFileGenerated?.('App.jsx', appJsx);
     onFileGenerated?.('style.css', styleCss);
@@ -1870,8 +1958,12 @@ function applyPatch(content: string, patches: FilePatch[]): { result: string; ap
   let applied = 0;
   for (const p of patches) {
     if (!p.find || p.replace === undefined) continue;
-    if (result.includes(p.find)) {
-      result = result.split(p.find).join(p.replace);
+    const idx = result.indexOf(p.find);
+    if (idx !== -1) {
+      // Replace only the FIRST occurrence. The patch contract requires `find` to carry
+      // 2-3 lines of unique context; the old split/join replaced ALL occurrences, which
+      // silently corrupted unrelated code whenever `find` was short/common (e.g. "</div>").
+      result = result.slice(0, idx) + p.replace + result.slice(idx + p.find.length);
       applied++;
     }
   }
@@ -1947,7 +2039,7 @@ CURRENT ${file.toUpperCase()} FILE — return this with ONLY the required change
 ${content}
 
 Return the COMPLETE updated ${file.toUpperCase()} file:`;
-  return callAI(prompt, sys, maxOut);
+  return stripCodeFences(await callAI(prompt, sys, maxOut));
 }
 
 async function diagnoseFix(
@@ -2055,7 +2147,7 @@ Return ONLY the fixed code — no markdown, no explanation. ALL identifiers must
         tasks.push(callAI(
           `Fix this HTML element.\nREQUEST: "${request}"\nROOT CAUSE: ${dx.rootCauses.join('; ')}\n\nELEMENT:\n${chunk.chunk}\n\nReturn ONLY the fixed element:`,
           editSys, 2000
-        ).then(fixed => { updated.html = reconstructFile(updated.html, chunk, fixed.trim()); onFileGenerated?.('index.html', updated.html); }));
+        ).then(fixed => { updated.html = reconstructFile(updated.html, chunk, stripCodeFences(fixed)); onFileGenerated?.('index.html', updated.html); }));
       } else {
         tasks.push((async () => {
           const patches = await generatePatches(request, 'html', currentFiles.html, dx.rootCauses, dx.fixStrategy);
@@ -2078,7 +2170,7 @@ Return ONLY the fixed code — no markdown, no explanation. ALL identifiers must
         tasks.push(callAI(
           `Fix this CSS rule.\nREQUEST: "${request}"\nROOT CAUSE: ${dx.rootCauses.join('; ')}\n\nRULE:\n${chunk.chunk}\n\nReturn ONLY the fixed CSS rule:`,
           editSys, 1000
-        ).then(fixed => { updated.css = reconstructFile(updated.css, chunk, fixed.trim()); onFileGenerated?.('style.css', updated.css); }));
+        ).then(fixed => { updated.css = reconstructFile(updated.css, chunk, stripCodeFences(fixed)); onFileGenerated?.('style.css', updated.css); }));
       } else {
         tasks.push((async () => {
           const patches = await generatePatches(request, 'css', currentFiles.css, dx.rootCauses, dx.fixStrategy);
@@ -2101,7 +2193,7 @@ Return ONLY the fixed code — no markdown, no explanation. ALL identifiers must
         tasks.push(callAI(
           `Fix this JavaScript function.\nREQUEST: "${request}"\nROOT CAUSE: ${dx.rootCauses.join('; ')}\nHTML CONTEXT: ${summarizeHTML(currentFiles.html)}\n\nFUNCTION:\n${chunk.chunk}\n\nReturn ONLY the fixed function:`,
           editSys, 3000
-        ).then(fixed => { updated.js = reconstructFile(updated.js, chunk, fixed.trim()); onFileGenerated?.('script.js', updated.js); }));
+        ).then(fixed => { updated.js = reconstructFile(updated.js, chunk, stripCodeFences(fixed)); onFileGenerated?.('script.js', updated.js); }));
       } else {
         tasks.push((async () => {
           const patches = await generatePatches(request, 'js', currentFiles.js, dx.rootCauses, dx.fixStrategy, `HTML IDs: ${summarizeHTML(currentFiles.html)}`);
@@ -2146,7 +2238,8 @@ Return ONLY the fixed code — no markdown, no explanation. ALL identifiers must
       : `⚠️ Could not apply: ${dx.rootCauses[0] || request} — try rephrasing or rebuild the app.`;
 
     return {
-      success: true, reply: replyMsg, files,
+      // Honest: a no-op edit (nothing actually changed) is not a success.
+      success: anyChanged, reply: replyMsg, files,
       fileList: Object.entries(files).map(([path, content]) => ({ path, content, description: path })),
       previewHtml, appName: 'Updated App', validationReport,
     };

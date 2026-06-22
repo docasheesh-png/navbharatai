@@ -61,9 +61,11 @@ function extOf(path: string): string {
   return i >= 0 ? path.slice(i).toLowerCase() : '';
 }
 
-/** Heuristic: a data-URL or known-binary extension or NUL bytes ⇒ binary. */
+/** Heuristic: a base64 data-URL or known-binary extension or NUL bytes ⇒ binary. */
 export function looksBinary(path: string, content: string): boolean {
-  if (content.startsWith('data:')) return true;
+  // Only a *base64* data-URL is binary. Plain text that merely begins with "data:"
+  // (e.g. a CSS/JS file referencing a data URI) must not be mis-encoded as base64.
+  if (/^data:[^;,]*;base64,/.test(content)) return true;
   if (BINARY_EXT.has(extOf(path))) return true;
   return content.includes('\u0000');
 }
@@ -104,12 +106,23 @@ export class VirtualFileSystem {
   write(path: string, content: string, encoding?: FileEncoding): ProjectFile {
     const norm = normalizePath(path);
     if (!norm) throw new Error('VFS.write: empty/invalid path');
-    const enc: FileEncoding = encoding ?? (looksBinary(norm, content) ? 'base64' : 'utf8');
+    // When a base64 data-URL is auto-detected, store ONLY the decoded payload as base64 so
+    // the round-trip through toRecord()/fromRecord() is idempotent (toRecord re-adds the
+    // "data:...;base64," wrapper). Storing the full data-URL as "base64" would corrupt it.
+    let storeContent = content;
+    let enc: FileEncoding;
+    if (encoding) {
+      enc = encoding;
+    } else {
+      const dataUrl = /^data:[^;,]*;base64,([\s\S]*)$/.exec(content);
+      if (dataUrl) { enc = 'base64'; storeContent = dataUrl[1]; }
+      else { enc = looksBinary(norm, content) ? 'base64' : 'utf8'; }
+    }
     const file: ProjectFile = {
       path: norm,
-      content,
+      content: storeContent,
       encoding: enc,
-      size: byteLength(content, enc),
+      size: byteLength(storeContent, enc),
       updatedAt: new Date().toISOString(),
     };
     this.files.set(norm, file);

@@ -17,6 +17,24 @@ import { deployVercel, deployNetlify, deployGitHubPages, deployCloudflarePages }
  * Behavior unchanged. Delegates model routing to the shared aiRouter and app
  * generation/editing to AppMakerLab/AppEngine.
  */
+/**
+ * Strip a single wrapping markdown code fence from AI-generated file content.
+ * Models frequently wrap whole-file output in ```lang ... ``` despite instructions; a leaked
+ * fence at the top of a .tsx/.ts source file is a hard syntax error that breaks the build.
+ * Only strips when BOTH a leading fence line and trailing fence exist (never corrupts code
+ * that legitimately contains backticks).
+ */
+function stripFileFences(s: string): string {
+  if (!s) return s;
+  let t = s.trim();
+  const leading = /^```[a-zA-Z0-9_+-]*[ \t]*\r?\n?/;
+  const trailing = /\r?\n?```[ \t]*$/;
+  if (leading.test(t) && trailing.test(t)) {
+    t = t.replace(leading, '').replace(trailing, '').trim();
+  }
+  return t;
+}
+
 export function registerProRoutes(app: Express): void {
   async function callClaudePro(
     apiKey: string,
@@ -610,8 +628,9 @@ Response Format:
                 [], 'free' as any, undefined,
                 'TypeScript/React expert. Return ONLY the complete updated file content. No markdown fences, no explanation.'
               );
-              updatedFiles[filePath] = updated;
-              send({ type: 'file', fileName: filePath, content: updated });
+              const cleaned = stripFileFences(updated);
+              updatedFiles[filePath] = cleaned;
+              send({ type: 'file', fileName: filePath, content: cleaned });
             } catch (e: any) {
               console.warn(`[TSX-EDIT] ${filePath}:`, e.message);
             }

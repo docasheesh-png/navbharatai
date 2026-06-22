@@ -4,6 +4,7 @@ import { ToolDispatcher, type ActuatorPort } from './ToolDispatcher';
 import { ClaudeClient, type MessagesCreateClient } from './ClaudeClient';
 import { WorkspaceState } from './WorkspaceState';
 import { AgentEventStream } from './AgentEventStream';
+import { getWorkspaceMemory, _clearWorkspaceMemory } from './WorkspaceMemory';
 import type { AgentEvent } from './types';
 
 class FakeActuator implements ActuatorPort {
@@ -60,6 +61,37 @@ describe('makeSubAgentSpawn — specialist sub-agents', () => {
     // The sub-agent's activity is attributed to 'frontend', not 'architect'.
     expect(events.some((e) => e.type === 'narration' && e.agent === 'frontend')).toBe(true);
     expect(events.some((e) => e.type === 'file_changed' && e.agent === 'frontend')).toBe(true);
+  });
+
+  it('injects the live project memory into the specialist\'s instruction', async () => {
+    _clearWorkspaceMemory();
+    // The Architect has already built something this workspace remembers.
+    getWorkspaceMemory('ws-mem').indexFile('src/Sidebar.tsx', 'export function Sidebar(){return null;}');
+
+    const stream = new AgentEventStream();
+    const state = new WorkspaceState(stream);
+    const actuator = new FakeActuator();
+
+    // A client that records the user prompt it receives.
+    let seenPrompt = '';
+    const recording: MessagesCreateClient = {
+      messages: {
+        create: async (params: Record<string, unknown>) => {
+          const msgs = params.messages as Array<{ role: string; content: unknown }>;
+          const first = msgs[0];
+          if (typeof first?.content === 'string') seenPrompt = first.content;
+          return { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' } as never;
+        },
+      },
+    };
+    const client = new ClaudeClient(recording);
+    const spawn = makeSubAgentSpawn({ client, actuator, workspaceId: 'ws-mem', state, events: stream, model: 'm' });
+    await spawn('designer', 'Polish the layout');
+
+    expect(seenPrompt).toContain('Current project context');
+    expect(seenPrompt).toContain('Sidebar');
+    expect(seenPrompt).toContain('Your task: Polish the layout');
+    _clearWorkspaceMemory();
   });
 
   it('a spawned worker cannot itself spawn (no task tool → honest error)', async () => {

@@ -1,0 +1,102 @@
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { ClaudeClient, parseMessage, type MessagesCreateClient } from './ClaudeClient';
+import { opusEquivalentUsd, billedAmountUsd, STANDARD_MULTIPLIER, ONLY_OPUS_MULTIPLIER } from './pricing';
+
+describe('parseMessage', () => {
+  it('extracts text, tool_use blocks, stop reason and usage', () => {
+    const result = parseMessage({
+      content: [
+        { type: 'text', text: 'Let me create the file.' },
+        { type: 'tool_use', id: 'tu_1', name: 'write_file', input: { path: 'a.ts', content: 'x' } },
+        { type: 'tool_use', id: 'tu_2', name: 'bash', input: { command: 'ls' } },
+      ],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 100, output_tokens: 40, cache_read_input_tokens: 10 },
+    });
+
+    expect(result.text).toBe('Let me create the file.');
+    expect(result.toolUses).toHaveLength(2);
+    expect(result.toolUses[0]).toEqual({ id: 'tu_1', name: 'write_file', input: { path: 'a.ts', content: 'x' } });
+    expect(result.toolUses[1].name).toBe('bash');
+    expect(result.stopReason).toBe('tool_use');
+    expect(result.usage.inputTokens).toBe(100);
+    expect(result.usage.outputTokens).toBe(40);
+    expect(result.usage.cacheReadInputTokens).toBe(10);
+    expect(result.usage.cacheCreationInputTokens).toBe(0);
+  });
+
+  it('tolerates a missing usage block and malformed tool_use', () => {
+    const result = parseMessage({
+      content: [
+        { type: 'text', text: 'done' },
+        { type: 'tool_use', name: 'no_id_so_skipped' }, // missing id → skipped
+      ],
+      stop_reason: 'end_turn',
+    });
+    expect(result.text).toBe('done');
+    expect(result.toolUses).toHaveLength(0);
+    expect(result.usage.inputTokens).toBe(0);
+  });
+});
+
+describe('ClaudeClient.runTurn (injected mock client)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('passes model/system/messages and adds tools + tool_choice when tools given', async () => {
+    const create = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 5, output_tokens: 2 },
+    });
+    const mock: MessagesCreateClient = { messages: { create } };
+    const client = new ClaudeClient(mock);
+
+    const res = await client.runTurn({
+      model: 'claude-sonnet-test',
+      system: 'You are an engineer.',
+      messages: [{ role: 'user', content: 'build x' }],
+      tools: [{ name: 'bash', description: 'run', input_schema: { type: 'object', properties: {} } }],
+    });
+
+    expect(create).toHaveBeenCalledTimes(1);
+    const params = create.mock.calls[0][0];
+    expect(params.model).toBe('claude-sonnet-test');
+    expect(params.system).toBe('You are an engineer.');
+    expect(params.tools).toHaveLength(1);
+    expect(params.tool_choice).toEqual({ type: 'auto' });
+    expect(params.max_tokens).toBe(8192);
+    expect(res.text).toBe('ok');
+    expect(res.usage.inputTokens).toBe(5);
+  });
+
+  it('omits tools/tool_choice when no tools are provided', async () => {
+    const create = vi.fn().mockResolvedValue({ content: [], stop_reason: 'end_turn' });
+    const client = new ClaudeClient({ messages: { create } });
+    await client.runTurn({ model: 'm', messages: [] });
+    const params = create.mock.calls[0][0];
+    expect(params.tools).toBeUndefined();
+    expect(params.tool_choice).toBeUndefined();
+  });
+});
+
+describe('pricing (D5/D6) — margin is structurally positive', () => {
+  it('computes Opus-equivalent cost from default $15/$75 per MTok', () => {
+    // 1M input + 1M output = $15 + $75 = $90
+    expect(opusEquivalentUsd({ inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBeCloseTo(90, 6);
+  });
+
+  it('applies 2.5x standard markup and 5x only-opus markup', () => {
+    const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000 };
+    const base = opusEquivalentUsd(usage);
+    expect(billedAmountUsd(usage, false)).toBeCloseTo(base * STANDARD_MULTIPLIER, 6);
+    expect(billedAmountUsd(usage, true)).toBeCloseTo(base * ONLY_OPUS_MULTIPLIER, 6);
+    // 5x > 2.5x > raw cost → user always pays at least the real cost.
+    expect(billedAmountUsd(usage, true)).toBeGreaterThan(billedAmountUsd(usage, false));
+    expect(billedAmountUsd(usage, false)).toBeGreaterThan(base);
+  });
+
+  it('never goes negative on zero/garbage token counts', () => {
+    expect(billedAmountUsd({ inputTokens: 0, outputTokens: 0 })).toBe(0);
+    expect(billedAmountUsd({ inputTokens: -5, outputTokens: -5 })).toBe(0);
+  });
+});

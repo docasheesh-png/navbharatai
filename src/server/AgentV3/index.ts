@@ -14,6 +14,23 @@ export {
   isAgentV3GloballyEnabled,
   agentV3Allowlist,
 } from './featureFlag';
+export { ClaudeClient, parseMessage } from './ClaudeClient';
+export type {
+  ClaudeToolDef,
+  ToolUse,
+  TurnUsage,
+  TurnResult,
+  RunTurnParams,
+  MessagesCreateClient,
+} from './ClaudeClient';
+export {
+  STANDARD_MULTIPLIER,
+  ONLY_OPUS_MULTIPLIER,
+  opusRate,
+  opusEquivalentUsd,
+  billedAmountUsd,
+} from './pricing';
+export type { BilledUsage } from './pricing';
 
 import { AGENTV3_PHASE } from './types';
 

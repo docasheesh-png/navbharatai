@@ -120,6 +120,7 @@ import {
 } from './lib/versionSnapshot';
 import { pickGreetingForAgent } from './lib/agentGreetings';
 import { validateDeployInput, buildDeployBody } from './lib/deployRequest';
+import { isZipFile, isTextFile, classifyZipSize } from './lib/uploadClassify';
 import {
   DEFAULT_HOME_DATA,
   DEFAULT_ABOUT_DATA,
@@ -4094,17 +4095,14 @@ ${buildLanguageRule(preferredLanguage)}`;
   }, [addToast]);
 
   const handleFilesUpload = useCallback(async (selectedFile: File) => {
-    const isZip = selectedFile.name.toLowerCase().endsWith('.zip') ||
-      selectedFile.type === 'application/zip' ||
-      selectedFile.type === 'application/x-zip-compressed';
-
-    if (isZip) {
+    if (isZipFile(selectedFile.name, selectedFile.type)) {
       const sizeMB = selectedFile.size / (1024 * 1024);
-      if (sizeMB > 500) {
+      const bucket = classifyZipSize(selectedFile.size);
+      if (bucket === 'too-large') {
         setZipSizeModal({ variant: 'too-large', fileName: selectedFile.name, fileSizeMB: sizeMB });
         return;
       }
-      if (sizeMB > 50) {
+      if (bucket === 'github') {
         setZipSizeModal({ variant: 'github', fileName: selectedFile.name, fileSizeMB: sizeMB });
         return;
       }
@@ -4120,7 +4118,7 @@ ${buildLanguageRule(preferredLanguage)}`;
 
     // Non-ZIP: read as text or base64, then check for conflict
     const existingKey = Object.keys(files).find(k => k === selectedFile.name || k.endsWith('/' + selectedFile.name));
-    const isText = /\.(html|htm|css|scss|js|ts|jsx|tsx|json|md|txt|xml|svg|yaml|yml|py|php|vue|svelte)$/i.test(selectedFile.name);
+    const isText = isTextFile(selectedFile.name);
 
     const readFile = (): Promise<string> => new Promise((resolve, reject) => {
       const reader = new FileReader();

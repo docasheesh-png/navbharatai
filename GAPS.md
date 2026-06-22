@@ -41,7 +41,7 @@
 | A16 | Ctrl+F (Find) not visually highlighted as shortcut hint | `[ ]` | |
 | A17 | Editor theme is always dark — no light theme option | `[ ]` | |
 | A18 | No "Select all occurrences" keyboard shortcut hint | `[ ]` | |
-| A19 | Monaco language not auto-detected for .mjs / .cjs / .mts / .cts | `[ ]` | |
+| A19 | Monaco language not auto-detected for .mjs / .cjs / .mts / .cts | `[x]` | #166 |
 | A20 | Read-only file indicator missing (no lock icon on non-editable files) | `[ ]` | |
 | A21 | No snippet library / custom snippets | `[ ]` | |
 | A22 | No "Compare File" (diff against saved) option in file tree | `[ ]` | |
@@ -73,7 +73,7 @@
 | B11 | Code blocks in chat have no line numbers | `[ ]` | |
 | B12 | Code blocks in chat not syntax-highlighted in all languages | `[ ]` | |
 | B13 | Long AI messages have no "Collapse" toggle | `[ ]` | |
-| B14 | No keyboard shortcut to focus input (Ctrl+K or /) | `[ ]` | |
+| B14 | No keyboard shortcut to focus input (Ctrl+K or /) | `[x]` | #166 |
 | B15 | Chat history scroll position lost when switching tabs | `[ ]` | |
 | B16 | No "Export chat" to markdown/PDF | `[ ]` | |
 | B17 | No search within chat history | `[ ]` | |
@@ -87,9 +87,9 @@
 | B25 | Session list shows raw UCI code, not human readable title | `[ ]` | |
 | B26 | No "pin to top" for important messages | `[ ]` | |
 | B27 | Paste image into chat not supported (clipboard paste) | `[ ]` | |
-| B28 | Voice input icon has no accessibility label | `[ ]` | |
+| B28 | Voice input icon has no accessibility label | `[x]` | #166 |
 | B29 | No multiline paste indicator (large pastes not warned) | `[ ]` | |
-| B30 | No "Send on Enter / Shift+Enter" preference toggle | `[ ]` | |
+| B30 | No "Send on Enter / Shift+Enter" preference toggle | `[x]` | #166 |
 
 ---
 

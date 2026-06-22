@@ -60,9 +60,13 @@ export const Editor: React.FC<EditorProps> = React.memo(({
     const ext = name.split('.').pop()?.toLowerCase();
     switch (ext) {
       case 'js':
-      case 'jsx': return 'javascript';
+      case 'jsx':
+      case 'mjs':
+      case 'cjs': return 'javascript';
       case 'ts':
-      case 'tsx': return 'typescript';
+      case 'tsx':
+      case 'mts':
+      case 'cts': return 'typescript';
       case 'html': return 'html';
       case 'css': return 'css';
       case 'py': return 'python';

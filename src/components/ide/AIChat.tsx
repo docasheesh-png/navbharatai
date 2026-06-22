@@ -423,6 +423,8 @@ export const AIChat: React.FC<AIChatProps> = ({
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
   const [showContinueModal, setShowContinueModal] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  // B30: send on Enter preference
+  const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => localStorage.getItem('chat_sendOnEnter') !== 'false');
 
   // Dynamic continuation suggestions
   const [continuePromptPhrase, setContinuePromptPhrase] = useState('Want to continue previous work? Enter your Universal Chat ID (UCI).');
@@ -451,6 +453,18 @@ export const AIChat: React.FC<AIChatProps> = ({
     setShared(true);
     setTimeout(() => setShared(false), 2000);
   };
+
+  // B14: Ctrl+K / Cmd+K focuses the input
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        textareaRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
 
   const handleRestoreByUci = async () => {
     if (!resumeUciInput.trim() || !onRestoreUci) return;
@@ -1346,6 +1360,13 @@ export const AIChat: React.FC<AIChatProps> = ({
                       e.target.style.height = 'auto';
                       e.target.style.height = `${Math.min(e.target.scrollHeight, 240)}px`;
                     }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && sendOnEnter && !isLoading && (input.trim() || attachments.length > 0)) {
+                        e.preventDefault();
+                        onSend(attachments);
+                        setAttachments([]);
+                      }
+                    }}
                     placeholder="Ask NavBharatAI..."
                     rows={1}
                     className={cn(
@@ -1381,6 +1402,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                       type="button"
                       onClick={isListening ? stopVoice : startVoice}
                       title={isListening ? 'Stop voice input' : 'Voice input (Chrome only)'}
+                      aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
                       className={`p-2.5 transition-colors ${isListening ? 'text-red-400 animate-pulse' : 'text-gray-500 hover:text-blue-400'}`}
                     >
                       {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
@@ -1422,6 +1444,14 @@ export const AIChat: React.FC<AIChatProps> = ({
                     {input.length}
                   </span>
                 )}
+                {/* B30: Enter sends toggle */}
+                <button
+                  onClick={() => { const v = !sendOnEnter; setSendOnEnter(v); localStorage.setItem('chat_sendOnEnter', String(v)); }}
+                  title={sendOnEnter ? 'Enter sends message (click to toggle)' : 'Shift+Enter sends (click to toggle)'}
+                  className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
+                >
+                  {sendOnEnter ? '↵ Send' : '⇧↵ Send'}
+                </button>
                 {messages.length > 0 && (
                   <button
                     onClick={() => { if (window.confirm('Clear conversation?')) { /* parent handles via onSend with special signal */ onSendSuggestion?.('__CLEAR_CHAT__'); } }}

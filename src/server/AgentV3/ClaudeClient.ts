@@ -60,6 +60,11 @@ export interface RunTurnParams {
   maxTokens?: number;
 }
 
+/** The slice of ClaudeClient the AgentRunner loop depends on (DI/testing). */
+export interface TurnRunner {
+  runTurn(params: RunTurnParams): Promise<TurnResult>;
+}
+
 /** Minimal structural type of the Anthropic client method we use (for DI/tests). */
 export interface MessagesCreateClient {
   messages: { create(params: Record<string, unknown>): Promise<AnthropicMessageLike> };
@@ -85,7 +90,7 @@ interface AnthropicMessageLike {
   };
 }
 
-export class ClaudeClient {
+export class ClaudeClient implements TurnRunner {
   private client?: MessagesCreateClient;
 
   constructor(client?: MessagesCreateClient) {

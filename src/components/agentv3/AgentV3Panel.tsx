@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw,
+  ChevronRight, ChevronLeft,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import type { AgentCard } from './agentV3Types';
@@ -22,6 +23,7 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
   const [onlyOpus, setOnlyOpus] = useState(false);
   const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default
   const [tab, setTab] = useState<SurfaceTab>('preview');
+  const [showWorkspace, setShowWorkspace] = useState(true); // collapsible right panel
   const [convo, setConvo] = useState<ChatMsg[]>([]);
   const lastNarr = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -69,15 +71,8 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
       </div>
 
       <div className="flex flex-1 min-h-0">
-        {/* LEFT: the chat */}
-        <div className="w-1/2 flex flex-col border-r border-zinc-800 min-h-0">
-          {/* AI team strip (only while there's a team) */}
-          {agents.length > 0 && (
-            <div className="px-3 py-2 border-b border-zinc-800 flex flex-wrap gap-1.5">
-              {agents.map((a) => <AgentChip key={a.agent} card={a} />)}
-            </div>
-          )}
-
+        {/* LEFT: the chat (full width when the workspace is collapsed) */}
+        <div className={`${showWorkspace ? 'w-1/2 border-r border-zinc-800' : 'flex-1'} flex flex-col min-h-0`}>
           {/* Conversation */}
           <div ref={scrollRef} className="flex-1 overflow-auto p-3 space-y-3 min-h-0">
             {convo.length === 0 && (
@@ -120,36 +115,49 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
             )}
           </div>
 
-          {/* Input */}
-          <div className="flex gap-2 p-3 border-t border-zinc-800">
-            <textarea
-              className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-sm resize-none focus:outline-none focus:border-indigo-500"
-              rows={2}
-              placeholder="Message v3.0… (e.g. “hello” or “build a notes app”)"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-            />
-            {running ? (
-              <button onClick={stop} className="flex items-center gap-1 px-3 bg-red-600 hover:bg-red-500 rounded text-sm" title="Stop">
-                <Square className="w-4 h-4" />
-              </button>
-            ) : (
-              <button onClick={send} disabled={!prompt.trim()} className="flex items-center gap-1 px-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded text-sm" title="Send">
-                <Send className="w-4 h-4" />
-              </button>
+          {/* Bottom: live AI-team chips + input (Claude-Code style — at the bottom) */}
+          <div className="border-t border-zinc-800">
+            {agents.length > 0 && (
+              <div className="px-3 pt-2 flex gap-1.5 overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+                {agents.map((a) => <AgentChip key={a.agent} card={a} />)}
+              </div>
             )}
+            <div className="flex gap-2 p-3">
+              <textarea
+                className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-sm resize-none focus:outline-none focus:border-indigo-500"
+                rows={2}
+                placeholder="Message v3.0… (e.g. “hello” or “build a notes app”)"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+              />
+              {running ? (
+                <button onClick={stop} className="flex items-center gap-1 px-3 bg-red-600 hover:bg-red-500 rounded text-sm" title="Stop">
+                  <Square className="w-4 h-4" />
+                </button>
+              ) : (
+                <button onClick={send} disabled={!prompt.trim()} className="flex items-center gap-1 px-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded text-sm" title="Send">
+                  <Send className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* RIGHT: merged workspace surfaces */}
+        {/* RIGHT: merged workspace surfaces (collapsible — ">" hides, "<" reopens) */}
+        {showWorkspace ? (
         <div className="w-1/2 flex flex-col min-h-0">
-          <div className="flex border-b border-zinc-800 text-xs overflow-x-auto">
+          <div className="flex items-center border-b border-zinc-800 text-xs">
+            <button onClick={() => setShowWorkspace(false)} title="Hide workspace" className="px-2 py-2 shrink-0 text-zinc-400 hover:text-white border-r border-zinc-800">
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <div className="flex overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
             <TabBtn active={tab === 'preview'} onClick={() => setTab('preview')} icon={<Globe className="w-3.5 h-3.5" />}>Preview</TabBtn>
             <TabBtn active={tab === 'files'} onClick={() => setTab('files')} icon={<FolderOpen className="w-3.5 h-3.5" />}>Files ({state.files.length})</TabBtn>
             <TabBtn active={tab === 'diff'} onClick={() => setTab('diff')} icon={<FileDiff className="w-3.5 h-3.5" />}>Diff ({diffPaths.length})</TabBtn>
             <TabBtn active={tab === 'terminal'} onClick={() => setTab('terminal')} icon={<Terminal className="w-3.5 h-3.5" />}>Terminal</TabBtn>
             <TabBtn active={tab === 'history'} onClick={() => setTab('history')} icon={<History className="w-3.5 h-3.5" />}>History ({state.checkpoints.length})</TabBtn>
+            </div>
           </div>
 
           {tab === 'preview' ? (
@@ -188,6 +196,11 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
             </div>
           )}
         </div>
+        ) : (
+          <button onClick={() => setShowWorkspace(true)} title="Show workspace" className="w-8 shrink-0 border-l border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-900">
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+        )}
       </div>
     </div>
   );

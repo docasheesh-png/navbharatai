@@ -31,6 +31,9 @@ export {
   billedAmountUsd,
 } from './pricing';
 export type { BilledUsage } from './pricing';
+export { defaultToolCatalog, CATALOG_TOOL_NAMES } from './ToolCatalog';
+export { ToolDispatcher } from './ToolDispatcher';
+export type { ActuatorPort, ToolResult } from './ToolDispatcher';
 
 import { AGENTV3_PHASE } from './types';
 

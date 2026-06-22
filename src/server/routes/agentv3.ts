@@ -58,6 +58,10 @@ function envInt(name: string, fallback: number): number {
   return Number.isInteger(raw) && raw > 0 ? raw : fallback;
 }
 
+/** One concurrent build per account — guards against runaway cost / abuse. */
+const activeBuilds = new Set<string>();
+const MAX_PROMPT_LEN = 20_000;
+
 export function registerAgentV3Routes(app: Express): void {
   // Capability probe — lets the frontend decide whether to show the v3.0 toggle.
   app.get('/api/agentv3/status', (req: Request, res: Response) => {
@@ -109,6 +113,16 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(400).json({ error: 'A non-empty "prompt" is required.' });
       return;
     }
+    if (prompt.length > MAX_PROMPT_LEN) {
+      res.status(400).json({ error: `Prompt is too long (max ${MAX_PROMPT_LEN} chars).` });
+      return;
+    }
+    const buildKey = userId ?? 'anon';
+    if (activeBuilds.has(buildKey)) {
+      res.status(409).json({ error: 'A build is already running for this account. Stop it before starting another.' });
+      return;
+    }
+    activeBuilds.add(buildKey);
     const onlyOpus = req.body?.onlyOpus === true;
     const planFirst = req.body?.planFirst !== false; // plan-mode ON by default (P4)
 
@@ -216,6 +230,7 @@ export function registerAgentV3Routes(app: Express): void {
     } catch (err) {
       send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {
+      activeBuilds.delete(buildKey);
       if (!res.writableEnded) res.end();
     }
   });

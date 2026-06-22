@@ -199,7 +199,7 @@
 | # | Gap | Status | PR |
 |---|-----|--------|----|
 | F1 | Error toasts disappear too quickly (3s on errors) | `[x]` | #167 |
-| F2 | Network errors and AI errors look identical in the UI | `[ ]` | |
+| F2 | Network errors and AI errors look identical in the UI | `[x]` | #167 |
 | F3 | No offline banner in the app header | `[x]` | #166 |
 | F4 | Session restore failures are silent | `[ ]` | |
 | F5 | Preview runtime errors don't highlight the failing file in Files panel | `[ ]` | |
@@ -337,7 +337,7 @@
 | K7 | Large file (>500 lines) Monaco render is noticeably slow | `[ ]` | |
 | K8 | ZIP download blocks main thread (no worker) | `[ ]` | |
 | K9 | No request deduplication for repeated API calls | `[ ]` | |
-| K10 | Images loaded without lazy loading (layout shifts) | `[ ]` | |
+| K10 | Images loaded without lazy loading (layout shifts) | `[x]` | #167 |
 | K11 | CSS animations not GPU-composited on mobile | `[ ]` | |
 | K12 | Firestore listeners not cleaned up on component unmount | `[ ]` | |
 | K13 | No service worker for offline caching | `[ ]` | |
@@ -356,7 +356,7 @@
 | L4 | Color contrast <4.5:1 in several dark-mode text areas | `[ ]` | |
 | L5 | Toasts not announced via aria-live region | `[x]` | #167 |
 | L6 | Tab order broken in sidebar navigation | `[ ]` | |
-| L7 | No keyboard shortcut to close modals (Escape should work everywhere) | `[ ]` | |
+| L7 | No keyboard shortcut to close modals (Escape should work everywhere) | `[x]` | #167 |
 | L8 | No high-contrast mode | `[ ]` | |
 | L9 | Animated elements not paused with prefers-reduced-motion | `[x]` | #167 |
 | L10 | Input placeholder text contrast insufficient | `[ ]` | |

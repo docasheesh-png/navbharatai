@@ -1218,7 +1218,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       <div className="flex items-center gap-2.5 min-w-0">
                         <div className="w-8 h-8 rounded-xl bg-indigo-600/10 flex items-center justify-center border border-white/5 overflow-hidden shrink-0">
                           {user?.avatar_url ? (
-                            <img src={user.avatar_url} referrerPolicy="no-referrer" alt="Avatar" className="w-full h-full object-cover" />
+                            <img src={user.avatar_url} referrerPolicy="no-referrer" alt="Avatar" className="w-full h-full object-cover" loading="lazy" />
                           ) : (
                             <Github className="w-4 h-4 text-white" />
                           )}
@@ -2121,7 +2121,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     <div className="flex items-center gap-2">
                       <div className="w-7 h-7 rounded-lg overflow-hidden border border-emerald-500/20 shrink-0">
                         {user?.avatar_url ? (
-                          <img src={user.avatar_url} alt="GitHub avatar" className="w-full h-full object-cover" />
+                          <img src={user.avatar_url} alt="GitHub avatar" className="w-full h-full object-cover" loading="lazy" />
                         ) : (
                           <div className="w-full h-full bg-neutral-900 border border-white/10 flex items-center justify-center text-white"><Github className="w-3.5 h-3.5" /></div>
                         )}

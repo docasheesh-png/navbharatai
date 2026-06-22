@@ -1205,8 +1205,18 @@ export default function App() {
         setShowCommandPalette(p => !p);
         return;
       }
-      // Escape — close command palette
-      if (e.key === 'Escape') { setShowCommandPalette(false); return; }
+      // L7: Escape — close command palette and any open modal overlay
+      if (e.key === 'Escape') {
+        if (showCommandPalette) { setShowCommandPalette(false); return; }
+        if (showAuth) { setShowAuth(false); return; }
+        if (showVishwakarmaChooser) { setShowVishwakarmaChooser(false); return; }
+        if (showVishwakarmaUnlockModal) { setShowVishwakarmaUnlockModal(false); return; }
+        if (showCheckoutModal) { setShowCheckoutModal(false); return; }
+        if (showPurchaseFormPanel) { setShowPurchaseFormPanel(false); return; }
+        if (showDeployPanel) { setShowDeployPanel(false); return; }
+        if (showContinueModal) { setShowContinueModal(false); return; }
+        return;
+      }
       // 9.1 Undo/Redo (not in input fields)
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey && !inInput) {
         if (canUndo) { e.preventDefault(); undoCode(); addToast('Undone ✓', 'info'); }
@@ -1217,7 +1227,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canUndo, canRedo, undoCode, redoCode, addToast]);
+  }, [canUndo, canRedo, undoCode, redoCode, addToast, showCommandPalette, showAuth, showVishwakarmaChooser, showVishwakarmaUnlockModal, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, showContinueModal]);
 
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const saved = localStorage.getItem('navbharat_keys');

@@ -1178,6 +1178,9 @@ export const AIChat: React.FC<AIChatProps> = ({
             const isLongMessage = cleanedText.length > 220 || lineCount > 4;
 
             const isLastAI = msg.sender === 'ai' && index === messages.length - 1 && !isLoading;
+            // F2: classify error type for visual distinction
+            const isNetworkError = msg.sender === 'ai' && /network.*fail|internet.*check|connection.*fail|ERR_NETWORK|cannot reach|unreachable|offline/i.test(cleanedText);
+            const isAIError = msg.sender === 'ai' && !isNetworkError && /temporarily busy|rate limit|quota|AI.*service|all.*providers|overload|timeout|unavailable/i.test(cleanedText);
             return (
               <motion.div
                 layout
@@ -1193,7 +1196,11 @@ export const AIChat: React.FC<AIChatProps> = ({
                   "max-w-[90%] p-3.5 rounded-2xl text-[11px] font-medium leading-relaxed shadow-sm break-words select-text",
                   msg.sender === 'user'
                     ? "bg-indigo-600 text-white rounded-tr-none"
-                    : "bg-[#161b22] text-[#c9d1d9] border border-white/5 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                    : isNetworkError
+                      ? "bg-[#1a0e0e] text-[#c9d1d9] border border-red-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                      : isAIError
+                        ? "bg-[#1a1600] text-[#c9d1d9] border border-amber-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                        : "bg-[#161b22] text-[#c9d1d9] border border-white/5 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
                 )}>
                   {/* Attachment image previews — compact grid */}
                   {msg.attachments && msg.attachments.length > 0 && (
@@ -1254,6 +1261,9 @@ export const AIChat: React.FC<AIChatProps> = ({
                   <span className="text-[7px] font-black text-[#484f58] uppercase tracking-widest">
                     {msg.sender === 'user' ? 'YOU' : activeAgent.toUpperCase().replace('_', ' ')}
                   </span>
+                  {/* F2: error type badge for visual distinction */}
+                  {isNetworkError && <span className="text-[7px] font-black uppercase tracking-widest text-red-400 bg-red-500/10 border border-red-500/20 rounded px-1 py-px">Network Error</span>}
+                  {isAIError && <span className="text-[7px] font-black uppercase tracking-widest text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded px-1 py-px">AI Service</span>}
                   {/* B7: Model badge on AI messages */}
                   {msg.sender === 'ai' && msg.modelUsed && (
                     <span className="text-[7px] font-mono text-indigo-400/70 bg-indigo-900/20 border border-indigo-800/30 rounded px-1 py-px">

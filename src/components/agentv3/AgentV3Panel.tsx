@@ -20,9 +20,10 @@ import type { AgentCard } from './agentV3Types';
 type SurfaceTab = 'preview' | 'files' | 'diff' | 'terminal' | 'history';
 
 export function AgentV3Panel({ userId }: { userId?: string }) {
-  const { state, running, error, start, stop } = useAgentV3Build();
+  const { state, running, error, start, respond, stop } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   const [onlyOpus, setOnlyOpus] = useState(false);
+  const [planFirst, setPlanFirst] = useState(true);
   const [tab, setTab] = useState<SurfaceTab>('preview');
 
   const agents = Object.values(state.agents).sort((a, b) => b.updatedTs - a.updatedTs);
@@ -36,6 +37,10 @@ export function AgentV3Panel({ userId }: { userId?: string }) {
         <span className="font-semibold">NavBharatAI Pro v3.0</span>
         <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
         <label className="ml-auto flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer">
+          <input type="checkbox" checked={planFirst} onChange={(e) => setPlanFirst(e.target.checked)} disabled={running} />
+          Plan first
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer">
           <input type="checkbox" checked={onlyOpus} onChange={(e) => setOnlyOpus(e.target.checked)} disabled={running} />
           Only Opus (5×)
         </label>
@@ -57,7 +62,7 @@ export function AgentV3Panel({ userId }: { userId?: string }) {
           </button>
         ) : (
           <button
-            onClick={() => prompt.trim() && start(prompt.trim(), { userId, onlyOpus })}
+            onClick={() => prompt.trim() && start(prompt.trim(), { userId, onlyOpus, planFirst })}
             disabled={!prompt.trim()}
             className="flex items-center gap-1 px-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded text-sm"
           >
@@ -69,6 +74,35 @@ export function AgentV3Panel({ userId }: { userId?: string }) {
       {error && (
         <div className="flex items-center gap-2 px-4 py-2 bg-red-950/60 text-red-300 text-sm border-b border-red-900">
           <AlertCircle className="w-4 h-4" /> {error}
+        </div>
+      )}
+
+      {state.pendingPermission && (
+        <div className="px-4 py-2.5 bg-amber-950/50 border-b border-amber-900">
+          <div className="flex items-center gap-2 text-sm text-amber-200 mb-2">
+            <AlertCircle className="w-4 h-4" /> {state.pendingPermission.action}
+          </div>
+          {state.todos.length > 0 && (
+            <ul className="mb-2 space-y-0.5">
+              {state.todos.map((t) => (
+                <li key={t.id} className="text-xs text-amber-100/90">• {t.title}</li>
+              ))}
+            </ul>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => respond(state.pendingPermission!.callId, true)}
+              className="px-3 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white"
+            >
+              Approve &amp; build
+            </button>
+            <button
+              onClick={() => respond(state.pendingPermission!.callId, false)}
+              className="px-3 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-100"
+            >
+              Reject
+            </button>
+          </div>
         </div>
       )}
 

@@ -27,7 +27,8 @@ export type {
 export { AgentRunner } from './AgentRunner';
 export type { AgentRunnerOptions, AgentRunResult } from './AgentRunner';
 export { resolveModel, sonnetModel, opusModel } from './models';
-export { architectSystemPrompt } from './systemPrompt';
+export { architectSystemPrompt, planSystemPrompt } from './systemPrompt';
+export { awaitApproval, resolveApproval, pendingApprovalCount } from './Approvals';
 export {
   STANDARD_MULTIPLIER,
   ONLY_OPUS_MULTIPLIER,

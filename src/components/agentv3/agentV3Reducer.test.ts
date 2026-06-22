@@ -62,6 +62,19 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(s.checkpoints[0].sha).toBe('abc123');
   });
 
+  it('sets a pending permission gate and clears it on completion', () => {
+    let s = agentV3Reducer(initialAgentV3State(), {
+      type: 'permission_request',
+      agent: 'architect',
+      action: 'Approve this plan to start building',
+      callId: 'req-1',
+      ts: 1,
+    });
+    expect(s.pendingPermission).toEqual({ callId: 'req-1', action: 'Approve this plan to start building' });
+    s = agentV3Reducer(s, { type: 'done', ok: true, summary: 'built', ts: 2 });
+    expect(s.pendingPermission).toBeUndefined();
+  });
+
   it('stores the live preview URL', () => {
     const s = agentV3Reducer(initialAgentV3State(), { type: 'preview', url: 'https://app.sandbox.dev', ts: 1 });
     expect(s.previewUrl).toBe('https://app.sandbox.dev');

@@ -13,7 +13,9 @@ export interface UseAgentV3Build {
   state: AgentV3ClientState;
   running: boolean;
   error: string | null;
-  start: (prompt: string, opts?: { userId?: string; onlyOpus?: boolean }) => Promise<void>;
+  start: (prompt: string, opts?: { userId?: string; onlyOpus?: boolean; planFirst?: boolean }) => Promise<void>;
+  /** Approve or reject a pending plan/permission gate (P4). */
+  respond: (requestId: string, approved: boolean) => Promise<void>;
   stop: () => void;
   reset: () => void;
 }
@@ -35,8 +37,22 @@ export function useAgentV3Build(): UseAgentV3Build {
     setRunning(false);
   }, []);
 
+  const respond = useCallback(async (requestId: string, approved: boolean) => {
+    // Clear the gate immediately so the UI is responsive; the build resumes.
+    setState((prev) => ({ ...prev, pendingPermission: undefined }));
+    try {
+      await fetch('/api/agentv3/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId, approved }),
+      });
+    } catch {
+      /* best-effort; the build will time out and auto-deny if this never lands */
+    }
+  }, []);
+
   const start = useCallback(
-    async (prompt: string, opts?: { userId?: string; onlyOpus?: boolean }) => {
+    async (prompt: string, opts?: { userId?: string; onlyOpus?: boolean; planFirst?: boolean }) => {
       if (running) return;
       setState(initialAgentV3State());
       setError(null);
@@ -49,7 +65,12 @@ export function useAgentV3Build(): UseAgentV3Build {
         const res = await fetch('/api/agentv3/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, userId: opts?.userId, onlyOpus: opts?.onlyOpus === true }),
+          body: JSON.stringify({
+            prompt,
+            userId: opts?.userId,
+            onlyOpus: opts?.onlyOpus === true,
+            planFirst: opts?.planFirst !== false,
+          }),
           signal: controller.signal,
         });
 
@@ -101,5 +122,5 @@ export function useAgentV3Build(): UseAgentV3Build {
     [running],
   );
 
-  return { state, running, error, start, stop, reset };
+  return { state, running, error, start, respond, stop, reset };
 }

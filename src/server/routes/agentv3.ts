@@ -13,7 +13,11 @@ import {
   makeSubAgentSpawn,
   resolveModel,
   architectSystemPrompt,
+  planSystemPrompt,
+  awaitApproval,
+  resolveApproval,
 } from '../AgentV3';
+import { randomUUID } from 'crypto';
 import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
@@ -52,6 +56,17 @@ export function registerAgentV3Routes(app: Express): void {
     res.json({ enabled: isAgentV3Enabled(userId), ...agentV3Status() });
   });
 
+  // Approve/reject a pending gate (plan mode / permission prompt, P4).
+  app.post('/api/agentv3/respond', (req: Request, res: Response) => {
+    const requestId = typeof req.body?.requestId === 'string' ? req.body.requestId : '';
+    const approved = req.body?.approved === true;
+    if (!requestId) {
+      res.status(400).json({ error: 'requestId is required.' });
+      return;
+    }
+    res.json({ ok: resolveApproval(requestId, approved) });
+  });
+
   // Build entry — runs the native tool-use loop and streams events as NDJSON.
   app.post('/api/agentv3/chat', buildRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
@@ -69,6 +84,7 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     const onlyOpus = req.body?.onlyOpus === true;
+    const planFirst = req.body?.planFirst !== false; // plan-mode ON by default (P4)
 
     // NDJSON stream (mirrors the Engineer route's streaming contract).
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -109,7 +125,49 @@ export function registerAgentV3Routes(app: Express): void {
         maxBudgetUsd: budget,
         agentRole: 'architect',
       });
-      const result = await runner.run(prompt);
+
+      let buildPrompt = prompt;
+
+      // Plan mode (P4): plan first, then block for the user's approval before
+      // building. A real gate — the build does not start until the user answers.
+      if (planFirst) {
+        const planRunner = new AgentRunner({
+          client,
+          dispatcher: new ToolDispatcher(actuator, workspaceId, state, events),
+          state,
+          events,
+          model,
+          system: planSystemPrompt(),
+          tools: catalogForTools(['update_todo']),
+          onlyOpus,
+          maxBudgetUsd: budget,
+          maxSteps: 4,
+          agentRole: 'architect',
+        });
+        await planRunner.run(prompt);
+
+        const requestId = randomUUID();
+        events.emit({
+          type: 'permission_request',
+          agent: 'architect',
+          action: 'Approve this plan to start building',
+          callId: requestId,
+          ts: Date.now(),
+        });
+        const approved = await awaitApproval(requestId);
+        if (!approved) {
+          const summary = 'Plan was not approved — build cancelled.';
+          events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
+          send({ type: 'result', ok: false, summary, steps: 0, billedUsd: 0 });
+          return;
+        }
+        const todos = state.snapshot().todos;
+        if (todos.length > 0) {
+          buildPrompt = `${prompt}\n\nApproved plan:\n${todos.map((t) => `- ${t.title}`).join('\n')}`;
+        }
+      }
+
+      const result = await runner.run(buildPrompt);
       send({ type: 'result', ...result });
     } catch (err) {
       send({ type: 'error', message: err instanceof Error ? err.message : String(err) });

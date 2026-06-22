@@ -88,6 +88,8 @@ export interface AgentV3ClientState {
   plan: string;
   /** Live preview URL (the running app in the sandbox), once published. */
   previewUrl?: string;
+  /** A pending plan/permission gate awaiting the user's Approve/Reject (P4). */
+  pendingPermission?: { callId: string; action: string };
   /** The live "AI Team" tracker, keyed by role (D9). */
   agents: Record<string, AgentCard>;
   /** Internal: bash callId → command, so a tool_result can be routed to the terminal. */

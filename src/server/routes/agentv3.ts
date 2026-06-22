@@ -26,6 +26,7 @@ import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
 import { DockerActuator } from '../EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
+import { makeResilientTurnRunner } from './agentv3Resilient';
 
 /**
  * AgentV3 (Vargen 3.0) routes.
@@ -146,7 +147,9 @@ export function registerAgentV3Routes(app: Express): void {
     const actuator = buildActuator();
     const workspaceId = `agentv3-${userId ?? 'anon'}-${Date.now()}`;
     try {
-      const client = new ClaudeClient();
+      // Native Claude for real tool-use, with a multi-provider text fallback
+      // (Vertex → Gemini → Grok) so chat never dies if Claude is down/misconfigured.
+      const client = makeResilientTurnRunner(new ClaudeClient());
       const model = resolveModel(onlyOpus);
       const budget = maxBuildBudgetUsd();
       const maxSteps = envInt('AGENTV3_MAX_STEPS', 80);

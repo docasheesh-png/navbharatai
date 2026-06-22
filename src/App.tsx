@@ -88,6 +88,10 @@ import {
   detectFrameworkFromFiles, detectAppType, isClassicVanillaWeb,
   buildLanguageRule, classifyError,
 } from './lib/appUtils';
+import {
+  generateUCI, getRandomElement, generateSmartHeuristicSummary,
+  extractCode, classifyBuildIntent, classifyAutoIntent,
+} from './lib/chatUtils';
 
 // AuthComponent → moved to AppModals
 // ReportProblemComponent → lazy above
@@ -3003,51 +3007,7 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
       toggleTab('deploy');
     }, 2000);
   };
-  const extractCode = (text: string) => {
-    // Look for HTML, then JS, then CSS
-    const htmlMatch = text.match(/```html\s+([\s\S]*?)?```/) || text.match(/<html>\s+([\s\S]*?)?<\/html>/i);
-    const jsMatch = text.match(/```(?:javascript|js)\s+([\s\S]*?)?```/);
-    const cssMatch = text.match(/```css\s+([\s\S]*?)?```/);
-
-    if (!htmlMatch && !jsMatch && !cssMatch) return null;
-
-    let html = htmlMatch ? (htmlMatch[1] || htmlMatch[0]) : '';
-    const js = jsMatch ? jsMatch[1] : '';
-    const css = cssMatch ? cssMatch[1] : '';
-
-    // If no HTML but we have JS or CSS, wrap them
-    // Inject Error Tracking & Viewport
-    const errorTracker = `
-      <script>
-        window.onerror = function(msg, url, lineNo, columnNo, error) {
-          window.parent.postMessage({ type: 'SANDBOX_ERROR', message: msg + " at line " + lineNo }, '*');
-          return false;
-        };
-        console.error = (function(oldError) {
-          return function(msg) {
-            window.parent.postMessage({ type: 'SANDBOX_ERROR', message: msg }, '*');
-            oldError.apply(console, arguments);
-          }
-        })(console.error);
-      </script>
-    `;
-
-    if (html) {
-      if (html.includes('</head>')) {
-        html = html.replace('</head>', errorTracker + '</head>');
-      } else if (html.includes('<head>')) {
-        html = html.replace('<head>', '<head>' + errorTracker);
-      }
-      
-      if (!html.toLowerCase().includes('viewport')) {
-        if (html.includes('</head>')) {
-          html = html.replace('</head>', '<meta name="viewport" content="width=device-width, initial-scale=1.0"></head>');
-        }
-      }
-    }
-
-    return html;
-  };
+  // extractCode → imported from src/lib/chatUtils.ts
 
   const handleSendForTab = async (tabId: ViewType, overrideMessage?: string, files: File[] = []) => {
       // ... (existing logic, maybe add files to messages)
@@ -3551,65 +3511,8 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     ));
 
   // Intent classifier — prevents build engine from firing on greetings/questions
-  const classifyBuildIntent = (message: string): 'build' | 'chat' => {
-    const lower = message.trim().toLowerCase();
-    const wordCount = lower.split(/\s+/).length;
-
-    // Greetings and affirmations (up to 4 words)
-    if (wordCount <= 4 && /^(hi|hello|hey|hii|helo|ok|okay|thanks|thank you|thx|shukriya|acha|accha|theek hai|theek|samjha|samajh|haan|nahi|sure|great|nice|good|perfect|kya haal|kaise ho|namaste|bye|good morning|good night|test)\s*[!.?]*$/.test(lower)) {
-      return 'chat';
-    }
-
-    // Clear app/build keywords → always build
-    if (/\b(app|game|website|web app|tool|bana[od]?|create|make|build|generate|develop|design|calculator|todo|quiz|login|dashboard|social|blog|portfolio|ecommerce|landing page|chat app|music player|weather|notes|timer|calendar|survey|banao|banana|chahiye)\b/i.test(lower)) {
-      return 'build';
-    }
-
-    // Short questions without build keywords → chat
-    if (wordCount < 12 && (/\?$/.test(message.trim()) || /^(what|how|why|when|where|who|explain|kya|batao|bata|samjhao|tell me|kaise|kyun|kab|kaisa)\b/i.test(lower))) {
-      return 'chat';
-    }
-
-    // Default: treat as build request
-    return 'build';
-  };
-
-  // Auto mode: classify what the user wants — chat, clarify, or which kind of build
-  const classifyAutoIntent = (message: string, history: Message[]): 'chat' | 'clarify' | 'direct_build' | 'plan_build' => {
-    const msg = message.trim();
-    const lower = msg.toLowerCase();
-
-    // Explicit "no coding / no build" signal — just converse
-    if (/\b(coding nahi|build nahi|mat bana|don't build|no code|no build|sirf bata|sirf samjha|just (tell|explain|discuss)|without (building|coding)|abhi nahi|bas batao)\b/i.test(lower)) return 'chat';
-
-    // Pure question with no build verb
-    const isQuestion = /\?$/.test(msg) || /^(kya|kaise|kyun|what|how|why|explain|batao|samjhao|tell me|describe)\b/i.test(lower);
-    const hasBuildVerb = /\b(bana|banao|banana|build|create|make|generate|develop|chahiye|chahie|design|kar do|karo)\b/i.test(lower);
-    if (isQuestion && !hasBuildVerb) return 'chat';
-
-    // User confirming after AI asked "Banau kya?" — build directly
-    const lastAi = [...history].reverse().find(m => m.sender === 'ai');
-    const aiWasAsking = !!(lastAi && /\?/.test(lastAi.text) && /\b(bana|build|banau|shall i|chahiye)\b/i.test(lastAi.text.toLowerCase()));
-    const isConfirm = /^(haan|yes|ok|sure|bilkul|karo|go ahead|ha\b|👍|theek|kar do|bana do)\s*[!.]*$/i.test(msg.trim());
-    if (isConfirm && aiWasAsking) return 'direct_build';
-
-    const hasAppNoun = /\b(app|application|game|website|tool|dashboard|calculator|quiz|generator|system|platform|portal|page|form|tracker|timer|clock|todo|chat|login|signup|landing)\b/i.test(lower);
-
-    // Has no app noun and no build verb → just chat
-    if (!hasBuildVerb && !hasAppNoun) return 'chat';
-
-    // Has app noun but no clear build verb → clarify
-    if (hasAppNoun && !hasBuildVerb && msg.length < 60) return 'clarify';
-
-    // Complex build: long message OR many features → show plan first
-    const isComplex = msg.length > 120 ||
-      (lower.match(/\b(aur|and|with|plus|bhi|also)\b/g) || []).length >= 3 ||
-      (msg.match(/^\d+\./gm) || []).length >= 2 ||
-      /\b(auth|login|database|api|dark mode|responsive|animation|filter|search|sort|registration|profile|payment|categories|multiple)\b/i.test(lower);
-
-    if (hasBuildVerb && isComplex) return 'plan_build';
-    return 'direct_build';
-  };
+  // classifyBuildIntent → imported from src/lib/chatUtils.ts
+  // classifyAutoIntent → imported from src/lib/chatUtils.ts
 
   // ── ZIP Import: stream raw binary → SSE extraction → real-time Code Studio load ──
   const handleZipImport = async (zipFile: File, extraMessage?: string) => {
@@ -4999,70 +4902,9 @@ body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;b
     "Welcome to VIP Workspace! Highly tuned LLM orchestrators and stateful agents are ready to assist you."
   ];
 
-  const generateUCI = (): string => {
-    const uppers = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    const lowers = 'abcdefghijklmnopqrstuvwxyz';
-    const digits = '0123456789';
-    const symbols = '!@#$%^&*';
-    const allChars = uppers + lowers + digits + symbols;
-    
-    // Choose randomized lengths between 10 and 16 characters
-    const len = Math.floor(Math.random() * (16 - 10 + 1)) + 10;
-    
-    let result = '';
-    // Guarantee characters from all necessary classes to prevent bypasses
-    result += uppers[Math.floor(Math.random() * uppers.length)];
-    result += lowers[Math.floor(Math.random() * lowers.length)];
-    result += digits[Math.floor(Math.random() * digits.length)];
-    result += symbols[Math.floor(Math.random() * symbols.length)];
-    
-    for (let i = 4; i < len; i++) {
-      result += allChars[Math.floor(Math.random() * allChars.length)];
-    }
-    
-    // Perform thorough randomized fisher-yates shuffle
-    const arr = result.split('');
-    for (let j = arr.length - 1; j > 0; j--) {
-      const k = Math.floor(Math.random() * (j + 1));
-      const temp = arr[j];
-      arr[j] = arr[k];
-      arr[k] = temp;
-    }
-    return arr.join('');
-  };
-
-  const getRandomElement = <T,>(arr: T[]): T => {
-    return arr[Math.floor(Math.random() * arr.length)];
-  };
-
-  const generateSmartHeuristicSummary = (history: Message[]): string => {
-    const userMessages = history.filter(m => m.sender === 'user');
-    if (userMessages.length === 0) return 'Initialized default sandbox environment';
-    
-    const completed: string[] = [];
-    const pending: string[] = [];
-    
-    userMessages.forEach(m => {
-      const txt = m.text.toLowerCase();
-      if (txt.includes('build') || txt.includes('create') || txt.includes('make') || txt.includes('banao')) {
-         completed.push(`Feature build: "${m.text.slice(0, 35)}..."`);
-      } else if (txt.includes('fix') || txt.includes('bug') || txt.includes('correct') || txt.includes('error')) {
-         completed.push(`Debugging session: "${m.text.slice(0, 35)}..."`);
-      } else {
-         pending.push(`Pending item: "${m.text.slice(0, 35)}..."`);
-      }
-    });
-
-    if (completed.length === 0) completed.push('Workspace initiation under UCI protocol');
-    if (pending.length === 0) pending.push('Dynamic continuous prompt analysis');
-
-    return `### 🧠 COMPRESSED INTELLECTUAL WORKSPACE MEMORY
-- **Completed Milestones**:
-${completed.map(c => `  - ${c}`).join('\n')}
-- **Pending Actions**:
-${pending.map(p => `  - ${p}`).join('\n')}
-`;
-  };
+  // generateUCI → imported from src/lib/chatUtils.ts
+  // getRandomElement → imported from src/lib/chatUtils.ts
+  // generateSmartHeuristicSummary → imported from src/lib/chatUtils.ts
 
   const resumeSession = (session: ChatSession) => {
     setCurrentSessionId(session.id);

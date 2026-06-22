@@ -696,6 +696,14 @@ Additional test files (this session):
 
 tsc x2 clean (0 errors), vitest 1310/1310 green.
 
+**Extended — 1345 tests / 173 test files (2026-06-22, session 5 continued):**
+
+Additional test files (this session):
+- `tests/chatUtils.test.ts` — 6 pure utility functions extracted from App.tsx (35 tests): generateUCI (6), getRandomElement (3), generateSmartHeuristicSummary (6), extractCode (6), classifyBuildIntent (7), classifyAutoIntent (7).
+- Refactor: removed 6 inline function bodies from App.tsx (extractCode, classifyBuildIntent, classifyAutoIntent, generateUCI, getRandomElement, generateSmartHeuristicSummary); all 6 now imported from `src/lib/chatUtils.ts`.
+
+tsc x2 clean (0 errors), vitest 1345/1345 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

@@ -17,6 +17,7 @@ export interface CapturedApp {
   post(path: string, ...h: Handler[]): void;
   put(path: string, ...h: Handler[]): void;
   delete(path: string, ...h: Handler[]): void;
+  all(path: string, ...h: Handler[]): void;
   use(...args: any[]): void;
 }
 
@@ -33,6 +34,7 @@ export function captureRoutes(register: (app: any, ...rest: any[]) => void, ...r
     post: record('POST'),
     put: record('PUT'),
     delete: record('DELETE'),
+    all: record('ALL'),
     use: () => { /* middleware ignored in unit tests */ },
   };
   register(app, ...rest);

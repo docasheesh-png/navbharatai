@@ -752,6 +752,12 @@ tsc x2 clean (0 errors), vitest 1399/1399 green.
 
 tsc x2 clean (0 errors), vitest 1406/1406 green.
 
+**Extended — 1420 tests / 180 test files (2026-06-22, session 8):**
+
+- `tests/routesSdaChatMisc.test.ts` (NEW) — 14 tests: SDA /api/sda-chat 400 when both message+fileData missing; chat tier registration (5 endpoints), 400 missing message/fileAttachments for navbharat+vishwakarma-pro; zip /api/download-zip 400 no files; anthropic /api/anthropic 400 missing userId/messages (3 body variants).
+
+tsc x2 clean (0 errors), vitest 1420/1420 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

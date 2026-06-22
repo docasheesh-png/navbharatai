@@ -16,10 +16,10 @@ import { AgentMode } from './ModeSelector';
 import { ThemeMode, getThemeClasses, THEME_MODES } from '../../lib/theme';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
-import { 
+import {
   Menu as MenuIcon, X, Maximize2, Minimize2,
   ChevronUp, ChevronDown, Rocket, Command, Search, Keyboard,
-  Bot, Palette, Monitor, FileCode, Plus
+  Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2
 } from 'lucide-react';
 
 interface CodeStudioProps {
@@ -136,6 +136,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const [isMobile, setIsMobile] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [replaceQuery, setReplaceQuery] = useState('');
+  // A2-A5: Editor display settings (persisted to localStorage)
+  const [editorWordWrap, setEditorWordWrap] = useState<boolean>(() => localStorage.getItem('ide_wordWrap') !== 'off');
+  const [editorMinimap, setEditorMinimap] = useState<boolean>(() => localStorage.getItem('ide_minimap') !== 'off');
+  const [editorFontSize, setEditorFontSize] = useState<number>(() => Number(localStorage.getItem('ide_fontSize') || 14));
+  const [editorTabSize, setEditorTabSize] = useState<number>(() => Number(localStorage.getItem('ide_tabSize') || 2));
 
   const handleScreenChange = (screen: IDEScreen) => {
     if (screen === 'shortcuts') {
@@ -617,8 +622,49 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
             </div>
          </div>
          
-         <div className="flex-1 flex justify-center mx-10">
-            <button 
+         {/* A2-A6: Editor quick-settings toolbar */}
+         <div className="hidden md:flex items-center gap-1 mx-4">
+           <button
+             onClick={() => { const v = !editorWordWrap; setEditorWordWrap(v); localStorage.setItem('ide_wordWrap', v ? 'on' : 'off'); }}
+             title={`Word wrap: ${editorWordWrap ? 'on' : 'off'}`}
+             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorWordWrap ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+           >
+             <AlignJustify className="w-3 h-3" />
+           </button>
+           <button
+             onClick={() => { const v = !editorMinimap; setEditorMinimap(v); localStorage.setItem('ide_minimap', v ? 'on' : 'off'); }}
+             title={`Minimap: ${editorMinimap ? 'on' : 'off'}`}
+             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorMinimap ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+           >
+             <Map className="w-3 h-3" />
+           </button>
+           <button
+             onClick={() => { const v = Math.max(10, editorFontSize - 1); setEditorFontSize(v); localStorage.setItem('ide_fontSize', String(v)); }}
+             title="Decrease font size"
+             className="p-0.5 text-[#484f58] hover:text-white rounded transition-colors"
+           >
+             <ChevronDown className="w-3 h-3" />
+           </button>
+           <span className="text-[9px] font-mono text-[#484f58] select-none w-5 text-center">{editorFontSize}</span>
+           <button
+             onClick={() => { const v = Math.min(30, editorFontSize + 1); setEditorFontSize(v); localStorage.setItem('ide_fontSize', String(v)); }}
+             title="Increase font size"
+             className="p-0.5 text-[#484f58] hover:text-white rounded transition-colors"
+           >
+             <ChevronUp className="w-3 h-3" />
+           </button>
+           {/* A6: Format document */}
+           <button
+             onClick={() => editorInstance?.getAction('editor.action.formatDocument')?.run()}
+             title="Format document (Shift+Alt+F)"
+             className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-all"
+           >
+             <Code2 className="w-3 h-3" />
+           </button>
+         </div>
+
+         <div className="flex-1 flex justify-center mx-4">
+            <button
                onClick={() => setIsCommandPaletteOpen(true)}
                className="w-full max-w-sm h-6 bg-black/20 rounded-md border border-white/5 flex items-center justify-center gap-2 text-[10px] text-white/40 hover:bg-black/30 hover:border-white/10 transition-all font-medium"
             >
@@ -726,6 +772,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 onMount={setEditorInstance}
                 onRun={() => onRun(files)}
                 onDebug={() => setIsPanelOpen(true)}
+                editorOptions={{
+                  wordWrap: editorWordWrap ? 'on' : 'off',
+                  minimap: { enabled: editorMinimap },
+                  fontSize: editorFontSize,
+                  tabSize: editorTabSize,
+                  stickyScroll: { enabled: true },
+                }}
               />
           )}
 

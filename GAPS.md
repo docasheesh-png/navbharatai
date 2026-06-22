@@ -24,13 +24,13 @@
 | # | Gap | Status | PR |
 |---|-----|--------|----|
 | A1 | Placeholder "Ask navBharatAI" — lowercase n (not a brand name) | `[x]` | #165 |
-| A2 | No word wrap toggle button in editor toolbar | `[ ]` | |
-| A3 | No minimap toggle in editor toolbar | `[ ]` | |
-| A4 | No font size control in editor | `[ ]` | |
+| A2 | No word wrap toggle button in editor toolbar | `[x]` | #166 |
+| A3 | No minimap toggle in editor toolbar | `[x]` | #166 |
+| A4 | No font size control in editor | `[x]` | #166 |
 | A5 | No tab size / indentation selector | `[ ]` | |
-| A6 | No "Format Document" button in toolbar | `[ ]` | |
-| A7 | Bracket pair colorization not enabled (Monaco supports it natively) | `[ ]` | |
-| A8 | Sticky scroll not enabled (function signature context line) | `[ ]` | |
+| A6 | No "Format Document" button in toolbar | `[x]` | #166 |
+| A7 | Bracket pair colorization not enabled (Monaco supports it natively) | `[x]` | #166 |
+| A8 | Sticky scroll not enabled (function signature context line) | `[x]` | #166 |
 | A9 | Code folding buttons (Fold All / Unfold All) missing from toolbar | `[ ]` | |
 | A10 | Unsaved-changes dot not shown on file tab when content differs from saved | `[ ]` | |
 | A11 | File extension icons missing from editor tabs (all show same icon) | `[ ]` | |

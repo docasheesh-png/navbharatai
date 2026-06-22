@@ -740,6 +740,12 @@ tsc x2 clean (0 errors), vitest 1380/1380 green.
 
 tsc x2 clean (0 errors), vitest 1393/1393 green.
 
+**Extended — 1399 tests / 178 test files (2026-06-22, session 7 continued):**
+
+- `tests/routesAuthGithub.test.ts` (NEW) — 6 tests: OTP send 400 missing phone, 200 first valid request, 429 phone cooldown; GitHub fetch/file/branches 401 on missing auth header.
+
+tsc x2 clean (0 errors), vitest 1399/1399 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

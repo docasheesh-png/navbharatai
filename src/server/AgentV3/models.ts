@@ -7,8 +7,8 @@
 // Model ids are env-overridable so ops can point at the exact current Anthropic
 // model without a code change. The defaults are valid Anthropic ids; admin should
 // bump them to the latest Sonnet/Opus at GA.
-const DEFAULT_SONNET = 'claude-3-5-sonnet-20241022';
-const DEFAULT_OPUS = 'claude-3-opus-20240229';
+const DEFAULT_SONNET = 'claude-sonnet-4-6';
+const DEFAULT_OPUS = 'claude-opus-4-8';
 
 export function sonnetModel(): string {
   return process.env.AGENTV3_SONNET_MODEL || DEFAULT_SONNET;

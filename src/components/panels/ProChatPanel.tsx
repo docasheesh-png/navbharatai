@@ -212,6 +212,20 @@ export const ProChatPanel: React.FC<ProChatPanelProps> = (props) => {
                    ⬇ Export PRD
                  </button>
                )}
+               {/* D5/D6: Lines of code + file count shown after successful build */}
+               {props.isAppBuilt && props.files && Object.keys(props.files).length > 0 && (() => {
+                 const fileList = Object.entries(props.files as Record<string, string>);
+                 const totalLines = fileList.reduce((sum, [, c]) => sum + (c || '').split('\n').length, 0);
+                 const tsxCount = fileList.filter(([p]) => /\.(tsx?|jsx?)$/.test(p)).length;
+                 const cssCount = fileList.filter(([p]) => /\.css$/.test(p)).length;
+                 return (
+                   <span className="text-[7px] font-mono text-[#484f58]" title={`${fileList.length} files · ${totalLines.toLocaleString()} lines`}>
+                     {fileList.length}F · {totalLines > 999 ? `${(totalLines/1000).toFixed(1)}K` : totalLines}L
+                     {tsxCount > 0 && ` · ${tsxCount}TS`}
+                     {cssCount > 0 && ` · ${cssCount}CSS`}
+                   </span>
+                 );
+               })()}
                {props.isAppBuilt && props.files && Object.keys(props.files).length > 0 && (
                  <button
                    onClick={() => { props.setDeployPanelError(''); props.setShowDeployPanel(true); }}

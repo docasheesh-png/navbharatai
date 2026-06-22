@@ -20,7 +20,8 @@ import {
   Menu as MenuIcon, X, Maximize2, Minimize2,
   ChevronUp, ChevronDown, Rocket, Command, Search, Keyboard,
   Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2,
-  MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck
+  MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck,
+  BookOpen, Key, Layers
 } from 'lucide-react';
 
 interface CodeStudioProps {
@@ -263,6 +264,17 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     delete newFiles[path];
     onFilesChange(newFiles);
     handleTabClose(path);
+  };
+
+  // N10-N12: Send a project-level AI action (no selection needed — whole project context)
+  const sendProjectAction = (prompt: string) => {
+    if (onSendDirect) {
+      onSendDirect(prompt);
+    } else {
+      onChatInputChange(prompt);
+    }
+    handleScreenChange('ai');
+    setIsSidebarOpen(true);
   };
 
   // N1-N9: Send selected code + action label to AI chat
@@ -734,6 +746,25 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            >
              <Maximize2 className="w-3 h-3" />
            </button>
+         </div>
+
+         {/* N10-N12: Project-level AI actions */}
+         <div className="hidden lg:flex items-center gap-0.5 border-l border-white/10 pl-2 ml-1">
+           {([
+             { label: 'README', icon: BookOpen, prompt: 'Generate a comprehensive README.md for this project based on the code. Include: project description, features, installation steps, usage examples, and tech stack.' },
+             { label: '.env', icon: Key, prompt: 'Generate a .env.example file listing all environment variables needed by this project with placeholder values and brief comments.' },
+             { label: 'API Docs', icon: Layers, prompt: 'Generate API documentation for all the backend routes and endpoints in this project. Include method, path, request body, and response format for each endpoint.' },
+           ] as const).map(({ label, icon: Icon, prompt }) => (
+             <button
+               key={label}
+               onClick={() => sendProjectAction(prompt)}
+               title={`AI: Generate ${label}`}
+               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black text-[#484f58] hover:text-emerald-400 hover:bg-emerald-900/20 transition-all uppercase tracking-widest"
+             >
+               <Icon className="w-3 h-3" />
+               {label}
+             </button>
+           ))}
          </div>
 
          <div className="flex-1 flex justify-center mx-4">

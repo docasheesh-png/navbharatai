@@ -65,7 +65,7 @@
 | B3 | No "Regenerate response" button on last AI message | `[x]` | #165 |
 | B4 | No character count / token estimate shown as input grows | `[x]` | #165 |
 | B5 | No "Clear conversation" button | `[x]` | #165 |
-| B6 | Starter suggestions not visible when chat is empty | `[ ]` | |
+| B6 | Starter suggestions not visible when chat is empty | `[x]` | #167 |
 | B7 | No model name badge showing which AI answered | `[x]` | #166 |
 | B8 | No typing indicator (three-dots animation) during generation | `[x]` | #166 |
 | B9 | No "Edit prompt" option on user messages | `[x]` | #167 |
@@ -133,8 +133,8 @@
 | D2 | No "What changed?" diff view after an edit build | `[ ]` | |
 | D3 | Success notification disappears before user reads | `[ ]` | |
 | D4 | Failure messages mix Hindi/English inconsistently | `[ ]` | |
-| D5 | No total lines-of-code counter in success state | `[ ]` | |
-| D6 | No file count breakdown by language in success | `[ ]` | |
+| D5 | No total lines-of-code counter in success state | `[x]` | #167 |
+| D6 | No file count breakdown by language in success | `[x]` | #167 |
 | D7 | No estimated build time shown before starting | `[ ]` | |
 | D8 | Build cancellation has no confirm dialog | `[ ]` | |
 | D9 | Repair attempt failure shows generic "Please try again" | `[ ]` | |
@@ -227,9 +227,9 @@
 |---|-----|--------|----|
 | G1 | No dark/light theme toggle in main header (quick access) | `[ ]` | |
 | G2 | User profile photo not shown anywhere in the UI | `[ ]` | |
-| G3 | No app version number shown in settings | `[ ]` | |
+| G3 | No app version number shown in settings | `[x]` | existing |
 | G4 | No "Reset all settings" button | `[ ]` | |
-| G5 | No keyboard shortcuts reference panel | `[ ]` | |
+| G5 | No keyboard shortcuts reference panel | `[x]` | existing |
 | G6 | No "What's new" / changelog panel | `[ ]` | |
 | G7 | No onboarding tour for first-time users | `[ ]` | |
 | G8 | Language preference not persisted across devices | `[ ]` | |
@@ -408,9 +408,9 @@
 | N7 | No "Simplify this function" action | `[ ]` | |
 | N8 | No "Find bugs in this file" action | `[x]` | #167 |
 | N9 | No "Security scan this file" button | `[x]` | #167 |
-| N10 | No "Generate README" from project structure | `[ ]` | |
-| N11 | No "Generate .env.example" from code | `[ ]` | |
-| N12 | No "Generate API documentation" | `[ ]` | |
+| N10 | No "Generate README" from project structure | `[x]` | #167 |
+| N11 | No "Generate .env.example" from code | `[x]` | #167 |
+| N12 | No "Generate API documentation" | `[x]` | #167 |
 | N13 | No "Generate data model diagram" | `[ ]` | |
 | N14 | No "Convert to dark mode" one-click action | `[ ]` | |
 | N15 | No "Add i18n / translations" action | `[ ]` | |

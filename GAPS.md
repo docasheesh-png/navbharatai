@@ -86,7 +86,7 @@
 | B24 | Chat session name is always "Untitled" — no auto-naming | `[x]` | #167 |
 | B25 | Session list shows raw UCI code, not human readable title | `[ ]` | |
 | B26 | No "pin to top" for important messages | `[ ]` | |
-| B27 | Paste image into chat not supported (clipboard paste) | `[ ]` | |
+| B27 | Paste image into chat not supported (clipboard paste) | `[x]` | #167 |
 | B28 | Voice input icon has no accessibility label | `[x]` | #166 |
 | B29 | No multiline paste indicator (large pastes not warned) | `[x]` | #167 |
 | B30 | No "Send on Enter / Shift+Enter" preference toggle | `[x]` | #166 |
@@ -168,7 +168,7 @@
 |---|-----|--------|----|
 | E1 | Bottom nav labels cut off on very small screens (<360px) | `[ ]` | |
 | E2 | Touch targets below 44px in several places | `[ ]` | |
-| E3 | No haptic feedback on key actions (vibration API) | `[ ]` | |
+| E3 | No haptic feedback on key actions (vibration API) | `[x]` | #167 |
 | E4 | Code blocks in chat overflow horizontally (no scroll) | `[x]` | #167 |
 | E5 | Long filenames in Files panel overflow without ellipsis | `[x]` | existing |
 | E6 | Pinch-to-zoom on preview iframe (should allow) | `[ ]` | |
@@ -243,7 +243,7 @@
 | G16 | No referral code generator | `[ ]` | |
 | G17 | Wallet top-up amounts are fixed — no custom amount | `[ ]` | |
 | G18 | No usage breakdown (tokens by feature: chat, build, engineer) | `[ ]` | |
-| G19 | No session count shown in settings | `[ ]` | |
+| G19 | No session count shown in settings | `[x]` | #167 |
 | G20 | No "Preferred AI model" selector for Pro builds | `[ ]` | |
 
 ---
@@ -416,11 +416,11 @@
 | N15 | No "Add i18n / translations" action | `[ ]` | |
 | N16 | No "Make accessible" auto-fix action | `[x]` | #167 |
 | N17 | No "Optimize for mobile" auto-fix | `[x]` | #167 |
-| N18 | No "Add loading states" to async operations | `[ ]` | |
-| N19 | No "Add error boundaries" action | `[ ]` | |
-| N20 | No "Add authentication guard" to routes | `[ ]` | |
-| N21 | No "Migrate to latest React 19 patterns" | `[ ]` | |
-| N22 | No "Replace useState with Zustand" action | `[ ]` | |
+| N18 | No "Add loading states" to async operations | `[x]` | #167 |
+| N19 | No "Add error boundaries" action | `[x]` | #167 |
+| N20 | No "Add authentication guard" to routes | `[x]` | #167 |
+| N21 | No "Migrate to latest React 19 patterns" | `[x]` | #167 |
+| N22 | No "Replace useState with Zustand" action | `[x]` | #167 |
 | N23 | No "Add Tailwind to existing app" migration | `[ ]` | |
 | N24 | No "Convert class component to functional" | `[ ]` | |
 | N25 | No "Generate mock data" for components | `[x]` | #167 |

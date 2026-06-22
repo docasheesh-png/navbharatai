@@ -454,6 +454,19 @@ export function SettingsPanel({
                     </div>
                   )}
 
+                  {/* G19: Session count */}
+                  <div className="p-4 bg-[#0d1117] border border-white/5 rounded-2xl space-y-2">
+                    <p className="text-[9px] font-black text-[#484f58] uppercase tracking-widest">Session Stats</p>
+                    <div className="flex items-center gap-3">
+                      <div className="flex flex-col">
+                        <span className="text-[18px] font-black text-white leading-none">
+                          {(() => { try { return JSON.parse(localStorage.getItem('navbharat_sessions') || '[]').length; } catch { return 0; } })()}
+                        </span>
+                        <span className="text-[8px] text-[#484f58] font-bold uppercase tracking-widest">Total Sessions</span>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* G4: Reset all editor settings */}
                   <button
                     onClick={() => {

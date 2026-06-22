@@ -358,6 +358,16 @@ export const AIChat: React.FC<AIChatProps> = ({
   // B29: Multiline paste indicator
   const [pasteLineCount, setPasteLineCount] = useState<number>(0);
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    // B27: Image paste from clipboard
+    const items = Array.from(e.clipboardData.items) as DataTransferItem[];
+    const imageItem = items.find((item: DataTransferItem) => item.type.startsWith('image/'));
+    if (imageItem) {
+      const file = imageItem.getAsFile();
+      if (file) {
+        setAttachments(prev => [...prev, file]);
+        return;
+      }
+    }
     const text = e.clipboardData.getData('text');
     const lines = (text.match(/\n/g) || []).length + 1;
     if (lines > 20) {
@@ -1583,7 +1593,12 @@ export const AIChat: React.FC<AIChatProps> = ({
                       </button>
                     ) : (
                       <button
-                        onClick={() => { onSend(attachments); setAttachments([]); setEditingMsgId(null); }}
+                        onClick={() => {
+                          navigator.vibrate?.(30);
+                          onSend(attachments);
+                          setAttachments([]);
+                          setEditingMsgId(null);
+                        }}
                         disabled={(!input.trim() && attachments.length === 0) || isLoading}
                         className="p-3 bg-indigo-600 text-white rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95"
                       >

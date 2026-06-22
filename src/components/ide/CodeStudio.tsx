@@ -21,7 +21,8 @@ import {
   ChevronUp, ChevronDown, Rocket, Command, Search, Keyboard,
   Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2,
   MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck,
-  BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces
+  BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces,
+  RefreshCw, Shield, Package, Lock, Users
 } from 'lucide-react';
 
 interface CodeStudioProps {
@@ -996,6 +997,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                   { label: 'Accessible', icon: Accessibility, instruction: 'Improve accessibility: add aria-labels, roles, keyboard navigation, and fix contrast issues' },
                   { label: 'Mobile', icon: Smartphone, instruction: 'Optimize this component for mobile: responsive layout, touch targets ≥44px, mobile-friendly interactions' },
                   { label: 'Mock Data', icon: Database, instruction: 'Generate realistic mock data and sample fixtures for this component or function' },
+                  { label: 'Loading', icon: RefreshCw, instruction: 'Add loading states and skeleton placeholders to all async operations in this code' },
+                  { label: 'Error Boundary', icon: Shield, instruction: 'Wrap this component with a React ErrorBoundary and add appropriate error fallback UI' },
+                  { label: 'Auth Guard', icon: Lock, instruction: 'Add authentication guard to these routes: redirect to /login if the user is not authenticated' },
+                  { label: 'React 19', icon: Package, instruction: 'Migrate this code to React 19 patterns: use() hook, server components, new form actions where applicable' },
+                  { label: 'Zustand', icon: Users, instruction: 'Replace useState/useReducer in this component with a Zustand store for global state management' },
                 ] as const).map(({ label, icon: Icon, instruction }) => (
                   <button
                     key={label}

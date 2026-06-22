@@ -5,6 +5,7 @@ import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
 import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
+import { analyzeArchitecture, architectureSummary } from './ArchitectureAnalysis';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -195,6 +196,11 @@ export class ToolDispatcher {
             return `${h.detail}: ${h.ref}`;
           })
           .join('\n');
+      }
+
+      case 'evaluate': {
+        const graph = getWorkspaceMemory(this.workspaceId).graph();
+        return architectureSummary(analyzeArchitecture(graph));
       }
 
       case 'update_todo': {

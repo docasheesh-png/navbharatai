@@ -47,6 +47,8 @@ export { agentLifecycle } from './AgentLifecycle';
 export type { AgentHealth, AgentPhase, RunToken } from './AgentLifecycle';
 export { WorkspaceMemory, getWorkspaceMemory, extractFacts } from './WorkspaceMemory';
 export type { ProjectGraph, SymbolInfo, Episode, MemorySnapshot, RecallHit } from './WorkspaceMemory';
+export { analyzeArchitecture, architectureSummary, resolveLocalImport } from './ArchitectureAnalysis';
+export type { ArchitectureReport } from './ArchitectureAnalysis';
 export { makeSubAgentSpawn } from './SubAgent';
 export type { SubAgentDeps } from './SubAgent';
 export { GitManager } from './GitManager';

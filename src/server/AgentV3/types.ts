@@ -19,6 +19,7 @@ export type ToolName =
   | 'update_todo'
   | 'update_preview'
   | 'recall'
+  | 'evaluate'
   | 'task';
 
 /**

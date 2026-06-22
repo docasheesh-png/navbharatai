@@ -26,12 +26,13 @@ export interface RoleConfig {
   capabilities: string[];
 }
 
-// Tool-set groups, by what a role is allowed to do. Every group includes
-// `recall` — querying project memory is read-only and useful to all roles.
-const BUILD_TOOLS: ToolName[] = ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'recall', 'update_todo', 'update_preview'];
-const EDIT_TOOLS: ToolName[] = ['read_file', 'write_file', 'edit_file', 'grep', 'glob', 'recall'];
-const RUN_TOOLS: ToolName[] = ['read_file', 'bash', 'grep', 'glob', 'recall'];
-const READONLY_TOOLS: ToolName[] = ['read_file', 'grep', 'glob', 'recall'];
+// Tool-set groups, by what a role is allowed to do. Every group includes the
+// read-only `recall` (query project memory) and `evaluate` (static architecture
+// analysis) — both are useful to all roles and never mutate the workspace.
+const BUILD_TOOLS: ToolName[] = ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'recall', 'evaluate', 'update_todo', 'update_preview'];
+const EDIT_TOOLS: ToolName[] = ['read_file', 'write_file', 'edit_file', 'grep', 'glob', 'recall', 'evaluate'];
+const RUN_TOOLS: ToolName[] = ['read_file', 'bash', 'grep', 'glob', 'recall', 'evaluate'];
+const READONLY_TOOLS: ToolName[] = ['read_file', 'grep', 'glob', 'recall', 'evaluate'];
 
 const REGISTRY: Record<AgentRole, RoleConfig> = {
   // ── Lead ────────────────────────────────────────────────────────────────

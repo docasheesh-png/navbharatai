@@ -149,6 +149,8 @@ function describeToolCall(tool: string, input: unknown): string {
       return 'updating the plan';
     case 'recall':
       return typeof arg.query === 'string' ? `recalling "${arg.query}"` : 'recalling from memory';
+    case 'evaluate':
+      return 'evaluating the architecture';
     default:
       return `using ${tool}`;
   }

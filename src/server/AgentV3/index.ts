@@ -14,12 +14,13 @@ export {
   isAgentV3GloballyEnabled,
   agentV3Allowlist,
 } from './featureFlag';
-export { ClaudeClient, parseMessage } from './ClaudeClient';
+export { ClaudeClient, parseMessage, isRetryableError } from './ClaudeClient';
 export type {
   ClaudeToolDef,
   ToolUse,
   TurnUsage,
   TurnResult,
+  RetryOptions,
   RunTurnParams,
   TurnRunner,
   MessagesCreateClient,

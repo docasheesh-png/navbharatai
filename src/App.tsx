@@ -5588,7 +5588,7 @@ ${buildLanguageRule(preferredLanguage)}`;
  
               
       {/* AgentV3 (Vargen 3.0) launcher — admin-only, flag-gated; renders nothing when disabled. */}
-      <AgentV3Launcher userId={user?.uid} />
+      <AgentV3Launcher userId={user?.uid} email={user?.email} />
 
       {/* Auth Modal + all overlay modals → AppModals */}
       <AppModals

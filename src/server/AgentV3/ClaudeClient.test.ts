@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { ClaudeClient, parseMessage, type MessagesCreateClient } from './ClaudeClient';
+import { ClaudeClient, parseMessage, isRetryableError, type MessagesCreateClient } from './ClaudeClient';
 import { opusEquivalentUsd, billedAmountUsd, STANDARD_MULTIPLIER, ONLY_OPUS_MULTIPLIER } from './pricing';
 
 describe('parseMessage', () => {
@@ -114,6 +114,58 @@ describe('ClaudeClient prompt caching (RC-2)', () => {
     const tools = create.mock.calls[0][0].tools;
     expect(tools[0].cache_control).toBeUndefined();
     expect(tools[1].cache_control).toEqual({ type: 'ephemeral' });
+  });
+});
+
+describe('ClaudeClient retry/backoff (production hardening)', () => {
+  const noSleep = async () => {};
+
+  it('retries a transient 529 (overloaded) then succeeds', async () => {
+    let calls = 0;
+    const create = vi.fn().mockImplementation(async () => {
+      calls++;
+      if (calls < 3) {
+        const e = Object.assign(new Error('overloaded'), { status: 529 });
+        throw e;
+      }
+      return { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' };
+    });
+    const client = new ClaudeClient({ messages: { create } }, { sleep: noSleep, baseDelayMs: 0 });
+    const res = await client.runTurn({ model: 'm', messages: [] });
+    expect(calls).toBe(3);
+    expect(res.text).toBe('ok');
+  });
+
+  it('fails fast on a 400 (no retry)', async () => {
+    const create = vi.fn().mockImplementation(async () => {
+      throw Object.assign(new Error('bad request'), { status: 400 });
+    });
+    const client = new ClaudeClient({ messages: { create } }, { sleep: noSleep });
+    await expect(client.runTurn({ model: 'm', messages: [] })).rejects.toThrow('bad request');
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up after maxRetries on a persistent 503', async () => {
+    const create = vi.fn().mockImplementation(async () => {
+      throw Object.assign(new Error('down'), { status: 503 });
+    });
+    const client = new ClaudeClient({ messages: { create } }, { sleep: noSleep, maxRetries: 2 });
+    await expect(client.runTurn({ model: 'm', messages: [] })).rejects.toThrow('down');
+    expect(create).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
+  });
+});
+
+describe('isRetryableError', () => {
+  it('treats rate-limit / overload / 5xx as retryable, client errors as fatal', () => {
+    expect(isRetryableError({ status: 429 })).toBe(true);
+    expect(isRetryableError({ status: 529 })).toBe(true);
+    expect(isRetryableError({ status: 503 })).toBe(true);
+    expect(isRetryableError({ status: 400 })).toBe(false);
+    expect(isRetryableError({ status: 401 })).toBe(false);
+    expect(isRetryableError({ status: 404 })).toBe(false);
+    expect(isRetryableError(new Error('Connection error'))).toBe(true);
+    expect(isRetryableError(new Error('request timeout'))).toBe(true);
+    expect(isRetryableError(new Error('totally invalid prompt'))).toBe(false);
   });
 });
 

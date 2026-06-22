@@ -58,11 +58,16 @@ function envInt(name: string, fallback: number): number {
   return Number.isInteger(raw) && raw > 0 ? raw : fallback;
 }
 
+/** One concurrent build per account — guards against runaway cost / abuse. */
+const activeBuilds = new Set<string>();
+const MAX_PROMPT_LEN = 20_000;
+
 export function registerAgentV3Routes(app: Express): void {
   // Capability probe — lets the frontend decide whether to show the v3.0 toggle.
   app.get('/api/agentv3/status', (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
-    res.json({ enabled: isAgentV3Enabled(userId), ...agentV3Status() });
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    res.json({ enabled: isAgentV3Enabled(userId, email), ...agentV3Status() });
   });
 
   // Approve/reject a pending gate (plan mode / permission prompt, P4).
@@ -79,7 +84,8 @@ export function registerAgentV3Routes(app: Express): void {
   // History → restore: roll the workspace back to a checkpoint commit (P-git).
   app.post('/api/agentv3/restore', async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
-    if (!isAgentV3Enabled(userId)) {
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
       return;
     }
@@ -96,7 +102,8 @@ export function registerAgentV3Routes(app: Express): void {
   // Build entry — runs the native tool-use loop and streams events as NDJSON.
   app.post('/api/agentv3/chat', buildRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
-    if (!isAgentV3Enabled(userId)) {
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
       return;
     }
@@ -109,6 +116,16 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(400).json({ error: 'A non-empty "prompt" is required.' });
       return;
     }
+    if (prompt.length > MAX_PROMPT_LEN) {
+      res.status(400).json({ error: `Prompt is too long (max ${MAX_PROMPT_LEN} chars).` });
+      return;
+    }
+    const buildKey = userId ?? 'anon';
+    if (activeBuilds.has(buildKey)) {
+      res.status(409).json({ error: 'A build is already running for this account. Stop it before starting another.' });
+      return;
+    }
+    activeBuilds.add(buildKey);
     const onlyOpus = req.body?.onlyOpus === true;
     const planFirst = req.body?.planFirst !== false; // plan-mode ON by default (P4)
 
@@ -216,6 +233,7 @@ export function registerAgentV3Routes(app: Express): void {
     } catch (err) {
       send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {
+      activeBuilds.delete(buildKey);
       if (!res.writableEnded) res.end();
     }
   });

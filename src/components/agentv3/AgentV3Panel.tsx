@@ -19,7 +19,7 @@ import type { AgentCard } from './agentV3Types';
  */
 type SurfaceTab = 'preview' | 'files' | 'diff' | 'terminal' | 'history';
 
-export function AgentV3Panel({ userId }: { userId?: string }) {
+export function AgentV3Panel({ userId, email }: { userId?: string; email?: string }) {
   const { state, running, error, start, respond, restore, stop } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   const [onlyOpus, setOnlyOpus] = useState(false);
@@ -62,7 +62,7 @@ export function AgentV3Panel({ userId }: { userId?: string }) {
           </button>
         ) : (
           <button
-            onClick={() => prompt.trim() && start(prompt.trim(), { userId, onlyOpus, planFirst })}
+            onClick={() => prompt.trim() && start(prompt.trim(), { userId, email, onlyOpus, planFirst })}
             disabled={!prompt.trim()}
             className="flex items-center gap-1 px-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded text-sm"
           >

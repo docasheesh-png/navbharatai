@@ -13,7 +13,7 @@ export interface UseAgentV3Build {
   state: AgentV3ClientState;
   running: boolean;
   error: string | null;
-  start: (prompt: string, opts?: { userId?: string; onlyOpus?: boolean; planFirst?: boolean }) => Promise<void>;
+  start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; planFirst?: boolean }) => Promise<void>;
   /** Approve or reject a pending plan/permission gate (P4). */
   respond: (requestId: string, approved: boolean) => Promise<void>;
   /** Restore the workspace to a checkpoint commit (History → restore). */
@@ -28,6 +28,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const userIdRef = useRef<string | undefined>(undefined);
+  const emailRef = useRef<string | undefined>(undefined);
   const workspaceIdRef = useRef<string | undefined>(undefined);
 
   // Keep the latest workspace id available to restore() without a stale closure.
@@ -65,7 +66,7 @@ export function useAgentV3Build(): UseAgentV3Build {
       const res = await fetch('/api/agentv3/restore', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId, sha, userId: userIdRef.current }),
+        body: JSON.stringify({ workspaceId, sha, userId: userIdRef.current, email: emailRef.current }),
       });
       const j = await res.json().catch(() => ({}));
       return res.ok && j?.ok === true;
@@ -75,9 +76,10 @@ export function useAgentV3Build(): UseAgentV3Build {
   }, []);
 
   const start = useCallback(
-    async (prompt: string, opts?: { userId?: string; onlyOpus?: boolean; planFirst?: boolean }) => {
+    async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; planFirst?: boolean }) => {
       if (running) return;
       userIdRef.current = opts?.userId;
+      emailRef.current = opts?.email;
       setState(initialAgentV3State());
       setError(null);
       setRunning(true);
@@ -92,6 +94,7 @@ export function useAgentV3Build(): UseAgentV3Build {
           body: JSON.stringify({
             prompt,
             userId: opts?.userId,
+            email: opts?.email,
             onlyOpus: opts?.onlyOpus === true,
             planFirst: opts?.planFirst !== false,
           }),

@@ -98,11 +98,27 @@ interface AnthropicMessageLike {
   };
 }
 
+/** Retry policy for transient provider errors (rate limits, overload, 5xx, network). */
+export interface RetryOptions {
+  /** Max retries after the first attempt. Default 5. */
+  maxRetries?: number;
+  /** Base backoff in ms (exponential + jitter). Default 1000. */
+  baseDelayMs?: number;
+  /** Injectable sleep (tests pass a no-op). Default real setTimeout. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
 export class ClaudeClient implements TurnRunner {
   private client?: MessagesCreateClient;
+  private readonly maxRetries: number;
+  private readonly baseDelayMs: number;
+  private readonly sleep: (ms: number) => Promise<void>;
 
-  constructor(client?: MessagesCreateClient) {
+  constructor(client?: MessagesCreateClient, retry?: RetryOptions) {
     this.client = client;
+    this.maxRetries = retry?.maxRetries ?? 5;
+    this.baseDelayMs = retry?.baseDelayMs ?? 1000;
+    this.sleep = retry?.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
   private getClient(): MessagesCreateClient {
@@ -147,9 +163,77 @@ export class ClaudeClient implements TurnRunner {
       createParams.tool_choice = { type: 'auto' };
     }
 
-    const resp = await this.getClient().messages.create(createParams);
+    const resp = await this.createWithRetry(createParams);
     return parseMessage(resp);
   }
+
+  /**
+   * Call the API with exponential backoff on transient errors (429 rate limit,
+   * 529 overloaded, 5xx, network/timeout). Non-transient errors (400/401/403/404
+   * and programming errors) fail fast. Honours a Retry-After header when present.
+   * This keeps a long multi-step build alive through provider hiccups instead of
+   * dying on the first blip.
+   */
+  private async createWithRetry(createParams: Record<string, unknown>): Promise<AnthropicMessageLike> {
+    let attempt = 0;
+    for (;;) {
+      try {
+        return await this.getClient().messages.create(createParams);
+      } catch (err) {
+        attempt++;
+        if (attempt > this.maxRetries || !isRetryableError(err)) throw err;
+        await this.sleep(retryDelayMs(err, attempt, this.baseDelayMs));
+      }
+    }
+  }
+}
+
+function errStatus(err: unknown): number | undefined {
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>;
+    if (typeof e.status === 'number') return e.status;
+    const resp = e.response as Record<string, unknown> | undefined;
+    if (resp && typeof resp.status === 'number') return resp.status;
+  }
+  return undefined;
+}
+
+/** True for transient errors worth retrying. */
+export function isRetryableError(err: unknown): boolean {
+  const status = errStatus(err);
+  if (typeof status === 'number') {
+    return status === 408 || status === 409 || status === 429 || status === 529 || status >= 500;
+  }
+  // No HTTP status → treat connection/timeout style errors as transient.
+  const name = err && typeof err === 'object' && typeof (err as { name?: unknown }).name === 'string'
+    ? String((err as { name?: unknown }).name)
+    : '';
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  return /connection|timeout|econnreset|enotfound|socket|network|fetch failed|overload/i.test(
+    `${name} ${msg}`,
+  );
+}
+
+function retryAfterSeconds(err: unknown): number | undefined {
+  if (err && typeof err === 'object') {
+    const e = err as { headers?: unknown; response?: { headers?: unknown } };
+    const headers = e.headers ?? e.response?.headers;
+    if (headers && typeof headers === 'object') {
+      const h = headers as { get?: (k: string) => unknown; [k: string]: unknown };
+      const raw = typeof h.get === 'function' ? h.get('retry-after') : h['retry-after'];
+      const n = Number(raw);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+  }
+  return undefined;
+}
+
+function retryDelayMs(err: unknown, attempt: number, baseDelayMs: number): number {
+  const retryAfter = retryAfterSeconds(err);
+  if (retryAfter !== undefined) return Math.min(retryAfter * 1000, 60_000);
+  const expo = baseDelayMs * Math.pow(2, attempt - 1);
+  const jitter = Math.random() * baseDelayMs;
+  return Math.min(expo + jitter, 30_000);
 }
 
 /** Parse a raw Anthropic message into the engine's TurnResult shape. */

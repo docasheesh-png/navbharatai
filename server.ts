@@ -32,6 +32,7 @@ import { registerChatRoutes } from './src/server/routes/chat';
 import { registerProRoutes } from './src/server/routes/pro';
 import { registerSdaRoutes } from './src/server/routes/sda';
 import { registerEngineerRoutes } from './src/server/routes/engineer';
+import { registerDomainsRoutes } from './src/server/routes/domains';
 import { registerZipRoutes } from './src/server/routes/zip';
 import { registerPreviewRoutes } from './src/server/routes/preview';
 import { registerBuildRoutes } from './src/server/routes/build';
@@ -388,6 +389,9 @@ setInterval(() => {
   registerSdaRoutes(app);
   // Engineer AI — autonomous coding agent (Phase 1: process-level sandbox, Claude + Grok).
   registerEngineerRoutes(app);
+
+  // Custom-domain connect (Cloudflare for SaaS).
+  registerDomainsRoutes(app);
 
   // Wallet / sync / payment / admin / secrets / anthropic / zip routes (Phase 1 extractions).
   registerWalletRoutes(app);

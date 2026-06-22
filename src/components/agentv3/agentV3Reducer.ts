@@ -44,13 +44,37 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
 
     case 'tool_call': {
       const action = describeToolCall(event.tool, event.input);
-      return { ...state, agents: touchAgent(state.agents, event.agent, action, true, event.ts) };
+      const agents = touchAgent(state.agents, event.agent, action, true, event.ts);
+      // Route bash commands to the terminal surface (real execution log).
+      if (event.tool === 'bash') {
+        const cmd = typeof (event.input as Record<string, unknown>)?.command === 'string'
+          ? String((event.input as Record<string, unknown>).command)
+          : '';
+        return {
+          ...state,
+          agents,
+          pendingBash: { ...state.pendingBash, [event.callId]: cmd },
+          terminal: [...state.terminal, `$ ${cmd}`].slice(-MAX_TERMINAL),
+        };
+      }
+      return { ...state, agents };
     }
 
     case 'tool_result': {
       const existing = state.agents[event.agent];
       const action = existing ? existing.lastAction : event.summary;
-      return { ...state, agents: touchAgent(state.agents, event.agent, action, false, event.ts) };
+      const agents = touchAgent(state.agents, event.agent, action, false, event.ts);
+      // If this completes a bash call, append its output to the terminal.
+      if (state.pendingBash[event.callId] !== undefined) {
+        const { [event.callId]: _done, ...rest } = state.pendingBash;
+        return {
+          ...state,
+          agents,
+          pendingBash: rest,
+          terminal: [...state.terminal, event.summary].slice(-MAX_TERMINAL),
+        };
+      }
+      return { ...state, agents };
     }
 
     case 'agent_spawned':

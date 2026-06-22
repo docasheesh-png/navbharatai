@@ -80,6 +80,36 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(errored.error).toBe('boom');
   });
 
+  it('routes bash command + result to the terminal surface', () => {
+    let s = initialAgentV3State();
+    s = agentV3Reducer(s, {
+      type: 'tool_call',
+      agent: 'backend',
+      tool: 'bash',
+      input: { command: 'npm install' },
+      callId: 'b1',
+      ts: 1,
+    });
+    expect(s.terminal).toEqual(['$ npm install']);
+    s = agentV3Reducer(s, { type: 'tool_result', agent: 'backend', callId: 'b1', ok: true, summary: 'exit=0 added 12 packages', ts: 2 });
+    expect(s.terminal).toEqual(['$ npm install', 'exit=0 added 12 packages']);
+    expect(s.pendingBash).toEqual({});
+  });
+
+  it('does not route non-bash tool results to the terminal', () => {
+    let s = initialAgentV3State();
+    s = agentV3Reducer(s, {
+      type: 'tool_call',
+      agent: 'frontend',
+      tool: 'write_file',
+      input: { path: 'a.ts' },
+      callId: 'w1',
+      ts: 1,
+    });
+    s = agentV3Reducer(s, { type: 'tool_result', agent: 'frontend', callId: 'w1', ok: true, summary: 'Created a.ts', ts: 2 });
+    expect(s.terminal).toEqual([]);
+  });
+
   it('appendTerminal accumulates and bounds terminal output', () => {
     let s = initialAgentV3State();
     s = appendTerminal(s, 'exit=0');

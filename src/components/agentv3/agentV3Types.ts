@@ -87,6 +87,8 @@ export interface AgentV3ClientState {
   plan: string;
   /** The live "AI Team" tracker, keyed by role (D9). */
   agents: Record<string, AgentCard>;
+  /** Internal: bash callId → command, so a tool_result can be routed to the terminal. */
+  pendingBash: Record<string, string>;
   /** Terminal state. */
   done: boolean;
   ok?: boolean;
@@ -105,6 +107,7 @@ export function initialAgentV3State(): AgentV3ClientState {
     checkpoints: [],
     plan: '',
     agents: {},
+    pendingBash: {},
     done: false,
   };
 }

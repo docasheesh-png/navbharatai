@@ -484,9 +484,9 @@ export function registerBuildRoutes(app: Express): void {
             }
             eng = engineResult;
           }
-          // Emit a terminal result when the engine produced usable files OR the soft
-          // deadline fired (so the user always gets what was built — never "no result").
-          if (eng.usable || deadline.signal.aborted) {
+          // Emit a terminal result when the engine produced usable files, the soft
+          // deadline fired, OR any files exist (partial build) — never "no result".
+          if (eng.usable || deadline.signal.aborted || eng.fileCount > 0) {
             // G3 — surface the execution tier so the client can show the badge.
             if (eng.tier) send({ type: 'status', message: `Engine: ${eng.tier === 'e2b' ? 'E2B cloud VM' : eng.tier === 'cloudrun' ? 'server container' : 'in-memory'}` });
             send({ type: 'status', message: 'Updating project memory…' });
@@ -532,7 +532,7 @@ export function registerBuildRoutes(app: Express): void {
               memorySummary: updatedSummary,
               editLog: updatedEditLog,
               tier: eng.tier,
-              partial: eng.partial || deadline.signal.aborted,
+              partial: eng.partial || deadline.signal.aborted || !eng.usable,
               codeReview,
               costUsd: eng.estimatedCostUsd,
             });
@@ -571,16 +571,28 @@ export function registerBuildRoutes(app: Express): void {
             cleanup();
             return res.end();
           }
-          // Not usable → fall through to the legacy pipeline.
-          send({ type: 'status', message: 'Refining with the standard build pipeline…' });
+          // Engine ran but produced zero files — surface a clear error.
+          // We do NOT fall through to the legacy one-shot pipeline: the agentic
+          // tool-calling loop IS the build pipeline. A zero-file result means the
+          // agent replied conversationally or failed before writing anything.
+          send({ type: 'error', message: 'Build did not produce any files. Please describe what you want to build in more detail, or try again.' });
+          cleanup();
+          return res.end();
         } catch (e: any) {
-          console.warn('[BUILD] Agentic engine error — falling back to runBuild:', e?.message || e);
+          // Re-throw so the outer catch handles it — no silent fallback to legacy.
+          console.error('[BUILD] Agentic engine error:', e?.message || e);
+          throw e;
         } finally {
-          // Phase 4.1 — always release the workspace lock (success, failure, or fallback).
+          // Phase 4.1 — always release the workspace lock (success, failure, or error).
           if (sid && wsLockId !== 'nosid') workspaceLock.release(sid, wsLockId).catch(() => {});
         }
+        // Never reaches here — all paths above return, throw, or res.end().
+        return;
       }
 
+      // ── Legacy pipeline — EMERGENCY FALLBACK ONLY (PRO_AGENTIC_ENGINE=0) ──────
+      // Reached only when agenticEnabled=false. Kept as an escape hatch; the
+      // standard path is the agentic tool-calling loop above.
       const { generate: singleGenerate, fix, completeFeatures } = makeAiEditGenerator(callModel, memory);
       // Phase 72 — multi-agent orchestration: for full-stack tasks, fan out to two
       // parallel focused generation calls (frontend + backend) and merge results.

@@ -758,6 +758,14 @@ tsc x2 clean (0 errors), vitest 1406/1406 green.
 
 tsc x2 clean (0 errors), vitest 1420/1420 green.
 
+**Extended — 1445 tests / 182 test files (2026-06-22, session 8 continued):**
+
+- `tests/routesPaymentPreview.test.ts` (NEW) — 13 tests: payment create-order 400 missing userId/amount; verify-payment 400 missing orderId; redeem-coupon 400 missing userId/code; preview-bundle/preview-vue 400 missing/non-object files; /api/preview 400 missing and empty files object.
+- `tests/routesMiscValidation.test.ts` (NEW) — 12 tests: audit security/scan + full audit 400 missing target/url; githubAuth /api/github/user + /repos 401 missing token; sync POST 400; cloudsync/github 401; team/invite 400 missing fields + invalid email.
+- `tests/helpers/routeTestUtils.ts` — extended with `app.all()` support for routes using it.
+
+tsc x2 clean (0 errors), vitest 1445/1445 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

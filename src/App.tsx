@@ -119,6 +119,7 @@ import {
   appendVersionSnapshot,
 } from './lib/versionSnapshot';
 import { pickGreetingForAgent } from './lib/agentGreetings';
+import { validateDeployInput, buildDeployBody } from './lib/deployRequest';
 import {
   DEFAULT_HOME_DATA,
   DEFAULT_ABOUT_DATA,
@@ -4040,19 +4041,17 @@ ${buildLanguageRule(preferredLanguage)}`;
 
   const handleDeployApp = useCallback(async () => {
     const deployFiles = files && Object.keys(files).length > 0 ? files : null;
-    if (!deployFiles) { setDeployPanelError('No files to deploy. Build an app first.'); return; }
-    if (!deployToken.trim()) { setDeployPanelError('Please enter your API token.'); return; }
-    if (deployPlatform === 'vercel' && !deployProjectName.trim()) { setDeployPanelError('Please enter a project name.'); return; }
-    if (deployPlatform === 'github' && (!deployOwner.trim() || !deployRepo.trim())) { setDeployPanelError('Please enter owner and repo.'); return; }
-    if (deployPlatform === 'cloudflare' && (!deployOwner.trim() || !deployProjectName.trim())) { setDeployPanelError('Please enter Account ID and project name.'); return; }
+    const validationError = validateDeployInput({
+      platform: deployPlatform, token: deployToken, projectName: deployProjectName,
+      owner: deployOwner, repo: deployRepo, hasFiles: !!deployFiles,
+    });
+    if (validationError) { setDeployPanelError(validationError); return; }
     setIsDeploying(true);
     setDeployPanelError('');
     try {
-      const body: Record<string, string | Record<string, string>> = { provider: deployPlatform, token: deployToken, files: deployFiles };
-      if (deployPlatform === 'vercel') body.name = deployProjectName.trim();
-      else if (deployPlatform === 'netlify') body.siteId = deployProjectName.trim();
-      else if (deployPlatform === 'github') { body.owner = deployOwner.trim(); body.repo = deployRepo.trim(); }
-      else if (deployPlatform === 'cloudflare') { body.accountId = deployOwner.trim(); body.name = deployProjectName.trim(); }
+      const body = buildDeployBody(deployPlatform, deployToken, deployFiles as Record<string, string>, {
+        projectName: deployProjectName, owner: deployOwner, repo: deployRepo,
+      });
       const resp = await fetch('/api/pro/deploy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -24,6 +24,22 @@ import type { AIProviderResponse, ProviderTelemetry } from '../../AI/Router/Prov
 import type { ModelCall } from '../../project/aiEdits';
 import { AnthropicProvider } from '../../AI/Router/providers/AnthropicProvider';
 
+// Maximum time a single AI reasoning step may take before we abort it.
+// Without this, a single Claude Opus + extended-thinking call can block
+// the agentic loop for 10-12 minutes, outlasting Cloud Run's request timeout
+// and causing "Build stream ended without a result" on the client.
+const THINKING_STEP_TIMEOUT_MS = 150_000; // 2.5 min — thinking calls are slow but bounded
+const REGULAR_STEP_TIMEOUT_MS  =  90_000; // 90 s  — non-thinking calls should be fast
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms),
+    ),
+  ]);
+}
+
 export class ProAgentRouter extends AIRouter {
   private thinkingProvider: AnthropicProvider | null = null;
 
@@ -52,17 +68,25 @@ export class ProAgentRouter extends AIRouter {
     // Extended thinking path: use AnthropicProvider directly for deeper reasoning.
     if (this.thinkingProvider) {
       try {
-        const response = await this.thinkingProvider.execute(prompt, undefined, undefined, systemPrompt);
+        const response = await withTimeout(
+          this.thinkingProvider.execute(prompt, undefined, undefined, systemPrompt),
+          THINKING_STEP_TIMEOUT_MS,
+          'Extended-thinking AI step',
+        );
         const latency = Date.now() - start;
         return {
           response: { ...response, provider: 'ANTHROPIC' },
           telemetry: { provider: 'ANTHROPIC', retries: 0, latency, success: true },
         };
       } catch {
-        // Fall through to callModel on any error (network, rate-limit, etc.)
+        // Fall through to callModel on any error (network, rate-limit, timeout, etc.)
       }
     }
-    const content = await this.callModel(systemPrompt ?? '', prompt);
+    const content = await withTimeout(
+      this.callModel(systemPrompt ?? '', prompt),
+      REGULAR_STEP_TIMEOUT_MS,
+      'AI step',
+    );
     const latency = Date.now() - start;
     return {
       response: { content, latencyMs: latency, provider: 'PRO', model: 'navbharat-pro' },

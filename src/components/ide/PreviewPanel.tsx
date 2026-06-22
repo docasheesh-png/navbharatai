@@ -236,12 +236,24 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
     if (!files || Object.keys(files).length === 0) return;
     setDownloading(true);
     try {
-      const fileEntries = Object.entries(files);
+      // C16: Filter out build artifacts and generated directories
+      const EXCLUDED = /^(node_modules|__pycache__|\.git|dist\/|build\/|\.DS_Store)/;
+      const filteredEntries = Object.entries(files).filter(([p]) => !EXCLUDED.test(p));
+      // C15: Ensure .env.example is included if .env exists
+      const hasEnv = filteredEntries.some(([p]) => p === '.env' || p.endsWith('.env'));
+      const hasEnvExample = filteredEntries.some(([p]) => p === '.env.example');
+      if (hasEnv && !hasEnvExample) {
+        const envVars = (files['.env'] || '').split('\n')
+          .filter(l => l.includes('=') && !l.startsWith('#'))
+          .map(l => `${l.split('=')[0]}=`)
+          .join('\n');
+        filteredEntries.push(['.env.example', `# Copy to .env and fill in values\n${envVars}`]);
+      }
       const parts: string[] = [];
       parts.push(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>NavBharat App Files</title>`);
       parts.push(`<style>body{font-family:monospace;background:#0d1117;color:#c9d1d9;padding:2rem}h1{color:#58a6ff}pre{background:#161b22;padding:1rem;border-radius:8px;overflow:auto;border:1px solid #30363d}.file-header{color:#3fb950;margin-top:2rem;font-weight:bold}</style></head><body>`);
-      parts.push(`<h1>📦 NavBharat App — Source Files</h1><p>${fileEntries.length} files</p>`);
-      for (const [path, content] of fileEntries) {
+      parts.push(`<h1>📦 NavBharat App — Source Files</h1><p>${filteredEntries.length} files</p>`);
+      for (const [path, content] of filteredEntries) {
         parts.push(`<div class="file-header">📄 ${path}</div><pre>${(content as string).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>`);
       }
       parts.push(`</body></html>`);

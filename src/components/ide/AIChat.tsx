@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X } from 'lucide-react';
+import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Search } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -379,6 +379,10 @@ export const AIChat: React.FC<AIChatProps> = ({
   useEffect(() => {
     onAttachmentsChange?.(attachments);
   }, [attachments, onAttachmentsChange]);
+
+  // B17: Search within chat history
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [showChatSearch, setShowChatSearch] = useState(false);
 
   const [uploadError, setUploadError] = useState<string>('');
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -966,6 +970,23 @@ export const AIChat: React.FC<AIChatProps> = ({
         )}
       </AnimatePresence>
 
+      {/* B17: Chat search bar */}
+      {showChatSearch && (
+        <div className="px-3 py-2 border-b border-white/5 bg-black/20 flex items-center gap-2">
+          <Search className="w-3 h-3 text-[#484f58] shrink-0" />
+          <input
+            autoFocus
+            value={chatSearchQuery}
+            onChange={e => setChatSearchQuery(e.target.value)}
+            placeholder="Search messages..."
+            className="flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-[#484f58]"
+          />
+          <button onClick={() => { setShowChatSearch(false); setChatSearchQuery(''); }} className="text-[#484f58] hover:text-white">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
       <div className={cn("flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar overflow-x-hidden")} ref={scrollRef}>
         {/* AgentProgress removed here to only be rendered dynamically in messages if needed */}
         {restoredMessages && restoredMessages.length > 0 && (
@@ -1130,7 +1151,9 @@ export const AIChat: React.FC<AIChatProps> = ({
         )}
 
         <AnimatePresence>
-          {messages.map((msg, index) => {
+          {messages
+            .filter(msg => !chatSearchQuery || (msg.text || '').toLowerCase().includes(chatSearchQuery.toLowerCase()))
+            .map((msg, index) => {
             if (!msg) return null;
             const cleanedText = msg.text || (msg as any).content || "No Text";
             const lineCount = ((cleanedText || '').match(/\n/g) || []).length + 1;
@@ -1637,6 +1660,14 @@ export const AIChat: React.FC<AIChatProps> = ({
                 </button>
                 {messages.length > 0 && (
                   <>
+                    {/* B17: Toggle chat search */}
+                    <button
+                      onClick={() => { setShowChatSearch(v => !v); if (showChatSearch) setChatSearchQuery(''); }}
+                      title="Search messages (Ctrl+F)"
+                      className={`text-[8px] font-black uppercase tracking-widest transition-colors ${showChatSearch ? 'text-indigo-400' : 'text-[#30363d] hover:text-[#484f58]'}`}
+                    >
+                      Search
+                    </button>
                     {/* B16: Export chat as markdown */}
                     <button
                       onClick={() => {

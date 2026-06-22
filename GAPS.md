@@ -76,7 +76,7 @@
 | B14 | No keyboard shortcut to focus input (Ctrl+K or /) | `[x]` | #166 |
 | B15 | Chat history scroll position lost when switching tabs | `[ ]` | |
 | B16 | No "Export chat" to markdown/PDF | `[x]` | #167 |
-| B17 | No search within chat history | `[ ]` | |
+| B17 | No search within chat history | `[x]` | #167 |
 | B18 | No @-mention to reference a file in the prompt | `[ ]` | |
 | B19 | Markdown rendering missing: tables look unstyled | `[x]` | #167 |
 | B20 | Markdown rendering missing: task lists (- [ ]) not rendered | `[x]` | #167 |
@@ -111,8 +111,8 @@
 | C12 | Nested folder structure collapsed by default with no expand-all | `[x]` | #167 |
 | C13 | No recently-opened files section | `[x]` | #167 |
 | C14 | No file pinning (mark important files) | `[ ]` | |
-| C15 | ZIP download does not include .env.example | `[ ]` | |
-| C16 | ZIP download includes __pycache__, node_modules stubs if present | `[ ]` | |
+| C15 | ZIP download does not include .env.example | `[x]` | #167 |
+| C16 | ZIP download includes __pycache__, node_modules stubs if present | `[x]` | #167 |
 | C17 | No duplicate file option | `[x]` | #166 |
 | C18 | File name with spaces causes preview issues | `[ ]` | |
 | C19 | No drag-and-drop to reorder files | `[s]` | VFS has no order |

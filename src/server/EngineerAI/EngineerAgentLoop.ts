@@ -26,7 +26,7 @@ const MEMORY_PATH = '.engineer/memory.md';
 const MAX_MEMORY_CHARS = 4000;
 // Phase 4 — retain more steps of history so the agent keeps long-task context.
 const MAX_HISTORY_STEPS = 30;
-const MAX_PARSE_RETRIES = 3;
+const MAX_PARSE_RETRIES = 5;
 // Steps kept verbatim; older steps are condensed into a one-line summary each.
 const HISTORY_VERBATIM_TAIL = 12;
 // Regex patterns that indicate a dev server started and is listening on a port.
@@ -178,9 +178,33 @@ function stripFences(text: string): string {
 function extractJson(text: string): string {
   const s = stripFences(text);
   const start = s.indexOf('{');
+  if (start === -1) return s;
+  // Balanced-brace scan from the first '{' to its matching '}', ignoring braces
+  // that appear inside string literals (and escaped quotes). This is robust to
+  // trailing prose, multiple objects, and '}' characters inside string values —
+  // far more reliable than a naive lastIndexOf('}'), which is the #1 cause of
+  // "model returned invalid JSON" parse failures.
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return s.slice(start, i + 1);
+    }
+  }
+  // Unbalanced (e.g. truncated output) — best-effort fall back to the last '}'.
   const end = s.lastIndexOf('}');
-  if (start === -1 || end === -1 || end < start) return s;
-  return s.slice(start, end + 1);
+  return end > start ? s.slice(start, end + 1) : s.slice(start);
 }
 
 /**

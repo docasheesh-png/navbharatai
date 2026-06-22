@@ -2,6 +2,18 @@ import OpenAI from 'openai';
 import { getGemini, getGroq, getDeepSeek, getOpenAI, getOpenRouter, getClaude, resolveApiKey } from './aiClients';
 import { getBharatContext } from './prompts';
 
+export async function callGrok(message: string, key?: string, history: any[] = [], systemInstruction?: string): Promise<string> {
+  const apiKey = (key && key.trim()) || process.env.GROK_API_KEY || process.env.XAI_API_KEY;
+  if (!apiKey) throw new Error('Grok/xAI API key not available');
+  const client = new OpenAI({ apiKey, baseURL: 'https://api.x.ai/v1', timeout: 60_000, maxRetries: 0 });
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+  if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
+  for (const m of history) messages.push({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text });
+  messages.push({ role: 'user', content: message });
+  const completion = await client.chat.completions.create({ messages, model: 'grok-3', max_tokens: 8000 });
+  return completion.choices[0]?.message?.content ?? 'Grok error';
+}
+
 /**
  * Provider-specific AI call functions, extracted from the server.ts monolith
  * (Phase 1, AI-core step b). Each resolves a client via aiClients and returns
@@ -15,7 +27,7 @@ export async function callGemini(message: string, key?: string, history: any[] =
     throw new Error(`Gemini API Key missing or invalid! Please ensure a valid key is set in Settings.`);
   }
 
-  const modelCandidate = 'gemini-3.5-flash'; // Primary active model based on guidelines
+  const modelCandidate = 'gemini-2.5-flash';
 
   try {
     const contents = history.map(msg => ({

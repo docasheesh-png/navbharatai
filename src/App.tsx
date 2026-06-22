@@ -3770,9 +3770,14 @@ ${buildLanguageRule(preferredLanguage)}`;
           }
           // Honest failure — never fall back to the old vanilla generator.
           setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+          const errMsg = engineErr?.message || 'engine error';
+          const isProviderError = /all ai providers|temporarily busy|unavailable|rate limit|quota|timeout/i.test(errMsg);
+          const friendlyMsg = isProviderError
+            ? '⚠️ AI service is temporarily busy. Please try again in 1-2 minutes. If it keeps failing, try rephrasing your request.'
+            : `⚠️ Build failed: ${errMsg}. Please try again, or rephrase your request with a bit more detail.`;
           setProMessages(prev => [...prev, {
             id: (Date.now() + 1).toString(),
-            text: `⚠️ Build failed: ${engineErr?.message || 'engine error'}. Please try again, or rephrase your request with a bit more detail.`,
+            text: friendlyMsg,
             sender: 'ai', timestamp: new Date(),
           }]);
           setIsProLoading(false);

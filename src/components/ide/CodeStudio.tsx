@@ -225,6 +225,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     }
   }, [openTabs]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // C21: Scroll editor to top whenever the active file changes
+  useEffect(() => {
+    if (editorInstance) {
+      editorInstance.revealLine(1);
+      editorInstance.setScrollPosition({ scrollTop: 0, scrollLeft: 0 });
+    }
+  }, [activeFile]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // A24: subscribe to Monaco cursor position changes
   useEffect(() => {
     if (!editorInstance) return;
@@ -492,7 +500,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     switch (activeScreen) {
       case 'files':
         return (
-          <FileExplorer 
+          <FileExplorer
             files={files}
             activeFile={activeFile}
             onFileSelect={(f) => {
@@ -502,6 +510,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
             onFileCreate={handleCreateFile}
             onFileDelete={handleDeleteFile}
             onFileRename={handleRenameFile}
+            dirtyTabs={dirtyTabs}
           />
         );
       case 'search': {

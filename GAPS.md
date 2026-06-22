@@ -88,7 +88,7 @@
 | B26 | No "pin to top" for important messages | `[ ]` | |
 | B27 | Paste image into chat not supported (clipboard paste) | `[ ]` | |
 | B28 | Voice input icon has no accessibility label | `[x]` | #166 |
-| B29 | No multiline paste indicator (large pastes not warned) | `[ ]` | |
+| B29 | No multiline paste indicator (large pastes not warned) | `[x]` | #167 |
 | B30 | No "Send on Enter / Shift+Enter" preference toggle | `[x]` | #166 |
 
 ---
@@ -117,8 +117,8 @@
 | C18 | File name with spaces causes preview issues | `[ ]` | |
 | C19 | No drag-and-drop to reorder files | `[s]` | VFS has no order |
 | C20 | No "Move file" option (cut/paste across folders) | `[ ]` | |
-| C21 | File open does not scroll editor to top | `[ ]` | |
-| C22 | Files panel does not show which files have unsaved changes | `[ ]` | |
+| C21 | File open does not scroll editor to top | `[x]` | #167 |
+| C22 | Files panel does not show which files have unsaved changes | `[x]` | #167 |
 | C23 | No "Reveal in file tree" from open editor tab | `[ ]` | |
 | C24 | File tree does not auto-expand to show active file | `[ ]` | |
 | C25 | Uploaded files via upload button not announced as added | `[ ]` | |
@@ -169,8 +169,8 @@
 | E1 | Bottom nav labels cut off on very small screens (<360px) | `[ ]` | |
 | E2 | Touch targets below 44px in several places | `[ ]` | |
 | E3 | No haptic feedback on key actions (vibration API) | `[ ]` | |
-| E4 | Code blocks in chat overflow horizontally (no scroll) | `[ ]` | |
-| E5 | Long filenames in Files panel overflow without ellipsis | `[ ]` | |
+| E4 | Code blocks in chat overflow horizontally (no scroll) | `[x]` | #167 |
+| E5 | Long filenames in Files panel overflow without ellipsis | `[x]` | existing |
 | E6 | Pinch-to-zoom on preview iframe (should allow) | `[ ]` | |
 | E7 | No landscape orientation optimization | `[ ]` | |
 | E8 | Sidebar animation not smooth on low-end devices | `[ ]` | |

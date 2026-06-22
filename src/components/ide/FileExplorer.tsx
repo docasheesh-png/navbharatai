@@ -14,6 +14,8 @@ interface FileExplorerProps {
   onFileDelete: (path: string) => void;
   onFileCreate: (name: string) => void;
   onFileRename: (oldPath: string, newName: string) => void;
+  /** C22: Tabs with unsaved changes — shows amber dot on affected files */
+  dirtyTabs?: Set<string>;
 }
 
 interface FileNode {
@@ -29,7 +31,8 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
   onFileSelect,
   onFileDelete,
   onFileCreate,
-  onFileRename
+  onFileRename,
+  dirtyTabs,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddingFile, setIsAddingFile] = useState(false);
@@ -120,6 +123,9 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
           <div className="flex items-center gap-3 min-w-0">
             <FileCode className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-indigo-400" : "text-[#484f58]")} />
             <span className={cn("text-[11px] font-medium tracking-tight truncate", isActive ? "font-bold" : "")}>{item.name}</span>
+            {dirtyTabs?.has(item.path) && (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="Unsaved changes" />
+            )}
           </div>
           <div className="opacity-0 group-hover:opacity-100 transition-opacity">
             <button 

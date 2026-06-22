@@ -355,6 +355,17 @@ export const AIChat: React.FC<AIChatProps> = ({
     }
   }, [input]);
 
+  // B29: Multiline paste indicator
+  const [pasteLineCount, setPasteLineCount] = useState<number>(0);
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const text = e.clipboardData.getData('text');
+    const lines = (text.match(/\n/g) || []).length + 1;
+    if (lines > 20) {
+      setPasteLineCount(lines);
+      setTimeout(() => setPasteLineCount(0), 4000);
+    }
+  };
+
   useEffect(() => {
     onAttachmentsChange?.(attachments);
   }, [attachments, onAttachmentsChange]);
@@ -1476,6 +1487,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                         setEditingMsgId(null);
                       }
                     }}
+                    onPaste={handlePaste}
                     placeholder="Ask NavBharatAI..."
                     rows={1}
                     className={cn(
@@ -1484,6 +1496,11 @@ export const AIChat: React.FC<AIChatProps> = ({
                     )}
                     style={{ maxHeight: '240px', overflowY: 'auto' }}
                   />
+                  {pasteLineCount > 20 && (
+                    <div className="absolute left-2 top-2 bg-amber-500/20 border border-amber-500/40 rounded-lg px-2 py-0.5 text-[9px] font-black text-amber-400 pointer-events-none z-10">
+                      {pasteLineCount} lines pasted
+                    </div>
+                  )}
                   {( (input || '').length > 300 || (((input || '').match(/\n/g) || []).length > 4)) && (
                     <button
                       type="button"

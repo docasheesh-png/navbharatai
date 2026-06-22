@@ -186,6 +186,16 @@ export const ProChatPanel: React.FC<ProChatPanelProps> = (props) => {
                {props.mode === 'auto'     && <span className="px-1.5 py-0.5 bg-indigo-900/30 border border-indigo-600/30 text-indigo-400 rounded text-[8px]">AUTO</span>}
                {props.mode === 'planning' && <span className="px-1.5 py-0.5 bg-amber-900/30 border border-amber-600/30 text-amber-400 rounded text-[8px]">PLANNING</span>}
                {props.mode === 'build' && <span className="px-1.5 py-0.5 bg-orange-900/30 border border-orange-600/30 text-orange-400 rounded text-[8px]">BUILD</span>}
+               {/* D19: Execution tier badge — persists after build completes */}
+               {props.isAppBuilt && props.proBuildProgress.tier && (
+                 <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${
+                   props.proBuildProgress.tier === 'e2b' ? 'bg-green-500/15 border border-green-500/30 text-green-400' :
+                   props.proBuildProgress.tier === 'cloudrun' ? 'bg-blue-500/15 border border-blue-500/30 text-blue-400' :
+                   'bg-white/5 border border-white/10 text-[#484f58]'
+                 }`} title="Execution tier used for this build">
+                   {props.proBuildProgress.tier === 'e2b' ? '☁ E2B' : props.proBuildProgress.tier === 'cloudrun' ? '⚙ Server' : '💾 Local'}
+                 </span>
+               )}
              </div>
              <div className="flex items-center gap-2">
                {props.buildVersionStack.length > 0 && (

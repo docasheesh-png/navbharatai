@@ -504,6 +504,12 @@ export function SettingsPanel({
                               {showKeyStates[id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                             </button>
                           </div>
+                          {/* G14: Show masked last-4 chars when key is saved and hidden */}
+                          {!showKeyStates[id] && (keys as any)[id] && (keys as any)[id].length > 4 && (
+                            <p className="text-[8px] font-mono text-[#484f58] px-1 mt-1">
+                              Saved: ••••••••{((keys as any)[id] as string).slice(-4)}
+                            </p>
+                          )}
                         </div>
                       ))}
                     </div>

@@ -69,9 +69,9 @@
 | B7 | No model name badge showing which AI answered | `[x]` | #166 |
 | B8 | No typing indicator (three-dots animation) during generation | `[x]` | #166 |
 | B9 | No "Edit prompt" option on user messages | `[x]` | #167 |
-| B10 | Code blocks in chat have no file name header | `[ ]` | |
+| B10 | Code blocks in chat have no file name header | `[x]` | #167 |
 | B11 | Code blocks in chat have no line numbers | `[ ]` | |
-| B12 | Code blocks in chat not syntax-highlighted in all languages | `[ ]` | |
+| B12 | Code blocks in chat not syntax-highlighted in all languages | `[x]` | #167 |
 | B13 | Long AI messages have no "Collapse" toggle | `[x]` | existing |
 | B14 | No keyboard shortcut to focus input (Ctrl+K or /) | `[x]` | #166 |
 | B15 | Chat history scroll position lost when switching tabs | `[ ]` | |
@@ -147,7 +147,7 @@
 | D16 | No "Export build report" (files + review + tests) as PDF/MD | `[ ]` | |
 | D17 | Build steps list does not show actual file being generated | `[ ]` | |
 | D18 | No "Continue partial build" option on timeout | `[ ]` | |
-| D19 | Provider used for build not shown in completion badge | `[ ]` | |
+| D19 | Provider used for build not shown in completion badge | `[x]` | #167 |
 | D20 | Build steps collapse after build — no way to re-expand | `[ ]` | |
 | D21 | Generated app name defaults to "App" — no smart naming | `[ ]` | |
 | D22 | No copy-to-clipboard button on generated code blocks | `[ ]` | |
@@ -198,7 +198,7 @@
 
 | # | Gap | Status | PR |
 |---|-----|--------|----|
-| F1 | Error toasts disappear too quickly (3s on errors) | `[ ]` | |
+| F1 | Error toasts disappear too quickly (3s on errors) | `[x]` | #167 |
 | F2 | Network errors and AI errors look identical in the UI | `[ ]` | |
 | F3 | No offline banner in the app header | `[x]` | #166 |
 | F4 | Session restore failures are silent | `[ ]` | |

@@ -10,6 +10,27 @@ import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import { ThemeMode } from '../../lib/theme';
 import { useBuild } from './BuildContext';
 
+// B10/B12: Standalone code block with language header and copy button
+const ChatCodeBlock: React.FC<{ lang: string; code: string }> = ({ lang, code }) => {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="rounded-xl overflow-hidden border border-white/10 my-2 text-[11px]">
+      <div className="flex items-center justify-between px-3 py-1 bg-[#0d1117] border-b border-white/10">
+        <span className="text-[9px] font-mono font-black text-[#484f58] uppercase tracking-widest">{lang || 'code'}</span>
+        <button
+          onClick={() => { navigator.clipboard.writeText(code).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+          className="text-[8px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-colors flex items-center gap-1"
+        >
+          {copied ? <><Check className="w-2.5 h-2.5 text-emerald-400" /> Copied</> : <><Copy className="w-2.5 h-2.5" /> Copy</>}
+        </button>
+      </div>
+      <pre className="bg-[#0d1117] p-3 overflow-x-auto leading-relaxed m-0">
+        <code className="font-mono text-[#c9d1d9]">{code}</code>
+      </pre>
+    </div>
+  );
+};
+
 interface Message {
   id: string;
   text: string;
@@ -587,6 +608,17 @@ export const AIChat: React.FC<AIChatProps> = ({
           <ReactMarkdown
             components={{
               a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5" />,
+              // B10/B12: Code blocks with language header and copy button
+              code: ({ node, className, children, ...props }: any) => {
+                const isInline = !className;
+                if (isInline) {
+                  return <code className="bg-white/10 px-1 py-0.5 rounded text-[11px] font-mono text-indigo-300" {...props}>{children}</code>;
+                }
+                const lang = (className || '').replace('language-', '');
+                const code = String(children).replace(/\n$/, '');
+                return <ChatCodeBlock lang={lang} code={code} />;
+              },
+              pre: ({ node, children, ...props }: any) => <>{children}</>,
             }}
           >
             {cleanText || ""}

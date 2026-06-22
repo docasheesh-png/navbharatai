@@ -113,6 +113,11 @@ import {
   saveApnapanProfile,
   updateApnapanProfile,
 } from './lib/apnapanEngine';
+import {
+  type VersionSnapshot,
+  buildVersionSnapshot,
+  appendVersionSnapshot,
+} from './lib/versionSnapshot';
 // ZipSizeModal component → moved to ViewPanels.tsx
 import type { ZipSizeModalVariant } from './components/ide/ZipSizeModal';
 // AgentMode → re-exported from ./types
@@ -4250,25 +4255,12 @@ ${buildLanguageRule(preferredLanguage)}`;
   }, [buildVersionStack, updatePreview, addToast]);
 
   const saveVersionSnapshot = useCallback((buildRequest: string, builtFiles: Record<string, string>) => {
-    if (!builtFiles || Object.keys(builtFiles).length === 0) return;
+    const snapshot = buildVersionSnapshot(buildRequest, builtFiles);
+    if (!snapshot) return;
     try {
       const saved = localStorage.getItem('navbharat_versions');
-      const existing: any[] = saved ? JSON.parse(saved) : [];
-      const allContent = Object.values(builtFiles).join('');
-      // Strip base64 image data-URLs from files before storing to keep versions lean
-      const strippedFiles = Object.fromEntries(
-        Object.entries(builtFiles).map(([k, v]) => [k, v.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '(image)')])
-      );
-      const snapshot = {
-        id: Date.now().toString(),
-        name: `Build: ${buildRequest.slice(0, 40)}`,
-        code: (builtFiles['index.html'] || allContent).slice(0, 5000),
-        files: strippedFiles,
-        timestamp: Date.now(),
-        label: 'build',
-        size: allContent.length,
-      };
-      const updated = [snapshot, ...existing].slice(0, 10);
+      const existing: VersionSnapshot[] = saved ? JSON.parse(saved) : [];
+      const updated = appendVersionSnapshot(snapshot, existing);
       safeLS('navbharat_versions', JSON.stringify(updated));
     } catch {}
   }, []);

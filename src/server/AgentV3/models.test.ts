@@ -27,10 +27,14 @@ describe('model resolution (D5/D6)', () => {
 });
 
 describe('architect system prompt', () => {
-  it('forbids fake completion and explains the tool workflow', () => {
+  it('is conversational, forbids fake completion, and explains the tool workflow', () => {
     const p = architectSystemPrompt();
-    expect(p).toContain('Architect');
-    expect(p.toLowerCase()).toContain('no fake success');
+    const lower = p.toLowerCase();
+    // Conversational (replies to greetings, talks before building).
+    expect(lower).toContain('hello');
+    expect(lower).toContain('reply');
+    // Still builds for real with tools, no fake success.
+    expect(lower).toContain('no fake success');
     expect(p).toContain('update_todo');
     expect(p).toContain('write_file');
   });

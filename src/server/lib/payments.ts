@@ -42,8 +42,15 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
     let isPaid = false;
     let cfOrderIdRef = 'cf_' + orderId;
 
-    if (isPlaceholder || txData.isSimulator || orderId.startsWith('sim_')) {
-      console.log(`[CASHFREE SIMULATION] Marking order ${orderId} as paid inside verification simulator.`);
+    const isSimulatorOrder = isPlaceholder || txData.isSimulator || orderId.startsWith('sim_');
+    if (isSimulatorOrder) {
+      // The dev simulator credits a real wallet. That is acceptable ONLY outside production —
+      // in production a missing/placeholder credential must NEVER mint free balance. Fail safe.
+      if (process.env.NODE_ENV === 'production') {
+        console.error(`[CASHFREE] Refusing simulator credit in production for order ${orderId} — real Cashfree credentials are required.`);
+        return { success: false, error: 'Payment provider is not configured. Please contact support.' };
+      }
+      console.log(`[CASHFREE SIMULATION] (non-production) Marking order ${orderId} as paid inside verification simulator.`);
       isPaid = true;
     } else {
       const cfUrl = env === 'production'
@@ -60,6 +67,15 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
 
       const orderDetails = response.data;
       if (orderDetails.order_status === 'PAID') {
+        // Reconcile what Cashfree actually charged against the amount we recorded at create
+        // time. Without this, a tampered/mismatched local record could credit more than was
+        // paid. If they diverge beyond a 1-paisa rounding tolerance, refuse to credit.
+        const paidAmount = Number(orderDetails.order_amount);
+        const expectedAmount = Number(txData.amountPaid);
+        if (Number.isFinite(paidAmount) && Number.isFinite(expectedAmount) && Math.abs(paidAmount - expectedAmount) > 0.01) {
+          console.error(`[CASHFREE] Amount mismatch for order ${orderId}: Cashfree charged ${paidAmount}, expected ${expectedAmount}. Refusing to credit.`);
+          return { success: false, error: 'Payment amount mismatch detected — please contact support.' };
+        }
         isPaid = true;
         cfOrderIdRef = orderDetails.cf_order_id || 'cf_' + orderId;
       }

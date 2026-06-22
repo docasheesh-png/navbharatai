@@ -144,6 +144,28 @@ const LS_EVICTABLE = [
 ];
 
 /** localStorage.setItem that auto-evicts large non-essential keys on QuotaExceededError. */
+// D21: derive a human-friendly app name from the user's build prompt
+function inferAppName(prompt: string): string {
+  const p = prompt.trim();
+  // "build/create/make/design/generate a(n)? X (app|tool|dashboard|...)"
+  const m1 = p.match(/(?:build|create|make|generate|design)\s+(?:me\s+)?(?:a|an|the)?\s*([a-zA-Z][a-zA-Z\s]{1,28}?)(?:\s+(?:app|application|website|web\s*app|dashboard|tool|platform|system|tracker|manager|portal|page|site))?\s*(?:with|using|in\b|that|which|\.|,|!|\?|$)/i);
+  if (m1 && m1[1].trim().length >= 2) {
+    const words = m1[1].trim().split(/\s+/);
+    if (words.length <= 5) {
+      return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    }
+  }
+  // Direct "X app" / "X dashboard" / "X tool"
+  const m2 = p.match(/\b([A-Za-z][a-zA-Z\s]{1,25}?)\s+(?:app|dashboard|tool|tracker|manager|website|portal)\b/i);
+  if (m2) {
+    const words = m2[1].trim().split(/\s+/);
+    if (words.length >= 1 && words.length <= 4) {
+      return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    }
+  }
+  return 'NavBharat App';
+}
+
 function safeLS(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
@@ -3469,13 +3491,18 @@ ${buildLanguageRule(preferredLanguage)}`;
                 ...(vr.missingWires || []).map((id: string) => `⚠️ Unwired button: #${id}`),
                 ...(vr.syntaxIssues || []).map((s: string) => `⚠️ ${s}`),
               ];
+              // D9: if repairs were attempted but issues remain, show that explicitly
+              const repairFailNote = !vr.passed && (vr.repairsApplied ?? 0) > 0
+                ? `> 🔧 ${vr.repairsApplied} auto-repair attempt${vr.repairsApplied > 1 ? 's' : ''} could not fully resolve the issues above. Ask me to fix them.`
+                : '';
               validationSection = [
                 ``,
                 `**Quality Check** ${scoreEmoji} Score: ${score}/100`,
                 vr.passed
                   ? `> ✅ All checks passed${vr.repairsApplied > 0 ? ` (${vr.repairsApplied} auto-repair${vr.repairsApplied > 1 ? 's' : ''} applied)` : ''}`
                   : issues.map((i: string) => `> ${i}`).join('\n'),
-              ].join('\n');
+                repairFailNote,
+              ].filter(Boolean).join('\n');
             }
             const deployGuide = meta.deploymentGuide;
             const deploySection = deployGuide
@@ -3510,7 +3537,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               text: processLog + '\n\n__VIEW_PREVIEW____DEPLOY_ACTIONS__',
               sender: 'ai',
               timestamp: new Date(),
-              meta: { deployFiles: builtFiles, appName: meta.appName || 'NavBharatAI-App', suggestions: meta.followUpSuggestions || [] } as any,
+              meta: { deployFiles: builtFiles, appName: meta.appName || inferAppName(messageToSend), suggestions: meta.followUpSuggestions || [] } as any,
             }]);
             // Keep the green tick visible for 2 seconds before hiding the progress bar.
             setTimeout(() => {
@@ -3951,7 +3978,7 @@ ${buildLanguageRule(preferredLanguage)}`;
                     timestamp: new Date(),
                     meta: {
                       deployFiles: evt.files,
-                      appName: evt.appName || 'NavBharatAI-App',
+                      appName: evt.appName || inferAppName(messageToSend),
                       suggestions,
                     } as any,
                   }]);
@@ -5614,12 +5641,14 @@ ${buildLanguageRule(preferredLanguage)}`;
                 key={id}
                 disabled={isDisabled}
                 onClick={() => { if (!isDisabled) toggleTab(id); }}
-                className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-all active:scale-90 ${
+                aria-label={label}
+                aria-current={isActive ? 'page' : undefined}
+                className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${
                   isActive ? 'text-indigo-400' : isDisabled ? 'text-white/20' : 'text-[#484f58]'
                 }`}
               >
-                <Icon className={`w-5 h-5 ${isActive ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />
-                <span className={`text-[9px] font-black uppercase tracking-widest leading-none ${isActive ? 'text-indigo-400' : ''}`}>{label}</span>
+                <Icon className={`w-5 h-5 shrink-0 ${isActive ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />
+                <span className={`text-[9px] font-black uppercase tracking-wider leading-none truncate max-w-full px-0.5 ${isActive ? 'text-indigo-400' : ''}`}>{label}</span>
                 {isActive && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}
               </button>
             );

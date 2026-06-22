@@ -137,7 +137,7 @@
 | D6 | No file count breakdown by language in success | `[x]` | #167 |
 | D7 | No estimated build time shown before starting | `[x]` | #167 |
 | D8 | Build cancellation has no confirm dialog | `[x]` | #167 |
-| D9 | Repair attempt failure shows generic "Please try again" | `[ ]` | |
+| D9 | Repair attempt failure shows generic "Please try again" | `[x]` | #167 |
 | D10 | Code review panel UI collapses too easily (accordion UX) | `[x]` | #167 |
 | D11 | Security findings in code review not linked to file/line | `[ ]` | |
 | D12 | No "Dismiss finding" option in code review panel | `[x]` | #167 |
@@ -149,7 +149,7 @@
 | D18 | No "Continue partial build" option on timeout | `[ ]` | |
 | D19 | Provider used for build not shown in completion badge | `[x]` | #167 |
 | D20 | Build steps collapse after build — no way to re-expand | `[x]` | #167 |
-| D21 | Generated app name defaults to "App" — no smart naming | `[ ]` | |
+| D21 | Generated app name defaults to "App" — no smart naming | `[x]` | #167 |
 | D22 | No copy-to-clipboard button on generated code blocks | `[x]` | #167 |
 | D23 | No build history count shown in UI (e.g. "Build #7") | `[x]` | #167 |
 | D24 | No diff between current build and last build (file-level diff) | `[ ]` | |
@@ -166,8 +166,8 @@
 
 | # | Gap | Status | PR |
 |---|-----|--------|----|
-| E1 | Bottom nav labels cut off on very small screens (<360px) | `[ ]` | |
-| E2 | Touch targets below 44px in several places | `[ ]` | |
+| E1 | Bottom nav labels cut off on very small screens (<360px) | `[x]` | #167 |
+| E2 | Touch targets below 44px in several places | `[x]` | #167 |
 | E3 | No haptic feedback on key actions (vibration API) | `[x]` | #167 |
 | E4 | Code blocks in chat overflow horizontally (no scroll) | `[x]` | #167 |
 | E5 | Long filenames in Files panel overflow without ellipsis | `[x]` | existing |
@@ -226,7 +226,7 @@
 | # | Gap | Status | PR |
 |---|-----|--------|----|
 | G1 | No dark/light theme toggle in main header (quick access) | `[x]` | #167 |
-| G2 | User profile photo not shown anywhere in the UI | `[ ]` | |
+| G2 | User profile photo not shown anywhere in the UI | `[x]` | #167 |
 | G3 | No app version number shown in settings | `[x]` | existing |
 | G4 | No "Reset all settings" button | `[x]` | #167 |
 | G5 | No keyboard shortcuts reference panel | `[x]` | existing |

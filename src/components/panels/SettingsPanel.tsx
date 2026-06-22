@@ -184,6 +184,23 @@ export function SettingsPanel({
                 exit={{ opacity: 0, scale: 0.95 }}
                 className="space-y-4"
               >
+                {/* G2: User profile card */}
+                {user && (
+                  <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4 flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-full overflow-hidden shrink-0 bg-indigo-600 flex items-center justify-center border border-white/10">
+                      {user.photoURL ? (
+                        <img src={user.photoURL} alt={user.displayName || 'User'} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                        <span className="text-white font-black text-sm">{(user.displayName || user.email || 'U').charAt(0).toUpperCase()}</span>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-black text-white truncate">{user.displayName || 'User'}</p>
+                      <p className="text-[9px] text-[#484f58] truncate font-mono">{user.email}</p>
+                    </div>
+                  </div>
+                )}
+
                 {/* View Mode */}
                 <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
                   <div className="flex items-center gap-3 mb-3">

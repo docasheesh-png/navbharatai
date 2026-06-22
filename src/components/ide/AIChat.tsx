@@ -1159,7 +1159,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
             {/* Header */}
             <div className="flex items-center gap-2 px-4 py-2.5 bg-[#0d1117] border-b border-white/5">
               <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">NavBharatAI Pro — Building</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">NavBharatAI v2.0 — Building</span>
               {buildProgress.part && buildProgress.part > 1 && (
                 <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[8px] font-black uppercase tracking-wider text-amber-300">Part {buildProgress.part}</span>
               )}

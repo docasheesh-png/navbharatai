@@ -1304,7 +1304,7 @@ export default function App() {
 
     if ((view === 'nbi_pro_chat' || view === 'sda_chat' || view === 'engineer_ai') && !user) {
       setShowAuth(true);
-      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI Pro' : view === 'sda_chat' ? 'Doctor AI' : 'Engineer AI'} is available for logged-in users only. Please sign in.`, 'warn');
+      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI v2.0' : view === 'sda_chat' ? 'Doctor AI' : 'Engineer AI'} is available for logged-in users only. Please sign in.`, 'warn');
       return;
     }
 
@@ -4220,7 +4220,7 @@ ${buildLanguageRule(preferredLanguage)}`;
   const menuItems = useMemo(() => [
     { id: 'home',         label: 'Home',              icon: Bot },
     { id: 'nbi_chat',     label: 'NavBharatAI FREE',  icon: MessageSquare },
-    { id: 'nbi_pro_chat', label: 'NavBharatAI Pro',   icon: Bot },
+    { id: 'nbi_pro_chat', label: 'NavBharatAI v2.0',   icon: Bot },
     { id: 'preview',      label: 'Preview',           icon: Monitor },
     { id: 'files',        label: 'Files',             icon: FolderOpen },
     { id: 'history',      label: 'History',           icon: History },

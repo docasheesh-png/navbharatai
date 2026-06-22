@@ -117,6 +117,8 @@ export function useAgentV3Build(): UseAgentV3Build {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let gotEvent = false;
+        let rawSample = '';
 
         // Read NDJSON: one JSON event per line (mirrors the Engineer stream).
         for (;;) {
@@ -132,10 +134,23 @@ export function useAgentV3Build(): UseAgentV3Build {
             try {
               event = JSON.parse(trimmed) as AgentV3WireEvent;
             } catch {
+              if (rawSample.length < 400) rawSample += trimmed + '\n';
               continue;
             }
+            gotEvent = true;
             setState((prev) => agentV3Reducer(prev, event));
           }
+        }
+
+        // If the stream produced no usable events, surface what came back so a
+        // silent failure (e.g. an HTML error page, or an empty body) is visible.
+        if (!gotEvent) {
+          const sample = (rawSample || buffer).trim();
+          setError(
+            sample
+              ? `The server did not return v3.0 events. It replied with:\n${sample.slice(0, 300)}`
+              : `No response from the v3.0 engine (HTTP ${res.status}). The backend may be unreachable, or v3.0 is not enabled on the server.`,
+          );
         }
       } catch (err) {
         if (!(err instanceof DOMException && err.name === 'AbortError')) {

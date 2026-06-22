@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X } from 'lucide-react';
+import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Search } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -9,6 +9,36 @@ import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 
 import { ThemeMode } from '../../lib/theme';
 import { useBuild } from './BuildContext';
+
+// B10/B12: Standalone code block with language header and copy button
+const ChatCodeBlock: React.FC<{ lang: string; code: string }> = ({ lang, code }) => {
+  const [copied, setCopied] = useState(false);
+  const lines = code.split('\n');
+  const displayLines = lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
+  return (
+    <div className="rounded-xl overflow-hidden border border-white/10 my-2 text-[11px]">
+      <div className="flex items-center justify-between px-3 py-1 bg-[#0d1117] border-b border-white/10">
+        <span className="text-[9px] font-mono font-black text-[#484f58] uppercase tracking-widest">{lang || 'code'}</span>
+        <button
+          onClick={() => { navigator.clipboard.writeText(code).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+          className="text-[8px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-colors flex items-center gap-1"
+        >
+          {copied ? <><Check className="w-2.5 h-2.5 text-emerald-400" /> Copied</> : <><Copy className="w-2.5 h-2.5" /> Copy</>}
+        </button>
+      </div>
+      <div className="bg-[#0d1117] overflow-x-auto">
+        <code className="font-mono text-[#c9d1d9] leading-relaxed block">
+          {displayLines.map((line, i) => (
+            <div key={i} className="flex hover:bg-white/[0.03]">
+              <span className="select-none text-right pr-3 pl-2 text-[#484f58] text-[9px] min-w-[2rem] shrink-0 leading-[1.6]">{i + 1}</span>
+              <span className="pl-1 pr-3 whitespace-pre leading-[1.6]">{line}</span>
+            </div>
+          ))}
+        </code>
+      </div>
+    </div>
+  );
+};
 
 interface Message {
   id: string;
@@ -325,13 +355,50 @@ export const AIChat: React.FC<AIChatProps> = ({
     }
   }, [input]);
 
+  // B29: Multiline paste indicator
+  const [pasteLineCount, setPasteLineCount] = useState<number>(0);
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    // B27: Image paste from clipboard
+    const items = Array.from(e.clipboardData.items) as DataTransferItem[];
+    const imageItem = items.find((item: DataTransferItem) => item.type.startsWith('image/'));
+    if (imageItem) {
+      const file = imageItem.getAsFile();
+      if (file) {
+        setAttachments(prev => [...prev, file]);
+        return;
+      }
+    }
+    const text = e.clipboardData.getData('text');
+    const lines = (text.match(/\n/g) || []).length + 1;
+    if (lines > 20) {
+      setPasteLineCount(lines);
+      setTimeout(() => setPasteLineCount(0), 4000);
+    }
+  };
+
   useEffect(() => {
     onAttachmentsChange?.(attachments);
   }, [attachments, onAttachmentsChange]);
 
+  // B17: Search within chat history
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [showChatSearch, setShowChatSearch] = useState(false);
+
+  const [uploadError, setUploadError] = useState<string>('');
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      setAttachments(prev => [...prev, ...Array.from(e.target.files!)] as File[]);
+      const MAX_BYTES = 10 * 1024 * 1024; // F10: 10 MB limit
+      const allFiles: File[] = Array.from(e.target.files) as File[];
+      const tooBig = allFiles.filter((f: File) => f.size > MAX_BYTES);
+      if (tooBig.length > 0) {
+        const names = tooBig.map((f: File) => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`).join(', ');
+        setUploadError(`File too large (max 10 MB): ${names}`);
+        setTimeout(() => setUploadError(''), 5000);
+        const allowed = allFiles.filter((f: File) => f.size <= MAX_BYTES);
+        if (allowed.length > 0) setAttachments(prev => [...prev, ...allowed]);
+      } else {
+        setAttachments(prev => [...prev, ...allFiles]);
+      }
     }
     e.target.value = '';
   };
@@ -381,12 +448,33 @@ export const AIChat: React.FC<AIChatProps> = ({
   }, [isLoading]);
 
   const [showModeDropdown, setShowModeDropdown] = useState(false);
-const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
+  const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  // B9: Edit user message — fill input with message text for re-editing
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [liked, setLiked] = useState<Record<string, boolean>>({});
   const [disliked, setDisliked] = useState<Record<string, boolean>>({});
   const [showReport, setShowReport] = useState<Record<string, boolean>>({});
   const [reportText, setReportText] = useState<Record<string, string>>({});
   const [progressCollapsed, setProgressCollapsed] = useState(false);
+  // D20: keep build widget visible after completion until user dismisses it
+  const [buildProgressDismissed, setBuildProgressDismissed] = useState(false);
+  useEffect(() => {
+    if (buildProgress?.active) setBuildProgressDismissed(false);
+  }, [buildProgress?.active]);
+  // D23: build counter — increments on each new build start
+  const [currentBuildCount, setCurrentBuildCount] = useState(() => {
+    try { return parseInt(localStorage.getItem('nba_build_count') || '0', 10); } catch { return 0; }
+  });
+  useEffect(() => {
+    if (buildProgress?.active) {
+      const next = parseInt(localStorage.getItem('nba_build_count') || '0', 10) + 1;
+      try { localStorage.setItem('nba_build_count', String(next)); } catch {}
+      setCurrentBuildCount(next);
+    }
+  // Only fire when build starts (active flips to true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildProgress?.active]);
   // Live clock for the build elapsed-time display — ticks only while a build runs.
   const [nowTs, setNowTs] = useState(() => Date.now());
   useEffect(() => {
@@ -422,6 +510,8 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
   const [showContinueModal, setShowContinueModal] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  // B30: send on Enter preference
+  const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => localStorage.getItem('chat_sendOnEnter') !== 'false');
 
   // Dynamic continuation suggestions
   const [continuePromptPhrase, setContinuePromptPhrase] = useState('Want to continue previous work? Enter your Universal Chat ID (UCI).');
@@ -451,6 +541,28 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
     setTimeout(() => setShared(false), 2000);
   };
 
+  // F3: Offline detection
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const up = () => setIsOnline(true);
+    const down = () => setIsOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down); };
+  }, []);
+
+  // B14: Ctrl+K / Cmd+K focuses the input
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        textareaRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
   const handleRestoreByUci = async () => {
     if (!resumeUciInput.trim() || !onRestoreUci) return;
     setIsRestoring(true);
@@ -468,6 +580,13 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
     } finally {
       setIsRestoring(false);
     }
+  };
+
+  const formatMsgTime = (ts: Date | string | undefined): string => {
+    if (!ts) return '';
+    const d = ts instanceof Date ? ts : new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   const parseMessageAndTriggers = (msg: Message) => {
@@ -553,6 +672,41 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
           <ReactMarkdown
             components={{
               a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5" />,
+              // B10/B12: Code blocks with language header and copy button
+              code: ({ node, className, children, ...props }: any) => {
+                const isInline = !className;
+                if (isInline) {
+                  return <code className="bg-white/10 px-1 py-0.5 rounded text-[11px] font-mono text-indigo-300" {...props}>{children}</code>;
+                }
+                const lang = (className || '').replace('language-', '');
+                const code = String(children).replace(/\n$/, '');
+                return <ChatCodeBlock lang={lang} code={code} />;
+              },
+              pre: ({ node, children, ...props }: any) => <>{children}</>,
+              // B19: Styled markdown tables
+              table: ({ node, children, ...props }: any) => (
+                <div className="overflow-x-auto my-2 rounded-xl border border-white/10">
+                  <table className="w-full text-[11px] border-collapse" {...props}>{children}</table>
+                </div>
+              ),
+              thead: ({ node, children, ...props }: any) => <thead className="bg-[#0d1117]" {...props}>{children}</thead>,
+              th: ({ node, children, ...props }: any) => <th className="px-3 py-2 text-left font-black text-[#8b949e] uppercase tracking-widest text-[9px] border-b border-white/10" {...props}>{children}</th>,
+              td: ({ node, children, ...props }: any) => <td className="px-3 py-2 border-b border-white/5 text-[#c9d1d9]" {...props}>{children}</td>,
+              // B20: Task list checkboxes (GFM - [ ] / [x])
+              input: ({ node, ...props }: any) => (
+                <input {...props} disabled className="mr-1.5 align-middle accent-indigo-500 cursor-default" />
+              ),
+              // B22: Inline image rendering
+              img: ({ node, src, alt, ...props }: any) => (
+                <img
+                  src={src}
+                  alt={alt || ''}
+                  className="max-w-full rounded-xl my-2 border border-white/10"
+                  loading="lazy"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  {...props}
+                />
+              ),
             }}
           >
             {cleanText || ""}
@@ -688,6 +842,16 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
               >
                 🐙 GitHub Pages
               </button>
+              {/* D26: re-run code review from build results */}
+              {onSendSuggestion && (
+                <button
+                  onClick={() => onSendSuggestion('/code-review')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600/10 hover:bg-red-600/20 border border-red-500/20 text-red-400 text-[10px] font-bold rounded-xl transition-all active:scale-95"
+                  title="Run AI code review on the generated app"
+                >
+                  🔍 Code Review
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -712,15 +876,15 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
 
         {/* Interaction Controls */}
         <div className="flex gap-2 mt-3 pt-2 border-t border-white/5 items-center">
-            <button onClick={() => { navigator.clipboard.writeText(cleanText); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-1 hover:bg-white/10 rounded text-gray-500 hover:text-white">
+            <button onClick={() => { navigator.clipboard.writeText(cleanText); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-1 hover:bg-white/10 rounded text-gray-500 hover:text-white" title="Copy">
                 {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
             </button>
             {isAI && (
                 <>
-                    <button onClick={() => setLiked({...liked, [msg.id]: !liked[msg.id]})} className={cn("p-1 hover:bg-white/10 rounded", liked[msg.id] ? "text-emerald-400" : "text-gray-500 hover:text-white")}>
+                    <button onClick={() => setLiked({...liked, [msg.id]: !liked[msg.id]})} className={cn("p-1 hover:bg-white/10 rounded", liked[msg.id] ? "text-emerald-400" : "text-gray-500 hover:text-white")} title="Helpful">
                         <ThumbsUp className="w-3 h-3" />
                     </button>
-                    <button onClick={() => { setDisliked({...disliked, [msg.id]: !disliked[msg.id]}); setShowReport({...showReport, [msg.id]: !showReport[msg.id]})}} className={cn("p-1 hover:bg-white/10 rounded", disliked[msg.id] ? "text-rose-400" : "text-gray-500 hover:text-white")}>
+                    <button onClick={() => { setDisliked({...disliked, [msg.id]: !disliked[msg.id]}); setShowReport({...showReport, [msg.id]: !showReport[msg.id]})}} className={cn("p-1 hover:bg-white/10 rounded", disliked[msg.id] ? "text-rose-400" : "text-gray-500 hover:text-white")} title="Not helpful">
                         <ThumbsDown className="w-3 h-3" />
                     </button>
                 </>
@@ -738,6 +902,20 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
 
   return (
     <div className="flex flex-col h-full min-h-0 max-h-full bg-[var(--theme-bg)] transition-colors duration-500 overflow-hidden relative">
+      {/* F3: Offline banner */}
+      {!isOnline && (
+        <div className="shrink-0 bg-amber-600 px-3 py-1.5 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest text-white">
+          <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+          No internet connection — messages may not send
+        </div>
+      )}
+      {/* B9: Editing message indicator */}
+      {editingMsgId && (
+        <div className="shrink-0 bg-indigo-600/20 border-b border-indigo-500/30 px-3 py-1 flex items-center justify-between gap-2 text-[9px] font-black uppercase tracking-widest text-indigo-300">
+          <span className="flex items-center gap-1.5"><MessageSquare className="w-3 h-3" /> Editing message — modify and send</span>
+          <button onClick={() => { setEditingMsgId(null); onInputChange(''); }} className="text-indigo-400 hover:text-white transition-colors"><X className="w-3 h-3" /></button>
+        </div>
+      )}
       {/* In-chat image lightbox */}
       {lightbox && (
         <div
@@ -819,6 +997,23 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* B17: Chat search bar */}
+      {showChatSearch && (
+        <div className="px-3 py-2 border-b border-white/5 bg-black/20 flex items-center gap-2">
+          <Search className="w-3 h-3 text-[#484f58] shrink-0" />
+          <input
+            autoFocus
+            value={chatSearchQuery}
+            onChange={e => setChatSearchQuery(e.target.value)}
+            placeholder="Search messages..."
+            className="flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-[#484f58]"
+          />
+          <button onClick={() => { setShowChatSearch(false); setChatSearchQuery(''); }} className="text-[#484f58] hover:text-white">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
 
       <div className={cn("flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar overflow-x-hidden")} ref={scrollRef}>
         {/* AgentProgress removed here to only be rendered dynamically in messages if needed */}
@@ -928,33 +1123,47 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
               <p className={cn("text-[10px] font-black uppercase tracking-widest text-[#8b949e]")}>Ready to architect and build.</p>
             </div>
 
-            {/* G9 — Quick-Start Gallery: example prompts for Pro Chat */}
-            {activeAgent === 'navbharatai-pro' && (
-              <div className="px-3 pb-3 space-y-2">
-                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-[#484f58] text-center">Try one of these</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { icon: '📊', title: 'Analytics Dashboard', prompt: 'Build a modern analytics dashboard with sales charts, user metrics, revenue trends, and KPI cards. Use dark theme with gradient accents.' },
-                    { icon: '🛒', title: 'E-commerce Page', prompt: 'Create a product landing page with hero section, features grid, pricing table, customer reviews, and a buy-now button.' },
-                    { icon: '✅', title: 'Todo App', prompt: 'Build a todo app with categories, due dates, priority levels, drag-to-reorder, and localStorage persistence. Dark, minimal design.' },
-                    { icon: '🎨', title: 'Portfolio Site', prompt: 'Create a developer portfolio with animated hero section, projects grid with tech tags, skills section, and contact form.' },
-                    { icon: '🧠', title: 'Quiz App', prompt: 'Build an interactive quiz with 5 trivia questions, countdown timer, progress bar, score tracking, and a celebratory results screen.' },
-                    { icon: '☁️', title: 'Weather App', prompt: 'Create a weather dashboard with current conditions, hourly forecast, 5-day outlook, and animated weather icons. Use a glassmorphism card layout.' },
-                    { icon: '💬', title: 'Chat Interface', prompt: 'Build a real-time-style chat UI with message bubbles, timestamp, emoji reactions, typing indicator, and a message input with file attach.' },
-                    { icon: '📝', title: 'Note-taking App', prompt: 'Create a Notion-inspired note-taking app with rich text editor, tags, search, sidebar navigation, and localStorage sync.' },
-                  ].map(({ icon, title, prompt }) => (
-                    <button
-                      key={title}
-                      onClick={() => onInputChange(prompt)}
-                      className="text-left p-2.5 bg-[#161b22] hover:bg-[#1c2430] border border-white/5 hover:border-indigo-500/30 rounded-2xl transition-all group active:scale-95"
-                    >
-                      <span className="text-base leading-none">{icon}</span>
-                      <p className="text-[10px] font-black text-white mt-1.5 group-hover:text-indigo-300 transition-colors">{title}</p>
-                    </button>
-                  ))}
+            {/* B6/G9 — Quick-Start Gallery: example prompts, adapts per agent */}
+            {(() => {
+              const isPro = activeAgent === 'navbharatai-pro';
+              const isIde = activeAgent === 'navbharatai' || !activeAgent?.includes('pro');
+              const proStarters = [
+                { icon: '📊', title: 'Analytics Dashboard', prompt: 'Build a modern analytics dashboard with sales charts, user metrics, revenue trends, and KPI cards. Use dark theme with gradient accents.' },
+                { icon: '🛒', title: 'E-commerce Page', prompt: 'Create a product landing page with hero section, features grid, pricing table, customer reviews, and a buy-now button.' },
+                { icon: '✅', title: 'Todo App', prompt: 'Build a todo app with categories, due dates, priority levels, drag-to-reorder, and localStorage persistence. Dark, minimal design.' },
+                { icon: '🎨', title: 'Portfolio Site', prompt: 'Create a developer portfolio with animated hero section, projects grid with tech tags, skills section, and contact form.' },
+                { icon: '🧠', title: 'Quiz App', prompt: 'Build an interactive quiz with 5 trivia questions, countdown timer, progress bar, score tracking, and a celebratory results screen.' },
+                { icon: '☁️', title: 'Weather App', prompt: 'Create a weather dashboard with current conditions, hourly forecast, 5-day outlook, and animated weather icons. Use a glassmorphism card layout.' },
+                { icon: '💬', title: 'Chat Interface', prompt: 'Build a real-time-style chat UI with message bubbles, timestamp, emoji reactions, typing indicator, and a message input with file attach.' },
+                { icon: '📝', title: 'Note-taking App', prompt: 'Create a Notion-inspired note-taking app with rich text editor, tags, search, sidebar navigation, and localStorage sync.' },
+              ];
+              const ideStarters = [
+                { icon: '🔍', title: 'Explain this file', prompt: 'Explain what this file does and how it works.' },
+                { icon: '🐛', title: 'Find bugs', prompt: 'Review this code for bugs, edge cases, and potential issues. List each problem with a fix.' },
+                { icon: '⚡', title: 'Improve performance', prompt: 'Identify and fix performance bottlenecks in this code.' },
+                { icon: '🛡️', title: 'Security review', prompt: 'Do a security audit of this code. Identify vulnerabilities and suggest fixes.' },
+                { icon: '🧪', title: 'Write tests', prompt: 'Write comprehensive unit tests for the functions in this file.' },
+                { icon: '📚', title: 'Generate README', prompt: 'Generate a comprehensive README.md for this project based on the code.' },
+              ];
+              const starters = isPro ? proStarters : (isIde ? ideStarters : proStarters);
+              return (
+                <div className="px-3 pb-3 space-y-2">
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-[#484f58] text-center">Try one of these</p>
+                  <div className={`grid gap-2 ${isPro ? 'grid-cols-2' : 'grid-cols-2'}`}>
+                    {starters.map(({ icon, title, prompt }) => (
+                      <button
+                        key={title}
+                        onClick={() => onInputChange(prompt)}
+                        className="text-left p-2.5 bg-[#161b22] hover:bg-[#1c2430] border border-white/5 hover:border-indigo-500/30 rounded-2xl transition-all group active:scale-95"
+                      >
+                        <span className="text-base leading-none">{icon}</span>
+                        <p className="text-[10px] font-black text-white mt-1.5 group-hover:text-indigo-300 transition-colors">{title}</p>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             <div className="flex items-center justify-center py-4 border-t border-white/5 mt-4">
                <button
@@ -970,12 +1179,18 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
         )}
 
         <AnimatePresence>
-          {messages.map((msg, index) => {
+          {messages
+            .filter(msg => !chatSearchQuery || (msg.text || '').toLowerCase().includes(chatSearchQuery.toLowerCase()))
+            .map((msg, index) => {
             if (!msg) return null;
             const cleanedText = msg.text || (msg as any).content || "No Text";
             const lineCount = ((cleanedText || '').match(/\n/g) || []).length + 1;
             const isLongMessage = cleanedText.length > 220 || lineCount > 4;
 
+            const isLastAI = msg.sender === 'ai' && index === messages.length - 1 && !isLoading;
+            // F2: classify error type for visual distinction
+            const isNetworkError = msg.sender === 'ai' && /network.*fail|internet.*check|connection.*fail|ERR_NETWORK|cannot reach|unreachable|offline/i.test(cleanedText);
+            const isAIError = msg.sender === 'ai' && !isNetworkError && /temporarily busy|rate limit|quota|AI.*service|all.*providers|overload|timeout|unavailable/i.test(cleanedText);
             return (
               <motion.div
                 layout
@@ -983,7 +1198,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 key={msg.id}
                 className={cn(
-                  "flex flex-col space-y-2",
+                  "flex flex-col space-y-2 group/msg",
                   msg.sender === 'user' ? "items-end" : "items-start"
                 )}
               >
@@ -991,7 +1206,11 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                   "max-w-[90%] p-3.5 rounded-2xl text-[11px] font-medium leading-relaxed shadow-sm break-words select-text",
                   msg.sender === 'user'
                     ? "bg-indigo-600 text-white rounded-tr-none"
-                    : "bg-[#161b22] text-[#c9d1d9] border border-white/5 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                    : isNetworkError
+                      ? "bg-[#1a0e0e] text-[#c9d1d9] border border-red-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                      : isAIError
+                        ? "bg-[#1a1600] text-[#c9d1d9] border border-amber-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                        : "bg-[#161b22] text-[#c9d1d9] border border-white/5 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
                 )}>
                   {/* Attachment image previews — compact grid */}
                   {msg.attachments && msg.attachments.length > 0 && (
@@ -1052,17 +1271,78 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                   <span className="text-[7px] font-black text-[#484f58] uppercase tracking-widest">
                     {msg.sender === 'user' ? 'YOU' : activeAgent.toUpperCase().replace('_', ' ')}
                   </span>
+                  {/* F2: error type badge for visual distinction */}
+                  {isNetworkError && <span className="text-[7px] font-black uppercase tracking-widest text-red-400 bg-red-500/10 border border-red-500/20 rounded px-1 py-px">Network Error</span>}
+                  {isAIError && <span className="text-[7px] font-black uppercase tracking-widest text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded px-1 py-px">AI Service</span>}
+                  {/* B7: Model badge on AI messages */}
+                  {msg.sender === 'ai' && msg.modelUsed && (
+                    <span className="text-[7px] font-mono text-indigo-400/70 bg-indigo-900/20 border border-indigo-800/30 rounded px-1 py-px">
+                      {msg.modelUsed}
+                    </span>
+                  )}
+                  {msg.timestamp && (
+                    <span className="text-[7px] text-[#30363d] font-mono">{formatMsgTime(msg.timestamp)}</span>
+                  )}
                   {msg.sender === 'user' && <User className="w-2.5 h-2.5 text-indigo-400" />}
+                  {/* B9: Edit user message button */}
+                  {msg.sender === 'user' && (
+                    <button
+                      onClick={() => {
+                        onInputChange(msg.text || '');
+                        setEditingMsgId(msg.id);
+                        setTimeout(() => textareaRef.current?.focus(), 50);
+                      }}
+                      title="Edit and resend this message"
+                      className="opacity-0 group-hover/msg:opacity-100 transition-opacity p-0.5 hover:bg-white/10 rounded text-[#484f58] hover:text-indigo-400"
+                    >
+                      <MessageSquare className="w-2.5 h-2.5" />
+                    </button>
+                  )}
+                  {/* Copy message button — appears on hover */}
+                  <button
+                    onClick={() => {
+                      const t = msg.text || '';
+                      navigator.clipboard.writeText(t).catch(() => {});
+                      setCopiedMsgId(msg.id);
+                      setTimeout(() => setCopiedMsgId(null), 1500);
+                    }}
+                    title="Copy message"
+                    className="opacity-0 group-hover/msg:opacity-100 transition-opacity p-0.5 hover:bg-white/10 rounded text-[#484f58] hover:text-white"
+                  >
+                    {copiedMsgId === msg.id ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
+                  </button>
                 </div>
+                {/* B3 — Regenerate: only on the last AI message */}
+                {isLastAI && onSendSuggestion && (
+                  <button
+                    onClick={() => { if (messages.length > 0) onSendSuggestion(messages.filter(m => m.sender === 'user').at(-1)?.text || '__REGENERATE__'); }}
+                    title="Regenerate response"
+                    className="flex items-center gap-1 px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-lg bg-white/5 hover:bg-white/10 text-[#484f58] hover:text-white border border-white/5 transition-all"
+                  >
+                    ↺ Retry
+                  </button>
+                )}
               </motion.div>
             );
           })}
         </AnimatePresence>
 
+        {/* B8: Typing indicator — three-dot bounce animation */}
         {isLoading && (
-          <div className="flex items-center gap-3 text-[#484f58] px-2 animate-in fade-in slide-in-from-left-2 duration-300">
-            <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-            <span className="text-[9px] font-black uppercase tracking-widest animate-pulse">The Architect is analyzing...</span>
+          <div
+            role="status"
+            aria-busy="true"
+            aria-label="AI is generating a response"
+            className="flex items-start gap-2 animate-in fade-in slide-in-from-left-2 duration-300"
+          >
+            <div className="w-6 h-6 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
+              <Bot className="w-3 h-3 text-indigo-400" />
+            </div>
+            <div className="bg-[#161b22] border border-white/5 rounded-2xl rounded-tl-none px-3 py-2.5 shadow-sm flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
           </div>
         )}
 
@@ -1106,13 +1386,13 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
           >
             <div className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500/10 border-b border-indigo-500/20">
               <span className="text-base">🧭</span>
-              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300">Guider — Plan ke liye aapki manzoori chahiye</span>
+              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300">Guider — Your Approval Needed</span>
             </div>
             <div className="px-4 py-3">
               <p className="text-[12px] leading-relaxed text-[#c9d1d9] whitespace-pre-wrap">{guiderPlan.designProposal}</p>
               {Array.isArray(guiderPlan.clarifyingQuestions) && guiderPlan.clarifyingQuestions.length > 0 && (
                 <div className="mt-3 rounded-lg bg-white/5 border border-white/10 p-2.5">
-                  <div className="text-[9px] font-black uppercase tracking-widest text-indigo-300/80 mb-1">Kuch sawaal</div>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-indigo-300/80 mb-1">Clarifying Questions</div>
                   <ul className="list-disc list-inside space-y-0.5">
                     {guiderPlan.clarifyingQuestions.map((q, i) => (
                       <li key={i} className="text-[11px] text-[#8b949e]">{q}</li>
@@ -1123,7 +1403,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
               <textarea
                 value={guiderInput}
                 onChange={(e) => setGuiderInput(e.target.value)}
-                placeholder="Badlav batao ya sawaalon ke jawab do… (optional)"
+                placeholder="Suggest changes or answer the questions above… (optional)"
                 rows={2}
                 disabled={!!guiderReplanning}
                 className="mt-3 w-full resize-none rounded-lg bg-[#161b22] border border-white/10 px-3 py-2 text-[12px] text-white placeholder-white/30 focus:outline-none focus:border-indigo-500/50 disabled:opacity-50"
@@ -1134,7 +1414,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                   disabled={!!guiderReplanning}
                   className="flex-1 px-3 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 text-white text-[11px] font-black uppercase tracking-wider hover:opacity-90 transition disabled:opacity-50"
                 >
-                  ✅ Approve — banao
+                  ✅ Approve — Build It
                 </button>
                 <button
                   onClick={() => { const t = guiderInput.trim(); if (t) { setGuiderInput(''); onGuiderSend?.(t); } }}
@@ -1142,7 +1422,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                   className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-[#c9d1d9] text-[11px] font-black uppercase tracking-wider hover:bg-white/10 transition disabled:opacity-40"
                   title="Edit the plan or answer the questions"
                 >
-                  {guiderReplanning ? '⏳ Soch raha…' : '✏️ Bhejo'}
+                  {guiderReplanning ? '⏳ Thinking…' : '✏️ Send'}
                 </button>
               </div>
             </div>
@@ -1150,16 +1430,36 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
         )}
 
         {/* ── Inline Build Progress Widget ── */}
-        {buildProgress?.active && (
+        {buildProgress && (buildProgress.active || (buildProgress.steps.length > 0 && !buildProgressDismissed)) && (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-[#161b22] border border-amber-500/20 rounded-2xl overflow-hidden shadow-xl"
+            className={`border rounded-2xl overflow-hidden shadow-xl ${buildProgress.active ? 'bg-[#161b22] border-amber-500/20' : 'bg-[#161b22] border-white/10'}`}
           >
             {/* Header */}
             <div className="flex items-center gap-2 px-4 py-2.5 bg-[#0d1117] border-b border-white/5">
-              <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">NavBharatAI v2.0 — Building</span>
+              <div className={`w-2 h-2 rounded-full ${buildProgress.active ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+              <span className={`text-[9px] font-black uppercase tracking-widest ${buildProgress.active ? 'text-amber-400' : 'text-emerald-400'}`}>
+                {buildProgress.active ? 'NavBharatAI v2.0 — Building' : 'Build Completed'}
+              </span>
+              {/* D7: estimated build time hint */}
+              {buildProgress.active && !buildProgress.startedAt && (
+                <span className="text-[8px] text-white/20 font-mono">~30–90s</span>
+              )}
+              {/* D23: build count badge */}
+              {currentBuildCount > 0 && (
+                <span className="text-[8px] font-black text-white/25 font-mono">#{currentBuildCount}</span>
+              )}
+              {/* D20: dismiss completed build widget */}
+              {!buildProgress.active && (
+                <button
+                  onClick={() => setBuildProgressDismissed(true)}
+                  title="Dismiss build log"
+                  className="ml-auto p-1 text-white/20 hover:text-white/60 rounded"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
               {buildProgress.part && buildProgress.part > 1 && (
                 <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[8px] font-black uppercase tracking-wider text-amber-300">Part {buildProgress.part}</span>
               )}
@@ -1179,10 +1479,17 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                     {buildElapsedLabel}
                   </span>
                 )}
-                <div className="h-1.5 w-20 bg-white/5 rounded-full overflow-hidden">
+                <div
+                  role="progressbar"
+                  aria-valuenow={buildProgress.percent}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`Build progress: ${buildProgress.percent}%`}
+                  className="h-1.5 w-20 bg-white/5 rounded-full overflow-hidden"
+                >
                   <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{ width: `${buildProgress.percent}%`, background: 'linear-gradient(90deg,#f59e0b,#fbbf24)' }}
+                    className="h-full rounded-full transition-[width] duration-700 ease-in-out"
+                    style={{ width: `${Math.max(buildProgress.percent, buildProgress.active ? 3 : 0)}%`, background: 'linear-gradient(90deg,#f59e0b,#fbbf24)' }}
                   />
                 </div>
                 <span className="text-[8px] text-white/30 font-mono">{buildProgress.percent}%</span>
@@ -1234,13 +1541,29 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                   ))}
                 </div>
                 {/* Footer */}
-                <div className="px-4 py-2 border-t border-white/5 flex items-center justify-between">
+                <div className="px-4 py-2 border-t border-white/5 flex items-center justify-between gap-2">
                   <span className="text-[8px] text-white/25 font-mono">
                     {Object.keys(buildProgress.generatedFiles).length > 0
                       ? `${Object.keys(buildProgress.generatedFiles).length} file(s) generated`
                       : 'Working...'}
                   </span>
-                  <span className="text-[8px] text-white/15 font-mono">navBharatAI Pro Builder</span>
+                  {/* D30: size warning for very large apps */}
+                  {Object.keys(buildProgress.generatedFiles).length > 100 && (
+                    <span className="text-[8px] font-black text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full" title="Large app: over 100 files generated. ZIP download may be slow.">
+                      ⚠ Large app
+                    </span>
+                  )}
+                  {/* F20: copy full build log */}
+                  <button
+                    onClick={() => {
+                      const log = buildProgress.steps.map(s => `[${s.status}] ${s.label}${s.sub ? ` — ${s.sub}` : ''}${s.code ? '\n' + s.code : ''}`).join('\n');
+                      navigator.clipboard.writeText(log).catch(() => {});
+                    }}
+                    title="Copy build log"
+                    className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors ml-auto"
+                  >
+                    Copy Log
+                  </button>
                 </div>
               </>
             )}
@@ -1270,6 +1593,11 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
         style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : 'max(8px, env(safe-area-inset-bottom, 8px))' }}
       >
         <div className="max-w-4xl mx-auto space-y-1.5">
+            {uploadError && (
+              <div className="px-1">
+                <p className="text-[9px] text-red-400 font-medium py-0.5">{uploadError}</p>
+              </div>
+            )}
             {attachments.length > 0 && (
               <div className="px-1 flex flex-wrap gap-1.5">
                 {attachments.map((file, index) => (
@@ -1298,7 +1626,16 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                       e.target.style.height = 'auto';
                       e.target.style.height = `${Math.min(e.target.scrollHeight, 240)}px`;
                     }}
-                    placeholder="Ask navBharatAI..."
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && sendOnEnter && !isLoading && (input.trim() || attachments.length > 0)) {
+                        e.preventDefault();
+                        onSend(attachments);
+                        setAttachments([]);
+                        setEditingMsgId(null);
+                      }
+                    }}
+                    onPaste={handlePaste}
+                    placeholder="Ask NavBharatAI..."
                     rows={1}
                     className={cn(
                       "w-full bg-transparent text-[var(--theme-text)] pr-24 py-3.5 text-xs outline-none transition-all resize-none min-h-[48px] leading-relaxed text-[16px]",
@@ -1306,6 +1643,11 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                     )}
                     style={{ maxHeight: '240px', overflowY: 'auto' }}
                   />
+                  {pasteLineCount > 20 && (
+                    <div className="absolute left-2 top-2 bg-amber-500/20 border border-amber-500/40 rounded-lg px-2 py-0.5 text-[9px] font-black text-amber-400 pointer-events-none z-10">
+                      {pasteLineCount} lines pasted
+                    </div>
+                  )}
                   {( (input || '').length > 300 || (((input || '').match(/\n/g) || []).length > 4)) && (
                     <button
                       type="button"
@@ -1333,13 +1675,16 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                       type="button"
                       onClick={isListening ? stopVoice : startVoice}
                       title={isListening ? 'Stop voice input' : 'Voice input (Chrome only)'}
+                      aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
                       className={`p-2.5 transition-colors ${isListening ? 'text-red-400 animate-pulse' : 'text-gray-500 hover:text-blue-400'}`}
                     >
                       {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                     </button>
                     {isLoading && onStop ? (
                       <button
-                        onClick={onStop}
+                        onClick={() => {
+                          if (window.confirm('Stop the current AI generation?')) onStop?.();
+                        }}
                         title="Stop generation"
                         className="p-3 bg-red-600 text-white rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95"
                       >
@@ -1347,7 +1692,12 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                       </button>
                     ) : (
                       <button
-                        onClick={() => { onSend(attachments); setAttachments([]); }}
+                        onClick={() => {
+                          navigator.vibrate?.(30);
+                          onSend(attachments);
+                          setAttachments([]);
+                          setEditingMsgId(null);
+                        }}
                         disabled={(!input.trim() && attachments.length === 0) || isLoading}
                         className="p-3 bg-indigo-600 text-white rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95"
                       >
@@ -1358,12 +1708,70 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                   </div>{/* end inner flex row */}
             </div>{/* end rounded input container */}
 
-{isPinned && (
-            <div className="mt-2 flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">
-              <Zap className="w-2 h-2 fill-current" />
-              Pinned
+            {/* B4 — character count + B5 clear chat */}
+            <div className="flex items-center justify-between px-1 mt-1">
+              <div className="flex items-center gap-2">
+                {isPinned && (
+                  <div className="flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">
+                    <Zap className="w-2 h-2 fill-current" />
+                    Pinned
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {input.length > 60 && (
+                  <span className={`text-[9px] font-mono ${input.length > 1000 ? 'text-amber-400' : 'text-[#484f58]'}`}>
+                    {input.length}
+                  </span>
+                )}
+                {/* B30: Enter sends toggle */}
+                <button
+                  onClick={() => { const v = !sendOnEnter; setSendOnEnter(v); localStorage.setItem('chat_sendOnEnter', String(v)); }}
+                  title={sendOnEnter ? 'Enter sends message (click to toggle)' : 'Shift+Enter sends (click to toggle)'}
+                  className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
+                >
+                  {sendOnEnter ? '↵ Send' : '⇧↵ Send'}
+                </button>
+                {messages.length > 0 && (
+                  <>
+                    {/* B17: Toggle chat search */}
+                    <button
+                      onClick={() => { setShowChatSearch(v => !v); if (showChatSearch) setChatSearchQuery(''); }}
+                      title="Search messages (Ctrl+F)"
+                      className={`text-[8px] font-black uppercase tracking-widest transition-colors ${showChatSearch ? 'text-indigo-400' : 'text-[#30363d] hover:text-[#484f58]'}`}
+                    >
+                      Search
+                    </button>
+                    {/* B16: Export chat as markdown */}
+                    <button
+                      onClick={() => {
+                        const md = messages.map(m => {
+                          const role = m.sender === 'user' ? '**You**' : '**AI**';
+                          return `${role}\n\n${m.text || ''}\n`;
+                        }).join('\n---\n\n');
+                        const blob = new Blob([md], { type: 'text/markdown' });
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = `chat-${new Date().toISOString().slice(0, 10)}.md`;
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                      }}
+                      title="Export chat as Markdown"
+                      className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
+                    >
+                      Export
+                    </button>
+                    <button
+                      onClick={() => { if (window.confirm('Clear conversation?')) { onSendSuggestion?.('__CLEAR_CHAT__'); } }}
+                      title="Clear conversation"
+                      className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
+                    >
+                      Clear
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
-          )}
         </div>
       </div>
     </div>

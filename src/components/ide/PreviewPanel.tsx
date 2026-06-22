@@ -4,7 +4,7 @@ import {
   ExternalLink, Maximize2, Shield, Globe,
   Search, ChevronLeft, ChevronRight, Download, Package,
   Share2, Copy, Check, X, Wifi, Pen, Eye, ChevronDown, ChevronUp,
-  Zap, Tag
+  Zap, Tag, Camera
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { VisualEditor } from './VisualEditor';
@@ -95,9 +95,35 @@ function injectTagOverlay(html: string): string {
     : html + NBT_OVERLAY_SCRIPT;
 }
 
+const PreviewUrlBar: React.FC<{ url: string; hotReloadFlash: boolean; tagMode: boolean }> = ({ url, hotReloadFlash, tagMode }) => {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className={cn(
+      "flex-1 max-w-xl h-8 bg-black/40 border rounded-full px-4 flex items-center gap-2 group transition-all",
+      hotReloadFlash ? "border-emerald-500/50" : tagMode ? "border-violet-500/50" : "border-white/10 focus-within:border-indigo-500/50"
+    )}>
+      <Shield className={cn("w-3.5 h-3.5 flex-shrink-0", tagMode ? "text-violet-400" : "text-emerald-500")} />
+      <span className="flex-1 text-[11px] text-[#8b949e] font-mono truncate select-all cursor-text">{url}</span>
+      {hotReloadFlash && <Zap className="w-3 h-3 text-emerald-400 flex-shrink-0 animate-pulse" />}
+      {tagMode && !hotReloadFlash && <Tag className="w-3 h-3 text-violet-400 flex-shrink-0 animate-pulse" />}
+      <button
+        onClick={() => { navigator.clipboard.writeText(url).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+        className="text-[#484f58] hover:text-white transition-colors flex-shrink-0"
+        title="Copy preview URL"
+      >
+        {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+      </button>
+    </div>
+  );
+};
+
 export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, generatedCode, previewHistory = [], onRestoreHistory, onHtmlChange, onGoPro, onEditWithAI }) => {
   const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
   const [device, setDevice] = useState<'laptop' | 'mobile' | 'full'>(isMobileScreen ? 'full' : 'laptop');
+  // H4: Device frame toggle (phone bezel around mobile preview)
+  const [showDeviceFrame, setShowDeviceFrame] = useState(false);
+  // H18: Landscape/portrait rotation for mobile preview
+  const [isLandscape, setIsLandscape] = useState(false);
   const [visualMode, setVisualMode] = useState(false);
   const [tagMode, setTagMode] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -210,12 +236,24 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
     if (!files || Object.keys(files).length === 0) return;
     setDownloading(true);
     try {
-      const fileEntries = Object.entries(files);
+      // C16: Filter out build artifacts and generated directories
+      const EXCLUDED = /^(node_modules|__pycache__|\.git|dist\/|build\/|\.DS_Store)/;
+      const filteredEntries = Object.entries(files).filter(([p]) => !EXCLUDED.test(p));
+      // C15: Ensure .env.example is included if .env exists
+      const hasEnv = filteredEntries.some(([p]) => p === '.env' || p.endsWith('.env'));
+      const hasEnvExample = filteredEntries.some(([p]) => p === '.env.example');
+      if (hasEnv && !hasEnvExample) {
+        const envVars = (files['.env'] || '').split('\n')
+          .filter(l => l.includes('=') && !l.startsWith('#'))
+          .map(l => `${l.split('=')[0]}=`)
+          .join('\n');
+        filteredEntries.push(['.env.example', `# Copy to .env and fill in values\n${envVars}`]);
+      }
       const parts: string[] = [];
       parts.push(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>NavBharat App Files</title>`);
       parts.push(`<style>body{font-family:monospace;background:#0d1117;color:#c9d1d9;padding:2rem}h1{color:#58a6ff}pre{background:#161b22;padding:1rem;border-radius:8px;overflow:auto;border:1px solid #30363d}.file-header{color:#3fb950;margin-top:2rem;font-weight:bold}</style></head><body>`);
-      parts.push(`<h1>📦 NavBharat App — Source Files</h1><p>${fileEntries.length} files</p>`);
-      for (const [path, content] of fileEntries) {
+      parts.push(`<h1>📦 NavBharat App — Source Files</h1><p>${filteredEntries.length} files</p>`);
+      for (const [path, content] of filteredEntries) {
         parts.push(`<div class="file-header">📄 ${path}</div><pre>${(content as string).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>`);
       }
       parts.push(`</body></html>`);
@@ -272,13 +310,13 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
   // Only actual content changes (new build, tag mode toggle) should reload.
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const writtenSrcRef = useRef<string>('');
+  // H13: fade state for smooth preview refresh transition
+  const [previewOpacity, setPreviewOpacity] = useState(1);
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe || previewSrc === writtenSrcRef.current) return;
-    // Write into the iframe's document. CRITICAL: mark `writtenSrcRef` only AFTER
-    // a real write succeeds — marking it up front (the old bug) meant that if the
-    // doc wasn't ready yet (freshly-mounted iframe via the `key`/conditional-mount),
-    // we recorded it as written but never actually wrote → permanently blank preview.
+    // H13: fade out, then write, then fade in
+    setPreviewOpacity(0);
     const write = () => {
       try {
         const doc = iframe.contentDocument || iframe.contentWindow?.document;
@@ -287,16 +325,21 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           doc.write(previewSrc || '');
           doc.close();
           writtenSrcRef.current = previewSrc || '';
+          // H19: scroll preview to top after rebuild
+          try { iframe.contentWindow?.scrollTo(0, 0); } catch { /* cross-origin */ }
+          requestAnimationFrame(() => setPreviewOpacity(1));
         }
       } catch { /* cross-origin guard */ }
     };
-    write();
+    // Short delay so the fade-out renders before content is replaced
+    const t = setTimeout(write, 80);
     // If the doc wasn't ready (write didn't take), retry once when the fresh
     // iframe fires its load event.
     if (writtenSrcRef.current !== (previewSrc || '')) {
       iframe.addEventListener('load', write, { once: true });
-      return () => iframe.removeEventListener('load', write);
+      return () => { clearTimeout(t); iframe.removeEventListener('load', write); };
     }
+    return () => clearTimeout(t);
   }, [previewSrc]);
 
   return (
@@ -309,17 +352,8 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           <button onClick={onRun} className="p-2 hover:bg-indigo-600/20 rounded-full text-indigo-400"><RefreshCcw className="w-4 h-4" /></button>
         </div>
 
-        <div className={cn(
-          "flex-1 max-w-xl h-8 bg-black/40 border rounded-full px-4 flex items-center gap-2 group transition-all",
-          hotReloadFlash ? "border-emerald-500/50" : tagMode ? "border-violet-500/50" : "border-white/10 focus-within:border-indigo-500/50"
-        )}>
-          <Shield className={cn("w-3.5 h-3.5 flex-shrink-0", tagMode ? "text-violet-400" : "text-emerald-500")} />
-          <span className="flex-1 text-[11px] text-[#8b949e] font-mono truncate select-all cursor-text">
-            {url}
-          </span>
-          {hotReloadFlash && <Zap className="w-3 h-3 text-emerald-400 flex-shrink-0 animate-pulse" />}
-          {tagMode && !hotReloadFlash && <Tag className="w-3 h-3 text-violet-400 flex-shrink-0 animate-pulse" />}
-        </div>
+        {/* H5: Preview URL bar with copy button */}
+        <PreviewUrlBar url={url} hotReloadFlash={hotReloadFlash} tagMode={tagMode} />
 
         <div className="flex items-center gap-1 bg-black/20 p-1 rounded-xl border border-white/5">
           {devices.map((d) => (
@@ -327,6 +361,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
               key={d.id}
               onClick={() => setDevice(d.id)}
               title={d.label}
+              aria-label={`Preview in ${d.label} mode`}
               className={cn(
                 "p-2 rounded-lg transition-all flex items-center gap-2",
                 device === d.id ? "bg-indigo-600 text-white shadow-lg" : "text-[#484f58] hover:text-[#8b949e]"
@@ -336,6 +371,34 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
               {device === d.id && <span className="text-[10px] font-bold uppercase tracking-widest hidden lg:block">{d.label}</span>}
             </button>
           ))}
+          {/* H4: Phone frame toggle */}
+          {device === 'mobile' && (
+            <button
+              onClick={() => setShowDeviceFrame(f => !f)}
+              title={showDeviceFrame ? 'Hide phone frame' : 'Show phone frame'}
+              aria-label="Toggle phone device frame"
+              className={cn(
+                "p-2 rounded-lg transition-all text-[10px] font-black uppercase tracking-widest ml-0.5",
+                showDeviceFrame ? "bg-slate-700 text-white" : "text-[#484f58] hover:text-[#8b949e]"
+              )}
+            >
+              📱
+            </button>
+          )}
+          {/* H18: Rotate device (landscape/portrait) */}
+          {device === 'mobile' && (
+            <button
+              onClick={() => setIsLandscape(l => !l)}
+              title={isLandscape ? 'Switch to portrait' : 'Switch to landscape'}
+              aria-label="Rotate device orientation"
+              className={cn(
+                "p-2 rounded-lg transition-all ml-0.5",
+                isLandscape ? "bg-slate-700 text-white" : "text-[#484f58] hover:text-[#8b949e]"
+              )}
+            >
+              <RefreshCcw className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         <button
@@ -352,6 +415,19 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           className="p-2 hover:bg-white/5 rounded-full text-[#484f58] hover:text-white ml-2 disabled:opacity-30 transition-colors"
         >
           <ExternalLink className="w-4 h-4" />
+        </button>
+
+        {/* H10: Print / Save as PDF / Screenshot */}
+        <button
+          onClick={() => {
+            const iframe = document.querySelector('iframe[title="App Preview"]') as HTMLIFrameElement | null;
+            try { iframe?.contentWindow?.print(); } catch { window.print(); }
+          }}
+          title="Print / Save as PDF (screenshot)"
+          disabled={!generatedCode}
+          className="p-2 hover:bg-white/5 rounded-full text-[#484f58] hover:text-white disabled:opacity-30 transition-colors"
+        >
+          <Camera className="w-4 h-4" />
         </button>
 
         <button
@@ -512,17 +588,19 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
 
           <div
             style={{
-              width: device === 'full' ? `${targetWidth}px` : undefined,
-              height: device === 'full' ? `${targetHeight}px` : undefined,
+              width: device === 'full' ? `${targetWidth}px` : device === 'mobile' ? (isLandscape ? '667px' : '375px') : undefined,
+              height: device === 'full' ? `${targetHeight}px` : device === 'mobile' ? (isLandscape ? '375px' : undefined) : undefined,
               transform: `scale(${displayScale})`,
               transformOrigin: 'center center',
               flexShrink: 0
             }}
             className={cn(
-              "h-full bg-white shadow-2xl transition-all duration-300 rounded-lg overflow-hidden border-8",
-              tagMode ? "border-violet-500/40" : "border-black/20",
-              device === 'laptop' ? 'w-full max-w-[1280px]' :
-              device === 'mobile' ? 'w-[375px]' : ''
+              "h-full bg-white shadow-2xl transition-all duration-300 overflow-hidden",
+              showDeviceFrame && device === 'mobile'
+                ? "rounded-[3rem] border-[12px] border-slate-800 shadow-[0_0_0_4px_#1e293b,0_20px_60px_rgba(0,0,0,0.6)]"
+                : "rounded-lg border-8",
+              !showDeviceFrame && (tagMode ? "border-violet-500/40" : "border-black/20"),
+              device === 'laptop' ? 'w-full max-w-[1280px]' : ''
             )}>
             {generatedCode ? (
               <iframe
@@ -530,6 +608,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
                 key={tagMode ? 'tag' : 'preview'}
                 title="App Preview"
                 className="w-full h-full bg-white border-none"
+                style={{ opacity: previewOpacity, transition: 'opacity 0.15s ease' }}
                 sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
               />
             ) : (

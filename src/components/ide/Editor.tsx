@@ -1,15 +1,36 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MonacoEditor, { loader } from '@monaco-editor/react';
 import { cn } from '../../lib/utils';
-import { 
-  X, Play, Bug, Save, FileCode, Check, 
-  ChevronRight, MoreVertical, Layout
+import {
+  X, Play, Bug, Save, FileCode, Check,
+  ChevronRight, MoreVertical, Layout,
+  Globe, Paintbrush, Braces, FileText, Image, FolderOpen
 } from 'lucide-react';
+import type { FC, SVGProps } from 'react';
+
+type IconComponent = FC<SVGProps<SVGSVGElement> & { className?: string }>;
+
+function iconForFile(path: string): IconComponent {
+  const ext = path.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'html': case 'htm': return Globe;
+    case 'css': case 'scss': case 'sass': return Paintbrush;
+    case 'json': return Braces;
+    case 'md': case 'mdx': return FileText;
+    case 'svg': case 'png': case 'jpg': case 'jpeg': case 'gif': case 'webp': return Image;
+    default: return FileCode;
+  }
+}
 import { Tab } from '../../types/ide';
 
 // Configure Monaco to load from a faster CDN or local if possible, 
 // using the default which is usually CDN.
 loader.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs' } });
+
+const BINARY_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp', 'pdf', 'zip', 'tar', 'gz',
+  'woff', 'woff2', 'ttf', 'eot', 'otf', 'mp4', 'mp3', 'ogg', 'wav', 'avi', 'mov',
+]);
 
 interface EditorProps {
   content: string;
@@ -23,6 +44,14 @@ interface EditorProps {
   onMount?: (editor: any) => void;
   onRun?: () => void;
   onDebug?: () => void;
+  /** Tabs with unsaved changes (shows a dot indicator) */
+  dirtyTabs?: Set<string>;
+  /** A17: Monaco editor color theme */
+  editorTheme?: 'vs-dark' | 'vs';
+  /** Override / extend Monaco editor options */
+  editorOptions?: Record<string, unknown>;
+  /** C23: Reveal active file in the file explorer sidebar */
+  onRevealInExplorer?: (path: string) => void;
 }
 
 export const Editor: React.FC<EditorProps> = React.memo(({
@@ -36,8 +65,13 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   onTabClose,
   onMount,
   onRun,
-  onDebug
+  onDebug,
+  dirtyTabs,
+  editorTheme = 'vs-dark',
+  editorOptions = {},
+  onRevealInExplorer,
 }) => {
+  const isBinaryFile = BINARY_EXTENSIONS.has(fileName.split('.').pop()?.toLowerCase() ?? '');
   const editorRef = useRef<any>(null);
   // 8.2 — lightweight textarea fallback on mobile to avoid Monaco memory issues
   const [isMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
@@ -57,9 +91,13 @@ export const Editor: React.FC<EditorProps> = React.memo(({
     const ext = name.split('.').pop()?.toLowerCase();
     switch (ext) {
       case 'js':
-      case 'jsx': return 'javascript';
+      case 'jsx':
+      case 'mjs':
+      case 'cjs': return 'javascript';
       case 'ts':
-      case 'tsx': return 'typescript';
+      case 'tsx':
+      case 'mts':
+      case 'cts': return 'typescript';
       case 'html': return 'html';
       case 'css': return 'css';
       case 'py': return 'python';
@@ -75,6 +113,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
       <div className="h-9 bg-[#252526] flex items-center overflow-x-auto no-scrollbar shrink-0 select-none">
         {openTabs.map((tab) => {
           const isActive = tab.path === activeTab;
+          const TabIcon = iconForFile(tab.path);
           return (
             <div
               key={tab.path}
@@ -84,15 +123,19 @@ export const Editor: React.FC<EditorProps> = React.memo(({
                 isActive ? "bg-[#1e1e1e] text-white" : "bg-[#2d2d2d] text-[#969696] hover:bg-[#2a2d2e]"
               )}
             >
-              <FileCode className={cn("w-3.5 h-3.5", isActive ? "text-indigo-400" : "text-[#858585]")} />
+              <TabIcon className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-indigo-400" : "text-[#858585]")} />
               <span className={cn("text-[11px] truncate flex-1", isActive ? "font-medium" : "")}>
                 {tab.path}
               </span>
+              {dirtyTabs?.has(tab.path) && (
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="Unsaved changes" />
+              )}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onTabClose(tab.path);
                 }}
+                aria-label={`Close tab ${tab.path}`}
                 className={cn(
                   "p-0.5 rounded hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity",
                   isActive && "opacity-100"
@@ -111,11 +154,22 @@ export const Editor: React.FC<EditorProps> = React.memo(({
            <span>Project Root</span>
            <ChevronRight className="w-3 h-3" />
            <span className="text-white">{fileName}</span>
+           {/* C23: reveal active file in explorer */}
+           {onRevealInExplorer && (
+             <button
+               onClick={() => onRevealInExplorer(activeTab)}
+               title="Reveal in file explorer"
+               className="ml-1 p-0.5 hover:text-white transition-colors"
+             >
+               <FolderOpen className="w-3 h-3" />
+             </button>
+           )}
         </div>
         <div className="flex items-center gap-3">
             {onDebug && (
-               <button 
+               <button
                  onClick={onDebug}
+                 aria-label="Preview debug"
                  className="hover:text-amber-500 transition-all"
                  title="Preview Debug"
                >
@@ -123,8 +177,9 @@ export const Editor: React.FC<EditorProps> = React.memo(({
                </button>
             )}
             {onRun && (
-               <button 
+               <button
                  onClick={onRun}
+                 aria-label="Run project"
                  className="text-emerald-500 hover:text-emerald-400 transition-all flex items-center gap-1"
                  title="Run Project"
                >
@@ -135,8 +190,19 @@ export const Editor: React.FC<EditorProps> = React.memo(({
         </div>
       </div>
 
+      {/* C11: Binary file warning */}
+      {isBinaryFile && (
+        <div className="flex-1 flex flex-col items-center justify-center bg-[#1e1e1e] text-[#8b949e] gap-3 p-8">
+          <Image className="w-10 h-10 text-[#484f58]" />
+          <p className="text-sm font-medium text-[#c9d1d9]">Binary file</p>
+          <p className="text-[11px] text-center max-w-[280px] leading-relaxed">
+            This file type cannot be edited as text. Download the project ZIP to access it directly.
+          </p>
+        </div>
+      )}
+
       {/* Editor — Monaco on desktop, textarea on mobile */}
-      <div className="flex-1 overflow-hidden relative">
+      {!isBinaryFile && <div className="flex-1 overflow-hidden relative">
         {isMobile ? (
           <textarea
             value={content}
@@ -153,7 +219,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
           path={fileName}
           language={getLanguage(fileName)}
           value={content}
-          theme="vs-dark"
+          theme={editorTheme}
           loading={<div className="w-full h-full flex items-center justify-center bg-[#1e1e1e] text-[#8b949e] text-xs font-mono">Loading editor…</div>}
           onMount={handleEditorDidMount}
           onChange={(val) => onChange(val || '')}
@@ -176,10 +242,12 @@ export const Editor: React.FC<EditorProps> = React.memo(({
             cursorBlinking: 'smooth',
             cursorSmoothCaretAnimation: 'on',
             smoothScrolling: true,
+            stickyScroll: { enabled: true },
+            ...editorOptions,
           }}
         />
         )}
-      </div>
+      </div>}
 
       {/* Mobile Input Helper Toolbar - Hidden on desktop */}
       <div className="md:hidden h-10 bg-[#252526] border-t border-white/5 flex items-center px-1 overflow-x-auto no-scrollbar gap-1 shrink-0">

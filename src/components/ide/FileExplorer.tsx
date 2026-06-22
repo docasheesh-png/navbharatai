@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { 
-  FolderOpen, FileCode, Plus, FilePlus, FolderPlus, 
-  ChevronRight, ChevronDown, MoreVertical, Trash2, 
-  Edit2, HardDrive, Search
+import React, { useState, useEffect } from 'react';
+import {
+  FolderOpen, FileCode, Plus, FilePlus, FolderPlus,
+  ChevronRight, ChevronDown, MoreVertical, Trash2,
+  Edit2, HardDrive, Search, ArrowUpDown, SortAsc, Github, Lock, Image
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -14,6 +14,12 @@ interface FileExplorerProps {
   onFileDelete: (path: string) => void;
   onFileCreate: (name: string) => void;
   onFileRename: (oldPath: string, newName: string) => void;
+  /** C22: Tabs with unsaved changes — shows amber dot on affected files */
+  dirtyTabs?: Set<string>;
+  /** J19: GitHub repo URL for "Open in GitHub" link (e.g. "https://github.com/user/repo") */
+  githubRepoUrl?: string;
+  /** J19: Branch name for GitHub file links */
+  githubBranch?: string;
 }
 
 interface FileNode {
@@ -23,18 +29,56 @@ interface FileNode {
   children?: Record<string, FileNode>;
 }
 
+// A20: files that should be treated as read-only (auto-generated / lock files)
+const READ_ONLY_PATTERNS = /^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|\.DS_Store|.*\.min\.(js|css)|.*\.d\.ts)$/;
+function isReadOnly(name: string): boolean {
+  return READ_ONLY_PATTERNS.test(name);
+}
+
+// C10: image file extensions for preview
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.avif']);
+function isImageFile(name: string): boolean {
+  const dot = name.lastIndexOf('.');
+  return dot !== -1 && IMAGE_EXTS.has(name.slice(dot).toLowerCase());
+}
+
 export const FileExplorer: React.FC<FileExplorerProps> = ({
   files,
   activeFile,
   onFileSelect,
   onFileDelete,
   onFileCreate,
-  onFileRename
+  onFileRename,
+  dirtyTabs,
+  githubRepoUrl,
+  githubBranch = 'main',
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddingFile, setIsAddingFile] = useState(false);
   const [newFileName, setNewFileName] = useState('');
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']));
+  // C5: Sort mode (dirs-first by name is default)
+  const [sortMode, setSortMode] = useState<'name' | 'type'>('name');
+  // C13: Recently-opened files (last 5, persisted to localStorage)
+  const [recentFiles, setRecentFiles] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('ide_recent_files') || '[]'); } catch { return []; }
+  });
+
+  // C10: image preview hover state
+  const [imagePreviewPath, setImagePreviewPath] = useState<string | null>(null);
+
+  // C24: Auto-expand parent directories when the active file changes
+  useEffect(() => {
+    if (!activeFile) return;
+    const parts = activeFile.split('/');
+    if (parts.length < 2) return;
+    const parentDirs = parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join('/'));
+    setExpandedDirs(prev => {
+      const next = new Set(prev);
+      parentDirs.forEach(d => next.add(d));
+      return next;
+    });
+  }, [activeFile]);
 
   const buildTree = (filePaths: string[]): FileNode => {
     const root: FileNode = { name: 'root', path: '', type: 'dir', children: {} };
@@ -62,6 +106,15 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
     return root;
   };
 
+  const handleFileSelectWithRecent = (path: string) => {
+    onFileSelect(path);
+    setRecentFiles(prev => {
+      const updated = [path, ...prev.filter(p => p !== path)].slice(0, 5);
+      try { localStorage.setItem('ide_recent_files', JSON.stringify(updated)); } catch {}
+      return updated;
+    });
+  };
+
   const toggleDir = (path: string) => {
     const next = new Set(expandedDirs);
     if (next.has(path)) next.delete(path);
@@ -74,6 +127,12 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
     
     const sortedItems = Object.values(node.children).sort((a, b) => {
       if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+      if (sortMode === 'type') {
+        const extA = a.name.split('.').pop() || '';
+        const extB = b.name.split('.').pop() || '';
+        const extCmp = extA.localeCompare(extB);
+        if (extCmp !== 0) return extCmp;
+      }
       return a.name.localeCompare(b.name);
     });
 
@@ -108,36 +167,92 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
       }
 
       return (
-        <div 
+        <div
           key={item.path}
-          onClick={() => onFileSelect(item.path)}
+          onClick={() => handleFileSelectWithRecent(item.path)}
+          onMouseEnter={() => isImageFile(item.name) ? setImagePreviewPath(item.path) : undefined}
+          onMouseLeave={() => setImagePreviewPath(null)}
           className={cn(
-            "group flex items-center justify-between px-4 py-1.5 cursor-pointer transition-all",
+            "group relative flex items-center justify-between px-4 py-1.5 cursor-pointer transition-all",
             isActive ? "bg-indigo-600/10 text-white border-r-2 border-indigo-500" : "hover:bg-white/5 text-[#8b949e]"
           )}
           style={{ paddingLeft: `${(level + 1) * 12}px` }}
         >
           <div className="flex items-center gap-3 min-w-0">
-            <FileCode className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-indigo-400" : "text-[#484f58]")} />
+            {/* C10: image icon for image files */}
+            {isImageFile(item.name)
+              ? <Image className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-indigo-400" : "text-[#484f58]")} />
+              : <FileCode className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-indigo-400" : "text-[#484f58]")} />
+            }
             <span className={cn("text-[11px] font-medium tracking-tight truncate", isActive ? "font-bold" : "")}>{item.name}</span>
+            {dirtyTabs?.has(item.path) && (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="Unsaved changes" />
+            )}
+            {/* A20: read-only indicator */}
+            {isReadOnly(item.name) && (
+              <Lock className="w-2.5 h-2.5 shrink-0 text-[#484f58]/60" title="Read-only / auto-generated file" />
+            )}
           </div>
-          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-            <button 
+          <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+            {/* J19: Open in GitHub */}
+            {githubRepoUrl && (
+              <a
+                href={`${githubRepoUrl}/blob/${githubBranch}/${item.path}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                title="Open in GitHub"
+                aria-label={`Open ${item.path} in GitHub`}
+                className="p-1 hover:bg-white/10 rounded text-[#484f58] hover:text-white"
+              >
+                <Github className="w-3 h-3" />
+              </a>
+            )}
+            <button
               onClick={(e) => {
                 e.stopPropagation();
                 if (confirm(`Delete ${item.path}?`)) onFileDelete(item.path);
               }}
+              aria-label={`Delete ${item.path}`}
               className="p-1 hover:bg-red-500/10 rounded text-red-500/40 hover:text-red-500"
             >
               <Trash2 className="w-3 h-3" />
             </button>
           </div>
+          {/* C10: image preview tooltip on hover */}
+          {imagePreviewPath === item.path && (
+            <div className="absolute left-full top-0 ml-2 z-50 p-2 bg-[#161b22] border border-white/10 rounded-xl shadow-2xl pointer-events-none" style={{ minWidth: '120px', maxWidth: '200px' }}>
+              {(files[item.path] || '').startsWith('data:image') || item.name.endsWith('.svg') ? (
+                item.name.endsWith('.svg')
+                  ? <div className="w-full" dangerouslySetInnerHTML={{ __html: files[item.path] || '' }} />
+                  : <img src={files[item.path]} alt={item.name} className="w-full rounded" />
+              ) : (
+                <div className="flex items-center gap-2 p-1">
+                  <Image className="w-4 h-4 text-[#484f58]" />
+                  <span className="text-[9px] text-[#484f58]">{item.name}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       );
     });
   };
 
   const tree = buildTree(Object.keys(files));
+
+  // C12: Collect all directory paths for expand-all
+  const getAllDirPaths = (node: FileNode): string[] => {
+    if (!node.children) return [];
+    const dirs: string[] = [];
+    for (const child of Object.values(node.children)) {
+      if (child.type === 'dir') {
+        dirs.push(child.path);
+        dirs.push(...getAllDirPaths(child));
+      }
+    }
+    return dirs;
+  };
 
   const handleCreate = () => {
     if (newFileName.trim()) {
@@ -155,13 +270,40 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50">Explorer</span>
         </div>
         <div className="flex items-center gap-1">
-           <button 
-             onClick={() => setIsAddingFile(true)}
-             className="p-1.5 hover:bg-white/5 rounded-md text-[#8b949e] hover:text-white transition-all"
-             title="New File"
-           >
-             <FilePlus className="w-3.5 h-3.5" />
-           </button>
+          {/* C12: Expand All / Collapse All */}
+          <button
+            onClick={() => {
+              const allDirs = getAllDirPaths(tree);
+              const allExpanded = allDirs.every(d => expandedDirs.has(d));
+              if (allExpanded) {
+                setExpandedDirs(new Set(['']));
+              } else {
+                setExpandedDirs(new Set([...allDirs, '']));
+              }
+            }}
+            aria-label="Expand or collapse all folders"
+            className="p-1.5 hover:bg-white/5 rounded-md text-[#8b949e] hover:text-white transition-all"
+            title="Expand / Collapse All"
+          >
+            <FolderPlus className="w-3.5 h-3.5" />
+          </button>
+          {/* C5: Sort toggle */}
+          <button
+            onClick={() => setSortMode(m => m === 'name' ? 'type' : 'name')}
+            aria-label={`Sort files by ${sortMode === 'name' ? 'file type' : 'name'}`}
+            className={`p-1.5 rounded-md transition-all ${sortMode === 'type' ? 'text-indigo-400 bg-indigo-900/20' : 'text-[#8b949e] hover:text-white hover:bg-white/5'}`}
+            title={`Sort by: ${sortMode === 'name' ? 'name' : 'type'} (click to toggle)`}
+          >
+            <SortAsc className="w-3 h-3" />
+          </button>
+          <button
+            onClick={() => setIsAddingFile(true)}
+            aria-label="Create new file"
+            className="p-1.5 hover:bg-white/5 rounded-md text-[#8b949e] hover:text-white transition-all"
+            title="New File"
+          >
+            <FilePlus className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
@@ -198,6 +340,29 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* C13: Recently-opened files section */}
+        {!searchQuery && recentFiles.filter(p => p in files).length > 0 && (
+          <div className="mb-2">
+            <div className="px-4 pt-2 pb-1">
+              <span className="text-[8px] font-black uppercase tracking-[0.2em] text-[#484f58]">Recent</span>
+            </div>
+            {recentFiles.filter(p => p in files).map(path => (
+              <div
+                key={path}
+                onClick={() => handleFileSelectWithRecent(path)}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-1 cursor-pointer transition-all",
+                  activeFile === path ? "bg-indigo-600/10 text-white border-r-2 border-indigo-500" : "hover:bg-white/5 text-[#8b949e]"
+                )}
+              >
+                <FileCode className="w-3 h-3 shrink-0 text-[#484f58]" />
+                <span className="text-[10px] font-medium truncate">{path.split('/').pop()}</span>
+              </div>
+            ))}
+            <div className="mx-4 mt-1 mb-2 border-t border-white/5" />
+          </div>
+        )}
 
         <div className="space-y-0.5">
           {renderTree(tree)}

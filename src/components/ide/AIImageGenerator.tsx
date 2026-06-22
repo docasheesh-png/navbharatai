@@ -353,7 +353,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                     onClick={() => { setGeneratedUrl(item.url); setPrompt(item.prompt); setStyle(item.style); setSize(item.size); }}
                     className="group relative rounded-lg overflow-hidden border border-white/5 hover:border-violet-500/40 transition-all aspect-square bg-[#161b22]"
                   >
-                    <img src={item.url} alt={item.prompt} className="w-full h-full object-cover" />
+                    <img src={item.url} alt={item.prompt} className="w-full h-full object-cover" loading="lazy" />
                     <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
                       <p className="text-[8px] text-white text-center line-clamp-2">{item.prompt}</p>
                       <p className="text-[7px] text-white/50">{relativeTime(item.timestamp)}</p>

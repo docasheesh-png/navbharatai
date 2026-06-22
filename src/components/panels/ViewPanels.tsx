@@ -74,7 +74,7 @@ export interface ViewPanelsProps {
   setProInput: (v: string) => void;
   isLoading: boolean;
   activeIntent: string;
-  handleSendForTab: (tabId: ViewType) => void;
+  handleSendForTab: (tabId: ViewType, overrideMessage?: string) => void;
   toggleTab: (view: ViewType) => void;
   updatePreview: (files: any) => void;
   addLog: (msg: string, level: string) => void;
@@ -174,6 +174,10 @@ export function ViewPanels({
             onOpenProChat={() => toggleTab('nbi_pro_chat')}
             wallet={wallet}
             onUnlockVishwakarma={() => setShowVishwakarmaUnlockModal(true)}
+            onSendDirect={(text: string) => handleSendForTab(
+              activeAgent.startsWith('vishwakarma') ? 'asc_chat' as ViewType : 'nbi_pro_chat' as ViewType,
+              text
+            )}
           />
         </div>
       )}
@@ -216,6 +220,29 @@ export function ViewPanels({
           onUpload={handleFilesUpload}
           onDownloadZip={() => downloadAppZip(files as any, 'NavBharatApp')}
           onOpenFile={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
+          onAddFile={(path: string) => {
+            const next = { ...(files as Record<string, string>), [path]: '' };
+            setFiles(next as any);
+            setActiveFile(path);
+            toggleTab('studio');
+          }}
+          onDeleteFile={(path: string) => {
+            const next = { ...(files as Record<string, string>) };
+            delete next[path];
+            setFiles(next as any);
+          }}
+          onRenameFile={(oldPath: string, newPath: string) => {
+            const prev = files as Record<string, string>;
+            if (prev[newPath] !== undefined) return; // target exists, abort
+            const next = { ...prev, [newPath]: prev[oldPath] };
+            delete next[oldPath];
+            setFiles(next as any);
+          }}
+          onDuplicateFile={(sourcePath: string, targetPath: string) => {
+            const prev = files as Record<string, string>;
+            if (prev[targetPath] !== undefined) return; // target exists, abort
+            setFiles({ ...prev, [targetPath]: prev[sourcePath] } as any);
+          }}
           sessionId={currentProSessionId}
           onRestoreVersion={(restoredFiles: any, commitMsg: string) => {
             setFiles(restoredFiles);

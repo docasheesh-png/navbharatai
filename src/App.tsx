@@ -144,6 +144,28 @@ const LS_EVICTABLE = [
 ];
 
 /** localStorage.setItem that auto-evicts large non-essential keys on QuotaExceededError. */
+// D21: derive a human-friendly app name from the user's build prompt
+function inferAppName(prompt: string): string {
+  const p = prompt.trim();
+  // "build/create/make/design/generate a(n)? X (app|tool|dashboard|...)"
+  const m1 = p.match(/(?:build|create|make|generate|design)\s+(?:me\s+)?(?:a|an|the)?\s*([a-zA-Z][a-zA-Z\s]{1,28}?)(?:\s+(?:app|application|website|web\s*app|dashboard|tool|platform|system|tracker|manager|portal|page|site))?\s*(?:with|using|in\b|that|which|\.|,|!|\?|$)/i);
+  if (m1 && m1[1].trim().length >= 2) {
+    const words = m1[1].trim().split(/\s+/);
+    if (words.length <= 5) {
+      return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    }
+  }
+  // Direct "X app" / "X dashboard" / "X tool"
+  const m2 = p.match(/\b([A-Za-z][a-zA-Z\s]{1,25}?)\s+(?:app|dashboard|tool|tracker|manager|website|portal)\b/i);
+  if (m2) {
+    const words = m2[1].trim().split(/\s+/);
+    if (words.length >= 1 && words.length <= 4) {
+      return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    }
+  }
+  return 'NavBharat App';
+}
+
 function safeLS(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
@@ -1183,8 +1205,18 @@ export default function App() {
         setShowCommandPalette(p => !p);
         return;
       }
-      // Escape — close command palette
-      if (e.key === 'Escape') { setShowCommandPalette(false); return; }
+      // L7: Escape — close command palette and any open modal overlay
+      if (e.key === 'Escape') {
+        if (showCommandPalette) { setShowCommandPalette(false); return; }
+        if (showAuth) { setShowAuth(false); return; }
+        if (showVishwakarmaChooser) { setShowVishwakarmaChooser(false); return; }
+        if (showVishwakarmaUnlockModal) { setShowVishwakarmaUnlockModal(false); return; }
+        if (showCheckoutModal) { setShowCheckoutModal(false); return; }
+        if (showPurchaseFormPanel) { setShowPurchaseFormPanel(false); return; }
+        if (showDeployPanel) { setShowDeployPanel(false); return; }
+        if (showContinueModal) { setShowContinueModal(false); return; }
+        return;
+      }
       // 9.1 Undo/Redo (not in input fields)
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey && !inInput) {
         if (canUndo) { e.preventDefault(); undoCode(); addToast('Undone ✓', 'info'); }
@@ -1195,7 +1227,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canUndo, canRedo, undoCode, redoCode, addToast]);
+  }, [canUndo, canRedo, undoCode, redoCode, addToast, showCommandPalette, showAuth, showVishwakarmaChooser, showVishwakarmaUnlockModal, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, showContinueModal]);
 
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const saved = localStorage.getItem('navbharat_keys');
@@ -2018,6 +2050,7 @@ ${buildLanguageRule(preferredLanguage)}`;
       let errMsg = "AI request failed.";
 
       if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') errMsg = "Network connection failed. Please check your internet or the backend availability.";
+      else if (error.response?.status === 401) errMsg = "API key invalid or expired. Go to Settings → Secrets & Keys to update your key.";
       else if (error.response?.status === 500) errMsg = "Backend runtime failure detected.";
       else if (error.response?.status === 403) errMsg = "AI permission/authentication failure detected.";
       else if (error.message.includes('failed to fetch')) errMsg = "Frontend could not reach backend service.";
@@ -2296,10 +2329,13 @@ ${buildLanguageRule(preferredLanguage)}`;
     }
   };
 
+  // K4: debounce preview rebuild so rapid edits don't trigger a rebuild on every keystroke
+  const previewDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleFileChange = (path: string, content: string) => {
     setFiles(prev => {
       const next = { ...prev, [path]: content };
-      updatePreview(next);
+      if (previewDebounceRef.current) clearTimeout(previewDebounceRef.current);
+      previewDebounceRef.current = setTimeout(() => { updatePreview(next); }, 400);
       return next;
     });
   };
@@ -3469,13 +3505,18 @@ ${buildLanguageRule(preferredLanguage)}`;
                 ...(vr.missingWires || []).map((id: string) => `⚠️ Unwired button: #${id}`),
                 ...(vr.syntaxIssues || []).map((s: string) => `⚠️ ${s}`),
               ];
+              // D9: if repairs were attempted but issues remain, show that explicitly
+              const repairFailNote = !vr.passed && (vr.repairsApplied ?? 0) > 0
+                ? `> 🔧 ${vr.repairsApplied} auto-repair attempt${vr.repairsApplied > 1 ? 's' : ''} could not fully resolve the issues above. Ask me to fix them.`
+                : '';
               validationSection = [
                 ``,
                 `**Quality Check** ${scoreEmoji} Score: ${score}/100`,
                 vr.passed
                   ? `> ✅ All checks passed${vr.repairsApplied > 0 ? ` (${vr.repairsApplied} auto-repair${vr.repairsApplied > 1 ? 's' : ''} applied)` : ''}`
                   : issues.map((i: string) => `> ${i}`).join('\n'),
-              ].join('\n');
+                repairFailNote,
+              ].filter(Boolean).join('\n');
             }
             const deployGuide = meta.deploymentGuide;
             const deploySection = deployGuide
@@ -3510,7 +3551,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               text: processLog + '\n\n__VIEW_PREVIEW____DEPLOY_ACTIONS__',
               sender: 'ai',
               timestamp: new Date(),
-              meta: { deployFiles: builtFiles, appName: meta.appName || 'NavBharatAI-App', suggestions: meta.followUpSuggestions || [] } as any,
+              meta: { deployFiles: builtFiles, appName: meta.appName || inferAppName(messageToSend), suggestions: meta.followUpSuggestions || [] } as any,
             }]);
             // Keep the green tick visible for 2 seconds before hiding the progress bar.
             setTimeout(() => {
@@ -3951,7 +3992,7 @@ ${buildLanguageRule(preferredLanguage)}`;
                     timestamp: new Date(),
                     meta: {
                       deployFiles: evt.files,
-                      appName: evt.appName || 'NavBharatAI-App',
+                      appName: evt.appName || inferAppName(messageToSend),
                       suggestions,
                     } as any,
                   }]);
@@ -4327,10 +4368,14 @@ ${buildLanguageRule(preferredLanguage)}`;
         }
       } catch (err) {
         console.error('Error fetching session from Firestore:', err);
+        // F4: surface Firestore restore failures to the user
+        addToast('Failed to load session from cloud. Please try again.', 'error');
       }
     }
-    
+
     if (!targetSession) {
+      // F4: inform user when session is not found
+      addToast('Session not found. It may have been deleted or is from a different account.', 'error');
       return false;
     }
     
@@ -5039,7 +5084,7 @@ ${buildLanguageRule(preferredLanguage)}`;
   const themeClasses = getThemeClasses(theme);
 
   return (
-    <div 
+    <div
       className={cn("h-screen supports-[height:100dvh]:h-[100dvh] w-screen flex flex-col overflow-hidden transition-colors duration-500", themeClasses.bg, themeClasses.text)}
       style={{
         // @ts-ignore
@@ -5049,6 +5094,13 @@ ${buildLanguageRule(preferredLanguage)}`;
         '--theme-card': themeClasses.raw.card
       }}
     >
+      {/* L3: skip to main content for keyboard/screen-reader users */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[9999] focus:px-4 focus:py-2 focus:bg-indigo-600 focus:text-white focus:rounded-xl focus:text-sm focus:font-bold"
+      >
+        Skip to main content
+      </a>
       <TopNav
         themeClasses={themeClasses}
         effectiveDeviceMode={effectiveDeviceMode}
@@ -5070,6 +5122,8 @@ ${buildLanguageRule(preferredLanguage)}`;
         setShowAuth={setShowAuth}
         setShowCommandPalette={setShowCommandPalette}
         auth={auth}
+        theme={theme}
+        setTheme={setTheme}
       />
 
       {/* Main Content Area */}
@@ -5099,7 +5153,7 @@ ${buildLanguageRule(preferredLanguage)}`;
         setErrorContext={setErrorContext}
       />
       {/* Workspace */}
-      <main className="flex flex-1 relative min-h-0 min-w-0">
+      <main id="main-content" className="flex flex-1 relative min-h-0 min-w-0">
 
         {/* View Switcher Output — wrapped in ErrorBoundary + Suspense for lazy-loaded components */}
         <ErrorBoundary>
@@ -5605,12 +5659,14 @@ ${buildLanguageRule(preferredLanguage)}`;
                 key={id}
                 disabled={isDisabled}
                 onClick={() => { if (!isDisabled) toggleTab(id); }}
-                className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-all active:scale-90 ${
+                aria-label={label}
+                aria-current={isActive ? 'page' : undefined}
+                className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${
                   isActive ? 'text-indigo-400' : isDisabled ? 'text-white/20' : 'text-[#484f58]'
                 }`}
               >
-                <Icon className={`w-5 h-5 ${isActive ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />
-                <span className={`text-[9px] font-black uppercase tracking-widest leading-none ${isActive ? 'text-indigo-400' : ''}`}>{label}</span>
+                <Icon className={`w-5 h-5 shrink-0 ${isActive ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />
+                <span className={`text-[9px] font-black uppercase tracking-wider leading-none truncate max-w-full px-0.5 ${isActive ? 'text-indigo-400' : ''}`}>{label}</span>
                 {isActive && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}
               </button>
             );

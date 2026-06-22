@@ -185,7 +185,7 @@ export function AppModals({
       {/* Agent Vishwakarma Premium Access Modal */}
       <AnimatePresence>
         {showVishwakarmaUnlockModal && (
-          <div className="fixed inset-0 bg-[#0d1117]/95 backdrop-blur-md flex items-start md:items-center justify-center p-3 pt-24 md:pt-4 z-[9999] overflow-y-auto">
+          <div className="fixed inset-0 bg-[#0d1117]/95 backdrop-blur-md flex items-start md:items-center justify-center p-3 pt-24 md:pt-4 z-[9999] overflow-y-auto modal-scroll-lock">
             <motion.div
               initial={{ scale: 0.96, y: 15, opacity: 0 }}
               animate={{ scale: 1, y: 0, opacity: 1 }}

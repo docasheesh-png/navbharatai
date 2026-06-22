@@ -294,13 +294,13 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
   // Only actual content changes (new build, tag mode toggle) should reload.
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const writtenSrcRef = useRef<string>('');
+  // H13: fade state for smooth preview refresh transition
+  const [previewOpacity, setPreviewOpacity] = useState(1);
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe || previewSrc === writtenSrcRef.current) return;
-    // Write into the iframe's document. CRITICAL: mark `writtenSrcRef` only AFTER
-    // a real write succeeds — marking it up front (the old bug) meant that if the
-    // doc wasn't ready yet (freshly-mounted iframe via the `key`/conditional-mount),
-    // we recorded it as written but never actually wrote → permanently blank preview.
+    // H13: fade out, then write, then fade in
+    setPreviewOpacity(0);
     const write = () => {
       try {
         const doc = iframe.contentDocument || iframe.contentWindow?.document;
@@ -309,16 +309,21 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
           doc.write(previewSrc || '');
           doc.close();
           writtenSrcRef.current = previewSrc || '';
+          // H19: scroll preview to top after rebuild
+          try { iframe.contentWindow?.scrollTo(0, 0); } catch { /* cross-origin */ }
+          requestAnimationFrame(() => setPreviewOpacity(1));
         }
       } catch { /* cross-origin guard */ }
     };
-    write();
+    // Short delay so the fade-out renders before content is replaced
+    const t = setTimeout(write, 80);
     // If the doc wasn't ready (write didn't take), retry once when the fresh
     // iframe fires its load event.
     if (writtenSrcRef.current !== (previewSrc || '')) {
       iframe.addEventListener('load', write, { once: true });
-      return () => iframe.removeEventListener('load', write);
+      return () => { clearTimeout(t); iframe.removeEventListener('load', write); };
     }
+    return () => clearTimeout(t);
   }, [previewSrc]);
 
   return (
@@ -543,6 +548,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
                 key={tagMode ? 'tag' : 'preview'}
                 title="App Preview"
                 className="w-full h-full bg-white border-none"
+                style={{ opacity: previewOpacity, transition: 'opacity 0.15s ease' }}
                 sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
               />
             ) : (

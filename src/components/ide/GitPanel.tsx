@@ -1909,8 +1909,21 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   </div>
                 </div>
 
+                {/* J17: PR creation link after GitHub push */}
+                {selectedPlatform === 'github' && configs.github.branch && configs.github.branch !== 'main' && configs.github.branch !== 'master' && (
+                  <a
+                    href={`${deployedUrl}/compare/main...${encodeURIComponent(configs.github.branch)}?expand=1`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 w-full py-2 rounded-xl bg-indigo-900/30 border border-indigo-500/30 text-indigo-300 text-[9px] font-black uppercase tracking-widest hover:bg-indigo-900/50 transition-all"
+                  >
+                    <Github className="w-3 h-3" />
+                    Create Pull Request on GitHub
+                  </a>
+                )}
+
                 <div className="flex items-center gap-2 justify-end pt-1">
-                  <button 
+                  <button
                     onClick={() => {
                       if(confirm('Are you sure you want to perform zero-downtime rollback to the previous build instance?')) {
                         setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Rollback request approved. Pointing routing weights to previous branch build... Done!`]);
@@ -1921,7 +1934,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   >
                     Rollback Version
                   </button>
-                  <button 
+                  <button
                     onClick={() => {
                       window.open(deployedUrl, '_blank');
                     }}

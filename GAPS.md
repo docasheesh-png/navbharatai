@@ -264,13 +264,13 @@
 | H10 | No preview screenshot download | `[ ]` | |
 | H11 | Preview iframe has no title (accessibility) | `[x]` | existing |
 | H12 | Preview doesn't show dimensions (width x height) | `[x]` | #166 |
-| H13 | Preview refresh animation is abrupt (no fade) | `[ ]` | |
+| H13 | Preview refresh animation is abrupt (no fade) | `[x]` | #167 |
 | H14 | No "responsive" breakpoint preview (mobile/tablet/desktop) | `[x]` | #166 |
 | H15 | Preview panel header takes too much vertical space on mobile | `[ ]` | |
 | H16 | Preview error overlay doesn't show which file caused the error | `[ ]` | |
 | H17 | Preview doesn't handle loading fonts (flash of unstyled text) | `[ ]` | |
 | H18 | No "Rotate device" button (landscape/portrait simulation) | `[ ]` | |
-| H19 | Preview doesn't scroll to top after rebuild | `[ ]` | |
+| H19 | Preview doesn't scroll to top after rebuild | `[x]` | #167 |
 | H20 | "Fix Bug" in preview overlay sends wrong context sometimes | `[ ]` | |
 
 ---
@@ -279,7 +279,7 @@
 
 | # | Gap | Status | PR |
 |---|-----|--------|----|
-| I1 | Deploy success URL not clickable / no copy button | `[ ]` | |
+| I1 | Deploy success URL not clickable / no copy button | `[x]` | #167 |
 | I2 | No redeploy button after first deployment | `[ ]` | |
 | I3 | No deployment history panel | `[ ]` | |
 | I4 | Deploy modal does not show step-by-step progress | `[ ]` | |
@@ -317,7 +317,7 @@
 | J14 | No git blame view | `[ ]` | |
 | J15 | Commit message has no character limit warning (50/72 chars) | `[x]` | #167 |
 | J16 | No "Sync with remote" (pull + push in one click) | `[ ]` | |
-| J17 | PR creation link not shown after push | `[ ]` | |
+| J17 | PR creation link not shown after push | `[x]` | #167 |
 | J18 | No GitHub PR list view in Git panel | `[ ]` | |
 | J19 | No "Open file in GitHub" link | `[ ]` | |
 | J20 | No SSH key setup guide | `[ ]` | |

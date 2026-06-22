@@ -10,6 +10,7 @@ import {
   extractCode,
   classifyBuildIntent,
   classifyAutoIntent,
+  dedupAndSortMessages,
 } from '../src/lib/chatUtils';
 
 // ─── generateUCI ─────────────────────────────────────────────────────────────
@@ -232,5 +233,42 @@ describe('classifyAutoIntent', () => {
 
   it('returns "direct_build" for a simple build request', () => {
     expect(classifyAutoIntent('build a todo app', noHistory)).toBe('direct_build');
+  });
+});
+
+// ─── dedupAndSortMessages ────────────────────────────────────────────────────
+
+describe('dedupAndSortMessages', () => {
+  const mk = (id: string, ts: string, text = ''): Message =>
+    ({ id, text, sender: 'user', timestamp: ts } as unknown as Message);
+
+  it('removes duplicate ids (last write wins)', () => {
+    const result = dedupAndSortMessages([
+      mk('1', '2024-01-01T00:00:00Z', 'old'),
+      mk('1', '2024-01-01T00:00:00Z', 'new'),
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toBe('new');
+  });
+
+  it('sorts by ascending timestamp', () => {
+    const result = dedupAndSortMessages([
+      mk('b', '2024-01-03T00:00:00Z'),
+      mk('a', '2024-01-01T00:00:00Z'),
+      mk('c', '2024-01-02T00:00:00Z'),
+    ]);
+    expect(result.map(m => m.id)).toEqual(['a', 'c', 'b']);
+  });
+
+  it('skips messages without an id', () => {
+    const result = dedupAndSortMessages([
+      mk('1', '2024-01-01T00:00:00Z'),
+      { text: 'no id', sender: 'ai', timestamp: '2024-01-02T00:00:00Z' } as unknown as Message,
+    ]);
+    expect(result).toHaveLength(1);
+  });
+
+  it('returns an empty array for empty input', () => {
+    expect(dedupAndSortMessages([])).toEqual([]);
   });
 });

@@ -177,3 +177,18 @@ export function classifyAutoIntent(
   if (hasBuildVerb && isComplex) return 'plan_build';
   return 'direct_build';
 }
+
+/**
+ * Deduplicate messages by id and return them sorted by ascending timestamp.
+ * Used when restoring a session: combines restoredMessages + messages, drops
+ * duplicates (last write wins), and produces a stable chronological history.
+ */
+export function dedupAndSortMessages(messages: Message[]): Message[] {
+  const byId: Record<string, Message> = {};
+  for (const msg of messages) {
+    if (msg && msg.id) byId[msg.id] = msg;
+  }
+  return Object.values(byId).sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+  );
+}

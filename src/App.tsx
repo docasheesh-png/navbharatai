@@ -90,7 +90,7 @@ import {
 } from './lib/appUtils';
 import {
   generateUCI, getRandomElement, generateSmartHeuristicSummary,
-  extractCode, classifyBuildIntent, classifyAutoIntent,
+  extractCode, classifyBuildIntent, classifyAutoIntent, dedupAndSortMessages,
 } from './lib/chatUtils';
 import {
   stripFences, buildSourceAppPreview, buildUniversalPreview, injectHarness,
@@ -4309,15 +4309,8 @@ ${buildLanguageRule(preferredLanguage)}`;
     const targetAgent = targetSession.agent || 'navbharatai';
     const isVishwakarma = targetAgent.startsWith('vishwakarma');
     
-    // Build combined list of old messages to collapse
-    const combinedHistory = [...(targetSession.restoredMessages || []), ...targetSession.messages];
-    const uniqueHistoryMap: Record<string, Message> = {};
-    combinedHistory.forEach(msg => {
-      if (msg && msg.id) uniqueHistoryMap[msg.id] = msg;
-    });
-    const uniqueHistory = Object.values(uniqueHistoryMap).sort((a, b) => {
-      return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-    });
+    // Build combined list of old messages to collapse (dedup by id + sort by time)
+    const uniqueHistory = dedupAndSortMessages([...(targetSession.restoredMessages || []), ...targetSession.messages]);
 
     let memSummary = targetSession.memorySummary || '';
     if (!memSummary && uniqueHistory.length > 0) {

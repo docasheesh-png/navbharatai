@@ -381,7 +381,8 @@ export const AIChat: React.FC<AIChatProps> = ({
   }, [isLoading]);
 
   const [showModeDropdown, setShowModeDropdown] = useState(false);
-const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
+  const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [liked, setLiked] = useState<Record<string, boolean>>({});
   const [disliked, setDisliked] = useState<Record<string, boolean>>({});
   const [showReport, setShowReport] = useState<Record<string, boolean>>({});
@@ -468,6 +469,13 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
     } finally {
       setIsRestoring(false);
     }
+  };
+
+  const formatMsgTime = (ts: Date | string | undefined): string => {
+    if (!ts) return '';
+    const d = ts instanceof Date ? ts : new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   const parseMessageAndTriggers = (msg: Message) => {
@@ -712,15 +720,15 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
 
         {/* Interaction Controls */}
         <div className="flex gap-2 mt-3 pt-2 border-t border-white/5 items-center">
-            <button onClick={() => { navigator.clipboard.writeText(cleanText); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-1 hover:bg-white/10 rounded text-gray-500 hover:text-white">
+            <button onClick={() => { navigator.clipboard.writeText(cleanText); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-1 hover:bg-white/10 rounded text-gray-500 hover:text-white" title="Copy">
                 {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
             </button>
             {isAI && (
                 <>
-                    <button onClick={() => setLiked({...liked, [msg.id]: !liked[msg.id]})} className={cn("p-1 hover:bg-white/10 rounded", liked[msg.id] ? "text-emerald-400" : "text-gray-500 hover:text-white")}>
+                    <button onClick={() => setLiked({...liked, [msg.id]: !liked[msg.id]})} className={cn("p-1 hover:bg-white/10 rounded", liked[msg.id] ? "text-emerald-400" : "text-gray-500 hover:text-white")} title="Helpful">
                         <ThumbsUp className="w-3 h-3" />
                     </button>
-                    <button onClick={() => { setDisliked({...disliked, [msg.id]: !disliked[msg.id]}); setShowReport({...showReport, [msg.id]: !showReport[msg.id]})}} className={cn("p-1 hover:bg-white/10 rounded", disliked[msg.id] ? "text-rose-400" : "text-gray-500 hover:text-white")}>
+                    <button onClick={() => { setDisliked({...disliked, [msg.id]: !disliked[msg.id]}); setShowReport({...showReport, [msg.id]: !showReport[msg.id]})}} className={cn("p-1 hover:bg-white/10 rounded", disliked[msg.id] ? "text-rose-400" : "text-gray-500 hover:text-white")} title="Not helpful">
                         <ThumbsDown className="w-3 h-3" />
                     </button>
                 </>
@@ -976,6 +984,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
             const lineCount = ((cleanedText || '').match(/\n/g) || []).length + 1;
             const isLongMessage = cleanedText.length > 220 || lineCount > 4;
 
+            const isLastAI = msg.sender === 'ai' && index === messages.length - 1 && !isLoading;
             return (
               <motion.div
                 layout
@@ -983,7 +992,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 key={msg.id}
                 className={cn(
-                  "flex flex-col space-y-2",
+                  "flex flex-col space-y-2 group/msg",
                   msg.sender === 'user' ? "items-end" : "items-start"
                 )}
               >
@@ -1052,8 +1061,34 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                   <span className="text-[7px] font-black text-[#484f58] uppercase tracking-widest">
                     {msg.sender === 'user' ? 'YOU' : activeAgent.toUpperCase().replace('_', ' ')}
                   </span>
+                  {msg.timestamp && (
+                    <span className="text-[7px] text-[#30363d] font-mono">{formatMsgTime(msg.timestamp)}</span>
+                  )}
                   {msg.sender === 'user' && <User className="w-2.5 h-2.5 text-indigo-400" />}
+                  {/* Copy message button — appears on hover */}
+                  <button
+                    onClick={() => {
+                      const t = msg.text || '';
+                      navigator.clipboard.writeText(t).catch(() => {});
+                      setCopiedMsgId(msg.id);
+                      setTimeout(() => setCopiedMsgId(null), 1500);
+                    }}
+                    title="Copy message"
+                    className="opacity-0 group-hover/msg:opacity-100 transition-opacity p-0.5 hover:bg-white/10 rounded text-[#484f58] hover:text-white"
+                  >
+                    {copiedMsgId === msg.id ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
+                  </button>
                 </div>
+                {/* B3 — Regenerate: only on the last AI message */}
+                {isLastAI && onSendSuggestion && (
+                  <button
+                    onClick={() => { if (messages.length > 0) onSendSuggestion(messages.filter(m => m.sender === 'user').at(-1)?.text || '__REGENERATE__'); }}
+                    title="Regenerate response"
+                    className="flex items-center gap-1 px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-lg bg-white/5 hover:bg-white/10 text-[#484f58] hover:text-white border border-white/5 transition-all"
+                  >
+                    ↺ Retry
+                  </button>
+                )}
               </motion.div>
             );
           })}
@@ -1298,7 +1333,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                       e.target.style.height = 'auto';
                       e.target.style.height = `${Math.min(e.target.scrollHeight, 240)}px`;
                     }}
-                    placeholder="Ask navBharatAI..."
+                    placeholder="Ask NavBharatAI..."
                     rows={1}
                     className={cn(
                       "w-full bg-transparent text-[var(--theme-text)] pr-24 py-3.5 text-xs outline-none transition-all resize-none min-h-[48px] leading-relaxed text-[16px]",
@@ -1358,12 +1393,33 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                   </div>{/* end inner flex row */}
             </div>{/* end rounded input container */}
 
-{isPinned && (
-            <div className="mt-2 flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">
-              <Zap className="w-2 h-2 fill-current" />
-              Pinned
+            {/* B4 — character count + B5 clear chat */}
+            <div className="flex items-center justify-between px-1 mt-1">
+              <div className="flex items-center gap-2">
+                {isPinned && (
+                  <div className="flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">
+                    <Zap className="w-2 h-2 fill-current" />
+                    Pinned
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {input.length > 60 && (
+                  <span className={`text-[9px] font-mono ${input.length > 1000 ? 'text-amber-400' : 'text-[#484f58]'}`}>
+                    {input.length}
+                  </span>
+                )}
+                {messages.length > 0 && (
+                  <button
+                    onClick={() => { if (window.confirm('Clear conversation?')) { /* parent handles via onSend with special signal */ onSendSuggestion?.('__CLEAR_CHAT__'); } }}
+                    title="Clear conversation"
+                    className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
-          )}
         </div>
       </div>
     </div>

@@ -14,8 +14,8 @@
  * passed in. Editing a file calls back to onFilesChange so the single source of
  * truth stays in App.
  */
-import React, { useState, useMemo } from 'react';
-import { Eye, Code2, Maximize2, Rocket, FileCode } from 'lucide-react';
+import React, { useState, useMemo, useRef } from 'react';
+import { Eye, Code2, Maximize2, Rocket, FileCode, RefreshCw, ExternalLink } from 'lucide-react';
 import { Editor } from '../ide/Editor';
 import { PreviewPanel } from '../ide/PreviewPanel';
 import type { Tab } from '../../types/ide';
@@ -79,6 +79,7 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
   const [pane, setPane] = useState<Pane>('preview');
   const [activeFile, setActiveFile] = useState<string>('');
   const [openTabs, setOpenTabs] = useState<Tab[]>([]);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const filePaths = useMemo(() => Object.keys(files).sort(), [files]);
 
@@ -129,6 +130,31 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
           </button>
         </div>
         <div className="flex items-center gap-1">
+          {pane === 'preview' && (
+            <>
+              <button
+                onClick={() => setReloadKey(k => k + 1)}
+                title="Reload preview"
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold text-[#8b949e] hover:text-white hover:bg-white/5 transition-all"
+              >
+                <RefreshCw className="w-3 h-3" />
+              </button>
+              {generatedCode && (
+                <button
+                  onClick={() => {
+                    const blob = new Blob([generatedCode], { type: 'text/html' });
+                    const url = URL.createObjectURL(blob);
+                    window.open(url, '_blank');
+                    setTimeout(() => URL.revokeObjectURL(url), 5000);
+                  }}
+                  title="Open preview in new tab"
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold text-[#8b949e] hover:text-white hover:bg-white/5 transition-all"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              )}
+            </>
+          )}
           {canDeploy && onDeploy && (
             <button
               onClick={onDeploy}
@@ -152,6 +178,7 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
       <div className="flex-1 min-h-0 overflow-hidden">
         {pane === 'preview' ? (
           <PreviewPanel
+            key={reloadKey}
             files={files}
             onRun={() => onRun(files)}
             generatedCode={generatedCode}

@@ -72,7 +72,7 @@
 | B10 | Code blocks in chat have no file name header | `[ ]` | |
 | B11 | Code blocks in chat have no line numbers | `[ ]` | |
 | B12 | Code blocks in chat not syntax-highlighted in all languages | `[ ]` | |
-| B13 | Long AI messages have no "Collapse" toggle | `[ ]` | |
+| B13 | Long AI messages have no "Collapse" toggle | `[x]` | existing |
 | B14 | No keyboard shortcut to focus input (Ctrl+K or /) | `[x]` | #166 |
 | B15 | Chat history scroll position lost when switching tabs | `[ ]` | |
 | B16 | No "Export chat" to markdown/PDF | `[ ]` | |
@@ -103,8 +103,8 @@
 | C4 | No "New Folder" button in Files panel | `[s]` | VFS flat namespace |
 | C5 | File list not sortable (by name, type, size, modified) | `[ ]` | |
 | C6 | No search / filter input in Files panel | `[x]` | #165 |
-| C7 | No file size shown in file list | `[ ]` | |
-| C8 | No "Copy file path" button | `[ ]` | |
+| C7 | No file size shown in file list | `[x]` | #166 |
+| C8 | No "Copy file path" button | `[x]` | #166 |
 | C9 | No multi-file selection for bulk delete/download | `[ ]` | |
 | C10 | No image preview for .png/.jpg/.svg files | `[ ]` | |
 | C11 | No binary file warning (tries to show binary as text) | `[ ]` | |
@@ -200,7 +200,7 @@
 |---|-----|--------|----|
 | F1 | Error toasts disappear too quickly (3s on errors) | `[ ]` | |
 | F2 | Network errors and AI errors look identical in the UI | `[ ]` | |
-| F3 | No offline banner in the app header | `[ ]` | |
+| F3 | No offline banner in the app header | `[x]` | #166 |
 | F4 | Session restore failures are silent | `[ ]` | |
 | F5 | Preview runtime errors don't highlight the failing file in Files panel | `[ ]` | |
 | F6 | No error log / history panel (only see last error) | `[ ]` | |
@@ -262,7 +262,7 @@
 | H8 | Preview doesn't respect system dark/light preference | `[ ]` | |
 | H9 | Console errors from preview not surfaced in chat | `[ ]` | |
 | H10 | No preview screenshot download | `[ ]` | |
-| H11 | Preview iframe has no title (accessibility) | `[ ]` | |
+| H11 | Preview iframe has no title (accessibility) | `[x]` | existing |
 | H12 | Preview doesn't show dimensions (width x height) | `[ ]` | |
 | H13 | Preview refresh animation is abrupt (no fade) | `[ ]` | |
 | H14 | No "responsive" breakpoint preview (mobile/tablet/desktop) | `[x]` | #166 |

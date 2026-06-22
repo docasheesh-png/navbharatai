@@ -454,6 +454,16 @@ export const AIChat: React.FC<AIChatProps> = ({
     setTimeout(() => setShared(false), 2000);
   };
 
+  // F3: Offline detection
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const up = () => setIsOnline(true);
+    const down = () => setIsOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down); };
+  }, []);
+
   // B14: Ctrl+K / Cmd+K focuses the input
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -760,6 +770,13 @@ export const AIChat: React.FC<AIChatProps> = ({
 
   return (
     <div className="flex flex-col h-full min-h-0 max-h-full bg-[var(--theme-bg)] transition-colors duration-500 overflow-hidden relative">
+      {/* F3: Offline banner */}
+      {!isOnline && (
+        <div className="shrink-0 bg-amber-600 px-3 py-1.5 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest text-white">
+          <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+          No internet connection — messages may not send
+        </div>
+      )}
       {/* In-chat image lightbox */}
       {lightbox && (
         <div

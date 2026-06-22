@@ -9,7 +9,7 @@
  * Owns the hidden file input ref internally.
  */
 import React, { useRef, useState, useEffect } from 'react';
-import { FolderOpen, Upload, Download, FileCode, ChevronRight, History, GitCommit, RotateCcw, Loader2, Plus, Trash2, Pencil, Check, X } from 'lucide-react';
+import { FolderOpen, Upload, Download, FileCode, ChevronRight, History, GitCommit, RotateCcw, Loader2, Plus, Trash2, Pencil, Check, X, Copy } from 'lucide-react';
 import { listBuildHistory, fetchBuildVersion } from '../../services/buildService';
 import type { VersionMeta } from '../../services/buildService';
 
@@ -249,7 +249,10 @@ export function FilesPanel({
                   .map(([path, content]) => {
                     const ext = path.split('.').pop() || '';
                     const color = EXT_COLOR[ext] || 'text-white/50';
-                    const lines = (content as string).split('\n').length;
+                    const contentStr = content as string;
+                    const lines = contentStr.split('\n').length;
+                    const bytes = contentStr.length;
+                    const sizeLabel = bytes < 1024 ? `${bytes}B` : `${(bytes / 1024).toFixed(1)}K`;
                     const isRenaming = renamingPath === path;
                     return (
                       <div key={path} className="group flex items-center gap-1 rounded-xl hover:bg-white/5 transition-colors">
@@ -273,10 +276,17 @@ export function FilesPanel({
                             >
                               <FileCode className={`w-4 h-4 flex-shrink-0 ${color}`} />
                               <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{path}</span>
-                              <span className="text-[8px] text-[#484f58] font-mono shrink-0">{lines}L</span>
+                              <span className="text-[8px] text-[#484f58] font-mono shrink-0">{lines}L · {sizeLabel}</span>
                             </button>
-                            {/* C1/C2 — rename + delete (appear on hover) */}
+                            {/* C1/C2/C8 — copy path, rename, delete (appear on hover) */}
                             <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                              <button
+                                onClick={() => navigator.clipboard.writeText(path).catch(() => {})}
+                                title="Copy file path"
+                                className="p-1 text-[#484f58] hover:text-white rounded transition-colors"
+                              >
+                                <Copy className="w-2.5 h-2.5" />
+                              </button>
                               {onRenameFile && (
                                 <button
                                   onClick={() => { setRenamingPath(path); setRenameValue(path); }}

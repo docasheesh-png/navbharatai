@@ -704,6 +704,16 @@ Additional test files (this session):
 
 tsc x2 clean (0 errors), vitest 1345/1345 green.
 
+**Extended — 1379 tests / 176 test files (2026-06-22, session 6):**
+
+Additional test files (this session):
+- `tests/previewUtils.test.ts` — stripFences (5), injectHarness (6), buildUniversalPreview (3) = 14 tests
+- `tests/firestoreUtils.test.ts` — sanitizeFirestoreData recursive null-replacement (7 tests)
+- Refactor: extracted PREVIEW_HARNESS, PREVIEW_BOOTSTRAP, UNIVERSAL_VIEWER_CSS/JS, stripFences, buildSourceAppPreview, buildUniversalPreview, injectHarness from App.tsx → `src/lib/previewUtils.ts`; extracted sanitizeFirestoreData → `src/lib/firestoreUtils.ts` (re-exported for SDAChat backward compat)
+- App.tsx: **5,861 lines** (down from 10,658 original = 45% total reduction; down from 6,610 before this session)
+
+tsc x2 clean (0 errors), vitest 1379/1379 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

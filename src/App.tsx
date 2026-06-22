@@ -1299,6 +1299,25 @@ export default function App() {
     return unsubscribe;
   }, []);
 
+  // Admin login = full app access. When the admin is signed in (separate server
+  // password auth), treat them as a logged-in user so the app never forces the
+  // Firebase login modal. A real Firebase sign-in always takes precedence; the
+  // synthetic identity is cleared on admin logout. The app only reads
+  // user.uid / email / displayName (no Firebase methods), so this is safe.
+  useEffect(() => {
+    if (isAdmin && !user) {
+      setUser({
+        uid: 'admin',
+        email: 'admin@navbharatai.in',
+        displayName: 'Admin',
+        photoURL: null,
+      } as unknown as FirebaseUser);
+      setLoadingUser(false);
+    } else if (!isAdmin && user && (user as { uid?: string }).uid === 'admin') {
+      setUser(null);
+    }
+  }, [isAdmin, user]);
+
   const MAX_UPLOAD_BYTES = 2 * 1024 * 1024; // 2 MB
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logoUrl' | 'qrUrl') => {
     const file = e.target.files?.[0];

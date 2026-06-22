@@ -121,6 +121,7 @@ import {
 import { pickGreetingForAgent } from './lib/agentGreetings';
 import { validateDeployInput, buildDeployBody } from './lib/deployRequest';
 import { isZipFile, isTextFile, classifyZipSize } from './lib/uploadClassify';
+import { resolveSessionSurface } from './lib/sessionRouting';
 import {
   DEFAULT_HOME_DATA,
   DEFAULT_ABOUT_DATA,
@@ -4351,11 +4352,8 @@ ${buildLanguageRule(preferredLanguage)}`;
     
     // Detect target tab — use saved tab field first, then broad agent/mode detection
     const savedTab = (targetSession as any).meta?.tab as ViewType | undefined;
-    const isProAgent = targetAgent === 'navbharatai-pro' || targetAgent.includes('pro');
     const isVishwakarmaAgent = targetAgent.startsWith('vishwakarma');
-    const isProSession = savedTab === 'nbi_pro_chat' || isProAgent;
-    const isAscSession = savedTab === 'asc_chat' || isVishwakarmaAgent;
-    const isSdaSession = savedTab === 'sda_chat' || targetAgent === 'sda';
+    const { isProSession, isAscSession, isSdaSession, targetTab } = resolveSessionSurface(targetAgent, savedTab);
 
     // Show the last 40 messages from previous conversation so user can scroll up and see context,
     // then append the continuation greeting at the bottom.
@@ -4387,9 +4385,6 @@ ${buildLanguageRule(preferredLanguage)}`;
     }
 
     // Navigate to the correct chat tab — never open preview
-    const targetTab: ViewType = savedTab && ['nbi_chat', 'nbi_pro_chat', 'asc_chat', 'sda_chat'].includes(savedTab)
-      ? savedTab
-      : isAscSession ? 'asc_chat' : isProSession ? 'nbi_pro_chat' : isSdaSession ? 'sda_chat' : 'nbi_chat';
     toggleTab(targetTab);
 
     // Restore activeAgent to match the session

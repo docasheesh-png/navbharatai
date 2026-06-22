@@ -22,7 +22,8 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       return res.status(400).json({ error: 'Invalid order amount' });
     }
 
-    const orderId = `ord_nb_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    // Cryptographically-random suffix avoids the collision/predictability of Math.random()*1000.
+    const orderId = `ord_nb_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
 
     try {
       // Save pending transaction to payment_transactions collection
@@ -245,7 +246,8 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       const isSignatureValid = (signature === expectedV2) || (signature === expectedV1Base64) || (signature === expectedV1Hex);
 
       if (!isSignatureValid) {
-        console.error(`[CASHFREE WEBHOOK] Webhook signature mismatch for order ${orderId}. Got: "${signature}", expected: ["${expectedV2}", "${expectedV1Base64}"]`);
+        // Never log the expected HMACs — they are secret-derived and would let a reader forge signatures.
+        console.error(`[CASHFREE WEBHOOK] Webhook signature mismatch for order ${orderId} — rejecting.`);
         return res.status(401).json({ error: 'Invalid webhook signature' });
       }
 
@@ -269,7 +271,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     res.redirect(`/?payment=check&order_id=${order_id}`);
   });
 
-  app.post('/api/payment/redeem-coupon', async (req: Request, res: Response) => {
+  app.post('/api/payment/redeem-coupon', paymentLimiter, async (req: Request, res: Response) => {
     const db = getDb() as any;
     const { couponCode, userId, userEmail, userName } = req.body;
     if (!userId) return res.status(400).json({ error: 'User is not authenticated' });

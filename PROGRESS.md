@@ -766,6 +766,18 @@ tsc x2 clean (0 errors), vitest 1420/1420 green.
 
 tsc x2 clean (0 errors), vitest 1445/1445 green.
 
+**World-class Chat+IDE (2026-06-22, session 9):**
+
+- `src/components/panels/ProChatPanel.tsx` — resizable split pane: drag handle between chat and workspace (20–80% range), grip dots, wider hit area, indigo hover; auto-opens workspace pane when build completes with files (desktop only).
+
+tsc x2 clean (0 errors), vitest 1445/1445 green.
+
+**Extended — 1450 tests / 183 test files (2026-06-22, session 9 continued):**
+
+- `tests/routesFirebaseAuth.test.ts` (NEW) — 5 tests: registration (all 4 endpoints); GET /api/auth/firebase returns HTML with "Firebase" text; GET /consent and /callback return HTML; POST /connect returns 501.
+
+tsc x2 clean (0 errors), vitest 1450/1450 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

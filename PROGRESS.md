@@ -42,7 +42,8 @@
 - **P5** billing wired: `UserCostStore.record(userId, billedUsd)` (2.5×/5×) + CLAUDE.md admin-override recorded (scoped to AgentV3).
 - Test count grew ~1049 → **1602 passing** (~50 new AgentV3 tests). 
 - **To run live (admin):** set `AGENTV3_ENABLED=true` + `AGENTV3_ALLOWLIST=<admin uid>` + `ANTHROPIC_API_KEY` + `E2B_API_KEY` in Cloud Run; a floating "v3.0" button appears for the admin → full multi-agent builder.
-- **Remaining/next:** P6 cutover (make v3.0 the default, retire old builders) — only after live dogfood; consider BYOK; conversation persistence (D7) backend; wire `update_todo` to an editable UI; GitManager real commits (currently checkpoints are modeled, not yet real git commits in the sandbox).
+- **GitManager (real git commits) DONE** (pushed to #191): sandbox is a real git repo; every write/edit creates a real commit (sandbox-only; best-effort), History shows real SHAs; step caps now env-configurable (AGENTV3_MAX_STEPS=80, AGENTV3_SUBAGENT_MAX_STEPS=40). 1607 tests.
+- **Remaining/next:** P6 cutover (make v3.0 default, retire old builders) — only after live dogfood; conversation persistence (D7) reconnect-durable backend; wire GitManager.restore to a History→restore endpoint (needs persistent sandbox mapping); editable-todo UI (bidirectional); BYOK option. Live run still requires admin to set keys + flag (real Claude+E2B spend) — not exercised in-session (no keys).
 
 **Session 2026-06-22 (c) — Pro v3.0 ("Vargen 3.0") kickoff: parity audit + design doc (DESIGN ONLY, no runtime change):**
 - Earlier this session: 35-bug brutal audit → 28 fixes shipped live (PRs #173–#178, all CI-green) + Cashfree payment-leak fixes.

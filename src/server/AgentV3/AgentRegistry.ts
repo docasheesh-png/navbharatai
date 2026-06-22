@@ -15,7 +15,7 @@ export interface RoleConfig {
   tools: ToolName[];
 }
 
-const WORKER_TOOLS: ToolName[] = ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'update_todo'];
+const WORKER_TOOLS: ToolName[] = ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'update_todo', 'update_preview'];
 const READONLY_TOOLS: ToolName[] = ['read_file', 'grep', 'glob'];
 
 const REGISTRY: Record<AgentRole, RoleConfig> = {

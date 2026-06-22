@@ -17,6 +17,7 @@ export type ToolName =
   | 'grep'
   | 'glob'
   | 'update_todo'
+  | 'update_preview'
   | 'task';
 
 /** The multi-agent team roles (§3.3). 'architect' is the lead/orchestrator. */
@@ -77,6 +78,7 @@ export type AgentEvent =
   | { type: 'agent_spawned'; agent: AgentRole; task: string; ts: number }
   | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
+  | { type: 'preview'; url: string; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number }
   | { type: 'error'; message: string; ts: number };
 

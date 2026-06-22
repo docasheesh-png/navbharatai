@@ -50,6 +50,7 @@ export type AgentV3WireEvent =
   | { type: 'agent_spawned'; agent: AgentRole; task: string; ts: number }
   | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
+  | { type: 'preview'; url: string; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number }
   | { type: 'error'; message: string; ts: number }
   | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number };
@@ -85,6 +86,8 @@ export interface AgentV3ClientState {
   checkpoints: GitCheckpoint[];
   /** Plan-mode text. */
   plan: string;
+  /** Live preview URL (the running app in the sandbox), once published. */
+  previewUrl?: string;
   /** The live "AI Team" tracker, keyed by role (D9). */
   agents: Record<string, AgentCard>;
   /** Internal: bash callId → command, so a tool_result can be routed to the terminal. */

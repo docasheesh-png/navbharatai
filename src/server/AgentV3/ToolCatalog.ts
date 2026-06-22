@@ -84,6 +84,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'update_preview',
+      description:
+        'Publish the live preview URL after you start a dev server. Call this with ' +
+        'the port your dev server is listening on so the user sees the app live as ' +
+        'it builds. Call it again if the port changes.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          port: { type: 'number', description: 'The port the dev server is listening on (e.g. 3000, 5173).' },
+        },
+        required: ['port'],
+      },
+    },
+    {
       name: 'update_todo',
       description: 'Replace the build todo list shown to the user. Use this to plan and track progress.',
       input_schema: {
@@ -119,6 +133,7 @@ export const CATALOG_TOOL_NAMES = [
   'grep',
   'glob',
   'update_todo',
+  'update_preview',
 ] as const;
 
 /**

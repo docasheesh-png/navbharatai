@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
-  History, CheckCircle2, AlertCircle, Rocket,
+  History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import type { AgentCard } from './agentV3Types';
@@ -17,13 +17,13 @@ import type { AgentCard } from './agentV3Types';
  * Self-contained and flag-gated by the server (404 when AgentV3 is disabled), so
  * mounting it never affects the live app.
  */
-type SurfaceTab = 'files' | 'diff' | 'terminal' | 'history';
+type SurfaceTab = 'preview' | 'files' | 'diff' | 'terminal' | 'history';
 
 export function AgentV3Panel({ userId }: { userId?: string }) {
   const { state, running, error, start, stop } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   const [onlyOpus, setOnlyOpus] = useState(false);
-  const [tab, setTab] = useState<SurfaceTab>('files');
+  const [tab, setTab] = useState<SurfaceTab>('preview');
 
   const agents = Object.values(state.agents).sort((a, b) => b.updatedTs - a.updatedTs);
   const diffPaths = Object.keys(state.diffs);
@@ -123,6 +123,9 @@ export function AgentV3Panel({ userId }: { userId?: string }) {
         {/* Right: merged surfaces (Files / Diff / Terminal / History) */}
         <div className="w-1/2 flex flex-col min-h-0">
           <div className="flex border-b border-zinc-800 text-xs">
+            <TabBtn active={tab === 'preview'} onClick={() => setTab('preview')} icon={<Globe className="w-3.5 h-3.5" />}>
+              Preview
+            </TabBtn>
             <TabBtn active={tab === 'files'} onClick={() => setTab('files')} icon={<FolderOpen className="w-3.5 h-3.5" />}>
               Files ({state.files.length})
             </TabBtn>
@@ -137,6 +140,9 @@ export function AgentV3Panel({ userId }: { userId?: string }) {
             </TabBtn>
           </div>
 
+          {tab === 'preview' ? (
+            <PreviewSurface url={state.previewUrl} />
+          ) : (
           <div className="flex-1 overflow-auto p-3 font-mono text-xs">
             {tab === 'files' && (
               state.files.length === 0 ? <Empty>No files yet.</Empty> : (
@@ -179,6 +185,7 @@ export function AgentV3Panel({ userId }: { userId?: string }) {
               )
             )}
           </div>
+          )}
         </div>
       </div>
 
@@ -194,6 +201,27 @@ export function AgentV3Panel({ userId }: { userId?: string }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function PreviewSurface({ url }: { url?: string }) {
+  if (!url) {
+    return (
+      <div className="h-full flex items-center justify-center p-6">
+        <Empty>No live preview yet — it appears here the moment the agent starts the app.</Empty>
+      </div>
+    );
+  }
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
+        <span className="truncate flex-1">{url}</span>
+        <a href={url} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab">
+          <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+      </div>
+      <iframe title="Live preview" src={url} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
     </div>
   );
 }

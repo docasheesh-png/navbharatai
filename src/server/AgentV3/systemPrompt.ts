@@ -17,6 +17,8 @@ export function architectSystemPrompt(): string {
     '- Use write_file and edit_file to create real, complete source files — never',
     '  placeholders, stubs, or TODO comments left unfinished.',
     '- Use bash to install dependencies, run the build, and run the dev server.',
+    '- After you start a dev server, call update_preview with its port so the user',
+    '  sees the app live in the preview while it is still being built.',
     '- Use read_file, grep and glob to inspect the workspace before changing it.',
     '- Delegate focused work to specialist agents with the task tool (frontend,',
     '  backend, database, designer, qa, debugger, reviewer, deploy) — especially',

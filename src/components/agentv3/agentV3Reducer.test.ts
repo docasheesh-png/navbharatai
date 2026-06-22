@@ -62,6 +62,11 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(s.checkpoints[0].sha).toBe('abc123');
   });
 
+  it('stores the live preview URL', () => {
+    const s = agentV3Reducer(initialAgentV3State(), { type: 'preview', url: 'https://app.sandbox.dev', ts: 1 });
+    expect(s.previewUrl).toBe('https://app.sandbox.dev');
+  });
+
   it('marks done/ok/billed on result and error on error', () => {
     const done = agentV3Reducer(initialAgentV3State(), {
       type: 'result',

@@ -2,6 +2,7 @@ import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
 import type { TurnRunner } from './ClaudeClient';
 import type { ActuatorPort, SubAgentSpawn } from './ToolDispatcher';
+import type { Checkpointer } from './GitManager';
 import { ToolDispatcher } from './ToolDispatcher';
 import { AgentRunner } from './AgentRunner';
 import { roleConfig } from './AgentRegistry';
@@ -28,16 +29,20 @@ export interface SubAgentDeps {
   events: AgentEventStream;
   model: string;
   onlyOpus?: boolean;
-  /** Per-sub-agent caps (defaults: 30 steps; budget inherited from parent if unset). */
+  /** Per-sub-agent caps (defaults: 40 steps; budget inherited from parent if unset). */
   maxSteps?: number;
   maxBudgetUsd?: number;
+  /** Real git checkpointer, so sub-agent writes are committed too. */
+  checkpointer?: Checkpointer;
 }
 
 export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
   return async (role: AgentRole, instruction: string) => {
     const cfg = roleConfig(role);
     // A child dispatcher with NO spawn capability → workers cannot recurse.
-    const childDispatcher = new ToolDispatcher(deps.actuator, deps.workspaceId, deps.state, deps.events);
+    const childDispatcher = new ToolDispatcher(
+      deps.actuator, deps.workspaceId, deps.state, deps.events, undefined, deps.checkpointer,
+    );
     const runner = new AgentRunner({
       client: deps.client,
       dispatcher: childDispatcher,
@@ -47,7 +52,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       system: cfg.system,
       tools: catalogForTools(cfg.tools),
       onlyOpus: deps.onlyOpus,
-      maxSteps: deps.maxSteps ?? 30,
+      maxSteps: deps.maxSteps ?? 40,
       maxBudgetUsd: deps.maxBudgetUsd,
       agentRole: role,
     });

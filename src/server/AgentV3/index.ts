@@ -44,6 +44,8 @@ export { roleConfig, isWorkerRole, WORKER_ROLES } from './AgentRegistry';
 export type { RoleConfig } from './AgentRegistry';
 export { makeSubAgentSpawn } from './SubAgent';
 export type { SubAgentDeps } from './SubAgent';
+export { GitManager } from './GitManager';
+export type { Checkpointer, CommandRunner } from './GitManager';
 
 import { AGENTV3_PHASE } from './types';
 

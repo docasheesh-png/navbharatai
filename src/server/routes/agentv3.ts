@@ -16,6 +16,7 @@ import {
   planSystemPrompt,
   awaitApproval,
   resolveApproval,
+  GitManager,
 } from '../AgentV3';
 import { randomUUID } from 'crypto';
 import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
@@ -48,6 +49,11 @@ function buildActuator(): IEngineerActuator {
 function maxBuildBudgetUsd(): number {
   const raw = Number(process.env.AGENTV3_MAX_BUILD_USD);
   return Number.isFinite(raw) && raw > 0 ? raw : 25;
+}
+
+function envInt(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isInteger(raw) && raw > 0 ? raw : fallback;
 }
 
 export function registerAgentV3Routes(app: Express): void {
@@ -108,12 +114,20 @@ export function registerAgentV3Routes(app: Express): void {
       const client = new ClaudeClient();
       const model = resolveModel(onlyOpus);
       const budget = maxBuildBudgetUsd();
+      const maxSteps = envInt('AGENTV3_MAX_STEPS', 80);
+      const subAgentMaxSteps = envInt('AGENTV3_SUBAGENT_MAX_STEPS', 40);
+
+      // Real git repo → real checkpoints/History/restore (best-effort on sandboxes
+      // without a shell).
+      const git = new GitManager(actuator, workspaceId);
+      await git.ensureRepo();
 
       // The Architect can delegate to specialist sub-agents via the task tool.
       const spawnSubAgent = makeSubAgentSpawn({
-        client, actuator, workspaceId, state, events, model, onlyOpus, maxBudgetUsd: budget,
+        client, actuator, workspaceId, state, events, model, onlyOpus,
+        maxBudgetUsd: budget, maxSteps: subAgentMaxSteps, checkpointer: git,
       });
-      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent);
+      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git);
       const runner = new AgentRunner({
         client,
         dispatcher,
@@ -124,6 +138,7 @@ export function registerAgentV3Routes(app: Express): void {
         tools: catalogForTools(roleConfig('architect').tools),
         onlyOpus,
         maxBudgetUsd: budget,
+        maxSteps,
         agentRole: 'architect',
       });
 

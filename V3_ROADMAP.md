@@ -164,3 +164,13 @@ Every phase is graded against these, because they are what makes the difference:
   monotonic ordering; wired into the sub-agent spawn and exposed via
   GET /api/agentv3/status (`team`). 1634 tests green. Phase 1 remaining: parallel
   coordination polish + surface the team health in the AI-team UI.
+- 2026-06-22: Phase 1 merged to main (#205) → deployed.
+- 2026-06-22: Phase 2 (Memory & Artifact Intelligence) — built a real per-
+  workspace WorkspaceMemory: artifact index / project graph (files → exported
+  symbols, React components, routes, import edges, external dependencies) updated
+  on every real write/edit; episodic memory (build request + bash errors);
+  relevance recall across symbols/files/episodes; projectMap() for context. New
+  `recall` tool wired into the catalog + dispatcher and granted to the whole team
+  (read-only). Replaces the unsafe global Memory/ProjectMemoryManager for v3.0.
+  1641 tests green (+7). Next (Phase 2 cont.): inject projectMap into the
+  Architect context automatically + persist memory across sessions.

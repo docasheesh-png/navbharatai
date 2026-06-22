@@ -20,6 +20,7 @@ import {
   registerSession,
   restoreSession,
   agentLifecycle,
+  getWorkspaceMemory,
 } from '../AgentV3';
 import { randomUUID } from 'crypto';
 import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
@@ -180,6 +181,10 @@ export function registerAgentV3Routes(app: Express): void {
           ts: Date.now(),
         });
       }
+
+      // Remember the build request in project memory (episodic — the team can
+      // recall what was asked for during the build).
+      getWorkspaceMemory(workspaceId).recordRequest(prompt);
 
       // The Architect can delegate to specialist sub-agents via the task tool.
       const spawnSubAgent = makeSubAgentSpawn({

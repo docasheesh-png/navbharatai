@@ -147,6 +147,8 @@ function describeToolCall(tool: string, input: unknown): string {
       return 'listing files';
     case 'update_todo':
       return 'updating the plan';
+    case 'recall':
+      return typeof arg.query === 'string' ? `recalling "${arg.query}"` : 'recalling from memory';
     default:
       return `using ${tool}`;
   }

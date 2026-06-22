@@ -98,6 +98,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'recall',
+      description:
+        'Search the project memory — exported symbols, files, components, routes ' +
+        'and past errors/fixes from this build — for a query. Use it to find where ' +
+        'something is, what already exists, or what failed before, instead of ' +
+        're-scanning the whole tree.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'What to look for (a symbol/file/component name, or a past error).' },
+        },
+        required: ['query'],
+      },
+    },
+    {
       name: 'update_todo',
       description: 'Replace the build todo list shown to the user. Use this to plan and track progress.',
       input_schema: {
@@ -134,6 +149,7 @@ export const CATALOG_TOOL_NAMES = [
   'glob',
   'update_todo',
   'update_preview',
+  'recall',
 ] as const;
 
 /**

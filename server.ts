@@ -32,6 +32,7 @@ import { registerChatRoutes } from './src/server/routes/chat';
 import { registerProRoutes } from './src/server/routes/pro';
 import { registerSdaRoutes } from './src/server/routes/sda';
 import { registerEngineerRoutes } from './src/server/routes/engineer';
+import { registerAgentV3Routes } from './src/server/routes/agentv3';
 import { registerDomainsRoutes } from './src/server/routes/domains';
 import { registerZipRoutes } from './src/server/routes/zip';
 import { registerPreviewRoutes } from './src/server/routes/preview';
@@ -391,6 +392,11 @@ setInterval(() => {
   registerSdaRoutes(app);
   // Engineer AI — autonomous coding agent (Phase 1: process-level sandbox, Claude + Grok).
   registerEngineerRoutes(app);
+
+  // AgentV3 (Vargen 3.0) — v3.0 agent engine, strangler-fig P0 skeleton.
+  // Flag-gated (AGENTV3_ENABLED, default OFF); imports nothing from the live
+  // build paths, so it cannot affect the live app until explicitly enabled.
+  registerAgentV3Routes(app);
 
   // Custom-domain connect (Cloudflare for SaaS).
   registerDomainsRoutes(app);

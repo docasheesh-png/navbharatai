@@ -16,6 +16,10 @@
     "src/server/routes/**/*.ts",
     "src/server/lib/**/*.ts",
     "src/server/project/**/*.ts",
-    "src/server/runtime/**/*.ts"
+    "src/server/runtime/**/*.ts",
+    "src/server/AgentV3/**/*.ts"
+  ],
+  "exclude": [
+    "**/*.test.ts"
   ]
 }

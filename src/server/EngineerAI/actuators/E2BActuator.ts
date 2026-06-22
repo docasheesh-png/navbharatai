@@ -11,6 +11,28 @@ const IDLE_LIMIT_MS = 45 * 60 * 1000;
 const IDLE_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 
 const WORKSPACE_ROOT = '/home/user/workspace';
+
+/**
+ * Sanitize an AI/agent-supplied relative path so it can never escape WORKSPACE_ROOT.
+ * Drops traversal ("..") / empty / "." segments; legitimate nested paths are unaffected.
+ */
+function safeRelPath(filePath: string): string {
+  const cleaned = String(filePath ?? '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter((s) => s && s !== '.' && s !== '..')
+    .join('/');
+  if (!cleaned) throw new Error(`Unsafe workspace path: ${JSON.stringify(filePath)}`);
+  return cleaned;
+}
+
+/** Reject identifiers that are not safe to interpolate into a shell command. */
+function assertSafeId(id: string, label: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(String(id ?? ''))) {
+    throw new Error(`Invalid ${label}: ${JSON.stringify(id)}`);
+  }
+  return id;
+}
 // Dedicated tools dir outside the user's workspace — persists across workspace resets
 const TOOLS_DIR = '/home/user/.e-tools';
 // 1-hour sandbox lifetime. Refreshed on every activity via sandbox.setTimeout() so
@@ -276,7 +298,7 @@ export class E2BActuator implements IEngineerActuator {
     try {
       const files = this.templateRegistry.getProvider(templateKey).getFiles([]);
       await sandbox.files.writeFiles(
-        Object.entries(files).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${p}`, data: content }))
+        Object.entries(files).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${safeRelPath(p)}`, data: content }))
       );
     } catch {
       // Unknown template — start with an empty workspace, agent will scaffold it.
@@ -326,18 +348,18 @@ export class E2BActuator implements IEngineerActuator {
 
   async writeFile(workspaceId: string, filePath: string, content: string): Promise<void> {
     const sandbox = await this.getSandbox(workspaceId);
-    await sandbox.files.write(`${WORKSPACE_ROOT}/${filePath}`, content);
+    await sandbox.files.write(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`, content);
   }
 
   async writeBinaryFile(workspaceId: string, filePath: string, base64: string): Promise<void> {
     const sandbox = await this.getSandbox(workspaceId);
     const bytes = new Uint8Array(Buffer.from(base64, 'base64'));
-    await sandbox.files.write(`${WORKSPACE_ROOT}/${filePath}`, bytes);
+    await sandbox.files.write(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`, bytes);
   }
 
   async readFile(workspaceId: string, filePath: string): Promise<string> {
     const sandbox = await this.getSandbox(workspaceId);
-    return sandbox.files.read(`${WORKSPACE_ROOT}/${filePath}`);
+    return sandbox.files.read(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`);
   }
 
   async listFiles(workspaceId: string): Promise<string[]> {
@@ -686,6 +708,7 @@ const {chromium}=require('playwright');
 
   async checkpoint(workspaceId: string, triggeredBy = 'manual'): Promise<string> {
     const sandbox = await this.getSandbox(workspaceId);
+    assertSafeId(workspaceId, 'workspaceId');
     const id = `ckpt_${Date.now()}`;
     const dir = `${E2BActuator.CKPT_DIR}/${workspaceId}`;
     const meta = JSON.stringify({ id, createdAt: Date.now(), triggeredBy: triggeredBy.slice(0, 80) });
@@ -778,6 +801,9 @@ echo "DB_URL:postgresql://postgres@localhost:5432/myapp"`,
 
   async restore(workspaceId: string, checkpointId: string): Promise<void> {
     const sandbox = await this.getSandbox(workspaceId);
+    // checkpointId is agent-controlled — validate before it reaches the shell to block injection.
+    assertSafeId(workspaceId, 'workspaceId');
+    assertSafeId(checkpointId, 'checkpointId');
     const tarPath = `${E2BActuator.CKPT_DIR}/${workspaceId}/${checkpointId}.tar.gz`;
     const result = await sandbox.commands.run(
       `test -f ${tarPath} && tar -xzf ${tarPath} -C ${WORKSPACE_ROOT} --overwrite`,

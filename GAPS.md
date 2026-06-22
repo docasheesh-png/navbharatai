@@ -83,7 +83,7 @@
 | B21 | No LaTeX / math rendering support | `[ ]` | |
 | B22 | No inline image rendering for AI-returned image URLs | `[x]` | #167 |
 | B23 | No "thumbs up / thumbs down" feedback per message | `[ ]` | |
-| B24 | Chat session name is always "Untitled" — no auto-naming | `[ ]` | |
+| B24 | Chat session name is always "Untitled" — no auto-naming | `[x]` | #167 |
 | B25 | Session list shows raw UCI code, not human readable title | `[ ]` | |
 | B26 | No "pin to top" for important messages | `[ ]` | |
 | B27 | Paste image into chat not supported (clipboard paste) | `[ ]` | |
@@ -150,7 +150,7 @@
 | D19 | Provider used for build not shown in completion badge | `[x]` | #167 |
 | D20 | Build steps collapse after build — no way to re-expand | `[ ]` | |
 | D21 | Generated app name defaults to "App" — no smart naming | `[ ]` | |
-| D22 | No copy-to-clipboard button on generated code blocks | `[ ]` | |
+| D22 | No copy-to-clipboard button on generated code blocks | `[x]` | #167 |
 | D23 | No build history count shown in UI (e.g. "Build #7") | `[ ]` | |
 | D24 | No diff between current build and last build (file-level diff) | `[ ]` | |
 | D25 | Build stops on first error without reporting all errors | `[ ]` | |
@@ -301,7 +301,7 @@
 
 | # | Gap | Status | PR |
 |---|-----|--------|----|
-| J1 | No AI-suggested commit messages | `[ ]` | |
+| J1 | No AI-suggested commit messages | `[x]` | #167 |
 | J2 | No git log / commit history view | `[ ]` | |
 | J3 | Staged vs unstaged files not visually distinct | `[ ]` | |
 | J4 | No create-branch button in Git panel | `[ ]` | |
@@ -363,13 +363,13 @@
 | L11 | File upload button not keyboard accessible | `[ ]` | |
 | L12 | Code editor not announced to screen readers | `[~]` | Monaco limit |
 | L13 | No alt text generation for uploaded images | `[ ]` | |
-| L14 | Form labels not associated with inputs via htmlFor | `[ ]` | |
+| L14 | Form labels not associated with inputs via htmlFor | `[x]` | #167 |
 | L15 | Dropdowns (theme, mode selectors) have no keyboard navigation | `[ ]` | |
-| L16 | "Loading..." states have no aria-busy | `[ ]` | |
+| L16 | "Loading..." states have no aria-busy | `[x]` | #167 |
 | L17 | Error messages not associated with their input fields | `[ ]` | |
 | L18 | No focus-visible outline on interactive elements | `[ ]` | |
 | L19 | Session list has no accessible name | `[ ]` | |
-| L20 | Progress bars have no aria-valuenow/valuemin/valuemax | `[ ]` | |
+| L20 | Progress bars have no aria-valuenow/valuemin/valuemax | `[x]` | #167 |
 
 ---
 

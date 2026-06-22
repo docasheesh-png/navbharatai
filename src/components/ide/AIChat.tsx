@@ -1258,7 +1258,12 @@ export const AIChat: React.FC<AIChatProps> = ({
 
         {/* B8: Typing indicator — three-dot bounce animation */}
         {isLoading && (
-          <div className="flex items-start gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
+          <div
+            role="status"
+            aria-busy="true"
+            aria-label="AI is generating a response"
+            className="flex items-start gap-2 animate-in fade-in slide-in-from-left-2 duration-300"
+          >
             <div className="w-6 h-6 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
               <Bot className="w-3 h-3 text-indigo-400" />
             </div>
@@ -1383,7 +1388,14 @@ export const AIChat: React.FC<AIChatProps> = ({
                     {buildElapsedLabel}
                   </span>
                 )}
-                <div className="h-1.5 w-20 bg-white/5 rounded-full overflow-hidden">
+                <div
+                  role="progressbar"
+                  aria-valuenow={buildProgress.percent}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`Build progress: ${buildProgress.percent}%`}
+                  className="h-1.5 w-20 bg-white/5 rounded-full overflow-hidden"
+                >
                   <div
                     className="h-full rounded-full transition-all duration-500"
                     style={{ width: `${buildProgress.percent}%`, background: 'linear-gradient(90deg,#f59e0b,#fbbf24)' }}

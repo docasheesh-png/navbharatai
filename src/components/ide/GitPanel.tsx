@@ -93,7 +93,25 @@ export const GitPanel: React.FC<GitPanelProps> = ({
   const [activeTab, setActiveTab2] = useState<'sync' | 'deploy'>('deploy');
   const [commitMsg, setCommitMsg] = useState('');
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  
+  const [isGeneratingCommitMsg, setIsGeneratingCommitMsg] = useState(false);
+
+  const generateCommitMessage = () => {
+    setIsGeneratingCommitMsg(true);
+    const fileNames = Object.keys(files);
+    const exts = [...new Set(fileNames.map(f => f.split('.').pop() || ''))].filter(Boolean);
+    const components = fileNames.filter(f => /\.(tsx?|jsx?)$/.test(f)).map(f => f.split('/').pop()?.replace(/\.[^.]+$/, '') || '').filter(Boolean);
+    let msg = 'Update project files';
+    if (components.length === 1) msg = `Update ${components[0]} component`;
+    else if (components.length > 1 && components.length <= 3) msg = `Update ${components.slice(0, 3).join(', ')}`;
+    else if (exts.includes('css') && exts.length === 1) msg = 'Update styles';
+    else if (exts.includes('json')) msg = 'Update configuration';
+    else if (fileNames.some(f => /test|spec/i.test(f))) msg = 'Add tests';
+    else if (fileNames.some(f => /readme|docs/i.test(f))) msg = 'Update documentation';
+    else if (fileNames.length === 1) msg = `Update ${fileNames[0].split('/').pop()}`;
+    setCommitMsg(msg);
+    setTimeout(() => setIsGeneratingCommitMsg(false), 400);
+  };
+
   // Premium Cloud Sync States
   const [selectedSyncPlatform, setSelectedSyncPlatform] = useState<string>('github');
   const [syncDropdownOpen, setSyncDropdownOpen] = useState(false);
@@ -1291,10 +1309,23 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                         <div className="space-y-1 text-left">
                           <div className="flex items-center justify-between">
                             <label className="text-[9.5px] font-bold text-[#8b949e]">Commit Message</label>
-                            {/* J15: Character count warning */}
-                            <span className={`text-[8px] font-mono ${(configs.github.commitMsg || '').length > 72 ? 'text-amber-400' : 'text-[#484f58]'}`}>
-                              {(configs.github.commitMsg || '').length}/72
-                            </span>
+                            <div className="flex items-center gap-2">
+                              {/* J1: AI-suggested commit message */}
+                              <button
+                                onClick={generateCommitMessage}
+                                disabled={isGeneratingCommitMsg}
+                                title="AI: Suggest commit message"
+                                aria-label="Suggest commit message with AI"
+                                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-black text-indigo-400 hover:text-indigo-300 hover:bg-indigo-900/20 transition-all uppercase tracking-widest"
+                              >
+                                <Sparkles className={`w-2.5 h-2.5 ${isGeneratingCommitMsg ? 'animate-pulse' : ''}`} />
+                                Suggest
+                              </button>
+                              {/* J15: Character count warning */}
+                              <span className={`text-[8px] font-mono ${(configs.github.commitMsg || '').length > 72 ? 'text-amber-400' : 'text-[#484f58]'}`}>
+                                {(configs.github.commitMsg || '').length}/72
+                              </span>
+                            </div>
                           </div>
                           <input
                             type="text"

@@ -132,6 +132,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
                   e.stopPropagation();
                   onTabClose(tab.path);
                 }}
+                aria-label={`Close tab ${tab.path}`}
                 className={cn(
                   "p-0.5 rounded hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity",
                   isActive && "opacity-100"
@@ -153,8 +154,9 @@ export const Editor: React.FC<EditorProps> = React.memo(({
         </div>
         <div className="flex items-center gap-3">
             {onDebug && (
-               <button 
+               <button
                  onClick={onDebug}
+                 aria-label="Preview debug"
                  className="hover:text-amber-500 transition-all"
                  title="Preview Debug"
                >
@@ -162,8 +164,9 @@ export const Editor: React.FC<EditorProps> = React.memo(({
                </button>
             )}
             {onRun && (
-               <button 
+               <button
                  onClick={onRun}
+                 aria-label="Run project"
                  className="text-emerald-500 hover:text-emerald-400 transition-all flex items-center gap-1"
                  title="Run Project"
                >

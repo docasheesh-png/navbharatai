@@ -357,8 +357,9 @@ export function SettingsPanel({
 
                   <div className="space-y-6 pt-4">
                      <div className="space-y-3">
-                       <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1 block pl-1">Application Name</label>
+                       <label htmlFor="settings-app-name" className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1 block pl-1">Application Name</label>
                        <input
+                         id="settings-app-name"
                          defaultValue="Navbharat AI"
                          className="w-full bg-[#0d1117] border border-white/10 rounded-[1.5rem] px-6 py-4 text-sm font-bold text-white outline-none focus:border-indigo-500 transition-all shadow-inner"
                        />
@@ -385,8 +386,9 @@ export function SettingsPanel({
                      </div>
 
                      <div className="space-y-3 pt-6 border-t border-white/10">
-                       <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1 block pl-1">Description</label>
+                       <label htmlFor="settings-app-desc" className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1 block pl-1">Description</label>
                        <textarea
+                         id="settings-app-desc"
                          defaultValue="The ultimate specialized AI developer workspace for Bharat."
                          className="w-full bg-[#0d1117] border border-white/10 rounded-[1.5rem] px-6 py-5 text-sm font-medium text-[#8b949e] outline-none focus:border-indigo-500 transition-all min-h-[120px] resize-none shadow-inner"
                        />

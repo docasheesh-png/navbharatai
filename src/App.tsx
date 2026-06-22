@@ -118,6 +118,7 @@ import {
   buildVersionSnapshot,
   appendVersionSnapshot,
 } from './lib/versionSnapshot';
+import { pickGreetingForAgent } from './lib/agentGreetings';
 // ZipSizeModal component → moved to ViewPanels.tsx
 import type { ZipSizeModalVariant } from './components/ide/ZipSizeModal';
 // AgentMode → re-exported from ./types
@@ -4283,30 +4284,7 @@ ${buildLanguageRule(preferredLanguage)}`;
 
   // --- UNIVERSAL CHAT CONTINUATION SYSTEM (UCI) HELPERS & IMPLEMENTATION ---
   
-  const NBI_GREETINGS = [
-    "Welcome to navBharatAI Workspace! What advanced platform shall we design today?",
-    "navBharatAI orchestrator is live. General queries or full-stack builds — let's innovate!",
-    "navBharatAI core cognitive system is active. Your enterprise specifications are welcome here.",
-    "navBharatAI online. Let's craft scalable architectures with deep, robust logic today."
-  ];
-
-  const BASIC_GREETINGS = [
-    "Vishwakarma Basic active. Security audit protocols loaded and ready for code analysis.",
-    "Vishwakarma Basic online. Let's identify structural vulnerabilities and build secure pages.",
-    "Vishwakarma Basic analysis engine is fully operational. Ready for your coding needs."
-  ];
-
-  const PRO_GREETINGS = [
-    "Vishwakarma Pro ready. Previous architecture context restored. Ready to build highly optimized premium SaaS workflows!",
-    "Welcome back. Continuing your last high-fidelity development session with Vishwakarma Pro configurations.",
-    "Pro level authorized. Let's design premium microservices, database structures, and high-performance assets."
-  ];
-
-  const VIP_GREETINGS = [
-    "VIP orchestration initialized. Sovereign multi-model cognitive routing is actively online.",
-    "Sovereign VIP Agent active. Enterprise platforms, AI scaling, and zero-trust security matrices initialized.",
-    "Welcome to VIP Workspace! Highly tuned LLM orchestrators and stateful agents are ready to assist you."
-  ];
+  // Agent greetings (NBI/Basic/Pro/VIP) → imported from src/lib/agentGreetings.ts
 
   // generateUCI → imported from src/lib/chatUtils.ts
   // getRandomElement → imported from src/lib/chatUtils.ts
@@ -4403,11 +4381,7 @@ ${buildLanguageRule(preferredLanguage)}`;
       memSummary = generateSmartHeuristicSummary(uniqueHistory);
     }
     
-    let greetingText = '';
-    if (targetAgent === 'vishwakarma_vip') greetingText = getRandomElement(VIP_GREETINGS);
-    else if (targetAgent === 'vishwakarma_pro') greetingText = getRandomElement(PRO_GREETINGS);
-    else if (targetAgent === 'vishwakarma_basic') greetingText = getRandomElement(BASIC_GREETINGS);
-    else greetingText = getRandomElement(NBI_GREETINGS);
+    const greetingText = pickGreetingForAgent(targetAgent, getRandomElement);
     
     const continuationGreeting: Message = {
       id: `continuation-greeting-${Date.now()}`,
@@ -4594,12 +4568,6 @@ ${buildLanguageRule(preferredLanguage)}`;
     const newId = Date.now().toString();
     const newUci = user ? generateUCI() : '';
     
-    // Choose starting dynamic welcomes
-    const pNbi = getRandomElement(NBI_GREETINGS);
-    const pBasic = getRandomElement(BASIC_GREETINGS);
-    const pPro = getRandomElement(PRO_GREETINGS);
-    const pVip = getRandomElement(VIP_GREETINGS);
-
     setCurrentSessionId(newId);
     setMessages([]);
     

@@ -13,11 +13,19 @@ import {
   makeSubAgentSpawn,
   resolveModel,
   architectSystemPrompt,
+  planSystemPrompt,
+  awaitApproval,
+  resolveApproval,
+  GitManager,
+  registerSession,
+  restoreSession,
 } from '../AgentV3';
+import { randomUUID } from 'crypto';
 import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
 import { DockerActuator } from '../EngineerAI/actuators/DockerActuator';
+import { userCostStore } from '../lib/UserCostStore';
 
 /**
  * AgentV3 (Vargen 3.0) routes.
@@ -45,11 +53,44 @@ function maxBuildBudgetUsd(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : 25;
 }
 
+function envInt(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isInteger(raw) && raw > 0 ? raw : fallback;
+}
+
 export function registerAgentV3Routes(app: Express): void {
   // Capability probe — lets the frontend decide whether to show the v3.0 toggle.
   app.get('/api/agentv3/status', (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     res.json({ enabled: isAgentV3Enabled(userId), ...agentV3Status() });
+  });
+
+  // Approve/reject a pending gate (plan mode / permission prompt, P4).
+  app.post('/api/agentv3/respond', (req: Request, res: Response) => {
+    const requestId = typeof req.body?.requestId === 'string' ? req.body.requestId : '';
+    const approved = req.body?.approved === true;
+    if (!requestId) {
+      res.status(400).json({ error: 'requestId is required.' });
+      return;
+    }
+    res.json({ ok: resolveApproval(requestId, approved) });
+  });
+
+  // History → restore: roll the workspace back to a checkpoint commit (P-git).
+  app.post('/api/agentv3/restore', async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    if (!isAgentV3Enabled(userId)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const sha = typeof req.body?.sha === 'string' ? req.body.sha : '';
+    if (!workspaceId || !sha) {
+      res.status(400).json({ error: 'workspaceId and sha are required.' });
+      return;
+    }
+    const ok = await restoreSession(workspaceId, sha, userId ?? undefined);
+    res.json({ ok });
   });
 
   // Build entry — runs the native tool-use loop and streams events as NDJSON.
@@ -69,6 +110,7 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     const onlyOpus = req.body?.onlyOpus === true;
+    const planFirst = req.body?.planFirst !== false; // plan-mode ON by default (P4)
 
     // NDJSON stream (mirrors the Engineer route's streaming contract).
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -91,12 +133,22 @@ export function registerAgentV3Routes(app: Express): void {
       const client = new ClaudeClient();
       const model = resolveModel(onlyOpus);
       const budget = maxBuildBudgetUsd();
+      const maxSteps = envInt('AGENTV3_MAX_STEPS', 80);
+      const subAgentMaxSteps = envInt('AGENTV3_SUBAGENT_MAX_STEPS', 40);
+
+      // Real git repo → real checkpoints/History/restore (best-effort on sandboxes
+      // without a shell).
+      const git = new GitManager(actuator, workspaceId);
+      await git.ensureRepo();
+      registerSession(workspaceId, git, userId ?? undefined);
+      events.emit({ type: 'workspace', workspaceId, ts: Date.now() });
 
       // The Architect can delegate to specialist sub-agents via the task tool.
       const spawnSubAgent = makeSubAgentSpawn({
-        client, actuator, workspaceId, state, events, model, onlyOpus, maxBudgetUsd: budget,
+        client, actuator, workspaceId, state, events, model, onlyOpus,
+        maxBudgetUsd: budget, maxSteps: subAgentMaxSteps, checkpointer: git,
       });
-      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent);
+      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git);
       const runner = new AgentRunner({
         client,
         dispatcher,
@@ -107,9 +159,59 @@ export function registerAgentV3Routes(app: Express): void {
         tools: catalogForTools(roleConfig('architect').tools),
         onlyOpus,
         maxBudgetUsd: budget,
+        maxSteps,
         agentRole: 'architect',
       });
-      const result = await runner.run(prompt);
+
+      let buildPrompt = prompt;
+
+      // Plan mode (P4): plan first, then block for the user's approval before
+      // building. A real gate — the build does not start until the user answers.
+      if (planFirst) {
+        const planRunner = new AgentRunner({
+          client,
+          dispatcher: new ToolDispatcher(actuator, workspaceId, state, events),
+          state,
+          events,
+          model,
+          system: planSystemPrompt(),
+          tools: catalogForTools(['update_todo']),
+          onlyOpus,
+          maxBudgetUsd: budget,
+          maxSteps: 4,
+          agentRole: 'architect',
+        });
+        await planRunner.run(prompt);
+
+        const requestId = randomUUID();
+        events.emit({
+          type: 'permission_request',
+          agent: 'architect',
+          action: 'Approve this plan to start building',
+          callId: requestId,
+          ts: Date.now(),
+        });
+        const approved = await awaitApproval(requestId);
+        if (!approved) {
+          const summary = 'Plan was not approved — build cancelled.';
+          events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
+          send({ type: 'result', ok: false, summary, steps: 0, billedUsd: 0 });
+          return;
+        }
+        const todos = state.snapshot().todos;
+        if (todos.length > 0) {
+          buildPrompt = `${prompt}\n\nApproved plan:\n${todos.map((t) => `- ${t.title}`).join('\n')}`;
+        }
+      }
+
+      const result = await runner.run(buildPrompt);
+
+      // Bill the user the marked-up cost (D5/D6), recorded in the same place the
+      // platform records every build's cost. Best-effort — never blocks the run.
+      if (userId && result.billedUsd > 0) {
+        userCostStore.record(userId, result.billedUsd).catch(() => {});
+      }
+
       send({ type: 'result', ...result });
     } catch (err) {
       send({ type: 'error', message: err instanceof Error ? err.message : String(err) });

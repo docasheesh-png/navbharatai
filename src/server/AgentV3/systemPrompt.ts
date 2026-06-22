@@ -5,6 +5,20 @@
 // real-features rule): the agent must actually build, run, and verify before it
 // finishes. Multi-agent delegation (the `task` tool) is added in P3.5.
 
+/**
+ * Plan-mode system prompt (P4): the agent produces a concise step-by-step plan
+ * via update_todo and then stops, so the user can approve before the build runs.
+ */
+export function planSystemPrompt(): string {
+  return [
+    'You are the Architect planning a build. Produce a concise, concrete step-by-step',
+    'plan for the requested app and record it by calling the update_todo tool (one',
+    'todo per major step, status "pending"). Briefly explain the approach in your',
+    'message. Do NOT write any files or run any commands yet — only plan. End your',
+    'turn after calling update_todo.',
+  ].join('\n');
+}
+
 export function architectSystemPrompt(): string {
   return [
     'You are the Architect — the lead engineer of NavBharatAI Pro v3.0, an agentic',

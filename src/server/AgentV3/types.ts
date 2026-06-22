@@ -67,6 +67,7 @@ export interface GitCheckpoint {
  * every surface stays in sync from one stream (§3.2).
  */
 export type AgentEvent =
+  | { type: 'workspace'; workspaceId: string; ts: number }
   | { type: 'narration'; agent: AgentRole; text: string; ts: number }
   | { type: 'thinking'; agent: AgentRole; text: string; ts: number }
   | { type: 'tool_call'; agent: AgentRole; tool: ToolName; input: unknown; callId: string; ts: number }

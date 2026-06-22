@@ -27,7 +27,8 @@ export type {
 export { AgentRunner } from './AgentRunner';
 export type { AgentRunnerOptions, AgentRunResult } from './AgentRunner';
 export { resolveModel, sonnetModel, opusModel } from './models';
-export { architectSystemPrompt } from './systemPrompt';
+export { architectSystemPrompt, planSystemPrompt } from './systemPrompt';
+export { awaitApproval, resolveApproval, pendingApprovalCount } from './Approvals';
 export {
   STANDARD_MULTIPLIER,
   ONLY_OPUS_MULTIPLIER,
@@ -43,6 +44,10 @@ export { roleConfig, isWorkerRole, WORKER_ROLES } from './AgentRegistry';
 export type { RoleConfig } from './AgentRegistry';
 export { makeSubAgentSpawn } from './SubAgent';
 export type { SubAgentDeps } from './SubAgent';
+export { GitManager } from './GitManager';
+export type { Checkpointer, CommandRunner } from './GitManager';
+export { registerSession, getSession, restoreSession, sessionCount } from './WorkspaceRegistry';
+export type { WorkspaceSession } from './WorkspaceRegistry';
 
 import { AGENTV3_PHASE } from './types';
 

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
-  History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink,
+  History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import type { AgentCard } from './agentV3Types';
@@ -20,9 +20,10 @@ import type { AgentCard } from './agentV3Types';
 type SurfaceTab = 'preview' | 'files' | 'diff' | 'terminal' | 'history';
 
 export function AgentV3Panel({ userId }: { userId?: string }) {
-  const { state, running, error, start, stop } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, stop } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   const [onlyOpus, setOnlyOpus] = useState(false);
+  const [planFirst, setPlanFirst] = useState(true);
   const [tab, setTab] = useState<SurfaceTab>('preview');
 
   const agents = Object.values(state.agents).sort((a, b) => b.updatedTs - a.updatedTs);
@@ -36,6 +37,10 @@ export function AgentV3Panel({ userId }: { userId?: string }) {
         <span className="font-semibold">NavBharatAI Pro v3.0</span>
         <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
         <label className="ml-auto flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer">
+          <input type="checkbox" checked={planFirst} onChange={(e) => setPlanFirst(e.target.checked)} disabled={running} />
+          Plan first
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer">
           <input type="checkbox" checked={onlyOpus} onChange={(e) => setOnlyOpus(e.target.checked)} disabled={running} />
           Only Opus (5×)
         </label>
@@ -57,7 +62,7 @@ export function AgentV3Panel({ userId }: { userId?: string }) {
           </button>
         ) : (
           <button
-            onClick={() => prompt.trim() && start(prompt.trim(), { userId, onlyOpus })}
+            onClick={() => prompt.trim() && start(prompt.trim(), { userId, onlyOpus, planFirst })}
             disabled={!prompt.trim()}
             className="flex items-center gap-1 px-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded text-sm"
           >
@@ -69,6 +74,35 @@ export function AgentV3Panel({ userId }: { userId?: string }) {
       {error && (
         <div className="flex items-center gap-2 px-4 py-2 bg-red-950/60 text-red-300 text-sm border-b border-red-900">
           <AlertCircle className="w-4 h-4" /> {error}
+        </div>
+      )}
+
+      {state.pendingPermission && (
+        <div className="px-4 py-2.5 bg-amber-950/50 border-b border-amber-900">
+          <div className="flex items-center gap-2 text-sm text-amber-200 mb-2">
+            <AlertCircle className="w-4 h-4" /> {state.pendingPermission.action}
+          </div>
+          {state.todos.length > 0 && (
+            <ul className="mb-2 space-y-0.5">
+              {state.todos.map((t) => (
+                <li key={t.id} className="text-xs text-amber-100/90">• {t.title}</li>
+              ))}
+            </ul>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => respond(state.pendingPermission!.callId, true)}
+              className="px-3 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white"
+            >
+              Approve &amp; build
+            </button>
+            <button
+              onClick={() => respond(state.pendingPermission!.callId, false)}
+              className="px-3 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-100"
+            >
+              Reject
+            </button>
+          </div>
         </div>
       )}
 
@@ -176,9 +210,19 @@ export function AgentV3Panel({ userId }: { userId?: string }) {
               state.checkpoints.length === 0 ? <Empty>No checkpoints yet.</Empty> : (
                 <ul className="space-y-1">
                   {state.checkpoints.map((c) => (
-                    <li key={c.id} className="flex items-center gap-2">
+                    <li key={c.id} className="flex items-center gap-2 group">
                       <History className="w-3.5 h-3.5 text-zinc-500" />
-                      <span className="text-zinc-500">{c.sha.slice(0, 7) || '—'}</span> {c.message}
+                      <span className="text-zinc-500">{c.sha.slice(0, 7) || '—'}</span>
+                      <span className="flex-1 truncate">{c.message}</span>
+                      {c.sha && (
+                        <button
+                          onClick={() => restore(c.sha)}
+                          className="opacity-0 group-hover:opacity-100 flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                          title="Restore the workspace to this checkpoint"
+                        >
+                          <RotateCcw className="w-3 h-3" /> Restore
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>

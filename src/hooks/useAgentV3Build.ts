@@ -13,7 +13,11 @@ export interface UseAgentV3Build {
   state: AgentV3ClientState;
   running: boolean;
   error: string | null;
-  start: (prompt: string, opts?: { userId?: string; onlyOpus?: boolean }) => Promise<void>;
+  start: (prompt: string, opts?: { userId?: string; onlyOpus?: boolean; planFirst?: boolean }) => Promise<void>;
+  /** Approve or reject a pending plan/permission gate (P4). */
+  respond: (requestId: string, approved: boolean) => Promise<void>;
+  /** Restore the workspace to a checkpoint commit (History → restore). */
+  restore: (sha: string) => Promise<boolean>;
   stop: () => void;
   reset: () => void;
 }
@@ -23,6 +27,11 @@ export function useAgentV3Build(): UseAgentV3Build {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const userIdRef = useRef<string | undefined>(undefined);
+  const workspaceIdRef = useRef<string | undefined>(undefined);
+
+  // Keep the latest workspace id available to restore() without a stale closure.
+  workspaceIdRef.current = state.workspaceId;
 
   const reset = useCallback(() => {
     setState(initialAgentV3State());
@@ -35,9 +44,40 @@ export function useAgentV3Build(): UseAgentV3Build {
     setRunning(false);
   }, []);
 
+  const respond = useCallback(async (requestId: string, approved: boolean) => {
+    // Clear the gate immediately so the UI is responsive; the build resumes.
+    setState((prev) => ({ ...prev, pendingPermission: undefined }));
+    try {
+      await fetch('/api/agentv3/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId, approved }),
+      });
+    } catch {
+      /* best-effort; the build will time out and auto-deny if this never lands */
+    }
+  }, []);
+
+  const restore = useCallback(async (sha: string): Promise<boolean> => {
+    const workspaceId = workspaceIdRef.current;
+    if (!workspaceId) return false;
+    try {
+      const res = await fetch('/api/agentv3/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId, sha, userId: userIdRef.current }),
+      });
+      const j = await res.json().catch(() => ({}));
+      return res.ok && j?.ok === true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const start = useCallback(
-    async (prompt: string, opts?: { userId?: string; onlyOpus?: boolean }) => {
+    async (prompt: string, opts?: { userId?: string; onlyOpus?: boolean; planFirst?: boolean }) => {
       if (running) return;
+      userIdRef.current = opts?.userId;
       setState(initialAgentV3State());
       setError(null);
       setRunning(true);
@@ -49,7 +89,12 @@ export function useAgentV3Build(): UseAgentV3Build {
         const res = await fetch('/api/agentv3/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, userId: opts?.userId, onlyOpus: opts?.onlyOpus === true }),
+          body: JSON.stringify({
+            prompt,
+            userId: opts?.userId,
+            onlyOpus: opts?.onlyOpus === true,
+            planFirst: opts?.planFirst !== false,
+          }),
           signal: controller.signal,
         });
 
@@ -101,5 +146,5 @@ export function useAgentV3Build(): UseAgentV3Build {
     [running],
   );
 
-  return { state, running, error, start, stop, reset };
+  return { state, running, error, start, respond, restore, stop, reset };
 }

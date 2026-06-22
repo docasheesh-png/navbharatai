@@ -29,6 +29,9 @@ function applyFileChange(files: FileChange[], change: FileChange): FileChange[] 
 
 export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEvent): AgentV3ClientState {
   switch (event.type) {
+    case 'workspace':
+      return { ...state, workspaceId: event.workspaceId };
+
     case 'narration':
     case 'thinking': {
       const narration =
@@ -104,17 +107,18 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'permission_request':
       return {
         ...state,
+        pendingPermission: { callId: event.callId, action: event.action },
         agents: touchAgent(state.agents, event.agent, `awaiting permission: ${event.action}`, true, event.ts),
       };
 
     case 'done':
-      return { ...state, done: true, ok: event.ok, summary: event.summary };
+      return { ...state, done: true, ok: event.ok, summary: event.summary, pendingPermission: undefined };
 
     case 'result':
-      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd };
+      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, pendingPermission: undefined };
 
     case 'error':
-      return { ...state, done: true, ok: false, error: event.message };
+      return { ...state, done: true, ok: false, error: event.message, pendingPermission: undefined };
 
     default:
       return state;

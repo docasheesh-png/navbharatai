@@ -2,6 +2,7 @@ import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
 import type { ToolUse } from './ClaudeClient';
 import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
+import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 
 /**
@@ -52,7 +53,19 @@ export class ToolDispatcher {
     private readonly state?: WorkspaceState,
     private readonly events?: AgentEventStream,
     private readonly spawnSubAgent?: SubAgentSpawn,
+    private readonly checkpointer?: Checkpointer,
   ) {}
+
+  /** Create a real git checkpoint after a change (best-effort; emits on success). */
+  private async maybeCheckpoint(message: string): Promise<void> {
+    if (!this.checkpointer) return;
+    try {
+      const cp = await this.checkpointer.checkpoint(message);
+      if (cp) this.state?.addCheckpoint(cp);
+    } catch {
+      /* checkpointing never blocks a build */
+    }
+  }
 
   async dispatch(call: ToolUse, agent: AgentRole = 'architect'): Promise<ToolResult> {
     this.events?.emit({
@@ -106,6 +119,7 @@ export class ToolDispatcher {
         }
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.state?.recordFileChange({ path, kind }, agent);
+        await this.maybeCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} (${content.length} bytes).`;
       }
 
@@ -132,6 +146,7 @@ export class ToolDispatcher {
           diff: { path, patch: miniDiff(oldStr, newStr) },
           ts: Date.now(),
         });
+        await this.maybeCheckpoint(`edit ${path}`);
         return `Edited ${path}.`;
       }
 

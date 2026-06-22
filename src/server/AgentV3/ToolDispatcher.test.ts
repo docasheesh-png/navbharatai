@@ -167,6 +167,17 @@ describe('ToolDispatcher', () => {
     expect(res.content).toContain('not available');
   });
 
+  it('creates a real git checkpoint after a write when a checkpointer is wired', async () => {
+    const checkpointer = {
+      checkpoint: async (message: string) => ({ id: 'c1', sha: 'deadbeef', message, ts: 1 }),
+    };
+    const dWithGit = new ToolDispatcher(act, 'ws-1', state, stream, undefined, checkpointer);
+    await dWithGit.dispatch(call('write_file', { path: 'a.ts', content: 'x' }));
+    const checkpoints = state.snapshot().checkpoints;
+    expect(checkpoints).toHaveLength(1);
+    expect(checkpoints[0].sha).toBe('deadbeef');
+  });
+
   it('unknown tool returns an honest error', async () => {
     const res = await d.dispatch(call('teleport', {}));
     expect(res.is_error).toBe(true);

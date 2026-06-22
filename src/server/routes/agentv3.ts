@@ -22,6 +22,7 @@ import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuato
 import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
 import { DockerActuator } from '../EngineerAI/actuators/DockerActuator';
+import { userCostStore } from '../lib/UserCostStore';
 
 /**
  * AgentV3 (Vargen 3.0) routes.
@@ -168,6 +169,13 @@ export function registerAgentV3Routes(app: Express): void {
       }
 
       const result = await runner.run(buildPrompt);
+
+      // Bill the user the marked-up cost (D5/D6), recorded in the same place the
+      // platform records every build's cost. Best-effort — never blocks the run.
+      if (userId && result.billedUsd > 0) {
+        userCostStore.record(userId, result.billedUsd).catch(() => {});
+      }
+
       send({ type: 'result', ...result });
     } catch (err) {
       send({ type: 'error', message: err instanceof Error ? err.message : String(err) });

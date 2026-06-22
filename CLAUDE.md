@@ -161,6 +161,29 @@ follow this standard from the start.
   Users bring their own credentials (Supabase, Firebase, or other providers).
 - **Sandbox:** E2B real cloud VM. LocalActuator is for dev/CI only.
 
+### NavBharatAI Pro v3.0 (AgentV3) — admin-authorized billing override (2026-06-22)
+
+The constraints above remain in force for **Engineer AI and the existing
+builders**. They do **NOT** apply to the separate **NavBharatAI Pro v3.0
+(AgentV3 / "Vargen 3.0")** engine, for which the admin (aashishcpmt09) has
+explicitly authorized a different model on 2026-06-22 (see
+`NAVBHARATAI_PRO_V3_DESIGN.md` §0, decisions D2/D5/D6):
+
+- **NavBharatAI pays the Claude provider cost** for v3.0 builds (its own
+  Anthropic account) — this is the authorized exception to "own account credits
+  must never be spent on user builds", scoped to AgentV3 only.
+- **The user is billed a markup** that makes this revenue-positive: the
+  Claude **Opus-equivalent** token cost **× 2.5** (standard), or **× 5** for the
+  "Only Opus" super toggle — regardless of which model actually runs. Billed via
+  the platform's usage cost record (`UserCostStore`), the same place every other
+  build records cost. Margin is structurally positive (billed ≥ real cost).
+- A future BYOK option (user's own Anthropic key) stays open and is preferred
+  where available; it would restore the original "users' own accounts" model.
+
+This override is **scoped to AgentV3** and was added in the same change that
+wired v3.0 billing. Do not extend it to Engineer AI or remove the constraints
+above for the other builders without separate admin sign-off.
+
 ## Core engineering rules (copied up from PROGRESS.md so they're never missed)
 
 These were previously only stated inside `PROGRESS.md`. Because that file is

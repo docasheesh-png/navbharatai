@@ -87,9 +87,14 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" /> working…
               </div>
             )}
-            {error && (
+            {(error || state.error) && (
               <div className="flex items-start gap-2 px-3 py-2 bg-red-950/60 text-red-300 text-xs rounded">
-                <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{error}</span>
+                <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{error || state.error}</span>
+              </div>
+            )}
+            {state.done && state.ok === false && !state.error && state.summary && (
+              <div className="flex items-start gap-2 px-3 py-2 bg-amber-950/50 text-amber-200 text-xs rounded">
+                <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{state.summary}</span>
               </div>
             )}
             {state.pendingPermission && (

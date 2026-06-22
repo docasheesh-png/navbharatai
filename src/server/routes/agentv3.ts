@@ -146,19 +146,36 @@ export function registerAgentV3Routes(app: Express): void {
     const actuator = buildActuator();
     const workspaceId = `agentv3-${userId ?? 'anon'}-${Date.now()}`;
     try {
-      await actuator.ensureWorkspace(workspaceId, 'react');
       const client = new ClaudeClient();
       const model = resolveModel(onlyOpus);
       const budget = maxBuildBudgetUsd();
       const maxSteps = envInt('AGENTV3_MAX_STEPS', 80);
       const subAgentMaxSteps = envInt('AGENTV3_SUBAGENT_MAX_STEPS', 40);
 
-      // Real git repo → real checkpoints/History/restore (best-effort on sandboxes
-      // without a shell).
-      const git = new GitManager(actuator, workspaceId);
-      await git.ensureRepo();
-      registerSession(workspaceId, git, userId ?? undefined);
-      events.emit({ type: 'workspace', workspaceId, ts: Date.now() });
+      // Sandbox + git setup is best-effort: a plain chat (e.g. "hello") must still
+      // get a reply even when no sandbox is available (no E2B key, or a read-only
+      // filesystem). If setup fails we tell the user honestly and keep chatting —
+      // the build tools will report the real sandbox error only if the user asks
+      // to build. This is what makes v3.0 conversational like Claude Code.
+      let git: GitManager | undefined;
+      try {
+        await actuator.ensureWorkspace(workspaceId, 'react');
+        // Real git repo → real checkpoints/History/restore (best-effort on
+        // sandboxes without a shell).
+        git = new GitManager(actuator, workspaceId);
+        await git.ensureRepo();
+        registerSession(workspaceId, git, userId ?? undefined);
+        events.emit({ type: 'workspace', workspaceId, ts: Date.now() });
+      } catch (setupErr) {
+        const m = setupErr instanceof Error ? setupErr.message : String(setupErr);
+        git = undefined;
+        events.emit({
+          type: 'narration',
+          agent: 'architect',
+          text: `Note: the build sandbox isn't available right now (${m}). I can still chat, but I won't be able to build until it's back.`,
+          ts: Date.now(),
+        });
+      }
 
       // The Architect can delegate to specialist sub-agents via the task tool.
       const spawnSubAgent = makeSubAgentSpawn({

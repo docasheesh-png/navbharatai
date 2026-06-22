@@ -39,6 +39,7 @@ export interface GitCheckpoint {
 
 /** One NDJSON line from /api/agentv3/chat: an engine AgentEvent or the final result. */
 export type AgentV3WireEvent =
+  | { type: 'workspace'; workspaceId: string; ts: number }
   | { type: 'narration'; agent: AgentRole; text: string; ts: number }
   | { type: 'thinking'; agent: AgentRole; text: string; ts: number }
   | { type: 'tool_call'; agent: AgentRole; tool: string; input: unknown; callId: string; ts: number }
@@ -90,6 +91,8 @@ export interface AgentV3ClientState {
   previewUrl?: string;
   /** A pending plan/permission gate awaiting the user's Approve/Reject (P4). */
   pendingPermission?: { callId: string; action: string };
+  /** The sandbox workspace id for this build (enables History → restore). */
+  workspaceId?: string;
   /** The live "AI Team" tracker, keyed by role (D9). */
   agents: Record<string, AgentCard>;
   /** Internal: bash callId → command, so a tool_result can be routed to the terminal. */

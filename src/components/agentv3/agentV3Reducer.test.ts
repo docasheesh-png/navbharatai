@@ -75,6 +75,11 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(s.pendingPermission).toBeUndefined();
   });
 
+  it('stores the workspace id for restore', () => {
+    const s = agentV3Reducer(initialAgentV3State(), { type: 'workspace', workspaceId: 'ws-42', ts: 1 });
+    expect(s.workspaceId).toBe('ws-42');
+  });
+
   it('stores the live preview URL', () => {
     const s = agentV3Reducer(initialAgentV3State(), { type: 'preview', url: 'https://app.sandbox.dev', ts: 1 });
     expect(s.previewUrl).toBe('https://app.sandbox.dev');

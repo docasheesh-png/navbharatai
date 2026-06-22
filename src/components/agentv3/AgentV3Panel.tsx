@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
-  History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink,
+  History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import type { AgentCard } from './agentV3Types';
@@ -20,7 +20,7 @@ import type { AgentCard } from './agentV3Types';
 type SurfaceTab = 'preview' | 'files' | 'diff' | 'terminal' | 'history';
 
 export function AgentV3Panel({ userId }: { userId?: string }) {
-  const { state, running, error, start, respond, stop } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, stop } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   const [onlyOpus, setOnlyOpus] = useState(false);
   const [planFirst, setPlanFirst] = useState(true);
@@ -210,9 +210,19 @@ export function AgentV3Panel({ userId }: { userId?: string }) {
               state.checkpoints.length === 0 ? <Empty>No checkpoints yet.</Empty> : (
                 <ul className="space-y-1">
                   {state.checkpoints.map((c) => (
-                    <li key={c.id} className="flex items-center gap-2">
+                    <li key={c.id} className="flex items-center gap-2 group">
                       <History className="w-3.5 h-3.5 text-zinc-500" />
-                      <span className="text-zinc-500">{c.sha.slice(0, 7) || '—'}</span> {c.message}
+                      <span className="text-zinc-500">{c.sha.slice(0, 7) || '—'}</span>
+                      <span className="flex-1 truncate">{c.message}</span>
+                      {c.sha && (
+                        <button
+                          onClick={() => restore(c.sha)}
+                          className="opacity-0 group-hover:opacity-100 flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                          title="Restore the workspace to this checkpoint"
+                        >
+                          <RotateCcw className="w-3 h-3" /> Restore
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>

@@ -29,6 +29,9 @@ function applyFileChange(files: FileChange[], change: FileChange): FileChange[] 
 
 export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEvent): AgentV3ClientState {
   switch (event.type) {
+    case 'workspace':
+      return { ...state, workspaceId: event.workspaceId };
+
     case 'narration':
     case 'thinking': {
       const narration =

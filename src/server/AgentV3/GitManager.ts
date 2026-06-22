@@ -59,11 +59,15 @@ export class GitManager implements Checkpointer {
     }
   }
 
-  /** Restore the workspace to a checkpoint SHA (used by History → restore). */
+  /**
+   * Restore the workspace files to a checkpoint SHA (used by History → restore).
+   * Uses `git checkout <sha> -- .` so the working tree matches that commit
+   * without detaching HEAD; the user can then continue building from there.
+   */
   async restore(sha: string): Promise<boolean> {
     if (!this.ready || !/^[0-9a-f]{4,40}$/i.test(sha)) return false;
     try {
-      const r = await this.run(`git checkout -q ${sha} -- . && git checkout -q ${sha} 2>/dev/null || git checkout -q ${sha} -- .`);
+      const r = await this.run(`git checkout ${sha} -- .`);
       return r.exitCode === 0;
     } catch {
       return false;

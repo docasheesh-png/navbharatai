@@ -17,6 +17,8 @@ import {
   awaitApproval,
   resolveApproval,
   GitManager,
+  registerSession,
+  restoreSession,
 } from '../AgentV3';
 import { randomUUID } from 'crypto';
 import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
@@ -74,6 +76,23 @@ export function registerAgentV3Routes(app: Express): void {
     res.json({ ok: resolveApproval(requestId, approved) });
   });
 
+  // History → restore: roll the workspace back to a checkpoint commit (P-git).
+  app.post('/api/agentv3/restore', async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    if (!isAgentV3Enabled(userId)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const sha = typeof req.body?.sha === 'string' ? req.body.sha : '';
+    if (!workspaceId || !sha) {
+      res.status(400).json({ error: 'workspaceId and sha are required.' });
+      return;
+    }
+    const ok = await restoreSession(workspaceId, sha, userId ?? undefined);
+    res.json({ ok });
+  });
+
   // Build entry — runs the native tool-use loop and streams events as NDJSON.
   app.post('/api/agentv3/chat', buildRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
@@ -121,6 +140,8 @@ export function registerAgentV3Routes(app: Express): void {
       // without a shell).
       const git = new GitManager(actuator, workspaceId);
       await git.ensureRepo();
+      registerSession(workspaceId, git, userId ?? undefined);
+      events.emit({ type: 'workspace', workspaceId, ts: Date.now() });
 
       // The Architect can delegate to specialist sub-agents via the task tool.
       const spawnSubAgent = makeSubAgentSpawn({

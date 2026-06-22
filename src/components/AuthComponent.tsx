@@ -13,6 +13,29 @@ import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
+/**
+ * Surface the REAL reason behind a Firebase auth failure. The generic
+ * "auth/internal-error" message hides the underlying server response; this digs
+ * out the nested detail (customData / serverResponse) so the user can see and
+ * report the actual cause without a desktop console.
+ */
+function describeAuthError(err: any): string {
+  try {
+    const code = err?.code ? `[${err.code}] ` : '';
+    const msg = err?.message ?? String(err);
+    const cd = err?.customData ?? {};
+    let server = cd?.serverResponse ?? cd?._serverResponse ?? cd?.message ?? '';
+    if (server && typeof server !== 'string') server = JSON.stringify(server);
+    // Avoid repeating the same text twice.
+    const extra = server && !msg.includes(String(server)) ? ` — ${server}` : '';
+    // Best-effort: also log the full object for a desktop console.
+    try { console.error('AUTH_ERROR_FULL', JSON.stringify(err, Object.getOwnPropertyNames(err))); } catch { /* ignore */ }
+    return `${code}${msg}${extra}`.slice(0, 700) || 'Sign-in failed. Try again.';
+  } catch {
+    return err?.message || 'Sign-in failed. Try again.';
+  }
+}
+
 export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser: any, onClose: () => void }) => {
   const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
   const [email, setEmail] = useState('');
@@ -185,7 +208,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       setUser(result.user);
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Google sign-in failed. Try again.');
+      setError(describeAuthError(err));
     } finally {
       setLoading(false);
     }
@@ -208,7 +231,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       }
       onClose();
     } catch (err: any) {
-      setError(err.message);
+      setError(describeAuthError(err));
     } finally {
       setLoading(false);
     }

@@ -12,13 +12,16 @@ import { AgentV3Panel } from './AgentV3Panel';
  * logged-in users at GA — D8) → a small floating button opens the full v3.0
  * builder as an overlay. Server-authoritative gating; self-hiding.
  */
-export function AgentV3Launcher({ userId }: { userId?: string }) {
+export function AgentV3Launcher({ userId, email }: { userId?: string; email?: string }) {
   const [enabled, setEnabled] = useState(false);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+    const params = new URLSearchParams();
+    if (userId) params.set('userId', userId);
+    if (email) params.set('email', email);
+    const qs = params.toString() ? `?${params.toString()}` : '';
     fetch(`/api/agentv3/status${qs}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
@@ -30,7 +33,7 @@ export function AgentV3Launcher({ userId }: { userId?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, email]);
 
   if (!enabled) return null;
 
@@ -60,7 +63,7 @@ export function AgentV3Launcher({ userId }: { userId?: string }) {
             </button>
           </div>
           <div className="flex-1 min-h-0">
-            <AgentV3Panel userId={userId} />
+            <AgentV3Panel userId={userId} email={email} />
           </div>
         </div>
       )}

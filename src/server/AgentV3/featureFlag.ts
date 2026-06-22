@@ -20,11 +20,16 @@ export function agentV3Allowlist(): string[] {
 
 /**
  * Whether v3.0 is available for a given user. Enabled when the global flag is on
- * AND (the allowlist is empty → all users, OR the user is on the allowlist).
+ * AND (the allowlist is empty → all logged-in users, OR the user matches an
+ * allowlist entry). An entry matches either the Firebase uid OR the email
+ * (case-insensitive) — so an admin can allowlist by the email they know rather
+ * than hunting for a uid.
  */
-export function isAgentV3Enabled(userId?: string | null): boolean {
+export function isAgentV3Enabled(userId?: string | null, email?: string | null): boolean {
   if (!isAgentV3GloballyEnabled()) return false;
   const allow = agentV3Allowlist();
   if (allow.length === 0) return true;
-  return !!userId && allow.includes(userId);
+  const id = (userId ?? '').trim();
+  const mail = (email ?? '').trim().toLowerCase();
+  return allow.some((entry) => (id !== '' && entry === id) || (mail !== '' && entry.toLowerCase() === mail));
 }

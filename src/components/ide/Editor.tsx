@@ -4,7 +4,7 @@ import { cn } from '../../lib/utils';
 import {
   X, Play, Bug, Save, FileCode, Check,
   ChevronRight, MoreVertical, Layout,
-  Globe, Paintbrush, Braces, FileText, Image
+  Globe, Paintbrush, Braces, FileText, Image, FolderOpen
 } from 'lucide-react';
 import type { FC, SVGProps } from 'react';
 
@@ -50,6 +50,8 @@ interface EditorProps {
   editorTheme?: 'vs-dark' | 'vs';
   /** Override / extend Monaco editor options */
   editorOptions?: Record<string, unknown>;
+  /** C23: Reveal active file in the file explorer sidebar */
+  onRevealInExplorer?: (path: string) => void;
 }
 
 export const Editor: React.FC<EditorProps> = React.memo(({
@@ -67,6 +69,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   dirtyTabs,
   editorTheme = 'vs-dark',
   editorOptions = {},
+  onRevealInExplorer,
 }) => {
   const isBinaryFile = BINARY_EXTENSIONS.has(fileName.split('.').pop()?.toLowerCase() ?? '');
   const editorRef = useRef<any>(null);
@@ -151,6 +154,16 @@ export const Editor: React.FC<EditorProps> = React.memo(({
            <span>Project Root</span>
            <ChevronRight className="w-3 h-3" />
            <span className="text-white">{fileName}</span>
+           {/* C23: reveal active file in explorer */}
+           {onRevealInExplorer && (
+             <button
+               onClick={() => onRevealInExplorer(activeTab)}
+               title="Reveal in file explorer"
+               className="ml-1 p-0.5 hover:text-white transition-colors"
+             >
+               <FolderOpen className="w-3 h-3" />
+             </button>
+           )}
         </div>
         <div className="flex items-center gap-3">
             {onDebug && (

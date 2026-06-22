@@ -296,7 +296,7 @@ export function DatabaseStudio() {
               ) : filteredRows.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-40 gap-2">
                   <Database className="w-10 h-10 text-white/10" />
-                  <p className="text-sm text-white/30">Koi data nahi — "Add Row" se shuru karo</p>
+                  <p className="text-sm text-white/30">No data yet — click "Add Row" to get started</p>
                 </div>
               ) : (
                 <table className="w-full text-xs border-collapse min-w-max">

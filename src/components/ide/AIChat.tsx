@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X } from 'lucide-react';
+import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Search } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -380,6 +380,10 @@ export const AIChat: React.FC<AIChatProps> = ({
     onAttachmentsChange?.(attachments);
   }, [attachments, onAttachmentsChange]);
 
+  // B17: Search within chat history
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [showChatSearch, setShowChatSearch] = useState(false);
+
   const [uploadError, setUploadError] = useState<string>('');
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -453,6 +457,24 @@ export const AIChat: React.FC<AIChatProps> = ({
   const [showReport, setShowReport] = useState<Record<string, boolean>>({});
   const [reportText, setReportText] = useState<Record<string, string>>({});
   const [progressCollapsed, setProgressCollapsed] = useState(false);
+  // D20: keep build widget visible after completion until user dismisses it
+  const [buildProgressDismissed, setBuildProgressDismissed] = useState(false);
+  useEffect(() => {
+    if (buildProgress?.active) setBuildProgressDismissed(false);
+  }, [buildProgress?.active]);
+  // D23: build counter — increments on each new build start
+  const [currentBuildCount, setCurrentBuildCount] = useState(() => {
+    try { return parseInt(localStorage.getItem('nba_build_count') || '0', 10); } catch { return 0; }
+  });
+  useEffect(() => {
+    if (buildProgress?.active) {
+      const next = parseInt(localStorage.getItem('nba_build_count') || '0', 10) + 1;
+      try { localStorage.setItem('nba_build_count', String(next)); } catch {}
+      setCurrentBuildCount(next);
+    }
+  // Only fire when build starts (active flips to true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildProgress?.active]);
   // Live clock for the build elapsed-time display — ticks only while a build runs.
   const [nowTs, setNowTs] = useState(() => Date.now());
   useEffect(() => {
@@ -820,6 +842,16 @@ export const AIChat: React.FC<AIChatProps> = ({
               >
                 🐙 GitHub Pages
               </button>
+              {/* D26: re-run code review from build results */}
+              {onSendSuggestion && (
+                <button
+                  onClick={() => onSendSuggestion('/code-review')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600/10 hover:bg-red-600/20 border border-red-500/20 text-red-400 text-[10px] font-bold rounded-xl transition-all active:scale-95"
+                  title="Run AI code review on the generated app"
+                >
+                  🔍 Code Review
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -965,6 +997,23 @@ export const AIChat: React.FC<AIChatProps> = ({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* B17: Chat search bar */}
+      {showChatSearch && (
+        <div className="px-3 py-2 border-b border-white/5 bg-black/20 flex items-center gap-2">
+          <Search className="w-3 h-3 text-[#484f58] shrink-0" />
+          <input
+            autoFocus
+            value={chatSearchQuery}
+            onChange={e => setChatSearchQuery(e.target.value)}
+            placeholder="Search messages..."
+            className="flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-[#484f58]"
+          />
+          <button onClick={() => { setShowChatSearch(false); setChatSearchQuery(''); }} className="text-[#484f58] hover:text-white">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
 
       <div className={cn("flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar overflow-x-hidden")} ref={scrollRef}>
         {/* AgentProgress removed here to only be rendered dynamically in messages if needed */}
@@ -1130,13 +1179,18 @@ export const AIChat: React.FC<AIChatProps> = ({
         )}
 
         <AnimatePresence>
-          {messages.map((msg, index) => {
+          {messages
+            .filter(msg => !chatSearchQuery || (msg.text || '').toLowerCase().includes(chatSearchQuery.toLowerCase()))
+            .map((msg, index) => {
             if (!msg) return null;
             const cleanedText = msg.text || (msg as any).content || "No Text";
             const lineCount = ((cleanedText || '').match(/\n/g) || []).length + 1;
             const isLongMessage = cleanedText.length > 220 || lineCount > 4;
 
             const isLastAI = msg.sender === 'ai' && index === messages.length - 1 && !isLoading;
+            // F2: classify error type for visual distinction
+            const isNetworkError = msg.sender === 'ai' && /network.*fail|internet.*check|connection.*fail|ERR_NETWORK|cannot reach|unreachable|offline/i.test(cleanedText);
+            const isAIError = msg.sender === 'ai' && !isNetworkError && /temporarily busy|rate limit|quota|AI.*service|all.*providers|overload|timeout|unavailable/i.test(cleanedText);
             return (
               <motion.div
                 layout
@@ -1152,7 +1206,11 @@ export const AIChat: React.FC<AIChatProps> = ({
                   "max-w-[90%] p-3.5 rounded-2xl text-[11px] font-medium leading-relaxed shadow-sm break-words select-text",
                   msg.sender === 'user'
                     ? "bg-indigo-600 text-white rounded-tr-none"
-                    : "bg-[#161b22] text-[#c9d1d9] border border-white/5 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                    : isNetworkError
+                      ? "bg-[#1a0e0e] text-[#c9d1d9] border border-red-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                      : isAIError
+                        ? "bg-[#1a1600] text-[#c9d1d9] border border-amber-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                        : "bg-[#161b22] text-[#c9d1d9] border border-white/5 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
                 )}>
                   {/* Attachment image previews — compact grid */}
                   {msg.attachments && msg.attachments.length > 0 && (
@@ -1213,6 +1271,9 @@ export const AIChat: React.FC<AIChatProps> = ({
                   <span className="text-[7px] font-black text-[#484f58] uppercase tracking-widest">
                     {msg.sender === 'user' ? 'YOU' : activeAgent.toUpperCase().replace('_', ' ')}
                   </span>
+                  {/* F2: error type badge for visual distinction */}
+                  {isNetworkError && <span className="text-[7px] font-black uppercase tracking-widest text-red-400 bg-red-500/10 border border-red-500/20 rounded px-1 py-px">Network Error</span>}
+                  {isAIError && <span className="text-[7px] font-black uppercase tracking-widest text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded px-1 py-px">AI Service</span>}
                   {/* B7: Model badge on AI messages */}
                   {msg.sender === 'ai' && msg.modelUsed && (
                     <span className="text-[7px] font-mono text-indigo-400/70 bg-indigo-900/20 border border-indigo-800/30 rounded px-1 py-px">
@@ -1325,13 +1386,13 @@ export const AIChat: React.FC<AIChatProps> = ({
           >
             <div className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500/10 border-b border-indigo-500/20">
               <span className="text-base">🧭</span>
-              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300">Guider — Plan ke liye aapki manzoori chahiye</span>
+              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300">Guider — Your Approval Needed</span>
             </div>
             <div className="px-4 py-3">
               <p className="text-[12px] leading-relaxed text-[#c9d1d9] whitespace-pre-wrap">{guiderPlan.designProposal}</p>
               {Array.isArray(guiderPlan.clarifyingQuestions) && guiderPlan.clarifyingQuestions.length > 0 && (
                 <div className="mt-3 rounded-lg bg-white/5 border border-white/10 p-2.5">
-                  <div className="text-[9px] font-black uppercase tracking-widest text-indigo-300/80 mb-1">Kuch sawaal</div>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-indigo-300/80 mb-1">Clarifying Questions</div>
                   <ul className="list-disc list-inside space-y-0.5">
                     {guiderPlan.clarifyingQuestions.map((q, i) => (
                       <li key={i} className="text-[11px] text-[#8b949e]">{q}</li>
@@ -1342,7 +1403,7 @@ export const AIChat: React.FC<AIChatProps> = ({
               <textarea
                 value={guiderInput}
                 onChange={(e) => setGuiderInput(e.target.value)}
-                placeholder="Badlav batao ya sawaalon ke jawab do… (optional)"
+                placeholder="Suggest changes or answer the questions above… (optional)"
                 rows={2}
                 disabled={!!guiderReplanning}
                 className="mt-3 w-full resize-none rounded-lg bg-[#161b22] border border-white/10 px-3 py-2 text-[12px] text-white placeholder-white/30 focus:outline-none focus:border-indigo-500/50 disabled:opacity-50"
@@ -1353,7 +1414,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                   disabled={!!guiderReplanning}
                   className="flex-1 px-3 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 text-white text-[11px] font-black uppercase tracking-wider hover:opacity-90 transition disabled:opacity-50"
                 >
-                  ✅ Approve — banao
+                  ✅ Approve — Build It
                 </button>
                 <button
                   onClick={() => { const t = guiderInput.trim(); if (t) { setGuiderInput(''); onGuiderSend?.(t); } }}
@@ -1361,7 +1422,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                   className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-[#c9d1d9] text-[11px] font-black uppercase tracking-wider hover:bg-white/10 transition disabled:opacity-40"
                   title="Edit the plan or answer the questions"
                 >
-                  {guiderReplanning ? '⏳ Soch raha…' : '✏️ Bhejo'}
+                  {guiderReplanning ? '⏳ Thinking…' : '✏️ Send'}
                 </button>
               </div>
             </div>
@@ -1369,16 +1430,36 @@ export const AIChat: React.FC<AIChatProps> = ({
         )}
 
         {/* ── Inline Build Progress Widget ── */}
-        {buildProgress?.active && (
+        {buildProgress && (buildProgress.active || (buildProgress.steps.length > 0 && !buildProgressDismissed)) && (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-[#161b22] border border-amber-500/20 rounded-2xl overflow-hidden shadow-xl"
+            className={`border rounded-2xl overflow-hidden shadow-xl ${buildProgress.active ? 'bg-[#161b22] border-amber-500/20' : 'bg-[#161b22] border-white/10'}`}
           >
             {/* Header */}
             <div className="flex items-center gap-2 px-4 py-2.5 bg-[#0d1117] border-b border-white/5">
-              <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">NavBharatAI v2.0 — Building</span>
+              <div className={`w-2 h-2 rounded-full ${buildProgress.active ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+              <span className={`text-[9px] font-black uppercase tracking-widest ${buildProgress.active ? 'text-amber-400' : 'text-emerald-400'}`}>
+                {buildProgress.active ? 'NavBharatAI v2.0 — Building' : 'Build Completed'}
+              </span>
+              {/* D7: estimated build time hint */}
+              {buildProgress.active && !buildProgress.startedAt && (
+                <span className="text-[8px] text-white/20 font-mono">~30–90s</span>
+              )}
+              {/* D23: build count badge */}
+              {currentBuildCount > 0 && (
+                <span className="text-[8px] font-black text-white/25 font-mono">#{currentBuildCount}</span>
+              )}
+              {/* D20: dismiss completed build widget */}
+              {!buildProgress.active && (
+                <button
+                  onClick={() => setBuildProgressDismissed(true)}
+                  title="Dismiss build log"
+                  className="ml-auto p-1 text-white/20 hover:text-white/60 rounded"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
               {buildProgress.part && buildProgress.part > 1 && (
                 <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[8px] font-black uppercase tracking-wider text-amber-300">Part {buildProgress.part}</span>
               )}
@@ -1407,8 +1488,8 @@ export const AIChat: React.FC<AIChatProps> = ({
                   className="h-1.5 w-20 bg-white/5 rounded-full overflow-hidden"
                 >
                   <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{ width: `${buildProgress.percent}%`, background: 'linear-gradient(90deg,#f59e0b,#fbbf24)' }}
+                    className="h-full rounded-full transition-[width] duration-700 ease-in-out"
+                    style={{ width: `${Math.max(buildProgress.percent, buildProgress.active ? 3 : 0)}%`, background: 'linear-gradient(90deg,#f59e0b,#fbbf24)' }}
                   />
                 </div>
                 <span className="text-[8px] text-white/30 font-mono">{buildProgress.percent}%</span>
@@ -1460,13 +1541,29 @@ export const AIChat: React.FC<AIChatProps> = ({
                   ))}
                 </div>
                 {/* Footer */}
-                <div className="px-4 py-2 border-t border-white/5 flex items-center justify-between">
+                <div className="px-4 py-2 border-t border-white/5 flex items-center justify-between gap-2">
                   <span className="text-[8px] text-white/25 font-mono">
                     {Object.keys(buildProgress.generatedFiles).length > 0
                       ? `${Object.keys(buildProgress.generatedFiles).length} file(s) generated`
                       : 'Working...'}
                   </span>
-                  <span className="text-[8px] text-white/15 font-mono">navBharatAI Pro Builder</span>
+                  {/* D30: size warning for very large apps */}
+                  {Object.keys(buildProgress.generatedFiles).length > 100 && (
+                    <span className="text-[8px] font-black text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full" title="Large app: over 100 files generated. ZIP download may be slow.">
+                      ⚠ Large app
+                    </span>
+                  )}
+                  {/* F20: copy full build log */}
+                  <button
+                    onClick={() => {
+                      const log = buildProgress.steps.map(s => `[${s.status}] ${s.label}${s.sub ? ` — ${s.sub}` : ''}${s.code ? '\n' + s.code : ''}`).join('\n');
+                      navigator.clipboard.writeText(log).catch(() => {});
+                    }}
+                    title="Copy build log"
+                    className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors ml-auto"
+                  >
+                    Copy Log
+                  </button>
                 </div>
               </>
             )}
@@ -1636,13 +1733,42 @@ export const AIChat: React.FC<AIChatProps> = ({
                   {sendOnEnter ? '↵ Send' : '⇧↵ Send'}
                 </button>
                 {messages.length > 0 && (
-                  <button
-                    onClick={() => { if (window.confirm('Clear conversation?')) { /* parent handles via onSend with special signal */ onSendSuggestion?.('__CLEAR_CHAT__'); } }}
-                    title="Clear conversation"
-                    className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
-                  >
-                    Clear
-                  </button>
+                  <>
+                    {/* B17: Toggle chat search */}
+                    <button
+                      onClick={() => { setShowChatSearch(v => !v); if (showChatSearch) setChatSearchQuery(''); }}
+                      title="Search messages (Ctrl+F)"
+                      className={`text-[8px] font-black uppercase tracking-widest transition-colors ${showChatSearch ? 'text-indigo-400' : 'text-[#30363d] hover:text-[#484f58]'}`}
+                    >
+                      Search
+                    </button>
+                    {/* B16: Export chat as markdown */}
+                    <button
+                      onClick={() => {
+                        const md = messages.map(m => {
+                          const role = m.sender === 'user' ? '**You**' : '**AI**';
+                          return `${role}\n\n${m.text || ''}\n`;
+                        }).join('\n---\n\n');
+                        const blob = new Blob([md], { type: 'text/markdown' });
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = `chat-${new Date().toISOString().slice(0, 10)}.md`;
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                      }}
+                      title="Export chat as Markdown"
+                      className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
+                    >
+                      Export
+                    </button>
+                    <button
+                      onClick={() => { if (window.confirm('Clear conversation?')) { onSendSuggestion?.('__CLEAR_CHAT__'); } }}
+                      title="Clear conversation"
+                      className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
+                    >
+                      Clear
+                    </button>
+                  </>
                 )}
               </div>
             </div>

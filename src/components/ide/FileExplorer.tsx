@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FolderOpen, FileCode, Plus, FilePlus, FolderPlus,
   ChevronRight, ChevronDown, MoreVertical, Trash2,
-  Edit2, HardDrive, Search, ArrowUpDown, SortAsc, Github
+  Edit2, HardDrive, Search, ArrowUpDown, SortAsc, Github, Lock, Image
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -29,6 +29,19 @@ interface FileNode {
   children?: Record<string, FileNode>;
 }
 
+// A20: files that should be treated as read-only (auto-generated / lock files)
+const READ_ONLY_PATTERNS = /^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|\.DS_Store|.*\.min\.(js|css)|.*\.d\.ts)$/;
+function isReadOnly(name: string): boolean {
+  return READ_ONLY_PATTERNS.test(name);
+}
+
+// C10: image file extensions for preview
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.avif']);
+function isImageFile(name: string): boolean {
+  const dot = name.lastIndexOf('.');
+  return dot !== -1 && IMAGE_EXTS.has(name.slice(dot).toLowerCase());
+}
+
 export const FileExplorer: React.FC<FileExplorerProps> = ({
   files,
   activeFile,
@@ -50,6 +63,22 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
   const [recentFiles, setRecentFiles] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('ide_recent_files') || '[]'); } catch { return []; }
   });
+
+  // C10: image preview hover state
+  const [imagePreviewPath, setImagePreviewPath] = useState<string | null>(null);
+
+  // C24: Auto-expand parent directories when the active file changes
+  useEffect(() => {
+    if (!activeFile) return;
+    const parts = activeFile.split('/');
+    if (parts.length < 2) return;
+    const parentDirs = parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join('/'));
+    setExpandedDirs(prev => {
+      const next = new Set(prev);
+      parentDirs.forEach(d => next.add(d));
+      return next;
+    });
+  }, [activeFile]);
 
   const buildTree = (filePaths: string[]): FileNode => {
     const root: FileNode = { name: 'root', path: '', type: 'dir', children: {} };
@@ -141,17 +170,27 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
         <div
           key={item.path}
           onClick={() => handleFileSelectWithRecent(item.path)}
+          onMouseEnter={() => isImageFile(item.name) ? setImagePreviewPath(item.path) : undefined}
+          onMouseLeave={() => setImagePreviewPath(null)}
           className={cn(
-            "group flex items-center justify-between px-4 py-1.5 cursor-pointer transition-all",
+            "group relative flex items-center justify-between px-4 py-1.5 cursor-pointer transition-all",
             isActive ? "bg-indigo-600/10 text-white border-r-2 border-indigo-500" : "hover:bg-white/5 text-[#8b949e]"
           )}
           style={{ paddingLeft: `${(level + 1) * 12}px` }}
         >
           <div className="flex items-center gap-3 min-w-0">
-            <FileCode className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-indigo-400" : "text-[#484f58]")} />
+            {/* C10: image icon for image files */}
+            {isImageFile(item.name)
+              ? <Image className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-indigo-400" : "text-[#484f58]")} />
+              : <FileCode className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-indigo-400" : "text-[#484f58]")} />
+            }
             <span className={cn("text-[11px] font-medium tracking-tight truncate", isActive ? "font-bold" : "")}>{item.name}</span>
             {dirtyTabs?.has(item.path) && (
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="Unsaved changes" />
+            )}
+            {/* A20: read-only indicator */}
+            {isReadOnly(item.name) && (
+              <Lock className="w-2.5 h-2.5 shrink-0 text-[#484f58]/60" title="Read-only / auto-generated file" />
             )}
           </div>
           <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
@@ -180,6 +219,21 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
               <Trash2 className="w-3 h-3" />
             </button>
           </div>
+          {/* C10: image preview tooltip on hover */}
+          {imagePreviewPath === item.path && (
+            <div className="absolute left-full top-0 ml-2 z-50 p-2 bg-[#161b22] border border-white/10 rounded-xl shadow-2xl pointer-events-none" style={{ minWidth: '120px', maxWidth: '200px' }}>
+              {(files[item.path] || '').startsWith('data:image') || item.name.endsWith('.svg') ? (
+                item.name.endsWith('.svg')
+                  ? <div className="w-full" dangerouslySetInnerHTML={{ __html: files[item.path] || '' }} />
+                  : <img src={files[item.path]} alt={item.name} className="w-full rounded" />
+              ) : (
+                <div className="flex items-center gap-2 p-1">
+                  <Image className="w-4 h-4 text-[#484f58]" />
+                  <span className="text-[9px] text-[#484f58]">{item.name}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       );
     });

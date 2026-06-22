@@ -516,7 +516,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
             <div className="p-3 border-b border-white/10 flex-shrink-0">
               <div className="bg-[#161b22] border border-white/10 rounded-lg p-3">
                 {fileInfo.thumbnailUrl && (
-                  <img src={fileInfo.thumbnailUrl} alt="thumbnail" className="w-full h-20 object-cover rounded mb-2 opacity-80" />
+                  <img src={fileInfo.thumbnailUrl} alt="thumbnail" className="w-full h-20 object-cover rounded mb-2 opacity-80" loading="lazy" />
                 )}
                 <p className="text-xs font-semibold text-gray-100 truncate">{fileInfo.name}</p>
                 {fileInfo.lastModified && (

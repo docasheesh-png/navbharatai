@@ -61,7 +61,7 @@ function generateTestsFromCode(code: string): TestCase[] {
     tests.push({
       id: String(id++), category: 'unit', status: 'pending',
       name: `${fn}() — basic functionality`,
-      description: `${fn} function correctly execute hoti hai aur expected output deti hai`,
+      description: `${fn} function executes correctly and returns the expected output`,
       code: `import { ${fn} } from './component';\n\ntest('${fn} works correctly', () => {\n  const result = ${fn}();\n  expect(result).toBeDefined();\n  expect(result).not.toBeNull();\n});`,
     });
   });
@@ -70,7 +70,7 @@ function generateTestsFromCode(code: string): TestCase[] {
     tests.push({
       id: String(id++), category: 'unit', status: 'pending',
       name: 'State initialization check',
-      description: 'Component ka initial state correct values ke saath set hota hai',
+      description: 'Component initial state is set with the correct values',
       code: `import { render } from '@testing-library/react';\nimport Component from './component';\n\ntest('initial state is correct', () => {\n  const { getByTestId } = render(<Component />);\n  // Initial state values verify karo\n  expect(getByTestId('counter')).toHaveTextContent('0');\n});`,
     });
   }
@@ -79,7 +79,7 @@ function generateTestsFromCode(code: string): TestCase[] {
     tests.push({
       id: String(id++), category: 'unit', status: 'pending',
       name: 'Input field onChange handler',
-      description: 'User input change pe state update hota hai correctly',
+      description: 'State updates correctly when user input changes',
       code: `import { render, fireEvent } from '@testing-library/react';\n\ntest('input onChange updates state', () => {\n  const { getByPlaceholderText } = render(<Component />);\n  const input = getByPlaceholderText('Enter text...');\n  fireEvent.change(input, { target: { value: 'test value' } });\n  expect(input.value).toBe('test value');\n});`,
     });
   }
@@ -89,7 +89,7 @@ function generateTestsFromCode(code: string): TestCase[] {
     tests.push({
       id: String(id++), category: 'integration', status: 'pending',
       name: 'Form submission flow',
-      description: 'Form submit karne pe correct data process hota hai aur UI update hota hai',
+      description: 'Submitting the form processes data correctly and updates the UI',
       code: `import { render, fireEvent, waitFor } from '@testing-library/react';\n\ntest('form submission works end-to-end', async () => {\n  const mockSubmit = jest.fn();\n  const { getByRole } = render(<Component onSubmit={mockSubmit} />);\n  \n  fireEvent.click(getByRole('button', { name: /submit/i }));\n  await waitFor(() => expect(mockSubmit).toHaveBeenCalledTimes(1));\n});`,
     });
   }
@@ -98,14 +98,14 @@ function generateTestsFromCode(code: string): TestCase[] {
     tests.push({
       id: String(id++), category: 'integration', status: 'pending',
       name: 'API call — success response',
-      description: 'API se data fetch hota hai aur component mein correctly display hota hai',
+      description: 'Data fetched from the API is displayed correctly in the component',
       code: `import { render, waitFor } from '@testing-library/react';\n\nglobal.fetch = jest.fn(() =>\n  Promise.resolve({ ok: true, json: () => Promise.resolve({ data: 'test' }) })\n);\n\ntest('fetches and displays data', async () => {\n  const { getByText } = render(<Component />);\n  await waitFor(() => expect(getByText('test')).toBeInTheDocument());\n  expect(fetch).toHaveBeenCalledTimes(1);\n});`,
     });
 
     tests.push({
       id: String(id++), category: 'integration', status: 'pending',
       name: 'API call — error handling',
-      description: 'API fail hone pe error message user ko dikhta hai',
+      description: 'An error message is shown to the user when the API request fails',
       code: `import { render, waitFor } from '@testing-library/react';\n\nglobal.fetch = jest.fn(() => Promise.reject(new Error('Network Error')));\n\ntest('handles API error gracefully', async () => {\n  const { getByText } = render(<Component />);\n  await waitFor(() => {\n    expect(getByText(/error/i)).toBeInTheDocument();\n  });\n});`,
     });
   }
@@ -114,29 +114,29 @@ function generateTestsFromCode(code: string): TestCase[] {
   tests.push({
     id: String(id++), category: 'edge', status: 'pending',
     name: 'Empty input handling',
-    description: 'Empty string, null, ya undefined input pe crash nahi karta',
+    description: 'Does not crash on empty string, null, or undefined input',
     code: `test('handles empty input without crash', () => {\n  expect(() => {\n    const { rerender } = render(<Component value="" />);\n    rerender(<Component value={null} />);\n    rerender(<Component value={undefined} />);\n  }).not.toThrow();\n});`,
   });
 
   tests.push({
     id: String(id++), category: 'edge', status: 'pending',
     name: 'Very long string input',
-    description: '1000+ character input pe performance ya UI break nahi hoti',
+    description: 'Performance and UI remain stable with 1000+ character input',
     code: `test('handles very long strings', () => {\n  const longString = 'a'.repeat(10000);\n  const { container } = render(<Component value={longString} />);\n  expect(container).toBeTruthy(); // Component renders without error\n});`,
   });
 
   tests.push({
     id: String(id++), category: 'edge', status: 'pending',
     name: 'Special characters & Unicode',
-    description: 'Hindi, emoji, special chars (<, >, &, ") correctly handle hote hain',
-    code: `test('handles special characters and unicode', () => {\n  const specialInput = '<script>alert("xss")</script> नमस्ते 🙏';\n  const { getByText } = render(<Component value={specialInput} />);\n  // XSS nahi hona chahiye — script execute nahi hona\n  expect(document.querySelectorAll('script')).toHaveLength(0);\n});`,
+    description: 'Special characters, emoji, and unicode (<, >, &, ") are handled correctly',
+    code: `test('handles special characters and unicode', () => {\n  const specialInput = '<script>alert("xss")</script> Hello 🙏';\n  const { getByText } = render(<Component value={specialInput} />);\n  // Script should not execute — XSS must be prevented\n  expect(document.querySelectorAll('script')).toHaveLength(0);\n});`,
   });
 
   if (hasLocalStorage) {
     tests.push({
       id: String(id++), category: 'edge', status: 'pending',
       name: 'localStorage unavailable',
-      description: 'Private mode ya localStorage block hone pe gracefully degrade karta hai',
+      description: 'Degrades gracefully when localStorage is blocked or unavailable (private mode)',
       code: `test('works when localStorage is unavailable', () => {\n  const mockStorage = { getItem: () => { throw new Error('Storage blocked'); } };\n  Object.defineProperty(window, 'localStorage', { value: mockStorage });\n  \n  expect(() => render(<Component />)).not.toThrow();\n});`,
     });
   }
@@ -145,22 +145,22 @@ function generateTestsFromCode(code: string): TestCase[] {
   tests.push({
     id: String(id++), category: 'security', status: 'pending',
     name: 'XSS Prevention',
-    description: 'User input mein script inject karke XSS attack nahi hona chahiye',
-    code: `test('prevents XSS injection', () => {\n  const xssPayload = '<img src=x onerror=alert(1)>';\n  const { container } = render(<Component userInput={xssPayload} />);\n  \n  // Dangerous HTML nahi hona chahiye\n  expect(container.innerHTML).not.toContain('<img src=x');\n  expect(container.innerHTML).not.toContain('onerror');\n});`,
+    description: 'Injecting a script via user input should not result in an XSS attack',
+    code: `test('prevents XSS injection', () => {\n  const xssPayload = '<img src=x onerror=alert(1)>';\n  const { container } = render(<Component userInput={xssPayload} />);\n  \n  // Dangerous HTML must not be rendered\n  expect(container.innerHTML).not.toContain('<img src=x');\n  expect(container.innerHTML).not.toContain('onerror');\n});`,
   });
 
   if (hasAuth) {
     tests.push({
       id: String(id++), category: 'security', status: 'pending',
       name: 'Authentication check',
-      description: 'Protected routes/actions unauthorized users ko block karte hain',
+      description: 'Protected routes and actions block unauthorized users',
       code: `test('blocks unauthenticated access', () => {\n  const { getByText } = render(<ProtectedComponent user={null} />);\n  expect(getByText(/login|sign in|unauthorized/i)).toBeInTheDocument();\n});`,
     });
 
     tests.push({
       id: String(id++), category: 'security', status: 'pending',
       name: 'Password not stored in plain text',
-      description: 'Password ya sensitive data localStorage/console mein plain text nahi hona chahiye',
+      description: 'Passwords and sensitive data must not be stored as plain text in localStorage or console',
       code: `test('sensitive data is not exposed', () => {\n  const consoleSpy = jest.spyOn(console, 'log');\n  render(<LoginComponent />);\n  \n  consoleSpy.mock.calls.forEach(args => {\n    const msg = JSON.stringify(args);\n    expect(msg).not.toMatch(/password|token|secret/i);\n  });\n  consoleSpy.mockRestore();\n});`,
     });
   }
@@ -362,7 +362,7 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
               </div>
               <div className="text-center">
                 <p className="text-base font-semibold text-white mb-1">AI-Powered Test Generation</p>
-                <p className="text-sm text-white/40">Code analyze karke automatically tests banata hai</p>
+                <p className="text-sm text-white/40">Automatically generates tests by analyzing your code</p>
               </div>
               <div className="grid grid-cols-2 gap-3 max-w-md w-full">
                 {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
@@ -374,13 +374,13 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
               </div>
               {!generatedCode.trim() && (
                 <p className="text-xs text-amber-400 flex items-center gap-1.5">
-                  <AlertCircle className="w-3.5 h-3.5" /> Pehle kuch code generate karo
+                  <AlertCircle className="w-3.5 h-3.5" /> Generate some code first
                 </p>
               )}
             </div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
-              <p className="text-sm text-white/30">Is category mein koi tests nahi</p>
+              <p className="text-sm text-white/30">No tests in this category</p>
             </div>
           ) : (
             <div className="space-y-2">

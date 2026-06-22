@@ -4,6 +4,7 @@ import type { ToolUse } from './ClaudeClient';
 import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
 import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
+import { getWorkspaceMemory } from './WorkspaceMemory';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -119,6 +120,7 @@ export class ToolDispatcher {
         }
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.state?.recordFileChange({ path, kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         await this.maybeCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} (${content.length} bytes).`;
       }
@@ -140,6 +142,7 @@ export class ToolDispatcher {
         const updated = existing.replace(oldStr, newStr);
         await this.actuator.writeFile(this.workspaceId, path, updated);
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, updated);
         this.events?.emit({
           type: 'diff',
           agent,
@@ -156,6 +159,10 @@ export class ToolDispatcher {
         const out =
           `exit=${exitCode}\n${stdout}` + (stderr ? `\n[stderr]\n${stderr}` : '');
         this.state?.appendTerminal(out);
+        // Remember real failures so the team can recall what went wrong (error memory).
+        if (exitCode !== 0) {
+          getWorkspaceMemory(this.workspaceId).recordError(`bash failed (exit ${exitCode}): ${command}\n${stderr.slice(0, 300)}`);
+        }
         return out;
       }
 
@@ -175,6 +182,19 @@ export class ToolDispatcher {
         const re = globToRegExp(pattern);
         const matched = files.filter((f) => re.test(f));
         return matched.length ? matched.join('\n') : '(no files match)';
+      }
+
+      case 'recall': {
+        const query = reqStr(input, 'query');
+        const hits = getWorkspaceMemory(this.workspaceId).recall(query, 12);
+        if (hits.length === 0) return `No project memory matches "${query}" yet.`;
+        return hits
+          .map((h) => {
+            if (h.type === 'symbol') return `symbol ${h.ref} (${h.detail}) in ${h.file}`;
+            if (h.type === 'file') return `file ${h.ref}`;
+            return `${h.detail}: ${h.ref}`;
+          })
+          .join('\n');
       }
 
       case 'update_todo': {

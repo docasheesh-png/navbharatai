@@ -18,6 +18,7 @@ export type ToolName =
   | 'glob'
   | 'update_todo'
   | 'update_preview'
+  | 'recall'
   | 'task';
 
 /**

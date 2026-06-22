@@ -40,6 +40,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • NATIVE TOOL-USE engine on Claude (Sonnet by default; "Only Opus" super toggle for maximum capability).
 • MULTI-AGENT "AI team": an Architect plans and delegates to a six-layer roster of specialist agents — planning (Requirements, Planner, Product), development (Frontend, Backend, Fullstack, Database, Mobile, API, DevOps, Infrastructure, Designer), quality (QA, Tester, Security, Performance, Accessibility, Reviewer), repair (Debugger, Refactor, Optimizer), knowledge (Docs, Researcher) and operations (Deploy, Monitor, Recovery) — routed by capability and working in parallel where safe.
 • MULTI-PROVIDER resilience: native Claude for building, with automatic fallback to Vertex / Gemini / Grok for chat so it always replies.
+• PROJECT MEMORY & artifact intelligence: as it builds it indexes your files into a live project graph (symbols, components, routes, imports, dependencies) and remembers errors and fixes; agents can "recall" this to find where things are and what failed before.
 • LIVE "AI Team" tracker — watch each real agent's current action as it builds (not a fake animation).
 • MERGED SURFACES from one live stream: file explorer, Code Studio diffs (red/green), terminal, git/history checkpoints, todos and plan — all in sync, zero drift.
 • HYBRID sandbox: a fast E2B cloud sandbox initialised as a real Git repo you own.

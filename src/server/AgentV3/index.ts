@@ -41,7 +41,7 @@ export type { BilledUsage } from './pricing';
 export { defaultToolCatalog, CATALOG_TOOL_NAMES, taskToolDef, catalogForTools } from './ToolCatalog';
 export { ToolDispatcher } from './ToolDispatcher';
 export type { ActuatorPort, ToolResult, SubAgentSpawn } from './ToolDispatcher';
-export { roleConfig, isWorkerRole, WORKER_ROLES } from './AgentRegistry';
+export { roleConfig, isWorkerRole, WORKER_ROLES, allRoles, findRolesByCapability, rolesByLayer } from './AgentRegistry';
 export type { RoleConfig } from './AgentRegistry';
 export { makeSubAgentSpawn } from './SubAgent';
 export type { SubAgentDeps } from './SubAgent';

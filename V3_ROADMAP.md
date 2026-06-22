@@ -147,3 +147,11 @@ Every phase is graded against these, because they are what makes the difference:
 ## Progress log (append-only)
 
 - 2026-06-22: Roadmap created. Audit complete (Section A). Starting Phase 1.
+- 2026-06-22: Phase 1 step 1 — expanded the agent roster from 9 to 27 roles
+  across six org layers (planning/development/quality/repair/knowledge/
+  operations), each with a focused system prompt, constrained tool set and
+  declared capabilities. Added a Capability Registry (findRolesByCapability,
+  rolesByLayer, allRoles) so work is routed to the right specialist. Task-tool
+  enum + dispatcher validation auto-wire from WORKER_ROLES. Frontend AgentRole +
+  AppKnowledgeBase synced. 1628 tests green. Next: agent lifecycle/health +
+  capability-aware routing in the Architect prompt + parallel coordination.

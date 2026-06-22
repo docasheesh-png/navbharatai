@@ -38,7 +38,8 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     path: 'Sidebar → "App Builder v3.0"  OR  the floating "v3.0" button (bottom-right when enabled for your account).',
     description: `Claude-Code-class agentic app builder (Vargen 3.0). Capabilities:
 • NATIVE TOOL-USE engine on Claude (Sonnet by default; "Only Opus" super toggle for maximum capability).
-• MULTI-AGENT "AI team": an Architect plans and delegates to specialist agents (Frontend, Backend, Database, Designer, QA, Debugger, Reviewer, Deploy) that work in parallel where safe.
+• MULTI-AGENT "AI team": an Architect plans and delegates to a six-layer roster of specialist agents — planning (Requirements, Planner, Product), development (Frontend, Backend, Fullstack, Database, Mobile, API, DevOps, Infrastructure, Designer), quality (QA, Tester, Security, Performance, Accessibility, Reviewer), repair (Debugger, Refactor, Optimizer), knowledge (Docs, Researcher) and operations (Deploy, Monitor, Recovery) — routed by capability and working in parallel where safe.
+• MULTI-PROVIDER resilience: native Claude for building, with automatic fallback to Vertex / Gemini / Grok for chat so it always replies.
 • LIVE "AI Team" tracker — watch each real agent's current action as it builds (not a fake animation).
 • MERGED SURFACES from one live stream: file explorer, Code Studio diffs (red/green), terminal, git/history checkpoints, todos and plan — all in sync, zero drift.
 • HYBRID sandbox: a fast E2B cloud sandbox initialised as a real Git repo you own.

@@ -5,16 +5,15 @@
 // the final {type:'result'} line streamed by /api/agentv3/chat. Client and server
 // communicate only via this JSON contract — normal client/server decoupling.
 
+// Mirrors the server roster (src/server/AgentV3/types.ts). The six-layer AI team.
 export type AgentRole =
   | 'architect'
-  | 'frontend'
-  | 'backend'
-  | 'database'
-  | 'designer'
-  | 'qa'
-  | 'debugger'
-  | 'reviewer'
-  | 'deploy';
+  | 'requirement' | 'planner' | 'product'
+  | 'frontend' | 'backend' | 'fullstack' | 'database' | 'mobile' | 'api' | 'devops' | 'infrastructure' | 'designer'
+  | 'qa' | 'tester' | 'security' | 'performance' | 'accessibility' | 'reviewer'
+  | 'debugger' | 'refactor' | 'optimizer'
+  | 'docs' | 'researcher'
+  | 'deploy' | 'monitor' | 'recovery';
 
 export type TodoStatus = 'pending' | 'in_progress' | 'done' | 'blocked';
 

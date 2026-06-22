@@ -20,17 +20,49 @@ export type ToolName =
   | 'update_preview'
   | 'task';
 
-/** The multi-agent team roles (§3.3). 'architect' is the lead/orchestrator. */
+/**
+ * The multi-agent team roles (§3.3). 'architect' is the lead/orchestrator; every
+ * other role is a specialist worker the Architect can delegate to via the `task`
+ * tool. The roster spans the planning, development, quality, repair, knowledge
+ * and operations layers (Phase 1 — Agent Orchestration). Each role has a focused
+ * system prompt, a constrained tool set, and declared capabilities (see
+ * AgentRegistry) so work is routed to the right specialist.
+ */
 export type AgentRole =
+  // Lead
   | 'architect'
+  // Planning layer
+  | 'requirement'
+  | 'planner'
+  | 'product'
+  // Development layer
   | 'frontend'
   | 'backend'
+  | 'fullstack'
   | 'database'
+  | 'mobile'
+  | 'api'
+  | 'devops'
+  | 'infrastructure'
   | 'designer'
+  // Quality layer
   | 'qa'
-  | 'debugger'
+  | 'tester'
+  | 'security'
+  | 'performance'
+  | 'accessibility'
   | 'reviewer'
-  | 'deploy';
+  // Repair layer
+  | 'debugger'
+  | 'refactor'
+  | 'optimizer'
+  // Knowledge layer
+  | 'docs'
+  | 'researcher'
+  // Operations layer
+  | 'deploy'
+  | 'monitor'
+  | 'recovery';
 
 export type TodoStatus = 'pending' | 'in_progress' | 'done' | 'blocked';
 

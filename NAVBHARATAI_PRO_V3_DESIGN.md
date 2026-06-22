@@ -13,8 +13,14 @@
 | D1 | **Build approach** | **Strangler-fig** — build v3.0 alongside the live app, behind a feature flag, prove, then cut over. | The live app + payments must NEVER break (CLAUDE.md absolute rule #1). No "delete & rewrite". |
 | D2 | **Who pays for Claude** | **NavBharatAI pays** (admin override). | This **overrides** the CLAUDE.md constraint *"AiCreditsProvider is NEVER registered / user apps run on the user's own accounts"* — authorized by admin (aashishcpmt09) on 2026-06-22. **Mandatory cost-control guardrails** apply (§7). A future BYOK option stays open. |
 | D3 | **Sequencing** | **Design-doc first** (this doc) → admin review → then code, phase by phase. | |
+| D4 | **Sandbox** | **Hybrid: E2B sandbox (engine execution) + real Git repo (user ownership).** | Both E2B keys and real-repo are available. "Give the engine what the engine needs (a fast cloud sandbox), give the user what the user needs (a real, ownable git repo)." World's-best app maker (§7.1). |
+| D5 | **Pricing / CostGuard** | **User is billed `user_tokens × Opus_price × 2.5`** — regardless of which model actually runs (Sonnet, Opus, or Vertex under the hood). | NavBharatAI pays the real provider cost (D2) and bills the user a **2.5× markup over the Opus-equivalent rate** → revenue-positive; D2 exposure is covered. The user always pays the Opus-equivalent ×2.5; the engine is free to route to a cheaper model and keep the margin (§7.2). |
+| D6 | **Super (only-Opus) toggle** | A premium **"Only Opus" super toggle** bills at **×5** (Opus-equivalent ×5). | Forces every step onto Opus; charged at 5× (§7.2). |
+| D7 | **Transcript / DB persistence** | **User's choice** — the user is asked where their data/DB lives. With BYOK, the transcript + app DB live on the **user's own account** (their Claude/their DB). | Honors CLAUDE.md "users' own accounts" for user *data* even though compute billing is D2/D5 (§5.1). |
+| D8 | **Beta allowlist** | **Admin-only now**; once v3.0 is complete → **all logged-in users**. | Matches the strangler-fig rollout (§6). P0 default is admin-only via `AGENTV3_ALLOWLIST`. |
+| D9 | **Engagement is REAL** | The "AI Team" live tracker + live preview must reflect **real running state** — never a fake/scripted animation. | Each agent card = a real running sub-agent + real tool calls; preview updates from real sandbox files as they're written (§3.4, §7.1). CLAUDE.md real-features rule. |
 
-> ⚠️ Because of D2, before any v3.0 build code lands, the CLAUDE.md "Engineer AI permanent constraints" section must be amended (in the same PR that wires Claude billing) to record this admin override — otherwise a future session will revert it per the old rule.
+> ⚠️ Because of D2/D5, before any v3.0 billing code lands, the CLAUDE.md "Engineer AI permanent constraints" section must be amended (in the same PR that wires Claude billing) to record this admin override — otherwise a future session will revert it per the old rule.
 
 ---
 
@@ -176,6 +182,12 @@ watches a live **"AI Team" panel**, not a dead spinner:
 This turns "waiting for a build" into "watching your team build" — the core
 engagement goal.
 
+> **REAL, not fake (D9).** Every agent card is driven by a real running
+> sub-agent and real `tool_call`/`tool_result` events — there is NO scripted or
+> decorative animation. If an agent is idle, its card is idle. The **live
+> preview** renders the real sandbox files the moment they're written (not a
+> mock). Faking any of this would violate the CLAUDE.md real-features rule.
+
 ---
 
 ## 4. Native tool-use design (RC-1) — the heart of "the feel"
@@ -206,9 +218,19 @@ engagement goal.
 
 ## 5. Context model (RC-2)
 
-- `ConversationStore` keeps the **full** message list (assistant turns + tool_results), persisted per session (DB/redis).
+- `ConversationStore` keeps the **full** message list (assistant turns + tool_results), persisted per session.
 - **Prompt caching:** mark the system prompt + tool definitions + early stable turns with `cache_control: {type:'ephemeral'}` → big cost + latency win (directly offsets D2's billing exposure).
 - Compaction only when nearing the context window: summarize oldest turns, keep recent verbatim (Claude-Code-style), never silently drop tool_results mid-task.
+
+### 5.1 Persistence is the user's choice (D7)
+- The user is **asked where their data lives**. Default: NavBharatAI-managed
+  storage (existing DB/Firestore) for the transcript so a build survives a
+  reconnect.
+- With **BYOK** (user brings their own Claude key / their own DB), the transcript
+  + the app's data live on the **user's own account** — honoring the CLAUDE.md
+  "users' own accounts" principle for user *data*, even though build *compute* is
+  billed via D5. `ConversationStore` is an interface with pluggable backends
+  (managed vs user-owned) selected per the user's setting.
 
 ---
 
@@ -225,15 +247,52 @@ No step removes or rewrites working code before its replacement is proven. **App
 
 ---
 
-## 7. Cost-control guardrails (mandatory because of D2 — NavBharatAI pays)
+## 7. Sandbox, pricing & cost guardrails
 
-These protect NavBharatAI's Anthropic billing:
-- **`CostGuard`**: per-session token budget + per-user daily budget; hard stop with an honest "budget reached" message (never a fake success).
-- **Model routing:** **Sonnet is the default**; Opus only when the user/task explicitly opts in (a toggle), or for a final hard step.
-- **Prompt caching** (§5) to cut input-token cost on every turn.
-- **Step/iteration cap** + 45-min wall clock (carry over from Engineer AI) as a backstop.
-- **Per-build cost telemetry** surfaced to admin (extend `TokenUsageManager.ts` / `ObservabilityManager.ts`).
-- **Abuse guard:** rate-limit + auth-gate `/api/agentv3/chat` (reuse existing auth middleware).
+### 7.1 Hybrid sandbox (D4) — "engine gets a sandbox, user gets a repo"
+- **Engine execution** runs in a fast **E2B cloud sandbox** (keys available) — this
+  is where tools (`bash`/`write`/`edit`) act, where the **live preview** is served
+  from, and where parallel sub-agents work.
+- **User ownership**: the sandbox is initialized as a **real Git repo**; every
+  checkpoint is a real commit (`GitManager`, §3.2). The user can take the repo
+  (download / push to their GitHub) — they own a real project, not a black box.
+- The actuator layer (`E2BActuator` + a `GitManager`) bridges both: the engine
+  sees a sandbox, the user sees a repo. Live preview streams from the same
+  sandbox files the agents write (D9 — real, not mocked).
+
+### 7.2 Pricing model (D5/D6) — markup over Opus-equivalent
+NavBharatAI fronts the real provider cost (D2) and **bills the user a markup**, so
+the platform is revenue-positive and the D2 exposure is fully covered:
+
+```
+billed_amount = user_tokens × OPUS_RATE × MULTIPLIER
+  MULTIPLIER = 2.5   (standard — engine may route to Sonnet/Vertex; user still
+                      pays the Opus-equivalent ×2.5, margin funds the platform)
+  MULTIPLIER = 5.0   ("Only Opus" super toggle, D6 — forces Opus on every step)
+```
+
+- `OPUS_RATE` = the current Claude Opus input/output token price (configurable
+  constant; updated when Anthropic pricing changes — keep in one place).
+- `user_tokens` = real metered tokens for the build (input + output), counted by
+  `CostGuard`. The **actual** model used (Sonnet / Opus / Vertex) determines
+  NavBharatAI's real cost; the **user** is always billed at the Opus-equivalent ×
+  the multiplier. The spread between real cost and billed amount is the margin.
+- Wallet integration: reuse the existing wallet/usage-billing (`TokenUsageManager`,
+  `routes/wallet.ts`) to charge the user's balance.
+
+### 7.3 Guardrails (protect billing + the user)
+- **`CostGuard`**: per-session token budget + per-user daily cap; hard stop with an
+  honest "budget reached" message (never a fake success). The user sees a **live
+  running cost estimate** as the build proceeds (transparency).
+- **Model routing:** standard mode defaults to **Sonnet** under the hood (cheaper
+  real cost, same 2.5× Opus-equivalent bill = healthy margin); the **Only-Opus
+  super toggle** (D6) forces Opus and bills ×5.
+- **Prompt caching** (§5) cuts real input-token cost on every turn → widens margin.
+- **Step/iteration cap** + 45-min wall clock (carry over from Engineer AI) backstop.
+- **Per-build cost + margin telemetry** for admin (extend `TokenUsageManager.ts` /
+  `ObservabilityManager.ts`).
+- **Abuse guard:** rate-limit + auth-gate `/api/agentv3/chat` (reuse existing auth
+  middleware). Beta access is **admin-only** now → **logged-in users** at GA (D8).
 
 ---
 
@@ -259,7 +318,7 @@ Each phase = its own branch → PR → CI green → merge (CLAUDE.md rule). `App
 
 | Risk | Mitigation |
 |---|---|
-| Claude cost runs away (D2) | §7 CostGuard + Sonnet-default + caching; hard budget stops. |
+| Claude cost runs away (D2) | §7 CostGuard + Sonnet-default + caching; hard budget stops. **Margin is structurally positive (D5):** user is billed Opus-equivalent ×2.5 (or ×5) while the real model used is ≤ Opus price — billed always ≥ real cost. |
 | v3.0 destabilizes live app | Strangler-fig (§6): zero live-path imports until proven; flag default OFF. |
 | Surface drift / race conditions | Single `WorkspaceState` source of truth; surfaces are read-only subscribers. |
 | Parallel sub-agents writing the same file (corruption) | Architect serializes writes per file; parallelism only for independent files + read-only work (§3.3); sub-agent results integrated by the lead. |
@@ -280,13 +339,15 @@ New/updated entries required (added in the PR that ships each surface):
 
 ---
 
-## 11. Open questions for admin (before P1 code)
+## 11. Open questions — ✅ ANSWERED by admin (2026-06-22)
 
-1. **Sandbox:** confirm E2B is the v3.0 "real repo" (vs Docker). E2B keys provisioned for production volume?
-2. **Budget numbers:** per-build and per-user daily caps (USD) for `CostGuard`?
-3. **Opus access:** Opus opt-in for all users, or premium-tier only?
-4. **Persistence:** where does `ConversationStore` live (existing DB? redis?) for transcript durability across reconnects?
-5. **Beta allowlist:** which users get the v3.0 toggle first?
+1. **Sandbox** → ✅ **Hybrid E2B + real Git repo** (D4, §7.1). Both available; engine gets the sandbox, user gets an ownable repo.
+2. **Budget / pricing** → ✅ **`user_tokens × Opus_rate × 2.5`** standard (D5, §7.2). NavBharatAI pays real cost, bills the markup.
+3. **Opus access** → ✅ **"Only Opus" super toggle billed ×5** (D6). Standard mode routes to Sonnet under the hood, still billed at Opus-equivalent ×2.5.
+4. **Persistence** → ✅ **User's choice** (D7, §5.1). User is asked where their data/DB lives; with BYOK it lives on the user's own account.
+5. **Beta allowlist** → ✅ **Admin-only now → all logged-in users at GA** (D8). Enforced via `AGENTV3_ALLOWLIST`.
+
+All five are now locked as decisions D4–D9 in §0. P1 is unblocked.
 
 ---
 

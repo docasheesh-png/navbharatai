@@ -58,6 +58,14 @@ export interface RunTurnParams {
   messages: unknown[];
   tools?: ClaudeToolDef[];
   maxTokens?: number;
+  /**
+   * Enable Anthropic prompt caching of the large, constant prefix (tool
+   * definitions + system prompt) via cache_control: ephemeral (RC-2). Default
+   * true. Cuts input-token cost on every turn after the first → directly widens
+   * the D5 margin. The Anthropic prompt prefix order is tools → system →
+   * messages, so a cache breakpoint on the system block caches tools+system.
+   */
+  cache?: boolean;
 }
 
 /** The slice of ClaudeClient the AgentRunner loop depends on (DI/testing). */
@@ -109,14 +117,33 @@ export class ClaudeClient implements TurnRunner {
 
   /** Run one assistant turn with optional native tools. */
   async runTurn(params: RunTurnParams): Promise<TurnResult> {
+    const cache = params.cache !== false; // default ON
     const createParams: Record<string, unknown> = {
       model: params.model,
       max_tokens: params.maxTokens ?? 8192,
       messages: params.messages,
     };
-    if (params.system) createParams.system = params.system;
-    if (params.tools && params.tools.length > 0) {
-      createParams.tools = params.tools;
+
+    const hasTools = !!params.tools && params.tools.length > 0;
+
+    if (params.system) {
+      // Cache the (large, constant) system prompt. A breakpoint here also caches
+      // the tool block that precedes it in the prompt prefix.
+      createParams.system = cache
+        ? [{ type: 'text', text: params.system, cache_control: { type: 'ephemeral' } }]
+        : params.system;
+    }
+
+    if (hasTools) {
+      const tools = params.tools as ClaudeToolDef[];
+      if (cache && !params.system) {
+        // No system block to carry the breakpoint → mark the last tool instead.
+        createParams.tools = tools.map((t, i) =>
+          i === tools.length - 1 ? { ...t, cache_control: { type: 'ephemeral' } } : t,
+        );
+      } else {
+        createParams.tools = tools;
+      }
       createParams.tool_choice = { type: 'auto' };
     }
 

@@ -61,7 +61,8 @@ describe('ClaudeClient.runTurn (injected mock client)', () => {
     expect(create).toHaveBeenCalledTimes(1);
     const params = create.mock.calls[0][0];
     expect(params.model).toBe('claude-sonnet-test');
-    expect(params.system).toBe('You are an engineer.');
+    // System is cached by default (RC-2): a [{type:'text', text, cache_control}] block.
+    expect(params.system[0].text).toBe('You are an engineer.');
     expect(params.tools).toHaveLength(1);
     expect(params.tool_choice).toEqual({ type: 'auto' });
     expect(params.max_tokens).toBe(8192);
@@ -76,6 +77,43 @@ describe('ClaudeClient.runTurn (injected mock client)', () => {
     const params = create.mock.calls[0][0];
     expect(params.tools).toBeUndefined();
     expect(params.tool_choice).toBeUndefined();
+  });
+});
+
+describe('ClaudeClient prompt caching (RC-2)', () => {
+  function mock() {
+    const create = vi.fn().mockResolvedValue({ content: [], stop_reason: 'end_turn' });
+    return { create, client: new ClaudeClient({ messages: { create } }) };
+  }
+
+  it('caches the system prompt by default (system becomes a cached block array)', async () => {
+    const { create, client } = mock();
+    await client.runTurn({ model: 'm', system: 'big system', messages: [] });
+    const params = create.mock.calls[0][0];
+    expect(Array.isArray(params.system)).toBe(true);
+    expect(params.system[0].cache_control).toEqual({ type: 'ephemeral' });
+    expect(params.system[0].text).toBe('big system');
+  });
+
+  it('does not cache when cache:false (system stays a plain string)', async () => {
+    const { create, client } = mock();
+    await client.runTurn({ model: 'm', system: 'big system', messages: [], cache: false });
+    expect(create.mock.calls[0][0].system).toBe('big system');
+  });
+
+  it('marks the last tool with cache_control when there is no system block', async () => {
+    const { create, client } = mock();
+    await client.runTurn({
+      model: 'm',
+      messages: [],
+      tools: [
+        { name: 'a', description: 'a', input_schema: { type: 'object', properties: {} } },
+        { name: 'b', description: 'b', input_schema: { type: 'object', properties: {} } },
+      ],
+    });
+    const tools = create.mock.calls[0][0].tools;
+    expect(tools[0].cache_control).toBeUndefined();
+    expect(tools[1].cache_control).toEqual({ type: 'ephemeral' });
   });
 });
 

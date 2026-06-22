@@ -146,6 +146,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const [editorMinimap, setEditorMinimap] = useState<boolean>(() => localStorage.getItem('ide_minimap') !== 'off');
   const [editorFontSize, setEditorFontSize] = useState<number>(() => Number(localStorage.getItem('ide_fontSize') || 14));
   const [editorTabSize, setEditorTabSize] = useState<number>(() => Number(localStorage.getItem('ide_tabSize') || 2));
+  // A12: Format on Save; A13: Trim trailing whitespace; A14: Insert final newline
+  const [editorFormatOnSave, setEditorFormatOnSave] = useState<boolean>(() => localStorage.getItem('ide_formatOnSave') !== 'off');
+  const [editorTrimWhitespace, setEditorTrimWhitespace] = useState<boolean>(() => localStorage.getItem('ide_trimWhitespace') !== 'off');
+  const [editorFinalNewline, setEditorFinalNewline] = useState<boolean>(() => localStorage.getItem('ide_finalNewline') !== 'off');
+  // A10: Track per-file "saved" snapshots so we can show an unsaved-changes dot
+  const savedFilesRef = React.useRef<Record<string, string>>({});
+  const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
   // A24: Cursor position shown in status bar
   const [cursorPos, setCursorPos] = useState<{ line: number; col: number }>({ line: 1, col: 1 });
   // N1-N9: Selected code for AI action toolbar
@@ -209,6 +216,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     }
   }, [activeFile]);
 
+  // A10: Snapshot file content when a tab is first opened (establishes the "saved" baseline)
+  useEffect(() => {
+    for (const tab of openTabs) {
+      if (!(tab.path in savedFilesRef.current)) {
+        savedFilesRef.current[tab.path] = files[tab.path] ?? '';
+      }
+    }
+  }, [openTabs]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // A24: subscribe to Monaco cursor position changes
   useEffect(() => {
     if (!editorInstance) return;
@@ -242,6 +258,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const handleFileChange = (content: string) => {
     const nextFiles = { ...files, [activeFile]: content };
     onFilesChange(nextFiles);
+    // A10: mark tab dirty if content differs from snapshot
+    const savedContent = savedFilesRef.current[activeFile] ?? content;
+    setDirtyTabs(prev => {
+      const next = new Set(prev);
+      if (content !== savedContent) { next.add(activeFile); } else { next.delete(activeFile); }
+      return next;
+    });
     if (autoRunTimer.current) clearTimeout(autoRunTimer.current);
     autoRunTimer.current = setTimeout(() => { onRun(nextFiles); }, 900);
   };
@@ -418,9 +441,23 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
           // Cannot open Chrome dev tools via JS, but can log guidance
           console.log('Press F12 or Ctrl+Shift+I to open DevTools');
           break;
-        case 'base.action.save':
-          console.log('File Saved');
+        case 'base.action.save': {
+          let finalContent = files[activeFile] || '';
+          // A13: Trim trailing whitespace
+          if (editorTrimWhitespace) finalContent = finalContent.replace(/[^\S\n]+$/gm, '');
+          // A14: Insert final newline
+          if (editorFinalNewline && finalContent.length > 0 && !finalContent.endsWith('\n')) finalContent += '\n';
+          if (finalContent !== (files[activeFile] || '')) {
+            onFilesChange({ ...files, [activeFile]: finalContent });
+            editorInstance?.setValue(finalContent);
+          }
+          // A12: Format on Save
+          if (editorFormatOnSave) editorInstance?.getAction('editor.action.formatDocument')?.run();
+          // A10: mark file as saved
+          savedFilesRef.current[activeFile] = finalContent;
+          setDirtyTabs(prev => { const next = new Set(prev); next.delete(activeFile); return next; });
           break;
+        }
       }
     }
 
@@ -731,6 +768,24 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            >
              <Code2 className="w-3 h-3" />
            </button>
+           {/* A12: Format on Save toggle */}
+           <button
+             onClick={() => { const v = !editorFormatOnSave; setEditorFormatOnSave(v); localStorage.setItem('ide_formatOnSave', v ? 'on' : 'off'); }}
+             title={`Format on Save: ${editorFormatOnSave ? 'on' : 'off'} (Ctrl+S)`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorFormatOnSave ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+           >Fmt</button>
+           {/* A13: Trim whitespace toggle */}
+           <button
+             onClick={() => { const v = !editorTrimWhitespace; setEditorTrimWhitespace(v); localStorage.setItem('ide_trimWhitespace', v ? 'on' : 'off'); }}
+             title={`Trim trailing whitespace on Save: ${editorTrimWhitespace ? 'on' : 'off'}`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorTrimWhitespace ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+           >Trim</button>
+           {/* A14: Final newline toggle */}
+           <button
+             onClick={() => { const v = !editorFinalNewline; setEditorFinalNewline(v); localStorage.setItem('ide_finalNewline', v ? 'on' : 'off'); }}
+             title={`Insert final newline on Save: ${editorFinalNewline ? 'on' : 'off'}`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorFinalNewline ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+           >↵</button>
            {/* A9: Code folding */}
            <button
              onClick={() => editorInstance?.getAction('editor.foldAll')?.run()}
@@ -876,12 +931,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 onMount={setEditorInstance}
                 onRun={() => onRun(files)}
                 onDebug={() => setIsPanelOpen(true)}
+                dirtyTabs={dirtyTabs}
                 editorOptions={{
                   wordWrap: editorWordWrap ? 'on' : 'off',
                   minimap: { enabled: editorMinimap },
                   fontSize: editorFontSize,
                   tabSize: editorTabSize,
                   stickyScroll: { enabled: true },
+                  trimAutoWhitespace: editorTrimWhitespace,
                 }}
               />
           )}

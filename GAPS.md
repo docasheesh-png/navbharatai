@@ -32,11 +32,11 @@
 | A7 | Bracket pair colorization not enabled (Monaco supports it natively) | `[x]` | #166 |
 | A8 | Sticky scroll not enabled (function signature context line) | `[x]` | #166 |
 | A9 | Code folding buttons (Fold All / Unfold All) missing from toolbar | `[x]` | #166 |
-| A10 | Unsaved-changes dot not shown on file tab when content differs from saved | `[ ]` | |
+| A10 | Unsaved-changes dot not shown on file tab when content differs from saved | `[x]` | #167 |
 | A11 | File extension icons missing from editor tabs (all show same icon) | `[x]` | #167 |
-| A12 | No "Format on Save" toggle in settings | `[ ]` | |
-| A13 | No "Trim trailing whitespace" setting | `[ ]` | |
-| A14 | No "Insert final newline" setting | `[ ]` | |
+| A12 | No "Format on Save" toggle in settings | `[x]` | #167 |
+| A13 | No "Trim trailing whitespace" setting | `[x]` | #167 |
+| A14 | No "Insert final newline" setting | `[x]` | #167 |
 | A15 | Ctrl+G (Go to Line) not wired as keyboard shortcut | `[ ]` | |
 | A16 | Ctrl+F (Find) not visually highlighted as shortcut hint | `[ ]` | |
 | A17 | Editor theme is always dark — no light theme option | `[ ]` | |
@@ -70,7 +70,7 @@
 | B8 | No typing indicator (three-dots animation) during generation | `[x]` | #166 |
 | B9 | No "Edit prompt" option on user messages | `[x]` | #167 |
 | B10 | Code blocks in chat have no file name header | `[x]` | #167 |
-| B11 | Code blocks in chat have no line numbers | `[ ]` | |
+| B11 | Code blocks in chat have no line numbers | `[x]` | #167 |
 | B12 | Code blocks in chat not syntax-highlighted in all languages | `[x]` | #167 |
 | B13 | Long AI messages have no "Collapse" toggle | `[x]` | existing |
 | B14 | No keyboard shortcut to focus input (Ctrl+K or /) | `[x]` | #166 |
@@ -107,7 +107,7 @@
 | C8 | No "Copy file path" button | `[x]` | #166 |
 | C9 | No multi-file selection for bulk delete/download | `[ ]` | |
 | C10 | No image preview for .png/.jpg/.svg files | `[ ]` | |
-| C11 | No binary file warning (tries to show binary as text) | `[ ]` | |
+| C11 | No binary file warning (tries to show binary as text) | `[x]` | #167 |
 | C12 | Nested folder structure collapsed by default with no expand-all | `[ ]` | |
 | C13 | No recently-opened files section | `[ ]` | |
 | C14 | No file pinning (mark important files) | `[ ]` | |

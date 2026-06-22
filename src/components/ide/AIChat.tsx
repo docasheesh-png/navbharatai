@@ -13,6 +13,8 @@ import { useBuild } from './BuildContext';
 // B10/B12: Standalone code block with language header and copy button
 const ChatCodeBlock: React.FC<{ lang: string; code: string }> = ({ lang, code }) => {
   const [copied, setCopied] = useState(false);
+  const lines = code.split('\n');
+  const displayLines = lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
   return (
     <div className="rounded-xl overflow-hidden border border-white/10 my-2 text-[11px]">
       <div className="flex items-center justify-between px-3 py-1 bg-[#0d1117] border-b border-white/10">
@@ -24,9 +26,16 @@ const ChatCodeBlock: React.FC<{ lang: string; code: string }> = ({ lang, code })
           {copied ? <><Check className="w-2.5 h-2.5 text-emerald-400" /> Copied</> : <><Copy className="w-2.5 h-2.5" /> Copy</>}
         </button>
       </div>
-      <pre className="bg-[#0d1117] p-3 overflow-x-auto leading-relaxed m-0">
-        <code className="font-mono text-[#c9d1d9]">{code}</code>
-      </pre>
+      <div className="bg-[#0d1117] overflow-x-auto">
+        <code className="font-mono text-[#c9d1d9] leading-relaxed block">
+          {displayLines.map((line, i) => (
+            <div key={i} className="flex hover:bg-white/[0.03]">
+              <span className="select-none text-right pr-3 pl-2 text-[#484f58] text-[9px] min-w-[2rem] shrink-0 leading-[1.6]">{i + 1}</span>
+              <span className="pl-1 pr-3 whitespace-pre leading-[1.6]">{line}</span>
+            </div>
+          ))}
+        </code>
+      </div>
     </div>
   );
 };

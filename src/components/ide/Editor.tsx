@@ -27,6 +27,11 @@ import { Tab } from '../../types/ide';
 // using the default which is usually CDN.
 loader.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs' } });
 
+const BINARY_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp', 'pdf', 'zip', 'tar', 'gz',
+  'woff', 'woff2', 'ttf', 'eot', 'otf', 'mp4', 'mp3', 'ogg', 'wav', 'avi', 'mov',
+]);
+
 interface EditorProps {
   content: string;
   language: string;
@@ -39,6 +44,8 @@ interface EditorProps {
   onMount?: (editor: any) => void;
   onRun?: () => void;
   onDebug?: () => void;
+  /** Tabs with unsaved changes (shows a dot indicator) */
+  dirtyTabs?: Set<string>;
   /** Override / extend Monaco editor options */
   editorOptions?: Record<string, unknown>;
 }
@@ -55,8 +62,10 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   onMount,
   onRun,
   onDebug,
+  dirtyTabs,
   editorOptions = {},
 }) => {
+  const isBinaryFile = BINARY_EXTENSIONS.has(fileName.split('.').pop()?.toLowerCase() ?? '');
   const editorRef = useRef<any>(null);
   // 8.2 — lightweight textarea fallback on mobile to avoid Monaco memory issues
   const [isMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
@@ -112,6 +121,9 @@ export const Editor: React.FC<EditorProps> = React.memo(({
               <span className={cn("text-[11px] truncate flex-1", isActive ? "font-medium" : "")}>
                 {tab.path}
               </span>
+              {dirtyTabs?.has(tab.path) && (
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="Unsaved changes" />
+              )}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -159,8 +171,19 @@ export const Editor: React.FC<EditorProps> = React.memo(({
         </div>
       </div>
 
+      {/* C11: Binary file warning */}
+      {isBinaryFile && (
+        <div className="flex-1 flex flex-col items-center justify-center bg-[#1e1e1e] text-[#8b949e] gap-3 p-8">
+          <Image className="w-10 h-10 text-[#484f58]" />
+          <p className="text-sm font-medium text-[#c9d1d9]">Binary file</p>
+          <p className="text-[11px] text-center max-w-[280px] leading-relaxed">
+            This file type cannot be edited as text. Download the project ZIP to access it directly.
+          </p>
+        </div>
+      )}
+
       {/* Editor — Monaco on desktop, textarea on mobile */}
-      <div className="flex-1 overflow-hidden relative">
+      {!isBinaryFile && <div className="flex-1 overflow-hidden relative">
         {isMobile ? (
           <textarea
             value={content}
@@ -205,7 +228,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
           }}
         />
         )}
-      </div>
+      </div>}
 
       {/* Mobile Input Helper Toolbar - Hidden on desktop */}
       <div className="md:hidden h-10 bg-[#252526] border-t border-white/5 flex items-center px-1 overflow-x-auto no-scrollbar gap-1 shrink-0">

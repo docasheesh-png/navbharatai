@@ -7,6 +7,7 @@ import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { analyzeArchitecture, architectureSummary } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
+import { assessReadiness, readinessVerdict } from './Readiness';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -201,9 +202,10 @@ export class ToolDispatcher {
 
       case 'evaluate': {
         const mem = getWorkspaceMemory(this.workspaceId);
-        const arch = architectureSummary(analyzeArchitecture(mem.graph()));
-        const security = securitySummary(mem.securityFindings());
-        return `${arch}\n\n${security}`;
+        const archReport = analyzeArchitecture(mem.graph());
+        const findings = mem.securityFindings();
+        const verdict = readinessVerdict(assessReadiness(archReport, findings));
+        return `${verdict}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}`;
       }
 
       case 'update_todo': {

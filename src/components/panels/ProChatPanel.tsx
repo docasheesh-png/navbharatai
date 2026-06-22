@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Rocket, RotateCcw, Layout } from 'lucide-react';
+import { Rocket, RotateCcw, Layout, Minimize2, Maximize2, Eye } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { WorkspacePane } from './WorkspacePane';
 import { DeployModal } from './DeployModal';
@@ -134,6 +134,9 @@ export const ProChatPanel: React.FC<ProChatPanelProps> = (props) => {
   const hasWorkspaceApp = props.isAppBuilt && !!props.files && Object.keys(props.files).length > 0;
   const workspaceVisible = hasWorkspaceApp && props.showWorkspace;
 
+  // Mobile: preview shows as expandable overlay (not pushing chat up)
+  const [mobilePreviewExpanded, setMobilePreviewExpanded] = useState(false);
+
   // Resizable split: chat pane width as percentage (20–80, default 44)
   const [chatWidthPct, setChatWidthPct] = useState(44);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -169,8 +172,9 @@ export const ProChatPanel: React.FC<ProChatPanelProps> = (props) => {
   }, [props.proBuildProgress.active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div ref={containerRef} className={cn("flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row divide-y md:divide-y-0", props.themeClasses.bg)}>
+    <div ref={containerRef} className={cn("flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row md:divide-y-0", props.themeClasses.bg)}>
 
+      {/* Chat pane — full width on mobile, partial on desktop when workspace open */}
       <div
         className="flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0"
         style={workspaceVisible ? { flexBasis: `${chatWidthPct}%`, flexGrow: 0, flexShrink: 0 } : { flex: '1 1 0%' }}
@@ -178,7 +182,7 @@ export const ProChatPanel: React.FC<ProChatPanelProps> = (props) => {
           <div className="flex items-center justify-between px-3 py-1 bg-indigo-950/20 border-b border-indigo-500/20 text-[9px] font-black uppercase tracking-widest text-[#8b949e]">
              <div className="flex items-center gap-2">
                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping shrink-0" />
-               <span>NAVBHARATAI-PRO</span>
+               <span>NAVBHARATAI V2.0</span>
                {props.mode === 'auto'     && <span className="px-1.5 py-0.5 bg-indigo-900/30 border border-indigo-600/30 text-indigo-400 rounded text-[8px]">AUTO</span>}
                {props.mode === 'planning' && <span className="px-1.5 py-0.5 bg-amber-900/30 border border-amber-600/30 text-amber-400 rounded text-[8px]">PLANNING</span>}
                {props.mode === 'build' && <span className="px-1.5 py-0.5 bg-orange-900/30 border border-orange-600/30 text-orange-400 rounded text-[8px]">BUILD</span>}
@@ -219,19 +223,30 @@ export const ProChatPanel: React.FC<ProChatPanelProps> = (props) => {
                  </button>
                )}
                {hasWorkspaceApp && (
-                 <button
-                   onClick={() => props.setShowWorkspace(v => !v)}
-                   title={workspaceVisible ? 'Hide live workspace' : 'Show live workspace (code + preview)'}
-                   className={cn(
-                     "hidden md:flex items-center gap-1 px-2 py-0.5 rounded text-[8px] border transition-all",
-                     workspaceVisible
-                       ? "bg-indigo-900/40 border-indigo-600/40 text-indigo-300 hover:text-indigo-200"
-                       : "bg-white/5 border-white/10 text-[#8b949e] hover:text-white",
-                   )}
-                 >
-                   <Layout className="w-2.5 h-2.5" />
-                   {workspaceVisible ? 'Hide app' : 'Show app'}
-                 </button>
+                 <>
+                   {/* Desktop: side-pane toggle */}
+                   <button
+                     onClick={() => props.setShowWorkspace(v => !v)}
+                     title={workspaceVisible ? 'Hide live workspace' : 'Show live workspace (code + preview)'}
+                     className={cn(
+                       "hidden md:flex items-center gap-1 px-2 py-0.5 rounded text-[8px] border transition-all",
+                       workspaceVisible
+                         ? "bg-indigo-900/40 border-indigo-600/40 text-indigo-300 hover:text-indigo-200"
+                         : "bg-white/5 border-white/10 text-[#8b949e] hover:text-white",
+                     )}
+                   >
+                     <Layout className="w-2.5 h-2.5" />
+                     {workspaceVisible ? 'Hide app' : 'Show app'}
+                   </button>
+                   {/* Mobile: preview overlay toggle */}
+                   <button
+                     onClick={() => setMobilePreviewExpanded(v => !v)}
+                     className="flex md:hidden items-center gap-1 px-2 py-0.5 rounded text-[8px] border bg-indigo-900/40 border-indigo-600/40 text-indigo-300 hover:text-indigo-200 transition-all"
+                   >
+                     <Eye className="w-2.5 h-2.5" />
+                     Preview
+                   </button>
+                 </>
                )}
                <span className="font-mono text-indigo-400">{props.sessions.find(s => s.id === props.currentProSessionId)?.uci || ''}</span>
              </div>
@@ -348,9 +363,9 @@ export const ProChatPanel: React.FC<ProChatPanelProps> = (props) => {
         </div>
       )}
 
-      {/* Phase 3.1 — live workspace (code + preview) docked to the right (desktop) */}
+      {/* Desktop: live workspace docked to the right */}
       {workspaceVisible && (
-        <div className="flex-1 min-w-0 h-full min-h-0 max-h-full overflow-hidden">
+        <div className="hidden md:flex flex-1 min-w-0 h-full min-h-0 max-h-full overflow-hidden">
           <WorkspacePane
             files={props.files as any}
             generatedCode={props.generatedCode}
@@ -363,6 +378,36 @@ export const ProChatPanel: React.FC<ProChatPanelProps> = (props) => {
             onRestoreHistory={(html) => props.setGeneratedCode(html)}
             onHtmlChange={(html) => props.setGeneratedCode(html)}
           />
+        </div>
+      )}
+
+      {/* Mobile: preview as full-screen overlay (does NOT push chat up) */}
+      {mobilePreviewExpanded && hasWorkspaceApp && (
+        <div className="md:hidden absolute inset-0 z-50 flex flex-col bg-[#0d1117]">
+          <div className="flex items-center justify-between px-4 py-2.5 bg-indigo-950/60 border-b border-indigo-500/20 shrink-0">
+            <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300">App Preview</span>
+            <button
+              onClick={() => setMobilePreviewExpanded(false)}
+              className="flex items-center gap-1 px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[9px] font-black text-[#8b949e] hover:text-white transition-all"
+            >
+              <Minimize2 className="w-3 h-3" />
+              Minimize
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <WorkspacePane
+              files={props.files as any}
+              generatedCode={props.generatedCode}
+              onFilesChange={(nf) => props.setFiles(nf as any)}
+              onRun={(f) => props.updatePreview(f || (props.files as any))}
+              onOpenStudio={() => props.toggleTab('studio')}
+              onDeploy={() => { props.setDeployPanelError(''); props.setShowDeployPanel(true); }}
+              canDeploy={props.isAppBuilt && !!props.files && Object.keys(props.files).length > 0}
+              previewHistory={props.previewHistory}
+              onRestoreHistory={(html) => props.setGeneratedCode(html)}
+              onHtmlChange={(html) => props.setGeneratedCode(html)}
+            />
+          </div>
         </div>
       )}
 

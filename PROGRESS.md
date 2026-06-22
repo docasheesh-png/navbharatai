@@ -778,6 +778,18 @@ tsc x2 clean (0 errors), vitest 1445/1445 green.
 
 tsc x2 clean (0 errors), vitest 1450/1450 green.
 
+**App.tsx split grind — 1494 tests / 187 test files (2026-06-22, session 9 continued):**
+
+Pure-logic extractions out of App.tsx (each with full unit tests), continuing Phase 5.1:
+- `tests/filePlanningEngine.test.ts` (NEW) — 7 tests for FilePlanningEngine.plan() + BlueprintReconstructor.
+- `src/lib/apnapanEngine.ts` (NEW) — greeting/language/style/project detection extracted; `tests/apnapanEngine.test.ts` 18 tests.
+- `src/lib/versionSnapshot.ts` (NEW) — buildVersionSnapshot + appendVersionSnapshot; `tests/versionSnapshot.test.ts` 12 tests.
+- `src/lib/agentGreetings.ts` (NEW) — NBI/Basic/Pro/VIP pools + pickGreetingForAgent; `tests/agentGreetings.test.ts` 8 tests; removed 4 dead vars.
+- `src/config/defaultContent.ts` (NEW) — DEFAULT_HOME/ABOUT/DONATION_DATA + loadPersistedContent; `tests/defaultContent.test.ts` 6 tests.
+- **App.tsx: 5,820 → 5,641 lines** (−179 this session; 47% total reduction from 10,658 original).
+
+tsc x2 clean (0 errors), vitest 1494/1494 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

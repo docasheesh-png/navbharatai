@@ -341,11 +341,10 @@ export function registerBuildRoutes(app: Express): void {
     // complete with whatever was built so far (the client can then auto-continue).
     //
     // G11 — reduced from 240s to 200s so the ~60s post-engine work (memory
-    // update + preview + code review) has a 40s buffer before Cloud Run kills us.
-    // Root cause of "Build stream ended without a result": summarizeForMemory had
-    // no timeout and could take 30-60s AFTER the deadline fired, consuming the
-    // remaining buffer before sendComplete was called.
-    const SOFT_DEADLINE_MS = 200_000; // 3 min 20 s, ~100s under Cloud Run's 300s cap
+    // update + preview + code review) has a 5-min buffer before Cloud Run kills us.
+    // Cloud Run request timeout is 3600s (1 hour); SOFT_DEADLINE_MS = 3300s (55 min)
+    // leaves 5 min for the post-engine work (memory summarization, preview, code review).
+    const SOFT_DEADLINE_MS = 3_300_000; // 55 min — 5 min buffer before Cloud Run's 1-hour hard kill
     const startedAt = Date.now();
     const deadline = new AbortController();
     const deadlineTimer = setTimeout(() => deadline.abort(), SOFT_DEADLINE_MS);

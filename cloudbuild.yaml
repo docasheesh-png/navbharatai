@@ -53,7 +53,7 @@ steps:
       - '--max-instances'
       - '10'
       - '--timeout'
-      - '300'
+      - '3600'
       - '--concurrency'
       - '100'
       - '--cpu-boost'

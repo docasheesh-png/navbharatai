@@ -31,6 +31,28 @@ export interface AppFeature {
 }
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
+  // ─── NAVBHARATAI PRO v3.0 (Vargen 3.0) ───────────────────────────────────
+  {
+    id: 'agentv3_builder',
+    name: 'NavBharatAI Pro v3.0 (beta)',
+    path: 'Floating "v3.0" button (bottom-right) → opens the v3.0 builder. Visible only when v3.0 is enabled for your account (admin-only during beta).',
+    description: `Claude-Code-class agentic app builder (Vargen 3.0). Capabilities:
+• NATIVE TOOL-USE engine on Claude (Sonnet by default; "Only Opus" super toggle for maximum capability).
+• MULTI-AGENT "AI team": an Architect plans and delegates to specialist agents (Frontend, Backend, Database, Designer, QA, Debugger, Reviewer, Deploy) that work in parallel where safe.
+• LIVE "AI Team" tracker — watch each real agent's current action as it builds (not a fake animation).
+• MERGED SURFACES from one live stream: file explorer, Code Studio diffs (red/green), terminal, git/history checkpoints, todos and plan — all in sync, zero drift.
+• HYBRID sandbox: a fast E2B cloud sandbox initialised as a real Git repo you own.
+• HONEST billing: you are charged the Claude Opus-equivalent token cost × 2.5 (or × 5 in Only-Opus mode); a live cost estimate is shown.`,
+    howToUse: 'Click the floating "v3.0" button (bottom-right), type what you want to build, and press Build. Watch the AI Team panel and the live Files / Diff / Terminal / History surfaces. Toggle "Only Opus" for maximum capability (5× cost). Press Stop to cancel.',
+    relatedFeatures: ['engineer_ai', 'pro_chat', 'history', 'settings_secrets'],
+    aiSurface: 'engineer_ai',
+    keywords: [
+      'v3', 'v3.0', 'vargen', 'vargen 3', 'agentv3', 'agent v3', 'pro v3',
+      'multi agent', 'multiple agents', 'ai team', 'sub agent', 'subagent',
+      'claude code', 'native tool use', 'architect', 'live preview',
+      'naya builder', 'naya engine', 'team', 'agent team', 'opus', 'only opus',
+    ],
+  },
   // ─── ENGINEER AI ─────────────────────────────────────────────────────────
   {
     id: 'connect_domain',

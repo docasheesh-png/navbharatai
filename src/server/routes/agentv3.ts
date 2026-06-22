@@ -8,7 +8,9 @@ import {
   ToolDispatcher,
   ClaudeClient,
   AgentRunner,
-  defaultToolCatalog,
+  catalogForTools,
+  roleConfig,
+  makeSubAgentSpawn,
   resolveModel,
   architectSystemPrompt,
 } from '../AgentV3';
@@ -86,17 +88,26 @@ export function registerAgentV3Routes(app: Express): void {
     const workspaceId = `agentv3-${userId ?? 'anon'}-${Date.now()}`;
     try {
       await actuator.ensureWorkspace(workspaceId, 'react');
-      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events);
+      const client = new ClaudeClient();
+      const model = resolveModel(onlyOpus);
+      const budget = maxBuildBudgetUsd();
+
+      // The Architect can delegate to specialist sub-agents via the task tool.
+      const spawnSubAgent = makeSubAgentSpawn({
+        client, actuator, workspaceId, state, events, model, onlyOpus, maxBudgetUsd: budget,
+      });
+      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent);
       const runner = new AgentRunner({
-        client: new ClaudeClient(),
+        client,
         dispatcher,
         state,
         events,
-        model: resolveModel(onlyOpus),
+        model,
         system: architectSystemPrompt(),
-        tools: defaultToolCatalog(),
+        tools: catalogForTools(roleConfig('architect').tools),
         onlyOpus,
-        maxBudgetUsd: maxBuildBudgetUsd(),
+        maxBudgetUsd: budget,
+        agentRole: 'architect',
       });
       const result = await runner.run(prompt);
       send({ type: 'result', ...result });

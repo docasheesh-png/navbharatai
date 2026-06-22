@@ -2,6 +2,14 @@ import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
 import type { ToolUse } from './ClaudeClient';
 import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
+import { isWorkerRole } from './AgentRegistry';
+
+/**
+ * Spawns a specialist sub-agent for the `task` tool and returns its result.
+ * Injected (not imported) so ToolDispatcher stays decoupled from AgentRunner —
+ * the composition root wires the real implementation (see SubAgent.ts).
+ */
+export type SubAgentSpawn = (role: AgentRole, instruction: string) => Promise<{ ok: boolean; summary: string }>;
 
 /**
  * ActuatorPort — the narrow slice of the sandbox actuator the dispatcher needs.
@@ -17,6 +25,8 @@ export interface ActuatorPort {
     workspaceId: string,
     command: string,
   ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  /** Public HTTPS URL for a port in the sandbox (real sandboxes only). Optional. */
+  getPortUrl?(workspaceId: string, port: number): Promise<string>;
 }
 
 /** The result of executing one tool — appended to the transcript as a tool_result. */
@@ -41,6 +51,7 @@ export class ToolDispatcher {
     private readonly workspaceId: string,
     private readonly state?: WorkspaceState,
     private readonly events?: AgentEventStream,
+    private readonly spawnSubAgent?: SubAgentSpawn,
   ) {}
 
   async dispatch(call: ToolUse, agent: AgentRole = 'architect'): Promise<ToolResult> {
@@ -157,6 +168,30 @@ export class ToolDispatcher {
         return `Updated ${todos.length} todo(s).`;
       }
 
+      case 'update_preview': {
+        const port = reqNum(input, 'port');
+        if (!this.actuator.getPortUrl) {
+          throw new Error('Live preview is not available in this sandbox.');
+        }
+        const url = await this.actuator.getPortUrl(this.workspaceId, port);
+        this.events?.emit({ type: 'preview', url, ts: Date.now() });
+        return `Live preview published at ${url}`;
+      }
+
+      case 'task': {
+        if (!this.spawnSubAgent) {
+          throw new Error('The task tool is not available in this context.');
+        }
+        const role = reqStr(input, 'role');
+        const instruction = reqStr(input, 'instruction');
+        if (!isWorkerRole(role)) {
+          throw new Error(`task: unknown role "${role}".`);
+        }
+        this.events?.emit({ type: 'agent_spawned', agent: role, task: instruction, ts: Date.now() });
+        const result = await this.spawnSubAgent(role, instruction);
+        return result.ok ? `[${role}] ${result.summary}` : `[${role}] FAILED: ${result.summary}`;
+      }
+
       default:
         throw new Error(`Unknown tool: ${call.name}`);
     }
@@ -167,6 +202,13 @@ function reqStr(input: Record<string, unknown>, key: string): string {
   const v = input[key];
   if (typeof v !== 'string') throw new Error(`Missing/invalid string argument: ${key}`);
   return v;
+}
+
+function reqNum(input: Record<string, unknown>, key: string): number {
+  const v = input[key];
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+  if (!Number.isFinite(n)) throw new Error(`Missing/invalid number argument: ${key}`);
+  return n;
 }
 
 function optStr(input: Record<string, unknown>, key: string): string | undefined {

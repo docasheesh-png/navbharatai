@@ -19,6 +19,7 @@ import { ViewPanels } from './components/panels/ViewPanels';
 import { SidebarNav } from './components/panels/SidebarNav';
 import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
+import { AgentV3Launcher } from './components/agentv3/AgentV3Launcher';
 import { ConnectDomainPanel } from './components/panels/ConnectDomainPanel';
 import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
@@ -5586,6 +5587,9 @@ ${buildLanguageRule(preferredLanguage)}`;
               </div>
  
               
+      {/* AgentV3 (Vargen 3.0) launcher — admin-only, flag-gated; renders nothing when disabled. */}
+      <AgentV3Launcher userId={user?.uid} />
+
       {/* Auth Modal + all overlay modals → AppModals */}
       <AppModals
         showAuth={showAuth}

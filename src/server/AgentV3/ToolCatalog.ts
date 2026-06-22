@@ -1,4 +1,6 @@
 import type { ClaudeToolDef } from './ClaudeClient';
+import type { ToolName } from './types';
+import { WORKER_ROLES } from './AgentRegistry';
 
 /**
  * ToolCatalog — the native Anthropic tool definitions the v3.0 agent team can
@@ -82,6 +84,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'update_preview',
+      description:
+        'Publish the live preview URL after you start a dev server. Call this with ' +
+        'the port your dev server is listening on so the user sees the app live as ' +
+        'it builds. Call it again if the port changes.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          port: { type: 'number', description: 'The port the dev server is listening on (e.g. 3000, 5173).' },
+        },
+        required: ['port'],
+      },
+    },
+    {
       name: 'update_todo',
       description: 'Replace the build todo list shown to the user. Use this to plan and track progress.',
       input_schema: {
@@ -108,7 +124,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
   ];
 }
 
-/** The set of tool names the catalog exposes (for validation). */
+/** The set of base tool names the catalog exposes (for validation). */
 export const CATALOG_TOOL_NAMES = [
   'read_file',
   'write_file',
@@ -117,4 +133,42 @@ export const CATALOG_TOOL_NAMES = [
   'grep',
   'glob',
   'update_todo',
+  'update_preview',
 ] as const;
+
+/**
+ * The `task` sub-agent tool (§3.3) — only the Architect gets this. Delegates a
+ * focused unit of work to a specialist agent, which runs as a constrained nested
+ * agent and returns a summary.
+ */
+export function taskToolDef(): ClaudeToolDef {
+  return {
+    name: 'task',
+    description:
+      'Delegate a focused task to a specialist agent. The agent runs with its own ' +
+      'tools and returns a summary of what it did. Use this to parallelise and ' +
+      'organise the build across the team.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        role: {
+          type: 'string',
+          description: `The specialist to delegate to. One of: ${WORKER_ROLES.join(', ')}.`,
+          enum: [...WORKER_ROLES],
+        },
+        instruction: {
+          type: 'string',
+          description: 'A clear, self-contained instruction for the specialist.',
+        },
+      },
+      required: ['role', 'instruction'],
+    },
+  };
+}
+
+/** Build the tool definitions for a given allowed-tool list (incl. `task`). */
+export function catalogForTools(allowed: ToolName[]): ClaudeToolDef[] {
+  const base = defaultToolCatalog().filter((t) => (allowed as string[]).includes(t.name));
+  if ((allowed as string[]).includes('task')) base.push(taskToolDef());
+  return base;
+}

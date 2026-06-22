@@ -2,6 +2,7 @@ import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
 import type { ClaudeToolDef, TurnRunner, TurnUsage } from './ClaudeClient';
 import type { ToolDispatcher } from './ToolDispatcher';
+import type { AgentRole } from './types';
 import { billedAmountUsd } from './pricing';
 
 /**
@@ -33,6 +34,8 @@ export interface AgentRunnerOptions {
   onlyOpus?: boolean;
   /** Optional hard budget (USD billed to the user). Stops honestly when reached. */
   maxBudgetUsd?: number;
+  /** Which agent this loop represents (for event attribution). Default 'architect'. */
+  agentRole?: AgentRole;
 }
 
 export interface AgentRunResult {
@@ -67,6 +70,7 @@ export class AgentRunner {
       maxBudgetUsd,
     } = this.opts;
     const maxSteps = this.opts.maxSteps ?? 50;
+    const agentRole: AgentRole = this.opts.agentRole ?? 'architect';
 
     const messages: unknown[] = [{ role: 'user', content: userPrompt }];
     const usage: TurnUsage = {
@@ -98,7 +102,7 @@ export class AgentRunner {
         usage.cacheReadInputTokens += turn.usage.cacheReadInputTokens;
 
         if (turn.text.trim()) {
-          events.emit({ type: 'narration', agent: 'architect', text: turn.text, ts: Date.now() });
+          events.emit({ type: 'narration', agent: agentRole, text: turn.text, ts: Date.now() });
         }
 
         // Record the assistant turn verbatim so tool_use ids resolve next turn.
@@ -114,7 +118,7 @@ export class AgentRunner {
         // Execute each requested tool and gather results for the next turn.
         const resultBlocks: ToolResultBlock[] = [];
         for (const toolUse of turn.toolUses) {
-          const result = await dispatcher.dispatch(toolUse, 'architect');
+          const result = await dispatcher.dispatch(toolUse, agentRole);
           resultBlocks.push({
             type: 'tool_result',
             tool_use_id: result.tool_use_id,

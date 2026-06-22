@@ -98,6 +98,9 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'checkpoint':
       return { ...state, checkpoints: [...state.checkpoints, event.checkpoint] };
 
+    case 'preview':
+      return { ...state, previewUrl: event.url };
+
     case 'permission_request':
       return {
         ...state,

@@ -27,6 +27,9 @@ class FakeActuator implements ActuatorPort {
     this.commands.push(command);
     return this.commandResult;
   }
+  async getPortUrl(_ws: string, port: number): Promise<string> {
+    return `https://sandbox-${port}.example.dev`;
+  }
 }
 
 function call(name: string, input: Record<string, unknown>, id = 't1'): ToolUse {
@@ -142,6 +145,26 @@ describe('ToolDispatcher', () => {
     expect(res.is_error).toBe(false);
     expect(state.snapshot().todos).toEqual([{ id: '1', title: 'scaffold', status: 'in_progress' }]);
     expect(events.find((e) => e.type === 'todo_updated')).toBeTruthy();
+  });
+
+  it('update_preview resolves the sandbox URL and emits a preview event', async () => {
+    const res = await d.dispatch(call('update_preview', { port: 5173 }));
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('https://sandbox-5173.example.dev');
+    const ev = events.find((e) => e.type === 'preview');
+    expect(ev && ev.type === 'preview' && ev.url).toBe('https://sandbox-5173.example.dev');
+  });
+
+  it('update_preview errors honestly when the sandbox has no port mapping', async () => {
+    const noPort = new ToolDispatcher(
+      { readFile: act.readFile.bind(act), writeFile: act.writeFile.bind(act), listFiles: act.listFiles.bind(act), runCommand: act.runCommand.bind(act) },
+      'ws-1',
+      state,
+      stream,
+    );
+    const res = await noPort.dispatch(call('update_preview', { port: 3000 }));
+    expect(res.is_error).toBe(true);
+    expect(res.content).toContain('not available');
   });
 
   it('unknown tool returns an honest error', async () => {

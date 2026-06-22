@@ -2329,10 +2329,13 @@ ${buildLanguageRule(preferredLanguage)}`;
     }
   };
 
+  // K4: debounce preview rebuild so rapid edits don't trigger a rebuild on every keystroke
+  const previewDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleFileChange = (path: string, content: string) => {
     setFiles(prev => {
       const next = { ...prev, [path]: content };
-      updatePreview(next);
+      if (previewDebounceRef.current) clearTimeout(previewDebounceRef.current);
+      previewDebounceRef.current = setTimeout(() => { updatePreview(next); }, 400);
       return next;
     });
   };

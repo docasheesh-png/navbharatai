@@ -842,6 +842,16 @@ export const AIChat: React.FC<AIChatProps> = ({
               >
                 🐙 GitHub Pages
               </button>
+              {/* D26: re-run code review from build results */}
+              {onSendSuggestion && (
+                <button
+                  onClick={() => onSendSuggestion('/code-review')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600/10 hover:bg-red-600/20 border border-red-500/20 text-red-400 text-[10px] font-bold rounded-xl transition-all active:scale-95"
+                  title="Run AI code review on the generated app"
+                >
+                  🔍 Code Review
+                </button>
+              )}
             </div>
           </div>
         )}

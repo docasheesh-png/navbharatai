@@ -154,7 +154,7 @@
 | D23 | No build history count shown in UI (e.g. "Build #7") | `[x]` | #167 |
 | D24 | No diff between current build and last build (file-level diff) | `[ ]` | |
 | D25 | Build stops on first error without reporting all errors | `[ ]` | |
-| D26 | No option to re-run code review separately (post-build) | `[ ]` | |
+| D26 | No option to re-run code review separately (post-build) | `[x]` | #167 |
 | D27 | AI model fallback not shown to user ("using Grok instead of Claude") | `[ ]` | |
 | D28 | Guider plan card does not allow editing the plan text | `[ ]` | |
 | D29 | No "Save this build as template" option | `[ ]` | |
@@ -174,7 +174,7 @@
 | E6 | Pinch-to-zoom on preview iframe (should allow) | `[ ]` | |
 | E7 | No landscape orientation optimization | `[ ]` | |
 | E8 | Sidebar animation not smooth on low-end devices | `[ ]` | |
-| E9 | No dark/light toggle in mobile header | `[ ]` | |
+| E9 | No dark/light toggle in mobile header | `[x]` | #167 |
 | E10 | Virtual keyboard causes layout jumps on some Android | `[ ]` | |
 | E11 | iOS bottom safe area not always respected in chat input | `[ ]` | |
 | E12 | Scrolling inside a modal on iOS causes page scroll (body lock) | `[ ]` | |
@@ -331,7 +331,7 @@
 | K1 | First contentful paint >3s (app boot) | `[ ]` | |
 | K2 | App.tsx is 5,661 lines — single bundle bottleneck | `[ ]` | |
 | K3 | Chat messages list renders all messages (no virtualization) | `[ ]` | |
-| K4 | Preview rebuild triggered without debounce | `[ ]` | |
+| K4 | Preview rebuild triggered without debounce | `[x]` | #167 |
 | K5 | Monaco editor instantiates even when not visible | `[ ]` | |
 | K6 | File tree re-renders on every file change | `[ ]` | |
 | K7 | Large file (>500 lines) Monaco render is noticeably slow | `[ ]` | |
@@ -381,7 +381,7 @@
 | M2 | No Subresource Integrity (SRI) for CDN-loaded scripts | `[ ]` | |
 | M3 | CORS policy allows dev origin in non-production (verify) | `[ ]` | |
 | M4 | Generated code secrets (API keys) not flagged/blocked | `[ ]` | |
-| M5 | No secrets scan in code review (regex for keys/tokens) | `[ ]` | |
+| M5 | No secrets scan in code review (regex for keys/tokens) | `[x]` | #167 |
 | M6 | Rate limiting per-user not enforced (only per-IP) | `[ ]` | |
 | M7 | No CSRF tokens on state-changing POST requests | `[ ]` | |
 | M8 | Admin panel has no audit log for actions taken | `[ ]` | |

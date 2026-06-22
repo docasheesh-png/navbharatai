@@ -44,7 +44,8 @@ function analyzeCode(code: string): ReviewIssue[] {
   const hasConsoleLog = (code.match(/console\.log/g) || []).length;
   const hasAny = code.includes(': any');
   const hasDangerousHtml = code.includes('dangerouslySetInnerHTML') || code.includes('innerHTML =');
-  const hasHardcodedKey = /['"]AIzaSy|['"]sk-|['"]pk_|password\s*=\s*['"][^'"]{4,}/.test(code);
+  // M5: expanded secrets scan — catches common key/token patterns
+  const hasHardcodedKey = /['"]AIzaSy|['"]sk-[a-zA-Z0-9]{20}|['"]pk_|['"]rk_|['"]whsec_|['"]xoxb-|['"]ghp_|['"]github_pat_|['"]glpat-|['"]AKIA[A-Z0-9]{16}|password\s*=\s*['"][^'"]{4,}|secret\s*[:=]\s*['"][^'"]{8,}|api[_-]?key\s*[:=]\s*['"][^'"]{8,}|Bearer\s+[a-zA-Z0-9._-]{20,}/.test(code);
   const hasNoAlt = /<img(?![^>]*alt\s*=)[^>]*>/i.test(code);
   const hasNoKey = /\.map\s*\([^)]*=>\s*[(<]/.test(code) && !code.includes('key=');
   const hasAsync = code.includes('async') || code.includes('await') || code.includes('.then(');

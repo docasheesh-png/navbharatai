@@ -2,6 +2,14 @@ import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
 import type { ToolUse } from './ClaudeClient';
 import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
+import { isWorkerRole } from './AgentRegistry';
+
+/**
+ * Spawns a specialist sub-agent for the `task` tool and returns its result.
+ * Injected (not imported) so ToolDispatcher stays decoupled from AgentRunner —
+ * the composition root wires the real implementation (see SubAgent.ts).
+ */
+export type SubAgentSpawn = (role: AgentRole, instruction: string) => Promise<{ ok: boolean; summary: string }>;
 
 /**
  * ActuatorPort — the narrow slice of the sandbox actuator the dispatcher needs.
@@ -41,6 +49,7 @@ export class ToolDispatcher {
     private readonly workspaceId: string,
     private readonly state?: WorkspaceState,
     private readonly events?: AgentEventStream,
+    private readonly spawnSubAgent?: SubAgentSpawn,
   ) {}
 
   async dispatch(call: ToolUse, agent: AgentRole = 'architect'): Promise<ToolResult> {
@@ -155,6 +164,20 @@ export class ToolDispatcher {
         const todos = parseTodos(input);
         this.state?.setTodos(todos);
         return `Updated ${todos.length} todo(s).`;
+      }
+
+      case 'task': {
+        if (!this.spawnSubAgent) {
+          throw new Error('The task tool is not available in this context.');
+        }
+        const role = reqStr(input, 'role');
+        const instruction = reqStr(input, 'instruction');
+        if (!isWorkerRole(role)) {
+          throw new Error(`task: unknown role "${role}".`);
+        }
+        this.events?.emit({ type: 'agent_spawned', agent: role, task: instruction, ts: Date.now() });
+        const result = await this.spawnSubAgent(role, instruction);
+        return result.ok ? `[${role}] ${result.summary}` : `[${role}] FAILED: ${result.summary}`;
       }
 
       default:

@@ -1,4 +1,6 @@
 import type { ClaudeToolDef } from './ClaudeClient';
+import type { ToolName } from './types';
+import { WORKER_ROLES } from './AgentRegistry';
 
 /**
  * ToolCatalog — the native Anthropic tool definitions the v3.0 agent team can
@@ -108,7 +110,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
   ];
 }
 
-/** The set of tool names the catalog exposes (for validation). */
+/** The set of base tool names the catalog exposes (for validation). */
 export const CATALOG_TOOL_NAMES = [
   'read_file',
   'write_file',
@@ -118,3 +120,40 @@ export const CATALOG_TOOL_NAMES = [
   'glob',
   'update_todo',
 ] as const;
+
+/**
+ * The `task` sub-agent tool (§3.3) — only the Architect gets this. Delegates a
+ * focused unit of work to a specialist agent, which runs as a constrained nested
+ * agent and returns a summary.
+ */
+export function taskToolDef(): ClaudeToolDef {
+  return {
+    name: 'task',
+    description:
+      'Delegate a focused task to a specialist agent. The agent runs with its own ' +
+      'tools and returns a summary of what it did. Use this to parallelise and ' +
+      'organise the build across the team.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        role: {
+          type: 'string',
+          description: `The specialist to delegate to. One of: ${WORKER_ROLES.join(', ')}.`,
+          enum: [...WORKER_ROLES],
+        },
+        instruction: {
+          type: 'string',
+          description: 'A clear, self-contained instruction for the specialist.',
+        },
+      },
+      required: ['role', 'instruction'],
+    },
+  };
+}
+
+/** Build the tool definitions for a given allowed-tool list (incl. `task`). */
+export function catalogForTools(allowed: ToolName[]): ClaudeToolDef[] {
+  const base = defaultToolCatalog().filter((t) => (allowed as string[]).includes(t.name));
+  if ((allowed as string[]).includes('task')) base.push(taskToolDef());
+  return base;
+}

@@ -21,8 +21,11 @@ export type {
   TurnUsage,
   TurnResult,
   RunTurnParams,
+  TurnRunner,
   MessagesCreateClient,
 } from './ClaudeClient';
+export { AgentRunner } from './AgentRunner';
+export type { AgentRunnerOptions, AgentRunResult } from './AgentRunner';
 export {
   STANDARD_MULTIPLIER,
   ONLY_OPUS_MULTIPLIER,

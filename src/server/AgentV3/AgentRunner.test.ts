@@ -1,0 +1,145 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { AgentRunner } from './AgentRunner';
+import { ClaudeClient, type MessagesCreateClient } from './ClaudeClient';
+import { ToolDispatcher, type ActuatorPort } from './ToolDispatcher';
+import { WorkspaceState } from './WorkspaceState';
+import { AgentEventStream } from './AgentEventStream';
+import { defaultToolCatalog } from './ToolCatalog';
+import type { AgentEvent } from './types';
+
+/** In-memory fake sandbox (ActuatorPort slice). */
+class FakeActuator implements ActuatorPort {
+  files = new Map<string, string>();
+  async readFile(_w: string, p: string): Promise<string> {
+    const f = this.files.get(p);
+    if (f === undefined) throw new Error(`ENOENT: ${p}`);
+    return f;
+  }
+  async writeFile(_w: string, p: string, c: string): Promise<void> {
+    this.files.set(p, c);
+  }
+  async listFiles(): Promise<string[]> {
+    return [...this.files.keys()];
+  }
+  async runCommand() {
+    return { exitCode: 0, stdout: '', stderr: '' };
+  }
+}
+
+/** A mock Anthropic client that replays a scripted list of raw messages. */
+function scriptedClient(messages: unknown[]): MessagesCreateClient {
+  let i = 0;
+  return {
+    messages: {
+      create: async () => {
+        const m = messages[i] ?? { content: [{ type: 'text', text: 'fallback end' }], stop_reason: 'end_turn' };
+        i++;
+        return m as never;
+      },
+    },
+  };
+}
+
+function buildRunner(script: unknown[], opts: { maxSteps?: number; maxBudgetUsd?: number } = {}) {
+  const actuator = new FakeActuator();
+  const stream = new AgentEventStream();
+  const events: AgentEvent[] = [];
+  stream.subscribe((e) => events.push(e), false);
+  const state = new WorkspaceState(stream);
+  const dispatcher = new ToolDispatcher(actuator, 'ws-1', state, stream);
+  const client = new ClaudeClient(scriptedClient(script));
+  const runner = new AgentRunner({
+    client,
+    dispatcher,
+    state,
+    events: stream,
+    model: 'claude-sonnet-test',
+    system: 'You are the Architect.',
+    tools: defaultToolCatalog(),
+    ...opts,
+  });
+  return { runner, actuator, state, events };
+}
+
+describe('AgentRunner (native tool-use loop)', () => {
+  it('runs a real two-turn build: tool_use then end_turn', async () => {
+    const { runner, actuator, state, events } = buildRunner([
+      {
+        content: [
+          { type: 'text', text: 'Creating the entry file.' },
+          { type: 'tool_use', id: 'tu1', name: 'write_file', input: { path: 'index.html', content: '<h1>Hi</h1>' } },
+        ],
+        stop_reason: 'tool_use',
+        usage: { input_tokens: 200, output_tokens: 50 },
+      },
+      {
+        content: [{ type: 'text', text: 'All done — the app is ready.' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 60, output_tokens: 20 },
+      },
+    ]);
+
+    const result = await runner.run('Build a hello page');
+
+    expect(result.ok).toBe(true);
+    expect(result.steps).toBe(2);
+    expect(actuator.files.get('index.html')).toBe('<h1>Hi</h1>');
+    expect(state.snapshot().files).toEqual([{ path: 'index.html', kind: 'create' }]);
+    // Aggregated tokens across both turns.
+    expect(result.usage.inputTokens).toBe(260);
+    expect(result.usage.outputTokens).toBe(70);
+    // Billed at the standard 2.5x Opus-equivalent → strictly positive.
+    expect(result.billedUsd).toBeGreaterThan(0);
+    // Events: narration + tool_call + tool_result + file_changed + done(ok).
+    expect(events.find((e) => e.type === 'done' && e.ok)).toBeTruthy();
+    expect(events.find((e) => e.type === 'file_changed')).toBeTruthy();
+    expect(events.filter((e) => e.type === 'narration').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('feeds tool errors back to the model (honest is_error, no fake success)', async () => {
+    const { runner, events } = buildRunner([
+      {
+        content: [{ type: 'tool_use', id: 'tu1', name: 'read_file', input: { path: 'missing.ts' } }],
+        stop_reason: 'tool_use',
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+      { content: [{ type: 'text', text: 'I see the file is missing; stopping.' }], stop_reason: 'end_turn' },
+    ]);
+    const result = await runner.run('read a missing file');
+    expect(result.ok).toBe(true); // model chose to end after seeing the error
+    const toolResult = events.find((e) => e.type === 'tool_result');
+    expect(toolResult && toolResult.type === 'tool_result' && toolResult.ok).toBe(false);
+  });
+
+  it('stops honestly at the step limit', async () => {
+    // Always returns a tool_use → never ends on its own.
+    const looping = [
+      {
+        content: [{ type: 'tool_use', id: 'tu', name: 'write_file', input: { path: 'a.ts', content: 'x' } }],
+        stop_reason: 'tool_use',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    ];
+    const { runner } = buildRunner(
+      Array.from({ length: 10 }, () => looping[0]),
+      { maxSteps: 3 },
+    );
+    const result = await runner.run('loop forever');
+    expect(result.ok).toBe(false);
+    expect(result.steps).toBe(3);
+    expect(result.summary).toContain('Step limit');
+  });
+
+  it('stops honestly when the budget cap is reached', async () => {
+    const looping = {
+      content: [{ type: 'tool_use', id: 'tu', name: 'write_file', input: { path: 'a.ts', content: 'x' } }],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 }, // ~ $90 Opus-equiv × 2.5 = $225/turn
+    };
+    const { runner } = buildRunner([looping, looping, looping], { maxBudgetUsd: 100 });
+    const result = await runner.run('expensive build');
+    expect(result.ok).toBe(false);
+    expect(result.summary).toContain('Budget reached');
+    expect(result.billedUsd).toBeGreaterThanOrEqual(100);
+  });
+});

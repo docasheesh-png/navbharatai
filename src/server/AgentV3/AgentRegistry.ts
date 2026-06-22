@@ -385,3 +385,29 @@ export function rolesByLayer(): Record<RoleConfig['layer'], AgentRole[]> {
   for (const role of allRoles()) out[REGISTRY[role].layer].push(role);
   return out;
 }
+
+/**
+ * A concise, grouped description of the specialist team — injected into the
+ * Architect's prompt so it delegates by capability to the right role instead of
+ * guessing. Generated from the registry so it can never drift from the real
+ * roster. Capabilities are capped per role to keep the prompt compact.
+ */
+export function rosterBriefing(): string {
+  const grouped = rolesByLayer();
+  const layers: RoleConfig['layer'][] = ['planning', 'development', 'quality', 'repair', 'knowledge', 'operations'];
+  const lines = layers.map((layer) => {
+    const roles = grouped[layer]
+      .map((role) => {
+        const cfg = REGISTRY[role];
+        return `${role} (${cfg.capabilities.slice(0, 4).join(', ')})`;
+      })
+      .join('; ');
+    return `- ${layer.toUpperCase()}: ${roles}`;
+  });
+  return [
+    'Your specialist team (delegate with the task tool — pick the role whose',
+    'capabilities best match the work; delegate independent pieces in parallel):',
+    ...lines,
+  ].join('\n');
+}
+

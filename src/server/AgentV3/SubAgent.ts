@@ -7,6 +7,7 @@ import { ToolDispatcher } from './ToolDispatcher';
 import { AgentRunner } from './AgentRunner';
 import { roleConfig } from './AgentRegistry';
 import { catalogForTools } from './ToolCatalog';
+import { agentLifecycle } from './AgentLifecycle';
 import type { AgentRole } from './types';
 
 /**
@@ -56,7 +57,15 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       maxBudgetUsd: deps.maxBudgetUsd,
       agentRole: role,
     });
-    const result = await runner.run(instruction);
-    return { ok: result.ok, summary: result.summary };
+    // Record the real lifecycle of this delegated run (Agent Health Monitor).
+    const token = agentLifecycle.start(role);
+    try {
+      const result = await runner.run(instruction);
+      agentLifecycle.finish(token, result.ok);
+      return { ok: result.ok, summary: result.summary };
+    } catch (err) {
+      agentLifecycle.finish(token, false);
+      throw err;
+    }
   };
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { roleConfig, isWorkerRole, WORKER_ROLES, allRoles, findRolesByCapability, rolesByLayer } from './AgentRegistry';
+import { roleConfig, isWorkerRole, WORKER_ROLES, allRoles, findRolesByCapability, rolesByLayer, rosterBriefing } from './AgentRegistry';
 import { catalogForTools, taskToolDef } from './ToolCatalog';
+import { architectSystemPrompt } from './systemPrompt';
 
 describe('AgentRegistry', () => {
   it('gives only the Architect the task tool (no deep recursion)', () => {
@@ -83,6 +84,23 @@ describe('Capability Registry', () => {
     const flat = Object.values(grouped).flat();
     expect(flat.sort()).toEqual(allRoles().sort());
     expect(grouped.lead).toEqual(['architect']);
+  });
+});
+
+describe('rosterBriefing (capability-aware routing)', () => {
+  it('describes the team by layer with capabilities, for the Architect prompt', () => {
+    const brief = rosterBriefing();
+    expect(brief).toContain('DEVELOPMENT');
+    expect(brief).toContain('QUALITY');
+    expect(brief).toContain('database');
+    expect(brief).toContain('security');
+    // Capabilities are surfaced so the Architect can route by need.
+    expect(brief.toLowerCase()).toContain('schema');
+  });
+
+  it('is embedded in the Architect system prompt so delegation is capability-aware', () => {
+    const prompt = architectSystemPrompt();
+    expect(prompt).toContain(rosterBriefing());
   });
 });
 

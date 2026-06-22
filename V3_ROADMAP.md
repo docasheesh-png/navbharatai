@@ -155,3 +155,12 @@ Every phase is graded against these, because they are what makes the difference:
   enum + dispatcher validation auto-wire from WORKER_ROLES. Frontend AgentRole +
   AppKnowledgeBase synced. 1628 tests green. Next: agent lifecycle/health +
   capability-aware routing in the Architect prompt + parallel coordination.
+- 2026-06-22: Phase 1 step 2 — capability-aware routing. rosterBriefing()
+  generates a grouped, capability-tagged team description from the registry and
+  is injected into the Architect's system prompt, so delegation picks the right
+  specialist by real capability (never drifts — generated from the roster).
+- 2026-06-22: Phase 1 step 3 — Agent Health Monitor (AgentLifecycle). Records
+  every delegated run's real start/success/failure/duration with a deterministic
+  monotonic ordering; wired into the sub-agent spawn and exposed via
+  GET /api/agentv3/status (`team`). 1634 tests green. Phase 1 remaining: parallel
+  coordination polish + surface the team health in the AI-team UI.

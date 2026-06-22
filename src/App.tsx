@@ -19,6 +19,7 @@ import { ViewPanels } from './components/panels/ViewPanels';
 import { SidebarNav } from './components/panels/SidebarNav';
 import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
+import { ConnectDomainPanel } from './components/panels/ConnectDomainPanel';
 import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
 import { 
@@ -5066,7 +5067,6 @@ ${buildLanguageRule(preferredLanguage)}`;
         setShowVishwakarmaChooser={setShowVishwakarmaChooser}
         setErrorContext={setErrorContext}
       />
-
       {/* Workspace */}
       <main className="flex flex-1 relative min-h-0 min-w-0">
 
@@ -5400,6 +5400,10 @@ ${buildLanguageRule(preferredLanguage)}`;
             <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0d1117] min-h-screen">
               <SocialHub />
             </div>
+          )}
+
+          {activeView === 'connect_domain' && (
+            <ConnectDomainPanel onBack={() => toggleTab('home')} />
           )}
 
           {activeView === 'donation' && (

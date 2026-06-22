@@ -78,7 +78,7 @@ export type ViewType =
   | 'appstore' | 'collab' | 'aitesting' | 'localization' | 'codereview'
   | 'dbstudio' | 'cicd' | 'plugins' | 'whitelabel' | 'projectmgr'
   | 'cloudeploy' | 'designsys' | 'healthmon' | 'engine_builder' | 'professionals'
-  | 'engineer_ai';
+  | 'engineer_ai' | 'connect_domain';
 
 export type SettingsScreen =
   | 'root' | 'general' | 'modules' | 'secrets' | 'database' | 'connections'

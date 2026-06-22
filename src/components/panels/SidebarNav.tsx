@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Info, Lock, Settings, Heart, Palette, X } from 'lucide-react';
+import { Info, Lock, Settings, Heart, Palette, X, Globe } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { THEME_MODES } from '../../lib/theme';
 import type { ThemeMode } from '../../lib/theme';
@@ -318,6 +318,13 @@ export function SidebarNav({
                   >
                     <Info className="w-4.5 h-4.5 text-indigo-400" />
                     <span className="text-sm font-bold tracking-tight">About Us</span>
+                  </button>
+                  <button
+                    onClick={() => { toggleTab('connect_domain'); setIsMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group ${activeView === 'connect_domain' ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:bg-white/5 hover:text-white'}`}
+                  >
+                    <Globe className="w-4.5 h-4.5 text-indigo-400" />
+                    <span className="text-sm font-bold tracking-tight">Connect my website</span>
                   </button>
                   <button
                     onClick={() => { toggleTab('engine_builder'); setIsMenuOpen(false); }}

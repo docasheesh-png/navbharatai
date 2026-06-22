@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { roleConfig, isWorkerRole, WORKER_ROLES } from './AgentRegistry';
+import { roleConfig, isWorkerRole, WORKER_ROLES, allRoles, findRolesByCapability, rolesByLayer, rosterBriefing } from './AgentRegistry';
 import { catalogForTools, taskToolDef } from './ToolCatalog';
+import { architectSystemPrompt } from './systemPrompt';
 
 describe('AgentRegistry', () => {
   it('gives only the Architect the task tool (no deep recursion)', () => {
@@ -31,6 +32,75 @@ describe('AgentRegistry', () => {
     expect(isWorkerRole('frontend')).toBe(true);
     expect(isWorkerRole('architect')).toBe(false);
     expect(isWorkerRole('wizard')).toBe(false);
+  });
+
+  it('staffs the full six-layer roster (planning…operations)', () => {
+    // Spot-check that the expanded roster is really present.
+    const expected = [
+      'requirement', 'planner', 'product',
+      'fullstack', 'mobile', 'api', 'devops', 'infrastructure',
+      'tester', 'security', 'performance', 'accessibility',
+      'refactor', 'optimizer', 'docs', 'researcher', 'monitor', 'recovery',
+    ] as const;
+    for (const role of expected) expect(isWorkerRole(role)).toBe(true);
+    // Architect + every worker is addressable.
+    expect(allRoles()).toContain('architect');
+    expect(allRoles().length).toBe(WORKER_ROLES.length + 1);
+  });
+
+  it('every worker declares capabilities and a valid layer', () => {
+    for (const role of WORKER_ROLES) {
+      const cfg = roleConfig(role);
+      expect(cfg.capabilities.length).toBeGreaterThan(0);
+      expect(cfg.layer).not.toBe('lead'); // only the architect is the lead
+    }
+  });
+
+  it('read-only/run-only roles never get write or edit tools', () => {
+    for (const role of ['security', 'performance', 'accessibility', 'researcher', 'monitor'] as const) {
+      const tools = roleConfig(role).tools;
+      expect(tools).not.toContain('write_file');
+      expect(tools).not.toContain('edit_file');
+    }
+  });
+});
+
+describe('Capability Registry', () => {
+  it('routes a free-text need to the right specialist', () => {
+    expect(findRolesByCapability('schema')).toContain('database');
+    expect(findRolesByCapability('a11y')).toContain('accessibility');
+    expect(findRolesByCapability('vulnerabilities')).toContain('security');
+    expect(findRolesByCapability('rollback')).toContain('recovery');
+  });
+
+  it('matches by role name too, and returns [] for nonsense', () => {
+    expect(findRolesByCapability('frontend')).toContain('frontend');
+    expect(findRolesByCapability('')).toEqual([]);
+    expect(findRolesByCapability('zzzznotacapability')).toEqual([]);
+  });
+
+  it('groups every role under exactly one layer', () => {
+    const grouped = rolesByLayer();
+    const flat = Object.values(grouped).flat();
+    expect(flat.sort()).toEqual(allRoles().sort());
+    expect(grouped.lead).toEqual(['architect']);
+  });
+});
+
+describe('rosterBriefing (capability-aware routing)', () => {
+  it('describes the team by layer with capabilities, for the Architect prompt', () => {
+    const brief = rosterBriefing();
+    expect(brief).toContain('DEVELOPMENT');
+    expect(brief).toContain('QUALITY');
+    expect(brief).toContain('database');
+    expect(brief).toContain('security');
+    // Capabilities are surfaced so the Architect can route by need.
+    expect(brief.toLowerCase()).toContain('schema');
+  });
+
+  it('is embedded in the Architect system prompt so delegation is capability-aware', () => {
+    const prompt = architectSystemPrompt();
+    expect(prompt).toContain(rosterBriefing());
   });
 });
 

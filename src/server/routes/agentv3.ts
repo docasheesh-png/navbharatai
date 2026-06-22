@@ -19,6 +19,7 @@ import {
   GitManager,
   registerSession,
   restoreSession,
+  agentLifecycle,
 } from '../AgentV3';
 import { randomUUID } from 'crypto';
 import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
@@ -68,7 +69,7 @@ export function registerAgentV3Routes(app: Express): void {
   app.get('/api/agentv3/status', (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
-    res.json({ enabled: isAgentV3Enabled(userId, email), ...agentV3Status() });
+    res.json({ enabled: isAgentV3Enabled(userId, email), ...agentV3Status(), team: agentLifecycle.snapshot() });
   });
 
   // Approve/reject a pending gate (plan mode / permission prompt, P4).

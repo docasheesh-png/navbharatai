@@ -3,7 +3,10 @@
 // This instructs the lead agent how to build a real, working app in the sandbox
 // using the native tools. It deliberately forbids fake completion (CLAUDE.md
 // real-features rule): the agent must actually build, run, and verify before it
-// finishes. Multi-agent delegation (the `task` tool) is added in P3.5.
+// finishes. The specialist roster (the "AI team") is injected from the
+// AgentRegistry so the Architect always delegates by real, current capability.
+
+import { rosterBriefing } from './AgentRegistry';
 
 /**
  * Plan-mode system prompt (P4): the agent produces a concise step-by-step plan
@@ -40,9 +43,12 @@ export function architectSystemPrompt(): string {
     '- After you start a dev server, call update_preview with its port so the user',
     '  sees the app live in the preview while it is still being built.',
     '- Use read_file, grep and glob to inspect the workspace before changing it.',
-    '- Delegate focused work to specialist agents with the task tool (frontend,',
-    '  backend, database, designer, qa, debugger, reviewer, deploy) — especially',
-    '  independent pieces that can progress in parallel. Integrate their results.',
+    '- Delegate focused work to the right specialist with the task tool —',
+    '  especially independent pieces that can progress in parallel. Integrate',
+    '  their results. The full team and what each role is best at:',
+    '',
+    rosterBriefing(),
+    '',
     '- After building, actually run the build/tests (or ask the qa agent to) and',
     '  fix what fails. Do not claim success until the app genuinely builds and works.',
     '',

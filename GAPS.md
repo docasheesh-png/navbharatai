@@ -68,7 +68,7 @@
 | B6 | Starter suggestions not visible when chat is empty | `[ ]` | |
 | B7 | No model name badge showing which AI answered | `[x]` | #166 |
 | B8 | No typing indicator (three-dots animation) during generation | `[x]` | #166 |
-| B9 | No "Edit prompt" option on user messages | `[ ]` | |
+| B9 | No "Edit prompt" option on user messages | `[x]` | #167 |
 | B10 | Code blocks in chat have no file name header | `[ ]` | |
 | B11 | Code blocks in chat have no line numbers | `[ ]` | |
 | B12 | Code blocks in chat not syntax-highlighted in all languages | `[ ]` | |
@@ -306,7 +306,7 @@
 | J3 | Staged vs unstaged files not visually distinct | `[ ]` | |
 | J4 | No create-branch button in Git panel | `[ ]` | |
 | J5 | No "Ahead / behind remote" indicator | `[ ]` | |
-| J6 | Empty commit message gives no error before submit | `[ ]` | |
+| J6 | Empty commit message gives no error before submit | `[x]` | #167 |
 | J7 | No .gitignore file editor | `[ ]` | |
 | J8 | No stash push/pop | `[ ]` | |
 | J9 | No cherry-pick | `[~]` | complex git |
@@ -315,7 +315,7 @@
 | J12 | No merge conflict resolution UI | `[~]` | complex git |
 | J13 | No tag creation | `[ ]` | |
 | J14 | No git blame view | `[ ]` | |
-| J15 | Commit message has no character limit warning (50/72 chars) | `[ ]` | |
+| J15 | Commit message has no character limit warning (50/72 chars) | `[x]` | #167 |
 | J16 | No "Sync with remote" (pull + push in one click) | `[ ]` | |
 | J17 | PR creation link not shown after push | `[ ]` | |
 | J18 | No GitHub PR list view in Git panel | `[ ]` | |
@@ -399,15 +399,15 @@
 
 | # | Gap | Status | PR |
 |---|-----|--------|----|
-| N1 | No "Explain this code" right-click action in editor | `[ ]` | |
-| N2 | No "Improve this code" inline suggestion | `[ ]` | |
-| N3 | No inline comment/explain on selected text | `[ ]` | |
-| N4 | No "Write tests for this function" button | `[ ]` | |
-| N5 | No "Add JSDoc / docstring" generator | `[ ]` | |
+| N1 | No "Explain this code" right-click action in editor | `[x]` | #167 |
+| N2 | No "Improve this code" inline suggestion | `[x]` | #167 |
+| N3 | No inline comment/explain on selected text | `[x]` | #167 |
+| N4 | No "Write tests for this function" button | `[x]` | #167 |
+| N5 | No "Add JSDoc / docstring" generator | `[x]` | #167 |
 | N6 | No "Convert to TypeScript" action | `[ ]` | |
 | N7 | No "Simplify this function" action | `[ ]` | |
-| N8 | No "Find bugs in this file" action | `[ ]` | |
-| N9 | No "Security scan this file" button | `[ ]` | |
+| N8 | No "Find bugs in this file" action | `[x]` | #167 |
+| N9 | No "Security scan this file" button | `[x]` | #167 |
 | N10 | No "Generate README" from project structure | `[ ]` | |
 | N11 | No "Generate .env.example" from code | `[ ]` | |
 | N12 | No "Generate API documentation" | `[ ]` | |

@@ -1289,13 +1289,23 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                         </div>
 
                         <div className="space-y-1 text-left">
-                          <label className="text-[9.5px] font-bold text-[#8b949e]">Commit Message</label>
-                          <input 
-                            type="text" 
+                          <div className="flex items-center justify-between">
+                            <label className="text-[9.5px] font-bold text-[#8b949e]">Commit Message</label>
+                            {/* J15: Character count warning */}
+                            <span className={`text-[8px] font-mono ${(configs.github.commitMsg || '').length > 72 ? 'text-amber-400' : 'text-[#484f58]'}`}>
+                              {(configs.github.commitMsg || '').length}/72
+                            </span>
+                          </div>
+                          <input
+                            type="text"
                             value={configs.github.commitMsg}
                             onChange={(e) => updateConfig('github', { commitMsg: e.target.value })}
-                            className="w-full bg-[#161b22] border border-white/10 rounded-xl p-2.5 text-xs font-bold text-white outline-none focus:border-indigo-500/40"
+                            maxLength={150}
+                            className={`w-full bg-[#161b22] border rounded-xl p-2.5 text-xs font-bold text-white outline-none focus:border-indigo-500/40 ${(configs.github.commitMsg || '').length > 72 ? 'border-amber-500/40' : 'border-white/10'}`}
                           />
+                          {(configs.github.commitMsg || '').length > 72 && (
+                            <p className="text-[8px] text-amber-400 font-bold">Commit messages over 72 characters may be truncated in Git logs.</p>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1772,6 +1782,11 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     if (!token) {
                       onConnect();
                     } else {
+                      // J6: Require a non-empty commit message before pushing
+                      if (!(configs.github.commitMsg || '').trim()) {
+                        setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ⚠️ Commit message is required. Please enter a message before pushing.`]);
+                        return;
+                      }
                       setShowConfirmModal(true);
                     }
                   } else if (selectedPlatform === 'firebase') {

@@ -19,7 +19,8 @@ import { cn } from '../../lib/utils';
 import {
   Menu as MenuIcon, X, Maximize2, Minimize2,
   ChevronUp, ChevronDown, Rocket, Command, Search, Keyboard,
-  Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2
+  Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2,
+  MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck
 } from 'lucide-react';
 
 interface CodeStudioProps {
@@ -68,6 +69,8 @@ interface CodeStudioProps {
   onOpenProChat?: () => void;
   wallet?: any;
   onUnlockVishwakarma: () => void;
+  /** N1-N9: Send a message directly to AI (bypasses controlled input state). */
+  onSendDirect?: (text: string) => void;
 }
 
 export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
@@ -113,6 +116,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   onOpenProChat,
   wallet,
   onUnlockVishwakarma,
+  onSendDirect,
 }) => {
   const themeClasses = getThemeClasses(theme);
   const [activeScreen, setActiveScreen] = useState<IDEScreen>(() => {
@@ -143,6 +147,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const [editorTabSize, setEditorTabSize] = useState<number>(() => Number(localStorage.getItem('ide_tabSize') || 2));
   // A24: Cursor position shown in status bar
   const [cursorPos, setCursorPos] = useState<{ line: number; col: number }>({ line: 1, col: 1 });
+  // N1-N9: Selected code for AI action toolbar
+  const [selectedCode, setSelectedCode] = useState<string>('');
 
   const handleScreenChange = (screen: IDEScreen) => {
     if (screen === 'shortcuts') {
@@ -211,6 +217,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     return () => disposable.dispose();
   }, [editorInstance]);
 
+  // N1-N9: Track selected text for AI code action toolbar
+  useEffect(() => {
+    if (!editorInstance) return;
+    const disposable = editorInstance.onDidChangeCursorSelection(() => {
+      const selection = editorInstance.getSelection();
+      if (selection && !selection.isEmpty()) {
+        setSelectedCode(editorInstance.getModel()?.getValueInRange(selection) || '');
+      } else {
+        setSelectedCode('');
+      }
+    });
+    return () => disposable.dispose();
+  }, [editorInstance]);
+
   // Debounced live editor → preview sync: when the user edits a file in the Monaco
   // editor, refresh the preview automatically (after a short idle) using the SAME
   // build pipeline as the Run button — no duplicate bundler, no risk of a loop
@@ -243,6 +263,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     delete newFiles[path];
     onFilesChange(newFiles);
     handleTabClose(path);
+  };
+
+  // N1-N9: Send selected code + action label to AI chat
+  const sendCodeAction = (label: string, instruction: string) => {
+    if (!selectedCode.trim()) return;
+    const lang = activeFile.split('.').pop() || 'code';
+    const prompt = `${instruction}:\n\n\`\`\`${lang}\n${selectedCode}\n\`\`\``;
+    if (onSendDirect) {
+      onSendDirect(prompt);
+    } else {
+      onChatInputChange(prompt);
+    }
+    handleScreenChange('ai');
+    setIsSidebarOpen(true);
   };
 
   const handleRenameFile = (oldPath: string, newName: string) => {
@@ -823,12 +857,52 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
 
           <AnimatePresence>
             {isCursorPopupOpen && editorInstance && (
-              <CursorPopup 
-                editor={editorInstance} 
-                onClose={() => setIsCursorPopupOpen(false)} 
+              <CursorPopup
+                editor={editorInstance}
+                onClose={() => setIsCursorPopupOpen(false)}
                 onToggleKeyboard={() => setIsShortcutsOpen(!isShortcutsOpen)}
                 isKeyboardOpen={isShortcutsOpen}
               />
+            )}
+          </AnimatePresence>
+
+          {/* N1-N9: AI code action toolbar — appears when text is selected in editor */}
+          <AnimatePresence>
+            {selectedCode.trim() && activeScreen !== 'preview' && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.12 }}
+                className="absolute top-10 right-2 z-[52] flex items-center gap-0.5 bg-[#0d1117] border border-white/15 rounded-xl shadow-2xl px-1.5 py-1 shadow-black/40"
+              >
+                <span className="text-[8px] font-black text-[#484f58] uppercase tracking-widest px-1 border-r border-white/10 mr-0.5">AI Actions</span>
+                {([
+                  { label: 'Explain', icon: MessageSquare, instruction: 'Explain this code' },
+                  { label: 'Improve', icon: Sparkles, instruction: 'Improve and optimize this code' },
+                  { label: 'Tests', icon: TestTube, instruction: 'Write unit tests for this code' },
+                  { label: 'JSDoc', icon: FileText, instruction: 'Add JSDoc documentation to this code' },
+                  { label: 'Find Bugs', icon: Bug, instruction: 'Find and fix bugs in this code' },
+                  { label: 'Security', icon: ShieldCheck, instruction: 'Do a security review of this code and identify vulnerabilities' },
+                ] as const).map(({ label, icon: Icon, instruction }) => (
+                  <button
+                    key={label}
+                    onClick={() => sendCodeAction(label, instruction)}
+                    title={instruction}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[8px] font-black text-[#8b949e] hover:text-white hover:bg-indigo-600/80 transition-all"
+                  >
+                    <Icon className="w-2.5 h-2.5 shrink-0" />
+                    {label}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setSelectedCode('')}
+                  title="Dismiss"
+                  className="ml-0.5 p-0.5 rounded text-[#484f58] hover:text-white transition-colors"
+                >
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </motion.div>
             )}
           </AnimatePresence>
 

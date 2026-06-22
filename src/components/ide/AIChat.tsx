@@ -383,6 +383,8 @@ export const AIChat: React.FC<AIChatProps> = ({
   const [showModeDropdown, setShowModeDropdown] = useState(false);
   const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  // B9: Edit user message — fill input with message text for re-editing
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [liked, setLiked] = useState<Record<string, boolean>>({});
   const [disliked, setDisliked] = useState<Record<string, boolean>>({});
   const [showReport, setShowReport] = useState<Record<string, boolean>>({});
@@ -777,6 +779,13 @@ export const AIChat: React.FC<AIChatProps> = ({
           No internet connection — messages may not send
         </div>
       )}
+      {/* B9: Editing message indicator */}
+      {editingMsgId && (
+        <div className="shrink-0 bg-indigo-600/20 border-b border-indigo-500/30 px-3 py-1 flex items-center justify-between gap-2 text-[9px] font-black uppercase tracking-widest text-indigo-300">
+          <span className="flex items-center gap-1.5"><MessageSquare className="w-3 h-3" /> Editing message — modify and send</span>
+          <button onClick={() => { setEditingMsgId(null); onInputChange(''); }} className="text-indigo-400 hover:text-white transition-colors"><X className="w-3 h-3" /></button>
+        </div>
+      )}
       {/* In-chat image lightbox */}
       {lightbox && (
         <div
@@ -1102,6 +1111,20 @@ export const AIChat: React.FC<AIChatProps> = ({
                     <span className="text-[7px] text-[#30363d] font-mono">{formatMsgTime(msg.timestamp)}</span>
                   )}
                   {msg.sender === 'user' && <User className="w-2.5 h-2.5 text-indigo-400" />}
+                  {/* B9: Edit user message button */}
+                  {msg.sender === 'user' && (
+                    <button
+                      onClick={() => {
+                        onInputChange(msg.text || '');
+                        setEditingMsgId(msg.id);
+                        setTimeout(() => textareaRef.current?.focus(), 50);
+                      }}
+                      title="Edit and resend this message"
+                      className="opacity-0 group-hover/msg:opacity-100 transition-opacity p-0.5 hover:bg-white/10 rounded text-[#484f58] hover:text-indigo-400"
+                    >
+                      <MessageSquare className="w-2.5 h-2.5" />
+                    </button>
+                  )}
                   {/* Copy message button — appears on hover */}
                   <button
                     onClick={() => {
@@ -1382,6 +1405,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                         e.preventDefault();
                         onSend(attachments);
                         setAttachments([]);
+                        setEditingMsgId(null);
                       }
                     }}
                     placeholder="Ask NavBharatAI..."
@@ -1434,7 +1458,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                       </button>
                     ) : (
                       <button
-                        onClick={() => { onSend(attachments); setAttachments([]); }}
+                        onClick={() => { onSend(attachments); setAttachments([]); setEditingMsgId(null); }}
                         disabled={(!input.trim() && attachments.length === 0) || isLoading}
                         className="p-3 bg-indigo-600 text-white rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95"
                       >

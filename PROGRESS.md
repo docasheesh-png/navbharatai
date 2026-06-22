@@ -746,6 +746,12 @@ tsc x2 clean (0 errors), vitest 1393/1393 green.
 
 tsc x2 clean (0 errors), vitest 1399/1399 green.
 
+**Extended — 1406 tests / 179 test files (2026-06-22, session 7 continued):**
+
+- `tests/theme.test.ts` (NEW) — 7 tests: THEME_MODES exports all 5 modes with label+value; getThemeClasses shape for all themes, dark/light bg classes, distinct backgrounds, raw.bg CSS format.
+
+tsc x2 clean (0 errors), vitest 1406/1406 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

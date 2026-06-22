@@ -664,6 +664,19 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            >
              <ChevronUp className="w-3 h-3" />
            </button>
+           {/* A5: Tab size selector */}
+           <div className="flex items-center gap-0.5 bg-white/5 rounded px-1">
+             {[2, 4].map(size => (
+               <button
+                 key={size}
+                 onClick={() => { setEditorTabSize(size); localStorage.setItem('ide_tabSize', String(size)); }}
+                 title={`Tab size: ${size}`}
+                 className={`px-1 py-0.5 rounded text-[9px] font-mono transition-all ${editorTabSize === size ? 'text-indigo-400 font-black' : 'text-[#484f58] hover:text-white'}`}
+               >
+                 {size}
+               </button>
+             ))}
+           </div>
            {/* A6: Format document */}
            <button
              onClick={() => editorInstance?.getAction('editor.action.formatDocument')?.run()}

@@ -27,7 +27,7 @@
 | A2 | No word wrap toggle button in editor toolbar | `[x]` | #166 |
 | A3 | No minimap toggle in editor toolbar | `[x]` | #166 |
 | A4 | No font size control in editor | `[x]` | #166 |
-| A5 | No tab size / indentation selector | `[ ]` | |
+| A5 | No tab size / indentation selector | `[x]` | #166 |
 | A6 | No "Format Document" button in toolbar | `[x]` | #166 |
 | A7 | Bracket pair colorization not enabled (Monaco supports it natively) | `[x]` | #166 |
 | A8 | Sticky scroll not enabled (function signature context line) | `[x]` | #166 |
@@ -113,7 +113,7 @@
 | C14 | No file pinning (mark important files) | `[ ]` | |
 | C15 | ZIP download does not include .env.example | `[ ]` | |
 | C16 | ZIP download includes __pycache__, node_modules stubs if present | `[ ]` | |
-| C17 | No duplicate file option | `[ ]` | |
+| C17 | No duplicate file option | `[x]` | #166 |
 | C18 | File name with spaces causes preview issues | `[ ]` | |
 | C19 | No drag-and-drop to reorder files | `[s]` | VFS has no order |
 | C20 | No "Move file" option (cut/paste across folders) | `[ ]` | |
@@ -263,7 +263,7 @@
 | H9 | Console errors from preview not surfaced in chat | `[ ]` | |
 | H10 | No preview screenshot download | `[ ]` | |
 | H11 | Preview iframe has no title (accessibility) | `[x]` | existing |
-| H12 | Preview doesn't show dimensions (width x height) | `[ ]` | |
+| H12 | Preview doesn't show dimensions (width x height) | `[x]` | #166 |
 | H13 | Preview refresh animation is abrupt (no fade) | `[ ]` | |
 | H14 | No "responsive" breakpoint preview (mobile/tablet/desktop) | `[x]` | #166 |
 | H15 | Preview panel header takes too much vertical space on mobile | `[ ]` | |

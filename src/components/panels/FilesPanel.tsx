@@ -33,6 +33,8 @@ export interface FilesPanelProps {
   onDeleteFile?: (path: string) => void;
   /** Rename a file */
   onRenameFile?: (oldPath: string, newPath: string) => void;
+  /** Duplicate a file — creates a copy at newPath with same content */
+  onDuplicateFile?: (sourcePath: string, targetPath: string) => void;
   /** Phase 2.1 — sessionId for version history API calls */
   sessionId?: string;
   /** Phase 2.1 — called when user restores a version; parent updates workspace files */
@@ -66,6 +68,7 @@ export function FilesPanel({
   onAddFile,
   onDeleteFile,
   onRenameFile,
+  onDuplicateFile,
   sessionId,
   onRestoreVersion,
 }: FilesPanelProps) {
@@ -278,7 +281,7 @@ export function FilesPanel({
                               <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{path}</span>
                               <span className="text-[8px] text-[#484f58] font-mono shrink-0">{lines}L · {sizeLabel}</span>
                             </button>
-                            {/* C1/C2/C8 — copy path, rename, delete (appear on hover) */}
+                            {/* C1/C2/C8/C17 — copy path, duplicate, rename, delete (appear on hover) */}
                             <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                               <button
                                 onClick={() => navigator.clipboard.writeText(path).catch(() => {})}
@@ -287,6 +290,22 @@ export function FilesPanel({
                               >
                                 <Copy className="w-2.5 h-2.5" />
                               </button>
+                              {/* C17: Duplicate file */}
+                              {onDuplicateFile && (
+                                <button
+                                  onClick={() => {
+                                    const dotIdx = path.lastIndexOf('.');
+                                    const copyPath = dotIdx > 0
+                                      ? `${path.slice(0, dotIdx)}-copy${path.slice(dotIdx)}`
+                                      : `${path}-copy`;
+                                    onDuplicateFile(path, copyPath);
+                                  }}
+                                  title="Duplicate file"
+                                  className="p-1 text-[#484f58] hover:text-white rounded transition-colors"
+                                >
+                                  <Plus className="w-2.5 h-2.5" />
+                                </button>
+                              )}
                               {onRenameFile && (
                                 <button
                                   onClick={() => { setRenamingPath(path); setRenameValue(path); }}

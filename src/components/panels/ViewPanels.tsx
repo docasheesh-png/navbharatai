@@ -234,6 +234,11 @@ export function ViewPanels({
             delete next[oldPath];
             setFiles(next as any);
           }}
+          onDuplicateFile={(sourcePath: string, targetPath: string) => {
+            const prev = files as Record<string, string>;
+            if (prev[targetPath] !== undefined) return; // target exists, abort
+            setFiles({ ...prev, [targetPath]: prev[sourcePath] } as any);
+          }}
           sessionId={currentProSessionId}
           onRestoreVersion={(restoredFiles: any, commitMsg: string) => {
             setFiles(restoredFiles);

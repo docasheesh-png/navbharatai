@@ -157,6 +157,11 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
                   </button>
                 ))}
               </div>
+              {/* H12: Viewport dimensions indicator */}
+              <span className="text-[9px] font-mono text-[#484f58]">
+                {viewport === 'mobile' ? '375' : viewport === 'tablet' ? '768' : '—'}
+                {viewport !== 'desktop' ? 'px' : ''}
+              </span>
               {/* H3: Zoom controls */}
               <div className="flex items-center gap-0.5">
                 <button onClick={() => setPreviewZoom(z => Math.max(50, z - 10))} title="Zoom out" className="p-1 text-[#8b949e] hover:text-white rounded hover:bg-white/5 transition-all"><ChevronDown className="w-3 h-3" /></button>

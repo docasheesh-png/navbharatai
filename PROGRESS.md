@@ -734,6 +734,12 @@ tsc x2 clean (0 errors), vitest 1370/1370 green.
 
 tsc x2 clean (0 errors), vitest 1380/1380 green.
 
+**Extended — 1393 tests / 177 test files (2026-06-22, session 7 continued):**
+
+- `tests/routesBuildPro.test.ts` (NEW) — 13 tests: GET /api/capabilities, /api/guider/plan 400+disabled path, /api/guider/grade disabled+no-files, /api/build 400, /api/pro/code-review 400 (missing+empty), /api/pro/deploy 400 (missing fields, vercel/netlify/cloudflare/unknown-provider validation).
+
+tsc x2 clean (0 errors), vitest 1393/1393 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

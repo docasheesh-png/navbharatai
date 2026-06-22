@@ -9,10 +9,15 @@
  * Sandbox-only capabilities (shell/dev-server/browser/provision/deploy) degrade
  * GRACEFULLY — they return a clear "not available in this tier" result and NEVER
  * throw (unlike LocalActuator), so the loop records an observation and moves on.
+ *
+ * ensureWorkspace() pre-seeds the VFS with the correct project template (same
+ * TemplateRegistry used by E2BActuator) so the agent starts with working
+ * boilerplate and only needs to write app-specific code — just like Claude Code.
  */
 import { VirtualFileSystem } from '../../project/ProjectModel';
 import { verifyProject } from '../../project/ProjectVerifier';
 import { checkSyntax } from '../../project/SyntaxCheck';
+import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
 import type { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 
 const TIER_NOTE = '(not available in the in-memory tier — edit files and verify with the build/syntax gate)';
@@ -20,6 +25,7 @@ const TIER_NOTE = '(not available in the in-memory tier — edit files and verif
 export class VfsActuator implements IEngineerActuator {
   private checkpoints = new Map<string, Record<string, string>>();
   private seq = 0;
+  private templateRegistry = new TemplateRegistry();
 
   constructor(private vfs: VirtualFileSystem) {}
 
@@ -28,8 +34,26 @@ export class VfsActuator implements IEngineerActuator {
     return this.vfs;
   }
 
-  async ensureWorkspace(): Promise<void> {
-    /* VFS is already seeded from the incoming files — nothing to do. */
+  /**
+   * Pre-seed the VFS with the project template so the agent starts with
+   * working boilerplate instead of a blank workspace.  Mirrors E2BActuator's
+   * ensureWorkspace() so both tiers give the agent the same starting point.
+   * Skipped when the VFS already has files (edit builds, re-runs).
+   */
+  async ensureWorkspace(_workspaceId: string, projectType?: string): Promise<void> {
+    if (this.vfs.count > 0) return; // existing project — don't overwrite
+    const templateKey =
+      projectType && projectType !== 'auto'
+        ? projectType
+        : 'vite-react'; // default — same as E2BActuator
+    try {
+      const files = this.templateRegistry.getProvider(templateKey).getFiles([]);
+      for (const [path, content] of Object.entries(files)) {
+        this.vfs.write(path, content);
+      }
+    } catch {
+      // Unknown template — agent will scaffold from scratch (graceful fallback)
+    }
   }
 
   async writeFile(_workspaceId: string, filePath: string, content: string): Promise<void> {
@@ -91,8 +115,8 @@ export class VfsActuator implements IEngineerActuator {
     if (/\bgit\b/.test(c)) {
       return { exitCode: 0, stdout: '(git skipped in in-memory tier)', stderr: '' };
     }
-    if (/\bnpm (install|i|ci|add)\b|\byarn\b|\bpnpm\b/.test(c)) {
-      return { exitCode: 0, stdout: '(dependency install skipped — the in-browser preview resolves deps from a CDN)', stderr: '' };
+    if (/\bnpm (install|i|ci|add)\b|\byarn (install|add)\b|\bpnpm (install|add)\b/.test(c)) {
+      return { exitCode: 0, stdout: 'Dependencies resolved via CDN (esm.sh) — no install needed in this tier. Declare them in package.json and they will be available at runtime.', stderr: '' };
     }
     return { exitCode: 0, stdout: `Command "${command}" ${TIER_NOTE}`, stderr: '' };
   }

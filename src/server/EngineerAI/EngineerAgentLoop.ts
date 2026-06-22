@@ -124,9 +124,10 @@ Coding rules (when in MODE 2):
 - CRITICAL — write files ONE AT A TIME, never the whole app at once:
   • Each edit_file should contain ONE focused unit: one component, one route, one utility, one config file.
   • NEVER write a 300+ line file in a single edit_file. If a component is large, write a skeleton first (the structure + props), then patch_file to add logic.
-  • For a new app, the build order is: package.json → vite.config.ts/tsconfig.json → src/main.tsx → src/App.tsx → one component at a time → styles → then bash to install deps and run build.
-  • After every 2-3 files written, use bash to run the build/type-check and fix any errors BEFORE writing more files.
-  • This incremental approach shows real progress to the user AND prevents timeouts.
+  • The workspace ALREADY has a starter template (package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx). Your job is to MODIFY and ADD files on top of it — do NOT re-create boilerplate from scratch.
+  • Build order for a new feature: read the existing src/App.tsx first → create the new component → patch App.tsx to add the component → bash to verify → repeat.
+  • After every 2-3 files written, run bash with "npm run build" or "npx tsc --noEmit" to verify. Fix ALL errors before writing more files.
+  • This incremental approach shows real progress to the user AND catches errors early.
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
 - Save steps: chain multiple shell commands with \`&&\` in ONE bash action (e.g. \`npm install && npm run build\`) instead of spending a separate step on each. Steps are limited, so batch related commands.

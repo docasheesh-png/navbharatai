@@ -982,6 +982,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                   stickyScroll: { enabled: true },
                   trimAutoWhitespace: editorTrimWhitespace,
                 }}
+                onRevealInExplorer={(path) => {
+                  setIsSidebarOpen(true);
+                  setActiveScreen('files');
+                  setActiveFile(path);
+                }}
               />
           )}
 

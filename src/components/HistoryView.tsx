@@ -175,7 +175,7 @@ export const HistoryView = ({
       </div>
 
       {/* Session list */}
-      <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar" role="list" aria-label="Session history">
         {filteredSessions.length === 0 ? (
           /* F18: helpful empty state with CTA */
           <div className="flex flex-col items-center justify-center py-20 gap-6">

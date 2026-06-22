@@ -119,7 +119,7 @@
 | C20 | No "Move file" option (cut/paste across folders) | `[ ]` | |
 | C21 | File open does not scroll editor to top | `[x]` | #167 |
 | C22 | Files panel does not show which files have unsaved changes | `[x]` | #167 |
-| C23 | No "Reveal in file tree" from open editor tab | `[ ]` | |
+| C23 | No "Reveal in file tree" from open editor tab | `[x]` | #167 |
 | C24 | File tree does not auto-expand to show active file | `[x]` | #167 |
 | C25 | Uploaded files via upload button not announced as added | `[ ]` | |
 
@@ -132,7 +132,7 @@
 | D1 | Build progress percent bar does not animate smoothly | `[ ]` | |
 | D2 | No "What changed?" diff view after an edit build | `[ ]` | |
 | D3 | Success notification disappears before user reads | `[x]` | #167 |
-| D4 | Failure messages mix Hindi/English inconsistently | `[ ]` | |
+| D4 | Failure messages mix Hindi/English inconsistently | `[x]` | #167 |
 | D5 | No total lines-of-code counter in success state | `[x]` | #167 |
 | D6 | No file count breakdown by language in success | `[x]` | #167 |
 | D7 | No estimated build time shown before starting | `[ ]` | |
@@ -352,7 +352,7 @@
 |---|-----|--------|----|
 | L1 | Icon-only buttons missing aria-label (Upload, Download, etc.) | `[x]` | #167 |
 | L2 | Modal dialogs do not trap focus | `[ ]` | |
-| L3 | No skip-to-main-content link | `[ ]` | |
+| L3 | No skip-to-main-content link | `[x]` | #167 |
 | L4 | Color contrast <4.5:1 in several dark-mode text areas | `[ ]` | |
 | L5 | Toasts not announced via aria-live region | `[x]` | #167 |
 | L6 | Tab order broken in sidebar navigation | `[ ]` | |
@@ -367,8 +367,8 @@
 | L15 | Dropdowns (theme, mode selectors) have no keyboard navigation | `[ ]` | |
 | L16 | "Loading..." states have no aria-busy | `[x]` | #167 |
 | L17 | Error messages not associated with their input fields | `[ ]` | |
-| L18 | No focus-visible outline on interactive elements | `[ ]` | |
-| L19 | Session list has no accessible name | `[ ]` | |
+| L18 | No focus-visible outline on interactive elements | `[x]` | #167 |
+| L19 | Session list has no accessible name | `[x]` | #167 |
 | L20 | Progress bars have no aria-valuenow/valuemin/valuemax | `[x]` | #167 |
 
 ---

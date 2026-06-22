@@ -1361,13 +1361,13 @@ export const AIChat: React.FC<AIChatProps> = ({
           >
             <div className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500/10 border-b border-indigo-500/20">
               <span className="text-base">🧭</span>
-              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300">Guider — Plan ke liye aapki manzoori chahiye</span>
+              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300">Guider — Your Approval Needed</span>
             </div>
             <div className="px-4 py-3">
               <p className="text-[12px] leading-relaxed text-[#c9d1d9] whitespace-pre-wrap">{guiderPlan.designProposal}</p>
               {Array.isArray(guiderPlan.clarifyingQuestions) && guiderPlan.clarifyingQuestions.length > 0 && (
                 <div className="mt-3 rounded-lg bg-white/5 border border-white/10 p-2.5">
-                  <div className="text-[9px] font-black uppercase tracking-widest text-indigo-300/80 mb-1">Kuch sawaal</div>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-indigo-300/80 mb-1">Clarifying Questions</div>
                   <ul className="list-disc list-inside space-y-0.5">
                     {guiderPlan.clarifyingQuestions.map((q, i) => (
                       <li key={i} className="text-[11px] text-[#8b949e]">{q}</li>
@@ -1378,7 +1378,7 @@ export const AIChat: React.FC<AIChatProps> = ({
               <textarea
                 value={guiderInput}
                 onChange={(e) => setGuiderInput(e.target.value)}
-                placeholder="Badlav batao ya sawaalon ke jawab do… (optional)"
+                placeholder="Suggest changes or answer the questions above… (optional)"
                 rows={2}
                 disabled={!!guiderReplanning}
                 className="mt-3 w-full resize-none rounded-lg bg-[#161b22] border border-white/10 px-3 py-2 text-[12px] text-white placeholder-white/30 focus:outline-none focus:border-indigo-500/50 disabled:opacity-50"
@@ -1389,7 +1389,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                   disabled={!!guiderReplanning}
                   className="flex-1 px-3 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 text-white text-[11px] font-black uppercase tracking-wider hover:opacity-90 transition disabled:opacity-50"
                 >
-                  ✅ Approve — banao
+                  ✅ Approve — Build It
                 </button>
                 <button
                   onClick={() => { const t = guiderInput.trim(); if (t) { setGuiderInput(''); onGuiderSend?.(t); } }}
@@ -1397,7 +1397,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                   className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-[#c9d1d9] text-[11px] font-black uppercase tracking-wider hover:bg-white/10 transition disabled:opacity-40"
                   title="Edit the plan or answer the questions"
                 >
-                  {guiderReplanning ? '⏳ Soch raha…' : '✏️ Bhejo'}
+                  {guiderReplanning ? '⏳ Thinking…' : '✏️ Send'}
                 </button>
               </div>
             </div>

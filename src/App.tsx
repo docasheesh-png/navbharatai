@@ -5039,7 +5039,7 @@ ${buildLanguageRule(preferredLanguage)}`;
   const themeClasses = getThemeClasses(theme);
 
   return (
-    <div 
+    <div
       className={cn("h-screen supports-[height:100dvh]:h-[100dvh] w-screen flex flex-col overflow-hidden transition-colors duration-500", themeClasses.bg, themeClasses.text)}
       style={{
         // @ts-ignore
@@ -5049,6 +5049,13 @@ ${buildLanguageRule(preferredLanguage)}`;
         '--theme-card': themeClasses.raw.card
       }}
     >
+      {/* L3: skip to main content for keyboard/screen-reader users */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[9999] focus:px-4 focus:py-2 focus:bg-indigo-600 focus:text-white focus:rounded-xl focus:text-sm focus:font-bold"
+      >
+        Skip to main content
+      </a>
       <TopNav
         themeClasses={themeClasses}
         effectiveDeviceMode={effectiveDeviceMode}
@@ -5101,7 +5108,7 @@ ${buildLanguageRule(preferredLanguage)}`;
         setErrorContext={setErrorContext}
       />
       {/* Workspace */}
-      <main className="flex flex-1 relative min-h-0 min-w-0">
+      <main id="main-content" className="flex flex-1 relative min-h-0 min-w-0">
 
         {/* View Switcher Output — wrapped in ErrorBoundary + Suspense for lazy-loaded components */}
         <ErrorBoundary>

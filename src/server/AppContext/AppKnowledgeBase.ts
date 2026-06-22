@@ -35,7 +35,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
     id: 'agentv3_builder',
     name: 'NavBharatAI Pro v3.0 (beta)',
-    path: 'Floating "v3.0" button (bottom-right) → opens the v3.0 builder. Visible only when v3.0 is enabled for your account (admin-only during beta).',
+    path: 'Sidebar → "App Builder v3.0"  OR  the floating "v3.0" button (bottom-right when enabled for your account).',
     description: `Claude-Code-class agentic app builder (Vargen 3.0). Capabilities:
 • NATIVE TOOL-USE engine on Claude (Sonnet by default; "Only Opus" super toggle for maximum capability).
 • MULTI-AGENT "AI team": an Architect plans and delegates to specialist agents (Frontend, Backend, Database, Designer, QA, Debugger, Reviewer, Deploy) that work in parallel where safe.

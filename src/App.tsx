@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
-import { EngineBuilder } from './components/EngineBuilder';
+import { AgentV3Panel } from './components/agentv3/AgentV3Panel';
 import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
 import { GitViewPanel } from './components/panels/GitViewPanel';
 import { DeploySuccessPanel } from './components/panels/DeploySuccessPanel';
@@ -5499,8 +5499,8 @@ ${buildLanguageRule(preferredLanguage)}`;
           )}
 
           {activeView === 'engine_builder' && (
-            <div className="flex-1 min-h-screen">
-              <EngineBuilder />
+            <div className="flex-1" style={{ height: '100vh' }}>
+              <AgentV3Panel userId={user?.uid} email={user?.email} />
             </div>
           )}
 

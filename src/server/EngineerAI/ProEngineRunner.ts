@@ -456,10 +456,12 @@ export async function runProEngine(opts: ProEngineOptions): Promise<ProEngineRes
     send({ type: 'status', message: `${aiStepCount} reasoning step${aiStepCount === 1 ? '' : 's'} — estimated AI cost: ${costStr}` });
   }
 
-  // An aborted run (soft deadline) still counts as usable when it produced edits —
-  // we keep the partial work instead of throwing it away, and flag it `partial` so
-  // the caller can continue it. Only a hard error / infra failure blocks usability.
-  const usable = !sawError && !runError && didEdit && Object.keys(finalFiles).length > 0;
+  // Usability: did the agent produce file edits without a hard infra failure?
+  // Soft errors (sawError — parse failures, step-level AI errors) do NOT block
+  // usability because the agent often recovers mid-run. Only a hard backend
+  // failure (runError — sandbox crash, infrastructure exception) truly blocks it.
+  // An aborted run (deadline) is still usable when files exist — mark partial.
+  const usable = !runError && didEdit && Object.keys(finalFiles).length > 0;
 
   const estimatedCostUsd = aiStepCount > 0
     ? aiStepCount * ((6_000 / 1_000_000) * 0.05 + (400 / 1_000_000) * 0.08)

@@ -121,6 +121,12 @@ browser_action examples (single step):
 Coding rules (when in MODE 2):
 - Always fill "thought" with explicit step-by-step reasoning before choosing an action: (1) what has been accomplished so far, (2) exactly what the next action will do and why it is the highest-impact choice right now, (3) one specific risk to watch for. Never leave "thought" as a vague label — concrete reasoning produces better actions.
 - One action per response. Wait for the observation before the next action.
+- CRITICAL — write files ONE AT A TIME, never the whole app at once:
+  • Each edit_file should contain ONE focused unit: one component, one route, one utility, one config file.
+  • NEVER write a 300+ line file in a single edit_file. If a component is large, write a skeleton first (the structure + props), then patch_file to add logic.
+  • For a new app, the build order is: package.json → vite.config.ts/tsconfig.json → src/main.tsx → src/App.tsx → one component at a time → styles → then bash to install deps and run build.
+  • After every 2-3 files written, use bash to run the build/type-check and fix any errors BEFORE writing more files.
+  • This incremental approach shows real progress to the user AND prevents timeouts.
 - Use patch_file for targeted changes (<30% of a file). Use edit_file for rewrites or new files.
 - Use bash to install packages, run scripts, inspect files, check versions, or build the project.
 - Save steps: chain multiple shell commands with \`&&\` in ONE bash action (e.g. \`npm install && npm run build\`) instead of spending a separate step on each. Steps are limited, so batch related commands.

@@ -728,6 +728,12 @@ tsc x2 clean (0 errors), vitest 1366/1366 green.
 
 tsc x2 clean (0 errors), vitest 1370/1370 green.
 
+**Extended — 1380 tests / 176 test files (2026-06-22, session 7 continued):**
+
+- `tests/routesEngineer.test.ts` (NEW) — 10 tests: engineer-chat 503 prod/400 missing fields, engineer-restore 400, engineer-browser-event 400, engineer-deploy 400, engineer-pause 400, engineer-db-scaffold 400 (missing workspaceId + invalid provider), engineer-guider-plan 400.
+
+tsc x2 clean (0 errors), vitest 1380/1380 green.
+
 ---
 
 ## PHASE 7 — Production Launch Hardening

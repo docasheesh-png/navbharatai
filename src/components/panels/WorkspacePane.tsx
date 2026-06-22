@@ -14,8 +14,8 @@
  * passed in. Editing a file calls back to onFilesChange so the single source of
  * truth stays in App.
  */
-import React, { useState, useMemo } from 'react';
-import { Eye, Code2, Maximize2, Rocket, FileCode } from 'lucide-react';
+import React, { useState, useMemo, useRef } from 'react';
+import { Eye, Code2, Maximize2, Rocket, FileCode, RefreshCw, ExternalLink, Smartphone, Monitor, Tablet, ChevronUp, ChevronDown } from 'lucide-react';
 import { Editor } from '../ide/Editor';
 import { PreviewPanel } from '../ide/PreviewPanel';
 import type { Tab } from '../../types/ide';
@@ -79,6 +79,12 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
   const [pane, setPane] = useState<Pane>('preview');
   const [activeFile, setActiveFile] = useState<string>('');
   const [openTabs, setOpenTabs] = useState<Tab[]>([]);
+  const [reloadKey, setReloadKey] = useState(0);
+  // H3: zoom level (50–150%)
+  const [previewZoom, setPreviewZoom] = useState(100);
+  // H14: responsive breakpoints
+  type Viewport = 'mobile' | 'tablet' | 'desktop';
+  const [viewport, setViewport] = useState<Viewport>('desktop');
 
   const filePaths = useMemo(() => Object.keys(files).sort(), [files]);
 
@@ -129,6 +135,62 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
           </button>
         </div>
         <div className="flex items-center gap-1">
+          {pane === 'preview' && (
+            <>
+              {/* H14: Responsive viewport presets */}
+              <div className="flex items-center gap-0.5 bg-white/5 rounded-md p-0.5">
+                {([
+                  { id: 'mobile', icon: Smartphone, label: '375px' },
+                  { id: 'tablet', icon: Tablet, label: '768px' },
+                  { id: 'desktop', icon: Monitor, label: 'Full' },
+                ] as const).map(({ id, icon: Icon, label }) => (
+                  <button
+                    key={id}
+                    onClick={() => setViewport(id)}
+                    title={`${id.charAt(0).toUpperCase() + id.slice(1)} — ${label}`}
+                    className={cn(
+                      'flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold transition-all',
+                      viewport === id ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:text-white',
+                    )}
+                  >
+                    <Icon className="w-2.5 h-2.5" />
+                  </button>
+                ))}
+              </div>
+              {/* H12: Viewport dimensions indicator */}
+              <span className="text-[9px] font-mono text-[#484f58]">
+                {viewport === 'mobile' ? '375' : viewport === 'tablet' ? '768' : '—'}
+                {viewport !== 'desktop' ? 'px' : ''}
+              </span>
+              {/* H3: Zoom controls */}
+              <div className="flex items-center gap-0.5">
+                <button onClick={() => setPreviewZoom(z => Math.max(50, z - 10))} title="Zoom out" className="p-1 text-[#8b949e] hover:text-white rounded hover:bg-white/5 transition-all"><ChevronDown className="w-3 h-3" /></button>
+                <span className="text-[9px] font-mono text-[#8b949e] w-7 text-center">{previewZoom}%</span>
+                <button onClick={() => setPreviewZoom(z => Math.min(150, z + 10))} title="Zoom in" className="p-1 text-[#8b949e] hover:text-white rounded hover:bg-white/5 transition-all"><ChevronUp className="w-3 h-3" /></button>
+              </div>
+              <button
+                onClick={() => setReloadKey(k => k + 1)}
+                title="Reload preview"
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold text-[#8b949e] hover:text-white hover:bg-white/5 transition-all"
+              >
+                <RefreshCw className="w-3 h-3" />
+              </button>
+              {generatedCode && (
+                <button
+                  onClick={() => {
+                    const blob = new Blob([generatedCode], { type: 'text/html' });
+                    const url = URL.createObjectURL(blob);
+                    window.open(url, '_blank');
+                    setTimeout(() => URL.revokeObjectURL(url), 5000);
+                  }}
+                  title="Open preview in new tab"
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold text-[#8b949e] hover:text-white hover:bg-white/5 transition-all"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              )}
+            </>
+          )}
           {canDeploy && onDeploy && (
             <button
               onClick={onDeploy}
@@ -151,14 +213,28 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
       {/* ── Pane body ── */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {pane === 'preview' ? (
-          <PreviewPanel
-            files={files}
-            onRun={() => onRun(files)}
-            generatedCode={generatedCode}
-            previewHistory={previewHistory}
-            onRestoreHistory={onRestoreHistory}
-            onHtmlChange={onHtmlChange}
-          />
+          <div className="w-full h-full flex justify-center overflow-auto bg-[#0a0a0a]">
+            <div
+              style={{
+                width: viewport === 'mobile' ? 375 : viewport === 'tablet' ? 768 : '100%',
+                minWidth: viewport === 'desktop' ? '100%' : undefined,
+                transform: `scale(${previewZoom / 100})`,
+                transformOrigin: 'top center',
+                height: `${100 * (100 / previewZoom)}%`,
+                flexShrink: 0,
+              }}
+            >
+              <PreviewPanel
+                key={reloadKey}
+                files={files}
+                onRun={() => onRun(files)}
+                generatedCode={generatedCode}
+                previewHistory={previewHistory}
+                onRestoreHistory={onRestoreHistory}
+                onHtmlChange={onHtmlChange}
+              />
+            </div>
+          </div>
         ) : (
           <div className="flex h-full min-h-0">
             {/* file list */}

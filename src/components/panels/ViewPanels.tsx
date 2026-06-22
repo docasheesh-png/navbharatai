@@ -216,6 +216,29 @@ export function ViewPanels({
           onUpload={handleFilesUpload}
           onDownloadZip={() => downloadAppZip(files as any, 'NavBharatApp')}
           onOpenFile={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
+          onAddFile={(path: string) => {
+            const next = { ...(files as Record<string, string>), [path]: '' };
+            setFiles(next as any);
+            setActiveFile(path);
+            toggleTab('studio');
+          }}
+          onDeleteFile={(path: string) => {
+            const next = { ...(files as Record<string, string>) };
+            delete next[path];
+            setFiles(next as any);
+          }}
+          onRenameFile={(oldPath: string, newPath: string) => {
+            const prev = files as Record<string, string>;
+            if (prev[newPath] !== undefined) return; // target exists, abort
+            const next = { ...prev, [newPath]: prev[oldPath] };
+            delete next[oldPath];
+            setFiles(next as any);
+          }}
+          onDuplicateFile={(sourcePath: string, targetPath: string) => {
+            const prev = files as Record<string, string>;
+            if (prev[targetPath] !== undefined) return; // target exists, abort
+            setFiles({ ...prev, [targetPath]: prev[sourcePath] } as any);
+          }}
           sessionId={currentProSessionId}
           onRestoreVersion={(restoredFiles: any, commitMsg: string) => {
             setFiles(restoredFiles);

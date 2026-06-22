@@ -9,7 +9,7 @@
  * Owns the hidden file input ref internally.
  */
 import React, { useRef, useState, useEffect } from 'react';
-import { FolderOpen, Upload, Download, FileCode, ChevronRight, History, GitCommit, RotateCcw, Loader2 } from 'lucide-react';
+import { FolderOpen, Upload, Download, FileCode, ChevronRight, History, GitCommit, RotateCcw, Loader2, Plus, Trash2, Pencil, Check, X, Copy } from 'lucide-react';
 import { listBuildHistory, fetchBuildVersion } from '../../services/buildService';
 import type { VersionMeta } from '../../services/buildService';
 
@@ -27,6 +27,14 @@ export interface FilesPanelProps {
   onUpload: (file: File) => void;
   onDownloadZip: () => void;
   onOpenFile: (path: string) => void;
+  /** Create a new empty file at a given path */
+  onAddFile?: (path: string) => void;
+  /** Delete a file by path */
+  onDeleteFile?: (path: string) => void;
+  /** Rename a file */
+  onRenameFile?: (oldPath: string, newPath: string) => void;
+  /** Duplicate a file — creates a copy at newPath with same content */
+  onDuplicateFile?: (sourcePath: string, targetPath: string) => void;
   /** Phase 2.1 — sessionId for version history API calls */
   sessionId?: string;
   /** Phase 2.1 — called when user restores a version; parent updates workspace files */
@@ -57,6 +65,10 @@ export function FilesPanel({
   onUpload,
   onDownloadZip,
   onOpenFile,
+  onAddFile,
+  onDeleteFile,
+  onRenameFile,
+  onDuplicateFile,
   sessionId,
   onRestoreVersion,
 }: FilesPanelProps) {
@@ -66,6 +78,28 @@ export function FilesPanel({
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
+  // File management state (C1–C4)
+  const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [showNewFile, setShowNewFile] = useState(false);
+  const [newFileName, setNewFileName] = useState('');
+  const [fileSearch, setFileSearch] = useState('');
+
+  const commitRename = () => {
+    const trimmed = renameValue.trim();
+    if (renamingPath && trimmed && trimmed !== renamingPath && onRenameFile) {
+      onRenameFile(renamingPath, trimmed);
+    }
+    setRenamingPath(null);
+    setRenameValue('');
+  };
+
+  const commitNewFile = () => {
+    const trimmed = newFileName.trim();
+    if (trimmed && onAddFile) onAddFile(trimmed);
+    setNewFileName('');
+    setShowNewFile(false);
+  };
 
   useEffect(() => {
     if (tab !== 'history' || !sessionId) return;
@@ -146,6 +180,15 @@ export function FilesPanel({
                 {Object.keys(files).filter(k => !k.startsWith('__pending__')).length} files
               </span>
             )}
+            {onAddFile && (
+              <button
+                onClick={() => setShowNewFile(v => !v)}
+                title="New file"
+                className="flex items-center gap-1 px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[9px] font-black uppercase tracking-wider text-[#8b949e] hover:text-white transition-all active:scale-95"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            )}
             <button
               onClick={() => uploadRef.current?.click()}
               className="flex items-center gap-1 px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[9px] font-black uppercase tracking-wider text-[#8b949e] hover:text-white transition-all active:scale-95"
@@ -159,7 +202,7 @@ export function FilesPanel({
                 className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/30 rounded-lg text-[9px] font-black uppercase tracking-wider text-indigo-400 hover:text-indigo-300 transition-all active:scale-95"
                 title="Download all files as ZIP"
               >
-                <Download className="w-3 h-3" /> Download ZIP
+                <Download className="w-3 h-3" /> ZIP
               </button>
             )}
           </div>
@@ -168,37 +211,129 @@ export function FilesPanel({
 
       {/* Files tab */}
       {tab === 'files' && (
-        <>
-          {!hasGeneratedCode ? (
-            <div className="flex-1 flex items-center justify-center flex-col gap-3 text-center p-8">
-              <FolderOpen className="w-12 h-12 text-white/10" />
-              <p className="text-[11px] text-[#484f58] font-medium">No app generated yet.</p>
-              <p className="text-[9px] text-[#484f58]">Build an app in NavBharatAI Pro — files will appear here.</p>
-            </div>
-          ) : (
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
-              <div className="space-y-1">
-                {Object.entries(files).map(([path, content]) => {
-                  const ext = path.split('.').pop() || '';
-                  const color = EXT_COLOR[ext] || 'text-white/50';
-                  const lines = (content as string).split('\n').length;
-                  return (
-                    <button
-                      key={path}
-                      onClick={() => onOpenFile(path)}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors group text-left"
-                    >
-                      <FileCode className={`w-4 h-4 flex-shrink-0 ${color}`} />
-                      <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{path}</span>
-                      <span className="text-[8px] text-[#484f58] font-mono">{lines}L</span>
-                      <ChevronRight className="w-3 h-3 text-white/20 group-hover:text-white/50 transition-colors" />
-                    </button>
-                  );
-                })}
+        <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col min-h-0">
+            <div className="flex flex-col flex-1 min-h-0">
+              {/* C6 — file search */}
+              {hasGeneratedCode && Object.keys(files).length > 5 && (
+                <div className="px-3 py-2 border-b border-white/5">
+                  <input
+                    value={fileSearch}
+                    onChange={e => setFileSearch(e.target.value)}
+                    placeholder="Filter files..."
+                    className="w-full bg-white/5 border border-white/5 rounded-lg px-2 py-1 text-[10px] text-white placeholder-[#484f58] outline-none focus:border-indigo-500/40 transition-all"
+                  />
+                </div>
+              )}
+              {/* C3 — new file input */}
+              {showNewFile && (
+                <div className="px-3 py-2 border-b border-white/5 flex items-center gap-2">
+                  <input
+                    autoFocus
+                    value={newFileName}
+                    onChange={e => setNewFileName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') commitNewFile(); if (e.key === 'Escape') { setShowNewFile(false); setNewFileName(''); } }}
+                    placeholder="filename.tsx"
+                    className="flex-1 bg-white/5 border border-indigo-500/30 rounded-lg px-2 py-1 text-[10px] text-white placeholder-[#484f58] outline-none"
+                  />
+                  <button onClick={commitNewFile} className="p-1 text-emerald-400 hover:text-emerald-300"><Check className="w-3 h-3" /></button>
+                  <button onClick={() => { setShowNewFile(false); setNewFileName(''); }} className="p-1 text-[#484f58] hover:text-white"><X className="w-3 h-3" /></button>
+                </div>
+              )}
+              {!hasGeneratedCode ? (
+                <div className="flex-1 flex items-center justify-center flex-col gap-3 text-center p-8">
+                  <FolderOpen className="w-12 h-12 text-white/10" />
+                  <p className="text-[11px] text-[#484f58] font-medium">No app generated yet.</p>
+                  <p className="text-[9px] text-[#484f58]">Build an app in NavBharatAI v2.0 — files will appear here.</p>
+                </div>
+              ) : (
+              <div className="p-4 space-y-1">
+                {Object.entries(files)
+                  .filter(([path]) => !fileSearch || path.toLowerCase().includes(fileSearch.toLowerCase()))
+                  .map(([path, content]) => {
+                    const ext = path.split('.').pop() || '';
+                    const color = EXT_COLOR[ext] || 'text-white/50';
+                    const contentStr = content as string;
+                    const lines = contentStr.split('\n').length;
+                    const bytes = contentStr.length;
+                    const sizeLabel = bytes < 1024 ? `${bytes}B` : `${(bytes / 1024).toFixed(1)}K`;
+                    const isRenaming = renamingPath === path;
+                    return (
+                      <div key={path} className="group flex items-center gap-1 rounded-xl hover:bg-white/5 transition-colors">
+                        {isRenaming ? (
+                          <div className="flex-1 flex items-center gap-1 px-2 py-1.5">
+                            <input
+                              autoFocus
+                              value={renameValue}
+                              onChange={e => setRenameValue(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setRenamingPath(null); }}
+                              className="flex-1 bg-white/5 border border-indigo-500/30 rounded px-1.5 py-0.5 text-[10px] text-white outline-none min-w-0"
+                            />
+                            <button onClick={commitRename} className="p-0.5 text-emerald-400 hover:text-emerald-300 shrink-0"><Check className="w-2.5 h-2.5" /></button>
+                            <button onClick={() => setRenamingPath(null)} className="p-0.5 text-[#484f58] hover:text-white shrink-0"><X className="w-2.5 h-2.5" /></button>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => onOpenFile(path)}
+                              className="flex-1 flex items-center gap-3 px-3 py-2.5 text-left min-w-0"
+                            >
+                              <FileCode className={`w-4 h-4 flex-shrink-0 ${color}`} />
+                              <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{path}</span>
+                              <span className="text-[8px] text-[#484f58] font-mono shrink-0">{lines}L · {sizeLabel}</span>
+                            </button>
+                            {/* C1/C2/C8/C17 — copy path, duplicate, rename, delete (appear on hover) */}
+                            <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                              <button
+                                onClick={() => navigator.clipboard.writeText(path).catch(() => {})}
+                                title="Copy file path"
+                                className="p-1 text-[#484f58] hover:text-white rounded transition-colors"
+                              >
+                                <Copy className="w-2.5 h-2.5" />
+                              </button>
+                              {/* C17: Duplicate file */}
+                              {onDuplicateFile && (
+                                <button
+                                  onClick={() => {
+                                    const dotIdx = path.lastIndexOf('.');
+                                    const copyPath = dotIdx > 0
+                                      ? `${path.slice(0, dotIdx)}-copy${path.slice(dotIdx)}`
+                                      : `${path}-copy`;
+                                    onDuplicateFile(path, copyPath);
+                                  }}
+                                  title="Duplicate file"
+                                  className="p-1 text-[#484f58] hover:text-white rounded transition-colors"
+                                >
+                                  <Plus className="w-2.5 h-2.5" />
+                                </button>
+                              )}
+                              {onRenameFile && (
+                                <button
+                                  onClick={() => { setRenamingPath(path); setRenameValue(path); }}
+                                  title="Rename"
+                                  className="p-1 text-[#484f58] hover:text-white rounded transition-colors"
+                                >
+                                  <Pencil className="w-2.5 h-2.5" />
+                                </button>
+                              )}
+                              {onDeleteFile && (
+                                <button
+                                  onClick={() => { if (window.confirm(`Delete ${path}?`)) onDeleteFile(path); }}
+                                  title="Delete"
+                                  className="p-1 text-[#484f58] hover:text-red-400 rounded transition-colors"
+                                >
+                                  <Trash2 className="w-2.5 h-2.5" />
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
               </div>
+              )}
             </div>
-          )}
-        </>
+        </div>
       )}
 
       {/* History tab */}

@@ -381,7 +381,8 @@ export const AIChat: React.FC<AIChatProps> = ({
   }, [isLoading]);
 
   const [showModeDropdown, setShowModeDropdown] = useState(false);
-const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
+  const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [liked, setLiked] = useState<Record<string, boolean>>({});
   const [disliked, setDisliked] = useState<Record<string, boolean>>({});
   const [showReport, setShowReport] = useState<Record<string, boolean>>({});
@@ -422,6 +423,8 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
   const [showContinueModal, setShowContinueModal] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  // B30: send on Enter preference
+  const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => localStorage.getItem('chat_sendOnEnter') !== 'false');
 
   // Dynamic continuation suggestions
   const [continuePromptPhrase, setContinuePromptPhrase] = useState('Want to continue previous work? Enter your Universal Chat ID (UCI).');
@@ -451,6 +454,28 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
     setTimeout(() => setShared(false), 2000);
   };
 
+  // F3: Offline detection
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const up = () => setIsOnline(true);
+    const down = () => setIsOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down); };
+  }, []);
+
+  // B14: Ctrl+K / Cmd+K focuses the input
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        textareaRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
   const handleRestoreByUci = async () => {
     if (!resumeUciInput.trim() || !onRestoreUci) return;
     setIsRestoring(true);
@@ -468,6 +493,13 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
     } finally {
       setIsRestoring(false);
     }
+  };
+
+  const formatMsgTime = (ts: Date | string | undefined): string => {
+    if (!ts) return '';
+    const d = ts instanceof Date ? ts : new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   const parseMessageAndTriggers = (msg: Message) => {
@@ -712,15 +744,15 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
 
         {/* Interaction Controls */}
         <div className="flex gap-2 mt-3 pt-2 border-t border-white/5 items-center">
-            <button onClick={() => { navigator.clipboard.writeText(cleanText); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-1 hover:bg-white/10 rounded text-gray-500 hover:text-white">
+            <button onClick={() => { navigator.clipboard.writeText(cleanText); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-1 hover:bg-white/10 rounded text-gray-500 hover:text-white" title="Copy">
                 {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
             </button>
             {isAI && (
                 <>
-                    <button onClick={() => setLiked({...liked, [msg.id]: !liked[msg.id]})} className={cn("p-1 hover:bg-white/10 rounded", liked[msg.id] ? "text-emerald-400" : "text-gray-500 hover:text-white")}>
+                    <button onClick={() => setLiked({...liked, [msg.id]: !liked[msg.id]})} className={cn("p-1 hover:bg-white/10 rounded", liked[msg.id] ? "text-emerald-400" : "text-gray-500 hover:text-white")} title="Helpful">
                         <ThumbsUp className="w-3 h-3" />
                     </button>
-                    <button onClick={() => { setDisliked({...disliked, [msg.id]: !disliked[msg.id]}); setShowReport({...showReport, [msg.id]: !showReport[msg.id]})}} className={cn("p-1 hover:bg-white/10 rounded", disliked[msg.id] ? "text-rose-400" : "text-gray-500 hover:text-white")}>
+                    <button onClick={() => { setDisliked({...disliked, [msg.id]: !disliked[msg.id]}); setShowReport({...showReport, [msg.id]: !showReport[msg.id]})}} className={cn("p-1 hover:bg-white/10 rounded", disliked[msg.id] ? "text-rose-400" : "text-gray-500 hover:text-white")} title="Not helpful">
                         <ThumbsDown className="w-3 h-3" />
                     </button>
                 </>
@@ -738,6 +770,13 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
 
   return (
     <div className="flex flex-col h-full min-h-0 max-h-full bg-[var(--theme-bg)] transition-colors duration-500 overflow-hidden relative">
+      {/* F3: Offline banner */}
+      {!isOnline && (
+        <div className="shrink-0 bg-amber-600 px-3 py-1.5 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest text-white">
+          <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+          No internet connection — messages may not send
+        </div>
+      )}
       {/* In-chat image lightbox */}
       {lightbox && (
         <div
@@ -976,6 +1015,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
             const lineCount = ((cleanedText || '').match(/\n/g) || []).length + 1;
             const isLongMessage = cleanedText.length > 220 || lineCount > 4;
 
+            const isLastAI = msg.sender === 'ai' && index === messages.length - 1 && !isLoading;
             return (
               <motion.div
                 layout
@@ -983,7 +1023,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 key={msg.id}
                 className={cn(
-                  "flex flex-col space-y-2",
+                  "flex flex-col space-y-2 group/msg",
                   msg.sender === 'user' ? "items-end" : "items-start"
                 )}
               >
@@ -1052,17 +1092,56 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                   <span className="text-[7px] font-black text-[#484f58] uppercase tracking-widest">
                     {msg.sender === 'user' ? 'YOU' : activeAgent.toUpperCase().replace('_', ' ')}
                   </span>
+                  {/* B7: Model badge on AI messages */}
+                  {msg.sender === 'ai' && msg.modelUsed && (
+                    <span className="text-[7px] font-mono text-indigo-400/70 bg-indigo-900/20 border border-indigo-800/30 rounded px-1 py-px">
+                      {msg.modelUsed}
+                    </span>
+                  )}
+                  {msg.timestamp && (
+                    <span className="text-[7px] text-[#30363d] font-mono">{formatMsgTime(msg.timestamp)}</span>
+                  )}
                   {msg.sender === 'user' && <User className="w-2.5 h-2.5 text-indigo-400" />}
+                  {/* Copy message button — appears on hover */}
+                  <button
+                    onClick={() => {
+                      const t = msg.text || '';
+                      navigator.clipboard.writeText(t).catch(() => {});
+                      setCopiedMsgId(msg.id);
+                      setTimeout(() => setCopiedMsgId(null), 1500);
+                    }}
+                    title="Copy message"
+                    className="opacity-0 group-hover/msg:opacity-100 transition-opacity p-0.5 hover:bg-white/10 rounded text-[#484f58] hover:text-white"
+                  >
+                    {copiedMsgId === msg.id ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
+                  </button>
                 </div>
+                {/* B3 — Regenerate: only on the last AI message */}
+                {isLastAI && onSendSuggestion && (
+                  <button
+                    onClick={() => { if (messages.length > 0) onSendSuggestion(messages.filter(m => m.sender === 'user').at(-1)?.text || '__REGENERATE__'); }}
+                    title="Regenerate response"
+                    className="flex items-center gap-1 px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-lg bg-white/5 hover:bg-white/10 text-[#484f58] hover:text-white border border-white/5 transition-all"
+                  >
+                    ↺ Retry
+                  </button>
+                )}
               </motion.div>
             );
           })}
         </AnimatePresence>
 
+        {/* B8: Typing indicator — three-dot bounce animation */}
         {isLoading && (
-          <div className="flex items-center gap-3 text-[#484f58] px-2 animate-in fade-in slide-in-from-left-2 duration-300">
-            <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-            <span className="text-[9px] font-black uppercase tracking-widest animate-pulse">The Architect is analyzing...</span>
+          <div className="flex items-start gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
+            <div className="w-6 h-6 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
+              <Bot className="w-3 h-3 text-indigo-400" />
+            </div>
+            <div className="bg-[#161b22] border border-white/5 rounded-2xl rounded-tl-none px-3 py-2.5 shadow-sm flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
           </div>
         )}
 
@@ -1159,7 +1238,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
             {/* Header */}
             <div className="flex items-center gap-2 px-4 py-2.5 bg-[#0d1117] border-b border-white/5">
               <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">NavBharatAI Pro — Building</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">NavBharatAI v2.0 — Building</span>
               {buildProgress.part && buildProgress.part > 1 && (
                 <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[8px] font-black uppercase tracking-wider text-amber-300">Part {buildProgress.part}</span>
               )}
@@ -1266,22 +1345,21 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
       )}
 
       <div
-        className="p-4 border-t border-white/5 bg-[var(--theme-card)] backdrop-blur-xl select-none shadow-[0_-12px_40px_rgba(0,0,0,0.5)]"
-        style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : 'max(16px, env(safe-area-inset-bottom, 16px))' }}
+        className="px-3 pt-2 border-t border-white/5 bg-[var(--theme-card)] backdrop-blur-xl select-none shadow-[0_-12px_40px_rgba(0,0,0,0.5)]"
+        style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : 'max(8px, env(safe-area-inset-bottom, 8px))' }}
       >
-        <div className="max-w-4xl mx-auto space-y-3">
-            {/* Fix 2: attachment chips above input, outside the flex row */}
-            <div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl shadow-inner focus-within:border-indigo-500 transition-all">
-                  {attachments.length > 0 && (
-                    <div className="px-3 pt-2 pb-1 flex flex-wrap gap-1.5 border-b border-white/5">
-                      {attachments.map((file, index) => (
-                        <div key={index} className="flex items-center gap-1 bg-[#161b22] border border-white/10 px-2 py-0.5 rounded-md text-[9px] text-[#8b949e] max-w-[160px]">
-                          <span className="truncate">{file.name}</span>
-                          <button onClick={() => removeAttachment(index)} className="hover:text-white ml-1 shrink-0 leading-none">×</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+        <div className="max-w-4xl mx-auto space-y-1.5">
+            {attachments.length > 0 && (
+              <div className="px-1 flex flex-wrap gap-1.5">
+                {attachments.map((file, index) => (
+                  <div key={index} className="flex items-center gap-1 bg-[#161b22] border border-white/10 px-2 py-0.5 rounded-md text-[9px] text-[#8b949e] max-w-[160px]">
+                    <span className="truncate">{file.name}</span>
+                    <button onClick={() => removeAttachment(index)} className="hover:text-white ml-1 shrink-0 leading-none">×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl focus-within:border-indigo-500 transition-all">
                   <div className="relative flex items-center">
                   <input
                     type="file"
@@ -1299,7 +1377,14 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                       e.target.style.height = 'auto';
                       e.target.style.height = `${Math.min(e.target.scrollHeight, 240)}px`;
                     }}
-                    placeholder="Ask navBharatAI..."
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && sendOnEnter && !isLoading && (input.trim() || attachments.length > 0)) {
+                        e.preventDefault();
+                        onSend(attachments);
+                        setAttachments([]);
+                      }
+                    }}
+                    placeholder="Ask NavBharatAI..."
                     rows={1}
                     className={cn(
                       "w-full bg-transparent text-[var(--theme-text)] pr-24 py-3.5 text-xs outline-none transition-all resize-none min-h-[48px] leading-relaxed text-[16px]",
@@ -1334,6 +1419,7 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                       type="button"
                       onClick={isListening ? stopVoice : startVoice}
                       title={isListening ? 'Stop voice input' : 'Voice input (Chrome only)'}
+                      aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
                       className={`p-2.5 transition-colors ${isListening ? 'text-red-400 animate-pulse' : 'text-gray-500 hover:text-blue-400'}`}
                     >
                       {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
@@ -1357,14 +1443,43 @@ const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>
                     )}
                   </div>
                   </div>{/* end inner flex row */}
-            </div>{/* end outer rounded container */}
+            </div>{/* end rounded input container */}
 
-{isPinned && (
-            <div className="mt-2 flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">
-              <Zap className="w-2 h-2 fill-current" />
-              Pinned
+            {/* B4 — character count + B5 clear chat */}
+            <div className="flex items-center justify-between px-1 mt-1">
+              <div className="flex items-center gap-2">
+                {isPinned && (
+                  <div className="flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">
+                    <Zap className="w-2 h-2 fill-current" />
+                    Pinned
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {input.length > 60 && (
+                  <span className={`text-[9px] font-mono ${input.length > 1000 ? 'text-amber-400' : 'text-[#484f58]'}`}>
+                    {input.length}
+                  </span>
+                )}
+                {/* B30: Enter sends toggle */}
+                <button
+                  onClick={() => { const v = !sendOnEnter; setSendOnEnter(v); localStorage.setItem('chat_sendOnEnter', String(v)); }}
+                  title={sendOnEnter ? 'Enter sends message (click to toggle)' : 'Shift+Enter sends (click to toggle)'}
+                  className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
+                >
+                  {sendOnEnter ? '↵ Send' : '⇧↵ Send'}
+                </button>
+                {messages.length > 0 && (
+                  <button
+                    onClick={() => { if (window.confirm('Clear conversation?')) { /* parent handles via onSend with special signal */ onSendSuggestion?.('__CLEAR_CHAT__'); } }}
+                    title="Clear conversation"
+                    className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
-          )}
         </div>
       </div>
     </div>

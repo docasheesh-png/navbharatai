@@ -23,6 +23,8 @@ interface EditorProps {
   onMount?: (editor: any) => void;
   onRun?: () => void;
   onDebug?: () => void;
+  /** Override / extend Monaco editor options */
+  editorOptions?: Record<string, unknown>;
 }
 
 export const Editor: React.FC<EditorProps> = React.memo(({
@@ -36,7 +38,8 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   onTabClose,
   onMount,
   onRun,
-  onDebug
+  onDebug,
+  editorOptions = {},
 }) => {
   const editorRef = useRef<any>(null);
   // 8.2 — lightweight textarea fallback on mobile to avoid Monaco memory issues
@@ -57,9 +60,13 @@ export const Editor: React.FC<EditorProps> = React.memo(({
     const ext = name.split('.').pop()?.toLowerCase();
     switch (ext) {
       case 'js':
-      case 'jsx': return 'javascript';
+      case 'jsx':
+      case 'mjs':
+      case 'cjs': return 'javascript';
       case 'ts':
-      case 'tsx': return 'typescript';
+      case 'tsx':
+      case 'mts':
+      case 'cts': return 'typescript';
       case 'html': return 'html';
       case 'css': return 'css';
       case 'py': return 'python';
@@ -176,6 +183,8 @@ export const Editor: React.FC<EditorProps> = React.memo(({
             cursorBlinking: 'smooth',
             cursorSmoothCaretAnimation: 'on',
             smoothScrolling: true,
+            stickyScroll: { enabled: true },
+            ...editorOptions,
           }}
         />
         )}

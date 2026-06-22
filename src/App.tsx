@@ -1304,7 +1304,7 @@ export default function App() {
 
     if ((view === 'nbi_pro_chat' || view === 'sda_chat' || view === 'engineer_ai') && !user) {
       setShowAuth(true);
-      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI Pro' : view === 'sda_chat' ? 'Doctor AI' : 'Engineer AI'} is available for logged-in users only. Please sign in.`, 'warn');
+      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI v2.0' : view === 'sda_chat' ? 'Doctor AI' : 'Engineer AI'} is available for logged-in users only. Please sign in.`, 'warn');
       return;
     }
 
@@ -2988,13 +2988,25 @@ ${buildLanguageRule(preferredLanguage)}`;
       setHasGeneratedCode(true);  // ← marks workspace as occupied so next prompt = edit, not rebuild
       setIsAppBuilt(true);
 
-      // Detect framework apps so we can show the right message (preview still runs in-browser)
+      // Classify the imported app to give an honest status message.
       const pkg = loadedFiles['package.json'] || '';
       const hasBuildTool = /["'](vite|webpack|rollup|parcel|next|nuxt|gatsby|create-react-app|@vitejs)\s*["']/.test(pkg);
       const hasJsxEntry = Object.keys(loadedFiles).some(k => /\.(tsx|jsx)$/i.test(k));
-      const isFrameworkApp = (hasBuildTool || hasJsxEntry) && !!pkg;
+      const hasPackageJson = !!pkg;
+      // Framework app = needs a real build step (npm install + npm run dev) — in-browser Babel
+      // cannot resolve npm packages, so the preview would silently fail.
+      const isFrameworkApp = hasBuildTool && hasPackageJson;
+      // Simple React = JSX/TSX without a bundler config — Babel can transpile these in-browser.
+      const isSimpleReact = hasJsxEntry && !hasBuildTool;
+      // Static app = plain HTML/CSS/JS — preview works immediately.
+      const isStaticApp = !hasPackageJson && Object.keys(loadedFiles).some(k => k === 'index.html' || k.endsWith('.html'));
 
-      setTimeout(() => updatePreview(loadedFiles as any), 100);
+      // Only attempt live preview for static and simple-React apps; framework apps need a
+      // real dev server (npm install + npm run dev) which only E2B/Engineer AI can provide.
+      if (!isFrameworkApp) {
+        setTimeout(() => updatePreview(loadedFiles as any), 100);
+      }
+
       const generatedFilesObj = Object.fromEntries(
         Object.entries(loadedFiles).map(([k, v]) => [k, { content: v, expanded: false }])
       );
@@ -3003,18 +3015,27 @@ ${buildLanguageRule(preferredLanguage)}`;
       const fileListText = fileList.slice(0, 10).map(f => `• \`${f}\``).join('\n');
       const moreText = fileList.length > 10 ? `\n• ... and ${fileList.length - 10} more` : '';
 
+      let importMessage: string;
       if (isFrameworkApp) {
-        setProMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          text: `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n✅ Preview is live — React/TSX is running in-browser via Babel + esm.sh. Tell me what you want to change!`,
-          sender: 'ai', timestamp: new Date(),
-        }]);
+        // Honest: framework apps need npm install + dev server — tell user exactly what to do.
+        importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n⚠️ **This app needs a build step** (it uses ${hasBuildTool ? 'Vite/webpack/etc.' : 'npm'}).\nIn-browser preview won't work for it — you need a real dev server.\n\n👉 Type **"run this app"** and I will install dependencies and launch a live preview for you.`;
+      } else if (isSimpleReact) {
+        importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\n✅ Preview is live in-browser via Babel transpilation. Tell me what you want to change!`;
+      } else if (isStaticApp) {
+        importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio. App is live in Preview.\n\n${fileListText}${moreText}\n\nApp is ready to edit — tell me what you want to change!`;
       } else {
-        setProMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          text: `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio. App is live in Preview.\n\n${fileListText}${moreText}\n\nApp is ready to edit — tell me what you want to change!`,
-          sender: 'ai', timestamp: new Date(),
-        }]);
+        importMessage = `📦 **${appName}** imported — ${fileCount} files loaded into Code Studio.\n\n${fileListText}${moreText}\n\nOpen Code Studio to view and edit the files. Tell me what you want to change!`;
+      }
+
+      setProMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        text: importMessage,
+        sender: 'ai', timestamp: new Date(),
+      }]);
+      // Framework apps: open Code Studio so user can see the imported files immediately.
+      // Static/simple apps stay in Pro Chat where the inline preview is already showing.
+      if (isFrameworkApp) {
+        setTimeout(() => toggleTab('studio'), 400);
       }
       // If user typed a message alongside the ZIP, run it as an edit
       if (extraMessage?.trim()) {
@@ -3430,9 +3451,11 @@ ${buildLanguageRule(preferredLanguage)}`;
             setFiles((prev: any) => ({ ...prev, ...builtFiles }));
             setIsAppBuilt(true);
             setHasGeneratedCode(true);
-            // Take the user to the now-ready live preview (the build message says
-            // "App is live in Preview →" but nothing navigated there before).
-            toggleTab('preview');
+            // In Pro Chat, WorkspacePane shows the preview inline — don't navigate away.
+            // Only auto-navigate to the Preview tab when the user is on a different view.
+            if (activeView !== 'nbi_pro_chat') {
+              toggleTab('preview');
+            }
             saveVersionSnapshot(messageToSend, builtFiles);
 
             const fileList = Object.keys(builtFiles);
@@ -3489,7 +3512,10 @@ ${buildLanguageRule(preferredLanguage)}`;
               timestamp: new Date(),
               meta: { deployFiles: builtFiles, appName: meta.appName || 'NavBharatAI-App', suggestions: meta.followUpSuggestions || [] } as any,
             }]);
-            setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+            // Keep the green tick visible for 2 seconds before hiding the progress bar.
+            setTimeout(() => {
+              setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+            }, 2000);
             setIsProLoading(false);
           }, 1200);
         };
@@ -3765,9 +3791,14 @@ ${buildLanguageRule(preferredLanguage)}`;
           }
           // Honest failure — never fall back to the old vanilla generator.
           setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+          const errMsg = engineErr?.message || 'engine error';
+          const isProviderError = /all ai providers|temporarily busy|unavailable|rate limit|quota|timeout/i.test(errMsg);
+          const friendlyMsg = isProviderError
+            ? '⚠️ AI service is temporarily busy. Please try again in 1-2 minutes. If it keeps failing, try rephrasing your request.'
+            : `⚠️ Build failed: ${errMsg}. Please try again, or rephrase your request with a bit more detail.`;
           setProMessages(prev => [...prev, {
             id: (Date.now() + 1).toString(),
-            text: `⚠️ Build failed: ${engineErr?.message || 'engine error'}. Please try again, or rephrase your request with a bit more detail.`,
+            text: friendlyMsg,
             sender: 'ai', timestamp: new Date(),
           }]);
           setIsProLoading(false);
@@ -4215,7 +4246,7 @@ ${buildLanguageRule(preferredLanguage)}`;
   const menuItems = useMemo(() => [
     { id: 'home',         label: 'Home',              icon: Bot },
     { id: 'nbi_chat',     label: 'NavBharatAI FREE',  icon: MessageSquare },
-    { id: 'nbi_pro_chat', label: 'NavBharatAI Pro',   icon: Bot },
+    { id: 'nbi_pro_chat', label: 'NavBharatAI v2.0',   icon: Bot },
     { id: 'preview',      label: 'Preview',           icon: Monitor },
     { id: 'files',        label: 'Files',             icon: FolderOpen },
     { id: 'history',      label: 'History',           icon: History },
@@ -5564,11 +5595,11 @@ ${buildLanguageRule(preferredLanguage)}`;
             { id: 'home' as ViewType,      icon: menuItems.find(m => m.id === 'home')?.icon      ?? Bot,         label: 'Home' },
             { id: (activeAgent === 'navbharatai-pro' ? 'nbi_pro_chat' : 'nbi_chat') as ViewType, icon: activeAgent === 'navbharatai-pro' ? (menuItems.find(m => m.id === 'nbi_pro_chat')?.icon ?? Zap) : (menuItems.find(m => m.id === 'nbi_chat')?.icon ?? MessageSquare), label: 'AI' },
             { id: 'preview' as ViewType,   icon: menuItems.find(m => m.id === 'preview')?.icon   ?? Monitor,     label: 'Preview' },
-            { id: 'files' as ViewType,     icon: menuItems.find(m => m.id === 'files')?.icon     ?? FolderOpen,  label: 'Files' },
+            { id: 'studio' as ViewType,    icon: menuItems.find(m => m.id === 'studio')?.icon    ?? Smartphone,  label: 'Studio' },
             { id: 'settings' as ViewType,  icon: menuItems.find(m => m.id === 'settings')?.icon  ?? Settings,    label: 'More' },
           ].map(({ id, icon: Icon, label }) => {
             const isActive = activeView === id;
-            const isDisabled = (id === 'preview' || id === 'files') && !hasGeneratedCode;
+            const isDisabled = (id === 'preview' || id === 'studio') && !hasGeneratedCode;
             return (
               <button
                 key={id}

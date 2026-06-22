@@ -32,7 +32,7 @@ import { generateTestSuite } from '../pro/ProTestGen';
 import { injectTestResults } from '../project/ValidationPipeline';
 import { reviewCode } from '../pro/ProCodeReview';
 import { VirtualFileSystem } from '../project/ProjectModel';
-import { callClaude, callGemini, callGroq, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
+import { callClaude, callGemini, callGroq, callGrok, callOpenAI, callDeepSeek, callOpenRouter } from '../lib/aiCalls';
 import { AnthropicProvider } from '../AI/Router/providers/AnthropicProvider';
 import { aiRouter } from '../lib/aiRouter';
 import { getPreviewService } from '../runtime/PreviewService';
@@ -120,6 +120,9 @@ function makeResilientModelCall(userKey?: string): ModelCall {
       // (e.g. aicredit.ai) this is the highest-quality coder; it cleanly throws
       // and falls through if the proxy/key is unavailable.
       { name: 'claude', run: () => callClaude(user, key, [], system) },
+      // Grok (xAI) — primary model for Engineer AI's structured-JSON agentic format.
+      // Added here so Pro builds benefit from Grok even when the Claude proxy is down.
+      { name: 'grok', run: () => callGrok(user, key, [], system) },
       // aiRouter is the same provider-selection path the legacy build uses in prod.
       { name: 'aiRouter', run: () => aiRouter.route(user, [], 'free' as any, undefined, system) },
       { name: 'gemini', run: () => callGemini(user, key, [], system) },

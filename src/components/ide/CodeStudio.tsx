@@ -16,10 +16,10 @@ import { AgentMode } from './ModeSelector';
 import { ThemeMode, getThemeClasses, THEME_MODES } from '../../lib/theme';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
-import { 
+import {
   Menu as MenuIcon, X, Maximize2, Minimize2,
   ChevronUp, ChevronDown, Rocket, Command, Search, Keyboard,
-  Bot, Palette, Monitor, FileCode, Plus
+  Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2
 } from 'lucide-react';
 
 interface CodeStudioProps {
@@ -136,6 +136,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const [isMobile, setIsMobile] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [replaceQuery, setReplaceQuery] = useState('');
+  // A2-A5: Editor display settings (persisted to localStorage)
+  const [editorWordWrap, setEditorWordWrap] = useState<boolean>(() => localStorage.getItem('ide_wordWrap') !== 'off');
+  const [editorMinimap, setEditorMinimap] = useState<boolean>(() => localStorage.getItem('ide_minimap') !== 'off');
+  const [editorFontSize, setEditorFontSize] = useState<number>(() => Number(localStorage.getItem('ide_fontSize') || 14));
+  const [editorTabSize, setEditorTabSize] = useState<number>(() => Number(localStorage.getItem('ide_tabSize') || 2));
+  // A24: Cursor position shown in status bar
+  const [cursorPos, setCursorPos] = useState<{ line: number; col: number }>({ line: 1, col: 1 });
 
   const handleScreenChange = (screen: IDEScreen) => {
     if (screen === 'shortcuts') {
@@ -194,6 +201,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
       setOpenTabs(prev => [...prev, { path: activeFile }]);
     }
   }, [activeFile]);
+
+  // A24: subscribe to Monaco cursor position changes
+  useEffect(() => {
+    if (!editorInstance) return;
+    const disposable = editorInstance.onDidChangeCursorPosition((e: any) => {
+      setCursorPos({ line: e.position.lineNumber, col: e.position.column });
+    });
+    return () => disposable.dispose();
+  }, [editorInstance]);
 
   // Debounced live editor → preview sync: when the user edits a file in the Monaco
   // editor, refresh the preview automatically (after a short idle) using the SAME
@@ -617,8 +633,77 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
             </div>
          </div>
          
-         <div className="flex-1 flex justify-center mx-10">
-            <button 
+         {/* A2-A6: Editor quick-settings toolbar */}
+         <div className="hidden md:flex items-center gap-1 mx-4">
+           <button
+             onClick={() => { const v = !editorWordWrap; setEditorWordWrap(v); localStorage.setItem('ide_wordWrap', v ? 'on' : 'off'); }}
+             title={`Word wrap: ${editorWordWrap ? 'on' : 'off'}`}
+             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorWordWrap ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+           >
+             <AlignJustify className="w-3 h-3" />
+           </button>
+           <button
+             onClick={() => { const v = !editorMinimap; setEditorMinimap(v); localStorage.setItem('ide_minimap', v ? 'on' : 'off'); }}
+             title={`Minimap: ${editorMinimap ? 'on' : 'off'}`}
+             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorMinimap ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+           >
+             <Map className="w-3 h-3" />
+           </button>
+           <button
+             onClick={() => { const v = Math.max(10, editorFontSize - 1); setEditorFontSize(v); localStorage.setItem('ide_fontSize', String(v)); }}
+             title="Decrease font size"
+             className="p-0.5 text-[#484f58] hover:text-white rounded transition-colors"
+           >
+             <ChevronDown className="w-3 h-3" />
+           </button>
+           <span className="text-[9px] font-mono text-[#484f58] select-none w-5 text-center">{editorFontSize}</span>
+           <button
+             onClick={() => { const v = Math.min(30, editorFontSize + 1); setEditorFontSize(v); localStorage.setItem('ide_fontSize', String(v)); }}
+             title="Increase font size"
+             className="p-0.5 text-[#484f58] hover:text-white rounded transition-colors"
+           >
+             <ChevronUp className="w-3 h-3" />
+           </button>
+           {/* A5: Tab size selector */}
+           <div className="flex items-center gap-0.5 bg-white/5 rounded px-1">
+             {[2, 4].map(size => (
+               <button
+                 key={size}
+                 onClick={() => { setEditorTabSize(size); localStorage.setItem('ide_tabSize', String(size)); }}
+                 title={`Tab size: ${size}`}
+                 className={`px-1 py-0.5 rounded text-[9px] font-mono transition-all ${editorTabSize === size ? 'text-indigo-400 font-black' : 'text-[#484f58] hover:text-white'}`}
+               >
+                 {size}
+               </button>
+             ))}
+           </div>
+           {/* A6: Format document */}
+           <button
+             onClick={() => editorInstance?.getAction('editor.action.formatDocument')?.run()}
+             title="Format document (Shift+Alt+F)"
+             className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-all"
+           >
+             <Code2 className="w-3 h-3" />
+           </button>
+           {/* A9: Code folding */}
+           <button
+             onClick={() => editorInstance?.getAction('editor.foldAll')?.run()}
+             title="Fold All (Ctrl+K Ctrl+0)"
+             className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-all"
+           >
+             <Minimize2 className="w-3 h-3" />
+           </button>
+           <button
+             onClick={() => editorInstance?.getAction('editor.unfoldAll')?.run()}
+             title="Unfold All (Ctrl+K Ctrl+J)"
+             className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-all"
+           >
+             <Maximize2 className="w-3 h-3" />
+           </button>
+         </div>
+
+         <div className="flex-1 flex justify-center mx-4">
+            <button
                onClick={() => setIsCommandPaletteOpen(true)}
                className="w-full max-w-sm h-6 bg-black/20 rounded-md border border-white/5 flex items-center justify-center gap-2 text-[10px] text-white/40 hover:bg-black/30 hover:border-white/10 transition-all font-medium"
             >
@@ -632,7 +717,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               id="ide-social-chat-trigger"
               onClick={() => onOpenProChat ? onOpenProChat() : (handleScreenChange('ai'), setIsSidebarOpen(true))}
               className="w-16 h-7 bg-indigo-600 hover:bg-indigo-700 rounded-l-lg flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-l border-indigo-400/20"
-              title="Open NavBharatAI Pro"
+              title="Open NavBharatAI v2.0"
             >
               <Bot className="w-4 h-4 mr-1" />
               <span className="text-[10px] font-bold">AI</span>
@@ -726,6 +811,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 onMount={setEditorInstance}
                 onRun={() => onRun(files)}
                 onDebug={() => setIsPanelOpen(true)}
+                editorOptions={{
+                  wordWrap: editorWordWrap ? 'on' : 'off',
+                  minimap: { enabled: editorMinimap },
+                  fontSize: editorFontSize,
+                  tabSize: editorTabSize,
+                  stickyScroll: { enabled: true },
+                }}
               />
           )}
 
@@ -739,6 +831,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               />
             )}
           </AnimatePresence>
+
+          {/* A24: Status bar — cursor position, language, file info */}
+          {activeScreen !== 'preview' && activeScreen !== 'security' && Object.keys(files).length > 0 && (
+            <div className="h-5 shrink-0 bg-[#007acc] flex items-center px-3 gap-4 select-none overflow-hidden">
+              <span className="text-[10px] text-white/90 font-mono">Ln {cursorPos.line}, Col {cursorPos.col}</span>
+              <span className="text-[10px] text-white/70 font-mono">{activeFile?.split('.').pop()?.toUpperCase() || 'TXT'}</span>
+              <span className="text-[10px] text-white/60 font-mono ml-auto">UTF-8</span>
+            </div>
+          )}
 
           {/* Terminal / Panel */}
           <AnimatePresence>

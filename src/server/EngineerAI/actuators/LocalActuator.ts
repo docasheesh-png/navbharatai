@@ -3,6 +3,7 @@ import { promises as fsPromises } from 'fs';
 import path from 'path';
 import util from 'util';
 import { WorkspaceManager } from '../../AppMakerLab/WorkspaceManager';
+import { FileSanitizer } from '../../AppMakerLab/FileSanitizer';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 
 const execPromise = util.promisify(exec);
@@ -44,7 +45,10 @@ export class LocalActuator implements IEngineerActuator {
   }
 
   async writeBinaryFile(workspaceId: string, filePath: string, base64: string): Promise<void> {
-    const full = path.join(WORKSPACES_ROOT, workspaceId, filePath);
+    // Use the same traversal-safe resolver as writeFile/readFile — a raw path.join lets
+    // "../../" escape the workspace onto the host filesystem.
+    const workspacePath = path.join(WORKSPACES_ROOT, workspaceId);
+    const full = FileSanitizer.resolveSafePath(workspacePath, filePath);
     await fsPromises.mkdir(path.dirname(full), { recursive: true });
     await fsPromises.writeFile(full, Buffer.from(base64, 'base64'));
   }

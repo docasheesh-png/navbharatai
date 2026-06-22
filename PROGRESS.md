@@ -24,6 +24,14 @@
 
 ## ▶ CURRENT RESUME POINT
 
+**Session 2026-06-22 (c) — Pro v3.0 ("Vargen 3.0") kickoff: parity audit + design doc (DESIGN ONLY, no runtime change):**
+- Earlier this session: 35-bug brutal audit → 28 fixes shipped live (PRs #173–#178, all CI-green) + Cashfree payment-leak fixes.
+- `CLAUDE_CODE_PARITY.md` added (PR #179, merged) — line-level NavBharatAI Pro vs Claude Code gap analysis, root causes RC-1…RC-8.
+- `NAVBHARATAI_PRO_V3_DESIGN.md` added — full v3.0 design (Claude-Code-class agentic builder, ~99% feel).
+- **Admin decisions locked (aashishcpmt09, 2026-06-22):** D1 = **strangler-fig** (build v3.0 alongside live app, never break it); D2 = **NavBharatAI pays for Claude** (admin OVERRIDE of the CLAUDE.md "AiCreditsProvider never registered / users' own accounts" rule — must be recorded in CLAUDE.md when P5 billing code lands; mandatory CostGuard guardrails apply); D3 = **design-doc first**, then phased code.
+- **Next un-done item:** admin reviews `NAVBHARATAI_PRO_V3_DESIGN.md` §11 open questions → then Phase P0 (AgentV3 skeleton, flag-gated, zero live-path imports). NO v3.0 build code written yet.
+- ⚠️ A future session must NOT revert the Grok-primary / no-Claude-billing rule blindly — D2 is an explicit admin override (see design doc §0).
+
 **Session 2026-06-22 — v2.0 rebranding + 5 bug fixes (PRs #158–#161, all merged to main):**
 - Issue #1 — v2.0 rebranding: All "NavBharatAI Pro" labels → "NavBharatAI v2.0" across App.tsx, index.html, FilesPanel, AIChat, CodeStudio ✅
 - Issue #2 — Code Studio (IDE) not opening on mobile: Added Studio to mobile bottom navigation bar ✅

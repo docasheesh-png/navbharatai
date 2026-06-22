@@ -12,6 +12,28 @@ import {
 import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { firebaseConfig } from '../config/firebase';
+
+/**
+ * Temporary diagnostic: hit the Identity Toolkit sign-up endpoint directly from
+ * the app (so it carries the app's referer + key) and return the RAW server
+ * response. This reveals the real reason behind a bare auth/internal-error —
+ * e.g. "Requests from referer … are blocked", "CONFIGURATION_NOT_FOUND",
+ * "PROJECT_DISABLED", "API key not valid", or "ADMIN_ONLY_OPERATION" (which
+ * would actually mean the auth backend is fine).
+ */
+async function diagnoseAuth(): Promise<string> {
+  try {
+    const res = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${firebaseConfig.apiKey}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ returnSecureToken: true }) },
+    );
+    const text = await res.text();
+    return `DIAG ${res.status}: ${text}`.slice(0, 600);
+  } catch (e: any) {
+    return `DIAG fetch failed: ${e?.message ?? String(e)}`;
+  }
+}
 
 /**
  * Surface the REAL reason behind a Firebase auth failure. The generic
@@ -208,7 +230,8 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       setUser(result.user);
       onClose();
     } catch (err: any) {
-      setError(describeAuthError(err));
+      setError(`${describeAuthError(err)} · diagnosing…`);
+      setError(`${describeAuthError(err)}\n${await diagnoseAuth()}`);
     } finally {
       setLoading(false);
     }
@@ -231,7 +254,8 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       }
       onClose();
     } catch (err: any) {
-      setError(describeAuthError(err));
+      setError(`${describeAuthError(err)} · diagnosing…`);
+      setError(`${describeAuthError(err)}\n${await diagnoseAuth()}`);
     } finally {
       setLoading(false);
     }
@@ -499,7 +523,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
           {error && (
             <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3 text-red-500 text-[10px] font-bold">
               <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{error}</span>
+              <span className="whitespace-pre-wrap break-words">{error}</span>
             </div>
           )}
 

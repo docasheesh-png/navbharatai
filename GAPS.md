@@ -269,7 +269,7 @@
 | H15 | Preview panel header takes too much vertical space on mobile | `[ ]` | |
 | H16 | Preview error overlay doesn't show which file caused the error | `[ ]` | |
 | H17 | Preview doesn't handle loading fonts (flash of unstyled text) | `[ ]` | |
-| H18 | No "Rotate device" button (landscape/portrait simulation) | `[ ]` | |
+| H18 | No "Rotate device" button (landscape/portrait simulation) | `[x]` | #167 |
 | H19 | Preview doesn't scroll to top after rebuild | `[x]` | #167 |
 | H20 | "Fix Bug" in preview overlay sends wrong context sometimes | `[ ]` | |
 
@@ -319,7 +319,7 @@
 | J16 | No "Sync with remote" (pull + push in one click) | `[x]` | #167 |
 | J17 | PR creation link not shown after push | `[x]` | #167 |
 | J18 | No GitHub PR list view in Git panel | `[ ]` | |
-| J19 | No "Open file in GitHub" link | `[ ]` | |
+| J19 | No "Open file in GitHub" link | `[x]` | #167 |
 | J20 | No SSH key setup guide | `[ ]` | |
 
 ---
@@ -424,11 +424,11 @@
 | N23 | No "Add Tailwind to existing app" migration | `[x]` | #167 |
 | N24 | No "Convert class component to functional" | `[x]` | #167 |
 | N25 | No "Generate mock data" for components | `[x]` | #167 |
-| N26 | No "Write Storybook stories" action | `[ ]` | |
+| N26 | No "Write Storybook stories" action | `[x]` | #167 |
 | N27 | No "Generate Cypress E2E tests" | `[~]` | needs E2B |
-| N28 | No "Add Lighthouse CI" to project | `[ ]` | |
-| N29 | No "Bundle size analysis" report | `[ ]` | |
-| N30 | No "Dependency audit" (npm outdated / security) | `[ ]` | |
+| N28 | No "Add Lighthouse CI" to project | `[x]` | #167 |
+| N29 | No "Bundle size analysis" report | `[x]` | #167 |
+| N30 | No "Dependency audit" (npm outdated / security) | `[x]` | #167 |
 
 ---
 

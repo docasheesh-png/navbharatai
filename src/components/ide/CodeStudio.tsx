@@ -22,7 +22,7 @@ import {
   Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2,
   MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck,
   BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces,
-  RefreshCw, Shield, Package, Lock, Users, Cpu, Type
+  RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle
 } from 'lucide-react';
 
 interface CodeStudioProps {
@@ -514,6 +514,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
             onFileDelete={handleDeleteFile}
             onFileRename={handleRenameFile}
             dirtyTabs={dirtyTabs}
+            githubRepoUrl={githubRepoContext?.html_url}
+            githubBranch={githubRepoContext?.default_branch || 'main'}
           />
         );
       case 'search': {
@@ -1004,6 +1006,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                   { label: 'Zustand', icon: Users, instruction: 'Replace useState/useReducer in this component with a Zustand store for global state management' },
                   { label: 'Tailwind', icon: Type, instruction: 'Add Tailwind CSS to this project: install it, create config files, and migrate any existing CSS classes to Tailwind utilities' },
                   { label: 'To Func', icon: Cpu, instruction: 'Convert this class component to a React functional component using hooks (useState, useEffect, useRef, etc.)' },
+                  { label: 'Storybook', icon: BookOpen, instruction: 'Write Storybook stories for this component: Default, Loading, Error, and interactive variant stories with argTypes' },
+                  { label: 'Bundle', icon: BarChart2, instruction: 'Analyze this code for bundle size impact: identify heavy imports, suggest lazy loading, and tree-shaking opportunities' },
+                  { label: 'Audit', icon: AlertTriangle, instruction: 'Run a dependency audit: identify outdated packages, security vulnerabilities, and suggest safe upgrade paths' },
+                  { label: 'Perf', icon: Activity, instruction: 'Add Lighthouse CI configuration and performance budget to this project for automated performance testing in CI/CD' },
                 ] as const).map(({ label, icon: Icon, instruction }) => (
                   <button
                     key={label}

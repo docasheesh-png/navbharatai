@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   FolderOpen, FileCode, Plus, FilePlus, FolderPlus,
   ChevronRight, ChevronDown, MoreVertical, Trash2,
-  Edit2, HardDrive, Search, ArrowUpDown, SortAsc
+  Edit2, HardDrive, Search, ArrowUpDown, SortAsc, Github
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -16,6 +16,10 @@ interface FileExplorerProps {
   onFileRename: (oldPath: string, newName: string) => void;
   /** C22: Tabs with unsaved changes — shows amber dot on affected files */
   dirtyTabs?: Set<string>;
+  /** J19: GitHub repo URL for "Open in GitHub" link (e.g. "https://github.com/user/repo") */
+  githubRepoUrl?: string;
+  /** J19: Branch name for GitHub file links */
+  githubBranch?: string;
 }
 
 interface FileNode {
@@ -33,6 +37,8 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
   onFileCreate,
   onFileRename,
   dirtyTabs,
+  githubRepoUrl,
+  githubBranch = 'main',
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddingFile, setIsAddingFile] = useState(false);
@@ -148,12 +154,27 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="Unsaved changes" />
             )}
           </div>
-          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-            <button 
+          <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+            {/* J19: Open in GitHub */}
+            {githubRepoUrl && (
+              <a
+                href={`${githubRepoUrl}/blob/${githubBranch}/${item.path}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                title="Open in GitHub"
+                aria-label={`Open ${item.path} in GitHub`}
+                className="p-1 hover:bg-white/10 rounded text-[#484f58] hover:text-white"
+              >
+                <Github className="w-3 h-3" />
+              </a>
+            )}
+            <button
               onClick={(e) => {
                 e.stopPropagation();
                 if (confirm(`Delete ${item.path}?`)) onFileDelete(item.path);
               }}
+              aria-label={`Delete ${item.path}`}
               className="p-1 hover:bg-red-500/10 rounded text-red-500/40 hover:text-red-500"
             >
               <Trash2 className="w-3 h-3" />

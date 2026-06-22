@@ -122,6 +122,8 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
   const [device, setDevice] = useState<'laptop' | 'mobile' | 'full'>(isMobileScreen ? 'full' : 'laptop');
   // H4: Device frame toggle (phone bezel around mobile preview)
   const [showDeviceFrame, setShowDeviceFrame] = useState(false);
+  // H18: Landscape/portrait rotation for mobile preview
+  const [isLandscape, setIsLandscape] = useState(false);
   const [visualMode, setVisualMode] = useState(false);
   const [tagMode, setTagMode] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -371,6 +373,20 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
               📱
             </button>
           )}
+          {/* H18: Rotate device (landscape/portrait) */}
+          {device === 'mobile' && (
+            <button
+              onClick={() => setIsLandscape(l => !l)}
+              title={isLandscape ? 'Switch to portrait' : 'Switch to landscape'}
+              aria-label="Rotate device orientation"
+              className={cn(
+                "p-2 rounded-lg transition-all ml-0.5",
+                isLandscape ? "bg-slate-700 text-white" : "text-[#484f58] hover:text-[#8b949e]"
+              )}
+            >
+              <RefreshCcw className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         <button
@@ -547,8 +563,8 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
 
           <div
             style={{
-              width: device === 'full' ? `${targetWidth}px` : undefined,
-              height: device === 'full' ? `${targetHeight}px` : undefined,
+              width: device === 'full' ? `${targetWidth}px` : device === 'mobile' ? (isLandscape ? '667px' : '375px') : undefined,
+              height: device === 'full' ? `${targetHeight}px` : device === 'mobile' ? (isLandscape ? '375px' : undefined) : undefined,
               transform: `scale(${displayScale})`,
               transformOrigin: 'center center',
               flexShrink: 0
@@ -559,8 +575,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
                 ? "rounded-[3rem] border-[12px] border-slate-800 shadow-[0_0_0_4px_#1e293b,0_20px_60px_rgba(0,0,0,0.6)]"
                 : "rounded-lg border-8",
               !showDeviceFrame && (tagMode ? "border-violet-500/40" : "border-black/20"),
-              device === 'laptop' ? 'w-full max-w-[1280px]' :
-              device === 'mobile' ? 'w-[375px]' : ''
+              device === 'laptop' ? 'w-full max-w-[1280px]' : ''
             )}>
             {generatedCode ? (
               <iframe

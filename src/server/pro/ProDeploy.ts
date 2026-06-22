@@ -131,12 +131,21 @@ export async function deployNetlify(
     });
     if (!entry) continue;
     const [path, content] = entry;
-    await jsonFetch(
-      'PUT',
-      `https://api.netlify.com/api/v1/deploys/${deploy.id}/files/${encodeURIComponent(path)}`,
-      content,
-      { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
+    // Upload the RAW file body — jsonFetch would JSON.stringify it (quoting + escaping the
+    // file) and corrupt the deploy. Encode each path segment but keep the slashes intact.
+    const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+    const up = await fetch(
+      `https://api.netlify.com/api/v1/deploys/${deploy.id}/files/${encodedPath}`,
+      {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
+        body: content,
+      },
     );
+    if (!up.ok) {
+      const text = await up.text().catch(() => '');
+      throw new Error(`Netlify file upload failed (${up.status}) for ${path}: ${text.slice(0, 200)}`);
+    }
   }
 
   return deploy.deploy_ssl_url || `https://app.netlify.com/sites/${siteId}`;
@@ -177,14 +186,22 @@ export async function deployGitHubPages(
     );
     baseSha = branch.object.sha;
   } catch {
-    // Branch doesn't exist — get default branch SHA to use as base
-    const main = await jsonFetch<{ object: { sha: string } }>(
+    // gh-pages doesn't exist yet — base off the repo's ACTUAL default branch, not a
+    // hardcoded "main" (repos on "master" or any other default would otherwise fail).
+    const repoInfo = await jsonFetch<{ default_branch: string }>(
       'GET',
-      `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/main`,
+      `https://api.github.com/repos/${owner}/${repo}`,
       undefined,
       headers,
     );
-    baseSha = main.object.sha;
+    const defaultBranch = repoInfo.default_branch || 'main';
+    const baseRef = await jsonFetch<{ object: { sha: string } }>(
+      'GET',
+      `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(defaultBranch)}`,
+      undefined,
+      headers,
+    );
+    baseSha = baseRef.object.sha;
   }
 
   // Create blobs for each file

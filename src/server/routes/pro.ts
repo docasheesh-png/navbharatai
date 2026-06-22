@@ -478,13 +478,12 @@ Response Format:
   });
 
   // ══ SSE STREAMING BUILD ENDPOINT — Live progress to frontend ══
-  // ── Shared sanitizer for user-supplied HTML ─────────────────────────────────
-  const sanitizeUserHtml = (html: string): string => html
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/\bignore\b.*\bprevious\b/gi, '')
-    .replace(/\bsystem\s*prompt\b/gi, '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '<script>[removed]</script>')
-    .slice(0, 18000);
+  // ── Edit-base bound for the user's existing HTML ────────────────────────────
+  // This is the user's OWN app being edited — it must be preserved faithfully. The old
+  // version stripped every <script> block and truncated to 18k chars, which destroyed the
+  // app's inline JavaScript and any content past the cap on every edit. Apply only a
+  // generous length bound (matching the js/css caps below); never mutate the content.
+  const sanitizeUserHtml = (html: string): string => html.slice(0, 250000);
 
   app.post('/api/pro-build', async (req: any, res: any) => {
     let { message, currentFiles, isEdit, framework, history, fileAttachments, allFiles } = req.body;

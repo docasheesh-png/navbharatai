@@ -120,6 +120,8 @@ const PreviewUrlBar: React.FC<{ url: string; hotReloadFlash: boolean; tagMode: b
 export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, generatedCode, previewHistory = [], onRestoreHistory, onHtmlChange, onGoPro, onEditWithAI }) => {
   const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
   const [device, setDevice] = useState<'laptop' | 'mobile' | 'full'>(isMobileScreen ? 'full' : 'laptop');
+  // H4: Device frame toggle (phone bezel around mobile preview)
+  const [showDeviceFrame, setShowDeviceFrame] = useState(false);
   const [visualMode, setVisualMode] = useState(false);
   const [tagMode, setTagMode] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -345,6 +347,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
               key={d.id}
               onClick={() => setDevice(d.id)}
               title={d.label}
+              aria-label={`Preview in ${d.label} mode`}
               className={cn(
                 "p-2 rounded-lg transition-all flex items-center gap-2",
                 device === d.id ? "bg-indigo-600 text-white shadow-lg" : "text-[#484f58] hover:text-[#8b949e]"
@@ -354,6 +357,20 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
               {device === d.id && <span className="text-[10px] font-bold uppercase tracking-widest hidden lg:block">{d.label}</span>}
             </button>
           ))}
+          {/* H4: Phone frame toggle */}
+          {device === 'mobile' && (
+            <button
+              onClick={() => setShowDeviceFrame(f => !f)}
+              title={showDeviceFrame ? 'Hide phone frame' : 'Show phone frame'}
+              aria-label="Toggle phone device frame"
+              className={cn(
+                "p-2 rounded-lg transition-all text-[10px] font-black uppercase tracking-widest ml-0.5",
+                showDeviceFrame ? "bg-slate-700 text-white" : "text-[#484f58] hover:text-[#8b949e]"
+              )}
+            >
+              📱
+            </button>
+          )}
         </div>
 
         <button
@@ -537,8 +554,11 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
               flexShrink: 0
             }}
             className={cn(
-              "h-full bg-white shadow-2xl transition-all duration-300 rounded-lg overflow-hidden border-8",
-              tagMode ? "border-violet-500/40" : "border-black/20",
+              "h-full bg-white shadow-2xl transition-all duration-300 overflow-hidden",
+              showDeviceFrame && device === 'mobile'
+                ? "rounded-[3rem] border-[12px] border-slate-800 shadow-[0_0_0_4px_#1e293b,0_20px_60px_rgba(0,0,0,0.6)]"
+                : "rounded-lg border-8",
+              !showDeviceFrame && (tagMode ? "border-violet-500/40" : "border-black/20"),
               device === 'laptop' ? 'w-full max-w-[1280px]' :
               device === 'mobile' ? 'w-[375px]' : ''
             )}>

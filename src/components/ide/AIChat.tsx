@@ -1585,7 +1585,9 @@ export const AIChat: React.FC<AIChatProps> = ({
                     </button>
                     {isLoading && onStop ? (
                       <button
-                        onClick={onStop}
+                        onClick={() => {
+                          if (window.confirm('Stop the current AI generation?')) onStop?.();
+                        }}
                         title="Stop generation"
                         className="p-3 bg-red-600 text-white rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95"
                       >

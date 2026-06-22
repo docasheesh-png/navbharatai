@@ -136,7 +136,7 @@
 | D5 | No total lines-of-code counter in success state | `[x]` | #167 |
 | D6 | No file count breakdown by language in success | `[x]` | #167 |
 | D7 | No estimated build time shown before starting | `[ ]` | |
-| D8 | Build cancellation has no confirm dialog | `[ ]` | |
+| D8 | Build cancellation has no confirm dialog | `[x]` | #167 |
 | D9 | Repair attempt failure shows generic "Please try again" | `[ ]` | |
 | D10 | Code review panel UI collapses too easily (accordion UX) | `[ ]` | |
 | D11 | Security findings in code review not linked to file/line | `[ ]` | |
@@ -255,7 +255,7 @@
 | H1 | Preview shows blank white flash before app loads | `[ ]` | |
 | H2 | No reload button visible in WorkspacePane preview header | `[x]` | #165 |
 | H3 | No zoom in/out controls for preview | `[x]` | #166 |
-| H4 | No device frame simulation (iPhone/Android frame toggle) | `[ ]` | |
+| H4 | No device frame simulation (iPhone/Android frame toggle) | `[x]` | #167 |
 | H5 | Preview URL not shown / copyable | `[x]` | #167 |
 | H6 | Preview does not persist after page reload | `[ ]` | |
 | H7 | No "Open in new tab" button for preview | `[x]` | #165 |
@@ -421,8 +421,8 @@
 | N20 | No "Add authentication guard" to routes | `[x]` | #167 |
 | N21 | No "Migrate to latest React 19 patterns" | `[x]` | #167 |
 | N22 | No "Replace useState with Zustand" action | `[x]` | #167 |
-| N23 | No "Add Tailwind to existing app" migration | `[ ]` | |
-| N24 | No "Convert class component to functional" | `[ ]` | |
+| N23 | No "Add Tailwind to existing app" migration | `[x]` | #167 |
+| N24 | No "Convert class component to functional" | `[x]` | #167 |
 | N25 | No "Generate mock data" for components | `[x]` | #167 |
 | N26 | No "Write Storybook stories" action | `[ ]` | |
 | N27 | No "Generate Cypress E2E tests" | `[~]` | needs E2B |

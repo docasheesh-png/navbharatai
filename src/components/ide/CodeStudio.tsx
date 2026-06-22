@@ -22,7 +22,7 @@ import {
   Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2,
   MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck,
   BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces,
-  RefreshCw, Shield, Package, Lock, Users
+  RefreshCw, Shield, Package, Lock, Users, Cpu, Type
 } from 'lucide-react';
 
 interface CodeStudioProps {
@@ -1002,6 +1002,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                   { label: 'Auth Guard', icon: Lock, instruction: 'Add authentication guard to these routes: redirect to /login if the user is not authenticated' },
                   { label: 'React 19', icon: Package, instruction: 'Migrate this code to React 19 patterns: use() hook, server components, new form actions where applicable' },
                   { label: 'Zustand', icon: Users, instruction: 'Replace useState/useReducer in this component with a Zustand store for global state management' },
+                  { label: 'Tailwind', icon: Type, instruction: 'Add Tailwind CSS to this project: install it, create config files, and migrate any existing CSS classes to Tailwind utilities' },
+                  { label: 'To Func', icon: Cpu, instruction: 'Convert this class component to a React functional component using hooks (useState, useEffect, useRef, etc.)' },
                 ] as const).map(({ label, icon: Icon, instruction }) => (
                   <button
                     key={label}

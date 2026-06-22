@@ -786,9 +786,13 @@ Pure-logic extractions out of App.tsx (each with full unit tests), continuing Ph
 - `src/lib/versionSnapshot.ts` (NEW) — buildVersionSnapshot + appendVersionSnapshot; `tests/versionSnapshot.test.ts` 12 tests.
 - `src/lib/agentGreetings.ts` (NEW) — NBI/Basic/Pro/VIP pools + pickGreetingForAgent; `tests/agentGreetings.test.ts` 8 tests; removed 4 dead vars.
 - `src/config/defaultContent.ts` (NEW) — DEFAULT_HOME/ABOUT/DONATION_DATA + loadPersistedContent; `tests/defaultContent.test.ts` 6 tests.
-- **App.tsx: 5,820 → 5,641 lines** (−179 this session; 47% total reduction from 10,658 original).
+- `src/lib/deployRequest.ts` (NEW) — validateDeployInput + buildDeployBody (4 platforms); `tests/deployRequest.test.ts` 13 tests.
+- `src/lib/uploadClassify.ts` (NEW) — isZipFile/isTextFile/classifyZipSize; `tests/uploadClassify.test.ts` 10 tests.
+- `chatUtils.ts` — NEW dedupAndSortMessages() (dedup by id + sort); +4 tests.
+- `src/lib/sessionRouting.ts` (NEW) — resolveSessionSurface(agent, savedTab); `tests/sessionRouting.test.ts` 9 tests.
+- **App.tsx: 5,820 → 5,626 lines** (−194 this session; 47% total reduction from 10,658 original).
 
-tsc x2 clean (0 errors), vitest 1494/1494 green.
+tsc x2 clean (0 errors), vitest 1530/1530 green.
 
 ---
 

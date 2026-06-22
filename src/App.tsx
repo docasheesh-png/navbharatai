@@ -119,6 +119,12 @@ import {
   appendVersionSnapshot,
 } from './lib/versionSnapshot';
 import { pickGreetingForAgent } from './lib/agentGreetings';
+import {
+  DEFAULT_HOME_DATA,
+  DEFAULT_ABOUT_DATA,
+  DEFAULT_DONATION_DATA,
+  loadPersistedContent,
+} from './config/defaultContent';
 // ZipSizeModal component → moved to ViewPanels.tsx
 import type { ZipSizeModalVariant } from './components/ide/ZipSizeModal';
 // AgentMode → re-exported from ./types
@@ -668,29 +674,8 @@ export default function App() {
     return () => { active = false; clearTimeout(timeoutId); };
   }, [setBuildSteps]);
   const [isDonationEditing, setIsDonationEditing] = useState(false);
-  const [donationData, setDonationData] = useState(() => {
-      const saved = localStorage.getItem('navbharat_donation_v1');
-      return saved ? JSON.parse(saved) : {
-          headline: '🇮🇳 नवभारत AI के लिए आपका सहयोग',
-          subHeadline: 'Empowering Bharat with Intelligence',
-          upiId: 'doc.asheesh@oksbi',
-          name: 'Dr. Asheesh',
-          missionStatement: 'मैंने अकेले मेहनत करके नवbharat AI बनाने की शुरुआत की है।',
-          dreamStatement: 'मेरा सपना है कि एक दिन "नवभारत AI" भारत का ही नहीं, बल्कि दुनिया का सबसे शक्तिशाली, सबसे बुद्धिमान और सबसे उपयोगी AI बने।',
-          qrUrl: '',
-          logoUrl: ''
-      };
-  });
-  const [aboutData, setAboutData] = useState(() => {
-    const saved = localStorage.getItem('navbharat_about_v1');
-    return saved ? JSON.parse(saved) : {
-        logoUrl: '',
-        headline: 'Bharat ka Apna AI - navBharat',
-        description: 'Navbharat AI is a mission to empower every Indian with the power of Artificial Intelligence.',
-        team: 'Built with ❤️ by a passionate developer.',
-        vision: 'To make Bharat a global leader in AI.'
-    };
-  });
+  const [donationData, setDonationData] = useState(() => loadPersistedContent('navbharat_donation_v1', DEFAULT_DONATION_DATA));
+  const [aboutData, setAboutData] = useState(() => loadPersistedContent('navbharat_about_v1', DEFAULT_ABOUT_DATA));
 
   useEffect(() => {
     localStorage.setItem('navbharat_about_v1', JSON.stringify(aboutData));
@@ -1253,46 +1238,7 @@ export default function App() {
     }
   };
 
-  const [homeData, setHomeData] = useState(() => {
-    const saved = localStorage.getItem('navbharat_home_v1');
-    return saved ? JSON.parse(saved) : {
-      heroTitle: 'navBharatAI Architect',
-      heroSubtitle: 'Enterprise-grade ecosystem for building complex, scalable, and production-ready applications with Bharat-first precision.',
-      welcomeText: 'Enterprise Architect Mode Active',
-      ctaText: 'Assemble System Architecture',
-      features: [
-        {
-          title: "Senior Architect Protocol",
-          subtitle: "15+ Years of Industry Expertise",
-          description: "Not just a chatbot. navBharatAI follows a strict 8-phase senior architect workflow from Discovery to DevOps.",
-          icon: 'ShieldCheck',
-          color: "from-indigo-600 to-blue-700"
-        },
-        {
-          title: "Scale-First Architecture",
-          subtitle: "Designed for Millions of Users",
-          description: "High-level guidance on Monorepos, Microservices, and TB-level data complexity management.",
-          icon: 'Zap',
-          color: "from-amber-500 to-orange-600"
-        },
-        {
-          title: "Modular Code Standards",
-          subtitle: "Production-Ready TypeScript",
-          description: "Clean, well-commented, and modular implementation plans that follow enterprise coding standards.",
-          icon: 'Code',
-          color: "from-emerald-500 to-teal-600"
-        },
-        {
-          title: "End-to-End Governance",
-          subtitle: "Security, Compliance & DevOps",
-          description: "Integrated RBAC, OWASP audits, and professional CI/CD strategy recommendations.",
-          icon: 'Shield',
-          color: "from-purple-500 to-pink-500",
-          status: "Enterprise"
-        }
-      ]
-    };
-  });
+  const [homeData, setHomeData] = useState(() => loadPersistedContent('navbharat_home_v1', DEFAULT_HOME_DATA));
 
   useEffect(() => {
     localStorage.setItem('navbharat_home_v1', JSON.stringify(homeData));

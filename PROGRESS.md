@@ -712,7 +712,15 @@ Additional test files (this session):
 - Refactor: extracted PREVIEW_HARNESS, PREVIEW_BOOTSTRAP, UNIVERSAL_VIEWER_CSS/JS, stripFences, buildSourceAppPreview, buildUniversalPreview, injectHarness from App.tsx → `src/lib/previewUtils.ts`; extracted sanitizeFirestoreData → `src/lib/firestoreUtils.ts` (re-exported for SDAChat backward compat)
 - App.tsx: **5,861 lines** (down from 10,658 original = 45% total reduction; down from 6,610 before this session)
 
-tsc x2 clean (0 errors), vitest 1379/1379 green.
+tsc x2 clean (0 errors), vitest 1366/1366 green. (Note: 1379 in PROGRESS.md was a typo; actual baseline was 1366.)
+
+**Extended — 1366 tests / 175 test files (2026-06-22, session 7):**
+
+Refactor: extracted NBI chat inline JSX from App.tsx → `src/components/panels/NBIChatPanel.tsx` (~155 lines).
+- App.tsx: **5,820 lines** (down from 10,658 original = 45.4% total reduction)
+- Removed unused `AISuggestions` lazy import from App.tsx (now imported inside NBIChatPanel)
+
+tsc x2 clean (0 errors), vitest 1366/1366 green.
 
 ---
 

@@ -14,6 +14,7 @@ import { DeployModal } from './components/panels/DeployModal';
 import { WorkspacePane } from './components/panels/WorkspacePane';
 import { SettingsPanel } from './components/panels/SettingsPanel';
 import { ProChatPanel } from './components/panels/ProChatPanel';
+import { NBIChatPanel } from './components/panels/NBIChatPanel';
 import { ViewPanels } from './components/panels/ViewPanels';
 import { SidebarNav } from './components/panels/SidebarNav';
 import { TopNav } from './components/panels/TopNav';
@@ -64,7 +65,6 @@ import { AIChat } from './components/ide/AIChat';
 const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
   lazy(() => fn().then(m => ({ default: m[k] as React.ComponentType<any> })));
 
-const AISuggestions    = _lz(() => import('./components/ide/AISuggestions'),    'AISuggestions');
 const SecretManager    = _lz(() => import('./components/SecretManager'),        'SecretManager');
 const DatabaseSettings = _lz(() => import('./components/settings/DatabaseSettings'), 'DatabaseSettings');
 const SocialHub        = _lz(() => import('./components/social/SocialHub'),     'SocialHub');
@@ -5343,78 +5343,37 @@ ${buildLanguageRule(preferredLanguage)}`;
           )}
 
           {(activeView === 'nbi_chat') && (
-            <div className={cn("flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-white/10", themeClasses.bg)}>
-              
-              {/* NBI Chat column */}
-              {activeView === 'nbi_chat' && (
-                <div className="flex-1 flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0">
-                  <div className="flex items-center justify-between px-3 py-1 bg-indigo-950/20 border-b border-indigo-500/20 text-[9px] font-black uppercase tracking-widest text-[#8b949e]">
-                     <div className="flex items-center gap-2">
-                       <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping shrink-0" />
-                       <span>NAVBHARATAI</span>
-                     </div>
-                     <div className="flex items-center gap-2">
-                       {/* 9.5 — Teaching Mode toggle */}
-                       <button
-                         onClick={() => setTeachMode(p => !p)}
-                         title={teachMode ? 'Teaching Mode ON — click to turn off' : 'Teaching Mode OFF — click to enable beginner explanations'}
-                         className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[8px] font-black uppercase tracking-widest transition-all ${
-                           teachMode ? 'bg-amber-500/20 border-amber-500/40 text-amber-400' : 'bg-white/5 border-white/10 text-[#484f58] hover:text-white'
-                         }`}
-                       >
-                         <span>{teachMode ? '📚' : '🎓'}</span>
-                         <span className="hidden sm:inline">Teach</span>
-                       </button>
-                       <span className="font-mono text-indigo-400 hidden sm:inline">{sessions.find(s => s.id === currentSessionId)?.uci || ''}</span>
-                     </div>
-                  </div>
-                  <AIChat
-                    messages={messages}
-                    input={input}
-                    onInputChange={setInput}
-                    onSend={(files) => { handleSendForTab('nbi_chat', undefined, files); }}
-                    isLoading={isLoading}
-                    activeIntent={activeIntent}
-                    isPinned={sessions.find(s => s.id === currentSessionId)?.isPinned || false}
-                    onTogglePin={() => togglePin(currentSessionId)}
-                    isLoggedIn={!!user}
-                    onShowLogin={() => setShowAuth(true)}
-                    mode={mode}
-                    onModeChange={setMode}
-                    activeAgent={activeAgent}
-                    pendingGHEdit={pendingGHEdit}
-                    onConfirmPush={handleGHConfirmPush}
-                    isPushing={isPushing}
-                    isAppBuilt={isAppBuilt}
-                    theme={theme}
-                    onPreviewClick={() => {
-                       toggleTab('preview');
-                       setIsMenuOpen(false);
-                    }}
-                    userId={user?.uid}
-                    activeUci={user ? (sessions.find(s => s.id === currentSessionId)?.uci || '') : ''}
-                    onRestoreUci={user ? handleRestoreUci : undefined}
-                    restoredMessages={sessions.find(s => s.id === currentSessionId)?.restoredMessages || []}
-                    memorySummary={sessions.find(s => s.id === currentSessionId)?.memorySummary || ''}
-                    wallet={wallet}
-                    onLanguagePick={(lang) => {
-                      setPreferredLanguage(lang as any);
-                      setMessages(prev => [
-                        ...prev.filter(m => m.id !== 'lang-picker'),
-                        { id: 'lang-confirmed', text: `✅ Language set! I'll now communicate with you in **${lang === 'hindi' ? '🇮🇳 Hindi' : lang === 'hinglish' ? '🔀 Hinglish' : lang === 'english' ? '🇬🇧 English' : '🌐 your language (auto-detect)'}**.\n\nCode will always be written in professional English.\n\nHow can I help you?`, sender: 'ai', timestamp: new Date(), modelUsed: 'navBharatAI' },
-                      ]);
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* 7.7 — AI Copilot Suggestions */}
-              <AISuggestions
-                generatedCode={generatedCode}
-                onSendSuggestion={(prompt) => handleSend(prompt)}
-              />
-
-            </div>
+            <NBIChatPanel
+              themeClasses={themeClasses}
+              teachMode={teachMode}
+              setTeachMode={setTeachMode}
+              sessions={sessions}
+              currentSessionId={currentSessionId}
+              messages={messages}
+              input={input}
+              setInput={setInput}
+              onSend={(files) => handleSendForTab('nbi_chat', undefined, files)}
+              isLoading={isLoading}
+              activeIntent={activeIntent}
+              togglePin={togglePin}
+              user={user}
+              setShowAuth={setShowAuth}
+              mode={mode}
+              setMode={setMode}
+              activeAgent={activeAgent}
+              pendingGHEdit={pendingGHEdit}
+              onConfirmPush={handleGHConfirmPush}
+              isPushing={isPushing}
+              isAppBuilt={isAppBuilt}
+              theme={theme}
+              onPreviewClick={() => { toggleTab('preview'); setIsMenuOpen(false); }}
+              onRestoreUci={handleRestoreUci}
+              wallet={wallet}
+              setPreferredLanguage={setPreferredLanguage}
+              setMessages={setMessages}
+              generatedCode={generatedCode}
+              onSendSuggestion={(prompt) => handleSend(prompt)}
+            />
           )}
 
           {activeView === 'nbi_pro_chat' && (

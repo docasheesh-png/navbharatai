@@ -1061,6 +1061,12 @@ export const AIChat: React.FC<AIChatProps> = ({
                   <span className="text-[7px] font-black text-[#484f58] uppercase tracking-widest">
                     {msg.sender === 'user' ? 'YOU' : activeAgent.toUpperCase().replace('_', ' ')}
                   </span>
+                  {/* B7: Model badge on AI messages */}
+                  {msg.sender === 'ai' && msg.modelUsed && (
+                    <span className="text-[7px] font-mono text-indigo-400/70 bg-indigo-900/20 border border-indigo-800/30 rounded px-1 py-px">
+                      {msg.modelUsed}
+                    </span>
+                  )}
                   {msg.timestamp && (
                     <span className="text-[7px] text-[#30363d] font-mono">{formatMsgTime(msg.timestamp)}</span>
                   )}
@@ -1094,10 +1100,17 @@ export const AIChat: React.FC<AIChatProps> = ({
           })}
         </AnimatePresence>
 
+        {/* B8: Typing indicator — three-dot bounce animation */}
         {isLoading && (
-          <div className="flex items-center gap-3 text-[#484f58] px-2 animate-in fade-in slide-in-from-left-2 duration-300">
-            <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-            <span className="text-[9px] font-black uppercase tracking-widest animate-pulse">The Architect is analyzing...</span>
+          <div className="flex items-start gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
+            <div className="w-6 h-6 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
+              <Bot className="w-3 h-3 text-indigo-400" />
+            </div>
+            <div className="bg-[#161b22] border border-white/5 rounded-2xl rounded-tl-none px-3 py-2.5 shadow-sm flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
           </div>
         )}
 

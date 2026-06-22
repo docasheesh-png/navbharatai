@@ -31,7 +31,7 @@
 | A6 | No "Format Document" button in toolbar | `[x]` | #166 |
 | A7 | Bracket pair colorization not enabled (Monaco supports it natively) | `[x]` | #166 |
 | A8 | Sticky scroll not enabled (function signature context line) | `[x]` | #166 |
-| A9 | Code folding buttons (Fold All / Unfold All) missing from toolbar | `[ ]` | |
+| A9 | Code folding buttons (Fold All / Unfold All) missing from toolbar | `[x]` | #166 |
 | A10 | Unsaved-changes dot not shown on file tab when content differs from saved | `[ ]` | |
 | A11 | File extension icons missing from editor tabs (all show same icon) | `[ ]` | |
 | A12 | No "Format on Save" toggle in settings | `[ ]` | |
@@ -46,7 +46,7 @@
 | A21 | No snippet library / custom snippets | `[ ]` | |
 | A22 | No "Compare File" (diff against saved) option in file tree | `[ ]` | |
 | A23 | No "Open in Split" option for files | `[ ]` | |
-| A24 | Cursor position (line:col) not shown in status bar | `[ ]` | |
+| A24 | Cursor position (line:col) not shown in status bar | `[x]` | #166 |
 | A25 | No "Jump to Definition" (even heuristic navigation to file) | `[~]` | needs LSP |
 | A26 | No "Find All References" refactor command | `[~]` | needs LSP |
 | A27 | No "Rename Symbol" command | `[~]` | needs LSP |
@@ -66,8 +66,8 @@
 | B4 | No character count / token estimate shown as input grows | `[x]` | #165 |
 | B5 | No "Clear conversation" button | `[x]` | #165 |
 | B6 | Starter suggestions not visible when chat is empty | `[ ]` | |
-| B7 | No model name badge showing which AI answered | `[ ]` | |
-| B8 | No typing indicator (three-dots animation) during generation | `[ ]` | |
+| B7 | No model name badge showing which AI answered | `[x]` | #166 |
+| B8 | No typing indicator (three-dots animation) during generation | `[x]` | #166 |
 | B9 | No "Edit prompt" option on user messages | `[ ]` | |
 | B10 | Code blocks in chat have no file name header | `[ ]` | |
 | B11 | Code blocks in chat have no line numbers | `[ ]` | |
@@ -254,7 +254,7 @@
 |---|-----|--------|----|
 | H1 | Preview shows blank white flash before app loads | `[ ]` | |
 | H2 | No reload button visible in WorkspacePane preview header | `[x]` | #165 |
-| H3 | No zoom in/out controls for preview | `[ ]` | |
+| H3 | No zoom in/out controls for preview | `[x]` | #166 |
 | H4 | No device frame simulation (iPhone/Android frame toggle) | `[ ]` | |
 | H5 | Preview URL not shown / copyable | `[ ]` | |
 | H6 | Preview does not persist after page reload | `[ ]` | |
@@ -265,7 +265,7 @@
 | H11 | Preview iframe has no title (accessibility) | `[ ]` | |
 | H12 | Preview doesn't show dimensions (width x height) | `[ ]` | |
 | H13 | Preview refresh animation is abrupt (no fade) | `[ ]` | |
-| H14 | No "responsive" breakpoint preview (mobile/tablet/desktop) | `[ ]` | |
+| H14 | No "responsive" breakpoint preview (mobile/tablet/desktop) | `[x]` | #166 |
 | H15 | Preview panel header takes too much vertical space on mobile | `[ ]` | |
 | H16 | Preview error overlay doesn't show which file caused the error | `[ ]` | |
 | H17 | Preview doesn't handle loading fonts (flash of unstyled text) | `[ ]` | |

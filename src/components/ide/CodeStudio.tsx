@@ -141,6 +141,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const [editorMinimap, setEditorMinimap] = useState<boolean>(() => localStorage.getItem('ide_minimap') !== 'off');
   const [editorFontSize, setEditorFontSize] = useState<number>(() => Number(localStorage.getItem('ide_fontSize') || 14));
   const [editorTabSize, setEditorTabSize] = useState<number>(() => Number(localStorage.getItem('ide_tabSize') || 2));
+  // A24: Cursor position shown in status bar
+  const [cursorPos, setCursorPos] = useState<{ line: number; col: number }>({ line: 1, col: 1 });
 
   const handleScreenChange = (screen: IDEScreen) => {
     if (screen === 'shortcuts') {
@@ -199,6 +201,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
       setOpenTabs(prev => [...prev, { path: activeFile }]);
     }
   }, [activeFile]);
+
+  // A24: subscribe to Monaco cursor position changes
+  useEffect(() => {
+    if (!editorInstance) return;
+    const disposable = editorInstance.onDidChangeCursorPosition((e: any) => {
+      setCursorPos({ line: e.position.lineNumber, col: e.position.column });
+    });
+    return () => disposable.dispose();
+  }, [editorInstance]);
 
   // Debounced live editor → preview sync: when the user edits a file in the Monaco
   // editor, refresh the preview automatically (after a short idle) using the SAME
@@ -661,6 +672,21 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            >
              <Code2 className="w-3 h-3" />
            </button>
+           {/* A9: Code folding */}
+           <button
+             onClick={() => editorInstance?.getAction('editor.foldAll')?.run()}
+             title="Fold All (Ctrl+K Ctrl+0)"
+             className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-all"
+           >
+             <Minimize2 className="w-3 h-3" />
+           </button>
+           <button
+             onClick={() => editorInstance?.getAction('editor.unfoldAll')?.run()}
+             title="Unfold All (Ctrl+K Ctrl+J)"
+             className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-all"
+           >
+             <Maximize2 className="w-3 h-3" />
+           </button>
          </div>
 
          <div className="flex-1 flex justify-center mx-4">
@@ -792,6 +818,15 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               />
             )}
           </AnimatePresence>
+
+          {/* A24: Status bar — cursor position, language, file info */}
+          {activeScreen !== 'preview' && activeScreen !== 'security' && Object.keys(files).length > 0 && (
+            <div className="h-5 shrink-0 bg-[#007acc] flex items-center px-3 gap-4 select-none overflow-hidden">
+              <span className="text-[10px] text-white/90 font-mono">Ln {cursorPos.line}, Col {cursorPos.col}</span>
+              <span className="text-[10px] text-white/70 font-mono">{activeFile?.split('.').pop()?.toUpperCase() || 'TXT'}</span>
+              <span className="text-[10px] text-white/60 font-mono ml-auto">UTF-8</span>
+            </div>
+          )}
 
           {/* Terminal / Panel */}
           <AnimatePresence>

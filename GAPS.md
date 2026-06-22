@@ -109,7 +109,7 @@
 | C10 | No image preview for .png/.jpg/.svg files | `[ ]` | |
 | C11 | No binary file warning (tries to show binary as text) | `[x]` | #167 |
 | C12 | Nested folder structure collapsed by default with no expand-all | `[x]` | #167 |
-| C13 | No recently-opened files section | `[ ]` | |
+| C13 | No recently-opened files section | `[x]` | #167 |
 | C14 | No file pinning (mark important files) | `[ ]` | |
 | C15 | ZIP download does not include .env.example | `[ ]` | |
 | C16 | ZIP download includes __pycache__, node_modules stubs if present | `[ ]` | |
@@ -304,7 +304,7 @@
 | J1 | No AI-suggested commit messages | `[x]` | #167 |
 | J2 | No git log / commit history view | `[ ]` | |
 | J3 | Staged vs unstaged files not visually distinct | `[ ]` | |
-| J4 | No create-branch button in Git panel | `[ ]` | |
+| J4 | No create-branch button in Git panel | `[x]` | #167 |
 | J5 | No "Ahead / behind remote" indicator | `[ ]` | |
 | J6 | Empty commit message gives no error before submit | `[x]` | #167 |
 | J7 | No .gitignore file editor | `[ ]` | |
@@ -316,7 +316,7 @@
 | J13 | No tag creation | `[ ]` | |
 | J14 | No git blame view | `[ ]` | |
 | J15 | Commit message has no character limit warning (50/72 chars) | `[x]` | #167 |
-| J16 | No "Sync with remote" (pull + push in one click) | `[ ]` | |
+| J16 | No "Sync with remote" (pull + push in one click) | `[x]` | #167 |
 | J17 | PR creation link not shown after push | `[x]` | #167 |
 | J18 | No GitHub PR list view in Git panel | `[ ]` | |
 | J19 | No "Open file in GitHub" link | `[ ]` | |

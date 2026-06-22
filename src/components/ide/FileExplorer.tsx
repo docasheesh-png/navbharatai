@@ -40,6 +40,10 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']));
   // C5: Sort mode (dirs-first by name is default)
   const [sortMode, setSortMode] = useState<'name' | 'type'>('name');
+  // C13: Recently-opened files (last 5, persisted to localStorage)
+  const [recentFiles, setRecentFiles] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('ide_recent_files') || '[]'); } catch { return []; }
+  });
 
   const buildTree = (filePaths: string[]): FileNode => {
     const root: FileNode = { name: 'root', path: '', type: 'dir', children: {} };
@@ -65,6 +69,15 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
     });
     
     return root;
+  };
+
+  const handleFileSelectWithRecent = (path: string) => {
+    onFileSelect(path);
+    setRecentFiles(prev => {
+      const updated = [path, ...prev.filter(p => p !== path)].slice(0, 5);
+      try { localStorage.setItem('ide_recent_files', JSON.stringify(updated)); } catch {}
+      return updated;
+    });
   };
 
   const toggleDir = (path: string) => {
@@ -119,9 +132,9 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
       }
 
       return (
-        <div 
+        <div
           key={item.path}
-          onClick={() => onFileSelect(item.path)}
+          onClick={() => handleFileSelectWithRecent(item.path)}
           className={cn(
             "group flex items-center justify-between px-4 py-1.5 cursor-pointer transition-all",
             isActive ? "bg-indigo-600/10 text-white border-r-2 border-indigo-500" : "hover:bg-white/5 text-[#8b949e]"
@@ -252,6 +265,29 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* C13: Recently-opened files section */}
+        {!searchQuery && recentFiles.filter(p => p in files).length > 0 && (
+          <div className="mb-2">
+            <div className="px-4 pt-2 pb-1">
+              <span className="text-[8px] font-black uppercase tracking-[0.2em] text-[#484f58]">Recent</span>
+            </div>
+            {recentFiles.filter(p => p in files).map(path => (
+              <div
+                key={path}
+                onClick={() => handleFileSelectWithRecent(path)}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-1 cursor-pointer transition-all",
+                  activeFile === path ? "bg-indigo-600/10 text-white border-r-2 border-indigo-500" : "hover:bg-white/5 text-[#8b949e]"
+                )}
+              >
+                <FileCode className="w-3 h-3 shrink-0 text-[#484f58]" />
+                <span className="text-[10px] font-medium truncate">{path.split('/').pop()}</span>
+              </div>
+            ))}
+            <div className="mx-4 mt-1 mb-2 border-t border-white/5" />
+          </div>
+        )}
 
         <div className="space-y-0.5">
           {renderTree(tree)}

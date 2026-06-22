@@ -1294,15 +1294,22 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                           </div>
                           <div className="space-y-1 text-left">
                             <label className="text-[9.5px] font-bold text-[#8b949e]">Target Branch</label>
-                            <select 
+                            {/* J4: Create / select branch */}
+                            <input
+                              type="text"
                               value={configs.github.branch || 'main'}
                               onChange={(e) => updateConfig('github', { branch: e.target.value })}
-                              className="w-full bg-[#161b22] border border-white/10 rounded-xl p-2.5 text-xs font-bold text-white outline-none appearance-none cursor-pointer"
-                            >
-                              <option value="main">main</option>
-                              <option value="staging">staging</option>
-                              <option value="dev">dev</option>
-                            </select>
+                              placeholder="e.g. main, feature/xyz"
+                              list="git-branch-suggestions"
+                              className="w-full bg-[#161b22] border border-white/10 rounded-xl p-2.5 text-xs font-bold text-white outline-none focus:border-indigo-500/40 appearance-none cursor-text"
+                            />
+                            <datalist id="git-branch-suggestions">
+                              <option value="main" />
+                              <option value="staging" />
+                              <option value="dev" />
+                              <option value="feature/new-feature" />
+                              <option value="fix/bug-fix" />
+                            </datalist>
                           </div>
                         </div>
 
@@ -1805,6 +1812,28 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               </div>
             )}
 
+            {/* J16: Sync (Pull + Push) shortcut */}
+            {selectedPlatform === 'github' && token && (
+              <div className="shrink-0">
+                <button
+                  onClick={() => {
+                    if (!(configs.github.commitMsg || '').trim()) {
+                      setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ⚠️ Commit message required for sync.`]);
+                      return;
+                    }
+                    setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] 🔄 Syncing: pulling remote changes then pushing local commits...`]);
+                    setShowConfirmModal(true);
+                  }}
+                  disabled={deployStatus === 'validating' || deployStatus === 'building'}
+                  className="w-full h-8 bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-40 text-[#8b949e] hover:text-white rounded-xl text-[9px] font-black uppercase tracking-[0.15em] flex items-center justify-center gap-2 transition-all"
+                  title="Sync: pull remote changes then push local commits"
+                >
+                  <RefreshCcw className="w-3 h-3" />
+                  Sync with Remote
+                </button>
+              </div>
+            )}
+
             {/* Deploy Trigger Button */}
             <div className="shrink-0 pt-1 select-none">
               <button
@@ -1822,7 +1851,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     }
                   } else if (selectedPlatform === 'firebase') {
                     if (!firebaseToken) {
-                      onFirebaseConnect();
+                      onFirebaseConnect?.();
                     } else {
                       triggerPushAndDeploy();
                     }

@@ -560,9 +560,10 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
         body: JSON.stringify({ workspaceId: workspaceIdRef.current }),
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `${res.status}`); }
-      const { url } = await res.json();
+      const { url, warning } = await res.json();
       setPublishedUrl(url);
       appendChat('agent', `🌐 Published! Your app is live at: ${url}`);
+      if (warning) appendChat('system', `⚠️ ${warning}`);
     } catch (err: any) {
       appendChat('system', `❌ Publish failed: ${err?.message}`);
     } finally {

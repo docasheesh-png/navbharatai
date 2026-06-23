@@ -90,4 +90,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How does gun-milan work?',
     ],
   },
+  govt_schemes_ai: {
+    id: 'govt_schemes_ai',
+    name: 'Govt Schemes Helper',
+    welcome:
+      "Namaste! 🏛️ I'm Yojana AI — I help you find and understand Indian government schemes (central & state): who's eligible, what benefit, which documents, and how to apply. Tell me about yourself (state, work, age, need). ⚠️ Always verify the latest details on official portals — and remember, real govt schemes never charge a fee or ask for your OTP/PIN.",
+    quickPrompts: [
+      'Schemes for farmers',
+      'Scholarships for students',
+      'Housing scheme — am I eligible?',
+      'What documents do I usually need?',
+    ],
+  },
 };

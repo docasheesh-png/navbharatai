@@ -251,6 +251,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['astrology', 'astrologer', 'horoscope', 'kundli', 'rashi', 'zodiac', 'jyotish', 'nakshatra', 'gun milan', 'numerology', 'palmistry'],
   },
 
+  // ─── GOVT SCHEMES HELPER ─────────────────────────────────────────────────
+  {
+    id: 'govt_schemes_ai',
+    name: 'Govt Schemes Helper',
+    path: 'Sidebar → Professionals → Govt Schemes Helper',
+    description: 'Makes Indian government schemes (central & state) easy to understand: find schemes by profile/need (farmer, student, woman, senior, entrepreneur, BPL), explain eligibility, benefits, documents and how to apply (official portal / CSC / local office). Anti-fraud built in: warns that real schemes never charge a fee or ask for OTP/PIN. Names/eligibility/amounts/portals change & vary by state — always verify on official portals (e.g. myscheme.gov.in) or at a CSC.',
+    howToUse: 'Open Sidebar → Professionals → Govt Schemes Helper and ask: "schemes for farmers", "scholarships for students", "am I eligible for a housing scheme", "what documents do I need".',
+    relatedFeatures: ['professionals'],
+    aiSurface: 'govt_schemes_ai',
+    keywords: ['scheme', 'yojana', 'government', 'sarkari', 'subsidy', 'scholarship', 'pension', 'pm kisan', 'ayushman', 'pmay', 'eligibility', 'apply', 'benefit'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

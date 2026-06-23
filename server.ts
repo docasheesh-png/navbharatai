@@ -19,7 +19,6 @@ import { registerGithubRoutes } from './src/server/routes/github';
 import { registerCloudsyncRoutes } from './src/server/routes/cloudsync';
 import { registerAppmakerRoutes } from './src/server/routes/appmaker';
 import { registerAuthRoutes } from './src/server/routes/auth';
-import { registerAnthropicRoutes } from './src/server/routes/anthropic';
 import { registerGithubAuthRoutes } from './src/server/routes/githubAuth';
 import { registerFirebaseAuthRoutes } from './src/server/routes/firebaseAuth';
 import { registerCreateOrderRoute } from './src/server/routes/createOrder';
@@ -407,7 +406,6 @@ setInterval(() => {
   registerPaymentRoutes(app, paymentLimiter);
   registerAdminRoutes(app, adminLimiter);
   registerSecretsRoutes(app);
-  registerAnthropicRoutes(app);
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
   registerPreviewRoutes(app, chatLimiter);

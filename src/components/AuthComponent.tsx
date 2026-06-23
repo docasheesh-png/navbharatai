@@ -7,7 +7,6 @@ import {
   signInWithPhoneNumber,
   ConfirmationResult,
   GoogleAuthProvider,
-  signInWithPopup,
   signInWithRedirect,
   getRedirectResult
 } from 'firebase/auth';
@@ -302,32 +301,20 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     setLoading(true);
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
+
+    // Redirect-FIRST. In many real environments the browser silently blocks the
+    // OAuth popup (nothing opens, no error to catch), so a popup-based flow just
+    // dies quietly. A full-page redirect needs no popup and cannot be blocked —
+    // the page navigates to Google, and getRedirectResult() (effect above) finishes
+    // the sign-in when the user returns. Popup is only tried as a nicer-UX upgrade
+    // on desktop, and any popup problem immediately falls through to the redirect.
     try {
-      const result = await signInWithPopup(auth, provider);
-      setUser(result.user);
-      onClose();
+      await signInWithRedirect(auth, provider);
+      return; // page navigates away to Google; loading stays until it returns
     } catch (err: any) {
+      // Redirect itself failed (rare — real config/credential issue). Show the
+      // actionable reason; for an opaque internal-error add the live diagnosis.
       const code = err?.code || '';
-      // Popup blocked/closed/unsupported (common on mobile + strict browsers) →
-      // fall back to a full-page redirect; getRedirectResult finishes it on return.
-      const POPUP_FAILURES = [
-        'auth/popup-blocked',
-        'auth/popup-closed-by-user',
-        'auth/cancelled-popup-request',
-        'auth/operation-not-supported-in-this-environment',
-      ];
-      if (POPUP_FAILURES.includes(code)) {
-        try {
-          await signInWithRedirect(auth, provider);
-          return; // page navigates away; loading stays until redirect completes
-        } catch (redirErr: any) {
-          setError(describeGoogleError(redirErr));
-          setLoading(false);
-          return;
-        }
-      }
-      // Real config/credential failure → show the actionable reason. For an opaque
-      // internal-error, append the raw Identity Toolkit diagnosis.
       if (code === 'auth/internal-error') {
         setError(`${describeGoogleError(err)}\n${await diagnoseAuth()}`);
       } else {

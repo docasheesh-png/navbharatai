@@ -1211,3 +1211,22 @@ Config still required by admin (Firebase Console, project gen-lang-client-086659
   • Authentication → Settings → Authorized domains → add navbharatai.com.
 
 Gate green: tsc frontend, build, 1884 vitest.
+
+---
+
+### 2026-06-23 — Google sign-in: redirect-FIRST (popups silently blocked → no popup)
+
+Live config probe (via the public API key, getProjectConfig + createAuthUri) PROVED
+the Firebase side is fully correct: navbharatai.com + www.navbharatai.com are in
+authorizedDomains, and the Google provider is enabled (createAuthUri returned a
+valid OAuth authUri with client_id 950841184325-3hcg…). So the 2 days spent on
+domains/providers were chasing a non-issue.
+
+User reported: clicking Google opens NO popup at all. Cause: the browser silently
+blocks the OAuth popup (no popup, and often no catchable error), so a popup-first
+flow dies quietly. Fix: handleGoogleSignIn is now REDIRECT-FIRST —
+signInWithRedirect navigates the whole page to Google (no popup needed, cannot be
+blocked); getRedirectResult() (existing effect) completes the sign-in on return.
+Removed the now-unused signInWithPopup import.
+
+Gate green: tsc frontend, build, 1884 vitest.

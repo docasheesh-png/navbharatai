@@ -86,6 +86,8 @@ export function architectSystemPrompt(): string {
     '- evaluate also reports a missing ERROR BOUNDARY for a real React app. Add one',
     '  at the app root so a single render error degrades gracefully instead of',
     '  white-screening the whole UI.',
+    '- evaluate also reports insecure SECURITY CONFIG (disabled TLS verification,',
+    '  wildcard CORS). Fix these — never ship man-in-the-middle or open-CORS holes.',
     '- Before finishing a real app, call generate_readme to write an accurate',
     '  README.md (stack, how to run, structure) derived from the real project.',
     '- If the app reads any env vars, call generate_env_example so .env.example',

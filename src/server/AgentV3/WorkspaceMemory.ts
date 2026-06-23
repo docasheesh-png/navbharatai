@@ -39,7 +39,7 @@ export interface ProjectGraph {
   dependencies: string[];
 }
 
-export type EpisodeKind = 'request' | 'error' | 'fix' | 'note';
+export type EpisodeKind = 'request' | 'error' | 'fix' | 'note' | 'audit';
 
 export interface Episode {
   ts: number;
@@ -165,6 +165,9 @@ export class WorkspaceMemory {
   recordError(text: string, file?: string): void { this.episode('error', text, file); }
   recordFix(text: string, file?: string): void { this.episode('fix', text, file); }
   recordNote(text: string, file?: string): void { this.episode('note', text, file); }
+  /** Governance decision-audit trail (Layer 58). Recorded but NOT fed back as a
+   *  build "lesson" — it is a separate, queryable record of risky actions taken. */
+  recordAudit(text: string, file?: string): void { this.episode('audit', text, file); }
 
   /** Aggregate the per-file facts into the project graph. */
   graph(): ProjectGraph {

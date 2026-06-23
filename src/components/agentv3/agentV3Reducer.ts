@@ -1,4 +1,4 @@
-import type { AgentCard, AgentRole, AgentV3ClientState, AgentV3WireEvent, FileChange } from './agentV3Types';
+import type { AgentCard, AgentRole, AgentV3ClientState, AgentV3WireEvent, FileChange, NarrationLine } from './agentV3Types';
 
 // Pure reducer: folds each NDJSON wire event into the client state that drives
 // all merged surfaces (narration, files, diffs, terminal, git/history, todos,
@@ -29,12 +29,60 @@ function applyFileChange(files: FileChange[], change: FileChange): FileChange[] 
 
 export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEvent): AgentV3ClientState {
   switch (event.type) {
+    case 'workspace':
+      return { ...state, workspaceId: event.workspaceId };
+
+    case 'stream_delta': {
+      const kind = event.kind ?? 'text';
+      // Find the LAST live line for this turn id + kind and append the delta.
+      let foundIdx = -1;
+      for (let i = state.narration.length - 1; i >= 0; i--) {
+        const line = state.narration[i];
+        if (line.id === event.id && (line.kind ?? 'text') === kind) {
+          foundIdx = i;
+          break;
+        }
+      }
+      let narration: NarrationLine[];
+      if (foundIdx >= 0) {
+        narration = state.narration.map((line, i) =>
+          i === foundIdx ? { ...line, text: line.text + event.delta } : line,
+        );
+      } else {
+        narration = [
+          ...state.narration,
+          { agent: event.agent, text: event.delta, ts: event.ts, id: event.id, kind, streaming: true },
+        ].slice(-MAX_NARRATION);
+      }
+      return {
+        ...state,
+        narration,
+        agents: touchAgent(state.agents, event.agent, event.delta, true, event.ts),
+      };
+    }
+
     case 'narration':
     case 'thinking': {
-      const narration =
-        event.type === 'narration'
-          ? [...state.narration, { agent: event.agent, text: event.text, ts: event.ts }].slice(-MAX_NARRATION)
-          : state.narration;
+      let narration = state.narration;
+      if (event.type === 'narration') {
+        // If this turn was streamed (its id already has a text line), finalize that
+        // line in place instead of pushing a duplicate. Otherwise (no id, or no
+        // matching line) push a new line — the original/backward-compatible path.
+        const idx =
+          event.id != null
+            ? state.narration.findIndex((line) => line.id === event.id && (line.kind ?? 'text') === 'text')
+            : -1;
+        if (idx >= 0) {
+          narration = state.narration.map((line, i) =>
+            i === idx ? { ...line, text: event.text, streaming: false } : line,
+          );
+        } else {
+          narration = [
+            ...state.narration,
+            { agent: event.agent, text: event.text, ts: event.ts, id: event.id },
+          ].slice(-MAX_NARRATION);
+        }
+      }
       return {
         ...state,
         narration,
@@ -44,13 +92,37 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
 
     case 'tool_call': {
       const action = describeToolCall(event.tool, event.input);
-      return { ...state, agents: touchAgent(state.agents, event.agent, action, true, event.ts) };
+      const agents = touchAgent(state.agents, event.agent, action, true, event.ts);
+      // Route bash commands to the terminal surface (real execution log).
+      if (event.tool === 'bash') {
+        const cmd = typeof (event.input as Record<string, unknown>)?.command === 'string'
+          ? String((event.input as Record<string, unknown>).command)
+          : '';
+        return {
+          ...state,
+          agents,
+          pendingBash: { ...state.pendingBash, [event.callId]: cmd },
+          terminal: [...state.terminal, `$ ${cmd}`].slice(-MAX_TERMINAL),
+        };
+      }
+      return { ...state, agents };
     }
 
     case 'tool_result': {
       const existing = state.agents[event.agent];
       const action = existing ? existing.lastAction : event.summary;
-      return { ...state, agents: touchAgent(state.agents, event.agent, action, false, event.ts) };
+      const agents = touchAgent(state.agents, event.agent, action, false, event.ts);
+      // If this completes a bash call, append its output to the terminal.
+      if (state.pendingBash[event.callId] !== undefined) {
+        const { [event.callId]: _done, ...rest } = state.pendingBash;
+        return {
+          ...state,
+          agents,
+          pendingBash: rest,
+          terminal: [...state.terminal, event.summary].slice(-MAX_TERMINAL),
+        };
+      }
+      return { ...state, agents };
     }
 
     case 'agent_spawned':
@@ -74,20 +146,24 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'checkpoint':
       return { ...state, checkpoints: [...state.checkpoints, event.checkpoint] };
 
+    case 'preview':
+      return { ...state, previewUrl: event.url };
+
     case 'permission_request':
       return {
         ...state,
+        pendingPermission: { callId: event.callId, action: event.action },
         agents: touchAgent(state.agents, event.agent, `awaiting permission: ${event.action}`, true, event.ts),
       };
 
     case 'done':
-      return { ...state, done: true, ok: event.ok, summary: event.summary };
+      return { ...state, done: true, ok: event.ok, summary: event.summary, pendingPermission: undefined };
 
     case 'result':
-      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd };
+      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, pendingPermission: undefined };
 
     case 'error':
-      return { ...state, done: true, ok: false, error: event.message };
+      return { ...state, done: true, ok: false, error: event.message, pendingPermission: undefined };
 
     default:
       return state;
@@ -116,6 +192,10 @@ function describeToolCall(tool: string, input: unknown): string {
       return 'listing files';
     case 'update_todo':
       return 'updating the plan';
+    case 'recall':
+      return typeof arg.query === 'string' ? `recalling "${arg.query}"` : 'recalling from memory';
+    case 'evaluate':
+      return 'evaluating the architecture';
     default:
       return `using ${tool}`;
   }

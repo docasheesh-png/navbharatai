@@ -116,62 +116,13 @@ export async function callOpenAI(message: string, key?: string, history: any[] =
 }
 
 export async function callClaude(message: string, key?: string, history: any[] = [], systemInstruction?: string): Promise<string> {
-  const { key: resolvedKey, source } = resolveApiKey('claude', key);
+  const { key: resolvedKey } = resolveApiKey('claude', key);
   if (!resolvedKey) {
     throw new Error('Claude API Key not available');
   }
 
-  // Support for OpenAI compatible proxy (e.g. aicredits.in) when ANTHROPIC_BASE_URL is configured
-  if (process.env.ANTHROPIC_BASE_URL) {
-    console.log(`[AUTH] Claude routing via OpenAI proxy: ${process.env.ANTHROPIC_BASE_URL} (source: ${source})`);
-    const client = new OpenAI({
-      apiKey: resolvedKey,
-      baseURL: process.env.ANTHROPIC_BASE_URL
-    });
-    // Try standard proxy/gateway compatible model names (including verified aicredits active mappings)
-    const modelsToTry = [
-      'anthropic/claude-sonnet-4.6',
-      'anthropic/claude-sonnet-4',
-      'claude-sonnet-4-6',
-      'anthropic/claude-opus-4.7-fast',
-      'anthropic/claude-opus-4.7',
-      'anthropic/claude-3-haiku',
-      'claude-3-5-sonnet-latest',
-      'claude-3-5-sonnet',
-      'claude-3.5-sonnet',
-      'anthropic/claude-3.5-sonnet',
-      'claude-3-5-sonnet-20241022',
-      'anthropic/claude-3-5-sonnet-latest',
-      'claude-3-opus'
-    ];
-
-    let lastErr = null;
-    for (const modelName of modelsToTry) {
-      try {
-        console.log(`[AUTH] Calling Claude proxy model: ${modelName}`);
-        const completion = await client.chat.completions.create({
-          model: modelName,
-          max_tokens: 16000,   // generous cap so code generation isn't truncated to a tiny app
-          messages: [
-            ...(systemInstruction ? [{ role: 'system' as const, content: systemInstruction }] : [{ role: 'system' as const, content: getBharatContext() }]),
-            ...history.map(m => ({
-              role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
-              content: m.text as string
-            })),
-            { role: 'user' as const, content: message }
-          ]
-        });
-        const ans = completion.choices[0]?.message?.content;
-        if (ans) return ans;
-      } catch (err: any) {
-        console.warn(`[AUTH] Claude proxy failed with model ${modelName}: ${err.message}`);
-        lastErr = err;
-      }
-    }
-    throw lastErr || new Error('Claude proxy failed');
-  }
-
-  // Normal Anthropic SDK usage (e.g. for User supplied keys with no custom base URL)
+  // Native Anthropic SDK (direct to api.anthropic.com). The OpenAI-compatible
+  // aicredits proxy has been removed — Claude is called natively only.
   const client = getClaude(key);
   if (!client) throw new Error('Claude API Key not available');
 

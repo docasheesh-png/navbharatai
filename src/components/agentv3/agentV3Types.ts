@@ -5,16 +5,15 @@
 // the final {type:'result'} line streamed by /api/agentv3/chat. Client and server
 // communicate only via this JSON contract — normal client/server decoupling.
 
+// Mirrors the server roster (src/server/AgentV3/types.ts). The six-layer AI team.
 export type AgentRole =
   | 'architect'
-  | 'frontend'
-  | 'backend'
-  | 'database'
-  | 'designer'
-  | 'qa'
-  | 'debugger'
-  | 'reviewer'
-  | 'deploy';
+  | 'requirement' | 'planner' | 'product'
+  | 'frontend' | 'backend' | 'fullstack' | 'database' | 'mobile' | 'api' | 'devops' | 'infrastructure' | 'designer'
+  | 'qa' | 'tester' | 'security' | 'performance' | 'accessibility' | 'reviewer'
+  | 'debugger' | 'refactor' | 'optimizer'
+  | 'docs' | 'researcher'
+  | 'deploy' | 'monitor' | 'recovery';
 
 export type TodoStatus = 'pending' | 'in_progress' | 'done' | 'blocked';
 
@@ -39,8 +38,10 @@ export interface GitCheckpoint {
 
 /** One NDJSON line from /api/agentv3/chat: an engine AgentEvent or the final result. */
 export type AgentV3WireEvent =
-  | { type: 'narration'; agent: AgentRole; text: string; ts: number }
+  | { type: 'workspace'; workspaceId: string; ts: number }
+  | { type: 'narration'; agent: AgentRole; text: string; ts: number; id?: string }
   | { type: 'thinking'; agent: AgentRole; text: string; ts: number }
+  | { type: 'stream_delta'; agent: AgentRole; id: string; kind: 'text' | 'thinking'; delta: string; ts: number }
   | { type: 'tool_call'; agent: AgentRole; tool: string; input: unknown; callId: string; ts: number }
   | { type: 'tool_result'; agent: AgentRole; callId: string; ok: boolean; summary: string; ts: number }
   | { type: 'file_changed'; agent: AgentRole; change: FileChange; ts: number }
@@ -50,6 +51,7 @@ export type AgentV3WireEvent =
   | { type: 'agent_spawned'; agent: AgentRole; task: string; ts: number }
   | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
+  | { type: 'preview'; url: string; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number }
   | { type: 'error'; message: string; ts: number }
   | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number };
@@ -67,6 +69,12 @@ export interface NarrationLine {
   agent: AgentRole;
   text: string;
   ts: number;
+  /** Ties a line to its streamed deltas so a final narration finalizes (not dupes) it. */
+  id?: string;
+  /** 'text' = visible reply, 'thinking' = dim/italic thinking summary. */
+  kind?: 'text' | 'thinking';
+  /** True while the line is still receiving deltas (renders a typing cursor). */
+  streaming?: boolean;
 }
 
 /** The full client view a v3.0 build renders — one source for all merged surfaces. */
@@ -85,8 +93,16 @@ export interface AgentV3ClientState {
   checkpoints: GitCheckpoint[];
   /** Plan-mode text. */
   plan: string;
+  /** Live preview URL (the running app in the sandbox), once published. */
+  previewUrl?: string;
+  /** A pending plan/permission gate awaiting the user's Approve/Reject (P4). */
+  pendingPermission?: { callId: string; action: string };
+  /** The sandbox workspace id for this build (enables History → restore). */
+  workspaceId?: string;
   /** The live "AI Team" tracker, keyed by role (D9). */
   agents: Record<string, AgentCard>;
+  /** Internal: bash callId → command, so a tool_result can be routed to the terminal. */
+  pendingBash: Record<string, string>;
   /** Terminal state. */
   done: boolean;
   ok?: boolean;
@@ -105,6 +121,7 @@ export function initialAgentV3State(): AgentV3ClientState {
     checkpoints: [],
     plan: '',
     agents: {},
+    pendingBash: {},
     done: false,
   };
 }

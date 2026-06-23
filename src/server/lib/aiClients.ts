@@ -147,17 +147,7 @@ export const getClaude = (userKey?: string): Anthropic | null => {
       return null;
   }
   console.log(`[DEBUG] getClaude: Key found, source: ${source}, length: ${key.length}`);
-  let baseUrl = process.env.ANTHROPIC_BASE_URL;
-  if (baseUrl && source === 'SYSTEM') {
-    if (baseUrl.endsWith('/v1')) {
-      baseUrl = baseUrl.slice(0, -3);
-    } else if (baseUrl.endsWith('/v1/')) {
-      baseUrl = baseUrl.slice(0, -4);
-    }
-  }
-  console.log(`[DEBUG] getClaude: BaseURL: ${baseUrl || 'default'}`);
-  return new Anthropic({
-    apiKey: key,
-    ...(baseUrl ? { baseURL: baseUrl } : {})
-  });
+  // Native Anthropic endpoint only — the aicredits proxy (ANTHROPIC_BASE_URL) has
+  // been removed, so Claude always talks directly to api.anthropic.com.
+  return new Anthropic({ apiKey: key });
 };

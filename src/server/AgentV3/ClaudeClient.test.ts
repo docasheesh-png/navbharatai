@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { ClaudeClient, parseMessage, type MessagesCreateClient } from './ClaudeClient';
+import { ClaudeClient, parseMessage, isRetryableError, type MessagesCreateClient } from './ClaudeClient';
 import { opusEquivalentUsd, billedAmountUsd, STANDARD_MULTIPLIER, ONLY_OPUS_MULTIPLIER } from './pricing';
 
 describe('parseMessage', () => {
@@ -80,6 +80,78 @@ describe('ClaudeClient.runTurn (injected mock client)', () => {
   });
 });
 
+describe('ClaudeClient streaming (word-by-word + thinking)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('delivers text/thinking deltas via callbacks and parses the final message', async () => {
+    const finalMessage = vi.fn().mockResolvedValue({
+      content: [
+        { type: 'text', text: 'Hello world' },
+        { type: 'tool_use', id: 'tu_1', name: 'write_file', input: { path: 'a.ts' } },
+      ],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 12, output_tokens: 8 },
+    });
+    async function* gen() {
+      yield { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'Let me ' } };
+      yield { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'plan' } };
+      yield { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello ' } };
+      yield { type: 'content_block_delta', delta: { type: 'text_delta', text: 'world' } };
+    }
+    const stream = vi.fn().mockImplementation(() => {
+      const iter = gen() as AsyncIterable<unknown> & { finalMessage: typeof finalMessage };
+      iter.finalMessage = finalMessage;
+      return iter;
+    });
+    const create = vi.fn();
+    const client = new ClaudeClient({ messages: { create, stream } } as MessagesCreateClient);
+
+    const textDeltas: string[] = [];
+    const thinkingDeltas: string[] = [];
+    const res = await client.runTurn({
+      model: 'm',
+      messages: [],
+      thinking: true,
+      onText: (d) => textDeltas.push(d),
+      onThinking: (d) => thinkingDeltas.push(d),
+    });
+
+    // Streamed, not the non-streaming create path.
+    expect(stream).toHaveBeenCalledTimes(1);
+    expect(create).not.toHaveBeenCalled();
+    // Adaptive thinking was requested in the right shape.
+    expect(stream.mock.calls[0][0].thinking).toEqual({ type: 'adaptive', display: 'summarized' });
+
+    expect(textDeltas).toEqual(['Hello ', 'world']);
+    expect(thinkingDeltas).toEqual(['Let me ', 'plan']);
+    expect(res.text).toBe('Hello world');
+    expect(res.toolUses).toHaveLength(1);
+    expect(res.usage.inputTokens).toBe(12);
+  });
+
+  it('uses the non-streaming path when no callbacks are provided (backward compatible)', async () => {
+    const create = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
+    const stream = vi.fn();
+    const client = new ClaudeClient({ messages: { create, stream } } as MessagesCreateClient);
+    const res = await client.runTurn({ model: 'm', messages: [] });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(stream).not.toHaveBeenCalled();
+    expect(res.text).toBe('ok');
+  });
+
+  it('falls back to the non-streaming create path when streaming throws a transient error', async () => {
+    const create = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'recovered' }], stop_reason: 'end_turn' });
+    const stream = vi.fn().mockImplementation(() => {
+      throw Object.assign(new Error('overloaded'), { status: 529 });
+    });
+    const client = new ClaudeClient({ messages: { create, stream } } as MessagesCreateClient, { sleep: async () => {}, baseDelayMs: 0 });
+    const res = await client.runTurn({ model: 'm', messages: [], onText: () => {} });
+    expect(stream).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(res.text).toBe('recovered');
+  });
+});
+
 describe('ClaudeClient prompt caching (RC-2)', () => {
   function mock() {
     const create = vi.fn().mockResolvedValue({ content: [], stop_reason: 'end_turn' });
@@ -117,6 +189,58 @@ describe('ClaudeClient prompt caching (RC-2)', () => {
   });
 });
 
+describe('ClaudeClient retry/backoff (production hardening)', () => {
+  const noSleep = async () => {};
+
+  it('retries a transient 529 (overloaded) then succeeds', async () => {
+    let calls = 0;
+    const create = vi.fn().mockImplementation(async () => {
+      calls++;
+      if (calls < 3) {
+        const e = Object.assign(new Error('overloaded'), { status: 529 });
+        throw e;
+      }
+      return { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' };
+    });
+    const client = new ClaudeClient({ messages: { create } }, { sleep: noSleep, baseDelayMs: 0 });
+    const res = await client.runTurn({ model: 'm', messages: [] });
+    expect(calls).toBe(3);
+    expect(res.text).toBe('ok');
+  });
+
+  it('fails fast on a 400 (no retry)', async () => {
+    const create = vi.fn().mockImplementation(async () => {
+      throw Object.assign(new Error('bad request'), { status: 400 });
+    });
+    const client = new ClaudeClient({ messages: { create } }, { sleep: noSleep });
+    await expect(client.runTurn({ model: 'm', messages: [] })).rejects.toThrow('bad request');
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up after maxRetries on a persistent 503', async () => {
+    const create = vi.fn().mockImplementation(async () => {
+      throw Object.assign(new Error('down'), { status: 503 });
+    });
+    const client = new ClaudeClient({ messages: { create } }, { sleep: noSleep, maxRetries: 2 });
+    await expect(client.runTurn({ model: 'm', messages: [] })).rejects.toThrow('down');
+    expect(create).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
+  });
+});
+
+describe('isRetryableError', () => {
+  it('treats rate-limit / overload / 5xx as retryable, client errors as fatal', () => {
+    expect(isRetryableError({ status: 429 })).toBe(true);
+    expect(isRetryableError({ status: 529 })).toBe(true);
+    expect(isRetryableError({ status: 503 })).toBe(true);
+    expect(isRetryableError({ status: 400 })).toBe(false);
+    expect(isRetryableError({ status: 401 })).toBe(false);
+    expect(isRetryableError({ status: 404 })).toBe(false);
+    expect(isRetryableError(new Error('Connection error'))).toBe(true);
+    expect(isRetryableError(new Error('request timeout'))).toBe(true);
+    expect(isRetryableError(new Error('totally invalid prompt'))).toBe(false);
+  });
+});
+
 describe('pricing (D5/D6) — margin is structurally positive', () => {
   it('computes Opus-equivalent cost from default $15/$75 per MTok', () => {
     // 1M input + 1M output = $15 + $75 = $90
@@ -136,5 +260,52 @@ describe('pricing (D5/D6) — margin is structurally positive', () => {
   it('never goes negative on zero/garbage token counts', () => {
     expect(billedAmountUsd({ inputTokens: 0, outputTokens: 0 })).toBe(0);
     expect(billedAmountUsd({ inputTokens: -5, outputTokens: -5 })).toBe(0);
+  });
+});
+
+import { sanitizeApiKey } from './ClaudeClient';
+
+describe('sanitizeApiKey', () => {
+  it('strips surrounding whitespace, newlines and wrapping quotes', () => {
+    expect(sanitizeApiKey('  sk-ant-abc\n')).toBe('sk-ant-abc');
+    expect(sanitizeApiKey('"sk-ant-abc"')).toBe('sk-ant-abc');
+    expect(sanitizeApiKey("'sk-ant-abc'")).toBe('sk-ant-abc');
+    expect(sanitizeApiKey('sk-ant-abc')).toBe('sk-ant-abc');
+  });
+  it('returns undefined for empty/missing values', () => {
+    expect(sanitizeApiKey(undefined)).toBeUndefined();
+    expect(sanitizeApiKey('   ')).toBeUndefined();
+    expect(sanitizeApiKey('')).toBeUndefined();
+  });
+});
+
+import { resolveAnthropicBaseUrl } from './ClaudeClient';
+
+describe('resolveAnthropicBaseUrl', () => {
+  const prevShared = process.env.ANTHROPIC_BASE_URL;
+  const prevOverride = process.env.AGENTV3_ANTHROPIC_BASE_URL;
+  afterEach(() => {
+    if (prevShared === undefined) delete process.env.ANTHROPIC_BASE_URL;
+    else process.env.ANTHROPIC_BASE_URL = prevShared;
+    if (prevOverride === undefined) delete process.env.AGENTV3_ANTHROPIC_BASE_URL;
+    else process.env.AGENTV3_ANTHROPIC_BASE_URL = prevOverride;
+  });
+
+  it('defaults to the real Anthropic endpoint', () => {
+    delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.AGENTV3_ANTHROPIC_BASE_URL;
+    expect(resolveAnthropicBaseUrl()).toBe('https://api.anthropic.com');
+  });
+
+  it('IGNORES the ambient ANTHROPIC_BASE_URL proxy (the 404 cause)', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.aicredits.in/v1';
+    delete process.env.AGENTV3_ANTHROPIC_BASE_URL;
+    // The SDK would read ANTHROPIC_BASE_URL if we left baseURL unset; we must not.
+    expect(resolveAnthropicBaseUrl()).toBe('https://api.anthropic.com');
+  });
+
+  it('honours an explicit AgentV3 override and strips a trailing /v1', () => {
+    process.env.AGENTV3_ANTHROPIC_BASE_URL = 'https://my-gateway.example.com/v1';
+    expect(resolveAnthropicBaseUrl()).toBe('https://my-gateway.example.com');
   });
 });

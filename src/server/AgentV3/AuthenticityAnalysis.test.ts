@@ -1,0 +1,89 @@
+import { describe, it, expect } from 'vitest';
+import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
+
+describe('scanAuthenticity', () => {
+  it('flags a "not implemented" throw as high', () => {
+    const issues = scanAuthenticity(
+      'src/service.ts',
+      'export function pay() {\n  throw new Error("Not implemented");\n}',
+    );
+    expect(issues.some((x) => x.severity === 'high')).toBe(true);
+    const hit = issues.find((x) => x.line === 2);
+    expect(hit).toBeTruthy();
+    expect(hit!.snippet).toContain('Not implemented');
+  });
+
+  it('flags TODO and FIXME comment markers as medium', () => {
+    const todo = scanAuthenticity('a.ts', 'const x = 1; // TODO: wire this up');
+    expect(todo.some((x) => x.kind === 'todo-marker' && x.severity === 'medium')).toBe(true);
+    const fixme = scanAuthenticity('b.ts', '// FIXME later');
+    expect(fixme.some((x) => x.kind === 'todo-marker')).toBe(true);
+  });
+
+  it('flags a console.log-only handler as an empty handler (medium)', () => {
+    const issues = scanAuthenticity(
+      'src/handler.ts',
+      'function onSubmit(e) {\n  console.log("submitted");\n}',
+    );
+    expect(issues.some((x) => x.kind === 'empty-handler' && x.severity === 'medium')).toBe(true);
+  });
+
+  it('flags lorem-ipsum and mockData stubs as high', () => {
+    const lorem = scanAuthenticity('src/page.tsx', 'const body = "Lorem ipsum dolor sit amet";');
+    expect(lorem.some((x) => x.kind === 'lorem-ipsum' && x.severity === 'high')).toBe(true);
+    const mock = scanAuthenticity('src/data.ts', 'export const users = mockData;');
+    expect(mock.some((x) => x.kind === 'fake-data-identifier' && x.severity === 'high')).toBe(true);
+  });
+
+  it('returns [] for clean, real code (no false positives)', () => {
+    const clean = scanAuthenticity(
+      'src/math.ts',
+      'export function add(a: number, b: number): number {\n  return a + b;\n}',
+    );
+    expect(clean).toEqual([]);
+  });
+
+  it('does not flag a handler with a real body', () => {
+    const real = scanAuthenticity(
+      'src/handler.ts',
+      'function onSubmit(e) {\n  e.preventDefault();\n  save(form);\n}',
+    );
+    expect(real).toEqual([]);
+  });
+
+  it('returns [] for files under test or node_modules paths', () => {
+    const code = 'throw new Error("Not implemented"); // TODO';
+    expect(scanAuthenticity('src/foo.test.ts', code)).toEqual([]);
+    expect(scanAuthenticity('src/__tests__/foo.ts', code)).toEqual([]);
+    expect(scanAuthenticity('node_modules/pkg/index.js', code)).toEqual([]);
+  });
+});
+
+describe('authenticitySummary', () => {
+  it('reports a clean line when there are no issues', () => {
+    expect(authenticitySummary([])).toContain('No fake/incomplete code detected');
+  });
+
+  it('summarises by severity with file:line lines when non-empty', () => {
+    const sum = authenticitySummary([
+      { file: 'a.ts', line: 1, kind: 'not-implemented', severity: 'high', snippet: 'throw new Error("Not implemented")' },
+      { file: 'b.ts', line: 2, kind: 'todo-marker', severity: 'medium', snippet: '// TODO' },
+    ]);
+    expect(sum).toContain('1 high');
+    expect(sum).toContain('1 medium');
+    expect(sum).toContain('a.ts:1');
+    expect(sum).toContain('not-implemented');
+  });
+
+  it('truncates to 15 lines with a "more" tail', () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({
+      file: `f${i}.ts`,
+      line: i + 1,
+      kind: 'todo-marker' as const,
+      severity: 'medium' as const,
+      snippet: '// TODO',
+    }));
+    const sum = authenticitySummary(many);
+    expect(sum).toContain('…and 5 more.');
+  });
+});

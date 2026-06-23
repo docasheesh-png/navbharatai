@@ -5,6 +5,7 @@ import { collection, addDoc } from 'firebase/firestore';
 import { getDb } from '../lib/db';
 import { aiRouter } from '../lib/aiRouter';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
+import { buildDocumentContext } from '../lib/attachmentText';
 
 /**
  * Chat routes (general + Vishwakarma tiers) extracted from the server.ts monolith
@@ -221,13 +222,12 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     const visionAttachments = attachments.filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
     const textAttachments = attachments.filter(f => !f.type.startsWith('image/') && f.type !== 'application/pdf');
 
-    // Append decoded text file content to message
+    // Extract document content (txt/csv/json/code AND Word/Excel/PowerPoint/ZIP)
+    // to real text via the shared extractor, then append to the message so any
+    // text model can read it — no per-call API cost, works for "any file".
     if (textAttachments.length > 0) {
-      const textParts = textAttachments.map(f => {
-        const content = Buffer.from(f.base64, 'base64').toString('utf8').slice(0, 8000);
-        return `\n\n[Attached file: ${f.name}]\n\`\`\`\n${content}\n\`\`\``;
-      });
-      message = (message || 'Please review these files:') + textParts.join('');
+      const docBlock = await buildDocumentContext(textAttachments);
+      if (docBlock) message = (message || 'Please review these files:') + '\n\n' + docBlock;
     }
     // Ensure file-only messages have a prompt
     if (!message && visionAttachments.length > 0) message = visionAttachments[0].type === 'application/pdf' ? 'Please analyze this PDF and extract all relevant information.' : 'Please describe and analyze this image.';
@@ -273,8 +273,9 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     if (visionAttachments.length > 0) {
       const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
       const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
-      if (geminiKey || projectId) {
+      {
         try {
+          if (!geminiKey && !projectId) throw new Error('No Gemini/Vertex credentials — using Grok/Claude vision fallback');
           const { GoogleGenAI } = await import('@google/genai');
           const ai = new GoogleGenAI({ apiKey: geminiKey || 'vertex' });
           const parts: any[] = [{ text: contextualMessage }];
@@ -366,6 +367,45 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
                 }
               } catch (grokVisionErr: any) { console.warn('[CHAT/VISION] Grok vision failed:', grokVisionErr.message); }
             }
+          }
+          // Last-resort vision fallback: Claude (native image + PDF document support).
+          // Kept LAST so the cheap providers (Gemini/Grok) are always preferred —
+          // Claude only runs if those are unavailable, guaranteeing files still work
+          // whenever ANY one provider key is set in the environment.
+          const anthropicVisionKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
+          if (anthropicVisionKey) {
+            try {
+              const Anthropic = (await import('@anthropic-ai/sdk')).default;
+              const claude = new Anthropic({ apiKey: anthropicVisionKey });
+              const claudeContent: any[] = [
+                ...visionAttachments.map(f => f.type === 'application/pdf'
+                  ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.base64 } }
+                  : { type: 'image', source: { type: 'base64', media_type: f.type, data: f.base64 } }),
+                { type: 'text', text: contextualMessage },
+              ];
+              const cr = await claude.messages.create({
+                model: 'claude-3-5-sonnet-20241022', max_tokens: 1500,
+                system: systemPrompt || undefined,
+                messages: [{ role: 'user', content: claudeContent }],
+              });
+              const cText = (cr.content.find((c: any) => c.type === 'text') as any)?.text?.trim();
+              if (cText) {
+                if (req.body.stream === true) {
+                  if (!res.headersSent) {
+                    res.setHeader('Content-Type', 'text/event-stream');
+                    res.setHeader('Cache-Control', 'no-cache');
+                    res.setHeader('Connection', 'keep-alive');
+                    res.setHeader('X-Accel-Buffering', 'no');
+                    res.flushHeaders();
+                  }
+                  if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: cText })}\n\n`);
+                  if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+                } else {
+                  res.json({ reply: cText });
+                }
+                return;
+              }
+            } catch (claudeVisionErr: any) { console.warn('[CHAT/VISION] Claude vision failed:', claudeVisionErr.message); }
           }
           // All dedicated vision providers failed — return a clear error (do NOT fall
           // through to the text-only race router which would silently drop the image).

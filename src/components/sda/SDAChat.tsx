@@ -44,7 +44,7 @@ interface SDAChatProps {
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const ACCEPTED_TYPES = 'image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.txt,.csv,.json';
+const ACCEPTED_TYPES = 'image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.txt,.csv,.json,.md,.docx,.xlsx,.xls,.pptx,.zip';
 const MAX_FILE_MB = 10;
 const BASE_HEIGHT = 44;
 const MAX_HEIGHT = BASE_HEIGHT * 5; // 5x max grow

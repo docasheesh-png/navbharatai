@@ -62,6 +62,29 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(s.checkpoints[0].sha).toBe('abc123');
   });
 
+  it('sets a pending permission gate and clears it on completion', () => {
+    let s = agentV3Reducer(initialAgentV3State(), {
+      type: 'permission_request',
+      agent: 'architect',
+      action: 'Approve this plan to start building',
+      callId: 'req-1',
+      ts: 1,
+    });
+    expect(s.pendingPermission).toEqual({ callId: 'req-1', action: 'Approve this plan to start building' });
+    s = agentV3Reducer(s, { type: 'done', ok: true, summary: 'built', ts: 2 });
+    expect(s.pendingPermission).toBeUndefined();
+  });
+
+  it('stores the workspace id for restore', () => {
+    const s = agentV3Reducer(initialAgentV3State(), { type: 'workspace', workspaceId: 'ws-42', ts: 1 });
+    expect(s.workspaceId).toBe('ws-42');
+  });
+
+  it('stores the live preview URL', () => {
+    const s = agentV3Reducer(initialAgentV3State(), { type: 'preview', url: 'https://app.sandbox.dev', ts: 1 });
+    expect(s.previewUrl).toBe('https://app.sandbox.dev');
+  });
+
   it('marks done/ok/billed on result and error on error', () => {
     const done = agentV3Reducer(initialAgentV3State(), {
       type: 'result',
@@ -80,11 +103,82 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(errored.error).toBe('boom');
   });
 
+  it('routes bash command + result to the terminal surface', () => {
+    let s = initialAgentV3State();
+    s = agentV3Reducer(s, {
+      type: 'tool_call',
+      agent: 'backend',
+      tool: 'bash',
+      input: { command: 'npm install' },
+      callId: 'b1',
+      ts: 1,
+    });
+    expect(s.terminal).toEqual(['$ npm install']);
+    s = agentV3Reducer(s, { type: 'tool_result', agent: 'backend', callId: 'b1', ok: true, summary: 'exit=0 added 12 packages', ts: 2 });
+    expect(s.terminal).toEqual(['$ npm install', 'exit=0 added 12 packages']);
+    expect(s.pendingBash).toEqual({});
+  });
+
+  it('does not route non-bash tool results to the terminal', () => {
+    let s = initialAgentV3State();
+    s = agentV3Reducer(s, {
+      type: 'tool_call',
+      agent: 'frontend',
+      tool: 'write_file',
+      input: { path: 'a.ts' },
+      callId: 'w1',
+      ts: 1,
+    });
+    s = agentV3Reducer(s, { type: 'tool_result', agent: 'frontend', callId: 'w1', ok: true, summary: 'Created a.ts', ts: 2 });
+    expect(s.terminal).toEqual([]);
+  });
+
   it('appendTerminal accumulates and bounds terminal output', () => {
     let s = initialAgentV3State();
     s = appendTerminal(s, 'exit=0');
     s = appendTerminal(s, 'hello');
     expect(s.terminal).toEqual(['exit=0', 'hello']);
+  });
+
+  it('accumulates stream_delta text then finalizes (not duplicates) on narration', () => {
+    let s = initialAgentV3State();
+    s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'text', delta: 'Hello', ts: 1 });
+    s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'text', delta: ' world', ts: 2 });
+    expect(s.narration).toHaveLength(1);
+    expect(s.narration[0].text).toBe('Hello world');
+    expect(s.narration[0].streaming).toBe(true);
+
+    // Final narration with the same id finalizes the existing line in place.
+    s = agentV3Reducer(s, { type: 'narration', agent: 'architect', text: 'Hello world', ts: 3, id: 't1' });
+    expect(s.narration).toHaveLength(1);
+    expect(s.narration[0].text).toBe('Hello world');
+    expect(s.narration[0].streaming).toBe(false);
+  });
+
+  it('keeps thinking deltas as a separate line from text deltas with the same id', () => {
+    let s = initialAgentV3State();
+    s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'thinking', delta: 'Let me', ts: 1 });
+    s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'thinking', delta: ' think', ts: 2 });
+    s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'text', delta: 'Done', ts: 3 });
+    expect(s.narration).toHaveLength(2);
+    expect(s.narration[0].kind).toBe('thinking');
+    expect(s.narration[0].text).toBe('Let me think');
+    expect(s.narration[1].kind).toBe('text');
+    expect(s.narration[1].text).toBe('Done');
+
+    // Finalizing the text turn leaves the thinking line untouched and does not dupe.
+    s = agentV3Reducer(s, { type: 'narration', agent: 'architect', text: 'Done', ts: 4, id: 't1' });
+    expect(s.narration).toHaveLength(2);
+    expect(s.narration[1].text).toBe('Done');
+    expect(s.narration[1].streaming).toBe(false);
+    expect(s.narration[0].text).toBe('Let me think');
+  });
+
+  it('backward compatible: a narration with no id pushes a new line as before', () => {
+    let s = initialAgentV3State();
+    s = agentV3Reducer(s, { type: 'narration', agent: 'architect', text: 'first', ts: 1 });
+    s = agentV3Reducer(s, { type: 'narration', agent: 'architect', text: 'second', ts: 2 });
+    expect(s.narration.map((n) => n.text)).toEqual(['first', 'second']);
   });
 
   it('is immutable — does not mutate the input state', () => {

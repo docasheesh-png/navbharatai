@@ -16,10 +16,8 @@ export class AnthropicProvider implements AIProvider {
   constructor(modelId = 'claude-3-5-sonnet-20241022') {
     this.modelId = modelId;
     console.log("ANTHROPIC_API_KEY check:", !!process.env.ANTHROPIC_API_KEY);
-    this.client = new Anthropic({
-        apiKey: process.env.ANTHROPIC_API_KEY,
-        baseURL: process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, '')
-    });
+    // Native Anthropic endpoint only — the aicredits proxy has been removed.
+    this.client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   }
 
   async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[]): Promise<AIProviderResponse> {

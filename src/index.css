@@ -105,6 +105,17 @@ html, body {
     background: rgba(79, 70, 229, 0.6);
   }
 
+  /* Hide the scrollbar while keeping the element scrollable (touch swipe).
+     Used by horizontally swipeable tab/header rows so they don't crop on
+     mobile yet stay clean on desktop. */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
 
 }
 

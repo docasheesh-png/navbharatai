@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type { Express } from 'express';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
+import { extractDocumentText } from '../lib/attachmentText';
 
 /**
  * Senior Doctor Assistant (SDA) chat route extracted from the server.ts monolith
@@ -70,15 +71,16 @@ export function registerSdaRoutes(app: Express): void {
       const hasFile = !!(fileData && fileType);
       const isImage = hasFile && fileType.startsWith('image/');
       const isPDF = hasFile && fileType === 'application/pdf';
-      const isTextDoc = hasFile && !isImage && !isPDF &&
-        (fileType === 'text/plain' || fileType === 'text/csv' || fileType === 'text/html' || fileType === 'application/json');
-
-      // For plain-text documents: decode base64 → prepend content to message (works with all providers)
-      if (isTextDoc && fileData) {
-        try {
-          const docText = Buffer.from(fileData, 'base64').toString('utf-8').slice(0, 10000);
+      // Any non-image, non-PDF file → extract real text (plain text/code AND Word,
+      // Excel, PowerPoint, ZIP) via the shared extractor and prepend to the message,
+      // so the document is readable by every provider at zero API cost. Images/PDFs
+      // keep their native multimodal path below (Gemini/Grok/Vertex/Claude).
+      const isDoc = hasFile && !isImage && !isPDF;
+      if (isDoc && fileData) {
+        const docText = await extractDocumentText({ name: fileName || 'document', type: fileType, base64: fileData });
+        if (docText && docText.trim()) {
           message = `[Document: ${fileName}]\n\n${docText}\n\n---\nDoctor's question: ${message}`;
-        } catch { /* keep original message */ }
+        }
       }
 
       const SDA_SYSTEM = `You are the Senior Doctor Assistant (SDA) — a Clinical Decision Support AI inside NavBharatAI, designed exclusively for qualified doctors (MBBS, residents, consultants, specialists).
@@ -376,35 +378,19 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
         if (anthropicKey) {
           try {
-            const rawBaseURL = process.env.ANTHROPIC_BASE_URL;
-            const baseURL = rawBaseURL?.replace(/\/v1\/?$/, '');
-            if (baseURL) {
-              const { default: OpenAI } = await import('openai');
-              const client = new OpenAI({ apiKey: anthropicKey, baseURL });
-              const userContent = isImage
-                ? [{ type: 'image_url', image_url: { url: `data:${fileType};base64,${fileData}` } }, { type: 'text', text: `[Document: ${fileName}]\n${message}` }]
-                : isPDF ? `[PDF attached: ${fileName}]\n${message}` : message;
-              for (const model of ['anthropic/claude-sonnet-4.6', 'claude-sonnet-4-6', 'anthropic/claude-3.5-sonnet', 'claude-3-5-sonnet-20241022']) {
-                try {
-                  const r = await client.chat.completions.create({ model, messages: buildOpenAIMsgs(userContent), max_tokens: 2000 });
-                  reply = r.choices[0]?.message?.content || '';
-                  if (reply) { console.log(`[SDA] Claude proxy ${model} succeeded`); break; }
-                } catch (e: any) { console.warn(`[SDA] Claude proxy ${model}:`, e.message); }
-              }
-            } else {
-              const A = (await import('@anthropic-ai/sdk')).default;
-              const userContent = isImage
-                ? [{ type: 'image', source: { type: 'base64', media_type: fileType, data: fileData } }, { type: 'text', text: `[Document: ${fileName}]\n${message}` }]
-                : isPDF
-                ? [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileData } }, { type: 'text', text: `[PDF Report: ${fileName}]\n${message}` }]
-                : message;
-              const r = await new A({ apiKey: anthropicKey }).messages.create({
-                model: 'claude-3-5-sonnet-20241022', max_tokens: 2000, system: SDA_SYSTEM_FINAL,
-                messages: [...historyForAI, { role: 'user', content: userContent }],
-              });
-              reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
-              if (reply) console.log('[SDA] Claude direct succeeded');
-            }
+            // Native Anthropic SDK only — the aicredits OpenAI-proxy path removed.
+            const A = (await import('@anthropic-ai/sdk')).default;
+            const userContent = isImage
+              ? [{ type: 'image', source: { type: 'base64', media_type: fileType, data: fileData } }, { type: 'text', text: `[Document: ${fileName}]\n${message}` }]
+              : isPDF
+              ? [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileData } }, { type: 'text', text: `[PDF Report: ${fileName}]\n${message}` }]
+              : message;
+            const r = await new A({ apiKey: anthropicKey }).messages.create({
+              model: 'claude-3-5-sonnet-20241022', max_tokens: 2000, system: SDA_SYSTEM_FINAL,
+              messages: [...historyForAI, { role: 'user', content: userContent }],
+            });
+            reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
+            if (reply) console.log('[SDA] Claude direct succeeded');
           } catch (e: any) { console.warn('[SDA] Claude err:', e.message); }
         }
       }

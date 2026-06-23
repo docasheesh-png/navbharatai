@@ -12,6 +12,51 @@ import {
 import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { firebaseConfig } from '../config/firebase';
+
+/**
+ * Temporary diagnostic: hit the Identity Toolkit sign-up endpoint directly from
+ * the app (so it carries the app's referer + key) and return the RAW server
+ * response. This reveals the real reason behind a bare auth/internal-error —
+ * e.g. "Requests from referer … are blocked", "CONFIGURATION_NOT_FOUND",
+ * "PROJECT_DISABLED", "API key not valid", or "ADMIN_ONLY_OPERATION" (which
+ * would actually mean the auth backend is fine).
+ */
+async function diagnoseAuth(): Promise<string> {
+  try {
+    const res = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${firebaseConfig.apiKey}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ returnSecureToken: true }) },
+    );
+    const text = await res.text();
+    return `DIAG ${res.status}: ${text}`.slice(0, 600);
+  } catch (e: any) {
+    return `DIAG fetch failed: ${e?.message ?? String(e)}`;
+  }
+}
+
+/**
+ * Surface the REAL reason behind a Firebase auth failure. The generic
+ * "auth/internal-error" message hides the underlying server response; this digs
+ * out the nested detail (customData / serverResponse) so the user can see and
+ * report the actual cause without a desktop console.
+ */
+function describeAuthError(err: any): string {
+  try {
+    const code = err?.code ? `[${err.code}] ` : '';
+    const msg = err?.message ?? String(err);
+    const cd = err?.customData ?? {};
+    let server = cd?.serverResponse ?? cd?._serverResponse ?? cd?.message ?? '';
+    if (server && typeof server !== 'string') server = JSON.stringify(server);
+    // Avoid repeating the same text twice.
+    const extra = server && !msg.includes(String(server)) ? ` — ${server}` : '';
+    // Best-effort: also log the full object for a desktop console.
+    try { console.error('AUTH_ERROR_FULL', JSON.stringify(err, Object.getOwnPropertyNames(err))); } catch { /* ignore */ }
+    return `${code}${msg}${extra}`.slice(0, 700) || 'Sign-in failed. Try again.';
+  } catch {
+    return err?.message || 'Sign-in failed. Try again.';
+  }
+}
 
 export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser: any, onClose: () => void }) => {
   const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
@@ -185,7 +230,8 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       setUser(result.user);
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Google sign-in failed. Try again.');
+      setError(`${describeAuthError(err)} · diagnosing…`);
+      setError(`${describeAuthError(err)}\n${await diagnoseAuth()}`);
     } finally {
       setLoading(false);
     }
@@ -208,7 +254,8 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       }
       onClose();
     } catch (err: any) {
-      setError(err.message);
+      setError(`${describeAuthError(err)} · diagnosing…`);
+      setError(`${describeAuthError(err)}\n${await diagnoseAuth()}`);
     } finally {
       setLoading(false);
     }
@@ -476,7 +523,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
           {error && (
             <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3 text-red-500 text-[10px] font-bold">
               <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{error}</span>
+              <span className="whitespace-pre-wrap break-words">{error}</span>
             </div>
           )}
 

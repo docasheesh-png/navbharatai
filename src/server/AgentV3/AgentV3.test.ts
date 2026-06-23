@@ -39,6 +39,15 @@ describe('AgentV3 feature flag (strangler-fig, default OFF)', () => {
     expect(isAgentV3Enabled('carol')).toBe(false);
     expect(isAgentV3Enabled(null)).toBe(false);
   });
+
+  it('matches an allowlist entry by email (case-insensitive) too', () => {
+    process.env.AGENTV3_ENABLED = 'true';
+    process.env.AGENTV3_ALLOWLIST = 'admin@example.com';
+    expect(isAgentV3Enabled('some-uid', 'admin@example.com')).toBe(true);
+    expect(isAgentV3Enabled('some-uid', 'ADMIN@example.com')).toBe(true);
+    expect(isAgentV3Enabled('some-uid', 'other@example.com')).toBe(false);
+    expect(isAgentV3Enabled('admin@example.com')).toBe(true); // uid field also matches
+  });
 });
 
 describe('AgentV3 status is honest (not ready until P1)', () => {

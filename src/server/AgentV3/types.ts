@@ -17,19 +17,56 @@ export type ToolName =
   | 'grep'
   | 'glob'
   | 'update_todo'
-  | 'task';
+  | 'update_preview'
+  | 'recall'
+  | 'evaluate'
+  | 'task'
+  | 'second_opinion'
+  | 'consensus';
 
-/** The multi-agent team roles (§3.3). 'architect' is the lead/orchestrator. */
+/**
+ * The multi-agent team roles (§3.3). 'architect' is the lead/orchestrator; every
+ * other role is a specialist worker the Architect can delegate to via the `task`
+ * tool. The roster spans the planning, development, quality, repair, knowledge
+ * and operations layers (Phase 1 — Agent Orchestration). Each role has a focused
+ * system prompt, a constrained tool set, and declared capabilities (see
+ * AgentRegistry) so work is routed to the right specialist.
+ */
 export type AgentRole =
+  // Lead
   | 'architect'
+  // Planning layer
+  | 'requirement'
+  | 'planner'
+  | 'product'
+  // Development layer
   | 'frontend'
   | 'backend'
+  | 'fullstack'
   | 'database'
+  | 'mobile'
+  | 'api'
+  | 'devops'
+  | 'infrastructure'
   | 'designer'
+  // Quality layer
   | 'qa'
-  | 'debugger'
+  | 'tester'
+  | 'security'
+  | 'performance'
+  | 'accessibility'
   | 'reviewer'
-  | 'deploy';
+  // Repair layer
+  | 'debugger'
+  | 'refactor'
+  | 'optimizer'
+  // Knowledge layer
+  | 'docs'
+  | 'researcher'
+  // Operations layer
+  | 'deploy'
+  | 'monitor'
+  | 'recovery';
 
 export type TodoStatus = 'pending' | 'in_progress' | 'done' | 'blocked';
 
@@ -66,8 +103,10 @@ export interface GitCheckpoint {
  * every surface stays in sync from one stream (§3.2).
  */
 export type AgentEvent =
-  | { type: 'narration'; agent: AgentRole; text: string; ts: number }
+  | { type: 'workspace'; workspaceId: string; ts: number }
+  | { type: 'narration'; agent: AgentRole; text: string; ts: number; id?: string }
   | { type: 'thinking'; agent: AgentRole; text: string; ts: number }
+  | { type: 'stream_delta'; agent: AgentRole; id: string; kind: 'text' | 'thinking'; delta: string; ts: number }
   | { type: 'tool_call'; agent: AgentRole; tool: ToolName; input: unknown; callId: string; ts: number }
   | { type: 'tool_result'; agent: AgentRole; callId: string; ok: boolean; summary: string; ts: number }
   | { type: 'file_changed'; agent: AgentRole; change: FileChange; ts: number }
@@ -77,6 +116,7 @@ export type AgentEvent =
   | { type: 'agent_spawned'; agent: AgentRole; task: string; ts: number }
   | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
+  | { type: 'preview'; url: string; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number }
   | { type: 'error'; message: string; ts: number };
 

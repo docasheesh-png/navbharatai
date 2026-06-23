@@ -27,6 +27,9 @@ class FakeActuator implements ActuatorPort {
     this.commands.push(command);
     return this.commandResult;
   }
+  async getPortUrl(_ws: string, port: number): Promise<string> {
+    return `https://sandbox-${port}.example.dev`;
+  }
 }
 
 function call(name: string, input: Record<string, unknown>, id = 't1'): ToolUse {
@@ -144,6 +147,37 @@ describe('ToolDispatcher', () => {
     expect(events.find((e) => e.type === 'todo_updated')).toBeTruthy();
   });
 
+  it('update_preview resolves the sandbox URL and emits a preview event', async () => {
+    const res = await d.dispatch(call('update_preview', { port: 5173 }));
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('https://sandbox-5173.example.dev');
+    const ev = events.find((e) => e.type === 'preview');
+    expect(ev && ev.type === 'preview' && ev.url).toBe('https://sandbox-5173.example.dev');
+  });
+
+  it('update_preview errors honestly when the sandbox has no port mapping', async () => {
+    const noPort = new ToolDispatcher(
+      { readFile: act.readFile.bind(act), writeFile: act.writeFile.bind(act), listFiles: act.listFiles.bind(act), runCommand: act.runCommand.bind(act) },
+      'ws-1',
+      state,
+      stream,
+    );
+    const res = await noPort.dispatch(call('update_preview', { port: 3000 }));
+    expect(res.is_error).toBe(true);
+    expect(res.content).toContain('not available');
+  });
+
+  it('creates a real git checkpoint after a write when a checkpointer is wired', async () => {
+    const checkpointer = {
+      checkpoint: async (message: string) => ({ id: 'c1', sha: 'deadbeef', message, ts: 1 }),
+    };
+    const dWithGit = new ToolDispatcher(act, 'ws-1', state, stream, undefined, checkpointer);
+    await dWithGit.dispatch(call('write_file', { path: 'a.ts', content: 'x' }));
+    const checkpoints = state.snapshot().checkpoints;
+    expect(checkpoints).toHaveLength(1);
+    expect(checkpoints[0].sha).toBe('deadbeef');
+  });
+
   it('unknown tool returns an honest error', async () => {
     const res = await d.dispatch(call('teleport', {}));
     expect(res.is_error).toBe(true);
@@ -154,5 +188,39 @@ describe('ToolDispatcher', () => {
     const res = await d.dispatch(call('write_file', { path: 'a.ts' })); // no content
     expect(res.is_error).toBe(true);
     expect(res.content).toContain('content');
+  });
+
+  it('second_opinion returns the injected reviewer result', async () => {
+    const dWithOpinion = new ToolDispatcher(
+      act, 'ws-1', state, stream, undefined, undefined,
+      async (prompt: string) => `[second opinion via GEMINI]\nReviewed: ${prompt}`,
+    );
+    const res = await dWithOpinion.dispatch(call('second_opinion', { prompt: 'check my auth flow' }));
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('second opinion via GEMINI');
+    expect(res.content).toContain('check my auth flow');
+  });
+
+  it('second_opinion returns an honest "not available" message when not wired (does not throw)', async () => {
+    const res = await d.dispatch(call('second_opinion', { prompt: 'review this' }));
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('not available');
+  });
+
+  it('consensus returns the injected panel result', async () => {
+    const dWithConsensus = new ToolDispatcher(
+      act, 'ws-1', state, stream, undefined, undefined, undefined,
+      async (question: string) => `Consensus panel on: ${question}\n\nPanel note: 3 perspective(s) gathered.`,
+    );
+    const res = await dWithConsensus.dispatch(call('consensus', { question: 'shard the DB?' }));
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('Consensus panel on: shard the DB?');
+    expect(res.content).toContain('3 perspective(s) gathered');
+  });
+
+  it('consensus returns an honest "not available" message when not wired (does not throw)', async () => {
+    const res = await d.dispatch(call('consensus', { question: 'decide this' }));
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('not available');
   });
 });

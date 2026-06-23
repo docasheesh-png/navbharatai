@@ -66,6 +66,24 @@ export interface RunTurnParams {
    * messages, so a cache breakpoint on the system block caches tools+system.
    */
   cache?: boolean;
+  /**
+   * Enable Anthropic adaptive "thinking" with a summarized display for this turn.
+   * When set, the model reasons before answering and emits a thinking summary the
+   * UI can stream (via `onThinking`). Off by default — backward compatible.
+   */
+  thinking?: boolean;
+  /**
+   * Optional streaming callback for the assistant's visible text. When provided
+   * (and the underlying client supports streaming), the turn streams and each
+   * text delta is delivered here token-by-token. Omitting it keeps the original
+   * non-streaming behaviour unchanged.
+   */
+  onText?: (delta: string) => void;
+  /**
+   * Optional streaming callback for the thinking summary. Receives thinking
+   * deltas token-by-token when `thinking` is on and streaming is active.
+   */
+  onThinking?: (delta: string) => void;
 }
 
 /** The slice of ClaudeClient the AgentRunner loop depends on (DI/testing). */
@@ -75,7 +93,17 @@ export interface TurnRunner {
 
 /** Minimal structural type of the Anthropic client method we use (for DI/tests). */
 export interface MessagesCreateClient {
-  messages: { create(params: Record<string, unknown>): Promise<AnthropicMessageLike> };
+  messages: {
+    create(params: Record<string, unknown>): Promise<AnthropicMessageLike>;
+    /**
+     * Optional streaming entry point. When present, runTurn uses it to emit
+     * text/thinking deltas live; the final assembled message is awaited via
+     * `finalMessage()`. The real Anthropic SDK provides this; tests can inject it.
+     */
+    stream?(params: Record<string, unknown>): AsyncIterable<unknown> & {
+      finalMessage(): Promise<AnthropicMessageLike>;
+    };
+  };
 }
 
 interface AnthropicContentBlock {
@@ -98,18 +126,69 @@ interface AnthropicMessageLike {
   };
 }
 
+/** Retry policy for transient provider errors (rate limits, overload, 5xx, network). */
+export interface RetryOptions {
+  /** Max retries after the first attempt. Default 5. */
+  maxRetries?: number;
+  /** Base backoff in ms (exponential + jitter). Default 1000. */
+  baseDelayMs?: number;
+  /** Injectable sleep (tests pass a no-op). Default real setTimeout. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Sanitize an env-supplied API key. Pasting a key into a Cloud Run variable
+ * often introduces a trailing newline/space or wrapping quotes; the Anthropic
+ * SDK sends the value verbatim, so an otherwise-valid key then 401s on every
+ * call. Strip surrounding whitespace and a single layer of wrapping quotes.
+ */
+export function sanitizeApiKey(raw: string | undefined): string | undefined {
+  if (raw == null) return undefined;
+  const trimmed = raw.trim().replace(/^['"]|['"]$/g, '').trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * Resolve the Anthropic endpoint for AgentV3. ALWAYS returns an explicit URL so
+ * the SDK never falls back to the ambient `ANTHROPIC_BASE_URL` (the shared
+ * aicredits proxy) — posting native tool-use there yields "404 page not found".
+ * Honours an explicit Anthropic-compatible AgentV3 override when set.
+ */
+export function resolveAnthropicBaseUrl(): string {
+  const override = process.env.AGENTV3_ANTHROPIC_BASE_URL?.trim().replace(/\/v1$/, '');
+  return override && override.length > 0 ? override : 'https://api.anthropic.com';
+}
+
 export class ClaudeClient implements TurnRunner {
   private client?: MessagesCreateClient;
+  private readonly maxRetries: number;
+  private readonly baseDelayMs: number;
+  private readonly sleep: (ms: number) => Promise<void>;
 
-  constructor(client?: MessagesCreateClient) {
+  constructor(client?: MessagesCreateClient, retry?: RetryOptions) {
     this.client = client;
+    this.maxRetries = retry?.maxRetries ?? 5;
+    this.baseDelayMs = retry?.baseDelayMs ?? 1000;
+    this.sleep = retry?.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
   private getClient(): MessagesCreateClient {
     if (!this.client) {
+      // AgentV3 talks to the NATIVE Anthropic API (messages.create with tools)
+      // and authenticates with the platform's own ANTHROPIC_API_KEY via the
+      // x-api-key header. It must NOT inherit the shared ANTHROPIC_BASE_URL:
+      // that points at an OpenAI-compatible proxy (aicredits.in), so posting the
+      // native messages.create there returns "404 page not found" and every
+      // Claude turn fails (the engine then silently falls back to Vertex/Gemini).
+      //
+      // CRITICAL: the Anthropic SDK reads `ANTHROPIC_BASE_URL` from the env when
+      // no `baseURL` is passed — so leaving it unset is NOT enough to avoid the
+      // proxy. We must ALWAYS pin an explicit baseURL: the real Anthropic
+      // endpoint by default, or an explicit Anthropic-compatible AgentV3 override
+      // (e.g. a real Anthropic gateway) when one is set.
       this.client = new Anthropic({
-        apiKey: process.env.ANTHROPIC_API_KEY,
-        baseURL: process.env.ANTHROPIC_BASE_URL?.replace(/\/v1$/, ''),
+        apiKey: sanitizeApiKey(process.env.ANTHROPIC_API_KEY),
+        baseURL: resolveAnthropicBaseUrl(),
       }) as unknown as MessagesCreateClient;
     }
     return this.client;
@@ -147,9 +226,118 @@ export class ClaudeClient implements TurnRunner {
       createParams.tool_choice = { type: 'auto' };
     }
 
-    const resp = await this.getClient().messages.create(createParams);
+    if (params.thinking) {
+      // Adaptive thinking with a summarized display — the correct shape for
+      // claude-opus-4-8 / claude-sonnet-4-6 (do NOT use budget_tokens here).
+      createParams.thinking = { type: 'adaptive', display: 'summarized' };
+    }
+
+    // Stream the turn when a streaming callback is provided AND the client
+    // supports it. A transient streaming failure falls back to the proven
+    // non-streaming path so a turn never dies just because streaming broke.
+    if ((params.onText || params.onThinking) && typeof this.getClient().messages.stream === 'function') {
+      try {
+        return await this.streamTurn(createParams, params);
+      } catch (err) {
+        if (!isRetryableError(err)) throw err;
+        // Fall through to the non-streaming path below on a transient error.
+      }
+    }
+
+    const resp = await this.createWithRetry(createParams);
     return parseMessage(resp);
   }
+
+  /**
+   * Stream one assistant turn, delivering text/thinking deltas live via the
+   * caller's callbacks, then parse the final assembled message into a TurnResult.
+   */
+  private async streamTurn(
+    createParams: Record<string, unknown>,
+    params: RunTurnParams,
+  ): Promise<TurnResult> {
+    const stream = this.getClient().messages.stream!(createParams);
+    for await (const event of stream) {
+      const e = event as { type?: string; delta?: { type?: string; text?: string; thinking?: string } };
+      if (e.type === 'content_block_delta' && e.delta) {
+        if (e.delta.type === 'text_delta' && typeof e.delta.text === 'string' && params.onText) {
+          params.onText(e.delta.text);
+        } else if (e.delta.type === 'thinking_delta' && typeof e.delta.thinking === 'string' && params.onThinking) {
+          params.onThinking(e.delta.thinking);
+        }
+      }
+    }
+    const finalMessage = await stream.finalMessage();
+    return parseMessage(finalMessage);
+  }
+
+  /**
+   * Call the API with exponential backoff on transient errors (429 rate limit,
+   * 529 overloaded, 5xx, network/timeout). Non-transient errors (400/401/403/404
+   * and programming errors) fail fast. Honours a Retry-After header when present.
+   * This keeps a long multi-step build alive through provider hiccups instead of
+   * dying on the first blip.
+   */
+  private async createWithRetry(createParams: Record<string, unknown>): Promise<AnthropicMessageLike> {
+    let attempt = 0;
+    for (;;) {
+      try {
+        return await this.getClient().messages.create(createParams);
+      } catch (err) {
+        attempt++;
+        if (attempt > this.maxRetries || !isRetryableError(err)) throw err;
+        await this.sleep(retryDelayMs(err, attempt, this.baseDelayMs));
+      }
+    }
+  }
+}
+
+function errStatus(err: unknown): number | undefined {
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>;
+    if (typeof e.status === 'number') return e.status;
+    const resp = e.response as Record<string, unknown> | undefined;
+    if (resp && typeof resp.status === 'number') return resp.status;
+  }
+  return undefined;
+}
+
+/** True for transient errors worth retrying. */
+export function isRetryableError(err: unknown): boolean {
+  const status = errStatus(err);
+  if (typeof status === 'number') {
+    return status === 408 || status === 409 || status === 429 || status === 529 || status >= 500;
+  }
+  // No HTTP status → treat connection/timeout style errors as transient.
+  const name = err && typeof err === 'object' && typeof (err as { name?: unknown }).name === 'string'
+    ? String((err as { name?: unknown }).name)
+    : '';
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  return /connection|timeout|econnreset|enotfound|socket|network|fetch failed|overload/i.test(
+    `${name} ${msg}`,
+  );
+}
+
+function retryAfterSeconds(err: unknown): number | undefined {
+  if (err && typeof err === 'object') {
+    const e = err as { headers?: unknown; response?: { headers?: unknown } };
+    const headers = e.headers ?? e.response?.headers;
+    if (headers && typeof headers === 'object') {
+      const h = headers as { get?: (k: string) => unknown; [k: string]: unknown };
+      const raw = typeof h.get === 'function' ? h.get('retry-after') : h['retry-after'];
+      const n = Number(raw);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+  }
+  return undefined;
+}
+
+function retryDelayMs(err: unknown, attempt: number, baseDelayMs: number): number {
+  const retryAfter = retryAfterSeconds(err);
+  if (retryAfter !== undefined) return Math.min(retryAfter * 1000, 60_000);
+  const expo = baseDelayMs * Math.pow(2, attempt - 1);
+  const jitter = Math.random() * baseDelayMs;
+  return Math.min(expo + jitter, 30_000);
 }
 
 /** Parse a raw Anthropic message into the engine's TurnResult shape. */

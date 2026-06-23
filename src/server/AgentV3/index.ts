@@ -14,12 +14,13 @@ export {
   isAgentV3GloballyEnabled,
   agentV3Allowlist,
 } from './featureFlag';
-export { ClaudeClient, parseMessage } from './ClaudeClient';
+export { ClaudeClient, parseMessage, isRetryableError, sanitizeApiKey } from './ClaudeClient';
 export type {
   ClaudeToolDef,
   ToolUse,
   TurnUsage,
   TurnResult,
+  RetryOptions,
   RunTurnParams,
   TurnRunner,
   MessagesCreateClient,
@@ -27,7 +28,8 @@ export type {
 export { AgentRunner } from './AgentRunner';
 export type { AgentRunnerOptions, AgentRunResult } from './AgentRunner';
 export { resolveModel, sonnetModel, opusModel } from './models';
-export { architectSystemPrompt } from './systemPrompt';
+export { architectSystemPrompt, planSystemPrompt } from './systemPrompt';
+export { awaitApproval, resolveApproval, pendingApprovalCount } from './Approvals';
 export {
   STANDARD_MULTIPLIER,
   ONLY_OPUS_MULTIPLIER,
@@ -36,9 +38,47 @@ export {
   billedAmountUsd,
 } from './pricing';
 export type { BilledUsage } from './pricing';
-export { defaultToolCatalog, CATALOG_TOOL_NAMES } from './ToolCatalog';
+export { defaultToolCatalog, CATALOG_TOOL_NAMES, taskToolDef, secondOpinionToolDef, consensusToolDef, catalogForTools } from './ToolCatalog';
 export { ToolDispatcher } from './ToolDispatcher';
-export type { ActuatorPort, ToolResult } from './ToolDispatcher';
+export type { ActuatorPort, ToolResult, SubAgentSpawn } from './ToolDispatcher';
+export { makeSecondOpinion } from './SecondOpinion';
+export type { SecondOpinion, OpinionRouter } from './SecondOpinion';
+export { makeConsensus, synthesizeConsensus } from './Consensus';
+export type { Consensus, Perspective } from './Consensus';
+export { roleConfig, isWorkerRole, WORKER_ROLES, allRoles, findRolesByCapability, rolesByLayer, rosterBriefing } from './AgentRegistry';
+export type { RoleConfig } from './AgentRegistry';
+export { agentLifecycle } from './AgentLifecycle';
+export type { AgentHealth, AgentPhase, RunToken } from './AgentLifecycle';
+export { WorkspaceMemory, getWorkspaceMemory, extractFacts } from './WorkspaceMemory';
+export type { ProjectGraph, SymbolInfo, Episode, MemorySnapshot, RecallHit } from './WorkspaceMemory';
+export { analyzeArchitecture, architectureSummary, resolveLocalImport } from './ArchitectureAnalysis';
+export type { ArchitectureReport } from './ArchitectureAnalysis';
+export { scanSecurity, securitySummary } from './SecurityAnalysis';
+export type { SecurityFinding, Severity } from './SecurityAnalysis';
+export { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
+export type { AuthenticityIssue, AuthenticitySeverity } from './AuthenticityAnalysis';
+export { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
+export type { AccessibilityIssue, AccessibilitySeverity } from './AccessibilityAnalysis';
+export { analyzeDependencies, dependencySummary, normalizeImportToPackage } from './DependencyAnalysis';
+export type { DependencyIssue, DependencySeverity } from './DependencyAnalysis';
+export { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
+export type { EnvVarIssue } from './EnvVarAnalysis';
+export { assessReadiness, readinessVerdict } from './Readiness';
+export type { ReadinessReport } from './Readiness';
+export { reflectOnBuild, reflectionNote } from './Reflection';
+export type { BuildReflection } from './Reflection';
+export { summarizeProject, projectSummaryNote } from './ProjectSummary';
+export { formatRecalledLessons } from './RecalledLessons';
+export { detectLanguageHint } from './LanguageDetect';
+export type { LanguageHint } from './LanguageDetect';
+export { makeSubAgentSpawn } from './SubAgent';
+export type { SubAgentDeps } from './SubAgent';
+export { GitManager } from './GitManager';
+export type { Checkpointer, CommandRunner } from './GitManager';
+export { registerSession, getSession, restoreSession, sessionCount } from './WorkspaceRegistry';
+export type { WorkspaceSession } from './WorkspaceRegistry';
+export { classifyIntent } from './IntentClassifier';
+export type { BuildIntent } from './IntentClassifier';
 
 import { AGENTV3_PHASE } from './types';
 

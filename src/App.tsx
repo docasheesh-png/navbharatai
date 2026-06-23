@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
-import { EngineBuilder } from './components/EngineBuilder';
+import { AgentV3Panel } from './components/agentv3/AgentV3Panel';
 import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
 import { GitViewPanel } from './components/panels/GitViewPanel';
 import { DeploySuccessPanel } from './components/panels/DeploySuccessPanel';
@@ -19,6 +19,7 @@ import { ViewPanels } from './components/panels/ViewPanels';
 import { SidebarNav } from './components/panels/SidebarNav';
 import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
+import { AgentV3Launcher } from './components/agentv3/AgentV3Launcher';
 import { ConnectDomainPanel } from './components/panels/ConnectDomainPanel';
 import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
@@ -1259,18 +1260,21 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: adminEmail, password: adminPassword }),
       });
-      const data = await res.json();
+      const raw = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(raw); } catch { /* non-JSON response (rate-limit text, HTML error, etc.) */ }
       if (res.ok && data.ok) {
         sessionStorage.setItem('admin_token', data.token);
         setIsAdmin(true);
         toggleTab('home');
         addLog('Admin: Access Granted.', 'success');
       } else {
-        setAdminError(data.error || 'Invalid credentials.');
+        // Surface the REAL reason: server JSON error, or the raw status + body.
+        setAdminError(data.error || `HTTP ${res.status}: ${raw.slice(0, 200) || '(empty response)'}`);
         addLog('Admin: Access Denied.', 'error');
       }
-    } catch {
-      setAdminError('Server error. Please try again.');
+    } catch (err: any) {
+      setAdminError(`Network error: ${err?.message ?? String(err)}`);
     }
   };
 
@@ -1297,6 +1301,25 @@ export default function App() {
     });
     return unsubscribe;
   }, []);
+
+  // Admin login = full app access. When the admin is signed in (separate server
+  // password auth), treat them as a logged-in user so the app never forces the
+  // Firebase login modal. A real Firebase sign-in always takes precedence; the
+  // synthetic identity is cleared on admin logout. The app only reads
+  // user.uid / email / displayName (no Firebase methods), so this is safe.
+  useEffect(() => {
+    if (isAdmin && !user) {
+      setUser({
+        uid: 'admin',
+        email: 'admin@navbharatai.in',
+        displayName: 'Admin',
+        photoURL: null,
+      } as unknown as FirebaseUser);
+      setLoadingUser(false);
+    } else if (!isAdmin && user && (user as { uid?: string }).uid === 'admin') {
+      setUser(null);
+    }
+  }, [isAdmin, user]);
 
   const MAX_UPLOAD_BYTES = 2 * 1024 * 1024; // 2 MB
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logoUrl' | 'qrUrl') => {
@@ -5476,8 +5499,8 @@ ${buildLanguageRule(preferredLanguage)}`;
           )}
 
           {activeView === 'engine_builder' && (
-            <div className="flex-1 min-h-screen">
-              <EngineBuilder />
+            <div className="flex-1" style={{ height: '100vh' }}>
+              <AgentV3Panel userId={user?.uid} email={user?.email} />
             </div>
           )}
 
@@ -5586,6 +5609,9 @@ ${buildLanguageRule(preferredLanguage)}`;
               </div>
  
               
+      {/* AgentV3 (Vargen 3.0) launcher — admin-only, flag-gated; renders nothing when disabled. */}
+      <AgentV3Launcher userId={user?.uid} email={user?.email} />
+
       {/* Auth Modal + all overlay modals → AppModals */}
       <AppModals
         showAuth={showAuth}

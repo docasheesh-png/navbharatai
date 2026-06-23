@@ -24,6 +24,27 @@
 
 ## ▶ CURRENT RESUME POINT
 
+**Session 2026-06-22 (d) — Pro v3.0 BUILT end-to-end (P0 → P5). Merged to main: P0–P3b (#181–#189). Awaiting manual merge: P3.5–P5 (PR #191).**
+
+⚠️ **CI INFRA NOTE:** From ~11:42 on 2026-06-22, GitHub Actions started failing at job startup (~4s, zero logs, even on an empty commit) — diagnosed as Actions minutes/spending-limit exhausted on this PRIVATE repo (all prior runs that day succeeded; the transition is abrupt and content-independent). **Admin must raise the Actions spending limit / wait for quota reset** to restore the automated gate. Until then, every v3.0 step below was verified with the EXACT CI commands locally (`tsc --noEmit` + `tsc -p tsconfig.server.json` + `vitest run` + `boot:check` + `npm run build`) and merged manually by admin. No red CI was merged on the basis of "skip the gate" — the gate ran locally.
+
+**v3.0 phases shipped this session (all flag-gated OFF by default; AgentV3 module has ZERO live-path imports → live app unaffected):**
+- **P0 #181** engine skeleton (types, AgentEventStream, WorkspaceState, featureFlag, honest route).
+- **D4–D9** locked (hybrid sandbox; pricing 2.5×/5× Opus-equiv; persistence=user choice; admin-only beta; real engagement). Design doc `NAVBHARATAI_PRO_V3_DESIGN.md`.
+- **P1 #182–#185** native tool-use engine: ClaudeClient + pricing, ToolCatalog + ToolDispatcher (7 tools→sandbox), AgentRunner loop, wired `/api/agentv3/chat` NDJSON stream.
+- **P2 #187** Anthropic prompt caching (tools+system) — cuts cost.
+- **P3a #188** client-side surface reducer (pure, tested).
+- **P3b #189** live build UI: `useAgentV3Build` hook + `AgentV3Panel` (AI-team tracker + Files/Diff/Terminal/History from one stream).
+- **P3.5** multi-agent "AI team": AgentRegistry (9 roles), `task` tool, SubAgent spawn (constrained nested agents, no deep recursion), agentRole attribution.
+- **P3c** in-app: `AgentV3Launcher` (admin-only, self-hiding) mounted in App.tsx (1 import + 1 line); AppKnowledgeBase `agentv3_builder` entry.
+- **P3d** live preview: `update_preview` tool → `preview` event → iframe Preview tab (app shows live as it builds).
+- **P4** plan-mode approval: Approvals registry + `/api/agentv3/respond` + plan-gate + panel Approve/Reject (real bidirectional block).
+- **P5** billing wired: `UserCostStore.record(userId, billedUsd)` (2.5×/5×) + CLAUDE.md admin-override recorded (scoped to AgentV3).
+- Test count grew ~1049 → **1602 passing** (~50 new AgentV3 tests). 
+- **To run live (admin):** set `AGENTV3_ENABLED=true` + `AGENTV3_ALLOWLIST=<admin uid>` + `ANTHROPIC_API_KEY` + `E2B_API_KEY` in Cloud Run; a floating "v3.0" button appears for the admin → full multi-agent builder.
+- **GitManager (real git commits) DONE** (pushed to #191): sandbox is a real git repo; every write/edit creates a real commit (sandbox-only; best-effort), History shows real SHAs; step caps now env-configurable (AGENTV3_MAX_STEPS=80, AGENTV3_SUBAGENT_MAX_STEPS=40). 1607 tests.
+- **Remaining/next:** P6 cutover (make v3.0 default, retire old builders) — only after live dogfood; conversation persistence (D7) reconnect-durable backend; wire GitManager.restore to a History→restore endpoint (needs persistent sandbox mapping); editable-todo UI (bidirectional); BYOK option. Live run still requires admin to set keys + flag (real Claude+E2B spend) — not exercised in-session (no keys).
+
 **Session 2026-06-22 (c) — Pro v3.0 ("Vargen 3.0") kickoff: parity audit + design doc (DESIGN ONLY, no runtime change):**
 - Earlier this session: 35-bug brutal audit → 28 fixes shipped live (PRs #173–#178, all CI-green) + Cashfree payment-leak fixes.
 - `CLAUDE_CODE_PARITY.md` added (PR #179, merged) — line-level NavBharatAI Pro vs Claude Code gap analysis, root causes RC-1…RC-8.
@@ -930,3 +951,122 @@ Goal: not to copy Claude Code — to build what Claude Code would be if designed
 
 _Roadmap version: 2.0 — 2026-06-21_
 _Previous work history: PROGRESS_ARCHIVE.md_
+
+---
+
+## 2026-06-23 — v3.0 made LIVE on Claude + roadmap build-out (session milestone)
+
+**Context:** v3.0 was silently failing on Claude (every call 404'd). Root-caused
+and fixed, then began building the post-48 roadmap one capability at a time, each
+fully verified (tsc frontend+server + full vitest + boot:check green) and merged
+to main (= deployed via Cloud Run). All commits use the verified
+`Claude <noreply@anthropic.com>` identity.
+
+### Fixes that made v3.0 actually work on Claude
+- **Root cause of "v3.0 not calling Claude":** the Anthropic SDK reads
+  `ANTHROPIC_BASE_URL` from the env when no `baseURL` is passed, so native
+  `messages.create` was being routed to the OpenAI-compatible **aicredits proxy**
+  (returns "404 page not found") and the engine silently fell back to
+  Vertex/Gemini/Grok — billing showed $0 spend on a valid `sk-ant` key.
+  Fixed by **always pinning** `baseURL` to the real Anthropic endpoint
+  (`resolveAnthropicBaseUrl`), plus `sanitizeApiKey()` (trims paste
+  whitespace/quotes). Confirmed LIVE by the admin.
+- **Removed the aicredits proxy app-wide** (`pro.ts`, `sda.ts`, `build.ts`,
+  `aiCalls.ts`, `aiClients.ts`, `AppEngine.ts`, `AnthropicProvider.ts`, deleted
+  the dead `/api/anthropic` route + `AiCreditsProvider`). Every feature now calls
+  Claude natively or falls through to Grok/Vertex/Gemini.
+- **Diagnostics:** `GET /api/agentv3/diag` (no secrets; `?test=1` live probe) +
+  `[AGENTV3][CLAUDE_FAIL]` log line for fast root-causing.
+
+### v3.0 UX
+- **Word-by-word streaming** of the assistant reply (Claude `messages.stream`).
+- **"Thinking" toggle** — adaptive thinking with summarized display, streamed live.
+- **Iterative sessions** (stable sessionId → same sandbox/memory across messages)
+  and a **"New"** button. (session-continuity)
+
+### Roadmap capabilities shipped (each real, tested, additive, best-effort)
+- **Layer 53 v1 — Authenticity analyzer** (evaluate): flags fake/incomplete code
+  (TODO/FIXME, "not implemented" throws, stub/mock data, lorem ipsum, empty
+  handlers) — enforces "no fakes".
+- **Layer 22 v2 — Dependency consistency** (evaluate): imports missing from
+  package.json (would break install/runtime) + unused deps.
+- **Layer 53 v3 — Env-var completeness** (evaluate): `process.env.X` read in code
+  but undocumented in `.env.example` (the app won't run for the user).
+  → `evaluate` now runs **6 gates**: Readiness + Architecture + Security +
+  Authenticity + Dependencies + Env-vars (all best-effort).
+- **Layer 57 v1 — Build Reflection**: after each build, write lessons (errors→
+  fixes) into project memory.
+- **Layer 79 v1 — Continual Learning**: at each build's START, recall and apply
+  those past lessons — closing the learn loop (the "beyond Mythos" lever).
+- **Layer 84 v1 — Second Opinion tool**: Architect/Reviewer can get an independent
+  cross-model review (non-Claude router). Optional, never throws, Architect+Reviewer.
+- **Layer 49 v1 — Consensus tool**: Architect convenes a 3-perspective panel
+  (correctness/security/UX) from a different model + synthesized verdict.
+- **Layer 73 v1 — Build in the user's language**: generated apps' user-facing
+  text matches the request's language (detectLanguageHint covers 22 Indian + CJK/
+  Arabic/Cyrillic scripts); code stays English. The "world #1 + Bharat" vision.
+
+### Roadmap docs
+- Added Sections D/E/F to `V3_ROADMAP.md`: Layers 49–86 (Collective Intelligence
+  → Civilization Scale, world-class + Bharat-friendly, beyond-Mythos) + Layer 72
+  (UCUE computer-use) + the 10-level Ultimate Maturity Model. Honest
+  self-assessment: **Level 3 (Claude Code class)**, parts of Level 4 underway.
+
+**Test suite: 1754 passing.** Next sessions: continue the roadmap one verified,
+additive capability at a time; a user-facing "what I built" summary and the
+multilingual UI are good next picks. Admin still to set `ADMIN_PASSWORD` in Cloud
+Run (admin login) and fix Google sign-in authorized domains (Firebase console).
+
+---
+
+### 2026-06-23 — Layer 77 "Bharosa" (Trust, Safety & Compliance) — evaluate gate #8
+
+Continued the Section-E roadmap. Added a real, deterministic privacy/compliance
+dimension to the v3.0 `evaluate` tool (the proven gate pattern — like Layers 53/22/78).
+DPDP/GDPR-oriented, DISTINCT from the existing security/secret scanner.
+
+- New `src/server/AgentV3/ComplianceAnalysis.ts`: file-local rules — personal data
+  written to logs (`pii-in-logs`, high), sensitive values in browser storage
+  (`sensitive-in-browser-storage`, medium), cookies without SameSite
+  (`cookie-no-samesite`, medium), personal data over plain http
+  (`insecure-http-endpoint`, medium); plus two PROJECT-LEVEL rules wired in the
+  dispatcher — collecting PII with no privacy policy (`missing-privacy-policy`,
+  high) and a tracker with no consent surface (`tracker-without-consent`, medium).
+  Ends with an honest **launch-safe certificate** (CERTIFIED / CONDITIONAL /
+  NOT CERTIFIED) derived only from real findings.
+- Wired into `ToolDispatcher.evaluate` (now 8 gates: Readiness + Architecture +
+  Security + Authenticity + Dependencies + Env-vars + Accessibility + Compliance),
+  `ToolCatalog` evaluate description, and `AppKnowledgeBase` (description + keywords).
+- 14 new unit tests. Full gate green: tsc frontend+server, build, boot:check.
+
+**Test suite: 1817 passing.** Also shipped earlier today (#238): real document
+extraction (Word/Excel/PPT/ZIP) + Claude vision fallback across Free/Pro chat,
+v3.0 file attachments (cheap vision default, Claude only in Power mode), and SDA
+office/zip support. Next picks: Layer 74 (Sahyog — partnership UX: calibrated
+confidence/explainability) is buildable now; Layers 75/76 need external hosting/
+payments infra.
+
+---
+
+### 2026-06-23 — Layer 74 "Sahyog" (Calibrated Build Confidence + explainability)
+
+Admin-selected next roadmap pick. The partnership move: v3.0's `evaluate` now states
+an HONEST, CALIBRATED confidence ("Build confidence: 72% (Medium) — here's why: …")
+instead of declaring success by vibes — derived only from the real signals across all
+eight gates, with every lost point explained as a concrete, fixable reason.
+
+- New `src/server/AgentV3/BuildConfidence.ts`: `computeBuildConfidence(input)` →
+  deterministic 0–100 score + High/Medium/Low band + positives (clean gates) +
+  negatives (issues, highest-impact first). Hard calibration ceilings: a build-breaker
+  (unresolved import / missing dependency) caps confidence at 35; a high-severity
+  security or privacy/compliance blocker caps it at 60. `buildConfidenceSummary()`
+  renders the "I'm N% confident — here's why" block.
+- Wired into `ToolDispatcher.evaluate`, surfaced right after the readiness verdict.
+  Refactored the dependency/env/compliance collectors to return their issue arrays
+  (summaries now rendered at the evaluate site) so confidence can be computed from
+  real per-gate tallies. Behavior of the existing sections is unchanged.
+- `ToolCatalog` evaluate description + `AppKnowledgeBase` (description + keywords)
+  updated. 10 new unit tests.
+
+**Test suite: 1827 passing.** Full gate green: tsc frontend+server, build, boot:check.
+Section E status: 73 ✓, 74 ✓, 77 ✓, 78 ✓ done; 75/76 need external hosting/payments.

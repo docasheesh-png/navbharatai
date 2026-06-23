@@ -37,7 +37,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     name: 'NavBharatAI Pro v3.0 (beta)',
     path: 'Sidebar → "App Builder v3.0"  OR  the floating "v3.0" button (bottom-right when enabled for your account).',
     description: `Claude-Code-class agentic app builder (Vargen 3.0). Capabilities:
-• NATIVE TOOL-USE engine on Claude (Sonnet by default; "Only Opus" super toggle for maximum capability).
+• NATIVE TOOL-USE engine on Claude (Sonnet by default; the "Power" super toggle — formerly "Only Opus" — in the build-options menu forces maximum capability).
 • MULTI-AGENT "AI team": an Architect plans and delegates to a six-layer roster of specialist agents — planning (Requirements, Planner, Product), development (Frontend, Backend, Fullstack, Database, Mobile, API, DevOps, Infrastructure, Designer), quality (QA, Tester, Security, Performance, Accessibility, Reviewer), repair (Debugger, Refactor, Optimizer), knowledge (Docs, Researcher) and operations (Deploy, Monitor, Recovery) — routed by capability and working in parallel where safe.
 • MULTI-PROVIDER resilience: native Claude for building, with automatic fallback to Vertex / Gemini / Grok for chat so it always replies.
 • PROJECT MEMORY & artifact intelligence: as it builds it indexes your files into a live project graph (symbols, components, routes, imports, dependencies) and remembers errors and fixes; agents can "recall" this to find where things are and what failed before. After each build it also writes a short REFLECTION — the lessons learned from that build's errors and fixes — back into project memory; and at the START of each new build it RECALLS the relevant past lessons and applies them, closing the learning loop so the project genuinely improves across iterations.
@@ -52,14 +52,14 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • WHAT I BUILT summary (Layer 27 — Product Understanding): after each successful build it shows a short, friendly recap in the chat — the detected stack/framework, how many files/components/routes were created, a few key components/routes, and how to run it (plus the Preview tab) — so you understand what was created at a glance.
 • HISTORY: your v3.0 conversations are saved to NavBharatAI's main History (the sidebar "History" option, under All/Apps) when you are signed in, so you can return to them later; inside v3.0 the "History" tab also lists the git checkpoints from the whole session so you can restore the project to any earlier point.
 • HONEST billing: you are charged the Claude Opus-equivalent token cost × 2.5 (or × 5 in Only-Opus mode); a live cost estimate is shown.`,
-    howToUse: 'Click the floating "v3.0" button (bottom-right), type what you want to build, and press Build. Watch the AI Team panel and the live Files / Diff / Terminal / History surfaces. Toggle "Only Opus" for maximum capability (5× cost). Press Stop to cancel.',
+    howToUse: 'Click the floating "v3.0" button (bottom-right), type what you want to build, and press Send. Open the build-options menu (the sliders icon on the left of the message box) to toggle Planning, Thinking, or Power (the "Only Opus" max-capability mode, 5× cost). The live surfaces — Preview / Files / Diff / Terminal / History — are tab pills in the header: tap one to open that workspace beside the chat (it takes over the screen on mobile), and tap it again (or the ✕) to collapse back to full-width chat. Press Stop to cancel.',
     relatedFeatures: ['engineer_ai', 'pro_chat', 'history', 'settings_secrets'],
     aiSurface: 'engineer_ai',
     keywords: [
       'v3', 'v3.0', 'vargen', 'vargen 3', 'agentv3', 'agent v3', 'pro v3',
       'multi agent', 'multiple agents', 'ai team', 'sub agent', 'subagent',
       'claude code', 'native tool use', 'architect', 'live preview',
-      'naya builder', 'naya engine', 'team', 'agent team', 'opus', 'only opus',
+      'naya builder', 'naya engine', 'team', 'agent team', 'opus', 'only opus', 'power', 'power mode', 'build options', 'planning', 'thinking',
       'evaluate', 'authenticity check', 'no fakes', 'fake code', 'placeholder', 'stub detection',
       'todo detection', 'incomplete code', 'readiness', 'self evaluation',
       'what i built', 'project summary', 'summary', 'what was created', 'recap', 'how to run',

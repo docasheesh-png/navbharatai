@@ -626,6 +626,10 @@ export class ToolDispatcher {
         // an app that can't run, or a high-severity security misconfig must BLOCK
         // "READY" — not merely be reported. The rest lower the score as warnings.
         const extra: ExtraFinding[] = [];
+        // Fake/incomplete code (not-implemented, placeholder, lorem-ipsum, fake-data)
+        // is a hard blocker — the constitution forbids shipping it as "done".
+        const authHigh = issues.filter((i) => i.severity === 'high').length;
+        if (authHigh) extra.push({ severity: 'high', label: `${authHigh} fake/incomplete code issue(s) (placeholder / not-implemented / fake data)` });
         if (secretLeak.findings.length) extra.push({ severity: 'high', label: 'Secret leak: a real .env is not gitignored' });
         for (const f of runnability.findings) extra.push({ severity: f.level === 'high' ? 'high' : 'medium', label: `Runnability: ${f.message}` });
         for (const i of securityConfig) extra.push({ severity: i.severity === 'high' ? 'high' : 'medium', label: `Security config (${i.rule})` });

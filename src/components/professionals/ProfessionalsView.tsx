@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -13,6 +13,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'engineer_ai', label: 'Engineer AI', description: 'Autonomous coding agent — writes, builds and fixes code.', icon: HardHat, active: true },
   { id: 'lawyer_ai', label: 'Lawyer AI', description: 'Legal research and drafting assistant.', icon: Scale, active: false },
   { id: 'teacher_ai', label: 'Teacher AI', description: 'Explains concepts, solves doubts step by step, lesson plans, quizzes & exam study plans.', icon: GraduationCap, active: true },
+  { id: 'mentor_ai', label: 'Mentor / Career Coach', description: 'Career direction, resume & interview prep, skill roadmaps, job-switch & higher-studies guidance.', icon: Compass, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'Accountant AI', description: 'Bookkeeping and tax-planning assistant.', icon: Calculator, active: false },
 ];

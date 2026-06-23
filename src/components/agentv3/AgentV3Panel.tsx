@@ -5,7 +5,9 @@ import {
   ChevronRight, ChevronLeft,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
-import type { AgentCard } from './agentV3Types';
+import type { AgentCard, GitCheckpoint } from './agentV3Types';
+import { db, sanitizeFirestoreData } from '../../App';
+import { doc, setDoc } from 'firebase/firestore';
 
 /**
  * AgentV3Panel — NavBharatAI Pro v3.0 (Vargen 3.0), a Claude-Code-style chat
@@ -38,6 +40,10 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
   // persisting prior replies here they would vanish from the thread when the
   // next message begins. Snapshotted in send() right before start() runs.
   const [agentHistory, setAgentHistory] = useState<ChatMsg[]>([]);
+  // Git checkpoints from PREVIOUS turns. Like state.narration, state.checkpoints
+  // is reset by start() on every message, so the History tab would forget prior
+  // checkpoints across an iterative session. Snapshotted in send() before start().
+  const [checkpointHistory, setCheckpointHistory] = useState<GitCheckpoint[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // A stable session id keeps the SAME sandbox + memory across messages, so the
   // build is iterative (each message continues the same project). "New session"
@@ -65,10 +71,65 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
     })),
   ].sort((a, b) => a.ts - b.ts);
 
+  // All checkpoints across the session (prior turns + the live build), deduped by
+  // sha so the History tab keeps showing earlier checkpoints across messages.
+  const allCheckpoints: GitCheckpoint[] = (() => {
+    const seen = new Set<string>();
+    const out: GitCheckpoint[] = [];
+    for (const c of [...checkpointHistory, ...state.checkpoints]) {
+      const key = c.sha || c.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(c);
+    }
+    return out;
+  })();
+
   // Auto-scroll the chat to the newest message.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [convo.length, state.narration, running]);
+
+  // Persist the v3.0 conversation into NavBharatAI's MAIN History (the sidebar
+  // "History" option), using the SAME chat_sessions shape as Free/Pro/SDA chats.
+  // Additive + best-effort: it only writes a new doc tagged 'agentv3' (so it shows
+  // under All/Apps and never collides with other sources) when a turn completes
+  // and the user is signed in; it never touches the shared history code paths.
+  useEffect(() => {
+    if (!state.done || !userId) return;
+    const thread = convo;
+    if (thread.length === 0) return;
+    const firstUser = thread.find((m) => m.role === 'user')?.text ?? 'v3.0 build';
+    const title = firstUser.slice(0, 40) + (firstUser.length > 40 ? '…' : '');
+    const docId = `v3_${sessionIdRef.current}`;
+    setDoc(
+      doc(db, 'chat_sessions', docId),
+      sanitizeFirestoreData({
+        id: docId,
+        uci: docId,
+        userId,
+        tab: 'engine_builder',
+        original_agent: 'agentv3',
+        current_agent: 'agentv3',
+        title,
+        memory_summary: '',
+        edit_log: [],
+        restoredMessages: [],
+        messages: thread.map((m) => ({
+          id: String(m.ts),
+          text: m.text,
+          sender: m.role === 'user' ? 'user' : 'ai',
+          timestamp: new Date(m.ts).toISOString(),
+        })),
+        files: {},
+        lastUpdated: new Date().toISOString(),
+        isPinned: false,
+        mode: 'build',
+      }),
+    ).catch(() => { /* history save is best-effort — never blocks the UI */ });
+    // Intentionally keyed on turn completion; `convo` is read at that moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.done, userId]);
 
   const send = () => {
     const text = prompt.trim();
@@ -88,6 +149,10 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
         })),
       ]);
     }
+    // Also preserve this turn's git checkpoints before start() resets them.
+    if (state.checkpoints.length > 0) {
+      setCheckpointHistory((h) => [...h, ...state.checkpoints]);
+    }
     setUserMsgs((c) => [...c, { role: 'user', text, ts: Date.now() }]);
     setPrompt('');
     start(text, { userId, email, onlyOpus, planFirst, thinking, sessionId: sessionIdRef.current });
@@ -99,6 +164,7 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
     sessionIdRef.current = newSessionId();
     setUserMsgs([]);
     setAgentHistory([]);
+    setCheckpointHistory([]);
     reset();
   };
 
@@ -225,7 +291,7 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
             <TabBtn active={tab === 'files'} onClick={() => setTab('files')} icon={<FolderOpen className="w-3.5 h-3.5" />}>Files ({state.files.length})</TabBtn>
             <TabBtn active={tab === 'diff'} onClick={() => setTab('diff')} icon={<FileDiff className="w-3.5 h-3.5" />}>Diff ({diffPaths.length})</TabBtn>
             <TabBtn active={tab === 'terminal'} onClick={() => setTab('terminal')} icon={<Terminal className="w-3.5 h-3.5" />}>Terminal</TabBtn>
-            <TabBtn active={tab === 'history'} onClick={() => setTab('history')} icon={<History className="w-3.5 h-3.5" />}>History ({state.checkpoints.length})</TabBtn>
+            <TabBtn active={tab === 'history'} onClick={() => setTab('history')} icon={<History className="w-3.5 h-3.5" />}>History ({allCheckpoints.length})</TabBtn>
             </div>
           </div>
 
@@ -246,9 +312,9 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
               {tab === 'terminal' && (state.terminal.length === 0 ? <Empty>No terminal output yet.</Empty> : (
                 <pre className="whitespace-pre-wrap text-zinc-300">{state.terminal.join('\n')}</pre>
               ))}
-              {tab === 'history' && (state.checkpoints.length === 0 ? <Empty>No checkpoints yet.</Empty> : (
+              {tab === 'history' && (allCheckpoints.length === 0 ? <Empty>No checkpoints yet.</Empty> : (
                 <ul className="space-y-1">
-                  {state.checkpoints.map((c) => (
+                  {allCheckpoints.map((c) => (
                     <li key={c.id} className="flex items-center gap-2 group">
                       <History className="w-3.5 h-3.5 text-zinc-500" />
                       <span className="text-zinc-500">{c.sha.slice(0, 7) || '—'}</span>

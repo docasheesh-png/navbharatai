@@ -50,6 +50,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • BUILDS IN YOUR LANGUAGE (Layer 73 — Universal Language): write your request in any language — all 22 Indian languages (Hindi, Tamil, Bengali, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Odia, Urdu and more) or major world languages — and the app's user-facing text (labels, buttons, headings, placeholders, messages) is generated in THAT language, while the code stays in English. Apni bhasha mein likho, app usi bhasha mein banega.
 • SMART COST ROUTING: plain conversation (a greeting, thanks, "who are you", small-talk) is answered by a fast, economical model and only REAL build/engineering requests use the premium engine — the experience is unchanged, you just don't pay build-grade cost for a "hello".
 • WHAT I BUILT summary (Layer 27 — Product Understanding): after each successful build it shows a short, friendly recap in the chat — the detected stack/framework, how many files/components/routes were created, a few key components/routes, and how to run it (plus the Preview tab) — so you understand what was created at a glance.
+• HISTORY: your v3.0 conversations are saved to NavBharatAI's main History (the sidebar "History" option, under All/Apps) when you are signed in, so you can return to them later; inside v3.0 the "History" tab also lists the git checkpoints from the whole session so you can restore the project to any earlier point.
 • HONEST billing: you are charged the Claude Opus-equivalent token cost × 2.5 (or × 5 in Only-Opus mode); a live cost estimate is shown.`,
     howToUse: 'Click the floating "v3.0" button (bottom-right), type what you want to build, and press Build. Watch the AI Team panel and the live Files / Diff / Terminal / History surfaces. Toggle "Only Opus" for maximum capability (5× cost). Press Stop to cancel.',
     relatedFeatures: ['engineer_ai', 'pro_chat', 'history', 'settings_secrets'],
@@ -62,6 +63,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'evaluate', 'authenticity check', 'no fakes', 'fake code', 'placeholder', 'stub detection',
       'todo detection', 'incomplete code', 'readiness', 'self evaluation',
       'what i built', 'project summary', 'summary', 'what was created', 'recap', 'how to run',
+      'history', 'saved chats', 'my conversations', 'past builds', 'checkpoints', 'restore',
       'reflection', 'learns', 'remembers lessons',
       'continual learning', 'applies lessons', 'learns across builds',
       'dependency check', 'missing dependency', 'package.json',

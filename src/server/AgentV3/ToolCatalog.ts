@@ -121,8 +121,12 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         'secrets, eval, dangerouslySetInnerHTML, insecure http) and accessibility ' +
         'issues (images with no alt text, form controls with no accessible name, ' +
         'click handlers on non-interactive elements, positive tabindex, missing ' +
-        'document language). Use it to check your work before declaring it done, ' +
-        'then fix what it reports.',
+        'document language), and trust/privacy/compliance issues (DPDP/GDPR-oriented: ' +
+        'personal data in logs, sensitive values in browser storage, cookies without ' +
+        'SameSite, personal data over plain http, a tracker with no consent surface, ' +
+        'or collecting personal data with no privacy policy) — ending with an honest ' +
+        '"launch-safe" certificate. Use it to check your work before declaring it ' +
+        'done, then fix what it reports.',
       input_schema: {
         type: 'object',
         properties: {},

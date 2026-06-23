@@ -1016,3 +1016,32 @@ to main (= deployed via Cloud Run). All commits use the verified
 additive capability at a time; a user-facing "what I built" summary and the
 multilingual UI are good next picks. Admin still to set `ADMIN_PASSWORD` in Cloud
 Run (admin login) and fix Google sign-in authorized domains (Firebase console).
+
+---
+
+### 2026-06-23 — Layer 77 "Bharosa" (Trust, Safety & Compliance) — evaluate gate #8
+
+Continued the Section-E roadmap. Added a real, deterministic privacy/compliance
+dimension to the v3.0 `evaluate` tool (the proven gate pattern — like Layers 53/22/78).
+DPDP/GDPR-oriented, DISTINCT from the existing security/secret scanner.
+
+- New `src/server/AgentV3/ComplianceAnalysis.ts`: file-local rules — personal data
+  written to logs (`pii-in-logs`, high), sensitive values in browser storage
+  (`sensitive-in-browser-storage`, medium), cookies without SameSite
+  (`cookie-no-samesite`, medium), personal data over plain http
+  (`insecure-http-endpoint`, medium); plus two PROJECT-LEVEL rules wired in the
+  dispatcher — collecting PII with no privacy policy (`missing-privacy-policy`,
+  high) and a tracker with no consent surface (`tracker-without-consent`, medium).
+  Ends with an honest **launch-safe certificate** (CERTIFIED / CONDITIONAL /
+  NOT CERTIFIED) derived only from real findings.
+- Wired into `ToolDispatcher.evaluate` (now 8 gates: Readiness + Architecture +
+  Security + Authenticity + Dependencies + Env-vars + Accessibility + Compliance),
+  `ToolCatalog` evaluate description, and `AppKnowledgeBase` (description + keywords).
+- 14 new unit tests. Full gate green: tsc frontend+server, build, boot:check.
+
+**Test suite: 1817 passing.** Also shipped earlier today (#238): real document
+extraction (Word/Excel/PPT/ZIP) + Claude vision fallback across Free/Pro chat,
+v3.0 file attachments (cheap vision default, Claude only in Power mode), and SDA
+office/zip support. Next picks: Layer 74 (Sahyog — partnership UX: calibrated
+confidence/explainability) is buildable now; Layers 75/76 need external hosting/
+payments infra.

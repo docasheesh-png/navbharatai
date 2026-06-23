@@ -102,8 +102,9 @@ export interface GitCheckpoint {
  */
 export type AgentEvent =
   | { type: 'workspace'; workspaceId: string; ts: number }
-  | { type: 'narration'; agent: AgentRole; text: string; ts: number }
+  | { type: 'narration'; agent: AgentRole; text: string; ts: number; id?: string }
   | { type: 'thinking'; agent: AgentRole; text: string; ts: number }
+  | { type: 'stream_delta'; agent: AgentRole; id: string; kind: 'text' | 'thinking'; delta: string; ts: number }
   | { type: 'tool_call'; agent: AgentRole; tool: ToolName; input: unknown; callId: string; ts: number }
   | { type: 'tool_result'; agent: AgentRole; callId: string; ok: boolean; summary: string; ts: number }
   | { type: 'file_changed'; agent: AgentRole; change: FileChange; ts: number }

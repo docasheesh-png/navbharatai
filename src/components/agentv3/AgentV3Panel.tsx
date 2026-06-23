@@ -15,17 +15,24 @@ import type { AgentCard } from './agentV3Types';
  * output — nothing is a scripted animation.
  */
 type SurfaceTab = 'preview' | 'files' | 'diff' | 'terminal' | 'history';
-interface ChatMsg { role: 'user' | 'agent'; agent?: string; text: string; ts: number }
+interface ChatMsg {
+  role: 'user' | 'agent';
+  agent?: string;
+  text: string;
+  ts: number;
+  kind?: 'text' | 'thinking';
+  streaming?: boolean;
+}
 
 export function AgentV3Panel({ userId, email }: { userId?: string; email?: string }) {
   const { state, running, error, start, respond, restore, stop, reset } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   const [onlyOpus, setOnlyOpus] = useState(false);
   const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default
+  const [thinking, setThinking] = useState(false); // adaptive thinking, off by default
   const [tab, setTab] = useState<SurfaceTab>('preview');
   const [showWorkspace, setShowWorkspace] = useState(true); // collapsible right panel
-  const [convo, setConvo] = useState<ChatMsg[]>([]);
-  const lastNarr = useRef(0);
+  const [userMsgs, setUserMsgs] = useState<ChatMsg[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // A stable session id keeps the SAME sandbox + memory across messages, so the
   // build is iterative (each message continues the same project). "New session"
@@ -36,34 +43,40 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
       : `s-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const sessionIdRef = useRef<string>(newSessionId());
 
-  // Stream the agent's narration into the chat thread as it arrives.
-  useEffect(() => {
-    if (state.narration.length > lastNarr.current) {
-      const fresh = state.narration.slice(lastNarr.current);
-      setConvo((c) => [...c, ...fresh.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts }))]);
-    }
-    lastNarr.current = state.narration.length;
-  }, [state.narration]);
+  // The chat thread merges the user's own messages with the engine's live
+  // narration (which streams in word-by-word and finalizes in place), ordered by
+  // timestamp. Reading narration straight from state means streaming updates show
+  // live instead of being frozen into a one-time snapshot.
+  const convo: ChatMsg[] = [
+    ...userMsgs,
+    ...state.narration.map((n) => ({
+      role: 'agent' as const,
+      agent: n.agent,
+      text: n.text,
+      ts: n.ts,
+      kind: n.kind,
+      streaming: n.streaming,
+    })),
+  ].sort((a, b) => a.ts - b.ts);
 
   // Auto-scroll the chat to the newest message.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [convo, running]);
+  }, [convo.length, state.narration, running]);
 
   const send = () => {
     const text = prompt.trim();
     if (!text || running) return;
-    setConvo((c) => [...c, { role: 'user', text, ts: Date.now() }]);
+    setUserMsgs((c) => [...c, { role: 'user', text, ts: Date.now() }]);
     setPrompt('');
-    start(text, { userId, email, onlyOpus, planFirst, sessionId: sessionIdRef.current });
+    start(text, { userId, email, onlyOpus, planFirst, thinking, sessionId: sessionIdRef.current });
   };
 
   // Start a brand-new project: fresh sandbox/memory (new session id) and clear chat.
   const startNewSession = () => {
     if (running) return;
     sessionIdRef.current = newSessionId();
-    lastNarr.current = 0;
-    setConvo([]);
+    setUserMsgs([]);
     reset();
   };
 
@@ -88,6 +101,10 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
         <label className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer">
           <input type="checkbox" checked={planFirst} onChange={(e) => setPlanFirst(e.target.checked)} disabled={running} />
           Plan first
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer">
+          <input type="checkbox" checked={thinking} onChange={(e) => setThinking(e.target.checked)} disabled={running} />
+          Thinking
         </label>
         <label className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer">
           <input type="checkbox" checked={onlyOpus} onChange={(e) => setOnlyOpus(e.target.checked)} disabled={running} />
@@ -244,13 +261,23 @@ function Bubble({ msg }: { msg: ChatMsg }) {
       </div>
     );
   }
+  const isThinking = msg.kind === 'thinking';
+  const cursor = msg.streaming ? <span className="inline-block w-1.5 h-3.5 ml-0.5 align-middle bg-current animate-pulse" /> : null;
   return (
     <div className="flex justify-start">
       <div className="max-w-[90%]">
         {msg.agent && msg.agent !== 'architect' && (
           <div className="text-[10px] uppercase tracking-wide text-indigo-400 mb-0.5">{msg.agent}</div>
         )}
-        <div className="bg-zinc-900 text-zinc-100 rounded-2xl rounded-bl-sm px-3 py-2 text-sm whitespace-pre-wrap break-words">{msg.text}</div>
+        <div
+          className={
+            isThinking
+              ? 'text-zinc-500 italic text-xs px-3 py-2 whitespace-pre-wrap break-words'
+              : 'bg-zinc-900 text-zinc-100 rounded-2xl rounded-bl-sm px-3 py-2 text-sm whitespace-pre-wrap break-words'
+          }
+        >
+          {msg.text}{cursor}
+        </div>
       </div>
     </div>
   );

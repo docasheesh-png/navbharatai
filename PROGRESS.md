@@ -951,3 +951,68 @@ Goal: not to copy Claude Code — to build what Claude Code would be if designed
 
 _Roadmap version: 2.0 — 2026-06-21_
 _Previous work history: PROGRESS_ARCHIVE.md_
+
+---
+
+## 2026-06-23 — v3.0 made LIVE on Claude + roadmap build-out (session milestone)
+
+**Context:** v3.0 was silently failing on Claude (every call 404'd). Root-caused
+and fixed, then began building the post-48 roadmap one capability at a time, each
+fully verified (tsc frontend+server + full vitest + boot:check green) and merged
+to main (= deployed via Cloud Run). All commits use the verified
+`Claude <noreply@anthropic.com>` identity.
+
+### Fixes that made v3.0 actually work on Claude
+- **Root cause of "v3.0 not calling Claude":** the Anthropic SDK reads
+  `ANTHROPIC_BASE_URL` from the env when no `baseURL` is passed, so native
+  `messages.create` was being routed to the OpenAI-compatible **aicredits proxy**
+  (returns "404 page not found") and the engine silently fell back to
+  Vertex/Gemini/Grok — billing showed $0 spend on a valid `sk-ant` key.
+  Fixed by **always pinning** `baseURL` to the real Anthropic endpoint
+  (`resolveAnthropicBaseUrl`), plus `sanitizeApiKey()` (trims paste
+  whitespace/quotes). Confirmed LIVE by the admin.
+- **Removed the aicredits proxy app-wide** (`pro.ts`, `sda.ts`, `build.ts`,
+  `aiCalls.ts`, `aiClients.ts`, `AppEngine.ts`, `AnthropicProvider.ts`, deleted
+  the dead `/api/anthropic` route + `AiCreditsProvider`). Every feature now calls
+  Claude natively or falls through to Grok/Vertex/Gemini.
+- **Diagnostics:** `GET /api/agentv3/diag` (no secrets; `?test=1` live probe) +
+  `[AGENTV3][CLAUDE_FAIL]` log line for fast root-causing.
+
+### v3.0 UX
+- **Word-by-word streaming** of the assistant reply (Claude `messages.stream`).
+- **"Thinking" toggle** — adaptive thinking with summarized display, streamed live.
+- **Iterative sessions** (stable sessionId → same sandbox/memory across messages)
+  and a **"New"** button. (session-continuity)
+
+### Roadmap capabilities shipped (each real, tested, additive, best-effort)
+- **Layer 53 v1 — Authenticity analyzer** (evaluate): flags fake/incomplete code
+  (TODO/FIXME, "not implemented" throws, stub/mock data, lorem ipsum, empty
+  handlers) — enforces "no fakes".
+- **Layer 22 v2 — Dependency consistency** (evaluate): imports missing from
+  package.json (would break install/runtime) + unused deps.
+- **Layer 53 v3 — Env-var completeness** (evaluate): `process.env.X` read in code
+  but undocumented in `.env.example` (the app won't run for the user).
+  → `evaluate` now runs **6 gates**: Readiness + Architecture + Security +
+  Authenticity + Dependencies + Env-vars (all best-effort).
+- **Layer 57 v1 — Build Reflection**: after each build, write lessons (errors→
+  fixes) into project memory.
+- **Layer 79 v1 — Continual Learning**: at each build's START, recall and apply
+  those past lessons — closing the learn loop (the "beyond Mythos" lever).
+- **Layer 84 v1 — Second Opinion tool**: Architect/Reviewer can get an independent
+  cross-model review (non-Claude router). Optional, never throws, Architect+Reviewer.
+- **Layer 49 v1 — Consensus tool**: Architect convenes a 3-perspective panel
+  (correctness/security/UX) from a different model + synthesized verdict.
+- **Layer 73 v1 — Build in the user's language**: generated apps' user-facing
+  text matches the request's language (detectLanguageHint covers 22 Indian + CJK/
+  Arabic/Cyrillic scripts); code stays English. The "world #1 + Bharat" vision.
+
+### Roadmap docs
+- Added Sections D/E/F to `V3_ROADMAP.md`: Layers 49–86 (Collective Intelligence
+  → Civilization Scale, world-class + Bharat-friendly, beyond-Mythos) + Layer 72
+  (UCUE computer-use) + the 10-level Ultimate Maturity Model. Honest
+  self-assessment: **Level 3 (Claude Code class)**, parts of Level 4 underway.
+
+**Test suite: 1754 passing.** Next sessions: continue the roadmap one verified,
+additive capability at a time; a user-facing "what I built" summary and the
+multilingual UI are good next picks. Admin still to set `ADMIN_PASSWORD` in Cloud
+Run (admin login) and fix Google sign-in authorized domains (Firebase console).

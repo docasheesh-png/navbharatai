@@ -30,4 +30,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Make a skill roadmap for my goal',
     ],
   },
+  thesis_ai: {
+    id: 'thesis_ai',
+    name: 'Thesis / Research Writer',
+    welcome:
+      "Hello! I'm Thesis AI 📚 — your academic research & writing assistant. I can sharpen your research question, structure your thesis (IMRaD/chapters), help organise a literature review, choose a methodology, format citations (APA/MLA/IEEE), and polish your own draft. I never invent sources or data — the scholarship stays yours.",
+    quickPrompts: [
+      'Sharpen my research question',
+      'Help structure my thesis',
+      'Format these references in APA',
+      'Improve the clarity of my draft',
+    ],
+  },
 };

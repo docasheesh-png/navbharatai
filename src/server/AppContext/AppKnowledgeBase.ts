@@ -189,6 +189,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['mentor', 'career', 'coach', 'resume', 'cv', 'interview', 'job', 'skill roadmap', 'career change', 'study abroad', 'naukri'],
   },
 
+  // ─── THESIS / RESEARCH WRITER ────────────────────────────────────────────
+  {
+    id: 'thesis_ai',
+    name: 'Thesis / Research Writer',
+    path: 'Sidebar → Professionals → Thesis / Research Writer',
+    description: 'Academic research & writing assistant (UG/PG/PhD): sharpen the research question (FINER/PICO), structure the thesis (IMRaD/chapters), organise a literature review, choose methodology, format citations (APA/MLA/IEEE/Chicago/Vancouver), and edit the author\'s own draft for clarity & academic tone. Academic integrity built-in: never fabricates citations/data, promotes original writing + proper attribution, and tells you to run an institutional plagiarism check.',
+    howToUse: 'Open Sidebar → Professionals → Thesis / Research Writer and ask: "sharpen my research question", "structure my thesis", "format these references in APA", "improve my draft".',
+    relatedFeatures: ['professionals'],
+    aiSurface: 'thesis_ai',
+    keywords: ['thesis', 'research', 'dissertation', 'paper', 'literature review', 'citation', 'apa', 'methodology', 'academic writing', 'shodhganga', 'phd'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

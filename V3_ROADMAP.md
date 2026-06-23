@@ -208,3 +208,144 @@ Every phase is graded against these, because they are what makes the difference:
   Added because the Anthropic dashboard showed the key "Last used: Never" while
   chat still replied — i.e. Claude 401s and the engine falls back to
   Vertex/Gemini/Grok (likely a leftover non-Anthropic key in ANTHROPIC_API_KEY).
+
+---
+
+## Section D — Beyond Level 48: The Frontier Roadmap (Layers 49-71)
+
+Admin-specified on 2026-06-23. These extend the 48-capability roadmap toward a
+self-improving, civilization-scale intelligence platform. **Honesty tier: almost
+all are Tier C** — each ships as a REAL framework + an explicitly-labelled
+working v1, never as faked "AGI". They build on the Section A-C foundation
+(orchestration, memory, evaluation, execution) already in place.
+
+> Ordering principle (unchanged): build the verifiable core first. Layers that
+> need external infra (research corpora, simulators, edge nodes) ship with real
+> connectors + an honest "not configured" state.
+
+### 49 — Collective Intelligence Layer  (builds on Ph 1 orchestration, cat 13/23)
+Swarm engine, multi-agent democracy/voting/debate/jury, consensus building,
+adversarial review, red-team/blue-team agent networks. **Purpose:** many agents
+deliberate before a decision. *Foundation exists:* 27-agent roster + capability
+router; v1 = structured debate→vote→consensus over a decision.
+
+### 50 — Scientific Discovery Layer
+Hypothesis generation, experiment design, research planning, knowledge-gap &
+novelty detection, theory evaluation. **Purpose:** discover new solutions, not
+just reuse old ones.
+
+### 51 — Autonomous Research Laboratory  (extends cat 40)
+Research agent swarm, paper reading/comparison, citation intelligence, research
+memory graph, OSS discovery, patent awareness. **Purpose:** read research,
+compare ideas, create innovations. Tier B for external corpora (BYO API).
+
+### 52 — Innovation Engine
+Architecture/framework/workflow invention, algorithm & pattern discovery.
+**Purpose:** invent new architectures and workflows.
+
+### 53 — Meta-Reasoning Layer  (extends Ph 9 evaluation)
+Thought evaluator, reasoning auditor, logic validator, contradiction detector,
+uncertainty & confidence-calibration engines. **Purpose:** evaluate and improve
+its own thinking. *Foundation exists:* readiness/quality scorers.
+
+### 54 — Strategic Intelligence Layer
+Long-horizon planner, strategic-goal & milestone & resource planners, opportunity
+& risk analyzers. **Purpose:** plan months and years ahead.
+
+### 55 — Digital Twin Layer
+User / team / project / product / organization digital twins. **Purpose:**
+simulate outcomes before execution.
+
+### 56 — World Simulation Layer
+Market / user / infrastructure / competitor / economic simulators.
+**Purpose:** predict real-world results before launch. Tier C.
+
+### 57 — Self-Reflection Layer  (extends cat 25, memory)
+Failure / success / strategy / agent / project reflection engines.
+**Purpose:** learn from every success and failure. *Foundation exists:* episodic
+error/fix memory.
+
+### 58 — Autonomous Governance Layer  (extends cat 16)
+Ethics, policy, risk-governance, compliance, decision-audit engines.
+**Purpose:** safe, accountable AI behaviour. Hard requirement before higher
+autonomy ships.
+
+### 59 — Knowledge Evolution Layer
+Knowledge verification / aging / refresh / conflict-resolution / ranking.
+**Purpose:** keep knowledge accurate and current.
+
+### 60 — Creativity Layer
+Design / product / UX creativity, naming, branding engines. **Purpose:**
+generate creative solutions and products.
+
+### 61 — Economic Agent Layer  (extends cat 42/47)
+Cost / revenue / pricing / growth / ROI agents. **Purpose:** understand business
+and profitability.
+
+### 62 — Autonomous Startup Layer  (extends cat 47)
+Startup validation, market research, product launch, monetization, growth,
+competitive-analysis agents. **Purpose:** build and launch complete startups.
+
+### 63 — Autonomous Organization Layer  (extends Ph 11, cat 37)
+CTO / product / engineering / QA / research / security / support team agents.
+**Purpose:** operate like a complete software company.
+
+### 64 — Evolutionary Architecture Layer
+Architecture mutation / selection / fitness / evolution engines. **Purpose:**
+continuously evolve better architectures.
+
+### 65 — Autonomous Ecosystem Layer  (extends cat 31)
+Agent / plugin / workflow / skill / template stores. **Purpose:** a developer
+ecosystem around the platform.
+
+### 66 — Universal Interface Layer
+Text / voice / video / image / AR / VR / API interfaces. **Purpose:** interact
+through any medium.
+
+### 67 — Federated Intelligence Layer
+Local / edge / cloud AI nodes, federated learning, distributed memory.
+**Purpose:** distributed intelligence across environments. Tier C.
+
+### 68 — Autonomous Knowledge Creation
+New pattern / framework / architecture / workflow discovery engines.
+**Purpose:** create knowledge instead of only retrieving it.
+
+### 69 — General Problem Solving Layer
+Engineering / business / legal-workflow / operations / research / strategy
+solvers. **Purpose:** solve problems beyond software development.
+
+### 70 — Recursive Self-Improvement Layer  (extends cat 43/44)
+Self-evaluation / modification / optimization / architecture-upgrade /
+agent-creation / workflow-creation engines. **Purpose:** the platform improves
+itself continuously. **Strictly gated behind Layer 58 (Governance).**
+
+### 71 — Civilization-Scale Layer
+Global knowledge graph, planetary memory, universal agent network, distributed
+research network, collective-intelligence fabric. **Purpose:** planet-scale
+intelligence infrastructure. Tier C — long-horizon north star.
+
+---
+
+## Ultimate Maturity Model (north-star levels)
+
+| Level | Stage | Maps to |
+|---|---|---|
+| 1 | Normal App Builder | base |
+| 2 | Agentic App Builder | Ph 1-4 |
+| 3 | Claude Code Class | Ph 5-9 (execution + memory + evaluation) |
+| 4 | Mythos / Devin Class | Ph 10-12 |
+| 5 | Autonomous Software Engineer | Ph 13-15 + Layer 53/57 |
+| 6 | Autonomous Software Company | Layer 62/63 |
+| 7 | Autonomous Research Organization | Layer 50/51/52/68 |
+| 8 | Self-Improving Intelligence Platform | Layer 58 (gate) + 64/70 |
+| 9 | Federated Collective Intelligence System | Layer 49/67/71 |
+| 10 | FOD — Future-Oriented Distributed Intelligence | full stack, governed |
+
+**Self-assessment (2026-06-23):** the platform is solidly at **Level 3** (real
+execution via E2B, 27-agent orchestration, project memory, evaluation/readiness
+gates), with parts of Level 4 underway. Layers 49-71 are the long road to
+Levels 5-10. Same rules apply: real or honestly "not built yet" — never faked.
+
+### Progress log (append-only)
+- 2026-06-23: Added Section D (layers 49-71) + Ultimate Maturity Model per admin.
+  Self-assessed current maturity at Level 3. No code yet for 49-71 — roadmap only.

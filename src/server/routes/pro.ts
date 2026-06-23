@@ -42,39 +42,17 @@ export function registerProRoutes(app: Express): void {
     msgs: { role: 'user' | 'assistant'; content: any }[],
     maxTokens: number,
   ): Promise<string> {
-    const rawBaseURL = process.env.ANTHROPIC_BASE_URL;
-    const baseURL = rawBaseURL?.replace(/\/v1\/?$/, '');
-
-    // Try Claude (proxy or direct) when a key is configured.
+    // Try Claude directly (native Anthropic SDK, x-api-key) when a key is set.
+    // The aicredits OpenAI-proxy path has been removed.
     if (apiKey) {
       try {
-        if (baseURL) {
-          // OpenAI-compatible proxy path — sends Authorization: Bearer
-          const proxyMsgs = [{ role: 'system' as const, content: systemPrompt }, ...msgs];
-          const client = new OpenAI({ apiKey, baseURL });
-          const models = [
-            'anthropic/claude-sonnet-4.6', 'claude-sonnet-4-6',
-            'anthropic/claude-3.5-sonnet', 'claude-3-5-sonnet-20241022',
-          ];
-          for (const model of models) {
-            try {
-              const r = await client.chat.completions.create({ model, messages: proxyMsgs, max_tokens: maxTokens });
-              const text = r.choices[0]?.message?.content;
-              if (text) return text;
-            } catch (e: any) {
-              console.warn(`[PRO-PROXY] model ${model} failed: ${e.message}`);
-            }
-          }
-        } else {
-          // Direct Anthropic SDK path — sends x-api-key
-          const A = (await import('@anthropic-ai/sdk')).default;
-          const r = await new A({ apiKey }).messages.create({
-            model: 'claude-3-5-sonnet-20241022', max_tokens: maxTokens,
-            system: systemPrompt, messages: msgs,
-          });
-          const text = (r.content.find((c: any) => c.type === 'text') as any)?.text;
-          if (text) return text;
-        }
+        const A = (await import('@anthropic-ai/sdk')).default;
+        const r = await new A({ apiKey }).messages.create({
+          model: 'claude-3-5-sonnet-20241022', max_tokens: maxTokens,
+          system: systemPrompt, messages: msgs,
+        });
+        const text = (r.content.find((c: any) => c.type === 'text') as any)?.text;
+        if (text) return text;
       } catch (e: any) {
         console.warn('[PRO] Claude path failed, falling back to aiRouter:', e?.message || e);
       }
@@ -341,9 +319,8 @@ Response Format:
         }
       } catch (e: any) { console.warn('[PRO PLAN] Claude err:', e.message); }
 
-      // ── Race 2: Claude + Grok simultaneously for planning ─────────────────
+      // ── Race 2: Grok for planning (the aicredits Claude racer was removed) ──
       const grokKeyPlan = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
-      const claudeKeyPlan = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
       type PlanRacerFn = (signal: AbortSignal) => Promise<string>;
       const planRacers: PlanRacerFn[] = [];
 
@@ -366,27 +343,7 @@ Response Format:
         { role: 'user' as const, content: message },
       ];
 
-      // NOTE: Claude race attempt — separate from the sequential attempt above
-      if (claudeKeyPlan) planRacers.push(async (signal) => {
-        const rawBase = process.env.ANTHROPIC_BASE_URL;
-        const base = rawBase?.replace(/\/v1\/?$/, '');
-        if (!base) throw new Error('No proxy for race');
-        const c = new OpenAI({ apiKey: claudeKeyPlan, baseURL: base });
-        const claudeMsgs = [
-          { role: 'system' as const, content: PLAN_PROMPT },
-          ...planHistoryMsgs,
-          { role: 'user' as const, content: buildRaceUserContent(true) },
-        ];
-        for (const m of ['anthropic/claude-sonnet-4.6', 'claude-sonnet-4-6']) {
-          try {
-            const r = await c.chat.completions.create({ model: m, messages: claudeMsgs, max_tokens: 1500 }, { signal });
-            const t = r.choices[0]?.message?.content || '';
-            if (t.trim()) return t;
-          } catch (e: any) { if (signal.aborted) throw e; }
-        }
-        throw new Error('Claude plan race: empty');
-      });
-
+      // Plan race: Grok (the aicredits Claude proxy racer has been removed).
       if (grokKeyPlan) planRacers.push(async (signal) => {
         const c = new OpenAI({ apiKey: grokKeyPlan, baseURL: 'https://api.x.ai/v1' });
         // Use vision model for images, text model for everything else
@@ -412,7 +369,7 @@ Response Format:
           const planWinner = await Promise.any(
             planRacers.map((fn, i) => fn(planAcs[i].signal).then(text => {
               planAcs.forEach((ac, j) => { if (j !== i && !ac.signal.aborted) ac.abort(); });
-              console.log(`[PRO PLAN] Race won by ${i === 0 ? 'Claude' : 'Grok'}`);
+              console.log('[PRO PLAN] Race won by Grok');
               return text;
             }))
           );

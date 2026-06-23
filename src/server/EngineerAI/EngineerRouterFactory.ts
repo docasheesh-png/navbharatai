@@ -17,8 +17,9 @@ import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
 // Engineer AI keeps its own isolated router so provider failures here never
 // bleed into the main chat and vice-versa.
 //
-// AiCreditsProvider is intentionally NEVER registered here — it proxies through
-// NavBharatAI's own account credits, which must not be spent on user builds.
+// The aicredits proxy provider has been removed app-wide; user builds run only
+// on the user's own provider keys (Grok/Vertex/Gemini), never on NavBharatAI's
+// account credits.
 export function buildEngineerRouter(): AIRouter {
   const router = new AIRouter();
 

@@ -342,25 +342,12 @@ async function callAI(prompt: string, systemPrompt: string, maxTokens = 6000): P
   type RacerFn = (signal: AbortSignal) => Promise<string>;
   const racers: RacerFn[] = [];
 
-  if (claudeKey) racers.push(async (signal) => {
-    const rawBase = process.env.ANTHROPIC_BASE_URL;
-    const base = rawBase?.replace(/\/v1\/?$/, '');
-    if (base) {
-      const { default: OpenAI } = await import('openai');
-      const c = new OpenAI({ apiKey: claudeKey, baseURL: base });
-      for (const m of ['anthropic/claude-sonnet-4.6', 'claude-sonnet-4-6', 'anthropic/claude-3.5-sonnet', 'claude-3-5-sonnet-20241022']) {
-        try {
-          const r = await c.chat.completions.create({ model: m, max_tokens: maxTokens, messages: msgs }, { signal });
-          const t = r.choices[0]?.message?.content || '';
-          if (t.trim()) return t;
-        } catch (e: any) { if (signal.aborted) throw e; console.warn(`[AppEngine] Claude proxy ${m}: ${e.message}`); }
-      }
-    } else {
-      const c = new Anthropic({ apiKey: claudeKey });
-      const r = await c.messages.create({ model: 'claude-sonnet-4-6', max_tokens: maxTokens, system: systemPrompt, messages: [{ role: 'user', content: prompt }] });
-      const t = (r.content.find((x: any) => x.type === 'text') as any)?.text || '';
-      if (t.trim()) return t;
-    }
+  if (claudeKey) racers.push(async (_signal) => {
+    // Native Anthropic SDK only — the aicredits OpenAI-proxy path has been removed.
+    const c = new Anthropic({ apiKey: claudeKey });
+    const r = await c.messages.create({ model: 'claude-sonnet-4-6', max_tokens: maxTokens, system: systemPrompt, messages: [{ role: 'user', content: prompt }] });
+    const t = (r.content.find((x: any) => x.type === 'text') as any)?.text || '';
+    if (t.trim()) return t;
     throw new Error('Claude: no valid response');
   });
 

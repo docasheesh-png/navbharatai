@@ -116,12 +116,11 @@ function makeResilientModelCall(userKey?: string): ModelCall {
   const key = typeof userKey === 'string' && userKey.trim() ? userKey : undefined;
   return async (system, user) => {
     const attempts: Array<{ name: string; run: () => Promise<string> }> = [
-      // Claude first — when ANTHROPIC_BASE_URL points at the user's paid proxy
-      // (e.g. aicredit.ai) this is the highest-quality coder; it cleanly throws
-      // and falls through if the proxy/key is unavailable.
+      // Claude first (native Anthropic SDK) — highest-quality coder; cleanly
+      // throws and falls through to Grok if no Anthropic key is configured.
       { name: 'claude', run: () => callClaude(user, key, [], system) },
       // Grok (xAI) — primary model for Engineer AI's structured-JSON agentic format.
-      // Added here so Pro builds benefit from Grok even when the Claude proxy is down.
+      // Added here so Pro builds benefit from Grok even when Claude is unavailable.
       { name: 'grok', run: () => callGrok(user, key, [], system) },
       // aiRouter is the same provider-selection path the legacy build uses in prod.
       { name: 'aiRouter', run: () => aiRouter.route(user, [], 'free' as any, undefined, system) },

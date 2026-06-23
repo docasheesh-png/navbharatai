@@ -319,6 +319,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['fitness', 'workout', 'exercise', 'gym', 'trainer', 'muscle', 'strength', 'fat loss', 'cardio', 'home workout', 'training', 'kasrat', 'vyayam', 'bodyweight'],
   },
 
+  // ─── VETERINARY / PASHU ADVISOR AI ───────────────────────────────────────
+  {
+    id: 'vet_ai',
+    name: 'Veterinary / Pashu Advisor AI',
+    path: 'Sidebar → Professionals → Veterinary / Pashu Advisor',
+    description: 'Practical animal-care advisor for Indian livestock farmers & pet owners: livestock husbandry (cattle, buffalo, goat, poultry — housing, feeding, milking hygiene, breeding basics, productivity), pet care (dogs, cats — feeding, grooming, exercise, training basics), prevention/biosecurity & vaccination/deworming AWARENESS, and recognising warning signs. Safety-first: NOT a veterinarian, NO diagnosis or prescription/doses; refers sick/injured animals to a licensed vet, takes bites/rabies & zoonoses (brucellosis, bird flu) seriously with urgent medical/vet care; no banned substances or growth hormones; never fabricates vaccines/doses/schedules.',
+    howToUse: 'Open Sidebar → Professionals → Veterinary / Pashu Advisor and ask: "care for a dairy cow", "feeding for my dog", "my animal is off-feed", "why vaccination & deworming matter". For sick/injured animals or bites, see a vet/doctor.',
+    relatedFeatures: ['professionals', 'kisan_ai', 'govt_schemes_ai'],
+    aiSurface: 'vet_ai',
+    keywords: ['vet', 'veterinary', 'pashu', 'animal', 'cattle', 'cow', 'buffalo', 'goat', 'poultry', 'dog', 'cat', 'pet', 'livestock', 'janwar', 'vaccination', 'rabies'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

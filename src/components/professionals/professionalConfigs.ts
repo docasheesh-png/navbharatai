@@ -150,4 +150,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Fix my squat / push-up form',
     ],
   },
+  vet_ai: {
+    id: 'vet_ai',
+    name: 'Veterinary / Pashu Advisor AI',
+    welcome:
+      "Namaste! 🐄🐕 I'm Pashu / Vet AI — I help with general care of livestock (cattle, buffalo, goat, poultry) and pets (dogs, cats): feeding & housing, hygiene, breeding basics, and prevention/vaccination awareness. Tell me the animal and your question. ⚠️ I'm not a vet and don't diagnose or prescribe — for any sick, injured or distressed animal, please see a licensed veterinarian. Take any bite/suspected rabies seriously and get urgent medical care.",
+    quickPrompts: [
+      'How to care for a dairy cow?',
+      'Basic care & feeding for my dog',
+      'My animal is off-feed — what should I do?',
+      'Why are vaccination & deworming important?',
+    ],
+  },
 };

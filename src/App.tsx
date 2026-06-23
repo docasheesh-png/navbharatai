@@ -5439,6 +5439,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'nutritionist_ai') toggleTab('nutritionist_ai');
               else if (id === 'wellness_ai') toggleTab('wellness_ai');
               else if (id === 'fitness_ai') toggleTab('fitness_ai');
+              else if (id === 'vet_ai') toggleTab('vet_ai');
             }} />
           )}
 
@@ -5501,6 +5502,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'fitness_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.fitness_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'vet_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.vet_ai} userId={user?.uid} />
             </div>
           )}
 

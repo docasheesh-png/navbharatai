@@ -65,6 +65,7 @@ export { assessReadiness, readinessVerdict } from './Readiness';
 export type { ReadinessReport } from './Readiness';
 export { reflectOnBuild, reflectionNote } from './Reflection';
 export type { BuildReflection } from './Reflection';
+export { summarizeProject, projectSummaryNote } from './ProjectSummary';
 export { formatRecalledLessons } from './RecalledLessons';
 export { detectLanguageHint } from './LanguageDetect';
 export type { LanguageHint } from './LanguageDetect';

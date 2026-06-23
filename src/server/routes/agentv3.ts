@@ -27,6 +27,7 @@ import {
   getWorkspaceMemory,
   reflectOnBuild,
   reflectionNote,
+  summarizeProject,
   formatRecalledLessons,
   detectLanguageHint,
   classifyIntent,
@@ -469,6 +470,17 @@ export function registerAgentV3Routes(app: Express): void {
         });
         reflectMem.recordNote(reflectionNote(reflection));
       } catch { /* reflection is best-effort — never affects the build result */ }
+
+      // Project Summary (Layer 27, "What I built"): on a SUCCESSFUL build, emit a
+      // short, friendly recap of what was created (stack, files/components/routes,
+      // how to run) as a final narration so it shows as the last chat message.
+      // Best-effort — wrapped so it can NEVER affect the build result.
+      if (result.ok) {
+        try {
+          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt);
+          if (summaryText) events.emit({ type: 'narration', agent: 'architect', text: summaryText, ts: Date.now() });
+        } catch { /* summary is best-effort — never affects the build */ }
+      }
 
       // Bill the user the marked-up cost (D5/D6), recorded in the same place the
       // platform records every build's cost. Best-effort — never blocks the run.

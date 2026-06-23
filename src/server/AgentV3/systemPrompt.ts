@@ -89,6 +89,8 @@ export function architectSystemPrompt(): string {
     '- evaluate also reports insecure SECURITY CONFIG (disabled TLS verification,',
     '  wildcard CORS, Math.random() used for tokens/secrets). Fix these — never ship',
     '  a man-in-the-middle hole, open CORS, or a predictable security token.',
+    '- evaluate also reports a SECRET LEAK: a real .env (with live secrets) that is',
+    '  not gitignored. This is critical — add .env to .gitignore immediately.',
     '- Before finishing a real app, call generate_readme to write an accurate',
     '  README.md (stack, how to run, structure) derived from the real project.',
     '- If the app reads any env vars, call generate_env_example so .env.example',

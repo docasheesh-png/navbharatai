@@ -284,6 +284,14 @@ Every phase is graded against these, because they are what makes the difference:
   AppKnowledgeBase synced. Third item via the Section I audit-first triage (ABSENT →
   solid); applies the app-must-never-break rule to the apps v3.0 builds. v3.0-only.
   Gate green: server+frontend tsc 0, 1965 vitest (+9), build, boot:check PASS.
+- 2026-06-23: Section I #4 (Security) — secret-leak check. New
+  `AgentV3/SecretLeakAnalysis.ts` (PURE): flags a real `.env` (not .env.example/
+  .sample/.template) that the project's .gitignore does not cover — the #1 way live
+  secrets get committed to git forever. High-precision: only fires when a secret-
+  bearing env file exists AND .gitignore doesn't reference .env. Folded into `evaluate`
+  as the 17th dimension (reuses the actuator file list + reads .gitignore); systemPrompt
+  + AppKnowledgeBase synced. v3.0-only. Gate green: server+frontend tsc 0, 1993 vitest
+  (+10), build, boot:check PASS.
 - 2026-06-23: Section I #4/#13 (Security) — insecure-randomness rule. Added a third
   rule to `SecurityConfigAnalysis`: Math.random() used near a security value (token/
   secret/password/otp/session/apikey, either order on the line) → flagged high, with

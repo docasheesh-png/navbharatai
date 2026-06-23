@@ -177,6 +177,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['teacher ai', 'tutor', 'study', 'lesson plan', 'exam prep', 'doubt', 'quiz', 'padhai', 'teacher', 'learn'],
   },
 
+  // ─── MENTOR / CAREER COACH ───────────────────────────────────────────────
+  {
+    id: 'mentor_ai',
+    name: 'Mentor / Career Coach',
+    path: 'Sidebar → Professionals → Mentor / Career Coach',
+    description: 'Career mentor & coach for Indian students and early-career professionals: career-direction guidance, resume/CV review & drafting, interview prep (STAR), skill roadmaps, job-search/career-switch strategy, and higher-studies/study-abroad guidance. Honest and India-aware (campus placements, govt vs private vs startup, UPSC/CAT, study-abroad). General guidance — does not guarantee jobs/salaries/admissions.',
+    howToUse: 'Open Sidebar → Professionals → Mentor / Career Coach and ask: "help me choose a career", "review my resume", "prep me for an interview", "make a skill roadmap".',
+    relatedFeatures: ['professionals'],
+    aiSurface: 'mentor_ai',
+    keywords: ['mentor', 'career', 'coach', 'resume', 'cv', 'interview', 'job', 'skill roadmap', 'career change', 'study abroad', 'naukri'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

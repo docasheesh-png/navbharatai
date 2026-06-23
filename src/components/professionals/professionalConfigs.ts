@@ -18,4 +18,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Help me solve a doubt step by step',
     ],
   },
+  mentor_ai: {
+    id: 'mentor_ai',
+    name: 'Mentor / Career Coach',
+    welcome:
+      "Hi! I'm your Mentor & Career Coach 🧭 — I can guide your career direction, review/build your resume, prep you for interviews (STAR), plan a skill roadmap, or help with a job switch or higher studies. Tell me where you are and what you want next.",
+    quickPrompts: [
+      'Help me choose a career path',
+      'Review my resume',
+      'Prepare me for an interview',
+      'Make a skill roadmap for my goal',
+    ],
+  },
 };

@@ -5428,13 +5428,19 @@ ${buildLanguageRule(preferredLanguage)}`;
               if (id === 'sda_chat') toggleTab('sda_chat');
               else if (id === 'engineer_ai') toggleTab('engineer_ai');
               else if (id === 'teacher_ai') toggleTab('teacher_ai');
+              else if (id === 'mentor_ai') toggleTab('mentor_ai');
             }} />
           )}
 
-          {/* ── Teacher AI (config-driven professional) ── */}
+          {/* ── Config-driven professionals (Teacher, Mentor, …) ── */}
           {activeView === 'teacher_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.teacher_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'mentor_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.mentor_ai} userId={user?.uid} />
             </div>
           )}
 

@@ -80,6 +80,78 @@ describe('ClaudeClient.runTurn (injected mock client)', () => {
   });
 });
 
+describe('ClaudeClient streaming (word-by-word + thinking)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('delivers text/thinking deltas via callbacks and parses the final message', async () => {
+    const finalMessage = vi.fn().mockResolvedValue({
+      content: [
+        { type: 'text', text: 'Hello world' },
+        { type: 'tool_use', id: 'tu_1', name: 'write_file', input: { path: 'a.ts' } },
+      ],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 12, output_tokens: 8 },
+    });
+    async function* gen() {
+      yield { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'Let me ' } };
+      yield { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'plan' } };
+      yield { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello ' } };
+      yield { type: 'content_block_delta', delta: { type: 'text_delta', text: 'world' } };
+    }
+    const stream = vi.fn().mockImplementation(() => {
+      const iter = gen() as AsyncIterable<unknown> & { finalMessage: typeof finalMessage };
+      iter.finalMessage = finalMessage;
+      return iter;
+    });
+    const create = vi.fn();
+    const client = new ClaudeClient({ messages: { create, stream } } as MessagesCreateClient);
+
+    const textDeltas: string[] = [];
+    const thinkingDeltas: string[] = [];
+    const res = await client.runTurn({
+      model: 'm',
+      messages: [],
+      thinking: true,
+      onText: (d) => textDeltas.push(d),
+      onThinking: (d) => thinkingDeltas.push(d),
+    });
+
+    // Streamed, not the non-streaming create path.
+    expect(stream).toHaveBeenCalledTimes(1);
+    expect(create).not.toHaveBeenCalled();
+    // Adaptive thinking was requested in the right shape.
+    expect(stream.mock.calls[0][0].thinking).toEqual({ type: 'adaptive', display: 'summarized' });
+
+    expect(textDeltas).toEqual(['Hello ', 'world']);
+    expect(thinkingDeltas).toEqual(['Let me ', 'plan']);
+    expect(res.text).toBe('Hello world');
+    expect(res.toolUses).toHaveLength(1);
+    expect(res.usage.inputTokens).toBe(12);
+  });
+
+  it('uses the non-streaming path when no callbacks are provided (backward compatible)', async () => {
+    const create = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
+    const stream = vi.fn();
+    const client = new ClaudeClient({ messages: { create, stream } } as MessagesCreateClient);
+    const res = await client.runTurn({ model: 'm', messages: [] });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(stream).not.toHaveBeenCalled();
+    expect(res.text).toBe('ok');
+  });
+
+  it('falls back to the non-streaming create path when streaming throws a transient error', async () => {
+    const create = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'recovered' }], stop_reason: 'end_turn' });
+    const stream = vi.fn().mockImplementation(() => {
+      throw Object.assign(new Error('overloaded'), { status: 529 });
+    });
+    const client = new ClaudeClient({ messages: { create, stream } } as MessagesCreateClient, { sleep: async () => {}, baseDelayMs: 0 });
+    const res = await client.runTurn({ model: 'm', messages: [], onText: () => {} });
+    expect(stream).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(res.text).toBe('recovered');
+  });
+});
+
 describe('ClaudeClient prompt caching (RC-2)', () => {
   function mock() {
     const create = vi.fn().mockResolvedValue({ content: [], stop_reason: 'end_turn' });

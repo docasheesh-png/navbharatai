@@ -66,6 +66,24 @@ export interface RunTurnParams {
    * messages, so a cache breakpoint on the system block caches tools+system.
    */
   cache?: boolean;
+  /**
+   * Enable Anthropic adaptive "thinking" with a summarized display for this turn.
+   * When set, the model reasons before answering and emits a thinking summary the
+   * UI can stream (via `onThinking`). Off by default — backward compatible.
+   */
+  thinking?: boolean;
+  /**
+   * Optional streaming callback for the assistant's visible text. When provided
+   * (and the underlying client supports streaming), the turn streams and each
+   * text delta is delivered here token-by-token. Omitting it keeps the original
+   * non-streaming behaviour unchanged.
+   */
+  onText?: (delta: string) => void;
+  /**
+   * Optional streaming callback for the thinking summary. Receives thinking
+   * deltas token-by-token when `thinking` is on and streaming is active.
+   */
+  onThinking?: (delta: string) => void;
 }
 
 /** The slice of ClaudeClient the AgentRunner loop depends on (DI/testing). */
@@ -75,7 +93,17 @@ export interface TurnRunner {
 
 /** Minimal structural type of the Anthropic client method we use (for DI/tests). */
 export interface MessagesCreateClient {
-  messages: { create(params: Record<string, unknown>): Promise<AnthropicMessageLike> };
+  messages: {
+    create(params: Record<string, unknown>): Promise<AnthropicMessageLike>;
+    /**
+     * Optional streaming entry point. When present, runTurn uses it to emit
+     * text/thinking deltas live; the final assembled message is awaited via
+     * `finalMessage()`. The real Anthropic SDK provides this; tests can inject it.
+     */
+    stream?(params: Record<string, unknown>): AsyncIterable<unknown> & {
+      finalMessage(): Promise<AnthropicMessageLike>;
+    };
+  };
 }
 
 interface AnthropicContentBlock {
@@ -198,8 +226,49 @@ export class ClaudeClient implements TurnRunner {
       createParams.tool_choice = { type: 'auto' };
     }
 
+    if (params.thinking) {
+      // Adaptive thinking with a summarized display — the correct shape for
+      // claude-opus-4-8 / claude-sonnet-4-6 (do NOT use budget_tokens here).
+      createParams.thinking = { type: 'adaptive', display: 'summarized' };
+    }
+
+    // Stream the turn when a streaming callback is provided AND the client
+    // supports it. A transient streaming failure falls back to the proven
+    // non-streaming path so a turn never dies just because streaming broke.
+    if ((params.onText || params.onThinking) && typeof this.getClient().messages.stream === 'function') {
+      try {
+        return await this.streamTurn(createParams, params);
+      } catch (err) {
+        if (!isRetryableError(err)) throw err;
+        // Fall through to the non-streaming path below on a transient error.
+      }
+    }
+
     const resp = await this.createWithRetry(createParams);
     return parseMessage(resp);
+  }
+
+  /**
+   * Stream one assistant turn, delivering text/thinking deltas live via the
+   * caller's callbacks, then parse the final assembled message into a TurnResult.
+   */
+  private async streamTurn(
+    createParams: Record<string, unknown>,
+    params: RunTurnParams,
+  ): Promise<TurnResult> {
+    const stream = this.getClient().messages.stream!(createParams);
+    for await (const event of stream) {
+      const e = event as { type?: string; delta?: { type?: string; text?: string; thinking?: string } };
+      if (e.type === 'content_block_delta' && e.delta) {
+        if (e.delta.type === 'text_delta' && typeof e.delta.text === 'string' && params.onText) {
+          params.onText(e.delta.text);
+        } else if (e.delta.type === 'thinking_delta' && typeof e.delta.thinking === 'string' && params.onThinking) {
+          params.onThinking(e.delta.thinking);
+        }
+      }
+    }
+    const finalMessage = await stream.finalMessage();
+    return parseMessage(finalMessage);
   }
 
   /**

@@ -1,4 +1,4 @@
-import type { AgentCard, AgentRole, AgentV3ClientState, AgentV3WireEvent, FileChange } from './agentV3Types';
+import type { AgentCard, AgentRole, AgentV3ClientState, AgentV3WireEvent, FileChange, NarrationLine } from './agentV3Types';
 
 // Pure reducer: folds each NDJSON wire event into the client state that drives
 // all merged surfaces (narration, files, diffs, terminal, git/history, todos,
@@ -32,12 +32,57 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'workspace':
       return { ...state, workspaceId: event.workspaceId };
 
+    case 'stream_delta': {
+      const kind = event.kind ?? 'text';
+      // Find the LAST live line for this turn id + kind and append the delta.
+      let foundIdx = -1;
+      for (let i = state.narration.length - 1; i >= 0; i--) {
+        const line = state.narration[i];
+        if (line.id === event.id && (line.kind ?? 'text') === kind) {
+          foundIdx = i;
+          break;
+        }
+      }
+      let narration: NarrationLine[];
+      if (foundIdx >= 0) {
+        narration = state.narration.map((line, i) =>
+          i === foundIdx ? { ...line, text: line.text + event.delta } : line,
+        );
+      } else {
+        narration = [
+          ...state.narration,
+          { agent: event.agent, text: event.delta, ts: event.ts, id: event.id, kind, streaming: true },
+        ].slice(-MAX_NARRATION);
+      }
+      return {
+        ...state,
+        narration,
+        agents: touchAgent(state.agents, event.agent, event.delta, true, event.ts),
+      };
+    }
+
     case 'narration':
     case 'thinking': {
-      const narration =
-        event.type === 'narration'
-          ? [...state.narration, { agent: event.agent, text: event.text, ts: event.ts }].slice(-MAX_NARRATION)
-          : state.narration;
+      let narration = state.narration;
+      if (event.type === 'narration') {
+        // If this turn was streamed (its id already has a text line), finalize that
+        // line in place instead of pushing a duplicate. Otherwise (no id, or no
+        // matching line) push a new line — the original/backward-compatible path.
+        const idx =
+          event.id != null
+            ? state.narration.findIndex((line) => line.id === event.id && (line.kind ?? 'text') === 'text')
+            : -1;
+        if (idx >= 0) {
+          narration = state.narration.map((line, i) =>
+            i === idx ? { ...line, text: event.text, streaming: false } : line,
+          );
+        } else {
+          narration = [
+            ...state.narration,
+            { agent: event.agent, text: event.text, ts: event.ts, id: event.id },
+          ].slice(-MAX_NARRATION);
+        }
+      }
       return {
         ...state,
         narration,

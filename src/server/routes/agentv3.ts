@@ -239,6 +239,7 @@ export function registerAgentV3Routes(app: Express): void {
     activeBuilds.add(buildKey);
     const onlyOpus = req.body?.onlyOpus === true;
     const planFirst = req.body?.planFirst !== false; // plan-mode ON by default (P4)
+    const thinking = req.body?.thinking === true; // adaptive thinking, off by default
 
     // NDJSON stream (mirrors the Engineer route's streaming contract).
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -309,6 +310,7 @@ export function registerAgentV3Routes(app: Express): void {
         system: architectSystemPrompt(),
         tools: catalogForTools(roleConfig('architect').tools),
         onlyOpus,
+        thinking,
         maxBudgetUsd: budget,
         maxSteps,
         agentRole: 'architect',
@@ -328,6 +330,7 @@ export function registerAgentV3Routes(app: Express): void {
           system: planSystemPrompt(),
           tools: catalogForTools(['update_todo']),
           onlyOpus,
+          thinking,
           maxBudgetUsd: budget,
           maxSteps: 4,
           agentRole: 'architect',

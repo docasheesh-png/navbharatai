@@ -32,6 +32,8 @@ export interface AgentRunnerOptions {
   maxTokensPerTurn?: number;
   /** D6 — bill at the Only-Opus 5× rate instead of the standard 2.5×. */
   onlyOpus?: boolean;
+  /** Enable Anthropic adaptive thinking (streams a thinking summary to the UI). */
+  thinking?: boolean;
   /** Optional hard budget (USD billed to the user). Stops honestly when reached. */
   maxBudgetUsd?: number;
   /** Which agent this loop represents (for event attribution). Default 'architect'. */
@@ -67,6 +69,7 @@ export class AgentRunner {
       tools,
       maxTokensPerTurn,
       onlyOpus,
+      thinking,
       maxBudgetUsd,
     } = this.opts;
     const maxSteps = this.opts.maxSteps ?? 50;
@@ -88,12 +91,21 @@ export class AgentRunner {
       while (steps < maxSteps) {
         steps++;
 
+        // A unique id for this turn — ties the streamed deltas to their final
+        // narration line so the client can finalize (not duplicate) the line.
+        const turnId = `t${steps}-${Date.now()}`;
+
         const turn = await client.runTurn({
           model,
           system,
           messages,
           tools,
           maxTokens: maxTokensPerTurn,
+          thinking,
+          onText: (delta) =>
+            events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'text', delta, ts: Date.now() }),
+          onThinking: (delta) =>
+            events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'thinking', delta, ts: Date.now() }),
         });
 
         usage.inputTokens += turn.usage.inputTokens;
@@ -102,7 +114,7 @@ export class AgentRunner {
         usage.cacheReadInputTokens += turn.usage.cacheReadInputTokens;
 
         if (turn.text.trim()) {
-          events.emit({ type: 'narration', agent: agentRole, text: turn.text, ts: Date.now() });
+          events.emit({ type: 'narration', agent: agentRole, text: turn.text, ts: Date.now(), id: turnId });
         }
 
         // Record the assistant turn verbatim so tool_use ids resolve next turn.

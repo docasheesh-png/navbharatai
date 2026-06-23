@@ -140,6 +140,47 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(s.terminal).toEqual(['exit=0', 'hello']);
   });
 
+  it('accumulates stream_delta text then finalizes (not duplicates) on narration', () => {
+    let s = initialAgentV3State();
+    s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'text', delta: 'Hello', ts: 1 });
+    s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'text', delta: ' world', ts: 2 });
+    expect(s.narration).toHaveLength(1);
+    expect(s.narration[0].text).toBe('Hello world');
+    expect(s.narration[0].streaming).toBe(true);
+
+    // Final narration with the same id finalizes the existing line in place.
+    s = agentV3Reducer(s, { type: 'narration', agent: 'architect', text: 'Hello world', ts: 3, id: 't1' });
+    expect(s.narration).toHaveLength(1);
+    expect(s.narration[0].text).toBe('Hello world');
+    expect(s.narration[0].streaming).toBe(false);
+  });
+
+  it('keeps thinking deltas as a separate line from text deltas with the same id', () => {
+    let s = initialAgentV3State();
+    s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'thinking', delta: 'Let me', ts: 1 });
+    s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'thinking', delta: ' think', ts: 2 });
+    s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'text', delta: 'Done', ts: 3 });
+    expect(s.narration).toHaveLength(2);
+    expect(s.narration[0].kind).toBe('thinking');
+    expect(s.narration[0].text).toBe('Let me think');
+    expect(s.narration[1].kind).toBe('text');
+    expect(s.narration[1].text).toBe('Done');
+
+    // Finalizing the text turn leaves the thinking line untouched and does not dupe.
+    s = agentV3Reducer(s, { type: 'narration', agent: 'architect', text: 'Done', ts: 4, id: 't1' });
+    expect(s.narration).toHaveLength(2);
+    expect(s.narration[1].text).toBe('Done');
+    expect(s.narration[1].streaming).toBe(false);
+    expect(s.narration[0].text).toBe('Let me think');
+  });
+
+  it('backward compatible: a narration with no id pushes a new line as before', () => {
+    let s = initialAgentV3State();
+    s = agentV3Reducer(s, { type: 'narration', agent: 'architect', text: 'first', ts: 1 });
+    s = agentV3Reducer(s, { type: 'narration', agent: 'architect', text: 'second', ts: 2 });
+    expect(s.narration.map((n) => n.text)).toEqual(['first', 'second']);
+  });
+
   it('is immutable — does not mutate the input state', () => {
     const s0 = initialAgentV3State();
     const s1 = agentV3Reducer(s0, { type: 'plan_updated', plan: 'x', ts: 1 });

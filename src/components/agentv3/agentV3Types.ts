@@ -39,8 +39,9 @@ export interface GitCheckpoint {
 /** One NDJSON line from /api/agentv3/chat: an engine AgentEvent or the final result. */
 export type AgentV3WireEvent =
   | { type: 'workspace'; workspaceId: string; ts: number }
-  | { type: 'narration'; agent: AgentRole; text: string; ts: number }
+  | { type: 'narration'; agent: AgentRole; text: string; ts: number; id?: string }
   | { type: 'thinking'; agent: AgentRole; text: string; ts: number }
+  | { type: 'stream_delta'; agent: AgentRole; id: string; kind: 'text' | 'thinking'; delta: string; ts: number }
   | { type: 'tool_call'; agent: AgentRole; tool: string; input: unknown; callId: string; ts: number }
   | { type: 'tool_result'; agent: AgentRole; callId: string; ok: boolean; summary: string; ts: number }
   | { type: 'file_changed'; agent: AgentRole; change: FileChange; ts: number }
@@ -68,6 +69,12 @@ export interface NarrationLine {
   agent: AgentRole;
   text: string;
   ts: number;
+  /** Ties a line to its streamed deltas so a final narration finalizes (not dupes) it. */
+  id?: string;
+  /** 'text' = visible reply, 'thinking' = dim/italic thinking summary. */
+  kind?: 'text' | 'thinking';
+  /** True while the line is still receiving deltas (renders a typing cursor). */
+  streaming?: boolean;
 }
 
 /** The full client view a v3.0 build renders — one source for all merged surfaces. */

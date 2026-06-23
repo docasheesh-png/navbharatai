@@ -1,0 +1,152 @@
+// AgentV3 — Trust, Safety & Compliance analysis (additive eighth evaluate dimension).
+//
+// Layer 77 ("Bharosa"). Real, deterministic static scanning of the USER's app for
+// DATA-PROTECTION / PRIVACY defects that block a safe public launch — oriented to
+// India's DPDP Act and the EU GDPR. This is intentionally DISTINCT from
+// SecurityAnalysis (which catches injection, hardcoded secrets, unsafe eval): here
+// we look at how the app treats *people's data* — PII written to logs, sensitive
+// values kept in browser storage, third-party trackers running without consent,
+// cookies set without SameSite, personal data sent over plain http, and an app
+// that collects personal data with no privacy policy at all.
+//
+// Every rule is computed from real file content (single-line, tag/expression-local)
+// so precision stays high and the agent is never sent chasing false positives. The
+// dimension also issues an honest "launch-safe certificate" derived only from what
+// was actually found — never a synthetic "looks compliant".
+
+export type ComplianceSeverity = 'high' | 'medium' | 'low';
+
+export interface ComplianceIssue {
+  file: string;
+  line: number;
+  kind: string;
+  severity: ComplianceSeverity;
+  snippet: string;
+}
+
+/** Generated / vendored / test code is never the user's product surface. */
+const SKIP_PATH = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__|(^|[\\/])tests?([\\/]|$)/i;
+/** Source files whose content we scan. */
+const CODE_EXT = /\.(tsx?|jsx?|vue|svelte|astro|html?|mjs|cjs)$/i;
+
+const SNIPPET_MAX = 120;
+
+// Sensitive tokens that must never be logged or stored in plaintext on the client.
+// Deliberately high-precision (no bare "email"/"phone" — too noisy) so a hit is a
+// real data-protection problem, not a guess.
+const SENSITIVE = /\b(password|passwd|aadhaar|aadhar|\bpan\b|cvv|\bssn\b|credit[_-]?card|card[_-]?number|otp|secret|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|private[_-]?key|passport)\b/i;
+
+// PII form-field signals — used to decide whether the app collects personal data
+// (and therefore needs a privacy policy). Names/types a real form would use.
+const PII_FIELD = /\b(name\s*=\s*['"`{]?\s*)?(email|e-mail|phone|mobile|aadhaar|aadhar|\bpan\b|passport|address|dob|date[_-]?of[_-]?birth|credit[_-]?card|card[_-]?number|ssn)\b/i;
+const PII_INPUT_TYPE = /type\s*=\s*['"{]?\s*(email|tel|password)\b/i;
+
+// Known third-party analytics / trackers that set cookies or fingerprint users.
+const TRACKER = /(google-analytics\.com|googletagmanager\.com|\bgtag\s*\(|\bga\s*\(\s*['"](send|create)|analytics\.track\s*\(|mixpanel|hotjar|\bfbq\s*\(|facebook[^\n]*pixel|cdn\.segment\.com|amplitude\.com|clarity\.ms|matomo|plausible\.io)/i;
+
+// A cookie-consent / CMP surface that legitimises trackers.
+const CONSENT_UI = /(cookie[\s-]?consent|cookie[\s-]?banner|consent[_-]?manager|gdpr[_-]?consent|CookieConsent|onetrust|cookiebot|tarteaucitron|usercentrics|\bconsent(Given|State|Mode)\b)/i;
+
+/** Does a file's content collect personal data (PII form fields / inputs)? */
+export function detectsPiiCollection(content: string): boolean {
+  return PII_INPUT_TYPE.test(content) || PII_FIELD.test(content);
+}
+
+/** Does a file load a known third-party tracker? */
+export function detectsTracker(content: string): boolean {
+  return TRACKER.test(content);
+}
+
+/** Does a file implement a cookie/consent surface? */
+export function detectsConsentUI(content: string): boolean {
+  return CONSENT_UI.test(content);
+}
+
+/** Does this file look like a privacy policy / data-protection notice? */
+export function looksLikePrivacyPolicy(file: string, content: string): boolean {
+  if (/privacy|data[_-]?protection|gdpr|dpdp/i.test(file)) return true;
+  return /privacy policy|data protection|how we (use|handle|process) your data|personal (data|information) we collect/i.test(content);
+}
+
+function trimSnippet(line: string): string {
+  const t = line.trim();
+  return t.length > SNIPPET_MAX ? t.slice(0, SNIPPET_MAX) + '…' : t;
+}
+
+/**
+ * Scan one file for FILE-LOCAL privacy/compliance defects. Project-level rules
+ * (missing privacy policy, trackers without consent) are decided by the caller
+ * using the exported detectors above, because they need the whole project.
+ * Returns [] for skipped/non-code/clean files.
+ */
+export function scanCompliance(file: string, content: string): ComplianceIssue[] {
+  if (!CODE_EXT.test(file) || SKIP_PATH.test(file)) return [];
+  const issues: ComplianceIssue[] = [];
+  const lines = content.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.length > 4000) continue; // skip minified/huge lines
+    const push = (kind: string, severity: ComplianceSeverity) =>
+      issues.push({ file, line: i + 1, kind, severity, snippet: trimSnippet(line) });
+
+    // ── high: personal data / secrets written to logs (DPDP minimisation, GDPR) ──
+    if (/\bconsole\.(log|info|warn|error|debug)\s*\(/.test(line) && SENSITIVE.test(line)) {
+      push('pii-in-logs', 'high');
+    }
+
+    // ── medium: sensitive value kept in browser storage (readable by any script) ─
+    if (/\b(localStorage|sessionStorage)\.setItem\s*\(/.test(line) && SENSITIVE.test(line)) {
+      push('sensitive-in-browser-storage', 'medium');
+    }
+
+    // ── medium: cookie set without SameSite (cross-site leakage / CSRF surface) ──
+    if (/document\.cookie\s*=/.test(line) && !/samesite/i.test(line)) {
+      push('cookie-no-samesite', 'medium');
+    }
+
+    // ── high: personal data over plain http:// (in the clear on the network) ─────
+    // Only flag a real network call to a non-local host.
+    if (/(fetch|axios|\.(get|post|put|patch)|url\s*:)\s*\(?\s*['"`]http:\/\//i.test(line) &&
+        !/http:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])/i.test(line)) {
+      push('insecure-http-endpoint', 'medium');
+    }
+  }
+  return issues;
+}
+
+/** The honest "launch-safe" certificate, derived only from real findings. */
+export function launchSafeCertificate(issues: ComplianceIssue[]): string {
+  const high = issues.filter((x) => x.severity === 'high').length;
+  const medium = issues.filter((x) => x.severity === 'medium').length;
+  if (high === 0 && medium === 0) {
+    return '🏅 Launch-safe certificate: CERTIFIED — no privacy/compliance blockers found (DPDP/GDPR-oriented checks).';
+  }
+  if (high > 0) {
+    return `⛔ Launch-safe certificate: NOT CERTIFIED — ${high} high-severity privacy/compliance blocker(s) must be fixed before public launch.`;
+  }
+  return `⚠️ Launch-safe certificate: CONDITIONAL — ${medium} medium issue(s) to review before launch (no hard blockers).`;
+}
+
+/** A concise, honest compliance report for the agent, ending with the certificate. */
+export function complianceSummary(issues: ComplianceIssue[]): string {
+  const cert = launchSafeCertificate(issues);
+  if (issues.length === 0) {
+    return `Trust & compliance scan: ✓ No privacy/compliance issues detected.\n${cert}`;
+  }
+  const order: Record<ComplianceSeverity, number> = { high: 0, medium: 1, low: 2 };
+  const sorted = [...issues].sort((a, b) => order[a.severity] - order[b.severity]);
+  const counts = issues.reduce(
+    (acc, x) => ((acc[x.severity] = (acc[x.severity] || 0) + 1), acc),
+    {} as Record<ComplianceSeverity, number>,
+  );
+  const head = `Trust & compliance scan: ${issues.length} issue(s) — ` +
+    (['high', 'medium', 'low'] as ComplianceSeverity[])
+      .filter((s) => counts[s])
+      .map((s) => `${counts[s]} ${s}`)
+      .join(', ') + '.';
+  const shown = sorted.slice(0, 15);
+  const body = shown.map((x) => `  - [${x.severity}] ${x.file}:${x.line} — ${x.kind}: ${x.snippet}`);
+  const more = issues.length > shown.length ? [`  …and ${issues.length - shown.length} more.`] : [];
+  return [head, ...body, ...more, cert].join('\n');
+}

@@ -13,6 +13,7 @@ import {
   roleConfig,
   makeSubAgentSpawn,
   makeSecondOpinion,
+  makeConsensus,
   type OpinionRouter,
   resolveModel,
   architectSystemPrompt,
@@ -313,7 +314,11 @@ export function registerAgentV3Routes(app: Express): void {
       // provider } }). Never throws — the tool itself degrades gracefully.
       const opinionRouter = AIRouterManager.getRouter('free') as unknown as OpinionRouter;
       const secondOpinion = makeSecondOpinion(opinionRouter);
-      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion);
+      // Layer 49 (Collective Intelligence): the Architect can call consensus to
+      // convene a multi-perspective panel (correctness, security, UX) on a hard
+      // decision, using the SAME non-Claude free router. Never throws.
+      const consensus = makeConsensus(opinionRouter);
+      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus);
       const runner = new AgentRunner({
         client,
         dispatcher,

@@ -31,6 +31,7 @@ import { generateEnvExample } from './EnvExampleGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
+import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary } from './ErrorBoundaryAnalysis';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
 
@@ -153,6 +154,32 @@ export class ToolDispatcher {
       /* listing failed — fall back to no accessibility issues */
     }
     return issues;
+  }
+
+  /**
+   * Best-effort scan for an error-boundary signal across the project's FRONT-END
+   * files. Returns true as soon as one is found; any listing/read failure degrades
+   * to false (which, combined with a real component count, surfaces the gap).
+   */
+  private async collectHasErrorBoundary(): Promise<boolean> {
+    const FRONTEND = /\.(tsx|jsx)$/i;
+    const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+    try {
+      const paths = await this.actuator.listFiles(this.workspaceId);
+      const candidates = paths.filter((p) => FRONTEND.test(p) && !SKIP.test(p)).slice(0, 200);
+      for (const p of candidates) {
+        try {
+          const content = await this.actuator.readFile(this.workspaceId, p);
+          if (content.length > 200_000) continue;
+          if (hasErrorBoundarySignal(content)) return true;
+        } catch {
+          /* skip a single unreadable file */
+        }
+      }
+    } catch {
+      /* listing failed — treat as no boundary found */
+    }
+    return false;
   }
 
   /**
@@ -522,6 +549,12 @@ export class ToolDispatcher {
           hygieneFiles = []; // listing failed — analyzeProjectHygiene degrades to "not assessable"
         }
         const hygiene = analyzeProjectHygiene(hygieneFiles, pkgForRun !== null);
+        // Best-effort error-boundary pass (Section I #5): a real React app with no
+        // error boundary white-screens on any render error. Never throws.
+        const errorBoundary = analyzeErrorBoundary(
+          mem.graph().components.length,
+          await this.collectHasErrorBoundary(),
+        );
         const confidence = computeBuildConfidence({
           readinessScore: readiness.score,
           ready: readiness.ready,
@@ -540,7 +573,7 @@ export class ToolDispatcher {
           accessibility: tally(a11yIssues),
           compliance: complianceTally,
         });
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}`;
       }
 
       case 'update_todo': {

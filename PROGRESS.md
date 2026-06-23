@@ -1143,3 +1143,27 @@ Config still required by admin (cannot be done from code):
     enable Google provider + add the live serving domain to Authorized domains.
 
 **Test suite: 1858 passing.** Gate green: tsc frontend, build, vitest.
+
+---
+
+### 2026-06-23 — Admin login real bug fix (HMAC key inconsistency on env whitespace/quotes)
+
+User confirmed ADMIN_PASSWORD is set in Cloud Run but admin login still failed.
+Root cause found in code (admin.ts): the login endpoint issued the daily token
+using a TRIMMED password as the HMAC key, but verifyAdminToken recomputed the
+expected token using the RAW process.env.ADMIN_PASSWORD (and raw ADMIN_USERNAME).
+If the env value carries a trailing newline / stray whitespace / wrapping quotes
+(very common when set via console or gcloud), the two HMAC keys differ → login
+SUCCEEDS but every subsequent /api/admin/* dashboard call 403s, so the panel
+appears broken.
+
+Fix: a shared adminCredential() normaliser (trim + strip one layer of wrapping
+quotes, with fallback) is now used on BOTH the login and verification sides, so
+the issued token and the verifier always agree. Exported + 5 unit tests
+(normalisation cases + an HMAC round-trip regression guard).
+
+Also noted (config, not code): firebase.json hosting rewrites '**' → /index.html,
+so on the Firebase-hosting domain /api/* never reaches Cloud Run; the live Cloud
+Run domain is unaffected.
+
+**Test suite: 1869 passing.** Gate green: tsc frontend+server, build, boot:check.

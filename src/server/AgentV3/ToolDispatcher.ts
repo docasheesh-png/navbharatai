@@ -26,6 +26,7 @@ import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict } from './Readiness';
 import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
 import { analyzeRequirementCoverage, requirementCoverageSummary } from './RequirementCoverage';
+import { generateReadme } from './ReadmeGenerator';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
 
@@ -502,6 +503,31 @@ export class ToolDispatcher {
         const todos = parseTodos(input);
         this.state?.setTodos(todos);
         return `Updated ${todos.length} todo(s).`;
+      }
+
+      case 'generate_readme': {
+        const path = optStr(input, 'path') || 'README.md';
+        const projectName = optStr(input, 'project_name');
+        let pkg: string | null = null;
+        try {
+          pkg = await this.actuator.readFile(this.workspaceId, 'package.json');
+        } catch {
+          pkg = null; // no manifest — generateReadme still produces an honest minimal README
+        }
+        const graph = getWorkspaceMemory(this.workspaceId).graph();
+        const content = generateReadme({ projectName, graph, packageJson: pkg });
+        let kind: 'create' | 'modify' = 'create';
+        try {
+          await this.actuator.readFile(this.workspaceId, path);
+          kind = 'modify';
+        } catch {
+          kind = 'create';
+        }
+        await this.actuator.writeFile(this.workspaceId, path, content);
+        this.state?.recordFileChange({ path, kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+        await this.maybeCheckpoint(`${kind} ${path}`);
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} from the project graph (${content.length} bytes).`;
       }
 
       case 'update_preview': {

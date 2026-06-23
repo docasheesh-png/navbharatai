@@ -22,6 +22,8 @@ import {
   restoreSession,
   agentLifecycle,
   getWorkspaceMemory,
+  reflectOnBuild,
+  reflectionNote,
 } from '../AgentV3';
 import { randomUUID } from 'crypto';
 import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
@@ -359,6 +361,21 @@ export function registerAgentV3Routes(app: Express): void {
       }
 
       const result = await runner.run(buildPrompt);
+
+      // Build Reflection (Layer 57, seed): derive a short reflection from what
+      // happened this build (errors hit, fixes applied, outcome) and store it
+      // back into project memory so the NEXT build in this session can recall
+      // those lessons. Best-effort — wrapped so it can NEVER affect the build.
+      try {
+        const reflectMem = getWorkspaceMemory(workspaceId);
+        const reflection = reflectOnBuild({
+          ok: result.ok,
+          summary: result.summary,
+          steps: result.steps,
+          episodes: reflectMem.snapshot().episodes,
+        });
+        reflectMem.recordNote(reflectionNote(reflection));
+      } catch { /* reflection is best-effort — never affects the build result */ }
 
       // Bill the user the marked-up cost (D5/D6), recorded in the same place the
       // platform records every build's cost. Best-effort — never blocks the run.

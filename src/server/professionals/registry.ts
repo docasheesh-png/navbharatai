@@ -5,6 +5,7 @@ import { THESIS_AI } from './configs/thesis';
 import { ACCOUNTANT_AI } from './configs/accountant';
 import { LAWYER_AI } from './configs/lawyer';
 import { FINANCE_AI } from './configs/finance';
+import { ASTROLOGER_AI } from './configs/astrologer';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -21,6 +22,7 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [ACCOUNTANT_AI.id]: ACCOUNTANT_AI,
   [LAWYER_AI.id]: LAWYER_AI,
   [FINANCE_AI.id]: FINANCE_AI,
+  [ASTROLOGER_AI.id]: ASTROLOGER_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

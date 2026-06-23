@@ -78,4 +78,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How should I pay off my loans?',
     ],
   },
+  astrologer_ai: {
+    id: 'astrologer_ai',
+    name: 'Astrologer',
+    welcome:
+      "Namaste 🙏 I'm Astro AI — for fun and cultural interest, I can share your sign's horoscope, explain kundli/rashi/nakshatra & gun-milan, and offer positive, hopeful guidance. Just for entertainment — not science, and never a substitute for real medical, money or legal advice. Your choices matter most! ✨",
+    quickPrompts: [
+      "Today's horoscope for my sign",
+      'Explain my rashi & personality',
+      'What is a kundli / birth chart?',
+      'How does gun-milan work?',
+    ],
+  },
 };

@@ -36,6 +36,47 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000);
 
+/**
+ * B — independent safety audit: a SECOND model reviews SDA's reply for dangerous
+ * errors (wrong dose, missed contraindication, missed red flag, unsafe statement)
+ * before it reaches the doctor. Best-effort + fail-open: any error/timeout/missing
+ * key returns null (no note) and never blocks the reply.
+ */
+async function auditSdaReply(caseContext: string, reply: string, geminiKey: string): Promise<string | null> {
+  if (!geminiKey) return null;
+  const auditPrompt = `You are a senior physician performing a SAFETY AUDIT of another AI assistant's reply to a doctor. Review ONLY for genuinely dangerous problems:
+- wrong or unsafe drug dose / frequency / route
+- a missed contraindication (allergy, pregnancy/breastfeeding, renal/hepatic, age/weight)
+- a missed red flag / emergency needing urgent action
+- a factually dangerous or clearly incorrect clinical statement
+
+CASE CONTEXT:
+${caseContext}
+
+AI REPLY TO AUDIT:
+${reply}
+
+If you find NO safety issue, output EXACTLY: OK
+Otherwise output up to 3 short bullet points, each naming the issue and the correction. Do NOT rewrite the whole reply. Be terse.`;
+  try {
+    const { GoogleGenAI } = await import('@google/genai');
+    const ai = new GoogleGenAI({ apiKey: geminiKey });
+    const r: any = await Promise.race([
+      ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{ role: 'user', parts: [{ text: auditPrompt }] }],
+        config: { thinkingConfig: { thinkingBudget: 0 } },
+      } as any),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('audit timeout')), 12000)),
+    ]);
+    const text = String(r?.text || r?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+    if (!text || /^ok\b/i.test(text) || /^ok[.!]?$/i.test(text)) return null;
+    return text;
+  } catch {
+    return null;
+  }
+}
+
 export function registerSdaRoutes(app: Express): void {
   // Deterministic clinical calculators — exact, coded scores/doses (never LLM math).
   app.post('/api/sda/calc', (req: any, res: any) => {
@@ -440,6 +481,21 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       const suggestPDF = reply.includes('[CASE_COMPLETE]');
       const cleanReply = reply.replace(/\[CASE_COMPLETE\]\s*/g, '').trim();
 
+      // B — independent safety audit. Run only on actionable ADVICE (not on a plain
+      // follow-up question), to keep cost/latency down. Fail-open, never blocks.
+      let finalReply = cleanReply;
+      if (process.env.SDA_VERIFY !== '0') {
+        const isJustQuestion = cleanReply.trim().endsWith('?') && cleanReply.length < 400;
+        const adviceRe = /\b(mg|mcg|ml|dose|dosage|tablet|capsule|syrup|inject|\biv\b|\bim\b|prescrib|treatment|manage|diagnos|differential|administer|refer|admit|start\b|give\b)/i;
+        if (!isJustQuestion && adviceRe.test(cleanReply)) {
+          const caseContext = `Recorded case data: ${JSON.stringify(clinicalEntry.patientData)}\nRecorded red flags: ${clinicalEntry.redFlags.join(', ') || 'none'}\nDoctor's latest message: ${message}`;
+          const audit = await auditSdaReply(caseContext, cleanReply, sdaGeminiKey);
+          if (audit) {
+            finalReply = `${cleanReply}\n\n---\n**⚠️ Automated safety cross-check (second AI):**\n${audit}\n\n_This is an automated double-check, not a substitute for your clinical judgment._`;
+          }
+        }
+      }
+
       const redFlags = detectRedFlags(cleanReply);
       const patientUpdate = extractPatientUpdate(cleanReply, message);
       const redFlagDetected = redFlags.length > 0 || /\bRED FLAG\b|\bEMERGENCY\b|\bURGENT\b/i.test(cleanReply);
@@ -456,7 +512,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       if (suggestPDF) clinicalEntry.stage = 'complete';
       clinicalEntry.updatedAt = Date.now();
 
-      return res.json({ reply: cleanReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF, sessionId: sdaSessionId });
+      return res.json({ reply: finalReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF, sessionId: sdaSessionId });
 
     } catch (err: any) {
       console.error('[SDA] Error:', err);

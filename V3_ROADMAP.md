@@ -284,6 +284,14 @@ Every phase is graded against these, because they are what makes the difference:
   AppKnowledgeBase synced. Third item via the Section I audit-first triage (ABSENT →
   solid); applies the app-must-never-break rule to the apps v3.0 builds. v3.0-only.
   Gate green: server+frontend tsc 0, 1965 vitest (+9), build, boot:check PASS.
+- 2026-06-23: Section I #4 (Security) — security-config scan. New
+  `AgentV3/SecurityConfigAnalysis.ts` (PURE): flags two high-impact, high-precision
+  misconfigurations — disabled TLS certificate verification (rejectUnauthorized:false /
+  NODE_TLS_REJECT_UNAUTHORIZED=0 → MITM, high) and wildcard "*" CORS (medium). Ignores
+  comments/non-code; records file:line. Folded into `evaluate` as the 16th dimension
+  (new collectSecurityConfigIssues source scan); systemPrompt + AppKnowledgeBase synced.
+  Fourth item via the Section I audit-first triage (ABSENT → solid). v3.0-only. Gate
+  green: server+frontend tsc 0, 1975 vitest (+10), build, boot:check PASS.
 - 2026-06-23: Provider diagnosis — GET /api/agentv3/diag reports (no secrets)
   whether ANTHROPIC_API_KEY is a real sk-ant key, plus base-url config; optional
   admin-gated ?test=1 makes one real Claude call and returns the exact outcome.

@@ -4433,7 +4433,30 @@ ${buildLanguageRule(preferredLanguage)}`;
       addToast('Session not found. It may have been deleted or is from a different account.', 'error');
       return false;
     }
-    
+
+    // v3.0 (engine_builder) sessions resume INSIDE v3.0 — adopt the saved sessionId
+    // (backend continues with the same workspace/memory, best-effort) and restore the
+    // saved thread, then open the v3.0 tab. Other sessions fall through to the regular
+    // chat restore below.
+    const isV3Session = targetSession.agent === 'agentv3'
+      || (targetSession as any).originalAgent === 'agentv3'
+      || (targetSession as any).currentAgent === 'agentv3'
+      || (targetSession as any).meta?.tab === 'engine_builder'
+      || (typeof targetSession.id === 'string' && targetSession.id.startsWith('v3_'));
+    if (isV3Session) {
+      const sid = (targetSession.id || '').replace(/^v3_/, '') || targetSession.id;
+      const msgs = ((targetSession.messages || []) as any[]).map((mm) => ({
+        role: (mm.sender === 'user' || mm.role === 'user') ? 'user' as const : 'agent' as const,
+        text: mm.text ?? mm.content ?? '',
+        ts: mm.timestamp ? (Date.parse(mm.timestamp) || Date.now()) : (mm.ts ?? Date.now()),
+      }));
+      setV3Resume({ sessionId: sid, messages: msgs, nonce: Date.now() });
+      setCurrentSessionId(targetSession.id);
+      toggleTab('engine_builder');
+      addToast('Resumed v3.0 session.', 'success');
+      return true;
+    }
+
     // Set matching workspace file config
     if (targetSession.files && Object.keys(targetSession.files).length > 0) {
       setFiles(targetSession.files);
@@ -5646,7 +5669,7 @@ ${buildLanguageRule(preferredLanguage)}`;
  
               
       {/* AgentV3 (Vargen 3.0) launcher — admin-only, flag-gated; renders nothing when disabled. */}
-      <AgentV3Launcher userId={user?.uid} email={user?.email} />
+      <AgentV3Launcher userId={user?.uid} email={user?.email} onOpen={() => toggleTab('engine_builder')} />
 
       {/* Auth Modal + all overlay modals → AppModals */}
       <AppModals

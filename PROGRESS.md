@@ -1349,3 +1349,27 @@ Two fixes (App.tsx + AgentV3Panel.tsx):
    on a v3.0 history item now resumes it in v3.0.
 
 Gate green: tsc frontend, build, 1884 vitest.
+
+---
+
+### 2026-06-23 — v3.0: 3 root-cause fixes (header tab, History open, preview)
+
+User: (1) v3.0 doesn't open as a header tab like other views; (2) History "open" on
+a v3.0 chat does nothing; (3) preview not working. Root causes found and fixed:
+
+1. The floating AgentV3Launcher opened its OWN overlay (its own AgentV3Panel
+   instance) via local `open` state — never calling toggleTab — so v3.0 never
+   entered openTabs and never showed as a header tab (and was a second, conflicting
+   instance). Fix: the launcher now calls onOpen → toggleTab('engine_builder'),
+   opening the single engine_builder view/tab; removed its overlay + duplicate panel.
+2. The History "open" handler is handleRestoreUci (via HistoryView onRestoreSession),
+   NOT resumeSession — it had no v3.0 branch, so v3.0 sessions fell through to the
+   generic chat restore (did nothing useful). Fix: added a v3.0 branch to
+   handleRestoreUci that adopts the saved sessionId + thread (setV3Resume) and opens
+   the v3.0 tab.
+3. The earlier CSP frameSrc tightening (none → a few google/firebase hosts) blocked
+   the v3.0 preview iframe (an arbitrary https sandbox/deploy URL). Fix: frameSrc is
+   now ["'self'", "https:"] so any https preview/auth iframe loads (clickjacking of
+   us is governed by frame-ancestors, not frameSrc).
+
+Gate green: tsc frontend+server, build, 1884 vitest, boot:check.

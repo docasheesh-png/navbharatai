@@ -284,6 +284,13 @@ Every phase is graded against these, because they are what makes the difference:
   AppKnowledgeBase synced. Third item via the Section I audit-first triage (ABSENT →
   solid); applies the app-must-never-break rule to the apps v3.0 builds. v3.0-only.
   Gate green: server+frontend tsc 0, 1965 vitest (+9), build, boot:check PASS.
+- 2026-06-23: Section I #4/#13 (Security) — insecure-randomness rule. Added a third
+  rule to `SecurityConfigAnalysis`: Math.random() used near a security value (token/
+  secret/password/otp/session/apikey, either order on the line) → flagged high, with
+  the fix (crypto.randomUUID()/randomBytes()). High-precision (requires a security
+  keyword adjacency) so ordinary Math.random() shuffles aren't nagged. systemPrompt +
+  AppKnowledgeBase synced. v3.0-only. Gate green: server+frontend tsc 0, 1983 vitest
+  (+3), build, boot:check PASS.
 - 2026-06-23: Section I #22 (DX, config engine) — .gitignore generator. New
   `AgentV3/GitignoreGenerator.ts` (PURE): writes a correct, stack-aware .gitignore
   (node_modules/build/.env/logs/coverage/editor + framework entries from real deps).

@@ -1187,3 +1187,27 @@ shown next to it, so the user strengthens the plan up front.
 - AppKnowledgeBase + (existing keywords) updated. 14 new unit tests.
 
 **Test suite: 1884 passing.** Gate green: tsc frontend+server, build, boot:check.
+
+---
+
+### 2026-06-23 — Auth diagnostics: surface the REAL Identity Toolkit reason
+
+User hit email/password login failing with auth/internal-error and a misleading
+"DIAG 400: ADMIN_ONLY_OPERATION". Root cause is Firebase Console config (sign-in
+providers not enabled for project gen-lang-client-0866594388), but the old
+diagnostic probed accounts:signUp anonymously — which returns ADMIN_ONLY_OPERATION
+simply because anonymous auth is off (normal), hiding the true reason.
+
+Code fix (AuthComponent.tsx): diagnoseAuth() now probes the REAL endpoint —
+signInWithPassword with the entered credentials — and explainAuthReason() maps the
+Identity Toolkit message to an actionable sentence (CONFIGURATION_NOT_FOUND →
+"enable Authentication", PASSWORD_LOGIN_DISABLED/OPERATION_NOT_ALLOWED/
+ADMIN_ONLY_OPERATION → "enable the provider in Sign-in method",
+INVALID_LOGIN_CREDENTIALS → "wrong password or sign up", API key/referer →
+"key restricted"). So the on-screen error now names the exact fix + project.
+
+Config still required by admin (Firebase Console, project gen-lang-client-0866594388):
+  • Authentication → Sign-in method → enable Email/Password AND Google.
+  • Authentication → Settings → Authorized domains → add navbharatai.com.
+
+Gate green: tsc frontend, build, 1884 vitest.

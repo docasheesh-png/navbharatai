@@ -24,13 +24,28 @@ function safeStrEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(ba, bb);
 }
 
+/**
+ * Normalise an admin credential read from the environment. Cloud Run / console /
+ * gcloud frequently store a value with a trailing newline, stray whitespace, or
+ * wrapping quotes; if login and token-verification disagree on that, login can
+ * succeed while every subsequent dashboard call 403s (they'd HMAC different keys).
+ * Trimming + stripping a single layer of surrounding quotes on BOTH sides keeps
+ * the issued token and the verifier consistent.
+ */
+export function adminCredential(raw: string | undefined, fallback = ''): string {
+  const norm = (v: string): string => v.trim().replace(/^['"]([\s\S]*)['"]$/, '$1').trim();
+  return norm(String(raw ?? '')) || norm(fallback);
+}
+const adminUsername = (): string => adminCredential(process.env.ADMIN_USERNAME, 'aashishcpmt09');
+const adminPassword = (): string => adminCredential(process.env.ADMIN_PASSWORD, '');
+
 export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequestHandler): void {
   // Admin server-side login — issues the daily HMAC token used by verifyAdminToken.
   app.post('/api/admin/login', adminLimiter, (req: Request, res: Response) => {
     const username = String(req.body?.username || '').trim();
     const password = String(req.body?.password || '').trim();
-    const validUser = (process.env.ADMIN_USERNAME || 'aashishcpmt09').trim();
-    const validPass = (process.env.ADMIN_PASSWORD || '').trim();
+    const validUser = adminUsername();
+    const validPass = adminPassword();
 
     if (!validPass) {
       audit('ADMIN_LOGIN_BLOCKED', { reason: 'ADMIN_PASSWORD not set', ip: req.ip });
@@ -61,10 +76,10 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // Admin token verification middleware
   const verifyAdminToken = (req: Request, res: Response, next: NextFunction) => {
     const token = req.headers['x-admin-token'] as string;
-    const validPass = process.env.ADMIN_PASSWORD;
+    const validPass = adminPassword();
     if (!validPass || !token) return res.status(401).json({ error: 'Admin token required.' });
     const expected = crypto.createHmac('sha256', validPass)
-      .update(`admin:${Math.floor(Date.now() / 86400000)}:${process.env.ADMIN_USERNAME || 'aashishcpmt09'}`)
+      .update(`admin:${Math.floor(Date.now() / 86400000)}:${adminUsername()}`)
       .digest('hex');
     if (!safeStrEqual(token, expected)) {
       audit('ADMIN_ACCESS_DENIED', { ip: req.ip, path: req.path });

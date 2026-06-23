@@ -57,6 +57,8 @@ export { scanSecurity, securitySummary } from './SecurityAnalysis';
 export type { SecurityFinding, Severity } from './SecurityAnalysis';
 export { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
 export type { AuthenticityIssue, AuthenticitySeverity } from './AuthenticityAnalysis';
+export { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
+export type { AccessibilityIssue, AccessibilitySeverity } from './AccessibilityAnalysis';
 export { analyzeDependencies, dependencySummary, normalizeImportToPackage } from './DependencyAnalysis';
 export type { DependencyIssue, DependencySeverity } from './DependencyAnalysis';
 export { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';

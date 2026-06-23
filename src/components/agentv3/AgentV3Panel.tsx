@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw,
-  SlidersHorizontal, Check, X,
+  SlidersHorizontal, Check, X, Paperclip, FileText,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import type { AgentCard, GitCheckpoint } from './agentV3Types';
@@ -38,6 +38,10 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
   const [showWorkspace, setShowWorkspace] = useState(false);
   // Local-only UI flag for the input-row settings popover (Planning/Thinking/Power).
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Files the user attached for the next message (images, PDFs, Word/Excel/PPT,
+  // ZIP, text/code). Read and analyzed by v3.0 — converted to base64 on send.
+  const [files, setFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [userMsgs, setUserMsgs] = useState<ChatMsg[]>([]);
   // Finalized agent replies from PREVIOUS turns. The live build state
   // (state.narration) is reset by start() on every new message, so without
@@ -135,9 +139,49 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, userId]);
 
-  const send = () => {
+  // Read a File as base64 (no data: prefix); downscale large images to keep the
+  // payload small and vision-optimal, exactly like the other chat surfaces.
+  const fileToAttachment = (file: File): Promise<{ name: string; type: string; base64: string }> =>
+    new Promise((resolve) => {
+      const isImage = file.type.startsWith('image/') && file.type !== 'image/svg+xml';
+      const raw = () => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, type: file.type || 'application/octet-stream', base64: (reader.result as string).split(',')[1] || '' });
+        reader.onerror = () => resolve({ name: file.name, type: file.type, base64: '' });
+        reader.readAsDataURL(file);
+      };
+      if (!isImage) return raw();
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, 1568 / Math.max(img.width, img.height));
+          if (scale === 1 && file.size <= 900 * 1024) { URL.revokeObjectURL(url); return raw(); }
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(img.width * scale));
+          canvas.height = Math.max(1, Math.round(img.height * scale));
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { URL.revokeObjectURL(url); return raw(); }
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(url);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          resolve({ name: file.name.replace(/\.(png|webp|gif|bmp|heic|heif)$/i, '.jpg'), type: 'image/jpeg', base64: dataUrl.split(',')[1] || '' });
+        } catch { URL.revokeObjectURL(url); raw(); }
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); raw(); };
+      img.src = url;
+    });
+
+  const addFiles = (list: FileList | null) => {
+    if (!list) return;
+    const MAX = 15 * 1024 * 1024; // 15MB/file
+    const picked = Array.from(list).filter((f) => f.size <= MAX);
+    if (picked.length > 0) setFiles((prev) => [...prev, ...picked].slice(0, 8));
+  };
+
+  const send = async () => {
     const text = prompt.trim();
-    if (!text || running) return;
+    if ((!text && files.length === 0) || running) return;
     // Preserve the previous turn's agent replies BEFORE start() resets the live
     // build state — otherwise the prior reply (which lives only in state.narration)
     // disappears from the thread the moment the next message begins.
@@ -157,9 +201,14 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
     if (state.checkpoints.length > 0) {
       setCheckpointHistory((h) => [...h, ...state.checkpoints]);
     }
-    setUserMsgs((c) => [...c, { role: 'user', text, ts: Date.now() }]);
+    const attachments = files.length > 0 ? await Promise.all(files.map(fileToAttachment)) : undefined;
+    // A file with no text gets a sensible default prompt (the server requires one).
+    const msgText = text || (files.length > 0 ? `Please read and analyze the attached file(s): ${files.map((f) => f.name).join(', ')}` : '');
+    const displayText = text || `📎 ${files.map((f) => f.name).join(', ')}`;
+    setUserMsgs((c) => [...c, { role: 'user', text: displayText, ts: Date.now() }]);
     setPrompt('');
-    start(text, { userId, email, onlyOpus, planFirst, thinking, sessionId: sessionIdRef.current });
+    setFiles([]);
+    start(msgText, { userId, email, onlyOpus, planFirst, thinking, sessionId: sessionIdRef.current, attachments });
   };
 
   // Start a brand-new project: fresh sandbox/memory (new session id) and clear chat.
@@ -169,6 +218,7 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
     setUserMsgs([]);
     setAgentHistory([]);
     setCheckpointHistory([]);
+    setFiles([]);
     reset();
   };
 
@@ -272,6 +322,27 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
                 {agents.map((a) => <AgentChip key={a.agent} card={a} />)}
               </div>
             )}
+            {files.length > 0 && (
+              <div className="px-3 pt-2 flex flex-wrap gap-1.5">
+                {files.map((f, i) => (
+                  <span key={i} className="flex items-center gap-1 max-w-[200px] text-[11px] bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-zinc-300">
+                    <FileText className="w-3 h-3 shrink-0 text-indigo-400" />
+                    <span className="truncate">{f.name}</span>
+                    <button type="button" onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} className="shrink-0 text-zinc-500 hover:text-white" title="Remove">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/*,.pdf,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.zip,.js,.ts,.tsx,.jsx,.py,.css"
+              className="hidden"
+              onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
+            />
             <div className="flex items-end gap-2 p-3">
               {/* Build-options popover (Planning / Thinking / Power) — anchored above the input */}
               <div className="relative shrink-0">
@@ -296,12 +367,29 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
                   {anyToggleOn && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-indigo-400" />}
                 </button>
               </div>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={running}
+                title="Attach files (images, PDF, Word, Excel, PowerPoint, ZIP, text…)"
+                className="relative h-[42px] w-10 shrink-0 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
+              >
+                <Paperclip className="w-4 h-4" />
+                {files.length > 0 && <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-indigo-500 text-[9px] leading-[14px] text-white text-center">{files.length}</span>}
+              </button>
               <textarea
                 className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-sm resize-none focus:outline-none focus:border-indigo-500"
                 rows={2}
-                placeholder="Message v3.0… (e.g. “hello” or “build a notes app”)"
+                placeholder="Message v3.0… (e.g. “hello”, “build a notes app”, or attach a file)"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
+                onPaste={(e) => {
+                  const imgs = (Array.from(e.clipboardData.items) as DataTransferItem[])
+                    .filter((it) => it.type.startsWith('image/'))
+                    .map((it) => it.getAsFile())
+                    .filter((f): f is File => !!f);
+                  if (imgs.length > 0) { e.preventDefault(); setFiles((prev) => [...prev, ...imgs].slice(0, 8)); }
+                }}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
               />
               {running ? (
@@ -309,7 +397,7 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
                   <Square className="w-4 h-4" />
                 </button>
               ) : (
-                <button onClick={send} disabled={!prompt.trim()} className="flex items-center gap-1 px-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded text-sm" title="Send">
+                <button onClick={send} disabled={!prompt.trim() && files.length === 0} className="flex items-center gap-1 px-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded text-sm" title="Send">
                   <Send className="w-4 h-4" />
                 </button>
               )}

@@ -120,6 +120,17 @@ export function sanitizeApiKey(raw: string | undefined): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+/**
+ * Resolve the Anthropic endpoint for AgentV3. ALWAYS returns an explicit URL so
+ * the SDK never falls back to the ambient `ANTHROPIC_BASE_URL` (the shared
+ * aicredits proxy) — posting native tool-use there yields "404 page not found".
+ * Honours an explicit Anthropic-compatible AgentV3 override when set.
+ */
+export function resolveAnthropicBaseUrl(): string {
+  const override = process.env.AGENTV3_ANTHROPIC_BASE_URL?.trim().replace(/\/v1$/, '');
+  return override && override.length > 0 ? override : 'https://api.anthropic.com';
+}
+
 export class ClaudeClient implements TurnRunner {
   private client?: MessagesCreateClient;
   private readonly maxRetries: number;
@@ -138,15 +149,18 @@ export class ClaudeClient implements TurnRunner {
       // AgentV3 talks to the NATIVE Anthropic API (messages.create with tools)
       // and authenticates with the platform's own ANTHROPIC_API_KEY via the
       // x-api-key header. It must NOT inherit the shared ANTHROPIC_BASE_URL:
-      // that points at an OpenAI-compatible proxy (aicredits.in — Bearer auth,
-      // OpenAI format, no native tool-use), which rejects the SDK's x-api-key
-      // request with "401 Missing or invalid Authorization header". Only an
-      // explicit, Anthropic-compatible AgentV3 override is honoured (e.g. a
-      // real Anthropic gateway); otherwise we use the SDK default endpoint.
-      const override = process.env.AGENTV3_ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
+      // that points at an OpenAI-compatible proxy (aicredits.in), so posting the
+      // native messages.create there returns "404 page not found" and every
+      // Claude turn fails (the engine then silently falls back to Vertex/Gemini).
+      //
+      // CRITICAL: the Anthropic SDK reads `ANTHROPIC_BASE_URL` from the env when
+      // no `baseURL` is passed — so leaving it unset is NOT enough to avoid the
+      // proxy. We must ALWAYS pin an explicit baseURL: the real Anthropic
+      // endpoint by default, or an explicit Anthropic-compatible AgentV3 override
+      // (e.g. a real Anthropic gateway) when one is set.
       this.client = new Anthropic({
         apiKey: sanitizeApiKey(process.env.ANTHROPIC_API_KEY),
-        ...(override ? { baseURL: override } : {}),
+        baseURL: resolveAnthropicBaseUrl(),
       }) as unknown as MessagesCreateClient;
     }
     return this.client;

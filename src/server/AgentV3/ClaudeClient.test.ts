@@ -206,3 +206,34 @@ describe('sanitizeApiKey', () => {
     expect(sanitizeApiKey('')).toBeUndefined();
   });
 });
+
+import { resolveAnthropicBaseUrl } from './ClaudeClient';
+
+describe('resolveAnthropicBaseUrl', () => {
+  const prevShared = process.env.ANTHROPIC_BASE_URL;
+  const prevOverride = process.env.AGENTV3_ANTHROPIC_BASE_URL;
+  afterEach(() => {
+    if (prevShared === undefined) delete process.env.ANTHROPIC_BASE_URL;
+    else process.env.ANTHROPIC_BASE_URL = prevShared;
+    if (prevOverride === undefined) delete process.env.AGENTV3_ANTHROPIC_BASE_URL;
+    else process.env.AGENTV3_ANTHROPIC_BASE_URL = prevOverride;
+  });
+
+  it('defaults to the real Anthropic endpoint', () => {
+    delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.AGENTV3_ANTHROPIC_BASE_URL;
+    expect(resolveAnthropicBaseUrl()).toBe('https://api.anthropic.com');
+  });
+
+  it('IGNORES the ambient ANTHROPIC_BASE_URL proxy (the 404 cause)', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.aicredits.in/v1';
+    delete process.env.AGENTV3_ANTHROPIC_BASE_URL;
+    // The SDK would read ANTHROPIC_BASE_URL if we left baseURL unset; we must not.
+    expect(resolveAnthropicBaseUrl()).toBe('https://api.anthropic.com');
+  });
+
+  it('honours an explicit AgentV3 override and strips a trailing /v1', () => {
+    process.env.AGENTV3_ANTHROPIC_BASE_URL = 'https://my-gateway.example.com/v1';
+    expect(resolveAnthropicBaseUrl()).toBe('https://my-gateway.example.com');
+  });
+});

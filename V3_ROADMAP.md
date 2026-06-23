@@ -211,6 +211,17 @@ Every phase is graded against these, because they are what makes the difference:
   closing the plan→build→TEST→validate loop. v3.0-only (AgentV3 has zero live-path
   imports, flag OFF). AppKnowledgeBase agentv3 entry synced. Gate green: server+frontend
   tsc 0, 1895 vitest (+11), build, boot:check PASS.
+- 2026-06-23: Phase 10.1 (Product Understanding) — requirement coverage. New
+  `AgentV3/RequirementCoverage.ts`: a PURE comparison of the user's original request
+  (from recorded 'request' episodes) against what was actually built (the graph's
+  components/routes/file names — names only, never bodies). Flags a clearly-named
+  surface the user asked for (login, dashboard, cart, admin, …) that has no matching
+  component/route/file, so the agent builds it instead of silently skipping it —
+  directly serving "real features only, nothing half-done". High-precision &
+  conservative: silent before anything is built and when no named feature is in the
+  request. Folded into `evaluate` as the 10th dimension; systemPrompt + AppKnowledgeBase
+  synced. v3.0-only. Gate green: server+frontend tsc 0, 1906 vitest (+11), build,
+  boot:check PASS.
 - 2026-06-23: Provider diagnosis — GET /api/agentv3/diag reports (no secrets)
   whether ANTHROPIC_API_KEY is a real sk-ant key, plus base-url config; optional
   admin-gated ?test=1 makes one real Claude call and returns the exact outcome.

@@ -1,7 +1,14 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Menu, ChevronLeft, X, LogOut } from 'lucide-react';
+import { Menu, ChevronLeft, X, LogOut, Rocket } from 'lucide-react';
 import { cn } from '../lib/utils';
+
+// Views that can be opened as a header tab but are intentionally NOT in the shared
+// menuItems list (which also feeds the sidebar, where they have a bespoke button).
+// Without this the Header's menuItems.find() returns nothing and the tab never shows.
+const HEADER_TAB_FALLBACK: Record<string, { label: string; icon: any }> = {
+  engine_builder: { label: 'NavBharatAI Pro v3.0', icon: Rocket },
+};
 
 export const Header = ({
   effectiveDeviceMode,
@@ -60,7 +67,7 @@ export const Header = ({
         <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-2 select-none">
           <AnimatePresence mode="popLayout">
             {openTabs.map((tabId: string) => {
-              const item = menuItems.find(m => m.id === tabId);
+              const item = menuItems.find(m => m.id === tabId) || HEADER_TAB_FALLBACK[tabId];
               if (!item) return null;
               const Icon = item.icon;
               return (

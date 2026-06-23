@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw,
-  ChevronRight, ChevronLeft,
+  SlidersHorizontal, Check, X,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import type { AgentCard, GitCheckpoint } from './agentV3Types';
@@ -33,7 +33,11 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
   const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default
   const [thinking, setThinking] = useState(false); // adaptive thinking, off by default
   const [tab, setTab] = useState<SurfaceTab>('preview');
-  const [showWorkspace, setShowWorkspace] = useState(true); // collapsible right panel
+  // Workspace is collapsed by default so the chat takes the full width; opening a
+  // header tab pill surfaces it. On mobile an open workspace takes over the area.
+  const [showWorkspace, setShowWorkspace] = useState(false);
+  // Local-only UI flag for the input-row settings popover (Planning/Thinking/Power).
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [userMsgs, setUserMsgs] = useState<ChatMsg[]>([]);
   // Finalized agent replies from PREVIOUS turns. The live build state
   // (state.narration) is reset by start() on every new message, so without
@@ -168,41 +172,52 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
     reset();
   };
 
+  // Header tab pill: tapping a surface opens the workspace on it; tapping the
+  // already-active pill collapses the workspace back to full-width chat.
+  const openTab = (t: SurfaceTab) => {
+    if (showWorkspace && tab === t) {
+      setShowWorkspace(false);
+      return;
+    }
+    setTab(t);
+    setShowWorkspace(true);
+  };
+  const anyToggleOn = planFirst || thinking || onlyOpus;
+
   const agents = Object.values(state.agents).sort((a, b) => b.updatedTs - a.updatedTs);
   const diffPaths = Object.keys(state.diffs);
 
   return (
     <div className="flex flex-col h-full max-h-full w-full min-h-0 bg-zinc-950 text-zinc-100">
-      {/* Header */}
-      <div className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-3 border-b border-zinc-800">
-        <Bot className="w-5 h-5 text-indigo-400" />
-        <span className="font-semibold">NavBharatAI Pro v3.0</span>
-        <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
-        <button
-          onClick={startNewSession}
-          disabled={running}
-          title="Start a new project (fresh sandbox + memory)"
-          className="ml-auto flex items-center gap-1 text-xs text-zinc-400 hover:text-white disabled:opacity-40 border border-zinc-700 rounded px-2 py-1"
-        >
-          <RotateCcw className="w-3.5 h-3.5" /> New
-        </button>
-        <label className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer">
-          <input type="checkbox" checked={planFirst} onChange={(e) => setPlanFirst(e.target.checked)} disabled={running} />
-          Plan first
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer">
-          <input type="checkbox" checked={thinking} onChange={(e) => setThinking(e.target.checked)} disabled={running} />
-          Thinking
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer">
-          <input type="checkbox" checked={onlyOpus} onChange={(e) => setOnlyOpus(e.target.checked)} disabled={running} />
-          Only Opus (5×)
-        </label>
+      {/* Header: title + New, and the workspace tab pills (open/collapse the workspace) */}
+      <div className="shrink-0 border-b border-zinc-800">
+        <div className="flex items-center gap-2 px-4 pt-3 pb-2">
+          <Bot className="w-5 h-5 text-indigo-400" />
+          <span className="font-semibold">NavBharatAI Pro v3.0</span>
+          <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
+          <button
+            onClick={startNewSession}
+            disabled={running}
+            title="Start a new project (fresh sandbox + memory)"
+            className="ml-auto flex items-center gap-1 text-xs text-zinc-400 hover:text-white disabled:opacity-40 border border-zinc-700 rounded px-2 py-1"
+          >
+            <RotateCcw className="w-3.5 h-3.5" /> New
+          </button>
+        </div>
+        <div className="flex gap-1 px-3 pb-2 overflow-x-auto whitespace-nowrap" style={{ WebkitOverflowScrolling: 'touch' }}>
+          <TabPill active={showWorkspace && tab === 'preview'} onClick={() => openTab('preview')} icon={<Globe className="w-3.5 h-3.5" />}>Preview</TabPill>
+          <TabPill active={showWorkspace && tab === 'files'} onClick={() => openTab('files')} icon={<FolderOpen className="w-3.5 h-3.5" />}>Files ({state.files.length})</TabPill>
+          <TabPill active={showWorkspace && tab === 'diff'} onClick={() => openTab('diff')} icon={<FileDiff className="w-3.5 h-3.5" />}>Diff ({diffPaths.length})</TabPill>
+          <TabPill active={showWorkspace && tab === 'terminal'} onClick={() => openTab('terminal')} icon={<Terminal className="w-3.5 h-3.5" />}>Terminal</TabPill>
+          <TabPill active={showWorkspace && tab === 'history'} onClick={() => openTab('history')} icon={<History className="w-3.5 h-3.5" />}>History ({allCheckpoints.length})</TabPill>
+        </div>
       </div>
 
       <div className="flex flex-col sm:flex-row flex-1 min-h-0">
-        {/* LEFT: the chat (full width when the workspace is collapsed) */}
-        <div className={`${showWorkspace ? 'flex-1 sm:flex-none sm:w-1/2 sm:border-r border-zinc-800' : 'flex-1'} flex flex-col min-h-0`}>
+        {/* LEFT: the chat. Full width when the workspace is collapsed. When the
+            workspace is open it shares the width on desktop, and is HIDDEN on
+            mobile (the workspace takes over so it's usable on a phone). */}
+        <div className={`${showWorkspace ? 'hidden sm:flex sm:w-1/2 sm:border-r border-zinc-800' : 'flex flex-1'} flex-col min-h-0`}>
           {/* Conversation */}
           <div ref={scrollRef} className="flex-1 overflow-auto p-3 space-y-3 min-h-0">
             {convo.length === 0 && (
@@ -257,7 +272,30 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
                 {agents.map((a) => <AgentChip key={a.agent} card={a} />)}
               </div>
             )}
-            <div className="flex gap-2 p-3">
+            <div className="flex items-end gap-2 p-3">
+              {/* Build-options popover (Planning / Thinking / Power) — anchored above the input */}
+              <div className="relative shrink-0">
+                {settingsOpen && (
+                  <>
+                    {/* outside-click catcher */}
+                    <div className="fixed inset-0 z-10" onClick={() => setSettingsOpen(false)} />
+                    <div className="absolute bottom-full left-0 mb-2 z-20 w-48 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
+                      <ToggleRow label="Planning" checked={planFirst} disabled={running} onClick={() => setPlanFirst((v) => !v)} />
+                      <ToggleRow label="Thinking" checked={thinking} disabled={running} onClick={() => setThinking((v) => !v)} />
+                      <ToggleRow label="Power" hint="5×" checked={onlyOpus} disabled={running} onClick={() => setOnlyOpus((v) => !v)} />
+                    </div>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen((v) => !v)}
+                  title="Build options"
+                  className={`relative h-[42px] w-10 flex items-center justify-center rounded border ${settingsOpen ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
+                >
+                  <SlidersHorizontal className="w-4 h-4" />
+                  {anyToggleOn && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-indigo-400" />}
+                </button>
+              </div>
               <textarea
                 className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-sm resize-none focus:outline-none focus:border-indigo-500"
                 rows={2}
@@ -279,20 +317,16 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
           </div>
         </div>
 
-        {/* RIGHT: merged workspace surfaces (collapsible — ">" hides, "<" reopens) */}
-        {showWorkspace ? (
-        <div className="sm:w-1/2 flex flex-col min-h-0 max-h-[40vh] border-t border-zinc-800 sm:max-h-none sm:border-t-0">
-          <div className="shrink-0 flex items-center border-b border-zinc-800 text-xs">
-            <button onClick={() => setShowWorkspace(false)} title="Hide workspace" className="px-2 py-2 shrink-0 text-zinc-400 hover:text-white border-r border-zinc-800">
-              <ChevronRight className="w-4 h-4" />
+        {/* RIGHT: merged workspace surfaces. Opened from the header tab pills;
+            collapses back to full-width chat via the ✕ button (or re-tapping the
+            active pill). On mobile it takes over the area; on desktop it shares. */}
+        {showWorkspace && (
+        <div className="flex-1 sm:flex-none sm:w-1/2 flex flex-col min-h-0">
+          <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs">
+            <span className="font-medium text-zinc-300 capitalize">{tab}</span>
+            <button onClick={() => setShowWorkspace(false)} title="Close workspace (back to chat)" className="flex items-center gap-1 text-zinc-400 hover:text-white">
+              <X className="w-4 h-4" />
             </button>
-            <div className="flex overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
-            <TabBtn active={tab === 'preview'} onClick={() => setTab('preview')} icon={<Globe className="w-3.5 h-3.5" />}>Preview</TabBtn>
-            <TabBtn active={tab === 'files'} onClick={() => setTab('files')} icon={<FolderOpen className="w-3.5 h-3.5" />}>Files ({state.files.length})</TabBtn>
-            <TabBtn active={tab === 'diff'} onClick={() => setTab('diff')} icon={<FileDiff className="w-3.5 h-3.5" />}>Diff ({diffPaths.length})</TabBtn>
-            <TabBtn active={tab === 'terminal'} onClick={() => setTab('terminal')} icon={<Terminal className="w-3.5 h-3.5" />}>Terminal</TabBtn>
-            <TabBtn active={tab === 'history'} onClick={() => setTab('history')} icon={<History className="w-3.5 h-3.5" />}>History ({allCheckpoints.length})</TabBtn>
-            </div>
           </div>
 
           {tab === 'preview' ? (
@@ -331,10 +365,6 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
             </div>
           )}
         </div>
-        ) : (
-          <button onClick={() => setShowWorkspace(true)} title="Show workspace" className="shrink-0 w-full py-1.5 border-t sm:w-8 sm:py-0 sm:border-t-0 sm:border-l border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-900">
-            <ChevronLeft className="w-4 h-4 rotate-90 sm:rotate-0" />
-          </button>
         )}
       </div>
     </div>
@@ -395,10 +425,36 @@ function AgentChip({ card }: { card: AgentCard }) {
   );
 }
 
-function TabBtn({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
+function TabPill({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
   return (
-    <button onClick={onClick} className={`flex items-center gap-1 px-3 py-2 whitespace-nowrap ${active ? 'text-indigo-300 border-b-2 border-indigo-500' : 'text-zinc-400 hover:text-zinc-200'}`}>
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1 shrink-0 px-3 py-1 rounded-full text-xs border whitespace-nowrap ${
+        active
+          ? 'bg-indigo-600 border-indigo-500 text-white'
+          : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-100 hover:border-zinc-600'
+      }`}
+    >
       {icon} {children}
+    </button>
+  );
+}
+
+function ToggleRow({ label, hint, checked, disabled, onClick }: { label: string; hint?: string; checked: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left disabled:opacity-40 ${
+        checked ? 'text-indigo-200 bg-indigo-500/10' : 'text-zinc-300 hover:bg-zinc-800'
+      }`}
+    >
+      <span className={`w-4 h-4 shrink-0 flex items-center justify-center rounded border ${checked ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-zinc-600'}`}>
+        {checked && <Check className="w-3 h-3" />}
+      </span>
+      <span className="flex-1">{label}</span>
+      {hint && <span className="text-[10px] text-zinc-500">({hint})</span>}
     </button>
   );
 }

@@ -9,6 +9,8 @@ import { analyzeArchitecture, architectureSummary } from './ArchitectureAnalysis
 import { securitySummary } from './SecurityAnalysis';
 import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
+import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
+import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict } from './Readiness';
 
 /**
@@ -99,6 +101,47 @@ export class ToolDispatcher {
       /* listing failed — fall back to no authenticity issues */
     }
     return issues;
+  }
+
+  /**
+   * Best-effort dependency-consistency report over the project graph vs the root
+   * package.json. Collects the EXTERNAL imports from the graph (specifiers that
+   * do not resolve to a local file — i.e. not relative and not a known module),
+   * reads package.json via the actuator, and runs analyzeDependencies. Wrapped so
+   * any graph/file-access error degrades gracefully — the evaluate tool still
+   * returns its architecture + security + authenticity result.
+   */
+  private async collectDependencySummary(): Promise<string> {
+    try {
+      const graph = getWorkspaceMemory(this.workspaceId).graph();
+      const files = new Set(graph.files);
+      const external = new Set<string>();
+      for (const [file, specs] of Object.entries(graph.imports)) {
+        for (const spec of specs) {
+          // External = not a resolvable local import. Relative specs resolve via
+          // resolveLocalImport; everything else (bare/scoped/alias) is external
+          // and analyzeDependencies decides if it is a real npm package.
+          if (spec.startsWith('.')) {
+            if (resolveLocalImport(file, spec, files)) continue;
+            // An unresolved relative import is a local defect (architecture's job),
+            // not an npm dependency — skip it here.
+            continue;
+          }
+          external.add(spec);
+        }
+      }
+      let pkg: string | null = null;
+      try {
+        pkg = await this.actuator.readFile(this.workspaceId, 'package.json');
+      } catch {
+        pkg = null; // no manifest reachable — analyzeDependencies returns []
+      }
+      const issues = analyzeDependencies([...external], pkg);
+      return dependencySummary(issues);
+    } catch {
+      // Any failure: return the clean summary so evaluate's other sections stand.
+      return dependencySummary([]);
+    }
   }
 
   async dispatch(call: ToolUse, agent: AgentRole = 'architect'): Promise<ToolResult> {
@@ -238,7 +281,11 @@ export class ToolDispatcher {
         // Best-effort authenticity/completeness pass — never throws, never breaks
         // evaluate if file access fails. On any error we fall back to no issues.
         const issues = await this.collectAuthenticityIssues();
-        return `${verdict}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}`;
+        // Best-effort dependency-consistency pass — never throws, never breaks
+        // evaluate if graph access or package.json read fails. On any error the
+        // prior four sections are still returned in full.
+        const depSummary = await this.collectDependencySummary();
+        return `${verdict}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${depSummary}`;
       }
 
       case 'update_todo': {

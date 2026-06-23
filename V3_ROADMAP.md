@@ -284,6 +284,12 @@ Every phase is graded against these, because they are what makes the difference:
   AppKnowledgeBase synced. Third item via the Section I audit-first triage (ABSENT →
   solid); applies the app-must-never-break rule to the apps v3.0 builds. v3.0-only.
   Gate green: server+frontend tsc 0, 1965 vitest (+9), build, boot:check PASS.
+- 2026-06-23: Section I #9 (Code quality) — leftover `debugger;` detection. Added a
+  high-precision `debugger-statement` rule to `AuthenticityAnalysis` (medium): a left-in
+  debugger statement pauses execution in devtools and must not ship. Guards against
+  comments and identifiers (debuggerMode, logger.debugger). Folds into the existing
+  authenticity dimension (no new dimension). v3.0-only. Gate green: server+frontend
+  tsc 0, 2006 vitest (+2), build, boot:check PASS.
 - 2026-06-23: Readiness gate now spans the FULL evaluate suite. `assessReadiness`
   gained an optional `extra: ExtraFinding[]` param (high = hard blocker, medium/low =
   scored warning). The evaluate case now computes readiness AFTER all collectors and

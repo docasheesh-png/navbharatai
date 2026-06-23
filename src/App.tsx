@@ -50,7 +50,7 @@ import { EngineerAIChat } from './components/engineer/EngineerAIChat';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, getRedirectResult, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { firebaseConfig } from './config/firebase';
 
@@ -1295,6 +1295,13 @@ export default function App() {
 
 
   useEffect(() => {
+    // Complete a pending Google redirect sign-in on app load. signInWithRedirect
+    // navigates the whole page to Google and back, so the auth modal that started it
+    // is no longer mounted on return — getRedirectResult MUST be called here, at the
+    // app root, or the sign-in is never finalized and the user stays logged out.
+    getRedirectResult(auth)
+      .then((result) => { if (result?.user) { setUser(result.user); setLoadingUser(false); } })
+      .catch((e) => { console.error('[auth] redirect sign-in failed:', e?.code || e?.message || e); });
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoadingUser(false);

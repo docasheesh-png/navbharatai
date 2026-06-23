@@ -1280,3 +1280,17 @@ redirect URIs) and the two origins (Authorized JavaScript origins). This is admi
 config; once added, Google login completes end-to-end with navbharatai.com branding.
 
 Gate green: tsc frontend, build, 1884 vitest.
+
+---
+
+### 2026-06-23 — Google redirect sign-in finalized at app root (was never completing)
+
+User added the GCP redirect URIs (Option 1) → redirect_uri_mismatch gone, Google
+accepts the request. But on return to navbharatai.com the user was still logged out:
+getRedirectResult() was only called inside AuthComponent's mount effect, and after a
+full-page signInWithRedirect the auth modal is NOT mounted on return — so the pending
+redirect was never finalized. Fix (App.tsx): call getRedirectResult(auth) in the
+app-root auth effect (alongside onAuthStateChanged) so the redirect sign-in completes
+on load regardless of the modal; errors are logged.
+
+Gate green: tsc frontend, build, 1884 vitest.

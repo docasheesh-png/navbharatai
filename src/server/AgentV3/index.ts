@@ -14,7 +14,7 @@ export {
   isAgentV3GloballyEnabled,
   agentV3Allowlist,
 } from './featureFlag';
-export { ClaudeClient, parseMessage, isRetryableError } from './ClaudeClient';
+export { ClaudeClient, parseMessage, isRetryableError, sanitizeApiKey } from './ClaudeClient';
 export type {
   ClaudeToolDef,
   ToolUse,

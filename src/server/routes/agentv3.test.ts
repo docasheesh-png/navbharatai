@@ -41,8 +41,16 @@ describe('agentV3KeyDiag (provider diagnosis)', () => {
     expect(d.anthropicKeySet).toBe(true);
     expect(d.looksLikeAnthropicKey).toBe(true);
     expect(d.anthropicKeyPrefix).toBe('sk-ant-');
+    expect(d.keyHadSurroundingWhitespaceOrQuotes).toBe(false);
     // The secret body is never returned — only the public scheme prefix.
     expect(JSON.stringify(d)).not.toContain('SECRETSECRET');
+  });
+
+  it('detects stray whitespace/quotes around the key (a common 401 cause)', () => {
+    process.env.ANTHROPIC_API_KEY = '  sk-ant-api03-SECRET\n';
+    const d = agentV3KeyDiag();
+    expect(d.keyHadSurroundingWhitespaceOrQuotes).toBe(true);
+    expect(d.looksLikeAnthropicKey).toBe(true); // still valid once trimmed
   });
 
   it('flags a non-Anthropic (e.g. leftover proxy) key as NOT looking like an Anthropic key', () => {

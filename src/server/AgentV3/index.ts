@@ -59,6 +59,8 @@ export { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
 export type { AuthenticityIssue, AuthenticitySeverity } from './AuthenticityAnalysis';
 export { analyzeDependencies, dependencySummary, normalizeImportToPackage } from './DependencyAnalysis';
 export type { DependencyIssue, DependencySeverity } from './DependencyAnalysis';
+export { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
+export type { EnvVarIssue } from './EnvVarAnalysis';
 export { assessReadiness, readinessVerdict } from './Readiness';
 export type { ReadinessReport } from './Readiness';
 export { reflectOnBuild, reflectionNote } from './Reflection';

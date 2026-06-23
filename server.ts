@@ -208,9 +208,11 @@ setInterval(() => {
         connectSrc: ["'self'", "https:", "wss:"],
         fontSrc:    ["'self'", "data:", "https:"],
         // Firebase Auth (redirect/popup + state sync) and phone-OTP reCAPTCHA load an
-        // iframe; a blanket 'none' silently breaks sign-in. Allow our own origin (the
-        // server proxies /__/auth/* to Firebase) plus Google's auth/reCAPTCHA frames.
-        frameSrc:   ["'self'", "https://accounts.google.com", "https://www.google.com", "https://gen-lang-client-0866594388.firebaseapp.com", "https://*.firebaseapp.com"],
+        // iframe, and v3.0 embeds the live app PREVIEW (an https sandbox/deploy URL);
+        // a blanket 'none' silently breaks all of them. Allow our own origin plus any
+        // https frame (preview can be any sandbox host) — clickjacking of US is still
+        // governed by frame-ancestors, not this.
+        frameSrc:   ["'self'", "https:"],
         objectSrc:  ["'none'"],
       },
     },

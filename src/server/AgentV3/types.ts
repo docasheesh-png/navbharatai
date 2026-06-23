@@ -20,6 +20,7 @@ export type ToolName =
   | 'update_preview'
   | 'recall'
   | 'evaluate'
+  | 'generate_readme'
   | 'task'
   | 'second_opinion'
   | 'consensus';

@@ -75,6 +75,8 @@ export function architectSystemPrompt(): string {
     '- evaluate also reports REQUIREMENT COVERAGE: a feature the user asked for',
     '  (e.g. login, dashboard, cart) that has no matching page/component. If it',
     '  flags one, actually build that feature — never skip what was requested.',
+    '- Before finishing a real app, call generate_readme to write an accurate',
+    '  README.md (stack, how to run, structure) derived from the real project.',
     '',
     'Rules:',
     '- Build the real thing. No fake success, no pretending something works.',

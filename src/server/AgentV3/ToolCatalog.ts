@@ -158,6 +158,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         required: ['todos'],
       },
     },
+    {
+      name: 'generate_readme',
+      description:
+        'Generate a real README.md for the project from the actual code: detected ' +
+        'tech stack, how to install and run, project structure (components/routes/files) ' +
+        'and the available npm scripts. Everything is derived from the real project ' +
+        'graph + package.json (never invented). Writes the result to README.md.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          project_name: { type: 'string', description: 'Optional project title (defaults to package.json name).' },
+          path: { type: 'string', description: 'Optional output path (defaults to README.md).' },
+        },
+      },
+    },
   ];
 }
 
@@ -173,6 +188,7 @@ export const CATALOG_TOOL_NAMES = [
   'update_preview',
   'recall',
   'evaluate',
+  'generate_readme',
 ] as const;
 
 /**

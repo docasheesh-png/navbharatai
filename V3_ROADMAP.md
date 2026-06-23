@@ -232,6 +232,15 @@ Every phase is graded against these, because they are what makes the difference:
   wasted loops + credit). PURE & deterministic; existing reflection behaviour
   unchanged when nothing recurs. v3.0-only. Gate green: server+frontend tsc 0, 1916
   vitest (+10), build, boot:check PASS.
+- 2026-06-23: Phase 4.2 (Engines Expansion — Docs engine) — README generator. New
+  `AgentV3/ReadmeGenerator.ts`: a PURE function that turns the REAL project graph +
+  package.json into an accurate README (detected stack, install/run steps, project
+  structure, available scripts — nothing invented). New `generate_readme` tool wired
+  end-to-end: ToolName + ToolCatalog def + CATALOG_TOOL_NAMES + BUILD_TOOLS grant +
+  dispatcher case (reads package.json best-effort, writes README.md with file_changed
+  + checkpoint). systemPrompt tells the agent to write the README before finishing;
+  AppKnowledgeBase synced. v3.0-only. Gate green: server+frontend tsc 0, 1922 vitest
+  (+6), build, boot:check PASS.
 - 2026-06-23: Provider diagnosis — GET /api/agentv3/diag reports (no secrets)
   whether ANTHROPIC_API_KEY is a real sk-ant key, plus base-url config; optional
   admin-gated ?test=1 makes one real Claude call and returns the exact outcome.

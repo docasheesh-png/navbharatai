@@ -126,4 +126,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How do I cut down sugar & junk food?',
     ],
   },
+  wellness_ai: {
+    id: 'wellness_ai',
+    name: 'Wellness / Counsellor AI',
+    welcome:
+      "Hello, I'm here for you. 🌼 I'm Wellness AI — a caring space to talk about stress, anxiety, low mood, exams, work or relationships, and to share gentle coping & self-care ideas. I'm an AI companion, not a therapist, and not a substitute for professional care. If you're ever in distress or thinking of harming yourself, please reach out now: Tele-MANAS 14416, KIRAN 1800-599-0019, or emergency 112. How are you feeling today?",
+    quickPrompts: [
+      "I'm feeling stressed and overwhelmed",
+      'Help me calm down from anxiety',
+      'How do I deal with low mood?',
+      'When should I see a counsellor?',
+    ],
+  },
 };

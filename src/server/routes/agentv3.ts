@@ -28,6 +28,7 @@ import {
   reflectOnBuild,
   reflectionNote,
   formatRecalledLessons,
+  detectLanguageHint,
 } from '../AgentV3';
 import { randomUUID } from 'crypto';
 import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
@@ -348,6 +349,18 @@ export function registerAgentV3Routes(app: Express): void {
         const lessons = formatRecalledLessons(hits);
         if (lessons) buildPrompt = `${lessons}\n\n---\n\n${buildPrompt}`;
       } catch { /* recall is best-effort — never blocks a build */ }
+
+      // Universal Language (Layer 73): build in the user's language. If the
+      // request is written in a distinctive non-Latin script we name the
+      // language explicitly; otherwise we instruct Claude to mirror whatever
+      // language the request used. Best-effort — NEVER blocks a build.
+      try {
+        const hint = detectLanguageHint(prompt);
+        const langInstruction = hint
+          ? `Language: the user is writing in ${hint.name}. Generate ALL user-facing text in the app (labels, buttons, headings, placeholders, messages) in ${hint.name}. Keep code identifiers and comments in English.`
+          : `Language: generate all user-facing text in the app in the SAME language the user used in this request (default to English if it is English). Keep code identifiers and comments in English.`;
+        buildPrompt = `${langInstruction}\n\n${buildPrompt}`;
+      } catch { /* best-effort — never blocks a build */ }
 
       // Plan mode (P4): plan first, then block for the user's approval before
       // building. A real gate — the build does not start until the user answers.

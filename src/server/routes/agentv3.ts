@@ -26,6 +26,7 @@ import {
   getWorkspaceMemory,
   reflectOnBuild,
   reflectionNote,
+  formatRecalledLessons,
 } from '../AgentV3';
 import { randomUUID } from 'crypto';
 import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
@@ -329,6 +330,19 @@ export function registerAgentV3Routes(app: Express): void {
       });
 
       let buildPrompt = prompt;
+
+      // Continual learning (Layer 79): recall the relevant lessons recorded by
+      // the Layer 57 reflection of earlier builds in this session (and any past
+      // error/fix episodes) and prepend them as guidance, so iterative builds
+      // actually apply what was learned. Best-effort — recall can NEVER block a
+      // build, and the current request is not echoed back (request episodes are
+      // excluded by formatRecalledLessons).
+      try {
+        const lessonsMem = getWorkspaceMemory(workspaceId);
+        const hits = lessonsMem.recall(prompt, 8);
+        const lessons = formatRecalledLessons(hits);
+        if (lessons) buildPrompt = `${lessons}\n\n---\n\n${buildPrompt}`;
+      } catch { /* recall is best-effort — never blocks a build */ }
 
       // Plan mode (P4): plan first, then block for the user's approval before
       // building. A real gate — the build does not start until the user answers.

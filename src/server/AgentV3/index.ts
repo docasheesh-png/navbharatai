@@ -61,6 +61,7 @@ export { assessReadiness, readinessVerdict } from './Readiness';
 export type { ReadinessReport } from './Readiness';
 export { reflectOnBuild, reflectionNote } from './Reflection';
 export type { BuildReflection } from './Reflection';
+export { formatRecalledLessons } from './RecalledLessons';
 export { makeSubAgentSpawn } from './SubAgent';
 export type { SubAgentDeps } from './SubAgent';
 export { GitManager } from './GitManager';

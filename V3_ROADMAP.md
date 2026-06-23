@@ -488,3 +488,58 @@ high-contrast, keyboard-only). Inclusion is both a moral and a market advantage.
 - 2026-06-23: Added Section E (Layers 73-78) per admin — reframed for "world #1 +
   Bharat-friendly": multilingual (22 Indian + 12 world languages), partnership UX,
   idea-to-live deploy, creator economy, trust/compliance, inclusion. Roadmap only.
+
+---
+
+## Section F — Beyond Mythos: the frontier path (Layers 79-86)  (admin-specified 2026-06-23)
+
+**The honest thesis:** NavBharatAI is a SYSTEM, not a frontier model lab — it will
+not out-train Mythos. But a great system around frontier models can **out-perform
+any single model.** That is the real "beyond Mythos" path: orchestration + memory +
+verification + tools + learning loops that make the whole greater than the model.
+Three buildable levers — **Ensemble (84) + Continual Learning (79) + Data Flywheel
+(82)** — can put the platform ahead of any single model TODAY. The rest are genuine
+research frontiers shipped as **Tier-C real framework + an honest v1 — never faked
+AGI.**
+
+### 79 — Continual / Lifelong Learning Layer  (#1 product lever)
+The base model resets each call; the SYSTEM must not. Persisted, ever-growing
+skills/patterns learned from the platform's own experience across projects and
+users (with consent). Builds on Ph 2 memory + Layer 57 reflection.
+
+### 80 — Causal & World-Model Reasoning Layer
+Cause→effect modelling and consequence simulation before acting — beyond
+correlation/next-token prediction. Ties to Layers 55/56 (digital twin/simulation).
+
+### 81 — Neuro-Symbolic & Provable-Correctness Layer
+LLM intuition + formal logic/proof engines → generated code/math that is *proven*
+correct, not merely tested. A capability frontier models don't provide alone.
+
+### 82 — Self-Improving Model Layer (data flywheel)  (buildable moat)
+Fine-tune/distill small specialist models from the platform's own successful
+builds. A proprietary capability no external model vendor hands you. BYO training
+infra (Tier B/C). Strictly consent- and privacy-gated.
+
+### 83 — Embodied / Physical-World Layer
+Bridge beyond the screen: IoT, hardware, and robotics control. Extends Layer 72
+(computer use) into the physical world. Tier C.
+
+### 84 — Multi-Model Ensemble Intelligence  (buildable TODAY)
+Orchestrate MANY frontier models (Claude + others) with debate/vote/verification so
+the ensemble beats any single model. Extends Layer 49 (collective intelligence) and
+the existing multi-provider router. The most realistic immediate "beyond Mythos".
+
+### 85 — AI Safety, Alignment & Interpretability Layer  (PREREQUISITE)
+Corrigibility, value alignment, interpretability, oversight. The non-negotiable
+foundation that MUST precede recursive self-improvement (Layer 70) and any
+higher-autonomy capability. Extends Layer 58 governance.
+
+### 86 — Next-Compute Readiness Layer
+Future-proofing for new compute paradigms (quantum, novel accelerators, on-device
+NPUs). A long-horizon north star, not near-term.
+
+### Progress log (append-only)
+- 2026-06-23: Added Section F (Layers 79-86) per admin — the honest "beyond Mythos"
+  path. Flagged 84/79/82 as the buildable levers that can lead today, 85 as a hard
+  prerequisite for higher autonomy, and the rest as Tier-C research v1s. Roadmap
+  only. ALSO this day: v3.0 confirmed LIVE on native Claude (proxy fully removed).

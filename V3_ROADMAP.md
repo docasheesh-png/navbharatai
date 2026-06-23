@@ -284,6 +284,7 @@ Every phase is graded against these, because they are what makes the difference:
   AppKnowledgeBase synced. Third item via the Section I audit-first triage (ABSENT →
   solid); applies the app-must-never-break rule to the apps v3.0 builds. v3.0-only.
   Gate green: server+frontend tsc 0, 1965 vitest (+9), build, boot:check PASS.
+- 2026-06-23: Layer 77 — serious privacy/compliance violations now BLOCK readiness. Folded compliance HIGH findings into the readiness extra as a hard blocker (consistent with the authenticity-high blocker), so a real privacy violation (PII in logs, plaintext sensitive storage, personal data over http) forces NOT READY, not just a certificate note. v3.0-only. Gate green locally: tsc 0, 2008 vitest, build, boot. (MERGE queued behind CI — Actions quota still exhausted.)
 - 2026-06-23: Section I #4 (Security) — logged-secret rule. Added a fourth rule to
   `SecurityConfigAnalysis`: logging a secret env var to the console
   (console.log(process.env.*KEY/SECRET/TOKEN/PASSWORD…)) leaks it into logs → flagged

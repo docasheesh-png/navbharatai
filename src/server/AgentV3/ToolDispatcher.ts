@@ -630,6 +630,10 @@ export class ToolDispatcher {
         // is a hard blocker — the constitution forbids shipping it as "done".
         const authHigh = issues.filter((i) => i.severity === 'high').length;
         if (authHigh) extra.push({ severity: 'high', label: `${authHigh} fake/incomplete code issue(s) (placeholder / not-implemented / fake data)` });
+        // Serious privacy/compliance violations (PII in logs, plaintext sensitive
+        // storage, personal data over http) block "launch-safe" (Layer 77).
+        const complianceHigh = complianceIssues.filter((i) => i.severity === ('high' as ComplianceSeverity)).length;
+        if (complianceHigh) extra.push({ severity: 'high', label: `${complianceHigh} serious privacy/compliance issue(s)` });
         if (secretLeak.findings.length) extra.push({ severity: 'high', label: 'Secret leak: a real .env is not gitignored' });
         for (const f of runnability.findings) extra.push({ severity: f.level === 'high' ? 'high' : 'medium', label: `Runnability: ${f.message}` });
         for (const i of securityConfig) extra.push({ severity: i.severity === 'high' ? 'high' : 'medium', label: `Security config (${i.rule})` });

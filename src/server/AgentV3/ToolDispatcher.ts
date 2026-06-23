@@ -28,6 +28,7 @@ import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis
 import { analyzeRequirementCoverage, requirementCoverageSummary } from './RequirementCoverage';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
+import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
 
@@ -490,6 +491,16 @@ export class ToolDispatcher {
           .map((e) => e.text)
           .join('\n');
         const reqCoverage = analyzeRequirementCoverage(requestText, mem.graph());
+        // Best-effort runnability pass (Phase 6 — Execution Quality): can the app
+        // actually start/build? Reads package.json; never throws, never breaks
+        // evaluate. "Preview is EARNED" — a build that compiles can still not run.
+        let pkgForRun: string | null = null;
+        try {
+          pkgForRun = await this.actuator.readFile(this.workspaceId, 'package.json');
+        } catch {
+          pkgForRun = null; // no manifest — runnability is simply "not assessable"
+        }
+        const runnability = analyzeRunnability(mem.graph(), pkgForRun);
         const confidence = computeBuildConfidence({
           readinessScore: readiness.score,
           ready: readiness.ready,
@@ -508,7 +519,7 @@ export class ToolDispatcher {
           accessibility: tally(a11yIssues),
           compliance: complianceTally,
         });
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}`;
       }
 
       case 'update_todo': {

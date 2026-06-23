@@ -39,6 +39,13 @@ const RULES: Rule[] = [
     re: /origin\s*:\s*['"]\*['"]|['"]Access-Control-Allow-Origin['"]\s*[,:]\s*['"]\*['"]/,
     message: 'CORS is open to all origins ("*") — restrict it to the specific trusted origins your app actually needs.',
   },
+  {
+    rule: 'insecure-randomness',
+    severity: 'high',
+    // Math.random() used near a security-sensitive value (either order, same line).
+    re: /\b(token|secret|password|passwd|otp|nonce|session|apikey|api_key|private_?key)\b[^\n]{0,40}Math\.random\s*\(|Math\.random\s*\([^\n]{0,40}\b(token|secret|password|passwd|otp|nonce|session|apikey|api_key|private_?key)\b/i,
+    message: 'Math.random() is used to generate a security value (token/secret/password/etc.) — it is predictable, not cryptographically secure. Use crypto.randomUUID() or crypto.randomBytes() instead.',
+  },
 ];
 
 const CODE_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;

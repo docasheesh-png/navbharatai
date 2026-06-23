@@ -22,6 +22,21 @@ describe('scanSecurityConfig', () => {
     expect(issues.some((i) => i.rule === 'wildcard-cors')).toBe(true);
   });
 
+  it('flags Math.random() used for a token (insecure randomness, high)', () => {
+    const issues = scanSecurityConfig('src/auth.ts', "const token = Math.random().toString(36).slice(2);");
+    expect(issues.some((i) => i.rule === 'insecure-randomness' && i.severity === 'high')).toBe(true);
+  });
+
+  it('flags Math.random() referenced before a security keyword too', () => {
+    const issues = scanSecurityConfig('src/a.ts', "const sessionId = `${Math.random()}` // session");
+    expect(issues.some((i) => i.rule === 'insecure-randomness')).toBe(true);
+  });
+
+  it('does not flag ordinary Math.random() use (e.g. a shuffle)', () => {
+    const issues = scanSecurityConfig('src/util.ts', "const r = Math.random() * items.length;");
+    expect(issues.some((i) => i.rule === 'insecure-randomness')).toBe(false);
+  });
+
   it('does not flag a restricted CORS origin', () => {
     const issues = scanSecurityConfig('src/server.ts', "app.use(cors({ origin: 'https://example.com' }));");
     expect(issues).toHaveLength(0);

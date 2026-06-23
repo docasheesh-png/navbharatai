@@ -1115,3 +1115,31 @@ and recorded to a per-project decision-audit trail.
 - AppKnowledgeBase + keywords updated. 10 new unit tests.
 
 **Test suite: 1847 passing.** Full gate green: tsc frontend+server, build, boot:check.
+
+---
+
+### 2026-06-23 — Google sign-in hardening (popup→redirect fallback + actionable errors)
+
+User reported Google login + admin login broken. Findings:
+- ADMIN LOGIN: code is correct (frontend handler + server /api/admin/login). The
+  only blocker is the `ADMIN_PASSWORD` env var not set in Cloud Run → server
+  returns 503 "Admin access not configured". This is a Cloud Run config action
+  (admin-only); no code change possible/needed.
+- GOOGLE LOGIN: code only used signInWithPopup (blocked on many mobile/strict
+  browsers) and surfaced opaque errors. Fixed in code:
+  • added signInWithRedirect fallback when the popup is blocked/closed/unsupported,
+    with getRedirectResult() completing the sign-in on return;
+  • added describeGoogleError() — names the exact fix for the two config failures
+    (auth/unauthorized-domain → add THIS domain to Firebase Authorized domains;
+    auth/operation-not-allowed → enable Google provider), including the live
+    hostname and project id, so it's self-diagnosing without a console;
+  • prompt:'select_account' for predictable account choice.
+  • declarations.d.ts: added signInWithRedirect/getRedirectResult to the hand-
+    written firebase/auth module types.
+
+Config still required by admin (cannot be done from code):
+  • Cloud Run: set ADMIN_PASSWORD (+ ADMIN_USERNAME if not aashishcpmt09).
+  • Firebase Console (project gen-lang-client-0866594388) → Authentication:
+    enable Google provider + add the live serving domain to Authorized domains.
+
+**Test suite: 1858 passing.** Gate green: tsc frontend, build, vitest.

@@ -7,7 +7,9 @@ import {
   signInWithPhoneNumber,
   ConfirmationResult,
   GoogleAuthProvider,
-  signInWithPopup
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult
 } from 'firebase/auth';
 import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2 } from 'lucide-react';
@@ -56,6 +58,24 @@ function describeAuthError(err: any): string {
   } catch {
     return err?.message || 'Sign-in failed. Try again.';
   }
+}
+
+/**
+ * Turn a Google sign-in failure into an ACTIONABLE message. The two failures that
+ * silently break Google login in production are config, not code — name the exact
+ * fix (which domain to authorize, which project) so it can be resolved without a
+ * console. Everything else falls back to the generic auth describer.
+ */
+function describeGoogleError(err: any): string {
+  const code = err?.code || '';
+  const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
+  if (code === 'auth/unauthorized-domain') {
+    return `Google sign-in is blocked for "${host}". An admin must add this exact domain in Firebase Console → Authentication → Settings → Authorized domains (project ${firebaseConfig.projectId}).`;
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return `Google sign-in is not enabled for this project. An admin must enable the Google provider in Firebase Console → Authentication → Sign-in method (project ${firebaseConfig.projectId}).`;
+  }
+  return describeAuthError(err);
 }
 
 export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser: any, onClose: () => void }) => {
@@ -221,18 +241,60 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     }
   };
 
+  // Complete a redirect-based Google sign-in when the user returns to the app
+  // (the fallback path used when the popup is blocked, e.g. on mobile browsers).
+  useEffect(() => {
+    let cancelled = false;
+    getRedirectResult(auth)
+      .then((result) => {
+        if (!cancelled && result?.user) {
+          setUser(result.user);
+          onClose();
+        }
+      })
+      .catch((err) => {
+        if (!cancelled && err?.code) setError(describeGoogleError(err));
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleGoogleSignIn = async () => {
     setError('');
     setLoading(true);
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
     try {
-      const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       setUser(result.user);
       onClose();
     } catch (err: any) {
-      setError(`${describeAuthError(err)} · diagnosing…`);
-      setError(`${describeAuthError(err)}\n${await diagnoseAuth()}`);
-    } finally {
+      const code = err?.code || '';
+      // Popup blocked/closed/unsupported (common on mobile + strict browsers) →
+      // fall back to a full-page redirect; getRedirectResult finishes it on return.
+      const POPUP_FAILURES = [
+        'auth/popup-blocked',
+        'auth/popup-closed-by-user',
+        'auth/cancelled-popup-request',
+        'auth/operation-not-supported-in-this-environment',
+      ];
+      if (POPUP_FAILURES.includes(code)) {
+        try {
+          await signInWithRedirect(auth, provider);
+          return; // page navigates away; loading stays until redirect completes
+        } catch (redirErr: any) {
+          setError(describeGoogleError(redirErr));
+          setLoading(false);
+          return;
+        }
+      }
+      // Real config/credential failure → show the actionable reason. For an opaque
+      // internal-error, append the raw Identity Toolkit diagnosis.
+      if (code === 'auth/internal-error') {
+        setError(`${describeGoogleError(err)}\n${await diagnoseAuth()}`);
+      } else {
+        setError(describeGoogleError(err));
+      }
       setLoading(false);
     }
   };

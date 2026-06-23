@@ -189,3 +189,9 @@ Every phase is graded against these, because they are what makes the difference:
   (read-only). Replaces the unsafe global Memory/ProjectMemoryManager for v3.0.
   1641 tests green (+7). Next (Phase 2 cont.): inject projectMap into the
   Architect context automatically + persist memory across sessions.
+- 2026-06-22: Phase 8.1 merged (#209) → deployed.
+- 2026-06-22: Phase 9.1 (Deployment readiness) — assessReadiness() combines the
+  architecture + security findings into a deterministic 0–100 score and a hard
+  ready/not-ready gate (build-breakers and high-severity security issues block).
+  Folded into `evaluate` as a top-line verdict, and the Architect must reach
+  READY before declaring done. 1661 tests green (+6).

@@ -51,6 +51,8 @@ export { analyzeArchitecture, architectureSummary, resolveLocalImport } from './
 export type { ArchitectureReport } from './ArchitectureAnalysis';
 export { scanSecurity, securitySummary } from './SecurityAnalysis';
 export type { SecurityFinding, Severity } from './SecurityAnalysis';
+export { assessReadiness, readinessVerdict } from './Readiness';
+export type { ReadinessReport } from './Readiness';
 export { makeSubAgentSpawn } from './SubAgent';
 export type { SubAgentDeps } from './SubAgent';
 export { GitManager } from './GitManager';

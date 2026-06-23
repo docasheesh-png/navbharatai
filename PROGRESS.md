@@ -1392,3 +1392,25 @@ screenshot showed a logged-out session), and the header-tab/resume/preview fixes
 need the new deploy to actually load.
 
 Gate green: tsc frontend, build (verified __BUILD_TIME__ injected), vitest, boot:check.
+
+---
+
+### 2026-06-23 — 220-System Gap Audit (UCUE v2.0 / Claude Code / Cursor / OpenHands / Devin)
+
+Admin gave a 220-system "missing systems" list and asked which are NOT in the app +
+to add the genuine gaps to the roadmap. Audited the list against the REAL codebase
+(four parallel code-inventory passes over AgentV3 / AppMakerLab / EngineerAI /
+QualityEvaluationEngine / workspace / runtime / routes — file-evidence per item, not
+guesses). Result: ~88 PRESENT (40%) · ~44 PARTIAL (20%) · ~88 ABSENT (40%).
+
+New doc `UCUE_V2_GAP_AUDIT.md`: full 220-item PRESENT/PARTIAL/ABSENT mapping with
+file evidence (Section 2), the already-planned gaps cross-referenced to existing
+tracks so nothing is re-planned (Section 3), and the genuinely-new gaps folded into
+17 build tracks GA-1…GA-18 (Section 4). Mirrored a summary into `V3_ROADMAP.md`
+Section G. Key finding: NavBharatAI is genuinely strong where it counts (real
+execution, 27-agent orchestration, memory+lessons, static security/architecture/
+compliance analysis, auto-repair, real git + multi-DB + real deploy); the absent
+40% is mostly advanced testing/sim, IaC, deep perf profiling, deploy strategies,
+and the frontier — and most of THAT was already on existing roadmaps. Docs only —
+no GA code yet. PowerShell/CMD/native-ZSH marked intentionally out of scope (cloud
+Linux by design).

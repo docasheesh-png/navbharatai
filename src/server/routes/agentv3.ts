@@ -44,11 +44,38 @@ import { makeResilientTurnRunner } from './agentv3Resilient';
  * budget/step stops are reported as-is, never a fake success.
  */
 
-/** Hybrid sandbox selection (D4): E2B for real builds, Docker/Local fallbacks. */
+/**
+ * Hybrid sandbox selection (D4): E2B for real builds, Docker/Local fallbacks.
+ *
+ * Cached as a process-level singleton so the actuator's per-workspace sandbox map
+ * survives across requests — that is what lets consecutive messages in the same
+ * session reuse the SAME sandbox (and its files, node_modules and dev server),
+ * enabling iterative building ("add a login page" after "build a todo app").
+ */
+let sharedActuator: IEngineerActuator | null = null;
 function buildActuator(): IEngineerActuator {
-  if (process.env.E2B_API_KEY) return new E2BActuator();
-  if (process.env.DOCKER_ENABLED === 'true') return new DockerActuator();
-  return new LocalActuator();
+  if (sharedActuator) return sharedActuator;
+  if (process.env.E2B_API_KEY) sharedActuator = new E2BActuator();
+  else if (process.env.DOCKER_ENABLED === 'true') sharedActuator = new DockerActuator();
+  else sharedActuator = new LocalActuator();
+  return sharedActuator;
+}
+
+/** A client-supplied session id must be a safe, bounded token (it becomes part of
+ *  the workspace id, which is interpolated into sandbox paths/commands). */
+const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
+
+/**
+ * Derive the workspace id for a request. A stable `sessionId` → a stable workspace
+ * (reused across messages = iterative building). No/invalid sessionId → a fresh,
+ * timestamped one-shot workspace (the previous behaviour).
+ */
+export function deriveWorkspaceId(userId: string | null, sessionId: unknown): string {
+  const uid = userId && /^[A-Za-z0-9_-]{1,64}$/.test(userId) ? userId : 'anon';
+  if (typeof sessionId === 'string' && SESSION_ID_RE.test(sessionId)) {
+    return `agentv3-${uid}-${sessionId}`;
+  }
+  return `agentv3-${uid}-${Date.now()}`;
 }
 
 function maxBuildBudgetUsd(): number {
@@ -65,12 +92,75 @@ function envInt(name: string, fallback: number): number {
 const activeBuilds = new Set<string>();
 const MAX_PROMPT_LEN = 20_000;
 
+/**
+ * Non-secret diagnosis of the Claude provider configuration. Surfaces ONLY what
+ * is needed to tell whether the wrong key is set — never the secret itself. The
+ * key prefix (e.g. "sk-ant-") is a public scheme marker, not sensitive; if it is
+ * anything other than "sk-ant-" the configured ANTHROPIC_API_KEY is not a real
+ * Anthropic key (e.g. a leftover proxy key), which is why direct calls 401 and
+ * the engine silently falls back to Vertex/Gemini/Grok.
+ */
+export function agentV3KeyDiag(): {
+  anthropicKeySet: boolean;
+  anthropicKeyPrefix: string | null;
+  anthropicKeyLength: number;
+  looksLikeAnthropicKey: boolean;
+  agentv3OverrideBaseUrlSet: boolean;
+  sharedProxyBaseUrlSet: boolean;
+  sonnetModel: string;
+  opusModel: string;
+} {
+  const key = process.env.ANTHROPIC_API_KEY ?? '';
+  return {
+    anthropicKeySet: key.length > 0,
+    anthropicKeyPrefix: key ? key.slice(0, 7) : null,
+    anthropicKeyLength: key.length,
+    looksLikeAnthropicKey: key.startsWith('sk-ant-'),
+    agentv3OverrideBaseUrlSet: !!process.env.AGENTV3_ANTHROPIC_BASE_URL,
+    sharedProxyBaseUrlSet: !!process.env.ANTHROPIC_BASE_URL,
+    sonnetModel: resolveModel(false),
+    opusModel: resolveModel(true),
+  };
+}
+
 export function registerAgentV3Routes(app: Express): void {
   // Capability probe — lets the frontend decide whether to show the v3.0 toggle.
   app.get('/api/agentv3/status', (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     res.json({ enabled: isAgentV3Enabled(userId, email), ...agentV3Status(), team: agentLifecycle.snapshot() });
+  });
+
+  // Provider diagnosis — confirms whether a real Anthropic key is configured.
+  // Returns no secrets (only the public "sk-ant-" scheme prefix + lengths), so a
+  // wrong/leftover key is visible without exposing it. Optional ?test=1 makes one
+  // tiny real Claude call and reports the exact outcome (success or the precise
+  // error), gated by the admin password so it can't be abused for cost.
+  app.get('/api/agentv3/diag', async (req: Request, res: Response) => {
+    const diag = agentV3KeyDiag();
+    const wantsTest = req.query.test === '1';
+    const adminOk =
+      !!process.env.ADMIN_PASSWORD && req.query.admin === process.env.ADMIN_PASSWORD;
+    if (!wantsTest || !adminOk) {
+      res.json(diag);
+      return;
+    }
+    // Live probe: one minimal, real Claude call to surface the exact error.
+    let live: { ok: boolean; model?: string; error?: string; status?: number };
+    try {
+      const client = new ClaudeClient();
+      const turn = await client.runTurn({
+        model: resolveModel(false),
+        messages: [{ role: 'user', content: 'ping' }],
+        maxTokens: 16,
+        cache: false,
+      });
+      live = { ok: true, model: resolveModel(false), error: turn.text ? undefined : 'empty response' };
+    } catch (err) {
+      const e = err as { status?: number; message?: string };
+      live = { ok: false, status: e?.status, error: e?.message ? String(e.message).slice(0, 300) : String(err).slice(0, 300) };
+    }
+    res.json({ ...diag, live });
   });
 
   // Approve/reject a pending gate (plan mode / permission prompt, P4).
@@ -147,7 +237,7 @@ export function registerAgentV3Routes(app: Express): void {
     const state = new WorkspaceState(events);
 
     const actuator = buildActuator();
-    const workspaceId = `agentv3-${userId ?? 'anon'}-${Date.now()}`;
+    const workspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
     try {
       // Native Claude for real tool-use, with a multi-provider text fallback
       // (Vertex → Gemini → Grok) so chat never dies if Claude is down/misconfigured.

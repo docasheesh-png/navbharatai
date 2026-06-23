@@ -13,7 +13,7 @@ export interface UseAgentV3Build {
   state: AgentV3ClientState;
   running: boolean;
   error: string | null;
-  start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; planFirst?: boolean }) => Promise<void>;
+  start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; planFirst?: boolean; sessionId?: string }) => Promise<void>;
   /** Approve or reject a pending plan/permission gate (P4). */
   respond: (requestId: string, approved: boolean) => Promise<void>;
   /** Restore the workspace to a checkpoint commit (History → restore). */
@@ -76,7 +76,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   }, []);
 
   const start = useCallback(
-    async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; planFirst?: boolean }) => {
+    async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; planFirst?: boolean; sessionId?: string }) => {
       if (running) return;
       userIdRef.current = opts?.userId;
       emailRef.current = opts?.email;
@@ -97,6 +97,7 @@ export function useAgentV3Build(): UseAgentV3Build {
             email: opts?.email,
             onlyOpus: opts?.onlyOpus === true,
             planFirst: opts?.planFirst !== false,
+            sessionId: opts?.sessionId,
           }),
           signal: controller.signal,
         });

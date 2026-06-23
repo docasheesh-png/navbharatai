@@ -18,7 +18,7 @@ type SurfaceTab = 'preview' | 'files' | 'diff' | 'terminal' | 'history';
 interface ChatMsg { role: 'user' | 'agent'; agent?: string; text: string; ts: number }
 
 export function AgentV3Panel({ userId, email }: { userId?: string; email?: string }) {
-  const { state, running, error, start, respond, restore, stop } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, stop, reset } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   const [onlyOpus, setOnlyOpus] = useState(false);
   const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default
@@ -27,6 +27,14 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
   const [convo, setConvo] = useState<ChatMsg[]>([]);
   const lastNarr = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // A stable session id keeps the SAME sandbox + memory across messages, so the
+  // build is iterative (each message continues the same project). "New session"
+  // starts a fresh project.
+  const newSessionId = () =>
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `s-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const sessionIdRef = useRef<string>(newSessionId());
 
   // Stream the agent's narration into the chat thread as it arrives.
   useEffect(() => {
@@ -47,7 +55,16 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
     if (!text || running) return;
     setConvo((c) => [...c, { role: 'user', text, ts: Date.now() }]);
     setPrompt('');
-    start(text, { userId, email, onlyOpus, planFirst });
+    start(text, { userId, email, onlyOpus, planFirst, sessionId: sessionIdRef.current });
+  };
+
+  // Start a brand-new project: fresh sandbox/memory (new session id) and clear chat.
+  const startNewSession = () => {
+    if (running) return;
+    sessionIdRef.current = newSessionId();
+    lastNarr.current = 0;
+    setConvo([]);
+    reset();
   };
 
   const agents = Object.values(state.agents).sort((a, b) => b.updatedTs - a.updatedTs);
@@ -60,7 +77,15 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
         <Bot className="w-5 h-5 text-indigo-400" />
         <span className="font-semibold">NavBharatAI Pro v3.0</span>
         <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
-        <label className="ml-auto flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer">
+        <button
+          onClick={startNewSession}
+          disabled={running}
+          title="Start a new project (fresh sandbox + memory)"
+          className="ml-auto flex items-center gap-1 text-xs text-zinc-400 hover:text-white disabled:opacity-40 border border-zinc-700 rounded px-2 py-1"
+        >
+          <RotateCcw className="w-3.5 h-3.5" /> New
+        </button>
+        <label className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer">
           <input type="checkbox" checked={planFirst} onChange={(e) => setPlanFirst(e.target.checked)} disabled={running} />
           Plan first
         </label>

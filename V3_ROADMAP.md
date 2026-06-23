@@ -195,3 +195,16 @@ Every phase is graded against these, because they are what makes the difference:
   ready/not-ready gate (build-breakers and high-severity security issues block).
   Folded into `evaluate` as a top-line verdict, and the Architect must reach
   READY before declaring done. 1661 tests green (+6).
+- 2026-06-22: Phase 9.1 merged (#210) → deployed. E2B confirmed set by admin.
+- 2026-06-22: Phase 5.1 (Session continuity) — iterative building. The actuator
+  is now a process-level singleton and the workspace id is derived from a stable
+  client sessionId (deriveWorkspaceId), so consecutive messages reuse the SAME
+  E2B sandbox + project memory + git repo instead of a fresh one each time. The
+  panel generates a stable sessionId and adds a "New" button to start a fresh
+  project. 1665 tests green (+4).
+- 2026-06-23: Provider diagnosis — GET /api/agentv3/diag reports (no secrets)
+  whether ANTHROPIC_API_KEY is a real sk-ant key, plus base-url config; optional
+  admin-gated ?test=1 makes one real Claude call and returns the exact outcome.
+  Added because the Anthropic dashboard showed the key "Last used: Never" while
+  chat still replied — i.e. Claude 401s and the engine falls back to
+  Vertex/Gemini/Grok (likely a leftover non-Anthropic key in ANTHROPIC_API_KEY).

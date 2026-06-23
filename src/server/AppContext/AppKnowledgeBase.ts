@@ -45,6 +45,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • LIVE "AI Team" tracker — watch each real agent's current action as it builds (not a fake animation).
 • MERGED SURFACES from one live stream: file explorer, Code Studio diffs (red/green), terminal, git/history checkpoints, todos and plan — all in sync, zero drift.
 • HYBRID sandbox: a fast E2B cloud sandbox initialised as a real Git repo you own.
+• ITERATIVE sessions: each message continues the SAME project (same sandbox, files and memory), so you can refine step by step ("add a login page" after "build a todo app"). Use the "New" button to start a fresh project.
 • HONEST billing: you are charged the Claude Opus-equivalent token cost × 2.5 (or × 5 in Only-Opus mode); a live cost estimate is shown.`,
     howToUse: 'Click the floating "v3.0" button (bottom-right), type what you want to build, and press Build. Watch the AI Team panel and the live Files / Diff / Terminal / History surfaces. Toggle "Only Opus" for maximum capability (5× cost). Press Stop to cancel.',
     relatedFeatures: ['engineer_ai', 'pro_chat', 'history', 'settings_secrets'],

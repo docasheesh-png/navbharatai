@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type { Express } from 'express';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
+import { extractDocumentText } from '../lib/attachmentText';
 
 /**
  * Senior Doctor Assistant (SDA) chat route extracted from the server.ts monolith
@@ -70,15 +71,16 @@ export function registerSdaRoutes(app: Express): void {
       const hasFile = !!(fileData && fileType);
       const isImage = hasFile && fileType.startsWith('image/');
       const isPDF = hasFile && fileType === 'application/pdf';
-      const isTextDoc = hasFile && !isImage && !isPDF &&
-        (fileType === 'text/plain' || fileType === 'text/csv' || fileType === 'text/html' || fileType === 'application/json');
-
-      // For plain-text documents: decode base64 → prepend content to message (works with all providers)
-      if (isTextDoc && fileData) {
-        try {
-          const docText = Buffer.from(fileData, 'base64').toString('utf-8').slice(0, 10000);
+      // Any non-image, non-PDF file → extract real text (plain text/code AND Word,
+      // Excel, PowerPoint, ZIP) via the shared extractor and prepend to the message,
+      // so the document is readable by every provider at zero API cost. Images/PDFs
+      // keep their native multimodal path below (Gemini/Grok/Vertex/Claude).
+      const isDoc = hasFile && !isImage && !isPDF;
+      if (isDoc && fileData) {
+        const docText = await extractDocumentText({ name: fileName || 'document', type: fileType, base64: fileData });
+        if (docText && docText.trim()) {
           message = `[Document: ${fileName}]\n\n${docText}\n\n---\nDoctor's question: ${message}`;
-        } catch { /* keep original message */ }
+        }
       }
 
       const SDA_SYSTEM = `You are the Senior Doctor Assistant (SDA) — a Clinical Decision Support AI inside NavBharatAI, designed exclusively for qualified doctors (MBBS, residents, consultants, specialists).

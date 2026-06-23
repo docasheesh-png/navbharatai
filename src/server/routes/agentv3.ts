@@ -40,6 +40,8 @@ import { DockerActuator } from '../EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { makeResilientTurnRunner } from './agentv3Resilient';
 import { AIRouterManager } from '../AI/AIRouterManager';
+import { buildDocumentContext } from '../lib/attachmentText';
+import { describeVisionAttachments } from '../lib/visionDescribe';
 
 /**
  * AgentV3 (Vargen 3.0) routes.
@@ -269,22 +271,43 @@ export function registerAgentV3Routes(app: Express): void {
     // so the user can't tell which model answered — it reads as a normal reply.
     //
     // Conservative gate (any doubt → fall through to the real build path):
-    //  • classifyIntent must say 'chat' (defaults to 'build' on any ambiguity),
-    //  • there must be no file/attachment in the request, and
+    //  • classifyIntent must say 'chat' (defaults to 'build' on any ambiguity), and
     //  • plan-mode must not be forcing a plan (a plain conversational turn).
-    const hasAttachment =
-      !!req.body?.file ||
-      (Array.isArray(req.body?.files) && req.body.files.length > 0) ||
-      (Array.isArray(req.body?.attachments) && req.body.attachments.length > 0) ||
-      !!req.body?.imageUrl ||
-      (Array.isArray(req.body?.images) && req.body.images.length > 0);
+    // A file attachment no longer forces the build path — it is pre-read into text
+    // (below) so "read this file" can be answered cheaply via the chat path too.
+    //
+    // Attachments (images, PDFs, Word/Excel/PowerPoint, ZIP, text/code). Turn them
+    // into TEXT the agent can read BEFORE any routing: documents are extracted on
+    // the server for free, and images/PDFs are described by the cheap vision
+    // providers (Gemini → Grok) by default — Claude is used to read them ONLY in
+    // Power / Only-Opus mode (onlyOpus). This keeps file reading cheap and means a
+    // file + a plain question can still take the cheap chat path below.
+    const rawAttachments: Array<{ name: string; type: string; base64: string }> =
+      Array.isArray(req.body?.attachments)
+        ? req.body.attachments.filter(
+            (a: any) => a && typeof a.base64 === 'string' && a.base64 && typeof a.type === 'string',
+          )
+        : [];
+    let attachmentContext = '';
+    if (rawAttachments.length > 0) {
+      send({ type: 'narration', agent: 'architect', text: `📎 Reading ${rawAttachments.length} file(s)…`, ts: Date.now() });
+      try {
+        const docs = await buildDocumentContext(rawAttachments);
+        const vis = await describeVisionAttachments(rawAttachments, { useClaude: onlyOpus });
+        attachmentContext = [docs, vis].filter(Boolean).join('\n\n');
+      } catch { /* best-effort — a bad file never blocks the turn */ }
+    }
+
     const isPlainChatTurn =
-      classifyIntent(prompt) === 'chat' && !hasAttachment && planFirst === false;
+      classifyIntent(prompt) === 'chat' && planFirst === false;
     if (isPlainChatTurn) {
       try {
         const chatRouter = AIRouterManager.getRouter('free');
+        const chatPrompt = attachmentContext
+          ? `${prompt}\n\nThe user attached file(s); here is the extracted content:\n\n${attachmentContext}`
+          : prompt;
         const { response } = await chatRouter.route(
-          prompt,
+          chatPrompt,
           "You are NavBharatAI's friendly assistant. Reply briefly and warmly in " +
             "the user's language. Do not mention which model you are.",
         );
@@ -413,6 +436,13 @@ export function registerAgentV3Routes(app: Express): void {
           : `Language: generate all user-facing text in the app in the SAME language the user used in this request (default to English if it is English). Keep code identifiers and comments in English.`;
         buildPrompt = `${langInstruction}\n\n${buildPrompt}`;
       } catch { /* best-effort — never blocks a build */ }
+
+      // Attachments: prepend the extracted file content/description so the build
+      // loop can act on the uploaded file(s). Computed earlier (cheap vision /
+      // free document extraction); empty when there were no attachments.
+      if (attachmentContext) {
+        buildPrompt = `The user attached file(s); here is the extracted content:\n\n${attachmentContext}\n\n---\n\n${buildPrompt}`;
+      }
 
       // Plan mode (P4): plan first, then block for the user's approval before
       // building. A real gate — the build does not start until the user answers.

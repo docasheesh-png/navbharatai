@@ -451,6 +451,7 @@ declare module 'lucide-react' {
   export const BarChart: Icon;
   export const LineChart: Icon;
   export const Apple: Icon;
+  export const Leaf: Icon;
   export const PlayCircle: Icon;
   export const Hash: Icon;
   export const AtSign: Icon;

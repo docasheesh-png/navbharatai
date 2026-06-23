@@ -78,7 +78,7 @@ export type ViewType =
   | 'appstore' | 'collab' | 'aitesting' | 'localization' | 'codereview'
   | 'dbstudio' | 'cicd' | 'plugins' | 'whitelabel' | 'projectmgr'
   | 'cloudeploy' | 'designsys' | 'healthmon' | 'engine_builder' | 'professionals'
-  | 'engineer_ai' | 'connect_domain' | 'teacher_ai' | 'mentor_ai' | 'thesis_ai' | 'accountant_ai' | 'lawyer_ai' | 'finance_ai' | 'astrologer_ai' | 'govt_schemes_ai';
+  | 'engineer_ai' | 'connect_domain' | 'teacher_ai' | 'mentor_ai' | 'thesis_ai' | 'accountant_ai' | 'lawyer_ai' | 'finance_ai' | 'astrologer_ai' | 'govt_schemes_ai' | 'kisan_ai';
 
 export type SettingsScreen =
   | 'root' | 'general' | 'modules' | 'secrets' | 'database' | 'connections'

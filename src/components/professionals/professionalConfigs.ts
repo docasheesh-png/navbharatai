@@ -102,4 +102,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'What documents do I usually need?',
     ],
   },
+  kisan_ai: {
+    id: 'kisan_ai',
+    name: 'Kisan / Agri Advisor',
+    welcome:
+      "Namaste kisan bhai/behen! 🌱 I'm Kisan AI — I can help with crop choice & season, soil & fertiliser, pest/disease (IPM), irrigation, and market/MSP & scheme awareness. Tell me your crop, region and problem. ⚠️ Local conditions vary — confirm big decisions with your KVK / agri officer & a soil test, and always follow pesticide-label safety.",
+    quickPrompts: [
+      'Which crop should I sow this season?',
+      'My crop has a pest — what to do?',
+      'How to read my Soil Health Card?',
+      'Water-saving irrigation tips',
+    ],
+  },
 };

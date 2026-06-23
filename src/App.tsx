@@ -5435,6 +5435,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'finance_ai') toggleTab('finance_ai');
               else if (id === 'astrologer_ai') toggleTab('astrologer_ai');
               else if (id === 'govt_schemes_ai') toggleTab('govt_schemes_ai');
+              else if (id === 'kisan_ai') toggleTab('kisan_ai');
             }} />
           )}
 
@@ -5477,6 +5478,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'govt_schemes_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.govt_schemes_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'kisan_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.kisan_ai} userId={user?.uid} />
             </div>
           )}
 

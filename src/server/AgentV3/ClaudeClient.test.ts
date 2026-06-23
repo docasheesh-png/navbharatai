@@ -190,3 +190,19 @@ describe('pricing (D5/D6) — margin is structurally positive', () => {
     expect(billedAmountUsd({ inputTokens: -5, outputTokens: -5 })).toBe(0);
   });
 });
+
+import { sanitizeApiKey } from './ClaudeClient';
+
+describe('sanitizeApiKey', () => {
+  it('strips surrounding whitespace, newlines and wrapping quotes', () => {
+    expect(sanitizeApiKey('  sk-ant-abc\n')).toBe('sk-ant-abc');
+    expect(sanitizeApiKey('"sk-ant-abc"')).toBe('sk-ant-abc');
+    expect(sanitizeApiKey("'sk-ant-abc'")).toBe('sk-ant-abc');
+    expect(sanitizeApiKey('sk-ant-abc')).toBe('sk-ant-abc');
+  });
+  it('returns undefined for empty/missing values', () => {
+    expect(sanitizeApiKey(undefined)).toBeUndefined();
+    expect(sanitizeApiKey('   ')).toBeUndefined();
+    expect(sanitizeApiKey('')).toBeUndefined();
+  });
+});

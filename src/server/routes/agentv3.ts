@@ -7,6 +7,7 @@ import {
   WorkspaceState,
   ToolDispatcher,
   ClaudeClient,
+  sanitizeApiKey,
   AgentRunner,
   catalogForTools,
   roleConfig,
@@ -105,23 +106,31 @@ export function agentV3KeyDiag(): {
   anthropicKeyPrefix: string | null;
   anthropicKeyLength: number;
   looksLikeAnthropicKey: boolean;
+  keyHadSurroundingWhitespaceOrQuotes: boolean;
   agentv3OverrideBaseUrlSet: boolean;
   sharedProxyBaseUrlSet: boolean;
   sonnetModel: string;
   opusModel: string;
 } {
-  const key = process.env.ANTHROPIC_API_KEY ?? '';
+  const raw = process.env.ANTHROPIC_API_KEY ?? '';
+  const key = sanitizeApiKey(raw) ?? '';
   return {
     anthropicKeySet: key.length > 0,
     anthropicKeyPrefix: key ? key.slice(0, 7) : null,
     anthropicKeyLength: key.length,
     looksLikeAnthropicKey: key.startsWith('sk-ant-'),
+    // If the raw value differed from the sanitized one, the key in Cloud Run had
+    // stray whitespace/quotes — a common cause of a 401 on an otherwise valid key.
+    keyHadSurroundingWhitespaceOrQuotes: raw.length > 0 && raw !== key,
     agentv3OverrideBaseUrlSet: !!process.env.AGENTV3_ANTHROPIC_BASE_URL,
     sharedProxyBaseUrlSet: !!process.env.ANTHROPIC_BASE_URL,
     sonnetModel: resolveModel(false),
     opusModel: resolveModel(true),
   };
 }
+
+/** Throttle the public live-probe so it can't be abused for cost (one per 30s). */
+let lastDiagProbeTs = 0;
 
 export function registerAgentV3Routes(app: Express): void {
   // Capability probe — lets the frontend decide whether to show the v3.0 toggle.
@@ -141,10 +150,19 @@ export function registerAgentV3Routes(app: Express): void {
     const wantsTest = req.query.test === '1';
     const adminOk =
       !!process.env.ADMIN_PASSWORD && req.query.admin === process.env.ADMIN_PASSWORD;
-    if (!wantsTest || !adminOk) {
+    // The live probe makes ONE tiny real Claude call. Admins can run it anytime;
+    // otherwise it's throttled to one every 30s globally so it can't be abused.
+    const now = Date.now();
+    const throttled = now - lastDiagProbeTs < 30_000;
+    if (!wantsTest) {
       res.json(diag);
       return;
     }
+    if (!adminOk && throttled) {
+      res.json({ ...diag, live: { ok: false, error: 'Live probe is throttled — try again in ~30s.' } });
+      return;
+    }
+    lastDiagProbeTs = now;
     // Live probe: one minimal, real Claude call to surface the exact error.
     let live: { ok: boolean; model?: string; error?: string; status?: number };
     try {

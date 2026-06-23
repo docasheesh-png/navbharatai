@@ -108,6 +108,18 @@ export interface RetryOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/**
+ * Sanitize an env-supplied API key. Pasting a key into a Cloud Run variable
+ * often introduces a trailing newline/space or wrapping quotes; the Anthropic
+ * SDK sends the value verbatim, so an otherwise-valid key then 401s on every
+ * call. Strip surrounding whitespace and a single layer of wrapping quotes.
+ */
+export function sanitizeApiKey(raw: string | undefined): string | undefined {
+  if (raw == null) return undefined;
+  const trimmed = raw.trim().replace(/^['"]|['"]$/g, '').trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export class ClaudeClient implements TurnRunner {
   private client?: MessagesCreateClient;
   private readonly maxRetries: number;
@@ -133,7 +145,7 @@ export class ClaudeClient implements TurnRunner {
       // real Anthropic gateway); otherwise we use the SDK default endpoint.
       const override = process.env.AGENTV3_ANTHROPIC_BASE_URL?.replace(/\/v1$/, '');
       this.client = new Anthropic({
-        apiKey: process.env.ANTHROPIC_API_KEY,
+        apiKey: sanitizeApiKey(process.env.ANTHROPIC_API_KEY),
         ...(override ? { baseURL: override } : {}),
       }) as unknown as MessagesCreateClient;
     }

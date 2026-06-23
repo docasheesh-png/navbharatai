@@ -266,6 +266,15 @@ Every phase is graded against these, because they are what makes the difference:
   graph's index.html); systemPrompt + AppKnowledgeBase synced. First item built via the
   Section I audit-first triage (was ABSENT → now solid). v3.0-only. Gate green:
   server+frontend tsc 0, 1946 vitest (+9), build, boot:check PASS.
+- 2026-06-23: Section I #22 (DX) — project-hygiene check. New
+  `AgentV3/ProjectHygieneAnalysis.ts` (PURE): checks the REAL file list for the
+  basics — .gitignore (medium; or node_modules/.env/secrets get committed),
+  tsconfig.json when the code is TypeScript (medium), and a lockfile (low; reproducible
+  installs). High-precision, "—" when not a JS/TS project. Folded into `evaluate` as
+  the 14th dimension (reuses the actuator file list + the package.json already read);
+  systemPrompt + AppKnowledgeBase synced. Second item via the Section I audit-first
+  triage (ABSENT → solid). v3.0-only. Gate green: server+frontend tsc 0, 1956 vitest
+  (+10), build, boot:check PASS.
 - 2026-06-23: Provider diagnosis — GET /api/agentv3/diag reports (no secrets)
   whether ANTHROPIC_API_KEY is a real sk-ant key, plus base-url config; optional
   admin-gated ?test=1 makes one real Claude call and returns the exact outcome.

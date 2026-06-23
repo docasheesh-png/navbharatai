@@ -10,6 +10,7 @@ import { securitySummary } from './SecurityAnalysis';
 import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
+import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict } from './Readiness';
 import type { SecondOpinion } from './SecondOpinion';
@@ -145,6 +146,53 @@ export class ToolDispatcher {
     } catch {
       // Any failure: return the clean summary so evaluate's other sections stand.
       return dependencySummary([]);
+    }
+  }
+
+  /**
+   * Best-effort environment-variable completeness report over the project's source
+   * vs its `.env.example`. Collects every `process.env.X` / `import.meta.env.X`
+   * reference from real source, reads `.env.example` (falling back to `.env`), and
+   * runs analyzeEnvVars. Wrapped so any file-access error degrades gracefully — the
+   * evaluate tool still returns its architecture + security + authenticity +
+   * dependency result. A missing/undocumented env var is the classic "your app won't
+   * run for the user" defect: the code needs it but the user is never told to set it.
+   */
+  private async collectEnvVarSummary(): Promise<string> {
+    const SOURCE_EXT = /\.(ts|tsx|js|jsx|py|vue|svelte|go|rb|java|php)$/i;
+    const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+    try {
+      const refs = new Set<string>();
+      try {
+        const paths = await this.actuator.listFiles(this.workspaceId);
+        const candidates = paths.filter((p) => SOURCE_EXT.test(p) && !SKIP.test(p)).slice(0, 200);
+        for (const p of candidates) {
+          try {
+            const content = await this.actuator.readFile(this.workspaceId, p);
+            if (content.length > 200_000) continue;
+            for (const name of extractEnvRefs(p, content)) refs.add(name);
+          } catch {
+            /* skip a single unreadable file — never break evaluate */
+          }
+        }
+      } catch {
+        /* listing failed — fall back to no references */
+      }
+      let envExample: string | null = null;
+      try {
+        envExample = await this.actuator.readFile(this.workspaceId, '.env.example');
+      } catch {
+        try {
+          envExample = await this.actuator.readFile(this.workspaceId, '.env');
+        } catch {
+          envExample = null; // no env file reachable — every referenced var is undocumented
+        }
+      }
+      const issues = analyzeEnvVars([...refs], parseEnvKeys(envExample));
+      return envVarSummary(issues);
+    } catch {
+      // Any failure: return the clean summary so evaluate's other sections stand.
+      return envVarSummary([]);
     }
   }
 
@@ -289,7 +337,11 @@ export class ToolDispatcher {
         // evaluate if graph access or package.json read fails. On any error the
         // prior four sections are still returned in full.
         const depSummary = await this.collectDependencySummary();
-        return `${verdict}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${depSummary}`;
+        // Best-effort environment-variable completeness pass — never throws, never
+        // breaks evaluate if file access fails. On any error the prior five sections
+        // are still returned in full.
+        const envSummary = await this.collectEnvVarSummary();
+        return `${verdict}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${depSummary}\n\n${envSummary}`;
       }
 
       case 'update_todo': {

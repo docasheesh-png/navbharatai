@@ -5437,6 +5437,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'govt_schemes_ai') toggleTab('govt_schemes_ai');
               else if (id === 'kisan_ai') toggleTab('kisan_ai');
               else if (id === 'nutritionist_ai') toggleTab('nutritionist_ai');
+              else if (id === 'wellness_ai') toggleTab('wellness_ai');
             }} />
           )}
 
@@ -5489,6 +5490,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'nutritionist_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.nutritionist_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'wellness_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.wellness_ai} userId={user?.uid} />
             </div>
           )}
 

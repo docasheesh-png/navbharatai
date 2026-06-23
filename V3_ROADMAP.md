@@ -284,6 +284,14 @@ Every phase is graded against these, because they are what makes the difference:
   AppKnowledgeBase synced. Third item via the Section I audit-first triage (ABSENT →
   solid); applies the app-must-never-break rule to the apps v3.0 builds. v3.0-only.
   Gate green: server+frontend tsc 0, 1965 vitest (+9), build, boot:check PASS.
+- 2026-06-23: Section I #22 (DX, config engine) — .gitignore generator. New
+  `AgentV3/GitignoreGenerator.ts` (PURE): writes a correct, stack-aware .gitignore
+  (node_modules/build/.env/logs/coverage/editor + framework entries from real deps).
+  New `generate_gitignore` tool wired end-to-end (ToolName, catalog def +
+  CATALOG_TOOL_NAMES, BUILD_TOOLS grant, dispatcher case). Closes the loop with the
+  #22 hygiene check (detect missing → generate the fix). systemPrompt + AppKnowledgeBase
+  synced. v3.0-only. Gate green: server+frontend tsc 0, 1980 vitest (+5), build,
+  boot:check PASS.
 - 2026-06-23: Section I #4 (Security) — security-config scan. New
   `AgentV3/SecurityConfigAnalysis.ts` (PURE): flags two high-impact, high-precision
   misconfigurations — disabled TLS certificate verification (rejectUnauthorized:false /

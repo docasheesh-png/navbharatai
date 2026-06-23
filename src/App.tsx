@@ -46,6 +46,8 @@ import { AdminDashboard } from './components/AdminDashboard';
 // SDAChat kept eager — used immediately on tab open
 import { SDAChat } from './components/sda/SDAChat';
 import { ProfessionalsView } from './components/professionals/ProfessionalsView';
+import { ProfessionalChat } from './components/professionals/ProfessionalChat';
+import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { EngineerAIChat } from './components/engineer/EngineerAIChat';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { triggerCashfreeCheckout } from './services/paymentService';
@@ -5425,7 +5427,15 @@ ${buildLanguageRule(preferredLanguage)}`;
             <ProfessionalsView onSelect={(id) => {
               if (id === 'sda_chat') toggleTab('sda_chat');
               else if (id === 'engineer_ai') toggleTab('engineer_ai');
+              else if (id === 'teacher_ai') toggleTab('teacher_ai');
             }} />
+          )}
+
+          {/* ── Teacher AI (config-driven professional) ── */}
+          {activeView === 'teacher_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.teacher_ai} userId={user?.uid} />
+            </div>
           )}
 
           {/* ── Engineer AI ── */}

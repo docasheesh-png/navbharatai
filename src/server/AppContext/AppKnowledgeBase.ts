@@ -164,6 +164,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['doctor ai', 'senior doctor', 'medical ai', 'clinical ai', 'doctor assistant', 'sda chat', 'doctor screen', 'open doctor'],
   },
 
+  // ─── TEACHER AI ──────────────────────────────────────────────────────────
+  {
+    id: 'teacher_ai',
+    name: 'Teacher AI',
+    path: 'Sidebar → Professionals → Teacher AI',
+    description: 'Patient expert teacher/tutor for Indian students and teachers. Explains any concept simply, solves doubts step by step (Socratic), creates lesson plans, quizzes and exam study plans (boards, NEET, JEE, UPSC), and works in any Indian language. Grounded in standard pedagogy; a study aid that builds understanding — verify exam-specific syllabus from official sources.',
+    howToUse: 'Open Sidebar → Professionals → Teacher AI and ask anything: "explain X simply", "solve this step by step", "make a study plan", "quiz me on Y".',
+    relatedFeatures: ['professionals'],
+    aiSurface: 'teacher_ai',
+    keywords: ['teacher ai', 'tutor', 'study', 'lesson plan', 'exam prep', 'doubt', 'quiz', 'padhai', 'teacher', 'learn'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

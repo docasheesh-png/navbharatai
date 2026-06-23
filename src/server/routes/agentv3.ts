@@ -44,11 +44,38 @@ import { makeResilientTurnRunner } from './agentv3Resilient';
  * budget/step stops are reported as-is, never a fake success.
  */
 
-/** Hybrid sandbox selection (D4): E2B for real builds, Docker/Local fallbacks. */
+/**
+ * Hybrid sandbox selection (D4): E2B for real builds, Docker/Local fallbacks.
+ *
+ * Cached as a process-level singleton so the actuator's per-workspace sandbox map
+ * survives across requests — that is what lets consecutive messages in the same
+ * session reuse the SAME sandbox (and its files, node_modules and dev server),
+ * enabling iterative building ("add a login page" after "build a todo app").
+ */
+let sharedActuator: IEngineerActuator | null = null;
 function buildActuator(): IEngineerActuator {
-  if (process.env.E2B_API_KEY) return new E2BActuator();
-  if (process.env.DOCKER_ENABLED === 'true') return new DockerActuator();
-  return new LocalActuator();
+  if (sharedActuator) return sharedActuator;
+  if (process.env.E2B_API_KEY) sharedActuator = new E2BActuator();
+  else if (process.env.DOCKER_ENABLED === 'true') sharedActuator = new DockerActuator();
+  else sharedActuator = new LocalActuator();
+  return sharedActuator;
+}
+
+/** A client-supplied session id must be a safe, bounded token (it becomes part of
+ *  the workspace id, which is interpolated into sandbox paths/commands). */
+const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
+
+/**
+ * Derive the workspace id for a request. A stable `sessionId` → a stable workspace
+ * (reused across messages = iterative building). No/invalid sessionId → a fresh,
+ * timestamped one-shot workspace (the previous behaviour).
+ */
+export function deriveWorkspaceId(userId: string | null, sessionId: unknown): string {
+  const uid = userId && /^[A-Za-z0-9_-]{1,64}$/.test(userId) ? userId : 'anon';
+  if (typeof sessionId === 'string' && SESSION_ID_RE.test(sessionId)) {
+    return `agentv3-${uid}-${sessionId}`;
+  }
+  return `agentv3-${uid}-${Date.now()}`;
 }
 
 function maxBuildBudgetUsd(): number {
@@ -147,7 +174,7 @@ export function registerAgentV3Routes(app: Express): void {
     const state = new WorkspaceState(events);
 
     const actuator = buildActuator();
-    const workspaceId = `agentv3-${userId ?? 'anon'}-${Date.now()}`;
+    const workspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
     try {
       // Native Claude for real tool-use, with a multi-provider text fallback
       // (Vertex → Gemini → Grok) so chat never dies if Claude is down/misconfigured.

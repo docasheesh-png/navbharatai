@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -23,6 +23,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'wellness_ai', label: 'Wellness / Counsellor', description: 'A caring space for stress, anxiety & low mood — listening, coping & self-care, crisis helplines. AI companion, not a therapist or a substitute for professional care.', icon: HeartHandshake, active: true },
   { id: 'fitness_ai', label: 'Fitness / Personal Trainer', description: 'Home/gym workout plans for your goal, exercise form, warm-up & recovery, staying consistent — general fitness guidance (not medical/physio advice).', icon: Activity, active: true },
   { id: 'vet_ai', label: 'Veterinary / Pashu Advisor', description: 'Livestock (cattle, buffalo, goat, poultry) & pet (dog, cat) care, hygiene, nutrition & vaccination awareness — general guidance, not a vet diagnosis (see a vet for sick animals).', icon: PawPrint, active: true },
+  { id: 'parenting_ai', label: 'Parenting / Child-Care', description: 'Development & milestones, routines (sleep, screen-time), positive discipline & tantrums, study stress & teens — general parenting guidance (not medical; see a paediatrician).', icon: Baby, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

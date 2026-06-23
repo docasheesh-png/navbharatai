@@ -162,4 +162,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Why are vaccination & deworming important?',
     ],
   },
+  parenting_ai: {
+    id: 'parenting_ai',
+    name: 'Parenting / Child-Care AI',
+    welcome:
+      "Namaste! 👶 I'm Parenting AI — a supportive space for raising kids: development & milestones, routines (sleep, feeding, screen-time), positive discipline & tantrums, study stress, and connecting with teens. Tell me your child's age and what's on your mind. ⚠️ This is general parenting guidance, not medical advice — for fever, illness, vaccination or any growth/developmental worry, please see a paediatrician.",
+    quickPrompts: [
+      'Is my child meeting milestones?',
+      'How do I handle tantrums calmly?',
+      'Build a good bedtime routine',
+      'Help me support my teen during exams',
+    ],
+  },
 };

@@ -304,6 +304,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['wellness', 'counsellor', 'counselor', 'mental health', 'stress', 'anxiety', 'depression', 'sad', 'low mood', 'therapy', 'emotional', 'support', 'mann', 'tension', 'help'],
   },
 
+  // ─── FITNESS / PERSONAL TRAINER AI ───────────────────────────────────────
+  {
+    id: 'fitness_ai',
+    name: 'Fitness / Personal Trainer AI',
+    path: 'Sidebar → Professionals → Fitness / Personal Trainer',
+    description: 'Encouraging personal-trainer & fitness coach: home/gym workout plans for goals (fat loss, muscle/strength, stamina, general fitness), exercise form & technique cues, warm-up/mobility/recovery & rest, cardio & steps, and habit/motivation help. Defers detailed diet to the Nutritionist AI. Safety-first: general fitness education, NOT medical/physiotherapy advice; advises medical clearance before a new programme (health condition, pregnancy, older, inactive), stop & see a doctor/physio for pain/injury; no crash regimes, overtraining, dehydration cutting, or anabolic/unproven supplements.',
+    howToUse: 'Open Sidebar → Professionals → Fitness / Personal Trainer and ask: "beginner home workout plan", "plan to build muscle", "lose fat safely", "fix my squat form". For diet specifics use Nutritionist AI; for pain/injury see a doctor/physio.',
+    relatedFeatures: ['professionals', 'nutritionist_ai', 'sda_chat'],
+    aiSurface: 'fitness_ai',
+    keywords: ['fitness', 'workout', 'exercise', 'gym', 'trainer', 'muscle', 'strength', 'fat loss', 'cardio', 'home workout', 'training', 'kasrat', 'vyayam', 'bodyweight'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

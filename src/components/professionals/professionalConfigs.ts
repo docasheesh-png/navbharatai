@@ -138,4 +138,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'When should I see a counsellor?',
     ],
   },
+  fitness_ai: {
+    id: 'fitness_ai',
+    name: 'Fitness / Personal Trainer AI',
+    welcome:
+      "Let's get moving! 💪 I'm Fitness AI — your personal-trainer companion. I can build a home or gym workout plan for your goal (fat loss, muscle, stamina, general fitness), explain exercise form, and help with warm-up, recovery & staying consistent. Tell me your goal, level and equipment. ⚠️ This is general fitness guidance, not medical advice — get a doctor's clearance if you have any health condition, and stop & see a physio for pain/injury.",
+    quickPrompts: [
+      'Make a beginner home workout plan',
+      'Workout plan to build muscle',
+      'How do I lose fat safely?',
+      'Fix my squat / push-up form',
+    ],
+  },
 };

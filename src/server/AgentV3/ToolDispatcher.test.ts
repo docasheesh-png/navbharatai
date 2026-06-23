@@ -224,3 +224,79 @@ describe('ToolDispatcher', () => {
     expect(res.content).toContain('not available');
   });
 });
+
+describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
+  function makeDispatcher(ws: string): ToolDispatcher {
+    const a = new FakeActuator();
+    const s = new AgentEventStream();
+    return new ToolDispatcher(a, ws, new WorkspaceState(s), s);
+  }
+  const evalText = async (dd: ToolDispatcher): Promise<string> =>
+    (await dd.dispatch(call('evaluate', {}))).content;
+  const write = (dd: ToolDispatcher, path: string, content: string) =>
+    dd.dispatch(call('write_file', { path, content }));
+
+  it('flags a secret leak (.env not gitignored) and blocks readiness', async () => {
+    const dd = makeDispatcher('ws-eval-leak-1');
+    await write(dd, '.env', 'API_KEY=secret123');
+    await write(dd, '.gitignore', 'node_modules/\ndist/');
+    await write(dd, 'src/App.tsx', 'export const App = () => null;');
+    const out = await evalText(dd);
+    expect(out).toContain('Secret leak');
+    expect(out).toContain('not covered by .gitignore');
+    expect(out).toContain('NOT READY');
+  });
+
+  it('passes the secret-leak check when .env is gitignored', async () => {
+    const dd = makeDispatcher('ws-eval-leak-2');
+    await write(dd, '.env', 'API_KEY=x');
+    await write(dd, '.gitignore', '.env\nnode_modules/');
+    const out = await evalText(dd);
+    expect(out).toContain('Secret leak: ✓');
+  });
+
+  it('flags a hardcoded localhost URL', async () => {
+    const dd = makeDispatcher('ws-eval-url');
+    await write(dd, 'src/api.ts', "export const API = 'http://localhost:3000/api';");
+    const out = await evalText(dd);
+    expect(out).toContain('hardcoded localhost URL');
+  });
+
+  it('flags runnability when there is no run script', async () => {
+    const dd = makeDispatcher('ws-eval-run');
+    await write(dd, 'package.json', JSON.stringify({ dependencies: { react: '^18' }, scripts: { lint: 'eslint .' } }));
+    await write(dd, 'src/App.tsx', 'export const App = () => null;');
+    const out = await evalText(dd);
+    expect(out).toContain('Runnability');
+    expect(out).toContain('no defined way to start');
+  });
+
+  it('flags missing SEO metadata in index.html', async () => {
+    const dd = makeDispatcher('ws-eval-seo');
+    await write(dd, 'index.html', '<html><head></head><body><div id="root"></div></body></html>');
+    const out = await evalText(dd);
+    expect(out).toContain('SEO/metadata');
+    expect(out).toContain('<title>');
+  });
+
+  it('flags insecure security config (disabled TLS verification)', async () => {
+    const dd = makeDispatcher('ws-eval-sec');
+    await write(dd, 'src/http.ts', 'const agent = new Agent({ rejectUnauthorized: false });');
+    const out = await evalText(dd);
+    expect(out).toContain('Security config');
+    expect(out).toContain('NOT READY'); // high security-config issue blocks readiness
+  });
+
+  it('reports READY for a clean, runnable, well-configured project', async () => {
+    const dd = makeDispatcher('ws-eval-clean');
+    await write(dd, 'package.json', JSON.stringify({ scripts: { dev: 'vite', build: 'vite build' }, devDependencies: { vite: '^5' } }));
+    await write(dd, 'index.html', '<html lang="en"><head><title>App</title><meta name="viewport" content="width=device-width"><meta name="description" content="A real app."></head><body></body></html>');
+    await write(dd, '.gitignore', 'node_modules/\n.env');
+    await write(dd, 'tsconfig.json', '{ "compilerOptions": { "strict": true } }');
+    await write(dd, 'package-lock.json', '{}');
+    await write(dd, 'src/App.tsx', 'export const App = () => null;');
+    const out = await evalText(dd);
+    expect(out).toContain('readiness: READY');
+    expect(out).not.toContain('NOT READY');
+  });
+});

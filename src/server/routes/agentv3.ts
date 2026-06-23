@@ -42,6 +42,7 @@ import { makeResilientTurnRunner } from './agentv3Resilient';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { describeVisionAttachments } from '../lib/visionDescribe';
+import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 
 /**
  * AgentV3 (Vargen 3.0) routes.
@@ -462,6 +463,22 @@ export function registerAgentV3Routes(app: Express): void {
           agentRole: 'architect',
         });
         await planRunner.run(prompt);
+
+        // Strategic Intelligence (Layer 54): review the proposed plan for gaps
+        // (no verification step, no setup, missing deploy, under-scoped, vague)
+        // and surface them next to the plan BEFORE the user approves. Best-effort —
+        // a review failure must never block the approval gate.
+        try {
+          const planTodos = state.snapshot().todos;
+          if (planTodos.length > 0) {
+            events.emit({
+              type: 'narration',
+              agent: 'architect',
+              text: planAnalysisSummary(planTodos, prompt),
+              ts: Date.now(),
+            });
+          }
+        } catch { /* plan review is advisory — never blocks the gate */ }
 
         const requestId = randomUUID();
         events.emit({

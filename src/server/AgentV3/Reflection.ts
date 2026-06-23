@@ -11,11 +11,22 @@
 
 import type { Episode } from './WorkspaceMemory';
 
+export interface RecurringError {
+  /** Normalized error signature (paths/numbers/quotes stripped). */
+  signature: string;
+  /** How many times this signature occurred in the build. */
+  count: number;
+  /** A short snippet of a representative occurrence. */
+  sample: string;
+}
+
 export interface BuildReflection {
   outcome: 'success' | 'failure';
   errorsEncountered: number;
   fixesApplied: number;
   unresolvedErrors: number;
+  /** Errors that recurred (same signature ≥ threshold) — a "stuck loop" signal. */
+  recurringErrors: RecurringError[];
   lessons: string[];
   summary: string;
 }
@@ -29,6 +40,44 @@ const NOTE_MAX_CHARS = 1500;
 function snippet(text: string, max = 80): string {
   const oneLine = text.replace(/\s+/g, ' ').trim();
   return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
+}
+
+/**
+ * Normalize an error message to a stable signature so the SAME error recurring is
+ * detectable across attempts: strip file paths, line:col numbers, hex addresses and
+ * quoted specifics that vary between otherwise-identical failures.
+ */
+export function errorSignature(text: string): string {
+  return (text || '')
+    .toLowerCase()
+    .replace(/0x[0-9a-f]+/g, '<hex>')
+    .replace(/[a-z]?:?[\\/][^\s'"`)]+/g, '<path>') // unix/windows paths
+    .replace(/['"`][^'"`]*['"`]/g, '<str>') // quoted specifics
+    .replace(/\b\d+(?::\d+)?\b/g, '<n>') // line:col and bare numbers
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
+/**
+ * Group 'error' episodes by signature and return those that recurred at least
+ * `minCount` times — i.e. the build kept hitting the SAME failure, a strong signal
+ * that the current fix approach is not working. PURE & deterministic.
+ */
+export function detectRecurringErrors(episodes: Episode[], minCount = 3): RecurringError[] {
+  const groups = new Map<string, { count: number; sample: string }>();
+  for (const e of episodes) {
+    if (e.kind !== 'error') continue;
+    const sig = errorSignature(e.text);
+    if (!sig) continue;
+    const g = groups.get(sig);
+    if (g) g.count++;
+    else groups.set(sig, { count: 1, sample: e.text });
+  }
+  return [...groups.entries()]
+    .filter(([, g]) => g.count >= minCount)
+    .map(([signature, g]) => ({ signature, count: g.count, sample: snippet(g.sample) }))
+    .sort((a, b) => b.count - a.count);
 }
 
 /**
@@ -52,7 +101,7 @@ export function reflectOnBuild(input: {
   const errorsEncountered = errors.length;
   const fixesApplied = fixes.length;
 
-  const lessons: string[] = [];
+  const pairLessons: string[] = [];
   const usedFix = new Set<number>(); // indices into `fixes` already paired
   let unresolvedErrors = 0;
 
@@ -71,19 +120,26 @@ export function reflectOnBuild(input: {
       continue;
     }
     usedFix.add(pairedIdx);
-    if (lessons.length < MAX_LESSONS) {
-      lessons.push(
-        `When '${snippet(err.text)}' occurred, the fix was '${snippet(fixes[pairedIdx].text)}'.`,
-      );
-    }
+    pairLessons.push(
+      `When '${snippet(err.text)}' occurred, the fix was '${snippet(fixes[pairedIdx].text)}'.`,
+    );
   }
+
+  // A repeatedly-recurring error is the highest-value lesson — surface it FIRST so
+  // the next build changes approach instead of re-applying a fix that never worked.
+  const recurringErrors = detectRecurringErrors(sorted);
+  const recurringLessons = recurringErrors.map(
+    (r) =>
+      `The same error recurred ${r.count}× (e.g. '${r.sample}') — repeated fixes were not resolving it; change strategy (different root cause) or ask for help instead of retrying the same approach.`,
+  );
+  const lessons = [...recurringLessons, ...pairLessons].slice(0, MAX_LESSONS);
 
   const outcome: 'success' | 'failure' = input.ok ? 'success' : 'failure';
   const summary =
     `Build ${input.ok ? 'succeeded' : 'failed'} in ${input.steps} steps; ` +
     `${errorsEncountered} error(s), ${fixesApplied} fix(es), ${unresolvedErrors} unresolved.`;
 
-  return { outcome, errorsEncountered, fixesApplied, unresolvedErrors, lessons, summary };
+  return { outcome, errorsEncountered, fixesApplied, unresolvedErrors, recurringErrors, lessons, summary };
 }
 
 /**

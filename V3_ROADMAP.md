@@ -222,6 +222,16 @@ Every phase is graded against these, because they are what makes the difference:
   request. Folded into `evaluate` as the 10th dimension; systemPrompt + AppKnowledgeBase
   synced. v3.0-only. Gate green: server+frontend tsc 0, 1906 vitest (+11), build,
   boot:check PASS.
+- 2026-06-23: Phase 6.2 / 57 (Self-Reflection) — recurring-error (thrash) detection.
+  Extended `AgentV3/Reflection.ts` with `errorSignature` (normalizes paths/line-cols/
+  quotes/hex so the SAME failure matches across attempts) and `detectRecurringErrors`
+  (groups 'error' episodes by signature, flags any that recurred ≥3×). When a build
+  keeps hitting the same error, reflectOnBuild now surfaces a high-priority lesson
+  FIRST — "change strategy / ask for help instead of retrying the same approach" —
+  stored as a recall-able reflection note so the next build stops thrashing (saves
+  wasted loops + credit). PURE & deterministic; existing reflection behaviour
+  unchanged when nothing recurs. v3.0-only. Gate green: server+frontend tsc 0, 1916
+  vitest (+10), build, boot:check PASS.
 - 2026-06-23: Provider diagnosis — GET /api/agentv3/diag reports (no secrets)
   whether ANTHROPIC_API_KEY is a real sk-ant key, plus base-url config; optional
   admin-gated ?test=1 makes one real Claude call and returns the exact outcome.

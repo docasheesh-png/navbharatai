@@ -522,6 +522,8 @@ declare module 'firebase/auth' {
   export function updateProfile(user: any, profile: any): Promise<void>;
   export const GoogleAuthProvider: any;
   export function signInWithPopup(auth: any, provider: any): Promise<any>;
+  export function signInWithRedirect(auth: any, provider: any): Promise<any>;
+  export function getRedirectResult(auth: any): Promise<any>;
   export function signInWithPhoneNumber(auth: any, phone: string, verifier: any): Promise<any>;
   export function setPersistence(auth: any, persistence: any): Promise<void>;
   export const browserLocalPersistence: any;

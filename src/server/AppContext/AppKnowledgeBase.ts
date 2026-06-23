@@ -48,6 +48,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • HYBRID sandbox: a fast E2B cloud sandbox initialised as a real Git repo you own.
 • ITERATIVE sessions: each message continues the SAME project (same sandbox, files and memory), so you can refine step by step ("add a login page" after "build a todo app"). Use the "New" button to start a fresh project.
 • BUILDS IN YOUR LANGUAGE (Layer 73 — Universal Language): write your request in any language — all 22 Indian languages (Hindi, Tamil, Bengali, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Odia, Urdu and more) or major world languages — and the app's user-facing text (labels, buttons, headings, placeholders, messages) is generated in THAT language, while the code stays in English. Apni bhasha mein likho, app usi bhasha mein banega.
+• SMART COST ROUTING: plain conversation (a greeting, thanks, "who are you", small-talk) is answered by a fast, economical model and only REAL build/engineering requests use the premium engine — the experience is unchanged, you just don't pay build-grade cost for a "hello".
 • HONEST billing: you are charged the Claude Opus-equivalent token cost × 2.5 (or × 5 in Only-Opus mode); a live cost estimate is shown.`,
     howToUse: 'Click the floating "v3.0" button (bottom-right), type what you want to build, and press Build. Watch the AI Team panel and the live Files / Diff / Terminal / History surfaces. Toggle "Only Opus" for maximum capability (5× cost). Press Stop to cancel.',
     relatedFeatures: ['engineer_ai', 'pro_chat', 'history', 'settings_secrets'],
@@ -67,6 +68,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'consensus', 'panel', 'collective intelligence', 'multiple perspectives',
       'hindi', 'tamil', 'bengali', 'apni bhasha', 'language', 'multilingual',
       'regional language', 'bhasha', 'build in my language', 'app in hindi',
+      'chat', 'cost', 'economical', 'cheap chat', 'cost routing', 'smart routing',
     ],
   },
   // ─── ENGINEER AI ─────────────────────────────────────────────────────────

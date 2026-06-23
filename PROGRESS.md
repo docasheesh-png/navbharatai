@@ -1091,3 +1091,27 @@ recalled lessons are now EVOLVED before they are fed back into the next build.
   tests still green.
 
 **Test suite: 1837 passing.** Full gate green: tsc frontend+server, build, boot:check.
+
+---
+
+### 2026-06-23 — Layer 58 "Autonomous Governance" v1 (command risk + decision-audit)
+
+Foundation for accountable autonomy: before the build agent runs a shell command,
+the command is risk-classified; risky operations are flagged honestly in the result
+and recorded to a per-project decision-audit trail.
+
+- New `src/server/AgentV3/CommandGovernance.ts` (`classifyCommandRisk`, pure/
+  deterministic): HIGH = irreversible/dangerous/RCE/exfiltration (rm -rf of
+  root/home/wildcard, --no-preserve-root, fork bomb, dd/mkfs to /dev, curl|sh,
+  env|curl, reading private keys, chmod 777 /, sudo, git push --force); MEDIUM =
+  local destructive / unexpected network (rm -rf <dir>, git reset --hard, git clean
+  -f, npm i -g, kill -9, external curl/wget, writes to system dirs). Conservative —
+  normal build/test/git commands never flagged.
+- New `audit` EpisodeKind + `recordAudit()` on WorkspaceMemory — a separate,
+  queryable record that is NOT injected back as a build "lesson".
+- Wired into the `bash` tool: risky commands get a governance warning prepended to
+  the result and an audit episode recorded. Does NOT block execution (hard gating
+  stays with the human-approval system) — it makes risk visible and accountable.
+- AppKnowledgeBase + keywords updated. 10 new unit tests.
+
+**Test suite: 1847 passing.** Full gate green: tsc frontend+server, build, boot:check.

@@ -19,6 +19,7 @@ import type { ComplianceIssue, ComplianceSeverity } from './ComplianceAnalysis';
 import type { DependencyIssue } from './DependencyAnalysis';
 import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
+import { classifyCommandRisk, governanceNote } from './CommandGovernance';
 import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
@@ -373,9 +374,18 @@ export class ToolDispatcher {
 
       case 'bash': {
         const command = reqStr(input, 'command');
+        // Governance (Layer 58): classify the command's risk before it runs so the
+        // result carries an honest warning and a decision-audit episode is recorded.
+        const risk = classifyCommandRisk(command);
         const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, command);
-        const out =
+        let out =
           `exit=${exitCode}\n${stdout}` + (stderr ? `\n[stderr]\n${stderr}` : '');
+        if (risk.level !== 'none') {
+          getWorkspaceMemory(this.workspaceId).recordAudit(
+            `[${risk.level}] ran: ${command.slice(0, 200)} — ${risk.reasons.join('; ')}`,
+          );
+          out = `${governanceNote(risk)}\n${out}`;
+        }
         this.state?.appendTerminal(out);
         // Remember real failures so the team can recall what went wrong (error memory).
         if (exitCode !== 0) {

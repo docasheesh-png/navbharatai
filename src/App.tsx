@@ -4337,7 +4337,32 @@ ${buildLanguageRule(preferredLanguage)}`;
   // getRandomElement → imported from src/lib/chatUtils.ts
   // generateSmartHeuristicSummary → imported from src/lib/chatUtils.ts
 
+  // A v3.0 session restored from History → handed to AgentV3Panel via this prop;
+  // the nonce makes each "open chat" re-adopt even if the panel is already mounted.
+  const [v3Resume, setV3Resume] = useState<{ sessionId: string; messages: Array<{ role: 'user' | 'agent'; text: string; ts: number }>; nonce: number } | null>(null);
+
   const resumeSession = (session: ChatSession) => {
+    // v3.0 (engine_builder) sessions resume INSIDE v3.0 — adopt the saved sessionId
+    // (so the backend continues with the same workspace/memory, best-effort) and
+    // restore the saved thread. Detected by the agentv3 agent tag or the v3_ id.
+    const isV3 = session.agent === 'agentv3'
+      || (session as any).originalAgent === 'agentv3'
+      || (session as any).currentAgent === 'agentv3'
+      || (typeof session.id === 'string' && session.id.startsWith('v3_'));
+    if (isV3) {
+      setCurrentSessionId(session.id);
+      const sid = (session.id || '').replace(/^v3_/, '') || session.id;
+      const msgs = (session.messages || []).map((mm: any) => ({
+        role: (mm.sender === 'user' || mm.role === 'user') ? 'user' as const : 'agent' as const,
+        text: mm.text ?? mm.content ?? '',
+        ts: mm.timestamp ? (Date.parse(mm.timestamp) || Date.now()) : (mm.ts ?? Date.now()),
+      }));
+      setV3Resume({ sessionId: sid, messages: msgs, nonce: Date.now() });
+      toggleTab('engine_builder');
+      addLog(`Resumed v3.0 session: ${session.title}`, 'info');
+      return;
+    }
+
     setCurrentSessionId(session.id);
     const m = session.messages || [];
     const isVishwakarmaSession = (session.agent && session.agent.startsWith('vishwakarma')) || m.some(msg => msg.text?.includes('Vishwakarma') || msg.text?.includes('AGENT: Vishwakarma') || msg.text?.includes('Vishwakarma VIP'));
@@ -5505,9 +5530,13 @@ ${buildLanguageRule(preferredLanguage)}`;
             />
           )}
 
-          {activeView === 'engine_builder' && (
-            <div className="flex-1" style={{ height: '100vh' }}>
-              <AgentV3Panel userId={user?.uid} email={user?.email} />
+          {/* v3.0 stays MOUNTED while its header tab is open — switching to another
+              tab (or mobile back) only hides it, so the build keeps running and the
+              chat/history are preserved. It is unmounted (and fully reset) ONLY when
+              its tab is closed via the ✕. */}
+          {openTabs.includes('engine_builder') && (
+            <div className="flex-1" style={{ height: '100vh', display: activeView === 'engine_builder' ? undefined : 'none' }}>
+              <AgentV3Panel userId={user?.uid} email={user?.email} resume={v3Resume} />
             </div>
           )}
 

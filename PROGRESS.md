@@ -1312,3 +1312,15 @@ User feedback on Pro v3.0:
 (#4 "v3.0 in header as window/tab" — asked the user to clarify before building.)
 
 Gate green: tsc frontend, build, 1884 vitest.
+
+### 2026-06-23 — v3.0 now shows as a top-header tab (#4 from the same feedback)
+
+The top-header tab bar maps openTabs → menuItems; v3.0's view id `engine_builder` was
+intentionally absent from the shared menuItems (it has a bespoke sidebar button), so
+the Header's lookup returned nothing and v3.0 never appeared as a header tab even
+though toggleTab adds it to openTabs. Fix (Header.tsx): a HEADER_TAB_FALLBACK map
+supplies a label/icon ("NavBharatAI Pro v3.0", Rocket) for such tab-openable-but-not-
+in-menu views, so opening v3.0 now shows it as a header tab like every other view —
+without duplicating it in the sidebar. AppKnowledgeBase howToUse updated.
+
+Gate green: tsc frontend+server, build, 1884 vitest.

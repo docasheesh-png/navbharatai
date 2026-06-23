@@ -92,6 +92,8 @@ export function architectSystemPrompt(): string {
     '  README.md (stack, how to run, structure) derived from the real project.',
     '- If the app reads any env vars, call generate_env_example so .env.example',
     '  documents every variable the code needs — so it runs for other people too.',
+    '- Call generate_gitignore to write a correct .gitignore so node_modules,',
+    '  build output and .env secrets are never committed.',
     '',
     'Rules:',
     '- Build the real thing. No fake success, no pretending something works.',

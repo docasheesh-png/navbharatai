@@ -187,6 +187,19 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         },
       },
     },
+    {
+      name: 'generate_gitignore',
+      description:
+        'Generate a correct, stack-aware .gitignore so node_modules, build output and ' +
+        '.env secrets are never committed. Framework-specific entries are added from the ' +
+        "project's real dependencies. Writes the result to .gitignore.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Optional output path (defaults to .gitignore).' },
+        },
+      },
+    },
   ];
 }
 
@@ -204,6 +217,7 @@ export const CATALOG_TOOL_NAMES = [
   'evaluate',
   'generate_readme',
   'generate_env_example',
+  'generate_gitignore',
 ] as const;
 
 /**

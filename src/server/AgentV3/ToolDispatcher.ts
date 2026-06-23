@@ -28,6 +28,7 @@ import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis
 import { analyzeRequirementCoverage, requirementCoverageSummary } from './RequirementCoverage';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
+import { generateGitignore } from './GitignoreGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
@@ -659,6 +660,23 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         await this.maybeCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} with ${refs.length} referenced variable(s).`;
+      }
+
+      case 'generate_gitignore': {
+        const path = optStr(input, 'path') || '.gitignore';
+        const content = generateGitignore({ dependencies: getWorkspaceMemory(this.workspaceId).graph().dependencies });
+        let kind: 'create' | 'modify' = 'create';
+        try {
+          await this.actuator.readFile(this.workspaceId, path);
+          kind = 'modify';
+        } catch {
+          kind = 'create';
+        }
+        await this.actuator.writeFile(this.workspaceId, path, content);
+        this.state?.recordFileChange({ path, kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+        await this.maybeCheckpoint(`${kind} ${path}`);
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} (stack-aware).`;
       }
 
       case 'update_preview': {

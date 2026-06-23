@@ -22,6 +22,7 @@ export type ToolName =
   | 'evaluate'
   | 'generate_readme'
   | 'generate_env_example'
+  | 'generate_gitignore'
   | 'task'
   | 'second_opinion'
   | 'consensus';

@@ -1261,3 +1261,22 @@ egress blocks firebaseapp.com (403 "Host not in allowlist") and there's no brows
 the proxy code is correct (it forwarded upstream). Needs a real browser test on the
 deployed site. Blast radius is contained: email/OTP login do not depend on the
 /__/auth handler, and Google login was already broken.
+
+---
+
+### 2026-06-23 — Logout made bulletproof (signOut could hang on the auth iframe)
+
+User reported logout not working. The handler did `await signOut(auth); reload()` —
+if signOut() hangs (the Firebase auth helper iframe is unavailable, which happens
+while the custom-authDomain OAuth is mid-config) the reload never runs, so the user
+stays signed in. Fix (Header.tsx): race signOut against a 2.5s timeout, then forcibly
+remove the persisted firebase:authUser / firebaseLocalStorage keys and reload — logout
+now always succeeds regardless of signOut's state.
+
+Also: Google login now returns "Error 400: redirect_uri_mismatch" — EXPECTED, and the
+final step: the OAuth client (950841184325-3hcg…) must whitelist
+https://navbharatai.com/__/auth/handler + www in GCP Console → Credentials (Authorized
+redirect URIs) and the two origins (Authorized JavaScript origins). This is admin-only
+config; once added, Google login completes end-to-end with navbharatai.com branding.
+
+Gate green: tsc frontend, build, 1884 vitest.

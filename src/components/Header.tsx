@@ -114,15 +114,23 @@ export const Header = ({
             <button 
               onClick={async (e) => {
                 e.stopPropagation();
-                if (confirm('Logout from NavBharat?')) {
-                  try {
-                    await signOut(auth);
-                    window.location.reload();
-                    console.log('Logged out successfully');
-                  } catch (error) {
-                    console.error('Logout failed:', error);
+                if (!confirm('Logout from NavBharat?')) return;
+                // Logout must ALWAYS work. signOut() can hang when the Firebase auth
+                // helper iframe is unavailable, so cap it with a timeout and then
+                // forcibly clear the persisted session + reload — the app comes back
+                // signed out no matter what.
+                try {
+                  await Promise.race([
+                    signOut(auth).catch(() => {}),
+                    new Promise((resolve) => setTimeout(resolve, 2500)),
+                  ]);
+                } catch { /* ignore — fall through to the hard clear below */ }
+                try {
+                  for (const k of Object.keys(localStorage)) {
+                    if (/^firebase:authUser/i.test(k) || /firebaseLocalStorage/i.test(k)) localStorage.removeItem(k);
                   }
-                }
+                } catch { /* storage may be unavailable — reload still signs out */ }
+                window.location.reload();
               }}
               className="w-10 h-10 bg-white/5 hover:bg-red-500/10 rounded-xl flex items-center justify-center text-[#484f58] hover:text-red-500 transition-all border border-white/5 active:scale-90"
             >

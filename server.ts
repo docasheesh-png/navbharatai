@@ -207,7 +207,10 @@ setInterval(() => {
         imgSrc:     ["'self'", "data:", "blob:", "https:"],
         connectSrc: ["'self'", "https:", "wss:"],
         fontSrc:    ["'self'", "data:", "https:"],
-        frameSrc:   ["'none'"],
+        // Firebase Auth (redirect/popup + state sync) and phone-OTP reCAPTCHA load an
+        // iframe; a blanket 'none' silently breaks sign-in. Allow our own origin (the
+        // server proxies /__/auth/* to Firebase) plus Google's auth/reCAPTCHA frames.
+        frameSrc:   ["'self'", "https://accounts.google.com", "https://www.google.com", "https://gen-lang-client-0866594388.firebaseapp.com", "https://*.firebaseapp.com"],
         objectSrc:  ["'none'"],
       },
     },
@@ -283,8 +286,36 @@ setInterval(() => {
   if (process.env.CASHFREE_SECRET_KEY) (Cashfree as any).XClientSecret = process.env.CASHFREE_SECRET_KEY;
   (Cashfree as any).XEnvironment = 'PRODUCTION';
   
+  // Firebase Auth helper proxy. With authDomain pointed at our own domain (so
+  // signInWithRedirect returns SIGNED-IN and the Google consent screen reads
+  // "continue to navbharatai.com"), the browser requests the sign-in helper code
+  // from OUR origin. We reverse-proxy those `/__/auth/*` and `/__/firebase/*`
+  // requests to the project's Firebase host, which serves the real handler/iframe.
+  // Registered before the SPA catch-all so it isn't swallowed and returned as
+  // index.html. Streams the request/response untouched (any method).
+  const FIREBASE_AUTH_HOST = 'gen-lang-client-0866594388.firebaseapp.com';
+  const proxyFirebaseAuth = (req: any, res: any) => {
+    const upstream = https.request(
+      {
+        hostname: FIREBASE_AUTH_HOST,
+        port: 443,
+        path: req.originalUrl,
+        method: req.method,
+        headers: { ...req.headers, host: FIREBASE_AUTH_HOST },
+      },
+      (pres) => {
+        res.writeHead(pres.statusCode || 502, pres.headers);
+        pres.pipe(res, { end: true });
+      },
+    );
+    upstream.on('error', () => { if (!res.headersSent) res.status(502).end('Auth proxy error'); });
+    req.pipe(upstream, { end: true });
+  };
+  app.use('/__/auth', proxyFirebaseAuth);
+  app.use('/__/firebase', proxyFirebaseAuth);
+
   async function initializeServer() {
-    
+
     // Vite integration
     if (process.env.NODE_ENV !== 'production') {
       const vite = await createViteServer({

@@ -1230,3 +1230,34 @@ blocked); getRedirectResult() (existing effect) completes the sign-in on return.
 Removed the now-unused signInWithPopup import.
 
 Gate green: tsc frontend, build, 1884 vitest.
+
+---
+
+### 2026-06-23 — Google login: custom authDomain + /__/auth proxy + CSP frameSrc fix
+
+After redirect-first (#252) the Google account chooser opens, but two bugs remained,
+BOTH from authDomain (gen-lang-client-0866594388.firebaseapp.com) ≠ app origin
+(navbharatai.com):
+  1. consent screen said "continue to …firebaseapp.com" instead of navbharatai.com;
+  2. after returning from Google the user was still logged out (modern browsers
+     partition the cross-origin auth storage so getRedirectResult comes back empty).
+Also found a third real cause: server CSP had frameSrc:["'none'"], which silently
+BLOCKS the Firebase auth iframe (and phone-OTP reCAPTCHA).
+
+Fix (the Firebase-documented custom-domain approach):
+  • src/config/firebase.ts — authDomain now resolves to the CURRENT origin on
+    navbharatai.com / www.navbharatai.com (same-origin → redirect completes, consent
+    screen reads the real domain); other hosts keep the firebaseapp.com default.
+  • server.ts — reverse-proxy `/__/auth/*` and `/__/firebase/*` to
+    gen-lang-client-0866594388.firebaseapp.com (streamed, any method), registered
+    before the SPA catch-all so the browser fetches the sign-in helper/iframe from
+    our own origin.
+  • server.ts CSP — frameSrc now allows 'self' + accounts.google.com + google.com +
+    *.firebaseapp.com so the auth/reCAPTCHA iframes can load.
+
+Verified locally: tsc frontend+server, build, boot:check, 1884 vitest all green.
+NOTE: the OAuth round-trip itself could not be exercised here — this sandbox's
+egress blocks firebaseapp.com (403 "Host not in allowlist") and there's no browser;
+the proxy code is correct (it forwarded upstream). Needs a real browser test on the
+deployed site. Blast radius is contained: email/OTP login do not depend on the
+/__/auth handler, and Google login was already broken.

@@ -59,6 +59,8 @@ export interface RecallHit {
   file?: string;
   detail?: string;
   score: number;
+  /** Episode timestamp (ms) when this hit is backed by an episode — for recency/aging. */
+  ts?: number;
 }
 
 /** Facts extracted from a single file — kept per-file so re-index/remove is clean. */
@@ -222,7 +224,7 @@ export class WorkspaceMemory {
     }
     for (const e of this.episodes) {
       const s = score(e.text);
-      if (s > 0) hits.push({ type: 'episode', ref: e.text.slice(0, 120), file: e.file, detail: e.kind, score: s });
+      if (s > 0) hits.push({ type: 'episode', ref: e.text.slice(0, 120), file: e.file, detail: e.kind, score: s, ts: e.ts });
     }
     return hits.sort((a, b) => b.score - a.score).slice(0, limit);
   }

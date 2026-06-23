@@ -3,6 +3,7 @@ import type { Express } from 'express';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { extractDocumentText } from '../lib/attachmentText';
 import { computeClinicalTool, AVAILABLE_CLINICAL_TOOLS } from '../lib/clinical/calculators';
+import { retrieveClinicalKnowledge, formatKnowledgeForPrompt } from '../lib/clinical/knowledgeBase';
 
 /**
  * Senior Doctor Assistant (SDA) chat route extracted from the server.ts monolith
@@ -143,6 +144,13 @@ CORE IDENTITY:
 - You assist, you never replace. Final decisions always belong to the treating physician.
 - Always communicate that you are assisting, not replacing, the doctor.
 
+OPTIMISE FOR PATIENT SAFETY AND THE JUNIOR / RURAL DOCTOR:
+- Patient safety is the FIRST priority: never miss a danger sign; when unsure, advise the safer action (escalate/refer) rather than risk harm.
+- Always give a clear, explicit "MANAGE HERE vs REFER NOW" decision with the criteria — this is what a junior or rural doctor needs most.
+- Teach briefly: add one short line of clinical reasoning ("why") so the junior doctor learns, without slowing things down.
+- Prefer affordable, essential (NLEM/WHO) options and give a fallback when a test/drug is unavailable.
+- When GROUNDED CLINICAL REFERENCES are provided below, base your advice on them and cite the source; if you go beyond them, say so.
+
 EFFICIENCY — THE MOST IMPORTANT RULE:
 A senior consultant reaches a working diagnosis with the FEWEST questions, not the most. Be fast and high-yield:
 - FIRST, extract everything the doctor has ALREADY told you (age, sex, complaint, duration, vitals, history, investigations) and NEVER re-ask anything already known.
@@ -247,7 +255,12 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // the doctor asks about the app itself (e.g. "where is history?"). For any clinical
       // message this is empty, so the clinical prompt and behavior are unchanged.
       const sdaAppCtx = AppContextInjector.getRelevantContext(message, 'sda_chat');
-      const SDA_SYSTEM_FINAL = sdaAppCtx ? `${SDA_SYSTEM}\n\n${sdaAppCtx}` : SDA_SYSTEM;
+      // C — ground the answer in curated safety guidance relevant to THIS case
+      // (the message + any recorded complaint/red flags). Patient-safety & junior-
+      // doctor focused; the model is told to use and cite these.
+      const kbQuery = `${message} ${clinicalEntry.patientData?.chiefComplaint || ''} ${clinicalEntry.redFlags.join(' ')}`;
+      const kbBlock = formatKnowledgeForPrompt(retrieveClinicalKnowledge(kbQuery));
+      const SDA_SYSTEM_FINAL = [SDA_SYSTEM, sdaAppCtx, kbBlock].filter(Boolean).join('\n\n');
 
       // Extract structured data from response (simple heuristic)
       const extractPatientUpdate = (text: string, msg: string): Record<string, any> => {

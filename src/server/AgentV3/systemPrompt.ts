@@ -91,6 +91,8 @@ export function architectSystemPrompt(): string {
     '  a man-in-the-middle hole, open CORS, or a predictable security token.',
     '- evaluate also reports a SECRET LEAK: a real .env (with live secrets) that is',
     '  not gitignored. This is critical — add .env to .gitignore immediately.',
+    '- evaluate also reports HARDCODED localhost URLs in code — read those from an',
+    '  env var instead, or the app will break the moment it is deployed.',
     '- Before finishing a real app, call generate_readme to write an accurate',
     '  README.md (stack, how to run, structure) derived from the real project.',
     '- If the app reads any env vars, call generate_env_example so .env.example',

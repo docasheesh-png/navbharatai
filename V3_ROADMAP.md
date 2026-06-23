@@ -250,6 +250,14 @@ Every phase is graded against these, because they are what makes the difference:
   the generator (DRY, behaviour unchanged). Fixes the classic "works on my machine"
   gap. systemPrompt + AppKnowledgeBase synced. v3.0-only. Gate green: server+frontend
   tsc 0, 1927 vitest (+5), build, boot:check PASS.
+- 2026-06-23: Phase 6.3 (Execution Quality) — runnability check. New
+  `AgentV3/RunnabilityAnalysis.ts` (PURE): detects "the app won't run/build" defects
+  from the graph + package.json — no run script (dev/start/serve), a bundler dep with
+  no build script, a Vite/CRA app with no index.html entry. High-precision (only
+  assesses Node apps; ✓ when runnable; "—" when not assessable). Folded into `evaluate`
+  as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
+  a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
+  1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
 - 2026-06-23: Provider diagnosis — GET /api/agentv3/diag reports (no secrets)
   whether ANTHROPIC_API_KEY is a real sk-ant key, plus base-url config; optional
   admin-gated ?test=1 makes one real Claude call and returns the exact outcome.

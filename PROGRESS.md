@@ -1373,3 +1373,22 @@ a v3.0 chat does nothing; (3) preview not working. Root causes found and fixed:
    us is governed by frame-ancestors, not frameSrc).
 
 Gate green: tsc frontend+server, build, 1884 vitest, boot:check.
+
+---
+
+### 2026-06-23 — "my changes don't show up": SW auto-update + visible build stamp
+
+User reported that several merged fixes had no effect on the live site (saw the OLD
+v3.0 launcher-overlay). Root cause is stale code on the device, not the code — so:
+- main.tsx: on a controllerchange (a freshly deployed service worker taking control)
+  the page reloads ONCE, and reg.update() is called on load — so a deploy auto-
+  updates open clients instead of leaving them on cached JS. public/sw.js bumped
+  v3→v4 to force a fresh activate + clients.claim.
+- vite.config.ts injects __BUILD_TIME__ (build timestamp); the v3.0 header shows a
+  tiny "b:MM-DD HH:MM" stamp so the deployed version is verifiable at a glance — if
+  it doesn't change after a deploy, the browser is serving cached code.
+Also clarified to the user: v3.0 History save/resume require being LOGGED IN (the
+screenshot showed a logged-out session), and the header-tab/resume/preview fixes
+need the new deploy to actually load.
+
+Gate green: tsc frontend, build (verified __BUILD_TIME__ injected), vitest, boot:check.

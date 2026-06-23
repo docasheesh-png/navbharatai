@@ -196,9 +196,36 @@ export function taskToolDef(): ClaudeToolDef {
   };
 }
 
+/**
+ * The `second_opinion` tool (Layer 84 — Multi-Model Ensemble). Optional, granted
+ * only to the Architect (and Reviewer). Sends the question/artifact to a DIFFERENT
+ * AI model (the non-Claude router) for an independent critique, so the agent can
+ * cross-check risky or final work beyond a single model.
+ */
+export function secondOpinionToolDef(): ClaudeToolDef {
+  return {
+    name: 'second_opinion',
+    description:
+      'Get an independent critical review from a DIFFERENT AI model (not Claude). ' +
+      'Provide the question or the code/decision to review. Use sparingly for ' +
+      'risky or final work.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        prompt: {
+          type: 'string',
+          description: 'What to review — a question, a decision, or code/explanation to critique.',
+        },
+      },
+      required: ['prompt'],
+    },
+  };
+}
+
 /** Build the tool definitions for a given allowed-tool list (incl. `task`). */
 export function catalogForTools(allowed: ToolName[]): ClaudeToolDef[] {
   const base = defaultToolCatalog().filter((t) => (allowed as string[]).includes(t.name));
   if ((allowed as string[]).includes('task')) base.push(taskToolDef());
+  if ((allowed as string[]).includes('second_opinion')) base.push(secondOpinionToolDef());
   return base;
 }

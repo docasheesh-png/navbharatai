@@ -12,6 +12,8 @@ import {
   catalogForTools,
   roleConfig,
   makeSubAgentSpawn,
+  makeSecondOpinion,
+  type OpinionRouter,
   resolveModel,
   architectSystemPrompt,
   planSystemPrompt,
@@ -32,6 +34,7 @@ import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
 import { DockerActuator } from '../EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { makeResilientTurnRunner } from './agentv3Resilient';
+import { AIRouterManager } from '../AI/AIRouterManager';
 
 /**
  * AgentV3 (Vargen 3.0) routes.
@@ -302,7 +305,14 @@ export function registerAgentV3Routes(app: Express): void {
         client, actuator, workspaceId, state, events, model, onlyOpus,
         maxBudgetUsd: budget, maxSteps: subAgentMaxSteps, checkpointer: git,
       });
-      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git);
+      // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
+      // get an independent cross-model review from the NON-Claude free router
+      // (Vertex → Gemini → Grok). Adapt the real AIRouter to the OpinionRouter
+      // port (its route(prompt, system) already returns { response: { content,
+      // provider } }). Never throws — the tool itself degrades gracefully.
+      const opinionRouter = AIRouterManager.getRouter('free') as unknown as OpinionRouter;
+      const secondOpinion = makeSecondOpinion(opinionRouter);
+      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion);
       const runner = new AgentRunner({
         client,
         dispatcher,

@@ -33,6 +33,11 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
   const [tab, setTab] = useState<SurfaceTab>('preview');
   const [showWorkspace, setShowWorkspace] = useState(true); // collapsible right panel
   const [userMsgs, setUserMsgs] = useState<ChatMsg[]>([]);
+  // Finalized agent replies from PREVIOUS turns. The live build state
+  // (state.narration) is reset by start() on every new message, so without
+  // persisting prior replies here they would vanish from the thread when the
+  // next message begins. Snapshotted in send() right before start() runs.
+  const [agentHistory, setAgentHistory] = useState<ChatMsg[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // A stable session id keeps the SAME sandbox + memory across messages, so the
   // build is iterative (each message continues the same project). "New session"
@@ -48,6 +53,7 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
   // timestamp. Reading narration straight from state means streaming updates show
   // live instead of being frozen into a one-time snapshot.
   const convo: ChatMsg[] = [
+    ...agentHistory,
     ...userMsgs,
     ...state.narration.map((n) => ({
       role: 'agent' as const,
@@ -67,6 +73,21 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
   const send = () => {
     const text = prompt.trim();
     if (!text || running) return;
+    // Preserve the previous turn's agent replies BEFORE start() resets the live
+    // build state — otherwise the prior reply (which lives only in state.narration)
+    // disappears from the thread the moment the next message begins.
+    if (state.narration.length > 0) {
+      setAgentHistory((h) => [
+        ...h,
+        ...state.narration.map((n) => ({
+          role: 'agent' as const,
+          agent: n.agent,
+          text: n.text,
+          ts: n.ts,
+          kind: n.kind,
+        })),
+      ]);
+    }
     setUserMsgs((c) => [...c, { role: 'user', text, ts: Date.now() }]);
     setPrompt('');
     start(text, { userId, email, onlyOpus, planFirst, thinking, sessionId: sessionIdRef.current });
@@ -77,6 +98,7 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
     if (running) return;
     sessionIdRef.current = newSessionId();
     setUserMsgs([]);
+    setAgentHistory([]);
     reset();
   };
 

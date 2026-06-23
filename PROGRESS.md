@@ -1294,3 +1294,21 @@ app-root auth effect (alongside onAuthStateChanged) so the redirect sign-in comp
 on load regardless of the modal; errors are logged.
 
 Gate green: tsc frontend, build, 1884 vitest.
+
+---
+
+### 2026-06-23 — v3.0 chat UX polish (smooth typing, live indicator, input-embedded send)
+
+User feedback on Pro v3.0:
+1. Long steps felt frozen (static "working…"). → New WorkingIndicator with a ticking
+   elapsed-time counter ("working… 12s") so liveness is unambiguous; if the number
+   stops, that's a real freeze (also a diagnostic).
+2. Streaming text jumped a whole line at once. → New TypewriterText reveals streamed
+   text at a steady ~120 cps cadence (auto-catches up when far behind, snaps to full
+   when streaming ends) so typing is always smooth.
+3. Send/Stop button now sits INSIDE the input box (absolute bottom-right, 32×32,
+   size-matched), with the textarea padded so text doesn't run under it.
+
+(#4 "v3.0 in header as window/tab" — asked the user to clarify before building.)
+
+Gate green: tsc frontend, build, 1884 vitest.

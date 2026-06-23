@@ -277,11 +277,7 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
               </div>
             )}
             {convo.map((m, i) => <Bubble key={i} msg={m} />)}
-            {running && (
-              <div className="flex items-center gap-2 text-xs text-zinc-500">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" /> working…
-              </div>
-            )}
+            {running && <WorkingIndicator />}
             {(error || state.error) && (
               <div className="flex items-start gap-2 px-3 py-2 bg-red-950/60 text-red-300 text-xs rounded">
                 <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{error || state.error}</span>
@@ -377,30 +373,32 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
                 <Paperclip className="w-4 h-4" />
                 {files.length > 0 && <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-indigo-500 text-[9px] leading-[14px] text-white text-center">{files.length}</span>}
               </button>
-              <textarea
-                className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-sm resize-none focus:outline-none focus:border-indigo-500"
-                rows={2}
-                placeholder="Message v3.0… (e.g. “hello”, “build a notes app”, or attach a file)"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                onPaste={(e) => {
-                  const imgs = (Array.from(e.clipboardData.items) as DataTransferItem[])
-                    .filter((it) => it.type.startsWith('image/'))
-                    .map((it) => it.getAsFile())
-                    .filter((f): f is File => !!f);
-                  if (imgs.length > 0) { e.preventDefault(); setFiles((prev) => [...prev, ...imgs].slice(0, 8)); }
-                }}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-              />
-              {running ? (
-                <button onClick={stop} className="flex items-center gap-1 px-3 bg-red-600 hover:bg-red-500 rounded text-sm" title="Stop">
-                  <Square className="w-4 h-4" />
-                </button>
-              ) : (
-                <button onClick={send} disabled={!prompt.trim() && files.length === 0} className="flex items-center gap-1 px-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded text-sm" title="Send">
-                  <Send className="w-4 h-4" />
-                </button>
-              )}
+              <div className="relative flex-1">
+                <textarea
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl pl-3 pr-12 py-2 text-sm resize-none focus:outline-none focus:border-indigo-500"
+                  rows={2}
+                  placeholder="Message v3.0… (e.g. “hello”, “build a notes app”, or attach a file)"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  onPaste={(e) => {
+                    const imgs = (Array.from(e.clipboardData.items) as DataTransferItem[])
+                      .filter((it) => it.type.startsWith('image/'))
+                      .map((it) => it.getAsFile())
+                      .filter((f): f is File => !!f);
+                    if (imgs.length > 0) { e.preventDefault(); setFiles((prev) => [...prev, ...imgs].slice(0, 8)); }
+                  }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                />
+                {running ? (
+                  <button onClick={stop} title="Stop" className="absolute right-2 bottom-2 h-8 w-8 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-white">
+                    <Square className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <button onClick={send} disabled={!prompt.trim() && files.length === 0} title="Send" className="absolute right-2 bottom-2 h-8 w-8 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
+                    <Send className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -459,6 +457,51 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
   );
 }
 
+/**
+ * Live "working…" indicator with an elapsed-time counter. The ticking seconds prove
+ * the build is alive even during a long step that emits no narration, so it never
+ * looks frozen. Mounts fresh on each run (rendered only while running).
+ */
+function WorkingIndicator() {
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setSecs((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const label = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
+  return (
+    <div className="flex items-center gap-2 text-xs text-zinc-500">
+      <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+      <span>working… {label}</span>
+    </div>
+  );
+}
+
+/**
+ * Smooth typewriter reveal. Provider chunks can arrive in bursts (a whole line at
+ * once); this reveals the text at a steady character cadence so the typing always
+ * looks smooth, then snaps to the full text the moment streaming ends. Reveal speed
+ * auto-catches up when a lot of text is buffered, so it never lags far behind.
+ */
+function TypewriterText({ text, streaming }: { text: string; streaming?: boolean }) {
+  const [shown, setShown] = useState(streaming ? 0 : text.length);
+  useEffect(() => {
+    if (!streaming) { setShown(text.length); return; }
+    const id = setInterval(() => {
+      setShown((s) => {
+        if (s >= text.length) return s;
+        const behind = text.length - s;
+        // Steady ~2 chars/tick (~120 cps), but speed up if we're far behind so the
+        // visible text never trails the real output by more than a moment.
+        const step = behind > 240 ? Math.ceil(behind / 60) : 2;
+        return Math.min(text.length, s + step);
+      });
+    }, 16);
+    return () => clearInterval(id);
+  }, [text, streaming]);
+  return <>{streaming ? text.slice(0, Math.min(shown, text.length)) : text}</>;
+}
+
 function Bubble({ msg }: { msg: ChatMsg }) {
   if (msg.role === 'user') {
     return (
@@ -482,7 +525,7 @@ function Bubble({ msg }: { msg: ChatMsg }) {
               : 'bg-zinc-900 text-zinc-100 rounded-2xl rounded-bl-sm px-3 py-2 text-sm whitespace-pre-wrap break-words'
           }
         >
-          {msg.text}{cursor}
+          <TypewriterText text={msg.text} streaming={msg.streaming} />{cursor}
         </div>
       </div>
     </div>

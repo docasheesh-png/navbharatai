@@ -27,6 +27,12 @@ describe('clinical knowledge grounding (C)', () => {
     expect(block).toMatch(/GROUNDED CLINICAL REFERENCES/);
   });
 
+  it('retrieves mentor (non-case) cards for junior-doctor queries', () => {
+    expect(retrieveClinicalKnowledge('how to write a discharge summary').some(c => c.id === 'doc_discharge_summary')).toBe(true);
+    expect(retrieveClinicalKnowledge('breaking bad news to family').some(c => c.id === 'comm_breaking_bad_news')).toBe(true);
+    expect(retrieveClinicalKnowledge('needle stick injury what to do').some(c => c.id === 'needlestick')).toBe(true);
+  });
+
   it('every card has id, content and a source', () => {
     for (const c of CLINICAL_KB) {
       expect(c.id && c.content && c.source).toBeTruthy();

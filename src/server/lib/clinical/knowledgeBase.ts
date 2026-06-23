@@ -113,6 +113,43 @@ export const CLINICAL_KB: KnowledgeCard[] = [
     content: 'Start the narrowest effective empirical antibiotic for the likely source, take cultures BEFORE the first dose where possible, set a review/stop date, and de-escalate to a targeted agent once cultures return. Avoid antibiotics for clearly viral illness.',
     source: 'WHO AMR stewardship',
   },
+
+  // ── Mentor / non-case help for junior doctors (standard structures) ──────────
+  {
+    id: 'doc_discharge_summary',
+    topic: 'Discharge summary — structure',
+    keywords: ['discharge summary', 'discharge', 'summary writing', 'documentation'],
+    content: 'A good discharge summary: patient identifiers; admission & discharge dates; diagnosis (primary + secondary); presenting complaint & key findings; investigations & results; treatment given (incl. procedures); condition at discharge; discharge medications with doses/duration; follow-up plan & date; red-flag advice on when to return; treating doctor & signature. (Exact format varies by institution — follow local template.)',
+    source: 'Standard clinical documentation',
+  },
+  {
+    id: 'doc_referral_letter',
+    topic: 'Referral letter — essentials',
+    keywords: ['referral letter', 'refer', 'referral', 'transfer note'],
+    content: 'Referral letter essentials: date/time & urgency; referring & receiving doctor/facility; patient details; reason for referral and clinical question; relevant history, examination, vitals, investigations done; treatment already given (incl. pre-transfer stabilisation); current status; what you want from the specialist. For emergencies add mode of transport and call ahead.',
+    source: 'Standard clinical documentation',
+  },
+  {
+    id: 'doc_informed_consent',
+    topic: 'Informed consent — essentials',
+    keywords: ['informed consent', 'consent', 'consent form'],
+    content: 'Valid informed consent: capacity to decide; voluntary (no coercion); disclosure of diagnosis, the proposed procedure, its benefits, material risks, alternatives, and the consequences of refusal; opportunity to ask questions; documented & signed. Use an interpreter if needed; for minors/incapacity follow local law for the authorised decision-maker. (Legal requirements vary — follow local law/institution.)',
+    source: 'Medical ethics / medico-legal (general)',
+  },
+  {
+    id: 'comm_breaking_bad_news',
+    topic: 'Breaking bad news — SPIKES',
+    keywords: ['bad news', 'breaking bad news', 'spikes', 'counsel', 'counselling', 'difficult conversation'],
+    content: 'SPIKES protocol: Setting (private, sit, no interruptions) → Perception (ask what they already know) → Invitation (ask how much they want to know) → Knowledge (warn, then tell simply, no jargon, in small chunks) → Emotions (acknowledge and respond with empathy) → Strategy/Summary (agree next steps and support). Allow silence; check understanding.',
+    source: 'SPIKES (Baile et al., standard)',
+  },
+  {
+    id: 'needlestick',
+    topic: 'Needle-stick / sharps injury — first steps',
+    keywords: ['needlestick', 'needle stick', 'sharps injury', 'occupational exposure', 'pep'],
+    content: 'Needle-stick: wash the wound with soap and water (do not scrub or squeeze excessively); flush mucous membranes with water. Assess source for HIV/HBV/HCV. Start HIV post-exposure prophylaxis (PEP) ASAP — ideally within 2 hours, up to 72 h — per protocol; give hepatitis B prophylaxis if non-immune. Report the incident, do baseline + follow-up testing. (Follow your institution/national PEP protocol.)',
+    source: 'WHO / national PEP protocol',
+  },
 ];
 
 /** Lightweight keyword retrieval — returns the most relevant cards for a query. */

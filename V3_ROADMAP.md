@@ -284,6 +284,37 @@ Every phase is graded against these, because they are what makes the difference:
   AppKnowledgeBase synced. Third item via the Section I audit-first triage (ABSENT →
   solid); applies the app-must-never-break rule to the apps v3.0 builds. v3.0-only.
   Gate green: server+frontend tsc 0, 1965 vitest (+9), build, boot:check PASS.
+- 2026-06-23: Section I #4 (Security) — secret-leak check. New
+  `AgentV3/SecretLeakAnalysis.ts` (PURE): flags a real `.env` (not .env.example/
+  .sample/.template) that the project's .gitignore does not cover — the #1 way live
+  secrets get committed to git forever. High-precision: only fires when a secret-
+  bearing env file exists AND .gitignore doesn't reference .env. Folded into `evaluate`
+  as the 17th dimension (reuses the actuator file list + reads .gitignore); systemPrompt
+  + AppKnowledgeBase synced. v3.0-only. Gate green: server+frontend tsc 0, 1993 vitest
+  (+10), build, boot:check PASS.
+- 2026-06-23: Section I #4/#13 (Security) — insecure-randomness rule. Added a third
+  rule to `SecurityConfigAnalysis`: Math.random() used near a security value (token/
+  secret/password/otp/session/apikey, either order on the line) → flagged high, with
+  the fix (crypto.randomUUID()/randomBytes()). High-precision (requires a security
+  keyword adjacency) so ordinary Math.random() shuffles aren't nagged. systemPrompt +
+  AppKnowledgeBase synced. v3.0-only. Gate green: server+frontend tsc 0, 1983 vitest
+  (+3), build, boot:check PASS.
+- 2026-06-23: Section I #22 (DX, config engine) — .gitignore generator. New
+  `AgentV3/GitignoreGenerator.ts` (PURE): writes a correct, stack-aware .gitignore
+  (node_modules/build/.env/logs/coverage/editor + framework entries from real deps).
+  New `generate_gitignore` tool wired end-to-end (ToolName, catalog def +
+  CATALOG_TOOL_NAMES, BUILD_TOOLS grant, dispatcher case). Closes the loop with the
+  #22 hygiene check (detect missing → generate the fix). systemPrompt + AppKnowledgeBase
+  synced. v3.0-only. Gate green: server+frontend tsc 0, 1980 vitest (+5), build,
+  boot:check PASS.
+- 2026-06-23: Section I #4 (Security) — security-config scan. New
+  `AgentV3/SecurityConfigAnalysis.ts` (PURE): flags two high-impact, high-precision
+  misconfigurations — disabled TLS certificate verification (rejectUnauthorized:false /
+  NODE_TLS_REJECT_UNAUTHORIZED=0 → MITM, high) and wildcard "*" CORS (medium). Ignores
+  comments/non-code; records file:line. Folded into `evaluate` as the 16th dimension
+  (new collectSecurityConfigIssues source scan); systemPrompt + AppKnowledgeBase synced.
+  Fourth item via the Section I audit-first triage (ABSENT → solid). v3.0-only. Gate
+  green: server+frontend tsc 0, 1975 vitest (+10), build, boot:check PASS.
 - 2026-06-23: Provider diagnosis — GET /api/agentv3/diag reports (no secrets)
   whether ANTHROPIC_API_KEY is a real sk-ant key, plus base-url config; optional
   admin-gated ?test=1 makes one real Claude call and returns the exact outcome.

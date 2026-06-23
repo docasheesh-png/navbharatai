@@ -28,10 +28,13 @@ import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis
 import { analyzeRequirementCoverage, requirementCoverageSummary } from './RequirementCoverage';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
+import { generateGitignore } from './GitignoreGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
 import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary } from './ErrorBoundaryAnalysis';
+import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
+import { analyzeSecretLeak, secretLeakSummary } from './SecretLeakAnalysis';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
 
@@ -152,6 +155,33 @@ export class ToolDispatcher {
       }
     } catch {
       /* listing failed — fall back to no accessibility issues */
+    }
+    return issues;
+  }
+
+  /**
+   * Best-effort security-configuration scan over the project's source files
+   * (insecure TLS verification, wildcard CORS). Bounded and wrapped so any
+   * listing/read failure degrades to no issues — never breaks evaluate.
+   */
+  private async collectSecurityConfigIssues(): Promise<SecConfigIssue[]> {
+    const CODE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
+    const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+    const issues: SecConfigIssue[] = [];
+    try {
+      const paths = await this.actuator.listFiles(this.workspaceId);
+      const candidates = paths.filter((p) => CODE.test(p) && !SKIP.test(p)).slice(0, 200);
+      for (const p of candidates) {
+        try {
+          const content = await this.actuator.readFile(this.workspaceId, p);
+          if (content.length > 200_000) continue;
+          issues.push(...scanSecurityConfig(p, content));
+        } catch {
+          /* skip a single unreadable file */
+        }
+      }
+    } catch {
+      /* listing failed — fall back to no issues */
     }
     return issues;
   }
@@ -555,6 +585,16 @@ export class ToolDispatcher {
           mem.graph().components.length,
           await this.collectHasErrorBoundary(),
         );
+        // Best-effort security-config pass (Section I #4): insecure TLS/CORS config.
+        const securityConfig = await this.collectSecurityConfigIssues();
+        // Best-effort secret-leak pass (Section I #4): a real .env not gitignored.
+        let gitignoreContent: string | null = null;
+        try {
+          gitignoreContent = await this.actuator.readFile(this.workspaceId, '.gitignore');
+        } catch {
+          gitignoreContent = null;
+        }
+        const secretLeak = analyzeSecretLeak(hygieneFiles, gitignoreContent);
         const confidence = computeBuildConfidence({
           readinessScore: readiness.score,
           ready: readiness.ready,
@@ -573,7 +613,7 @@ export class ToolDispatcher {
           accessibility: tally(a11yIssues),
           compliance: complianceTally,
         });
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}`;
       }
 
       case 'update_todo': {
@@ -629,6 +669,23 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         await this.maybeCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} with ${refs.length} referenced variable(s).`;
+      }
+
+      case 'generate_gitignore': {
+        const path = optStr(input, 'path') || '.gitignore';
+        const content = generateGitignore({ dependencies: getWorkspaceMemory(this.workspaceId).graph().dependencies });
+        let kind: 'create' | 'modify' = 'create';
+        try {
+          await this.actuator.readFile(this.workspaceId, path);
+          kind = 'modify';
+        } catch {
+          kind = 'create';
+        }
+        await this.actuator.writeFile(this.workspaceId, path, content);
+        this.state?.recordFileChange({ path, kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+        await this.maybeCheckpoint(`${kind} ${path}`);
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} (stack-aware).`;
       }
 
       case 'update_preview': {

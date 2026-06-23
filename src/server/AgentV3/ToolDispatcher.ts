@@ -13,6 +13,7 @@ import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict } from './Readiness';
 import type { SecondOpinion } from './SecondOpinion';
+import type { Consensus } from './Consensus';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -64,6 +65,7 @@ export class ToolDispatcher {
     private readonly spawnSubAgent?: SubAgentSpawn,
     private readonly checkpointer?: Checkpointer,
     private readonly secondOpinion?: SecondOpinion,
+    private readonly consensus?: Consensus,
   ) {}
 
   /** Create a real git checkpoint after a change (best-effort; emits on success). */
@@ -327,6 +329,14 @@ export class ToolDispatcher {
         }
         const review = await this.secondOpinion(prompt);
         return review;
+      }
+
+      case 'consensus': {
+        const question = reqStr(input, 'question');
+        if (!this.consensus) {
+          return 'Consensus is not available in this context.';
+        }
+        return await this.consensus(question);
       }
 
       default:

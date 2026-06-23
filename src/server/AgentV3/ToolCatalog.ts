@@ -222,10 +222,38 @@ export function secondOpinionToolDef(): ClaudeToolDef {
   };
 }
 
+/**
+ * The `consensus` tool (Layer 49 — Collective Intelligence). Optional, granted
+ * only to the Architect. Convenes a PANEL of independent expert viewpoints
+ * (correctness, security, UX) from a DIFFERENT AI model on a hard design
+ * decision and returns their synthesized verdict — going beyond a single
+ * viewpoint.
+ */
+export function consensusToolDef(): ClaudeToolDef {
+  return {
+    name: 'consensus',
+    description:
+      'Convene a panel of independent expert viewpoints (correctness, security, ' +
+      'UX) from a different AI model on a hard design decision, and get their ' +
+      'synthesized verdict. Use sparingly for important architectural choices.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        question: {
+          type: 'string',
+          description: 'The hard decision or design choice to put to the panel.',
+        },
+      },
+      required: ['question'],
+    },
+  };
+}
+
 /** Build the tool definitions for a given allowed-tool list (incl. `task`). */
 export function catalogForTools(allowed: ToolName[]): ClaudeToolDef[] {
   const base = defaultToolCatalog().filter((t) => (allowed as string[]).includes(t.name));
   if ((allowed as string[]).includes('task')) base.push(taskToolDef());
   if ((allowed as string[]).includes('second_opinion')) base.push(secondOpinionToolDef());
+  if ((allowed as string[]).includes('consensus')) base.push(consensusToolDef());
   return base;
 }

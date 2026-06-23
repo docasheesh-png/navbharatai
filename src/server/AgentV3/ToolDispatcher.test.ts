@@ -206,4 +206,21 @@ describe('ToolDispatcher', () => {
     expect(res.is_error).toBe(false);
     expect(res.content).toContain('not available');
   });
+
+  it('consensus returns the injected panel result', async () => {
+    const dWithConsensus = new ToolDispatcher(
+      act, 'ws-1', state, stream, undefined, undefined, undefined,
+      async (question: string) => `Consensus panel on: ${question}\n\nPanel note: 3 perspective(s) gathered.`,
+    );
+    const res = await dWithConsensus.dispatch(call('consensus', { question: 'shard the DB?' }));
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('Consensus panel on: shard the DB?');
+    expect(res.content).toContain('3 perspective(s) gathered');
+  });
+
+  it('consensus returns an honest "not available" message when not wired (does not throw)', async () => {
+    const res = await d.dispatch(call('consensus', { question: 'decide this' }));
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('not available');
+  });
 });

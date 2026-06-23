@@ -42,7 +42,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • MULTI-PROVIDER resilience: native Claude for building, with automatic fallback to Vertex / Gemini / Grok for chat so it always replies.
 • PROJECT MEMORY & artifact intelligence: as it builds it indexes your files into a live project graph (symbols, components, routes, imports, dependencies) and remembers errors and fixes; agents can "recall" this to find where things are and what failed before. After each build it also writes a short REFLECTION — the lessons learned from that build's errors and fixes — back into project memory; and at the START of each new build it RECALLS the relevant past lessons and applies them, closing the learning loop so the project genuinely improves across iterations.
 • SELF-EVALUATION: agents can "evaluate" the project for real structural defects (unresolved imports that would break the build, import cycles, front-end→back-end layering violations), security issues (hardcoded secrets/keys, eval, dangerouslySetInnerHTML, insecure http) AND an authenticity check that detects fake/incomplete/placeholder code (TODO/FIXME/HACK markers, "not implemented" throws, stub/dummy/mock data, lorem ipsum, empty console.log-only handlers) — enforcing the "real features only, no fakes" rule — AND a dependency-consistency check (packages imported in code but missing from package.json, which would break the build at install/runtime; plus declared-but-unused dependencies) — and fix them before claiming the app is done.
-• SECOND OPINION (Layer 84 — Multi-Model Ensemble): the agent team can get an independent cross-model "second opinion" — a DIFFERENT AI model (the non-Claude Vertex/Gemini/Grok router) critically reviews risky or final work for bugs, security issues and wrong assumptions — going beyond a single model's judgement.
+• SECOND OPINION (Layer 84 — Multi-Model Ensemble): the agent team can get an independent cross-model "second opinion" — a DIFFERENT AI model (the non-Claude Vertex/Gemini/Grok router) critically reviews risky or final work for bugs, security issues and wrong assumptions — going beyond a single model's judgement. The Architect can also convene a multi-perspective CONSENSUS panel (Layer 49 — Collective Intelligence): the same hard decision is put to independent correctness, security and UX reviewers and their viewpoints are synthesized into one verdict — multiple expert lenses, not one.
 • LIVE "AI Team" tracker — watch each real agent's current action as it builds (not a fake animation).
 • MERGED SURFACES from one live stream: file explorer, Code Studio diffs (red/green), terminal, git/history checkpoints, todos and plan — all in sync, zero drift.
 • HYBRID sandbox: a fast E2B cloud sandbox initialised as a real Git repo you own.
@@ -62,6 +62,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'continual learning', 'applies lessons', 'learns across builds',
       'dependency check', 'missing dependency', 'package.json',
       'second opinion', 'cross model', 'ensemble', 'independent review',
+      'consensus', 'panel', 'collective intelligence', 'multiple perspectives',
     ],
   },
   // ─── ENGINEER AI ─────────────────────────────────────────────────────────

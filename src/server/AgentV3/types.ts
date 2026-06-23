@@ -21,7 +21,8 @@ export type ToolName =
   | 'recall'
   | 'evaluate'
   | 'task'
-  | 'second_opinion';
+  | 'second_opinion'
+  | 'consensus';
 
 /**
  * The multi-agent team roles (§3.3). 'architect' is the lead/orchestrator; every

@@ -1,7 +1,9 @@
-// NavBharatAI Service Worker — v3 (chunk-safe)
+// NavBharatAI Service Worker — v4 (chunk-safe + auto-update)
 // Only caches true app-shell assets. JS/CSS chunks are NOT cached here —
 // they have Vite content hashes and are handled by CDN Cache-Control headers.
-const CACHE = 'navbharat-v3';
+// Bumped to v4: forces a fresh activate + clients.claim so deployed code is picked
+// up immediately (paired with a controllerchange reload in main.tsx).
+const CACHE = 'navbharat-v4';
 const APP_SHELL = [
   '/logo.png',
   '/logo22.png',

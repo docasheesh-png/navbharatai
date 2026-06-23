@@ -1,6 +1,9 @@
 // Ambient module declarations — used when node_modules is absent (CI containers).
 // When npm install is run, TypeScript uses the real package types instead.
 
+// Build-time stamp injected by Vite's `define` (see vite.config.ts).
+declare const __BUILD_TIME__: string;
+
 // React namespace — allows React.FC, React.useRef, React.FormEvent etc. in type positions
 declare namespace React {
   function useState<T = any>(init?: T | (() => T)): [T, (v: T | ((p: T) => T)) => void];

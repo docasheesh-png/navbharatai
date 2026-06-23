@@ -9,6 +9,10 @@ export default defineConfig(({mode}) => {
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      // Build-time stamp so a deployed version is verifiable at a glance (shown in
+      // the v3.0 header). If it doesn't change after a deploy, the browser is serving
+      // cached code, not a code problem.
+      '__BUILD_TIME__': JSON.stringify(new Date().toISOString()),
     },
     resolve: {
       alias: {

@@ -47,10 +47,21 @@ window.addEventListener('unhandledrejection', (e) => {
   }
 });
 
-// 8.6 PWA — register service worker
+// 8.6 PWA — register service worker, and AUTO-UPDATE: when a freshly deployed
+// service worker takes control, reload once so the user is never stuck on stale
+// code after a deploy (this was causing "my changes don't show up").
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  let reloadedForUpdate = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloadedForUpdate) return;
+    reloadedForUpdate = true;
+    window.location.reload();
+  });
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker.register('/sw.js').then((reg) => {
+      // Proactively check for a new SW on each load.
+      reg.update().catch(() => {});
+    }).catch(() => {});
   });
 }
 

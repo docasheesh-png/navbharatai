@@ -284,6 +284,14 @@ Every phase is graded against these, because they are what makes the difference:
   AppKnowledgeBase synced. Third item via the Section I audit-first triage (ABSENT →
   solid); applies the app-must-never-break rule to the apps v3.0 builds. v3.0-only.
   Gate green: server+frontend tsc 0, 1965 vitest (+9), build, boot:check PASS.
+- 2026-06-23: Section I #4 (Security) — logged-secret rule. Added a fourth rule to
+  `SecurityConfigAnalysis`: logging a secret env var to the console
+  (console.log(process.env.*KEY/SECRET/TOKEN/PASSWORD…)) leaks it into logs → flagged
+  medium. High-precision (only secret-looking env names; NODE_ENV etc. are ignored).
+  v3.0-only. Gate green locally: server+frontend tsc 0, full vitest, build, boot:check
+  PASS. (NOTE: GitHub Actions CI is failing at job startup — Actions quota exhausted,
+  same documented incident — so this and the other outage-window commits are pushed +
+  locally-verified but their PR MERGES are queued until the admin restores CI.)
 - 2026-06-23: Section I #9 (Code quality) — leftover `debugger;` detection. Added a
   high-precision `debugger-statement` rule to `AuthenticityAnalysis` (medium): a left-in
   debugger statement pauses execution in devtools and must not ship. Guards against

@@ -54,4 +54,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Basics of bookkeeping for my small business',
     ],
   },
+  lawyer_ai: {
+    id: 'lawyer_ai',
+    name: 'Lawyer / Legal Assistant',
+    welcome:
+      "Namaste! I'm Legal AI ⚖️ — I give general legal INFORMATION on Indian law: explain your rights & processes (consumer, tenancy, FIR, RTI, contracts), help you understand a notice or clause, and draft templates (legal notice, RTI, complaint, rent agreement). Important: this is information, not legal advice — get drafts vetted by an advocate, and verify current laws (they change & vary by state).",
+    quickPrompts: [
+      'Explain my consumer rights',
+      'Help me draft a legal notice',
+      'How do I file an RTI?',
+      'Explain this contract clause',
+    ],
+  },
 };

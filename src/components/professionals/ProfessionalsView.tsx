@@ -11,7 +11,7 @@ interface ProfessionalCard {
 const CARDS: ProfessionalCard[] = [
   { id: 'sda_chat', label: 'Doctor AI', description: 'Senior Doctor Assistant — clinical Q&A, case notes, red-flag detection.', icon: Stethoscope, active: true },
   { id: 'engineer_ai', label: 'Engineer AI', description: 'Autonomous coding agent — writes, builds and fixes code.', icon: HardHat, active: true },
-  { id: 'lawyer_ai', label: 'Lawyer AI', description: 'Legal research and drafting assistant.', icon: Scale, active: false },
+  { id: 'lawyer_ai', label: 'Lawyer / Legal', description: 'Explains Indian law & rights, understands notices/clauses, drafts legal notice/RTI/complaints (vet with an advocate).', icon: Scale, active: true },
   { id: 'teacher_ai', label: 'Teacher AI', description: 'Explains concepts, solves doubts step by step, lesson plans, quizzes & exam study plans.', icon: GraduationCap, active: true },
   { id: 'mentor_ai', label: 'Mentor / Career Coach', description: 'Career direction, resume & interview prep, skill roadmaps, job-switch & higher-studies guidance.', icon: Compass, active: true },
   { id: 'thesis_ai', label: 'Thesis / Research Writer', description: 'Research question, thesis structure, literature review, methodology, citations & draft editing.', icon: BookOpen, active: true },

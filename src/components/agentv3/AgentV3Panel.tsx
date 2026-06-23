@@ -84,9 +84,9 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
   const diffPaths = Object.keys(state.diffs);
 
   return (
-    <div className="flex flex-col h-full w-full bg-zinc-950 text-zinc-100">
+    <div className="flex flex-col h-full max-h-full w-full min-h-0 bg-zinc-950 text-zinc-100">
       {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-800">
+      <div className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-3 border-b border-zinc-800">
         <Bot className="w-5 h-5 text-indigo-400" />
         <span className="font-semibold">NavBharatAI Pro v3.0</span>
         <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
@@ -112,9 +112,9 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
         </label>
       </div>
 
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-col sm:flex-row flex-1 min-h-0">
         {/* LEFT: the chat (full width when the workspace is collapsed) */}
-        <div className={`${showWorkspace ? 'w-1/2 border-r border-zinc-800' : 'flex-1'} flex flex-col min-h-0`}>
+        <div className={`${showWorkspace ? 'flex-1 sm:flex-none sm:w-1/2 sm:border-r border-zinc-800' : 'flex-1'} flex flex-col min-h-0`}>
           {/* Conversation */}
           <div ref={scrollRef} className="flex-1 overflow-auto p-3 space-y-3 min-h-0">
             {convo.length === 0 && (
@@ -163,7 +163,7 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
           </div>
 
           {/* Bottom: live AI-team chips + input (Claude-Code style — at the bottom) */}
-          <div className="border-t border-zinc-800">
+          <div className="shrink-0 sticky bottom-0 bg-zinc-950 border-t border-zinc-800 pb-[env(safe-area-inset-bottom)]">
             {agents.length > 0 && (
               <div className="px-3 pt-2 flex gap-1.5 overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
                 {agents.map((a) => <AgentChip key={a.agent} card={a} />)}
@@ -193,8 +193,8 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
 
         {/* RIGHT: merged workspace surfaces (collapsible — ">" hides, "<" reopens) */}
         {showWorkspace ? (
-        <div className="w-1/2 flex flex-col min-h-0">
-          <div className="flex items-center border-b border-zinc-800 text-xs">
+        <div className="sm:w-1/2 flex flex-col min-h-0 max-h-[40vh] border-t border-zinc-800 sm:max-h-none sm:border-t-0">
+          <div className="shrink-0 flex items-center border-b border-zinc-800 text-xs">
             <button onClick={() => setShowWorkspace(false)} title="Hide workspace" className="px-2 py-2 shrink-0 text-zinc-400 hover:text-white border-r border-zinc-800">
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -244,8 +244,8 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
           )}
         </div>
         ) : (
-          <button onClick={() => setShowWorkspace(true)} title="Show workspace" className="w-8 shrink-0 border-l border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-900">
-            <ChevronLeft className="w-4 h-4" />
+          <button onClick={() => setShowWorkspace(true)} title="Show workspace" className="shrink-0 w-full py-1.5 border-t sm:w-8 sm:py-0 sm:border-t-0 sm:border-l border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-900">
+            <ChevronLeft className="w-4 h-4 rotate-90 sm:rotate-0" />
           </button>
         )}
       </div>

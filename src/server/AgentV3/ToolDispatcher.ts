@@ -23,7 +23,7 @@ import { classifyCommandRisk, governanceNote } from './CommandGovernance';
 import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
-import { assessReadiness, readinessVerdict } from './Readiness';
+import { assessReadiness, readinessVerdict, type ExtraFinding } from './Readiness';
 import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
 import { analyzeRequirementCoverage, requirementCoverageSummary } from './RequirementCoverage';
 import { generateReadme } from './ReadmeGenerator';
@@ -531,8 +531,6 @@ export class ToolDispatcher {
         const mem = getWorkspaceMemory(this.workspaceId);
         const archReport = analyzeArchitecture(mem.graph());
         const findings = mem.securityFindings();
-        const readiness = assessReadiness(archReport, findings);
-        const verdict = readinessVerdict(readiness);
         // Best-effort authenticity/completeness pass — never throws, never breaks
         // evaluate if file access fails. On any error we fall back to no issues.
         const issues = await this.collectAuthenticityIssues();
@@ -624,6 +622,19 @@ export class ToolDispatcher {
         const secretLeak = analyzeSecretLeak(hygieneFiles, gitignoreContent);
         // Best-effort hardcoded-URL pass (Section I #11): localhost baked into code.
         const hardcodedUrls = await this.collectHardcodedUrlIssues();
+        // Fold the critical new dimensions into the readiness gate: a secret leak,
+        // an app that can't run, or a high-severity security misconfig must BLOCK
+        // "READY" — not merely be reported. The rest lower the score as warnings.
+        const extra: ExtraFinding[] = [];
+        if (secretLeak.findings.length) extra.push({ severity: 'high', label: 'Secret leak: a real .env is not gitignored' });
+        for (const f of runnability.findings) extra.push({ severity: f.level === 'high' ? 'high' : 'medium', label: `Runnability: ${f.message}` });
+        for (const i of securityConfig) extra.push({ severity: i.severity === 'high' ? 'high' : 'medium', label: `Security config (${i.rule})` });
+        if (hardcodedUrls.length) extra.push({ severity: 'medium', label: `${hardcodedUrls.length} hardcoded localhost URL(s)` });
+        for (const f of reqCoverage.findings) extra.push({ severity: 'medium', label: `Requested feature not found: ${f.feature}` });
+        if (errorBoundary.findings.length) extra.push({ severity: 'medium', label: 'React app has no error boundary' });
+        if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
+        const readiness = assessReadiness(archReport, findings, extra);
+        const verdict = readinessVerdict(readiness);
         const confidence = computeBuildConfidence({
           readinessScore: readiness.score,
           ready: readiness.ready,

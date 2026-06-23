@@ -48,6 +48,30 @@ describe('assessReadiness', () => {
   });
 });
 
+describe('assessReadiness — extra findings', () => {
+  it('a high extra finding is a hard blocker (NOT READY)', () => {
+    const r = assessReadiness(cleanArch, [], [{ severity: 'high', label: 'Secret leak: .env not gitignored' }]);
+    expect(r.ready).toBe(false);
+    expect(r.blockers).toContain('Secret leak: .env not gitignored');
+    expect(r.score).toBeLessThan(100);
+  });
+
+  it('a medium/low extra finding lowers the score but stays READY', () => {
+    const r = assessReadiness(cleanArch, [], [
+      { severity: 'medium', label: 'No error boundary' },
+      { severity: 'low', label: 'minor thing' },
+    ]);
+    expect(r.ready).toBe(true);
+    expect(r.score).toBeLessThan(100);
+    expect(r.warnings).toEqual(expect.arrayContaining(['No error boundary', 'minor thing']));
+  });
+
+  it('defaults to no extra findings (backward compatible)', () => {
+    expect(assessReadiness(cleanArch, []).ready).toBe(true);
+    expect(assessReadiness(cleanArch, []).score).toBe(100);
+  });
+});
+
 describe('readinessVerdict', () => {
   it('states READY or NOT READY clearly', () => {
     expect(readinessVerdict(assessReadiness(cleanArch, []))).toContain('READY');

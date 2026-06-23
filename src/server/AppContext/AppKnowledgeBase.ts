@@ -41,7 +41,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • MULTI-AGENT "AI team": an Architect plans and delegates to a six-layer roster of specialist agents — planning (Requirements, Planner, Product), development (Frontend, Backend, Fullstack, Database, Mobile, API, DevOps, Infrastructure, Designer), quality (QA, Tester, Security, Performance, Accessibility, Reviewer), repair (Debugger, Refactor, Optimizer), knowledge (Docs, Researcher) and operations (Deploy, Monitor, Recovery) — routed by capability and working in parallel where safe.
 • MULTI-PROVIDER resilience: native Claude for building, with automatic fallback to Vertex / Gemini / Grok for chat so it always replies.
 • PROJECT MEMORY & artifact intelligence: as it builds it indexes your files into a live project graph (symbols, components, routes, imports, dependencies) and remembers errors and fixes; agents can "recall" this to find where things are and what failed before.
-• SELF-EVALUATION: agents can "evaluate" the project for real structural defects (unresolved imports that would break the build, import cycles, front-end→back-end layering violations) AND security issues (hardcoded secrets/keys, eval, dangerouslySetInnerHTML, insecure http) and fix them before claiming the app is done.
+• SELF-EVALUATION: agents can "evaluate" the project for real structural defects (unresolved imports that would break the build, import cycles, front-end→back-end layering violations), security issues (hardcoded secrets/keys, eval, dangerouslySetInnerHTML, insecure http) AND an authenticity check that detects fake/incomplete/placeholder code (TODO/FIXME/HACK markers, "not implemented" throws, stub/dummy/mock data, lorem ipsum, empty console.log-only handlers) — enforcing the "real features only, no fakes" rule — and fix them before claiming the app is done.
 • LIVE "AI Team" tracker — watch each real agent's current action as it builds (not a fake animation).
 • MERGED SURFACES from one live stream: file explorer, Code Studio diffs (red/green), terminal, git/history checkpoints, todos and plan — all in sync, zero drift.
 • HYBRID sandbox: a fast E2B cloud sandbox initialised as a real Git repo you own.
@@ -55,6 +55,8 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'multi agent', 'multiple agents', 'ai team', 'sub agent', 'subagent',
       'claude code', 'native tool use', 'architect', 'live preview',
       'naya builder', 'naya engine', 'team', 'agent team', 'opus', 'only opus',
+      'evaluate', 'authenticity check', 'no fakes', 'fake code', 'placeholder', 'stub detection',
+      'todo detection', 'incomplete code', 'readiness', 'self evaluation',
     ],
   },
   // ─── ENGINEER AI ─────────────────────────────────────────────────────────

@@ -27,6 +27,7 @@ import { assessReadiness, readinessVerdict } from './Readiness';
 import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
 import { analyzeRequirementCoverage, requirementCoverageSummary } from './RequirementCoverage';
 import { generateReadme } from './ReadmeGenerator';
+import { generateEnvExample } from './EnvExampleGenerator';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
 
@@ -253,26 +254,37 @@ export class ToolDispatcher {
    * dependency result. A missing/undocumented env var is the classic "your app won't
    * run for the user" defect: the code needs it but the user is never told to set it.
    */
-  private async collectEnvVarIssues(): Promise<EnvVarIssue[]> {
+  /**
+   * Scan the project's real source files for every `process.env.X` /
+   * `import.meta.env.X` reference. Best-effort and bounded (200 files, 200KB each);
+   * any listing/read failure degrades to fewer/no references. Shared by the env-var
+   * evaluate pass and the `generate_env_example` tool.
+   */
+  private async collectEnvRefs(): Promise<string[]> {
     const SOURCE_EXT = /\.(ts|tsx|js|jsx|py|vue|svelte|go|rb|java|php)$/i;
     const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+    const refs = new Set<string>();
     try {
-      const refs = new Set<string>();
-      try {
-        const paths = await this.actuator.listFiles(this.workspaceId);
-        const candidates = paths.filter((p) => SOURCE_EXT.test(p) && !SKIP.test(p)).slice(0, 200);
-        for (const p of candidates) {
-          try {
-            const content = await this.actuator.readFile(this.workspaceId, p);
-            if (content.length > 200_000) continue;
-            for (const name of extractEnvRefs(p, content)) refs.add(name);
-          } catch {
-            /* skip a single unreadable file — never break evaluate */
-          }
+      const paths = await this.actuator.listFiles(this.workspaceId);
+      const candidates = paths.filter((p) => SOURCE_EXT.test(p) && !SKIP.test(p)).slice(0, 200);
+      for (const p of candidates) {
+        try {
+          const content = await this.actuator.readFile(this.workspaceId, p);
+          if (content.length > 200_000) continue;
+          for (const name of extractEnvRefs(p, content)) refs.add(name);
+        } catch {
+          /* skip a single unreadable file — never break the caller */
         }
-      } catch {
-        /* listing failed — fall back to no references */
       }
+    } catch {
+      /* listing failed — fall back to no references */
+    }
+    return [...refs];
+  }
+
+  private async collectEnvVarIssues(): Promise<EnvVarIssue[]> {
+    try {
+      const refs = new Set<string>(await this.collectEnvRefs());
       let envExample: string | null = null;
       try {
         envExample = await this.actuator.readFile(this.workspaceId, '.env.example');
@@ -528,6 +540,30 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         await this.maybeCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} from the project graph (${content.length} bytes).`;
+      }
+
+      case 'generate_env_example': {
+        const path = optStr(input, 'path') || '.env.example';
+        const refs = await this.collectEnvRefs();
+        let existing: string | null = null;
+        try {
+          existing = await this.actuator.readFile(this.workspaceId, path);
+        } catch {
+          existing = null; // none yet — generate fresh from the referenced variables
+        }
+        const content = generateEnvExample(refs, existing);
+        let kind: 'create' | 'modify' = 'create';
+        try {
+          await this.actuator.readFile(this.workspaceId, path);
+          kind = 'modify';
+        } catch {
+          kind = 'create';
+        }
+        await this.actuator.writeFile(this.workspaceId, path, content);
+        this.state?.recordFileChange({ path, kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+        await this.maybeCheckpoint(`${kind} ${path}`);
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} with ${refs.length} referenced variable(s).`;
       }
 
       case 'update_preview': {

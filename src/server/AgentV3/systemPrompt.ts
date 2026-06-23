@@ -77,6 +77,8 @@ export function architectSystemPrompt(): string {
     '  flags one, actually build that feature — never skip what was requested.',
     '- Before finishing a real app, call generate_readme to write an accurate',
     '  README.md (stack, how to run, structure) derived from the real project.',
+    '- If the app reads any env vars, call generate_env_example so .env.example',
+    '  documents every variable the code needs — so it runs for other people too.',
     '',
     'Rules:',
     '- Build the real thing. No fake success, no pretending something works.',

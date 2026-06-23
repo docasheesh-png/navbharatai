@@ -29,7 +29,7 @@ export interface RoleConfig {
 // Tool-set groups, by what a role is allowed to do. Every group includes the
 // read-only `recall` (query project memory) and `evaluate` (static architecture
 // analysis) — both are useful to all roles and never mutate the workspace.
-const BUILD_TOOLS: ToolName[] = ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'recall', 'evaluate', 'generate_readme', 'update_todo', 'update_preview'];
+const BUILD_TOOLS: ToolName[] = ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'recall', 'evaluate', 'generate_readme', 'generate_env_example', 'update_todo', 'update_preview'];
 const EDIT_TOOLS: ToolName[] = ['read_file', 'write_file', 'edit_file', 'grep', 'glob', 'recall', 'evaluate'];
 const RUN_TOOLS: ToolName[] = ['read_file', 'bash', 'grep', 'glob', 'recall', 'evaluate'];
 const READONLY_TOOLS: ToolName[] = ['read_file', 'grep', 'glob', 'recall', 'evaluate'];

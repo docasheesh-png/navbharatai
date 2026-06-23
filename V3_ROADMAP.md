@@ -241,6 +241,15 @@ Every phase is graded against these, because they are what makes the difference:
   + checkpoint). systemPrompt tells the agent to write the README before finishing;
   AppKnowledgeBase synced. v3.0-only. Gate green: server+frontend tsc 0, 1922 vitest
   (+6), build, boot:check PASS.
+- 2026-06-23: Phase 4.3 (Engines Expansion — Config engine) — .env.example generator.
+  New `AgentV3/EnvExampleGenerator.ts` (PURE): builds a .env.example from the env vars
+  the code actually references, preserving any already-documented values and keeping
+  existing keys. New `generate_env_example` tool wired end-to-end (ToolName, catalog
+  def + CATALOG_TOOL_NAMES, BUILD_TOOLS grant, dispatcher case). Refactored the source
+  env-ref scan into a shared `collectEnvRefs()` reused by the env-var evaluate pass and
+  the generator (DRY, behaviour unchanged). Fixes the classic "works on my machine"
+  gap. systemPrompt + AppKnowledgeBase synced. v3.0-only. Gate green: server+frontend
+  tsc 0, 1927 vitest (+5), build, boot:check PASS.
 - 2026-06-23: Provider diagnosis — GET /api/agentv3/diag reports (no secrets)
   whether ANTHROPIC_API_KEY is a real sk-ant key, plus base-url config; optional
   admin-gated ?test=1 makes one real Claude call and returns the exact outcome.

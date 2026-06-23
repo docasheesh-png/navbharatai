@@ -79,6 +79,11 @@ export function makeResilientTurnRunner(
         return await primary.runTurn(params);
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
+        // Surface the EXACT Claude failure in the logs (greppable tag) so the
+        // root cause is visible without reading the chat reply. The status code
+        // (401 = bad key, 400 = credit/model, 404 = model) pinpoints the fix.
+        const status = (err as { status?: number })?.status;
+        console.error(`[AGENTV3][CLAUDE_FAIL] status=${status ?? 'n/a'} reason=${reason.slice(0, 300)}`);
         try {
           const { response } = await getRouter().route(flattenTranscript(params.messages), params.system);
           const note = `_(Claude unavailable — ${reason.slice(0, 140)}. Replied via ${response.provider}.)_\n\n`;

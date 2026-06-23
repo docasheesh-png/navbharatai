@@ -114,4 +114,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Water-saving irrigation tips',
     ],
   },
+  nutritionist_ai: {
+    id: 'nutritionist_ai',
+    name: 'Nutritionist / Diet AI',
+    welcome:
+      "Namaste! 🥗 I'm Nutritionist AI — I can help you build a balanced Indian plate, plan sustainable eating for your goal (weight, muscle, energy), find good veg/non-veg protein, and cut sugar/salt/junk. Tell me your goal, food preferences and routine. ⚠️ This is general nutrition education — for any health condition (diabetes, thyroid, pregnancy, allergies) please consult a registered dietitian or doctor.",
+    quickPrompts: [
+      'Make a balanced veg meal plan',
+      'Healthy ways to lose weight',
+      'Best protein sources for vegetarians',
+      'How do I cut down sugar & junk food?',
+    ],
+  },
 };

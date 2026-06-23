@@ -25,6 +25,7 @@ import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './E
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict } from './Readiness';
 import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
+import { analyzeRequirementCoverage, requirementCoverageSummary } from './RequirementCoverage';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
 
@@ -466,6 +467,16 @@ export class ToolDispatcher {
         // evaluate. Surfaces which modules/components have no test so the agent
         // closes the plan → build → TEST → validate loop instead of assuming.
         const testCoverage = analyzeTestCoverage(mem.graph());
+        // Best-effort requirement-coverage pass (Phase 10 — Product Understanding):
+        // PURE comparison of the user's original request against what was built, so
+        // it never throws and never breaks evaluate. Flags a clearly-named feature
+        // (login, dashboard, cart, …) that was asked for but has no matching surface.
+        const requestText = mem
+          .snapshot()
+          .episodes.filter((e) => e.kind === 'request')
+          .map((e) => e.text)
+          .join('\n');
+        const reqCoverage = analyzeRequirementCoverage(requestText, mem.graph());
         const confidence = computeBuildConfidence({
           readinessScore: readiness.score,
           ready: readiness.ready,
@@ -484,7 +495,7 @@ export class ToolDispatcher {
           accessibility: tally(a11yIssues),
           compliance: complianceTally,
         });
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}`;
       }
 
       case 'update_todo': {

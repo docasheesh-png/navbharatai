@@ -35,6 +35,7 @@ import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAn
 import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary } from './ErrorBoundaryAnalysis';
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
 import { analyzeSecretLeak, secretLeakSummary } from './SecretLeakAnalysis';
+import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
 
@@ -176,6 +177,32 @@ export class ToolDispatcher {
           const content = await this.actuator.readFile(this.workspaceId, p);
           if (content.length > 200_000) continue;
           issues.push(...scanSecurityConfig(p, content));
+        } catch {
+          /* skip a single unreadable file */
+        }
+      }
+    } catch {
+      /* listing failed — fall back to no issues */
+    }
+    return issues;
+  }
+
+  /**
+   * Best-effort scan for hardcoded localhost URLs across the project's source
+   * files (env-var fallbacks are excluded by the analyser). Bounded and wrapped.
+   */
+  private async collectHardcodedUrlIssues(): Promise<HardcodedUrlIssue[]> {
+    const CODE = /\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte)$/i;
+    const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+    const issues: HardcodedUrlIssue[] = [];
+    try {
+      const paths = await this.actuator.listFiles(this.workspaceId);
+      const candidates = paths.filter((p) => CODE.test(p) && !SKIP.test(p)).slice(0, 200);
+      for (const p of candidates) {
+        try {
+          const content = await this.actuator.readFile(this.workspaceId, p);
+          if (content.length > 200_000) continue;
+          issues.push(...scanHardcodedUrls(p, content));
         } catch {
           /* skip a single unreadable file */
         }
@@ -595,6 +622,8 @@ export class ToolDispatcher {
           gitignoreContent = null;
         }
         const secretLeak = analyzeSecretLeak(hygieneFiles, gitignoreContent);
+        // Best-effort hardcoded-URL pass (Section I #11): localhost baked into code.
+        const hardcodedUrls = await this.collectHardcodedUrlIssues();
         const confidence = computeBuildConfidence({
           readinessScore: readiness.score,
           ready: readiness.ready,
@@ -613,7 +642,7 @@ export class ToolDispatcher {
           accessibility: tally(a11yIssues),
           compliance: complianceTally,
         });
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}`;
       }
 
       case 'update_todo': {

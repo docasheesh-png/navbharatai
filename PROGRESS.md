@@ -1070,3 +1070,24 @@ eight gates, with every lost point explained as a concrete, fixable reason.
 
 **Test suite: 1827 passing.** Full gate green: tsc frontend+server, build, boot:check.
 Section E status: 73 ✓, 74 ✓, 77 ✓, 78 ✓ done; 75/76 need external hosting/payments.
+
+---
+
+### 2026-06-23 — Layer 59 "Knowledge Evolution" (continuing Section D)
+
+Improves the existing learning loop (Layers 57/79) with real knowledge hygiene:
+recalled lessons are now EVOLVED before they are fed back into the next build.
+
+- New `src/server/AgentV3/KnowledgeEvolution.ts` (`evolveLessons`, PURE/deterministic):
+  • de-duplicates near-identical lessons (token Jaccard ≥ 0.85, keeping the strongest),
+  • resolves CONFLICTS — when two lessons make the same claim with opposite polarity
+    ("use X" vs "avoid X"), the NEWER one wins and the stale one is dropped
+    (conservative: only fires on same-claim/flipped-negation),
+  • recency-weighted ranking (aging) — fresher lessons rank above equally-relevant
+    older ones; higher relevance still beats mere recency.
+- Surfaced `ts` on episode RecallHits (WorkspaceMemory) so recency is available.
+- Wired into `formatRecalledLessons` (Layer 79 recall path) — public API unchanged.
+- AppKnowledgeBase memory bullet updated. 10 new unit tests; existing 7 recall
+  tests still green.
+
+**Test suite: 1837 passing.** Full gate green: tsc frontend+server, build, boot:check.

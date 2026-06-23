@@ -12,6 +12,7 @@
 // calls recall() is wrapped so it can NEVER affect the build result.
 
 import type { RecallHit } from './WorkspaceMemory';
+import { evolveLessons, type Lesson } from './KnowledgeEvolution';
 
 /** Episode kinds whose recalled text is worth feeding back as guidance. */
 const GUIDANCE_KINDS = new Set(['note', 'error', 'fix']);
@@ -35,16 +36,16 @@ function snippet(text: string, max = LESSON_MAX_CHARS): string {
  *
  * Considers only hits backed by a `note` (the `[reflection]` lessons), `error`,
  * or `fix` episode — the user's own `request` episodes are excluded so we never
- * echo the current (or a past) ask back into the prompt. Hits are assumed to be
- * ordered by relevance, so we keep input order and just filter, dedupe by text,
- * and slice. Returns '' when nothing relevant remains.
+ * echo the current (or a past) ask back into the prompt. The relevant hits are run
+ * through Knowledge Evolution (Layer 59) — de-duplicated, conflict-resolved (newer
+ * advice wins over stale contradicting advice), and recency-ranked — before being
+ * trimmed and formatted. Returns '' when nothing relevant remains.
  */
 export function formatRecalledLessons(hits: RecallHit[]): string {
   if (!Array.isArray(hits) || hits.length === 0) return '';
 
-  const seen = new Set<string>();
-  const lessons: string[] = [];
-
+  // Collect the guidance-bearing hits as Lessons (text + relevance + recency).
+  const candidates: Lesson[] = [];
   for (const hit of hits) {
     if (!hit || typeof hit !== 'object') continue;
     // Episode hits carry their kind in `detail` and their text in `ref`.
@@ -53,14 +54,11 @@ export function formatRecalledLessons(hits: RecallHit[]): string {
     if (!GUIDANCE_KINDS.has(kind)) continue;
     const text = typeof hit.ref === 'string' ? hit.ref.trim() : '';
     if (!text) continue;
-
-    const key = text.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    lessons.push(snippet(text));
-    if (lessons.length >= MAX_LESSONS) break;
+    candidates.push({ text, score: typeof hit.score === 'number' ? hit.score : 0, ts: hit.ts });
   }
+
+  // Evolve (dedupe + resolve conflicts + age/rank), then trim to the budget.
+  const lessons = evolveLessons(candidates).slice(0, MAX_LESSONS).map((t) => snippet(t));
 
   if (lessons.length === 0) return '';
 

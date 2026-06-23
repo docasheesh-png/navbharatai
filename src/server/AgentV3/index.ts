@@ -55,6 +55,8 @@ export { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
 export type { AuthenticityIssue, AuthenticitySeverity } from './AuthenticityAnalysis';
 export { assessReadiness, readinessVerdict } from './Readiness';
 export type { ReadinessReport } from './Readiness';
+export { reflectOnBuild, reflectionNote } from './Reflection';
+export type { BuildReflection } from './Reflection';
 export { makeSubAgentSpawn } from './SubAgent';
 export type { SubAgentDeps } from './SubAgent';
 export { GitManager } from './GitManager';

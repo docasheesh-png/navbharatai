@@ -275,6 +275,15 @@ Every phase is graded against these, because they are what makes the difference:
   systemPrompt + AppKnowledgeBase synced. Second item via the Section I audit-first
   triage (ABSENT → solid). v3.0-only. Gate green: server+frontend tsc 0, 1956 vitest
   (+10), build, boot:check PASS.
+- 2026-06-23: Section I #5 (Frontend resilience) — error-boundary check. New
+  `AgentV3/ErrorBoundaryAnalysis.ts` (PURE): detects whether a React app has an error
+  boundary (componentDidCatch / getDerivedStateFromError / react-error-boundary /
+  <ErrorBoundary>) and flags a real multi-component (≥2) React app that has none —
+  one render error otherwise white-screens the whole UI. Folded into `evaluate` as the
+  15th dimension (new collectHasErrorBoundary front-end scan); systemPrompt +
+  AppKnowledgeBase synced. Third item via the Section I audit-first triage (ABSENT →
+  solid); applies the app-must-never-break rule to the apps v3.0 builds. v3.0-only.
+  Gate green: server+frontend tsc 0, 1965 vitest (+9), build, boot:check PASS.
 - 2026-06-23: Provider diagnosis — GET /api/agentv3/diag reports (no secrets)
   whether ANTHROPIC_API_KEY is a real sk-ant key, plus base-url config; optional
   admin-gated ?test=1 makes one real Claude call and returns the exact outcome.

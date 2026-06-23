@@ -51,8 +51,8 @@ export function AgentV3Launcher({ userId, email }: { userId?: string; email?: st
       )}
 
       {open && (
-        <div className="fixed inset-0 z-[70] bg-black/70 flex flex-col">
-          <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-zinc-800">
+        <div className="fixed inset-0 z-[70] bg-black/70 flex flex-col h-[100dvh] max-h-[100dvh]">
+          <div className="shrink-0 flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-zinc-800">
             <span className="text-sm text-zinc-300">NavBharatAI Pro v3.0 — builder (beta)</span>
             <button
               onClick={() => setOpen(false)}

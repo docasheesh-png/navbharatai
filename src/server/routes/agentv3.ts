@@ -29,6 +29,7 @@ import {
   reflectionNote,
   formatRecalledLessons,
   detectLanguageHint,
+  classifyIntent,
 } from '../AgentV3';
 import { randomUUID } from 'crypto';
 import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
@@ -258,6 +259,56 @@ export function registerAgentV3Routes(app: Express): void {
     const send = (obj: unknown): void => {
       if (!res.writableEnded) res.write(JSON.stringify(obj) + '\n');
     };
+
+    // Intelligent cost routing (additive): a plain conversational turn — a
+    // greeting, thanks, "who are you", small-talk — does NOT need the premium
+    // Claude native-tool-use build loop (₹12–20/message). Answer those cheaply
+    // via the existing NON-Claude free router (Vertex → Gemini → Grok) and skip
+    // the whole build loop. CRITICAL: the reply carries NO provider attribution,
+    // so the user can't tell which model answered — it reads as a normal reply.
+    //
+    // Conservative gate (any doubt → fall through to the real build path):
+    //  • classifyIntent must say 'chat' (defaults to 'build' on any ambiguity),
+    //  • there must be no file/attachment in the request, and
+    //  • plan-mode must not be forcing a plan (a plain conversational turn).
+    const hasAttachment =
+      !!req.body?.file ||
+      (Array.isArray(req.body?.files) && req.body.files.length > 0) ||
+      (Array.isArray(req.body?.attachments) && req.body.attachments.length > 0) ||
+      !!req.body?.imageUrl ||
+      (Array.isArray(req.body?.images) && req.body.images.length > 0);
+    const isPlainChatTurn =
+      classifyIntent(prompt) === 'chat' && !hasAttachment && planFirst === false;
+    if (isPlainChatTurn) {
+      try {
+        const chatRouter = AIRouterManager.getRouter('free');
+        const { response } = await chatRouter.route(
+          prompt,
+          "You are NavBharatAI's friendly assistant. Reply briefly and warmly in " +
+            "the user's language. Do not mention which model you are.",
+        );
+        const reply = response.content;
+        // Record the turn in project memory so iterative context is preserved
+        // (mirrors the build path's recordRequest). Best-effort.
+        try {
+          getWorkspaceMemory(deriveWorkspaceId(userId, req.body?.sessionId)).recordRequest(prompt);
+        } catch { /* memory is best-effort — never blocks a reply */ }
+        // Surface the reply EXACTLY like a normal build narration — no provider
+        // name, no note — then close out the stream the same way a build does.
+        const chatEvents = new AgentEventStream();
+        chatEvents.subscribe((e) => send(e), false);
+        chatEvents.emit({ type: 'narration', agent: 'architect', text: reply, ts: Date.now() });
+        chatEvents.emit({ type: 'done', ok: true, summary: reply, ts: Date.now() });
+        // billedUsd: 0 — the cheap free router is not billed to the user as a build.
+        send({ type: 'result', ok: true, summary: reply, steps: 0, billedUsd: 0 });
+        activeBuilds.delete(buildKey);
+        if (!res.writableEnded) res.end();
+        return;
+      } catch {
+        // The free router failed — do NOT error out. Fall through to the normal
+        // build path so the user always gets an answer. (No return here.)
+      }
+    }
 
     const events = new AgentEventStream();
     events.subscribe((e) => send(e), false);

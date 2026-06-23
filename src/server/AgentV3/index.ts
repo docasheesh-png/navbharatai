@@ -74,6 +74,8 @@ export { GitManager } from './GitManager';
 export type { Checkpointer, CommandRunner } from './GitManager';
 export { registerSession, getSession, restoreSession, sessionCount } from './WorkspaceRegistry';
 export type { WorkspaceSession } from './WorkspaceRegistry';
+export { classifyIntent } from './IntentClassifier';
+export type { BuildIntent } from './IntentClassifier';
 
 import { AGENTV3_PHASE } from './types';
 

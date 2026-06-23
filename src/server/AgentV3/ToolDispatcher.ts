@@ -15,7 +15,10 @@ import {
   scanCompliance, complianceSummary,
   detectsPiiCollection, detectsTracker, detectsConsentUI, looksLikePrivacyPolicy,
 } from './ComplianceAnalysis';
-import type { ComplianceIssue } from './ComplianceAnalysis';
+import type { ComplianceIssue, ComplianceSeverity } from './ComplianceAnalysis';
+import type { DependencyIssue } from './DependencyAnalysis';
+import type { EnvVarIssue } from './EnvVarAnalysis';
+import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
 import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
@@ -154,7 +157,7 @@ export class ToolDispatcher {
    * Wrapped so any file-access error degrades to a clean compliance report — the
    * evaluate tool still returns its other dimensions and an honest certificate.
    */
-  private async collectComplianceSummary(): Promise<string> {
+  private async collectComplianceIssues(): Promise<ComplianceIssue[]> {
     const CODE = /\.(tsx?|jsx?|vue|svelte|astro|html?|mjs|cjs)$/i;
     const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
     const issues: ComplianceIssue[] = [];
@@ -192,9 +195,9 @@ export class ToolDispatcher {
           snippet: 'Third-party tracker/analytics loads with no cookie-consent surface.' });
       }
     } catch {
-      /* listing failed — return the clean (certified) report below */
+      /* listing failed — return whatever issues were gathered (often none) */
     }
-    return complianceSummary(issues);
+    return issues;
   }
 
   /**
@@ -205,7 +208,7 @@ export class ToolDispatcher {
    * any graph/file-access error degrades gracefully — the evaluate tool still
    * returns its architecture + security + authenticity result.
    */
-  private async collectDependencySummary(): Promise<string> {
+  private async collectDependencyIssues(): Promise<DependencyIssue[]> {
     try {
       const graph = getWorkspaceMemory(this.workspaceId).graph();
       const files = new Set(graph.files);
@@ -230,11 +233,10 @@ export class ToolDispatcher {
       } catch {
         pkg = null; // no manifest reachable — analyzeDependencies returns []
       }
-      const issues = analyzeDependencies([...external], pkg);
-      return dependencySummary(issues);
+      return analyzeDependencies([...external], pkg);
     } catch {
-      // Any failure: return the clean summary so evaluate's other sections stand.
-      return dependencySummary([]);
+      // Any failure: return no issues so evaluate's other sections stand.
+      return [];
     }
   }
 
@@ -247,7 +249,7 @@ export class ToolDispatcher {
    * dependency result. A missing/undocumented env var is the classic "your app won't
    * run for the user" defect: the code needs it but the user is never told to set it.
    */
-  private async collectEnvVarSummary(): Promise<string> {
+  private async collectEnvVarIssues(): Promise<EnvVarIssue[]> {
     const SOURCE_EXT = /\.(ts|tsx|js|jsx|py|vue|svelte|go|rb|java|php)$/i;
     const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
     try {
@@ -277,11 +279,10 @@ export class ToolDispatcher {
           envExample = null; // no env file reachable — every referenced var is undocumented
         }
       }
-      const issues = analyzeEnvVars([...refs], parseEnvKeys(envExample));
-      return envVarSummary(issues);
+      return analyzeEnvVars([...refs], parseEnvKeys(envExample));
     } catch {
-      // Any failure: return the clean summary so evaluate's other sections stand.
-      return envVarSummary([]);
+      // Any failure: return no issues so evaluate's other sections stand.
+      return [];
     }
   }
 
@@ -418,25 +419,56 @@ export class ToolDispatcher {
         const mem = getWorkspaceMemory(this.workspaceId);
         const archReport = analyzeArchitecture(mem.graph());
         const findings = mem.securityFindings();
-        const verdict = readinessVerdict(assessReadiness(archReport, findings));
+        const readiness = assessReadiness(archReport, findings);
+        const verdict = readinessVerdict(readiness);
         // Best-effort authenticity/completeness pass — never throws, never breaks
         // evaluate if file access fails. On any error we fall back to no issues.
         const issues = await this.collectAuthenticityIssues();
         // Best-effort dependency-consistency pass — never throws, never breaks
         // evaluate if graph access or package.json read fails. On any error the
         // prior four sections are still returned in full.
-        const depSummary = await this.collectDependencySummary();
+        const depIssues = await this.collectDependencyIssues();
         // Best-effort environment-variable completeness pass — never throws, never
         // breaks evaluate if file access fails. On any error the prior five sections
         // are still returned in full.
-        const envSummary = await this.collectEnvVarSummary();
+        const envIssues = await this.collectEnvVarIssues();
         // Best-effort accessibility pass — never throws, never breaks evaluate if
         // file access fails. On any error the prior six sections are still returned.
         const a11yIssues = await this.collectAccessibilityIssues();
         // Best-effort trust/safety/compliance pass (Layer 77 "Bharosa") — never
         // throws, never breaks evaluate. Ends with an honest launch-safe certificate.
-        const complianceReport = await this.collectComplianceSummary();
-        return `${verdict}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${depSummary}\n\n${envSummary}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceReport}`;
+        const complianceIssues = await this.collectComplianceIssues();
+        // Calibrated build confidence (Layer 74 "Sahyog") — an honest synthesis of
+        // all eight dimensions with an explanation, surfaced right after the verdict.
+        const tally = (xs: ReadonlyArray<{ severity: 'high' | 'medium' | 'low' }>): SeverityTally => ({
+          high: xs.filter((x) => x.severity === 'high').length,
+          medium: xs.filter((x) => x.severity === 'medium').length,
+          low: xs.filter((x) => x.severity === 'low').length,
+        });
+        const complianceTally: SeverityTally = {
+          high: complianceIssues.filter((x) => x.severity === ('high' as ComplianceSeverity)).length,
+          medium: complianceIssues.filter((x) => x.severity === ('medium' as ComplianceSeverity)).length,
+          low: complianceIssues.filter((x) => x.severity === ('low' as ComplianceSeverity)).length,
+        };
+        const confidence = computeBuildConfidence({
+          readinessScore: readiness.score,
+          ready: readiness.ready,
+          architecture: {
+            unresolvedImports: archReport.unresolvedImports.length,
+            cycles: archReport.cycles.length,
+            layering: archReport.layeringViolations.length,
+          },
+          security: tally(findings),
+          authenticity: issues.length,
+          dependencies: {
+            missing: depIssues.filter((d) => d.kind === 'missing').length,
+            unused: depIssues.filter((d) => d.kind === 'unused').length,
+          },
+          envVarsMissing: envIssues.filter((e) => e.severity === 'high').length,
+          accessibility: tally(a11yIssues),
+          compliance: complianceTally,
+        });
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}`;
       }
 
       case 'update_todo': {

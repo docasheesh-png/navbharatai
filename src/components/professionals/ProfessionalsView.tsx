@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -18,6 +18,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'finance_ai', label: 'Financial Advisor', description: 'Budgeting, SIP/mutual funds, insurance, debt & goal planning — financial education (not investment advice).', icon: TrendingUp, active: true },
   { id: 'astrologer_ai', label: 'Astrologer', description: 'Horoscope, kundli/rashi/nakshatra & gun-milan — for cultural interest & entertainment (not science).', icon: Sparkles, active: true },
   { id: 'govt_schemes_ai', label: 'Govt Schemes Helper', description: 'Find & understand central/state schemes — eligibility, benefits, documents & how to apply (verify on official portals).', icon: Building2, active: true },
+  { id: 'kisan_ai', label: 'Kisan / Agri Advisor', description: 'Crop & season choice, soil & fertiliser, pest/disease (IPM), irrigation, market/MSP & scheme awareness (confirm with KVK).', icon: Leaf, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

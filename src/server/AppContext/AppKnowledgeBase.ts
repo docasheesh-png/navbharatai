@@ -265,6 +265,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['scheme', 'yojana', 'government', 'sarkari', 'subsidy', 'scholarship', 'pension', 'pm kisan', 'ayushman', 'pmay', 'eligibility', 'apply', 'benefit'],
   },
 
+  // ─── KISAN / AGRI ADVISOR ────────────────────────────────────────────────
+  {
+    id: 'kisan_ai',
+    name: 'Kisan / Agri Advisor',
+    path: 'Sidebar → Professionals → Kisan / Agri Advisor',
+    description: 'Practical farming advisor for Indian farmers: crop & season choice (kharif/rabi/zaid), soil & fertiliser (Soil Health Card), pest/disease via Integrated Pest Management, irrigation & water-saving, post-harvest, and market/MSP/scheme awareness (PM-Kisan, KCC, eNAM, FPOs). Safety-first: confirm big decisions with the local KVK/agri officer & a soil test, follow pesticide labels (never banned chemicals), verify current MSP/scheme details officially; never promises yields/prices.',
+    howToUse: 'Open Sidebar → Professionals → Kisan / Agri Advisor and ask: "which crop this season", "my crop has a pest", "read my Soil Health Card", "water-saving irrigation".',
+    relatedFeatures: ['professionals', 'govt_schemes_ai'],
+    aiSurface: 'kisan_ai',
+    keywords: ['kisan', 'farmer', 'farming', 'agriculture', 'crop', 'kheti', 'fasal', 'soil', 'pest', 'irrigation', 'msp', 'mandi', 'kvk', 'fertiliser'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

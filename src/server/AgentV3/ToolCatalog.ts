@@ -125,8 +125,10 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         'personal data in logs, sensitive values in browser storage, cookies without ' +
         'SameSite, personal data over plain http, a tracker with no consent surface, ' +
         'or collecting personal data with no privacy policy) — ending with an honest ' +
-        '"launch-safe" certificate. Use it to check your work before declaring it ' +
-        'done, then fix what it reports.',
+        '"launch-safe" certificate. It also reports a calibrated "build confidence" ' +
+        '(0–100% with High/Medium/Low and a plain-language "here\'s why") synthesized ' +
+        'from all of the above, so you state honest confidence instead of guessing. ' +
+        'Use it to check your work before declaring it done, then fix what it reports.',
       input_schema: {
         type: 'object',
         properties: {},

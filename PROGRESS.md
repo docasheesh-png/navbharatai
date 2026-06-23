@@ -1045,3 +1045,28 @@ v3.0 file attachments (cheap vision default, Claude only in Power mode), and SDA
 office/zip support. Next picks: Layer 74 (Sahyog — partnership UX: calibrated
 confidence/explainability) is buildable now; Layers 75/76 need external hosting/
 payments infra.
+
+---
+
+### 2026-06-23 — Layer 74 "Sahyog" (Calibrated Build Confidence + explainability)
+
+Admin-selected next roadmap pick. The partnership move: v3.0's `evaluate` now states
+an HONEST, CALIBRATED confidence ("Build confidence: 72% (Medium) — here's why: …")
+instead of declaring success by vibes — derived only from the real signals across all
+eight gates, with every lost point explained as a concrete, fixable reason.
+
+- New `src/server/AgentV3/BuildConfidence.ts`: `computeBuildConfidence(input)` →
+  deterministic 0–100 score + High/Medium/Low band + positives (clean gates) +
+  negatives (issues, highest-impact first). Hard calibration ceilings: a build-breaker
+  (unresolved import / missing dependency) caps confidence at 35; a high-severity
+  security or privacy/compliance blocker caps it at 60. `buildConfidenceSummary()`
+  renders the "I'm N% confident — here's why" block.
+- Wired into `ToolDispatcher.evaluate`, surfaced right after the readiness verdict.
+  Refactored the dependency/env/compliance collectors to return their issue arrays
+  (summaries now rendered at the evaluate site) so confidence can be computed from
+  real per-gate tallies. Behavior of the existing sections is unchanged.
+- `ToolCatalog` evaluate description + `AppKnowledgeBase` (description + keywords)
+  updated. 10 new unit tests.
+
+**Test suite: 1827 passing.** Full gate green: tsc frontend+server, build, boot:check.
+Section E status: 73 ✓, 74 ✓, 77 ✓, 78 ✓ done; 75/76 need external hosting/payments.

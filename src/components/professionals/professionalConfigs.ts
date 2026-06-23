@@ -66,4 +66,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Explain this contract clause',
     ],
   },
+  finance_ai: {
+    id: 'finance_ai',
+    name: 'Financial Advisor',
+    welcome:
+      "Hi! I'm Finance AI 💹 — I explain personal finance for India: budgeting & emergency funds, how SIP/mutual funds/PPF/NPS/FD work, insurance (term + health first), paying off debt, and goal-based planning. This is financial EDUCATION, not investment advice — investments carry market risk; for personalised advice consult a SEBI-registered adviser.",
+    quickPrompts: [
+      'How do I start a budget & emergency fund?',
+      'Explain SIP and mutual funds',
+      'Term vs endowment insurance?',
+      'How should I pay off my loans?',
+    ],
+  },
 };

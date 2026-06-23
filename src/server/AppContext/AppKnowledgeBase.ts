@@ -226,6 +226,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['lawyer', 'legal', 'law', 'advocate', 'notice', 'rti', 'fir', 'consumer', 'contract', 'agreement', 'rights', 'kanoon'],
   },
 
+  // ─── FINANCIAL ADVISOR ───────────────────────────────────────────────────
+  {
+    id: 'finance_ai',
+    name: 'Financial Advisor',
+    path: 'Sidebar → Professionals → Financial Advisor',
+    description: 'Personal-finance EDUCATION assistant for India: budgeting & emergency fund, how SIP/mutual funds/index funds/PPF/EPF/NPS/FD work, risk vs return & diversification, insurance (term + health first), debt payoff, and goal-based planning. NOT investment advice and NOT a SEBI-registered adviser — never recommends specific stocks/funds, always notes market risk and "past performance ≠ future returns", and tells you to consult a SEBI-registered adviser (and a CA for tax).',
+    howToUse: 'Open Sidebar → Professionals → Financial Advisor and ask: "start a budget & emergency fund", "explain SIP & mutual funds", "term vs endowment insurance", "how to pay off loans".',
+    relatedFeatures: ['professionals', 'accountant_ai'],
+    aiSurface: 'finance_ai',
+    keywords: ['finance', 'financial', 'money', 'invest', 'sip', 'mutual fund', 'savings', 'budget', 'insurance', 'ppf', 'nps', 'retirement', 'paisa', 'nivesh'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

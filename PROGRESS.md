@@ -1414,3 +1414,12 @@ compliance analysis, auto-repair, real git + multi-DB + real deploy); the absent
 and the frontier — and most of THAT was already on existing roadmaps. Docs only —
 no GA code yet. PowerShell/CMD/native-ZSH marked intentionally out of scope (cloud
 Linux by design).
+
+Follow-up (same day): admin asked whether Windows support would expand reach.
+Clarified honestly that a build-engine SHELL (PowerShell/CMD) does not — every user
+reaches NavBharatAI via a browser regardless of their own OS. The real reach lever
+is app OUTPUT targets (today: web only). Added `V3_ROADMAP.md` Section H "Universal
+App Targets": UT-1 Desktop (Electron/Tauri → .exe/.dmg/.AppImage), UT-2 Native
+Mobile (React Native/Capacitor/Flutter → Play/App Store), UT-3 Browser Extension.
+Admin reviewed and DROPPED PowerShell/CMD (no reach gain); kept out-of-scope in the
+audit. Roadmap only — no UT code yet.

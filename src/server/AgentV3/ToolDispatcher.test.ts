@@ -189,4 +189,21 @@ describe('ToolDispatcher', () => {
     expect(res.is_error).toBe(true);
     expect(res.content).toContain('content');
   });
+
+  it('second_opinion returns the injected reviewer result', async () => {
+    const dWithOpinion = new ToolDispatcher(
+      act, 'ws-1', state, stream, undefined, undefined,
+      async (prompt: string) => `[second opinion via GEMINI]\nReviewed: ${prompt}`,
+    );
+    const res = await dWithOpinion.dispatch(call('second_opinion', { prompt: 'check my auth flow' }));
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('second opinion via GEMINI');
+    expect(res.content).toContain('check my auth flow');
+  });
+
+  it('second_opinion returns an honest "not available" message when not wired (does not throw)', async () => {
+    const res = await d.dispatch(call('second_opinion', { prompt: 'review this' }));
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('not available');
+  });
 });

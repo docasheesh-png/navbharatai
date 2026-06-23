@@ -12,6 +12,7 @@ import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict } from './Readiness';
+import type { SecondOpinion } from './SecondOpinion';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -62,6 +63,7 @@ export class ToolDispatcher {
     private readonly events?: AgentEventStream,
     private readonly spawnSubAgent?: SubAgentSpawn,
     private readonly checkpointer?: Checkpointer,
+    private readonly secondOpinion?: SecondOpinion,
   ) {}
 
   /** Create a real git checkpoint after a change (best-effort; emits on success). */
@@ -316,6 +318,15 @@ export class ToolDispatcher {
         this.events?.emit({ type: 'agent_spawned', agent: role, task: instruction, ts: Date.now() });
         const result = await this.spawnSubAgent(role, instruction);
         return result.ok ? `[${role}] ${result.summary}` : `[${role}] FAILED: ${result.summary}`;
+      }
+
+      case 'second_opinion': {
+        const prompt = reqStr(input, 'prompt');
+        if (!this.secondOpinion) {
+          return 'Second opinion is not available in this context.';
+        }
+        const review = await this.secondOpinion(prompt);
+        return review;
       }
 
       default:

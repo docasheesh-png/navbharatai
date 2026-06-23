@@ -38,9 +38,11 @@ export {
   billedAmountUsd,
 } from './pricing';
 export type { BilledUsage } from './pricing';
-export { defaultToolCatalog, CATALOG_TOOL_NAMES, taskToolDef, catalogForTools } from './ToolCatalog';
+export { defaultToolCatalog, CATALOG_TOOL_NAMES, taskToolDef, secondOpinionToolDef, catalogForTools } from './ToolCatalog';
 export { ToolDispatcher } from './ToolDispatcher';
 export type { ActuatorPort, ToolResult, SubAgentSpawn } from './ToolDispatcher';
+export { makeSecondOpinion } from './SecondOpinion';
+export type { SecondOpinion, OpinionRouter } from './SecondOpinion';
 export { roleConfig, isWorkerRole, WORKER_ROLES, allRoles, findRolesByCapability, rolesByLayer, rosterBriefing } from './AgentRegistry';
 export type { RoleConfig } from './AgentRegistry';
 export { agentLifecycle } from './AgentLifecycle';

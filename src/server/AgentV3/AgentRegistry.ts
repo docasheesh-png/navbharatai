@@ -48,7 +48,7 @@ const REGISTRY: Record<AgentRole, RoleConfig> = {
       'Prefer delegating independent pieces in parallel; integrate their results, ' +
       'verify the app genuinely works, and only finish when it does. Never fake ' +
       'completion.',
-    tools: [...BUILD_TOOLS, 'task'],
+    tools: [...BUILD_TOOLS, 'task', 'second_opinion'],
     capabilities: ['orchestrate', 'plan', 'delegate', 'integrate', 'architecture', 'coordinate'],
   },
 
@@ -248,7 +248,7 @@ const REGISTRY: Record<AgentRole, RoleConfig> = {
     system:
       'You are the Reviewer. Read the diff and the code, and report correctness, ' +
       'security and quality issues before the build is called done. Read-only.',
-    tools: READONLY_TOOLS,
+    tools: [...READONLY_TOOLS, 'second_opinion'],
     capabilities: ['code review', 'correctness', 'quality', 'diff review', 'best practices'],
   },
 

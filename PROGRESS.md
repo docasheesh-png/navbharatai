@@ -1167,3 +1167,23 @@ so on the Firebase-hosting domain /api/* never reaches Cloud Run; the live Cloud
 Run domain is unaffected.
 
 **Test suite: 1869 passing.** Gate green: tsc frontend+server, build, boot:check.
+
+---
+
+### 2026-06-23 — Layer 54 "Strategic Intelligence" v1 (plan review before approval)
+
+Continuing Section D. In Plan mode the Architect proposes a plan then blocks for
+approval; now the plan is REVIEWED for strategic gaps first and the findings are
+shown next to it, so the user strengthens the plan up front.
+
+- New `src/server/AgentV3/PlanIntelligence.ts` (`analyzePlan` / `planAnalysisSummary`,
+  pure/deterministic): flags no testing/verification step (high), no setup/scaffold
+  before features (medium), a deploy requested but never planned (medium),
+  under-scoped one-step plan (medium), over-large plan (low), and vague generic
+  step titles (low). Conservative — a well-formed plan yields no findings.
+- Wired into the agentv3 plan flow: after planRunner produces the todos and BEFORE
+  the approval gate, a best-effort narration surfaces the review (never blocks the
+  gate).
+- AppKnowledgeBase + (existing keywords) updated. 14 new unit tests.
+
+**Test suite: 1884 passing.** Gate green: tsc frontend+server, build, boot:check.

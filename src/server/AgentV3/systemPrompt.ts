@@ -78,6 +78,8 @@ export function architectSystemPrompt(): string {
     '- evaluate also reports RUNNABILITY: whether the app can actually start/build',
     '  (a run script, a build script, an index.html entry). Fix any runnability',
     '  issue before claiming the app works — a build that compiles can still not run.',
+    '- evaluate also reports SEO/metadata gaps in the HTML entry (title, viewport,',
+    '  description, html lang). Add the missing tags for a real, shippable web app.',
     '- Before finishing a real app, call generate_readme to write an accurate',
     '  README.md (stack, how to run, structure) derived from the real project.',
     '- If the app reads any env vars, call generate_env_example so .env.example',

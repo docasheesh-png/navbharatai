@@ -258,6 +258,14 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-23: Section I #19 (SEO) — SEO/metadata check. New `AgentV3/SeoAnalysis.ts`
+  (PURE): reads the HTML entry and reports the missing discoverability essentials —
+  non-empty <title> (high), viewport meta (medium), meta description (low), <html lang>
+  (low). Focused on the high-signal four so a normal app is not nagged; "—" when there
+  is no HTML entry (pure API). Folded into `evaluate` as the 13th dimension (reads the
+  graph's index.html); systemPrompt + AppKnowledgeBase synced. First item built via the
+  Section I audit-first triage (was ABSENT → now solid). v3.0-only. Gate green:
+  server+frontend tsc 0, 1946 vitest (+9), build, boot:check PASS.
 - 2026-06-23: Provider diagnosis — GET /api/agentv3/diag reports (no secrets)
   whether ANTHROPIC_API_KEY is a real sk-ant key, plus base-url config; optional
   admin-gated ?test=1 makes one real Claude call and returns the exact outcome.

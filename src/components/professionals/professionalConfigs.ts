@@ -42,4 +42,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Improve the clarity of my draft',
     ],
   },
+  accountant_ai: {
+    id: 'accountant_ai',
+    name: 'CA / Tax & Accounts',
+    welcome:
+      "Namaste! I'm CA AI 🧮 — I can explain GST, income tax (old vs new regime), TDS, deductions, and bookkeeping, help you understand a tax notice or ITR/GST form, and walk through how a figure is computed. Note: tax rates & dates change every year — I'll always tell you to verify current figures and consult a CA before acting.",
+    quickPrompts: [
+      'Explain old vs new tax regime',
+      'How does GST input tax credit work?',
+      'What is TDS and Form 26AS?',
+      'Basics of bookkeeping for my small business',
+    ],
+  },
 };

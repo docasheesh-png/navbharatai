@@ -202,6 +202,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['thesis', 'research', 'dissertation', 'paper', 'literature review', 'citation', 'apa', 'methodology', 'academic writing', 'shodhganga', 'phd'],
   },
 
+  // ─── CA / TAX & ACCOUNTS ─────────────────────────────────────────────────
+  {
+    id: 'accountant_ai',
+    name: 'CA / Tax & Accounts',
+    path: 'Sidebar → Professionals → CA / Tax & Accounts',
+    description: 'Educational assistant for Indian taxation, accounting & business compliance: explains GST, income tax (old vs new regime), TDS/TCS, deductions (80C etc.), capital gains; helps understand a tax notice or ITR/GST form; bookkeeping (double-entry, P&L, balance sheet); business setup & compliance (proprietorship/LLP/Pvt Ltd, Udyam, ROC). NOT a substitute for a qualified CA — tax rates/slabs/dates change every Financial Year, so it always tells you to verify current figures (incometax.gov.in / gst.gov.in) and consult a CA.',
+    howToUse: 'Open Sidebar → Professionals → CA / Tax & Accounts and ask: "old vs new tax regime", "how GST ITC works", "what is TDS / Form 26AS", "bookkeeping basics".',
+    relatedFeatures: ['professionals'],
+    aiSurface: 'accountant_ai',
+    keywords: ['ca', 'tax', 'gst', 'income tax', 'itr', 'tds', 'accountant', 'bookkeeping', 'accounts', '80c', 'audit', 'compliance', 'msme'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

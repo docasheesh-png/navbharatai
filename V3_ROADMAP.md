@@ -543,3 +543,71 @@ NPUs). A long-horizon north star, not near-term.
   path. Flagged 84/79/82 as the buildable levers that can lead today, 85 as a hard
   prerequisite for higher autonomy, and the rest as Tier-C research v1s. Roadmap
   only. ALSO this day: v3.0 confirmed LIVE on native Claude (proxy fully removed).
+
+---
+
+## FINAL PHASE — In-App AI Browser ("Sahyatri") : UCUE applied  (admin-prioritised 2026-06-23)
+
+The flagship "dream" capability: a user-facing, AI-driven web browser inside
+NavBharatAI that any agent (web/computer agent) can fully operate — open any
+site, move the cursor, click, type, scroll, upload/download — across websites,
+SaaS, dashboards and cloud consoles. This is roadmap **Layer 72 (UCUE)** turned
+into a real product surface.
+
+### The architecture decision that makes it NOT get blocked (critical)
+- **DO NOT embed sites in an iframe** in the user's tab. Major sites refuse
+  embedding (`X-Frame-Options` / CSP `frame-ancestors`), and the browser's
+  same-origin policy forbids our JS from clicking inside a cross-origin frame.
+  That is the "block" to avoid.
+- **DO run a REAL browser on a server** (the E2B cloud sandbox — Chromium +
+  Playwright/CDP already shipped for Engineer AI visual testing) and **stream its
+  screen** (screenshots, later WebRTC video) into a NavBharatAI **popup**. The AI
+  drives the real server browser via CDP (navigate, click at coordinates, type).
+  To the target site it is a real browser making real requests — indistinguishable
+  from a human, so it is NOT blocked by the iframe/same-origin mechanisms.
+  ("Back-room assistant" model: a real assistant on a real computer; the user
+  watches the screen on a "TV" and can grab the mouse anytime.)
+
+### What CAN still block (and the honest mitigations)
+- **Bot detection / CAPTCHA** → hand control to the human for that step
+  (human-in-the-loop), stealth/headed browser, residential proxies where lawful.
+- **Login** → the user logs in once in the streamed browser; the session persists;
+  credentials stay out of the AI's reach.
+- **Cost** (cloud-browser compute), **latency** (screenshot lag → WebRTC),
+  **legal/ToS** (be responsible; respect site terms).
+
+### Build order (verifiable-first, safety-gated)
+SEE (stream the server browser into a popup) → CONTROL (agent click/type via CDP)
+→ HAND-OFF (user can take the wheel mid-task; co-browsing) → **SAFETY/APPROVAL
+(Layer 72-J — a hard prerequisite: the agent must ask before Pay/Delete/any
+irreversible step)** → RECORD & REPLAY (capture a task once → reusable skill) →
+VOICE/VERNACULAR (drive it by speaking, in any Layer-73 language).
+
+### Out-of-the-box ideas to ship with it (admin-requested)
+1. **Vernacular voice computer-use (the Bharat killer feature):** speak in Hindi/
+   Tamil/etc. — "IRCTC पर मेरी ट्रेन बुक कर दो" — and the agent operates the real
+   browser. Voice + computer-use + Indian languages (Layer 73 + 72). No global
+   competitor serves this; it lets non-technical Bharat users get real tasks done.
+2. **"Do once, learn forever":** the user/agent performs a task once; NavBharatAI
+   captures it as a reusable, named **workflow skill** ("pay my electricity bill")
+   the agent replays later (Layer 72-G learning).
+3. **Co-pilot hand-off:** AI drives, the human can seize the mouse at any moment in
+   the same window — the most trustworthy UX (Layer 72-H/J).
+4. **Live narration in the user's language:** the agent says what it is doing as it
+   clicks ("अब login दबा रहा हूँ…") — trust + transparency.
+5. **Browser swarm:** several cloud browsers in parallel (e.g. compare prices on 5
+   sites at once) — Layer 72 swarm + Layer 49 collective intelligence.
+6. **"Your data never leaves" mode:** sensitive tasks (banking) run in a private,
+   ephemeral sandbox that is wiped after — trust + DPDP-aligned (Layer 77).
+
+**Honesty:** the engine foundation (E2B Chromium + screenshot + CDP) already
+exists; this phase productises it into a streamed, agent-controlled, safety-gated
+in-app browser. NOTHING here ships until it is real and the safety/approval layer
+is in place first.
+
+### Progress log (append-only)
+- 2026-06-23: Added the FINAL PHASE (In-App AI Browser / UCUE applied) per admin,
+  with the no-iframe / server-browser-streaming architecture, honest blockers +
+  mitigations, the safety-gated build order, and 6 out-of-box ideas (vernacular
+  voice computer-use, do-once-learn-forever, co-pilot hand-off, live narration,
+  browser swarm, "data never leaves"). Discussion only — no UCUE code yet.

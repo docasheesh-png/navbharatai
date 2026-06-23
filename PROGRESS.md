@@ -1324,3 +1324,28 @@ in-menu views, so opening v3.0 now shows it as a header tab like every other vie
 without duplicating it in the sidebar. AppKnowledgeBase howToUse updated.
 
 Gate green: tsc frontend+server, build, 1884 vitest.
+
+---
+
+### 2026-06-23 — v3.0 session continuity: never reset on tab-switch + resume from History
+
+User: started a hospital-CRM build in v3.0, accidentally tapped another bottom-nav
+tab, came back and v3.0 was reset ("A build is already running" + empty chat). Also:
+v3.0 sessions show in History but "open chat" didn't reopen them in v3.0.
+
+Two fixes (App.tsx + AgentV3Panel.tsx):
+1. PERSISTENCE — the engine_builder (v3.0) view is now rendered whenever its header
+   tab is OPEN (openTabs), hidden with display:none when another view is active,
+   instead of being conditionally mounted on activeView. So switching tabs / mobile
+   back only HIDES it: the build keeps streaming and the chat/workspace survive. It
+   unmounts (and fully resets) ONLY when the tab's ✕ closes it (removed from
+   openTabs). This also removes the spurious "build already running" (the backend
+   build was continuing while the old client had unmounted).
+2. RESUME FROM HISTORY — resumeSession() now detects v3.0 sessions (agent 'agentv3'
+   or a v3_ id) and, instead of loading them into the regular chat, hands them to
+   AgentV3Panel via a new `resume` prop (sessionId + thread + nonce). The panel
+   adopts that sessionId (backend continues with the same workspace/memory,
+   best-effort) and restores the saved thread, then opens the v3.0 tab. "Open chat"
+   on a v3.0 history item now resumes it in v3.0.
+
+Gate green: tsc frontend, build, 1884 vitest.

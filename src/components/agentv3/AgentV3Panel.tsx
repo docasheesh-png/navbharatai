@@ -26,7 +26,7 @@ interface ChatMsg {
   streaming?: boolean;
 }
 
-export function AgentV3Panel({ userId, email }: { userId?: string; email?: string }) {
+export function AgentV3Panel({ userId, email, resume }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null }) {
   const { state, running, error, start, respond, restore, stop, reset } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   const [onlyOpus, setOnlyOpus] = useState(false);
@@ -97,6 +97,21 @@ export function AgentV3Panel({ userId, email }: { userId?: string; email?: strin
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [convo.length, state.narration, running]);
+
+  // Resume a saved v3.0 conversation opened from History ("open chat"). Adopt its
+  // sessionId so the backend continues with the SAME workspace/memory (best-effort,
+  // if still warm) and restore its saved thread into the chat. Fires on each new
+  // resume request (nonce change) — including when the panel mounts already-resumed.
+  useEffect(() => {
+    if (!resume) return;
+    sessionIdRef.current = resume.sessionId;
+    reset();
+    setUserMsgs(resume.messages.filter((m) => m.role === 'user'));
+    setAgentHistory(resume.messages.filter((m) => m.role !== 'user'));
+    setCheckpointHistory([]);
+    setFiles([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resume?.nonce]);
 
   // Persist the v3.0 conversation into NavBharatAI's MAIN History (the sidebar
   // "History" option), using the SAME chat_sessions shape as Free/Pro/SDA chats.

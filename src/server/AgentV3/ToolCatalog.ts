@@ -118,8 +118,11 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         'Statically analyse the project for real defects from the indexed code: ' +
         'unresolved local imports (which break the build), import cycles, ' +
         'front-end→back-end layering violations, plus security issues (hardcoded ' +
-        'secrets, eval, dangerouslySetInnerHTML, insecure http). Use it to check ' +
-        'your work before declaring it done, then fix what it reports.',
+        'secrets, eval, dangerouslySetInnerHTML, insecure http) and accessibility ' +
+        'issues (images with no alt text, form controls with no accessible name, ' +
+        'click handlers on non-interactive elements, positive tabindex, missing ' +
+        'document language). Use it to check your work before declaring it done, ' +
+        'then fix what it reports.',
       input_schema: {
         type: 'object',
         properties: {},

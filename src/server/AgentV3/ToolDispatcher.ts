@@ -9,6 +9,8 @@ import { analyzeArchitecture, architectureSummary } from './ArchitectureAnalysis
 import { securitySummary } from './SecurityAnalysis';
 import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
+import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
+import type { AccessibilityIssue } from './AccessibilityAnalysis';
 import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
@@ -104,6 +106,35 @@ export class ToolDispatcher {
       }
     } catch {
       /* listing failed — fall back to no authenticity issues */
+    }
+    return issues;
+  }
+
+  /**
+   * Best-effort accessibility (a11y) scan over the project's FRONT-END files.
+   * Reads real markup via the actuator and runs scanAccessibility on each (only
+   * .tsx/.jsx/.vue/.svelte/.html etc. carry a11y semantics). Wrapped so any
+   * file-access error degrades gracefully to an empty issue list — the evaluate
+   * tool still returns its other dimensions.
+   */
+  private async collectAccessibilityIssues(): Promise<AccessibilityIssue[]> {
+    const FRONTEND = /\.(tsx|jsx|vue|svelte|html?|astro)$/i;
+    const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+    const issues: AccessibilityIssue[] = [];
+    try {
+      const paths = await this.actuator.listFiles(this.workspaceId);
+      const candidates = paths.filter((p) => FRONTEND.test(p) && !SKIP.test(p)).slice(0, 200);
+      for (const p of candidates) {
+        try {
+          const content = await this.actuator.readFile(this.workspaceId, p);
+          if (content.length > 200_000) continue;
+          issues.push(...scanAccessibility(p, content));
+        } catch {
+          /* skip a single unreadable file — never break evaluate */
+        }
+      }
+    } catch {
+      /* listing failed — fall back to no accessibility issues */
     }
     return issues;
   }
@@ -341,7 +372,10 @@ export class ToolDispatcher {
         // breaks evaluate if file access fails. On any error the prior five sections
         // are still returned in full.
         const envSummary = await this.collectEnvVarSummary();
-        return `${verdict}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${depSummary}\n\n${envSummary}`;
+        // Best-effort accessibility pass — never throws, never breaks evaluate if
+        // file access fails. On any error the prior six sections are still returned.
+        const a11yIssues = await this.collectAccessibilityIssues();
+        return `${verdict}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${depSummary}\n\n${envSummary}\n\n${accessibilitySummary(a11yIssues)}`;
       }
 
       case 'update_todo': {

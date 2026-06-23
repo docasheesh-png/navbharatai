@@ -7,6 +7,8 @@ import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { analyzeArchitecture, architectureSummary } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
+import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
+import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { assessReadiness, readinessVerdict } from './Readiness';
 
 /**
@@ -69,6 +71,34 @@ export class ToolDispatcher {
     } catch {
       /* checkpointing never blocks a build */
     }
+  }
+
+  /**
+   * Best-effort authenticity/completeness scan over the project's source files.
+   * Reads real source via the actuator and runs scanAuthenticity on each. Wrapped
+   * so any file-access error degrades gracefully to an empty issue list — the
+   * evaluate tool still returns its architecture + security result.
+   */
+  private async collectAuthenticityIssues(): Promise<AuthenticityIssue[]> {
+    const SOURCE_EXT = /\.(ts|tsx|js|jsx|py|vue|svelte|go|rb|java|php)$/i;
+    const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+    const issues: AuthenticityIssue[] = [];
+    try {
+      const paths = await this.actuator.listFiles(this.workspaceId);
+      const candidates = paths.filter((p) => SOURCE_EXT.test(p) && !SKIP.test(p)).slice(0, 200);
+      for (const p of candidates) {
+        try {
+          const content = await this.actuator.readFile(this.workspaceId, p);
+          if (content.length > 200_000) continue;
+          issues.push(...scanAuthenticity(p, content));
+        } catch {
+          /* skip a single unreadable file — never break evaluate */
+        }
+      }
+    } catch {
+      /* listing failed — fall back to no authenticity issues */
+    }
+    return issues;
   }
 
   async dispatch(call: ToolUse, agent: AgentRole = 'architect'): Promise<ToolResult> {
@@ -205,7 +235,10 @@ export class ToolDispatcher {
         const archReport = analyzeArchitecture(mem.graph());
         const findings = mem.securityFindings();
         const verdict = readinessVerdict(assessReadiness(archReport, findings));
-        return `${verdict}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}`;
+        // Best-effort authenticity/completeness pass — never throws, never breaks
+        // evaluate if file access fails. On any error we fall back to no issues.
+        const issues = await this.collectAuthenticityIssues();
+        return `${verdict}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}`;
       }
 
       case 'update_todo': {

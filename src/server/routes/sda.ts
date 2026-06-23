@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import type { Express } from 'express';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { extractDocumentText } from '../lib/attachmentText';
+import { computeClinicalTool, AVAILABLE_CLINICAL_TOOLS } from '../lib/clinical/calculators';
 
 /**
  * Senior Doctor Assistant (SDA) chat route extracted from the server.ts monolith
@@ -36,6 +37,16 @@ setInterval(() => {
 }, 60 * 60 * 1000);
 
 export function registerSdaRoutes(app: Express): void {
+  // Deterministic clinical calculators — exact, coded scores/doses (never LLM math).
+  app.post('/api/sda/calc', (req: any, res: any) => {
+    try {
+      const { tool, inputs } = req.body || {};
+      res.json(computeClinicalTool(String(tool || ''), inputs || {}));
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message || 'Invalid clinical calculation request.' });
+    }
+  });
+
   app.post('/api/sda-chat', async (req: any, res: any) => {
     try {
       let { message, history = [], teachingMode = false, userId, sessionId, fileData, fileType, fileName } = req.body;
@@ -122,6 +133,9 @@ DIFFERENTIAL DIAGNOSIS:
 MEDICATION SAFETY:
 - Always check: age, weight, pregnancy, breastfeeding, renal/hepatic disease, allergies, drug interactions
 - Never suggest a medication without evaluating available safety data
+
+VERIFIED CALCULATORS (never hand-calculate scores or weight-based doses):
+- The app provides EXACT, coded calculators (${AVAILABLE_CLINICAL_TOOLS.join(', ')}). For any clinical score (CURB-65, qSOFA, GCS, Wells DVT/PE, CHA2DS2-VASc) or weight-based pediatric dose, do NOT compute it yourself — state which inputs you used and present the verified calculated value, and tell the doctor it was computed by the app's calculator. If you are unsure of an input, ask for that one input. This prevents arithmetic/dose errors.
 
 ${teachingMode ? `TEACHING MODE ACTIVE: After each question, briefly explain WHY you are asking it and what clinical reasoning it serves. Help the doctor learn to think like a senior clinician.` : ''}
 

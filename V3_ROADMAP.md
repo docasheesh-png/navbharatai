@@ -771,3 +771,475 @@ scripts, popup). Tier A. **Unlocks:** the extension-builder audience.
   Desktop (Electron/Tauri), Native Mobile (React Native/Capacitor/Flutter), and
   Browser Extension as UT-1..UT-3. Admin reviewed and DROPPED PowerShell/CMD (no
   reach gain) — kept as out-of-scope in the audit. Roadmap only — no UT code yet.
+
+---
+
+## Section I — App Builder Complete Knowledge Map (300+ points)  (admin-specified 2026-06-23)
+
+**Mandate (admin):** EVERYTHING in this list should exist in **NavBharatAI Pro v3.0**
+— real and solid. v3.0 must be able to reason about, and build apps that correctly
+apply, every one of these concerns.
+
+**HOW TO BUILD THIS (the triage rule — follow it when the build march reaches this
+section):**
+1. **AUDIT FIRST.** Before building anything here, check the REAL codebase and
+   classify each item:
+   - ✅ **SOLID** — already real & working → **IGNORE** it (do NOT rebuild; that
+     wastes credit and risks regressions — safeguard #6/#7).
+   - 🟡 **PARTIAL** — a foundation exists but it is incomplete → **COMPLETE it until
+     it is solid.**
+   - ❌ **ABSENT** — not there at all → **BUILD it real until it is solid.**
+2. **No fakes, ever.** Two states only: fully working, or honestly "not built yet".
+3. **One increment per PR**, full verification gate (tsc + vitest + boot:check +
+   build), **v3.0-only** (inside `src/server/AgentV3/` + its UI), merge on green CI.
+4. **AppKnowledgeBase sync** for every user-facing capability added.
+5. Cross-reference Sections A–H, `UCUE_V2_GAP_AUDIT.md` and the GA/UT tracks before
+   starting an item — much of this overlaps work already done or planned; don't
+   duplicate.
+
+> Note: many of these are things v3.0 must **build correctly into the USER's app**
+> (e.g. it should generate apps that have CSRF protection, pagination, empty states),
+> and many are things the v3.0 **engine itself** must do (e.g. evaluate for these,
+> generate them). The audit step decides which is which per item.
+
+### 1. ARCHITECTURE
+- Monolith vs Microservices vs Serverless
+- Layered architecture (Controller → Service → Repository)
+- Event-driven architecture
+- Domain-Driven Design (DDD)
+- CQRS (Command Query Responsibility Segregation)
+- API Gateway pattern
+- BFF (Backend for Frontend) pattern
+- Hexagonal / Clean Architecture
+- Dependency Injection
+- Design Patterns (Factory, Singleton, Observer, Strategy…)
+- Scalability planning (horizontal vs vertical)
+- Single Responsibility Principle
+- Separation of Concerns
+
+### 2. BACKEND
+- REST API design
+- GraphQL
+- tRPC
+- WebSockets / real-time
+- gRPC (for microservices)
+- Middleware pipeline
+- Request validation
+- Response serialization
+- Pagination (cursor vs offset)
+- Filtering & Sorting
+- Bulk operations
+- Batch processing
+- Background jobs / Queue (Bull, BullMQ, etc.)
+- Cron jobs / Scheduled tasks
+- Webhooks (incoming + outgoing)
+- File upload handling
+- Streaming responses
+- Server-Sent Events (SSE)
+- Long polling
+- Rate limiting
+- Throttling
+- Circuit breaker pattern
+- Retry logic with backoff
+- Timeout handling
+- Graceful shutdown
+- Health check endpoints
+
+### 3. DATABASE
+- Relational (PostgreSQL, MySQL)
+- NoSQL (MongoDB, Firestore)
+- Key-Value (Redis)
+- Time-series (InfluxDB)
+- Search (Elasticsearch, Typesense, Algolia)
+- Vector DB (Pinecone, pgvector — for AI apps)
+- Schema design & normalization
+- Indexing strategy
+- Query optimization
+- N+1 problem
+- Connection pooling
+- Migrations & versioning
+- Seeding / test data
+- Transactions & ACID
+- Optimistic vs Pessimistic locking
+- Soft delete vs Hard delete
+- Data archiving
+- Backup & Restore
+- Multi-tenancy (shared vs isolated DB)
+- Read replicas
+- Sharding
+- ORM vs Raw SQL tradeoffs
+
+### 4. SECURITY
+- Authentication (JWT, Session, OAuth2, SSO)
+- Authorization (RBAC, ABAC, ACL)
+- Password hashing (bcrypt, argon2)
+- MFA / 2FA
+- XSS prevention
+- CSRF protection
+- SQL Injection prevention
+- Input sanitization
+- Output encoding
+- CORS configuration
+- HTTP security headers (Helmet, CSP)
+- Rate limiting on auth endpoints
+- Brute force protection
+- Session management
+- Token rotation & revocation
+- API key management
+- Secret management (env vars, Vault)
+- Dependency vulnerability scanning (npm audit)
+- OWASP Top 10 awareness
+- Data encryption (at rest + in transit)
+- HTTPS / TLS
+- DDoS protection
+- Bot detection
+- Audit logs
+- Penetration testing
+
+### 5. FRONTEND
+- Component architecture
+- State management (local, global, server state)
+- Client-side routing
+- Code splitting & lazy loading
+- Bundle optimization
+- Tree shaking
+- Asset optimization (images, fonts, icons)
+- CSS architecture (BEM, CSS Modules, Tailwind, etc.)
+- Design tokens
+- Component library / Design system
+- Storybook / Component documentation
+- Cross-browser compatibility
+- Polyfills
+- Progressive Web App (PWA)
+- Service workers
+- Offline support
+- Web Vitals (LCP, FID, CLS)
+- Critical CSS
+- Font loading strategy
+- SVG vs Icon fonts vs Lucide
+
+### 6. UI (User Interface)
+- Visual hierarchy
+- Grid & layout systems
+- Typography scale
+- Color system & palette
+- Spacing system (4px/8px grid)
+- Dark mode / Light mode / System preference
+- Theming
+- Responsive design (mobile-first)
+- Breakpoints
+- Component states (default, hover, active, disabled, loading, error)
+- Empty states
+- Loading states (spinner, skeleton, shimmer)
+- Error states
+- Success states
+- Iconography consistency
+- Motion & animation principles
+- Micro-interactions
+- Transitions
+- Illustrations & imagery
+- Data visualization (charts, graphs, tables)
+- Print styles
+
+### 7. UX (User Experience)
+- User research & personas
+- User journey mapping
+- Information architecture
+- Navigation patterns (sidebar, topbar, tabs, breadcrumbs)
+- Onboarding flow
+- Progressive disclosure
+- Cognitive load reduction
+- Fitts's Law (click targets)
+- Hick's Law (fewer choices = faster decisions)
+- Error prevention vs error recovery
+- Undo / Redo
+- Autosave
+- Confirmation dialogs (destructive actions)
+- Feedback & affordances
+- Discoverability
+- Consistency & predictability
+- Keyboard shortcuts
+- Search UX & autocomplete
+- Form UX (inline validation, smart defaults)
+- Multi-step wizards / Steppers
+- Optimistic UI updates
+- Infinite scroll vs Pagination tradeoffs
+- Drag and drop
+- Context menus
+- Tooltips & Popovers
+- Toast notifications
+- Modal strategy (when to use vs not use)
+- Mobile gestures
+- Touch target sizes (44px minimum)
+
+### 8. ACCESSIBILITY (A11Y)
+- WCAG 2.1 AA compliance
+- Semantic HTML
+- ARIA labels & roles
+- Keyboard navigation (Tab order, Focus management)
+- Screen reader compatibility
+- Color contrast ratios
+- Focus visible indicators
+- Skip navigation links
+- Alt text for images
+- Captions for video/audio
+- Reduced motion (prefers-reduced-motion)
+- High contrast mode support
+- Form label associations
+
+### 9. PERFORMANCE
+- Time to First Byte (TTFB)
+- First Contentful Paint (FCP)
+- Largest Contentful Paint (LCP)
+- Time to Interactive (TTI)
+- Cumulative Layout Shift (CLS)
+- API response time optimization
+- Database query optimization
+- Caching strategy (browser, CDN, server, DB)
+- Redis / in-memory caching
+- HTTP caching headers (Cache-Control, ETag)
+- CDN setup
+- Image optimization (WebP, AVIF, lazy loading)
+- Compression (gzip, brotli)
+- Debouncing & throttling
+- Virtual lists (for large data)
+- Memoization
+- Worker threads
+- Edge computing / Edge functions
+
+### 10. TESTING
+- Unit tests
+- Integration tests
+- E2E tests (Playwright, Cypress)
+- Component tests
+- Snapshot tests
+- API tests
+- Load testing / Stress testing
+- Performance testing
+- Visual regression testing
+- Accessibility testing (axe-core)
+- Security testing
+- Test coverage metrics
+- Test data management
+- Mocking & stubbing
+- CI/CD test automation
+- TDD vs BDD
+
+### 11. DEVOPS / INFRASTRUCTURE
+- Docker & Containerization
+- Docker Compose (local dev)
+- Kubernetes (production orchestration)
+- CI/CD pipeline (GitHub Actions, Cloud Build)
+- Environment management (dev, staging, prod)
+- Infrastructure as Code (Terraform, Pulumi)
+- Cloud provider (AWS, GCP, Azure)
+- Serverless functions
+- Cloud Run / App Engine
+- Load balancing
+- Auto-scaling
+- Zero-downtime deployment
+- Blue-Green deployment
+- Canary releases
+- Feature flags
+- Rollback strategy
+- Secrets management (Secret Manager, Vault)
+- DNS management
+- SSL certificate automation
+- CDN configuration
+- Monitoring & Alerting
+- Log aggregation (Cloud Logging, Datadog, Loki)
+- Distributed tracing (OpenTelemetry)
+- Uptime monitoring
+- Status page
+- Incident management runbook
+- Disaster Recovery plan
+- Backup strategy
+
+### 12. API DESIGN
+- RESTful conventions (nouns not verbs)
+- HTTP methods semantics (GET, POST, PUT, PATCH, DELETE)
+- Status codes (200, 201, 400, 401, 403, 404, 409, 422, 429, 500)
+- Versioning strategy (v1, v2 in URL or header)
+- Consistent error response format
+- Pagination standards
+- HATEOAS (optional but good)
+- API documentation (OpenAPI/Swagger, Postman)
+- Breaking vs non-breaking changes
+- Deprecation policy
+- Idempotency (especially POST/PUT)
+- Request/Response examples
+- SDK generation from spec
+
+### 13. AUTHENTICATION & AUTHORIZATION
+- Email/Password
+- Magic link / Passwordless
+- OAuth2 / Social login (Google, GitHub, etc.)
+- SSO / SAML
+- JWT structure & validation
+- Refresh token rotation
+- Session cookies vs Bearer tokens
+- Role-Based Access Control (RBAC)
+- Permission matrices
+- Row-level security (per-user data isolation)
+- Admin vs User vs Guest roles
+- Team/Organization roles
+- Invite system
+- Account linking (multiple OAuth providers)
+- Account deletion & data export (GDPR)
+
+### 14. NOTIFICATIONS
+- In-app notifications
+- Email notifications (transactional + marketing)
+- Push notifications (web + mobile)
+- SMS
+- Notification preferences (user-controlled)
+- Notification batching
+- Real-time delivery (WebSocket/SSE)
+- Read/Unread state
+- Notification history
+
+### 15. PAYMENTS & BILLING
+- Payment gateway (Stripe, Razorpay, etc.)
+- Subscription management
+- One-time payments
+- Free trial logic
+- Freemium model
+- Seat-based pricing
+- Usage-based pricing
+- Invoice generation
+- Tax handling (GST, VAT)
+- Refunds
+- Failed payment recovery (dunning)
+- Billing portal
+- Plan upgrades/downgrades
+- Proration logic
+
+### 16. SEARCH
+- Full-text search
+- Fuzzy search
+- Filters & facets
+- Search ranking
+- Autocomplete / Typeahead
+- Search analytics (what users search)
+- Zero results handling
+- Typo tolerance
+
+### 17. FILE & MEDIA
+- File upload (single, multiple, chunked)
+- File size limits & validation
+- File type validation (server-side, not just frontend)
+- Image resizing & optimization
+- Video processing
+- Audio handling
+- CDN delivery for media
+- Signed URLs (secure access)
+- Storage providers (S3, GCS, Cloudinary)
+- Virus scanning (for user uploads)
+- File preview
+- Download tracking
+
+### 18. INTERNATIONALIZATION (i18n)
+- Multi-language support
+- Translation management
+- RTL (Right-to-Left) layout support
+- Date/Time formatting per locale
+- Currency formatting
+- Number formatting
+- Pluralization rules
+- Content negotiation (Accept-Language header)
+- Dynamic language switching
+
+### 19. SEO
+- Meta tags (title, description, OG tags)
+- Canonical URLs
+- Structured data (JSON-LD)
+- Sitemap generation
+- robots.txt
+- Server-side rendering vs CSR tradeoffs
+- Dynamic meta per page
+- URL structure best practices
+- Core Web Vitals impact on SEO
+- Image alt text
+
+### 20. ANALYTICS & TRACKING
+- Page views & sessions
+- User behavior (heatmaps, session recordings)
+- Funnel analysis
+- Retention metrics
+- Feature usage tracking
+- Error tracking (Sentry)
+- Custom events
+- A/B testing infrastructure
+- Privacy-compliant analytics (GDPR)
+- Cookie consent banner
+
+### 21. ADMIN & OPERATIONS
+- Admin panel / Dashboard
+- User management (search, ban, impersonate)
+- Data export (CSV, JSON)
+- Bulk operations
+- Feature flags per user/org
+- System health dashboard
+- Build metrics
+- Cost monitoring
+- Usage limits enforcement
+- Manual override capabilities
+
+### 22. DEVELOPER EXPERIENCE (DX)
+- Local dev setup (one command: npm run dev)
+- Hot Module Replacement (HMR)
+- Type safety (TypeScript)
+- Linting (ESLint) + Formatting (Prettier)
+- Pre-commit hooks (Husky)
+- Environment variable management (.env)
+- Seed scripts
+- Database reset scripts
+- Mock server for frontend dev
+- API documentation
+- Code generation (from schema)
+- Monorepo vs Polyrepo tradeoffs
+- Shared packages / internal libraries
+
+### 23. LEGAL & COMPLIANCE
+- Privacy Policy
+- Terms of Service
+- Cookie Policy
+- GDPR compliance (EU users)
+- Data residency requirements
+- Right to erasure (delete user data)
+- Data export (portability)
+- Age verification (COPPA if under 13)
+- Accessibility compliance (ADA, EN 301 549)
+- SOC 2 (if enterprise)
+- PCI DSS (if handling card data)
+
+### 24. BUSINESS LOGIC
+- Idempotency in critical operations
+- Concurrency handling (two users editing same record)
+- Optimistic locking
+- Eventual consistency handling
+- Workflow / State machine design
+- Business rule engine
+- Audit trail (who did what when)
+- Data integrity constraints
+- Cascading effects (delete user → delete related data)
+- Soft launch / dark launch strategy
+
+### 25. DOCUMENTATION
+- README (setup, run, deploy)
+- Architecture Decision Records (ADR)
+- API docs (Swagger/Postman)
+- Component docs (Storybook)
+- Runbook (ops procedures)
+- Onboarding guide (for new developers)
+- Changelog (user-facing)
+- Release notes
+- In-app help / FAQ
+
+### Progress log (append-only)
+- 2026-06-23: Added Section I (App Builder Complete Knowledge Map, 25 categories /
+  300+ points) per admin, with the mandate that ALL of it should exist in v3.0 and
+  the explicit triage build-rule: audit first → IGNORE what's solid, COMPLETE what's
+  partial, BUILD what's absent — never faked, one PR per increment, v3.0-only. To be
+  executed when the build march reaches this section; cross-reference Sections A–H +
+  `UCUE_V2_GAP_AUDIT.md` to avoid duplicating work already done/planned. Roadmap only.

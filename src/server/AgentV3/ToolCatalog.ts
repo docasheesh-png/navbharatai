@@ -173,6 +173,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         },
       },
     },
+    {
+      name: 'generate_env_example',
+      description:
+        'Generate or update .env.example listing every environment variable the code ' +
+        'actually references (process.env.X / import.meta.env.X). Existing documented ' +
+        'values are preserved. Use this so the app is runnable by others — the classic ' +
+        '"works on my machine" gap. Writes the result to .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Optional output path (defaults to .env.example).' },
+        },
+      },
+    },
   ];
 }
 
@@ -189,6 +203,7 @@ export const CATALOG_TOOL_NAMES = [
   'recall',
   'evaluate',
   'generate_readme',
+  'generate_env_example',
 ] as const;
 
 /**

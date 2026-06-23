@@ -21,6 +21,7 @@ export type ToolName =
   | 'recall'
   | 'evaluate'
   | 'generate_readme'
+  | 'generate_env_example'
   | 'task'
   | 'second_opinion'
   | 'consensus';

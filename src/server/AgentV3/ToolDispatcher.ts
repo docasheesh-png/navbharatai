@@ -24,6 +24,7 @@ import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict } from './Readiness';
+import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
 
@@ -460,6 +461,11 @@ export class ToolDispatcher {
           medium: complianceIssues.filter((x) => x.severity === ('medium' as ComplianceSeverity)).length,
           low: complianceIssues.filter((x) => x.severity === ('low' as ComplianceSeverity)).length,
         };
+        // Best-effort test-coverage pass (Phase 6 — Testing & Autonomous Loops):
+        // a PURE read of the project graph, so it never throws and never breaks
+        // evaluate. Surfaces which modules/components have no test so the agent
+        // closes the plan → build → TEST → validate loop instead of assuming.
+        const testCoverage = analyzeTestCoverage(mem.graph());
         const confidence = computeBuildConfidence({
           readinessScore: readiness.score,
           ready: readiness.ready,
@@ -478,7 +484,7 @@ export class ToolDispatcher {
           accessibility: tally(a11yIssues),
           compliance: complianceTally,
         });
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}`;
       }
 
       case 'update_todo': {

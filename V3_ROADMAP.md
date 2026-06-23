@@ -202,6 +202,15 @@ Every phase is graded against these, because they are what makes the difference:
   E2B sandbox + project memory + git repo instead of a fresh one each time. The
   panel generates a stable sessionId and adds a "New" button to start a fresh
   project. 1665 tests green (+4).
+- 2026-06-23: Phase 6.1 (Testing & Autonomous Loops) — test-coverage intelligence.
+  New `AgentV3/TestCoverageAnalysis.ts`: a PURE, deterministic read of the project
+  graph that reports which source modules/components have NO test (coverage credited
+  generously — co-located test files AND anything a test file imports count — so a
+  real test suite is never nagged). Folded into the `evaluate` tool as a 9th
+  dimension and the Architect/qa prompt now writes the missing tests and re-evaluates,
+  closing the plan→build→TEST→validate loop. v3.0-only (AgentV3 has zero live-path
+  imports, flag OFF). AppKnowledgeBase agentv3 entry synced. Gate green: server+frontend
+  tsc 0, 1895 vitest (+11), build, boot:check PASS.
 - 2026-06-23: Provider diagnosis — GET /api/agentv3/diag reports (no secrets)
   whether ANTHROPIC_API_KEY is a real sk-ant key, plus base-url config; optional
   admin-gated ?test=1 makes one real Claude call and returns the exact outcome.

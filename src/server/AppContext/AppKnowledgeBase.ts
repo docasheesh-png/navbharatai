@@ -47,6 +47,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • MERGED SURFACES from one live stream: file explorer, Code Studio diffs (red/green), terminal, git/history checkpoints, todos and plan — all in sync, zero drift.
 • HYBRID sandbox: a fast E2B cloud sandbox initialised as a real Git repo you own.
 • ITERATIVE sessions: each message continues the SAME project (same sandbox, files and memory), so you can refine step by step ("add a login page" after "build a todo app"). Use the "New" button to start a fresh project.
+• BUILDS IN YOUR LANGUAGE (Layer 73 — Universal Language): write your request in any language — all 22 Indian languages (Hindi, Tamil, Bengali, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Odia, Urdu and more) or major world languages — and the app's user-facing text (labels, buttons, headings, placeholders, messages) is generated in THAT language, while the code stays in English. Apni bhasha mein likho, app usi bhasha mein banega.
 • HONEST billing: you are charged the Claude Opus-equivalent token cost × 2.5 (or × 5 in Only-Opus mode); a live cost estimate is shown.`,
     howToUse: 'Click the floating "v3.0" button (bottom-right), type what you want to build, and press Build. Watch the AI Team panel and the live Files / Diff / Terminal / History surfaces. Toggle "Only Opus" for maximum capability (5× cost). Press Stop to cancel.',
     relatedFeatures: ['engineer_ai', 'pro_chat', 'history', 'settings_secrets'],
@@ -64,6 +65,8 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'env var', 'environment variable', '.env', '.env.example',
       'second opinion', 'cross model', 'ensemble', 'independent review',
       'consensus', 'panel', 'collective intelligence', 'multiple perspectives',
+      'hindi', 'tamil', 'bengali', 'apni bhasha', 'language', 'multilingual',
+      'regional language', 'bhasha', 'build in my language', 'app in hindi',
     ],
   },
   // ─── ENGINEER AI ─────────────────────────────────────────────────────────

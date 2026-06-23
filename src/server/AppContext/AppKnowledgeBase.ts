@@ -214,6 +214,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['ca', 'tax', 'gst', 'income tax', 'itr', 'tds', 'accountant', 'bookkeeping', 'accounts', '80c', 'audit', 'compliance', 'msme'],
   },
 
+  // ─── LAWYER / LEGAL ──────────────────────────────────────────────────────
+  {
+    id: 'lawyer_ai',
+    name: 'Lawyer / Legal Assistant',
+    path: 'Sidebar → Professionals → Lawyer / Legal',
+    description: 'General legal-INFORMATION assistant for Indian law: explains rights & processes (consumer, tenancy, employment, contracts, cheque bounce, FIR, RTI), helps understand a notice/contract clause, drafts templates (legal notice, RTI, complaint, rent agreement, affidavit), and explains how to file an FIR/consumer complaint/RTI. NOT legal advice and NOT a lawyer-client relationship — Indian laws change & vary by state/forum (e.g. IPC→BNS), so it never cites a section/case as definitive and tells you to verify and consult an advocate; drafts must be lawyer-vetted.',
+    howToUse: 'Open Sidebar → Professionals → Lawyer / Legal and ask: "explain my consumer rights", "draft a legal notice", "how to file an RTI", "explain this clause".',
+    relatedFeatures: ['professionals'],
+    aiSurface: 'lawyer_ai',
+    keywords: ['lawyer', 'legal', 'law', 'advocate', 'notice', 'rti', 'fir', 'consumer', 'contract', 'agreement', 'rights', 'kanoon'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

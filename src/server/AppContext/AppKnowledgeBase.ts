@@ -669,6 +669,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['productivity', 'time management', 'focus', 'procrastination', 'planning', 'habits', 'routine', 'pomodoro', 'study plan', 'time table', 'distraction', 'samay', 'goals', 'discipline'],
   },
 
+  // ─── RELATIONSHIP & COMMUNICATION AI ─────────────────────────────────────
+  {
+    id: 'relationship_ai',
+    name: 'Relationship & Communication AI',
+    path: 'Sidebar → Professionals → Relationship & Communication',
+    description: 'Warm, balanced, non-judgemental companion for navigating relationships (partner/marriage, family & in-laws, friends, workplace): communication (expressing needs with "I" statements, active listening, calm conflict resolution & de-escalation), understanding & empathy (perspective-taking, managing expectations, rebuilding trust, healthy boundaries), common situations (couple friction, family pressure, long-distance, workplace tension), what healthy vs unhealthy/abusive patterns look like, and self-reflection. Safety-first (sensitive): general support & perspective (hears only one side) NOT therapy/counselling/legal/medical advice — routes ongoing distress/therapy to a counsellor & the Wellness AI, legal (divorce/custody/dowry/DV law) to the Lawyer AI; on any abuse/violence/danger prioritises safety with India helplines (Women Helpline 181, Police 112, Tele-MANAS 14416), never tells anyone to "tolerate" abuse and never blames the victim; stays neutral (no taking sides/revenge/controlling behaviour), respects culture/values/autonomy & all genders/relationships; never fabricates psychology claims or guarantees outcomes.',
+    howToUse: 'Open Sidebar → Professionals → Relationship & Communication and ask: "communicate better with my partner", "handle family/in-law pressure", "we keep having the same fight", "set healthy boundaries". For therapy see a counsellor/Wellness AI; for legal use the Lawyer AI; for abuse/danger call 181/112.',
+    relatedFeatures: ['professionals', 'wellness_ai', 'lawyer_ai'],
+    aiSurface: 'relationship_ai',
+    keywords: ['relationship', 'marriage', 'partner', 'family', 'communication', 'conflict', 'in laws', 'rishta', 'couple', 'breakup', 'trust', 'boundaries', 'pyar', 'shaadi'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

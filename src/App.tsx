@@ -5441,6 +5441,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'fitness_ai') toggleTab('fitness_ai');
               else if (id === 'vet_ai') toggleTab('vet_ai');
               else if (id === 'parenting_ai') toggleTab('parenting_ai');
+              else if (id === 'cybersafety_ai') toggleTab('cybersafety_ai');
             }} />
           )}
 
@@ -5513,6 +5514,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'parenting_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.parenting_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'cybersafety_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.cybersafety_ai} userId={user?.uid} />
             </div>
           )}
 

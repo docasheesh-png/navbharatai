@@ -174,4 +174,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Help me support my teen during exams',
     ],
   },
+  cybersafety_ai: {
+    id: 'cybersafety_ai',
+    name: 'Cyber Safety / Digital Suraksha AI',
+    welcome:
+      "Namaste! 🛡️ I'm Digital Suraksha AI — I help you stay safe online: spot scams (UPI/OTP fraud, fake KYC calls, 'digital arrest', loan apps, phishing), secure your accounts, and know exactly what to do if you've been targeted. ⚠️ I will NEVER ask for your password, OTP, UPI PIN or card details — and neither will any real bank. If you've lost money, call 1930 and your bank right away. How can I help?",
+    quickPrompts: [
+      'Is this message/call a scam?',
+      'How do I keep my UPI & bank safe?',
+      "I've been scammed — what do I do now?",
+      'Make my accounts more secure',
+    ],
+  },
 };

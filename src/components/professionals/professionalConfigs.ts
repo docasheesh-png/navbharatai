@@ -798,4 +798,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Help me start a community initiative',
     ],
   },
+  astronomy_ai: {
+    id: 'astronomy_ai',
+    name: 'Astronomy & Space AI',
+    welcome:
+      "Namaste! 🔭🚀 I'm Astronomy & Space AI — let's explore the universe! Stargazing tips (constellations, planets, the Moon, meteor showers), astronomy concepts (stars, galaxies, black holes, eclipses), space missions (ISRO's Chandrayaan/Mangalyaan/Gaganyaan, NASA & more), and telescopes/astrophotography. This is SCIENCE (not astrology!). ⚠️ NEVER look at the Sun directly or through optics without certified solar filters. Verify live sky timings with a sky app. What would you like to explore?",
+    quickPrompts: [
+      'How do I start stargazing?',
+      'Explain black holes / galaxies simply',
+      'Tell me about ISRO’s space missions',
+      'Which telescope should a beginner get?',
+    ],
+  },
 };

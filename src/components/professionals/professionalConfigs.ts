@@ -378,4 +378,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Make me a daily practice routine',
     ],
   },
+  sports_ai: {
+    id: 'sports_ai',
+    name: 'Sports & Cricket Coaching AI',
+    welcome:
+      "Namaste! 🏏 I'm Sports Coach AI — strong on cricket (batting, bowling, fielding, strategy) and ready to help with football, badminton, kabaddi, athletics & more: technique, drills (even solo/at-home), sport fitness & mindset. Tell me your sport, level & goal. ⚠️ Coaching guidance only — always warm up & wear protective gear, never play through sharp pain (see a physio), and a coach/academy helps for serious growth.",
+    quickPrompts: [
+      'Improve my cricket batting technique',
+      'Bowling drills for line & length',
+      'Solo practice drills at home',
+      'Sport fitness & agility plan',
+    ],
+  },
 };

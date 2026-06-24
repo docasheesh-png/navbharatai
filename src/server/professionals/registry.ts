@@ -30,6 +30,7 @@ import { DRIVING_AI } from './configs/driving';
 import { PETCARE_AI } from './configs/petcare';
 import { BEAUTY_AI } from './configs/beauty';
 import { MUSIC_AI } from './configs/music';
+import { SPORTS_AI } from './configs/sports';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -71,6 +72,7 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [PETCARE_AI.id]: PETCARE_AI,
   [BEAUTY_AI.id]: BEAUTY_AI,
   [MUSIC_AI.id]: MUSIC_AI,
+  [SPORTS_AI.id]: SPORTS_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

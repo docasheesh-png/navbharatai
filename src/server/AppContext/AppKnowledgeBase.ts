@@ -549,6 +549,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['music', 'instrument', 'guitar', 'keyboard', 'piano', 'harmonium', 'tabla', 'singing', 'vocal', 'riyaaz', 'sargam', 'raag', 'sangeet', 'gaana', 'taal'],
   },
 
+  // ─── SPORTS & CRICKET COACHING AI ────────────────────────────────────────
+  {
+    id: 'sports_ai',
+    name: 'Sports & Cricket Coaching AI',
+    path: 'Sidebar → Professionals → Sports & Cricket Coaching',
+    description: 'Encouraging sports coach with cricket depth (batting: stance/grip/footwork/shot selection/playing spin & pace; bowling: run-up/action/line & length/spin & seam; fielding/keeping; strategy) plus general coaching for football, badminton, kabaddi, athletics & more — technique, structured & solo/at-home drills, sport-specific conditioning (agility/speed/stamina/strength/flexibility, warm-up/cool-down), and mindset (pressure, focus, consistency). Safety-first: coaching guidance NOT medical/physio advice — always warm up & use protective gear, never play through sharp pain (rest + doctor/physio), age-appropriate workloads (e.g. limit young fast-bowling overs), learn high-load techniques under a qualified coach; routes gym/strength to Fitness AI and diet to Nutritionist AI; realistic (no "become a pro fast"); never fabricates official rules/records/selection — confirm with the association.',
+    howToUse: 'Open Sidebar → Professionals → Sports & Cricket Coaching and ask: "improve my batting technique", "bowling drills for line & length", "solo practice drills at home", "sport fitness & agility plan". For injuries see a doctor/physio; for serious growth join a coach/academy.',
+    relatedFeatures: ['professionals', 'fitness_ai', 'nutritionist_ai'],
+    aiSurface: 'sports_ai',
+    keywords: ['sports', 'cricket', 'batting', 'bowling', 'fielding', 'football', 'badminton', 'kabaddi', 'athletics', 'coach', 'training', 'khel', 'practice', 'fitness', 'drills'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

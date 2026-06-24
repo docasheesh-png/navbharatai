@@ -1869,3 +1869,35 @@ Strangler-fig isolation preserved (imports only ClaudeClient types). 21 new test
 and every Claude tier is addressable. Next: P2 analyser/router.
 
 Gate green: server+frontend tsc 0, **2134 vitest** (+21), boot:check PASS.
+
+---
+
+### 2026-06-24 — Multi-Model Orchestration: Phase 2 — Request Analyser (the router brain)
+
+**Phase 2 built (REAL + tested, OFF default, billing-neutral):** `AgentV3/RequestAnalyser.ts`
+(PURE) — `analyzeRequest({prompt, historyTurns?, fileCount?, hasImages?})` returns
+`{complexityScore 0-100, taskType, startTier, escalationPath, ambiguous, reasoning}`.
+
+Deterministic, hybrid by design: the deterministic core handles the clean ~90% (fast, free,
+debuggable); it flags borderline scores `ambiguous:true` so a caller MAY refine with a cheap
+LLM later (deterministic verdict is always a safe default). Scoring:
+- task-type via keyword signals → base score; +adjustments for code present, long prompt,
+  large project (file count), production/security/perf signals, long conversation.
+- Score → tier: 0-20 Gemini, 21-40 Haiku, 41-70 Sonnet, 71-100 Opus. escalationPath = startTier…opus.
+- **Bias cheap (the goal):** simple_app (calculator/clock/ludo/3D-ball/todo/dice/quiz/…) is
+  CAPPED ≤20 → Gemini even with extra words — so a new user's calculator routes to the cheapest
+  tier; the evaluate-gate (P3) is the safety net that escalates only on objective failure.
+  Small coding → Haiku, full/complex apps (saas/auth/db/payment) → Sonnet, architecture → Opus.
+
+13 tests (chat/translate/simple-app/coding/complex/architecture + adjustments + escalation path
++ ambiguity + safe empty-input handling).
+
+**Also (admin Q this turn):** Power-mode effort selector — when POWER is ticked, a 5x/10x/20x
+selector near the chat input maps to Opus 4.8 effort mini/medium/max (effort = thinking budget →
+higher effort = genuinely higher cost → honest multipliers). Confirmed feasible; folded into the
+plan as a P4 enhancement (design doc §11.1). The 10x/20x are NEW billing multipliers → gated on
+explicit admin sign-off (with P5). Not built yet.
+
+Next: P3 — evaluate-gated escalation orchestrator (start at analyser tier → build → 22-dim
+evaluate-gate → deliver or escalate +1, budget-capped). Gate green: server+frontend tsc 0,
+**2147 vitest** (+13), boot:check PASS.

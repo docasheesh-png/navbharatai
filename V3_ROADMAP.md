@@ -258,6 +258,17 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Multi-Model Orchestration P1+P2 — Gemini/Vertex tool-use runner (P1, merged
+  #326: GeminiToolAdapter/GeminiToolRunner + full ladder model-ids haiku/sonnet/opus-4.7/
+  opus-4.8) and the Request ANALYSER (P2). New `AgentV3/RequestAnalyser.ts` (PURE): the cost-
+  ladder brain — deterministic complexity scoring (0-100) + task-type detection → cheapest
+  START tier (Gemini→Haiku→Sonnet→Opus) + escalation path. Bias cheap: simple apps
+  (calculator/clock/ludo/3D-ball/todo) are capped ≤20 → Gemini (the new-user case), small
+  coding → Haiku, full/complex apps → Sonnet, architecture → Opus; production/security/
+  large-project signals push up. Marks borderline scores `ambiguous` for optional LLM refine.
+  13 tests. Off-default + billing-neutral. Power-mode effort selector (5x/10x/20x → Opus 4.8
+  mini/medium/max) folded into the plan as a P4 enhancement (design doc §11.1, billing
+  sign-off pending). Gate green: server+frontend tsc 0, 2147 vitest (+13), boot:check PASS.
 - 2026-06-24: Section I #4 v9 (Security) — new Function() dynamic code. Added a
   `dynamic-function` rule (medium) to `SecurityAnalysis`: `new Function('…')` builds code from
   a string at runtime — eval()'s twin (code injection) — but the eval-usage rule only matched

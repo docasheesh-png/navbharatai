@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -31,6 +31,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'vastu_ai', label: 'Vastu Consultant', description: 'Traditional Vastu directions & room placement, plus simple free ways to add light, air & calm — cultural belief, not science. No fear, no paid remedies; architect first.', icon: LayoutGrid, active: true },
   { id: 'yoga_ai', label: 'Yoga & Meditation', description: 'Beginner asanas & Surya Namaskar, gentle pranayama, and meditation for calm, focus & sleep — general practice guidance (not medical; check with a doctor, never push pain).', icon: Flower2, active: true },
   { id: 'english_ai', label: 'Spoken English / Tutor', description: 'Conversation practice, gentle grammar & vocab fixes, writing (emails/essays), interview & IELTS-style prep — a patient tutor for every level. Practice builds fluency.', icon: Languages, active: true },
+  { id: 'resume_ai', label: 'Resume & Job Application', description: 'Strong resume/CV bullet points, ATS-friendly formatting, tailored cover letters & LinkedIn — presents YOUR real experience well. Never invents qualifications; no scams.', icon: FileText, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

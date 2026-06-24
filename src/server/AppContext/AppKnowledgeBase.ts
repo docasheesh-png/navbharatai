@@ -427,6 +427,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['english', 'spoken english', 'grammar', 'vocabulary', 'fluency', 'language', 'tutor', 'ielts', 'toefl', 'interview english', 'angrezi', 'speaking', 'writing', 'translate'],
   },
 
+  // ─── RESUME & JOB-APPLICATION AI ─────────────────────────────────────────
+  {
+    id: 'resume_ai',
+    name: 'Resume & Job-Application AI',
+    path: 'Sidebar → Professionals → Resume & Job Application',
+    description: 'Career-documents specialist for Indian job seekers (freshers to experienced): resume/CV structure & strong achievement bullet points (action verb + measurable impact), ATS-friendly formatting & keyword matching, tailored cover letters & application emails, LinkedIn headline/About, and application strategy (reading a JD, transferable skills, gaps). Works on the user’s OWN real content. Safety-first: NEVER fabricates qualifications/experience/dates/numbers (lying risks the job); helps phrase gaps/career-changes honestly; does not guarantee interviews/jobs/salaries; warns about job scams (no genuine employer asks for money/OTP/bank details — see Cyber Safety AI); follow each employer’s official instructions.',
+    howToUse: 'Open Sidebar → Professionals → Resume & Job Application and ask: "review & improve my resume", "make it ATS-friendly for this job", "write a cover letter for this role", "turn my duties into strong bullet points". Paste your real experience or current resume + the target job.',
+    relatedFeatures: ['professionals', 'mentor_ai', 'english_ai', 'cybersafety_ai'],
+    aiSurface: 'resume_ai',
+    keywords: ['resume', 'cv', 'biodata', 'cover letter', 'job application', 'ats', 'linkedin', 'job', 'interview', 'naukri', 'apply', 'fresher', 'curriculum vitae', 'bullet points'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

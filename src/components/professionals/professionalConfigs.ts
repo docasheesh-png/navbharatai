@@ -258,4 +258,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Run a mock interview with me',
     ],
   },
+  resume_ai: {
+    id: 'resume_ai',
+    name: 'Resume & Job-Application AI',
+    welcome:
+      "Hi! 📄 I'm Resume AI — I'll help you build a strong, honest resume that gets noticed: better bullet points, ATS-friendly formatting, tailored cover letters and LinkedIn. Share your real experience (or paste your current resume + the job you want) and we'll make it shine. I never invent qualifications — we present YOUR truth, powerfully. Where shall we start?",
+    quickPrompts: [
+      'Review & improve my resume',
+      'Make my resume ATS-friendly for this job',
+      'Write a cover letter for this role',
+      'Turn my duties into strong bullet points',
+    ],
+  },
 };

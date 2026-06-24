@@ -87,6 +87,16 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'if (el.innerHTML === "x") {}').some((f) => f.rule === 'unsafe-html-sink')).toBe(false);
   });
 
+  it('flags SQL built from interpolation/concatenation but not parameterised queries', () => {
+    expect(scanSecurity('a.ts', 'db.query(`SELECT * FROM users WHERE id = ${id}`);').some((f) => f.rule === 'sql-injection')).toBe(true);
+    expect(scanSecurity('a.ts', 'await db.query("SELECT * FROM users WHERE name = " + name);').some((f) => f.rule === 'sql-injection')).toBe(true);
+    expect(scanSecurity('a.ts', 'conn.execute(`UPDATE accounts SET bal=${b} WHERE id=${id}`);').some((f) => f.rule === 'sql-injection')).toBe(true);
+    // Safe: a parameterised query, a static query, and a literal+literal join are not flagged.
+    expect(scanSecurity('a.ts', 'db.query("SELECT * FROM users WHERE id = ?", [id]);').some((f) => f.rule === 'sql-injection')).toBe(false);
+    expect(scanSecurity('a.ts', 'db.query(`SELECT * FROM users`);').some((f) => f.rule === 'sql-injection')).toBe(false);
+    expect(scanSecurity('a.ts', 'db.query("SELECT id FROM " + "users");').some((f) => f.rule === 'sql-injection')).toBe(false);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

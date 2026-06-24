@@ -2009,3 +2009,24 @@ Fixes in this PR:
    it, AgentV3Panel renders `₹{billedInr}` (falls back to $ if INR absent). Reducer test covers it.
 
 Gate green: server+frontend tsc 0, **2170 vitest**, **npm run build PASS**, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 v11: SQL-injection detection (security)
+
+Resumed the autonomous Section I march. New item: `SecurityAnalysis` `sql-injection` rule
+(high). A SQL statement built by interpolating (`` `SELECT … ${x}` ``) or concatenating
+(`"SELECT … " + x`) a value straight into the query string is the classic SQL-injection
+vector — and nothing in the evaluate engine caught it before (command-injection covers shell
+sinks; SecurityConfigAnalysis covers TLS/CORS/randomness; none cover SQL). High-precision: the
+string must actually START with a SQL verb (SELECT/INSERT/UPDATE/DELETE) AND contain a template
+`${…}` or be concatenated with a non-literal — so parameterised queries
+(`query('… WHERE id = ?', [id])`), static queries, and literal+literal joins are NOT flagged.
+Redundant-work check (safeguard #6) first caught an almost-added duplicate TLS rule — reverted
+it (SecurityConfigAnalysis already has `tls-verification-disabled`) and built the genuinely-new
+SQL rule instead. Folds into the existing security dimension. AppKnowledgeBase synced. v3.0-only,
+flag-OFF.
+
+Tests: +1 unit (interpolation/concat flagged; parameterised/static/literal-join safe) + 1
+dispatcher integration. Gate green: server+frontend tsc 0, **2172 vitest** (+2), build PASS,
+boot:check PASS.

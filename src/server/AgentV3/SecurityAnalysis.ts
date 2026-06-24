@@ -112,6 +112,18 @@ const RULES: Rule[] = [
     ignore: (_m, line) => /\.(?:inner|outer)HTML\s*=\s*(['"`])\s*\1/.test(line),
   },
   {
+    rule: 'sql-injection',
+    severity: 'high',
+    // A SQL statement built by interpolating/concatenating a value straight into the
+    // query string — the classic SQL-injection vector. High-precision: the string must
+    // actually start with a SQL verb (SELECT/INSERT/UPDATE/DELETE) AND contain a
+    // template `${…}` interpolation, OR be concatenated with a non-literal (`"…" + x`).
+    // Parameterised queries (`query('… WHERE id = ?', [id])`) have no `${`/`+ var`, so
+    // they are not flagged. `(?!['"])` after `+` excludes safe literal+literal joins.
+    re: /`\s*(?:SELECT|INSERT|UPDATE|DELETE)\b[^`]*\$\{|['"]\s*(?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*['"]\s*\+\s*(?!['"])\S/i,
+    message: 'SQL query built from interpolated/concatenated input — this enables SQL injection; use parameterised queries (placeholders + a values array) instead.',
+  },
+  {
     rule: 'insecure-http',
     severity: 'low',
     re: /['"`]http:\/\/(?!localhost|127\.0\.0\.1)[^'"`]+['"`]/,

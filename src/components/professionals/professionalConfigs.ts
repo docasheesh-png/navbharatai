@@ -462,4 +462,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Scholarships & education-loan basics',
     ],
   },
+  disability_ai: {
+    id: 'disability_ai',
+    name: 'Disability & Accessibility Support AI',
+    welcome:
+      "Namaste 🙏 I'm Disability & Accessibility Support AI — here with respect and information for persons with disabilities and their families: rights (RPwD Act), schemes & benefits (UDID, ADIP, pensions, scholarships), assistive technology & accessibility, daily living & inclusion, and caregiver support. Tell me what you need. ⚠️ General info & support, not medical/legal/official advice — verify schemes/rights on official sources, and beware bribe/OTP scams around certificates & benefits.",
+    quickPrompts: [
+      'My rights under the RPwD Act',
+      'Schemes & benefits I may be eligible for',
+      'Assistive technology for my needs',
+      'Accommodations at school/work',
+    ],
+  },
 };

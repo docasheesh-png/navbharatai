@@ -258,6 +258,17 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Multi-Model Orchestration P3 — evaluate-gated escalation orchestrator. New
+  `AgentV3/EscalationOrchestrator.ts` (PURE policy): `runWithEscalation(path, deps)` builds on
+  the cheapest tier, runs the OBJECTIVE evaluate-gate, and climbs the path ONLY on failure —
+  gate PASS → deliver (cheap win), gate FAIL or build-throw → escalate +1, the LAST tier (Opus)
+  is the ceiling BACKSTOP delivered best-effort (build never "breaks"). Budget cap (maxTiers) +
+  gate-crash resilience (a gate that throws never blocks delivery). build/gate are INJECTED so
+  the policy is fully unit-tested (7 tests) without a live model/sandbox; wiring to the real
+  AgentRunner + evaluate happens at P8 behind the rollout flag. Off-default + billing-neutral.
+  Gate green: server+frontend tsc 0, 2154 vitest (+7), boot:check PASS. (Billing model P5 spec
+  received from admin — Normal: Sonnet-equiv ×2, ×5 if Opus escalated; Power: real Opus 4.8 ×5
+  — pending final 2-point confirm before pricing.ts changes.)
 - 2026-06-24: Multi-Model Orchestration P1+P2 — Gemini/Vertex tool-use runner (P1, merged
   #326: GeminiToolAdapter/GeminiToolRunner + full ladder model-ids haiku/sonnet/opus-4.7/
   opus-4.8) and the Request ANALYSER (P2). New `AgentV3/RequestAnalyser.ts` (PURE): the cost-

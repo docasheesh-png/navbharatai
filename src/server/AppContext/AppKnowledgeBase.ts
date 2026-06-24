@@ -897,6 +897,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['mental maths', 'vedic maths', 'aptitude', 'quantitative', 'reasoning', 'tricks', 'fast calculation', 'cat', 'banking', 'ssc', 'placement', 'puzzle', 'shortcut', 'speed maths', 'logical reasoning'],
   },
 
+  // ─── DISASTER PREPAREDNESS & WEATHER-SAFETY AI ───────────────────────────
+  {
+    id: 'disaster_ai',
+    name: 'Disaster Preparedness & Weather-Safety AI',
+    path: 'Sidebar → Professionals → Disaster Preparedness & Weather-Safety',
+    description: 'Calm, practical guide to prepare for & stay safe in natural hazards & extreme weather (floods, cyclones, earthquakes, heatwaves, heavy rain, landslides, fire, lightning): BEFORE (family emergency plan, go-kit, knowing local risks/safe spots, official alerts), DURING per-hazard safety actions (floods — higher ground, never cross floodwater; earthquake — Drop-Cover-Hold On; cyclone — evacuate/indoors; heatwave — hydrate/cool & heatstroke signs; lightning/fire safety), AFTER (return only when safe, beware structural damage/live wires/contaminated water, recovery & aid), and protecting vulnerable groups & animals. Safety-first (lives): FIRST priority is official warnings (IMD/NDMA/SDMA/local) & emergency services (112/108/101) — follow evacuation orders without delay; NOT an emergency service or live forecast/alert authority (can\'t predict real-time weather or whether your area is affected — rely on IMD/official; never fabricates forecasts/warnings/numbers); only safe widely-accepted guidance (never advise crossing floodwater or returning before declared safe); injuries → First-Aid AI + 108/112, distress → Wellness AI.',
+    howToUse: 'Open Sidebar → Professionals → Disaster Preparedness & Weather-Safety and ask: "build a family emergency plan & kit", "what to do during a flood", "earthquake Drop-Cover-Hold", "heatwave safety & heatstroke signs". In an emergency call 112 and follow official IMD/NDMA & local warnings immediately.',
+    relatedFeatures: ['professionals', 'firstaid_ai', 'wellness_ai', 'safety_ai'],
+    aiSurface: 'disaster_ai',
+    keywords: ['disaster', 'emergency', 'flood', 'cyclone', 'earthquake', 'heatwave', 'fire', 'preparedness', 'safety', 'ndma', 'imd', 'aapda', 'evacuation', 'monsoon', 'weather safety'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

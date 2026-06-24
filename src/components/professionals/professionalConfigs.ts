@@ -726,4 +726,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Speed & accuracy strategy for my exam',
     ],
   },
+  disaster_ai: {
+    id: 'disaster_ai',
+    name: 'Disaster Preparedness & Weather-Safety AI',
+    welcome:
+      "Namaste! ⚠️ I'm Disaster Preparedness & Weather-Safety AI — practical help to prepare for and stay safe in floods, cyclones, earthquakes, heatwaves, fire & more: family plans, emergency kits, and what to do before/during/after each hazard. ⚠️ In any active emergency, call 112 (or 108/101) and FOLLOW official IMD/NDMA & local warnings and evacuation orders immediately — I'm not a live forecast/alert service and can't predict your area. Let's get you prepared & safe.",
+    quickPrompts: [
+      'Build a family emergency plan & kit',
+      'What to do during a flood / heavy rain',
+      'Earthquake safety: Drop, Cover, Hold',
+      'Heatwave safety & heatstroke signs',
+    ],
+  },
 };

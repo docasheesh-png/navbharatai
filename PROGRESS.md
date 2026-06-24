@@ -2250,3 +2250,17 @@ v3.0-only, flag-OFF.
 
 Tests: +1 unit (unsafe form flagged; rel=noopener + target=_self safe) + 1 dispatcher integration.
 Gate green: server+frontend tsc 0, **2197 vitest** (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #6 v4: useEffect(async …) detection (correctness)
+
+Continuing the autonomous Section I march. New item: `AsyncPatternAnalysis` `async-useeffect` kind
+(joins async-foreach + new-promise-async). `useEffect(async () => …)` is a React footgun: the effect
+callback returns a Promise instead of nothing/a cleanup function, so React can NEVER run the cleanup
+(stale state / leaks) — the eslint-react-hooks rule flags it too. High-precision regex
+(`useEffect(  async`), comments skipped; the correct pattern (sync effect calling an inner async fn)
+is not flagged. AppKnowledgeBase already covers the async family. v3.0-only, flag-OFF.
+
+Tests: +1 unit (useEffect(async) flagged, sync effect safe) + 1 dispatcher integration. Gate green:
+server+frontend tsc 0, **2199 vitest** (+2), build PASS, boot:check PASS.

@@ -377,6 +377,13 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('Promise.all');
   });
 
+  it('flags useEffect(async …) where React cleanup never runs', async () => {
+    const dd = makeDispatcher('ws-eval-useeffect');
+    await write(dd, 'src/C.tsx', 'export const C = () => { useEffect(async () => { await load(); }, []); return null; };');
+    const out = await evalText(dd);
+    expect(out).toContain('useEffect(async');
+  });
+
   it('flags a new Promise(async …) executor that swallows errors', async () => {
     const dd = makeDispatcher('ws-eval-promexec');
     await write(dd, 'src/p.ts', 'export const go = () => new Promise(async (resolve) => { resolve(await fetchData()); });');

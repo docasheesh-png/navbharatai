@@ -34,6 +34,13 @@ describe('scanAsyncPatterns', () => {
     expect(scanAsyncPatterns('a.ts', 'const p = new Promise((resolve) => setTimeout(resolve, 10));')).toEqual([]);
   });
 
+  it('flags useEffect(async …) (the effect returns a Promise; cleanup never runs)', () => {
+    expect(scanAsyncPatterns('App.tsx', 'useEffect(async () => { await load(); }, []);')[0])
+      .toMatchObject({ kind: 'async-useeffect', line: 1 });
+    // Safe: the correct pattern — a sync effect that calls an inner async function.
+    expect(scanAsyncPatterns('App.tsx', 'useEffect(() => { void load(); }, []);')).toEqual([]);
+  });
+
   it('ignores comments and non-code files', () => {
     expect(scanAsyncPatterns('a.ts', '// items.forEach(async (x) => await f(x))')).toEqual([]);
     expect(scanAsyncPatterns('README.md', 'items.forEach(async (x) => await f(x))')).toEqual([]);

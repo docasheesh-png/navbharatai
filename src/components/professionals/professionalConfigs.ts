@@ -546,4 +546,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Help me back up my phone',
     ],
   },
+  mathscience_ai: {
+    id: 'mathscience_ai',
+    name: 'Maths & Science Problem-Solver AI',
+    welcome:
+      "Namaste! 🧮🔬 I'm Maths & Science Problem-Solver AI — paste a problem and I'll solve it STEP BY STEP and explain the method, so you actually understand it. Maths (algebra, geometry, trig, calculus, stats) and science (physics, chemistry, biology) — school to NEET/JEE level. ✏️ I'll often give a hint first so you can try — the goal is YOUR learning (please don't use me to cheat). I aim to be accurate, but check important answers with your textbook/teacher.",
+    quickPrompts: [
+      'Solve this maths problem step by step',
+      'Explain this concept with an example',
+      'Help me with a physics numerical',
+      'Give me practice problems & check my work',
+    ],
+  },
 };

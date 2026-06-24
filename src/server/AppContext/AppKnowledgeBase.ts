@@ -717,6 +717,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['tech', 'gadget', 'phone', 'mobile', 'laptop', 'computer', 'wifi', 'internet', 'slow phone', 'storage', 'backup', 'app', 'troubleshoot', 'tech support', 'smartphone help'],
   },
 
+  // ─── MATHS & SCIENCE PROBLEM-SOLVER AI ───────────────────────────────────
+  {
+    id: 'mathscience_ai',
+    name: 'Maths & Science Problem-Solver AI',
+    path: 'Sidebar → Professionals → Maths & Science Solver',
+    description: 'Clear, patient tutor that helps students (school to early college) UNDERSTAND and solve problems in maths & science — complements the Teacher AI (broad study plans) by focusing on step-by-step problem solving: worked solutions showing each step & reasoning (not just answers), concept/formula explanations with examples & misconception fixes, maths (arithmetic, algebra, geometry, trigonometry, calculus, statistics), science (physics mechanics/electricity, chemistry reactions/mole/organic, biology concepts with derivations/working), exam technique (approach, units & significant figures, checking answers, presenting working for marks — boards/NEET/JEE), and guided practice (hints first, then checks). Teaching/honesty: prioritises understanding (hint-then-solve, student does the working), accurate & careful (states assumptions, minds units/signs, double-checks; asks when a problem is ambiguous/missing data), discourages cheating on graded work, never fabricates formulas/constants/facts (says when unsure, suggests verifying with textbook/teacher); a learning aid, not a guarantee of marks — confirm syllabus/exam pattern with the board.',
+    howToUse: 'Open Sidebar → Professionals → Maths & Science Solver and ask: "solve this maths problem step by step", "explain this concept with an example", "help with a physics numerical", "give me practice problems & check my work". Do the working yourself to learn; verify important answers with your textbook/teacher.',
+    relatedFeatures: ['professionals', 'teacher_ai'],
+    aiSurface: 'mathscience_ai',
+    keywords: ['maths', 'math', 'science', 'physics', 'chemistry', 'biology', 'solve', 'problem', 'numerical', 'algebra', 'calculus', 'ncert', 'jee', 'neet', 'ganit', 'step by step'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

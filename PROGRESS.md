@@ -1607,3 +1607,29 @@ secret rules). v3.0-only, flag-OFF.
 
 Tests: +2 unit (`SecurityAnalysis.test.ts`, 6→8) + 1 dispatcher integration (41→42).
 Gate green: server+frontend tsc 0, **2056 vitest** (+3), boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 v6: command-injection detection (security)
+
+Continuing the autonomous Section I march. New item:
+
+**Section I #4 v6 — `SecurityAnalysis` command-injection rule (high).** A child_process
+shell sink — `exec` / `execFile` / `spawn` (sync or async) — whose command is built from
+a template interpolation (`` `…${x}` ``) or a string concatenation (`"…" + x`) is the
+classic remote-code-execution vector. Now flagged high.
+
+High-precision by design:
+- A negative lookbehind `(?<![.\w])` excludes member calls — `regex.exec(…)`,
+  `cp.exec(…)`, `pattern.exec("a"+b)` — so RegExp.exec and other libraries are NOT
+  false-positives. Documented trade-off: the `cp.exec` member form is therefore not
+  matched; the imported `exec(…)` form (what generated code typically uses) IS.
+- Only fires when the argument is dynamically built; a constant command
+  (`execSync("ls -la")`) or a pre-built variable (`exec(cmd)`) is not flagged.
+
+Folds into the existing security dimension (high security findings already gate
+readiness, so command injection blocks "READY"). AppKnowledgeBase security list synced;
+systemPrompt unchanged. v3.0-only, flag-OFF.
+
+Tests: +2 unit (`SecurityAnalysis.test.ts`, 8→10) + 1 dispatcher integration (42→43).
+Gate green: server+frontend tsc 0, **2059 vitest** (+3), boot:check PASS.

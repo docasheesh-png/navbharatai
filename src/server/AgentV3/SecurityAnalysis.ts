@@ -65,6 +65,18 @@ const RULES: Rule[] = [
     ignore: (_m, line) => /\/\/|\*/.test(line.slice(0, line.indexOf('eval'))),
   },
   {
+    rule: 'command-injection',
+    severity: 'high',
+    // A child_process shell sink (exec/execFile/spawn, sync or async) whose command is
+    // built from a template interpolation (`...${x}`) or a string concatenation
+    // ("..." + x) — the classic command-injection vector. The negative lookbehind
+    // excludes method calls like `regex.exec(...)` / `cp.exec(...)` so RegExp.exec and
+    // other libraries are not false-positives (a documented precision trade-off: the
+    // `cp.exec(...)` member form is not matched — prefer the imported `exec(...)` form).
+    re: /(?<![.\w])(?:exec|execFile|spawn)(?:Sync)?\s*\(\s*(?:`[^`]*\$\{|['"][^'"]*['"]\s*\+\s*\S)/,
+    message: 'Shell command built from dynamic input — this enables command injection; validate/escape the input or use execFile with an args array (no shell).',
+  },
+  {
     rule: 'dangerous-html',
     severity: 'medium',
     re: /dangerouslySetInnerHTML/,

@@ -258,6 +258,17 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Section I #4 v6 (Security) — command-injection detection. Added a
+  `command-injection` rule (high) to `SecurityAnalysis`: a child_process shell sink
+  (`exec`/`execFile`/`spawn`, sync or async) whose command is built from a template
+  interpolation (`` `…${x}` ``) or string concatenation (`"…" + x`) — the classic RCE
+  vector. High-precision: a negative lookbehind excludes member calls (`regex.exec(…)`,
+  `cp.exec(…)`) so RegExp.exec and other libraries are not false-positives (documented
+  trade-off: the `cp.exec` member form is not matched — prefer the imported `exec(…)`
+  form); a constant command (`execSync("ls -la")`) and a pre-built variable arg are not
+  flagged. Folds into the existing security dimension (high → gates readiness).
+  AppKnowledgeBase synced. v3.0-only. Gate green: server+frontend tsc 0, 2059 vitest
+  (+3), boot:check PASS.
 - 2026-06-24: Section I #4 v5 (Security) — connection-string credential leak. Added a
   `connection-string-credentials` rule (high) to `SecurityAnalysis`: a DB/queue URI with
   embedded credentials (`mongodb|postgres|mysql|mariadb|redis|amqp://user:pass@host`) is

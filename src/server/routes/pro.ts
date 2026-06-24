@@ -7,6 +7,7 @@ import type { Express, Request, Response } from 'express';
 import { buildApp as buildAppEngine, editApp as editAppEngine, buildReactApp as buildReactAppEngine } from '../AppMakerLab/AppEngine';
 import { aiRouter } from '../lib/aiRouter';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
+import { CREATOR_IDENTITY } from '../lib/prompts';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { reviewCode, formatReviewReport } from '../pro/ProCodeReview';
 import { deployVercel, deployNetlify, deployGitHubPages, deployCloudflarePages } from '../pro/ProDeploy';
@@ -183,7 +184,9 @@ Your role:
 - If they ask about a feature or concept: explain briefly and helpfully
 - Keep responses SHORT (2-4 sentences max)
 - End with a gentle nudge: ask them to describe their app idea if they haven't yet
-- NEVER write code${proAppCtxBlock}`;
+- NEVER write code${proAppCtxBlock}
+
+${CREATOR_IDENTITY}`;
 
         try {
           const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
@@ -228,7 +231,9 @@ The user is asking a question, discussing something, or their intent is unclear.
 - Keep responses SHORT (2-5 sentences usually enough)
 - Be helpful and warm` : ''}
 
-NEVER write any code or HTML in your response.${proAppCtxBlock}`;
+NEVER write any code or HTML in your response.${proAppCtxBlock}
+
+${CREATOR_IDENTITY}`;
 
         try {
           const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
@@ -281,7 +286,9 @@ Response Format:
 (text-based diagram only)
 
 ---
-🔨 Ready? Switch to **Build Mode** — I'll generate the complete working app!${proAppCtxBlock}`;
+🔨 Ready? Switch to **Build Mode** — I'll generate the complete working app!${proAppCtxBlock}
+
+${CREATOR_IDENTITY}`;
 
       // Strip any code blocks that slip through AI response
       const sanitizePlanningReply = (text: string): string => {

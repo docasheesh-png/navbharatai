@@ -6,6 +6,7 @@ import { getDb } from '../lib/db';
 import { aiRouter } from '../lib/aiRouter';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { buildDocumentContext } from '../lib/attachmentText';
+import { CREATOR_IDENTITY } from '../lib/prompts';
 
 /**
  * Chat routes (general + Vishwakarma tiers) extracted from the server.ts monolith
@@ -257,6 +258,9 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       const appCtx = AppContextInjector.getRelevantContext(message, chatSurface);
       if (appCtx) systemPrompt = `${systemPrompt}\n\n${appCtx}`;
     }
+
+    // Every chat tier credits its creators consistently (single source of truth).
+    systemPrompt = `${systemPrompt}\n\n${CREATOR_IDENTITY}`;
 
     // Build contextual message with canvas app prepended (Pro/VIP only)
     let contextualMessage = message;

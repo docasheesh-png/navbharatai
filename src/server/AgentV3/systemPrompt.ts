@@ -7,6 +7,7 @@
 // AgentRegistry so the Architect always delegates by real, current capability.
 
 import { rosterBriefing } from './AgentRegistry';
+import { CREATOR_IDENTITY } from '../lib/prompts';
 
 /**
  * Plan-mode system prompt (P4): the agent produces a concise step-by-step plan
@@ -19,7 +20,7 @@ export function planSystemPrompt(): string {
     'todo per major step, status "pending"). Briefly explain the approach in your',
     'message. Do NOT write any files or run any commands yet — only plan. End your',
     'turn after calling update_todo.',
-  ].join('\n');
+  ].join('\n') + '\n\n' + CREATOR_IDENTITY;
 }
 
 export function architectSystemPrompt(): string {
@@ -118,5 +119,5 @@ export function architectSystemPrompt(): string {
     '- When the app is genuinely complete and working, end your turn with a short',
     '  summary of what you built and how to run it. Do not call any tool in that',
     '  final turn.',
-  ].join('\n');
+  ].join('\n') + '\n\n' + CREATOR_IDENTITY;
 }

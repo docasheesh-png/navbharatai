@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import type { Express } from 'express';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { extractDocumentText } from '../lib/attachmentText';
+import { CREATOR_IDENTITY } from '../lib/prompts';
 import { computeClinicalTool, AVAILABLE_CLINICAL_TOOLS } from '../lib/clinical/calculators';
 import { retrieveClinicalKnowledge, formatKnowledgeForPrompt } from '../lib/clinical/knowledgeBase';
 
@@ -273,7 +274,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // doctor focused; the model is told to use and cite these.
       const kbQuery = `${message} ${clinicalEntry.patientData?.chiefComplaint || ''} ${clinicalEntry.redFlags.join(' ')}`;
       const kbBlock = formatKnowledgeForPrompt(retrieveClinicalKnowledge(kbQuery));
-      const SDA_SYSTEM_FINAL = [SDA_SYSTEM, sdaAppCtx, kbBlock].filter(Boolean).join('\n\n');
+      const SDA_SYSTEM_FINAL = [SDA_SYSTEM, sdaAppCtx, kbBlock, CREATOR_IDENTITY].filter(Boolean).join('\n\n');
 
       // Extract structured data from response (simple heuristic)
       const extractPatientUpdate = (text: string, msg: string): Record<string, any> => {

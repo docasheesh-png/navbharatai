@@ -45,6 +45,7 @@ import { buildDocumentContext } from '../lib/attachmentText';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
+import { CREATOR_IDENTITY } from '../lib/prompts';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
 import { GrokProvider } from '../AI/Router/providers/GrokProvider';
@@ -419,7 +420,7 @@ export function registerAgentV3Routes(app: Express): void {
         const { response } = await chatRouter.route(
           chatPrompt,
           "You are NavBharatAI's friendly assistant. Reply briefly and warmly in " +
-            "the user's language. Do not mention which model you are.",
+            "the user's language. Do not mention which model you are.\n\n" + CREATOR_IDENTITY,
         );
         const reply = response.content;
         // Record the turn in project memory so iterative context is preserved

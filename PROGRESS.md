@@ -2353,3 +2353,29 @@ security dimension. AppKnowledgeBase synced. v3.0-only, flag-OFF.
 
 Tests: +1 unit (wildcard '*' flagged; specific origin safe). Gate green: server+frontend tsc 0,
 **2210 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Feature: shared creator attribution across EVERY AI agent (admin Dr Asheesh)
+
+Admin (Dr Asheesh) request: every NavBharatAI agent, when asked "who made/created you", must credit
+"Dr Asheesh and his team" — naturally varied wording each time, same core fact. Implemented as a
+SINGLE SOURCE OF TRUTH and wired into every user-facing AI agent's system prompt (DRY — update one
+constant, all agents stay consistent).
+
+- `CREATOR_IDENTITY` constant in `src/server/lib/prompts.ts` — instructs the model to credit "Dr
+  Asheesh and his team" in the user's own language, vary the wording every time (never repeat the same
+  sentence), never claim an AI provider/model company made it, and not invent extra names/dates.
+- Wired into all agent surfaces (mapped via an Explore agent so none were missed):
+  • Free Chat / NBI + Pro conversation — chat.ts (universal `systemPrompt` fold → covers all its modes)
+  • Pro Chat — pro.ts (Build/Conversation, Auto, Plan — all 3 mode prompts)
+  • Engineer AI — EngineerAgentLoop.ts (effectiveSystemPrompt)
+  • Doctor AI (SDA) — sda.ts (SDA_SYSTEM_FINAL)
+  • ALL 58 Professionals AIs — professionals/engine.ts (extracted testable `buildProfessionalSystemPrompt`)
+  • AgentV3 v3.0 — systemPrompt.ts (architect + plan) AND the v3.0 cheap-chat greeting path in agentv3.ts
+- Language standard respected: the instruction is English; the reply text is AI-generated at runtime in
+  the user's language (the allowed exception). Per the KB rule, an AI-prompt change needs no KB nav entry.
+
+Tests: new creatorIdentity.test.ts (+3) — constant credits Dr Asheesh + asks variation + forbids provider
+attribution; professionals + agentv3 builders include the attribution. Gate green: frontend tsc 0,
+server tsc 0, **2213 vitest** (+3), build PASS, boot:check PASS.

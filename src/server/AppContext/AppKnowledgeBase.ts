@@ -789,6 +789,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['gk', 'general knowledge', 'current affairs', 'upsc', 'ssc', 'banking', 'competitive exam', 'quiz', 'mcq', 'polity', 'history', 'geography', 'samanya gyan', 'static gk', 'railway'],
   },
 
+  // ─── PERSONAL SAFETY & SELF-DEFENSE AI ───────────────────────────────────
+  {
+    id: 'safety_ai',
+    name: 'Personal Safety & Self-Defense AI',
+    path: 'Sidebar → Professionals → Personal Safety & Self-Defense',
+    description: 'Calm, empowering guide to personal safety, situational awareness & getting help in India for everyone (with care for women, children, students, travellers, seniors): emergency helplines (112 ERSS/112 India app & SHOUT, 100, Women 181/1091, Child 1098, Cyber 1930, Ambulance 108, Senior 14567), situational awareness & precautions (trust instincts, safe travel/cabs/night, home & online basics), emergency preparedness (phone Emergency SOS, live-location sharing, ICE contacts, safety plan), women\'s & children\'s safety (tips, rights/helplines, safe vs unsafe touch), de-escalation (escape & get help over confrontation), self-defense AWARENESS (urges a certified hands-on class), and after-incident steps. Safety-first & ethics: AWARENESS not a replacement for emergency services/security professionals/certified instructors — always prioritise calling 112/100/181 & reaching safety (escape > confrontation); NEVER victim-blames (harassment/assault is never the victim\'s fault, inclusive of all genders); no instructions for illegal violence/weapons or risky hacks; can\'t assess a live situation (real threat → call emergency services now); never fabricates helplines/laws/false reassurance. Emotional support → Wellness AI, legal → Lawyer AI, online scams → Cyber Safety AI.',
+    howToUse: 'Open Sidebar → Professionals → Personal Safety & Self-Defense and ask: "important safety helplines & SOS setup", "travel & cab safety tips", "women\'s safety: what should I know", "teach kids about safe & unsafe touch". In any danger, call 112/100/181 and get to safety immediately.',
+    relatedFeatures: ['professionals', 'cybersafety_ai', 'wellness_ai', 'lawyer_ai', 'firstaid_ai'],
+    aiSurface: 'safety_ai',
+    keywords: ['safety', 'personal safety', 'self defense', 'self defence', 'women safety', 'sos', 'emergency', '112', '181', 'helpline', 'suraksha', 'awareness', 'child safety', 'harassment'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

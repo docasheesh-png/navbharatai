@@ -618,4 +618,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Background of a current-affairs topic',
     ],
   },
+  safety_ai: {
+    id: 'safety_ai',
+    name: 'Personal Safety & Self-Defense AI',
+    welcome:
+      "Namaste! 🛡️ I'm Personal Safety & Self-Defense AI — calm, empowering help to stay safe & prepared: situational awareness, safe travel, phone SOS & emergency contacts, women's & children's safety, and getting help fast. ⚠️ In ANY danger, call 112 / 100 / Women Helpline 181 and get to safety NOW — awareness helps you avoid danger & reach help, not to fight (escape first). I'm not police or a self-defense instructor; for real skills, join a certified class. Harassment is NEVER your fault.",
+    quickPrompts: [
+      'Important safety helplines & SOS setup',
+      'Travel & cab safety tips',
+      "Women's safety: what should I know?",
+      'Teach kids about safe & unsafe touch',
+    ],
+  },
 };

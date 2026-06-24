@@ -69,6 +69,13 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'exec(commandVariable);').some((f) => f.rule === 'command-injection')).toBe(false);
   });
 
+  it('flags new Function() as dynamic code (eval twin), not React FunctionComponent', () => {
+    expect(scanSecurity('a.ts', 'const f = new Function("a", "return a+1");').some((x) => x.rule === 'dynamic-function')).toBe(true);
+    expect(scanSecurity('a.ts', 'const f = new Function ( "x" );').some((x) => x.rule === 'dynamic-function')).toBe(true);
+    // word boundary: must not flag a class whose name merely starts with "Function".
+    expect(scanSecurity('a.tsx', 'const c = new FunctionComponent(props);').some((x) => x.rule === 'dynamic-function')).toBe(false);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

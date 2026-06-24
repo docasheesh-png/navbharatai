@@ -72,13 +72,22 @@ export function analyzeSeo(indexHtml: string | null | undefined): SeoReport {
     });
   }
 
+  // Open Graph tags — without any, links shared on WhatsApp/social show a bare URL
+  // with no title/image. Flag only when there are NONE (high-signal, not nagging).
+  if (!/<meta[^>]+(?:property|name)=["']og:[^"']+["']/i.test(html)) {
+    findings.push({
+      level: 'low',
+      message: 'No Open Graph tags — add og:title, og:description and og:image so links shared on WhatsApp/social show a rich preview instead of a bare URL.',
+    });
+  }
+
   return { assessed: true, findings };
 }
 
 /** A short, honest SEO/metadata block for the `evaluate` output. */
 export function seoSummary(report: SeoReport): string {
   if (!report.assessed) return 'SEO/metadata: — (no HTML entry to assess).';
-  if (report.findings.length === 0) return 'SEO/metadata: ✓ title, viewport, charset, description and lang are present.';
+  if (report.findings.length === 0) return 'SEO/metadata: ✓ title, viewport, charset, description, lang and Open Graph tags are present.';
   const order: Record<SeoLevel, number> = { high: 0, medium: 1, low: 2 };
   const sorted = [...report.findings].sort((a, b) => order[a.level] - order[b.level]);
   const head = `SEO/metadata — ${report.findings.length} item(s) missing:`;

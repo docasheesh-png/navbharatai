@@ -6,6 +6,8 @@ const FULL = `<!doctype html><html lang="en"><head>
 <title>My Real App</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="description" content="A genuinely useful app." />
+<meta property="og:title" content="My Real App" />
+<meta property="og:image" content="/og.png" />
 </head><body><div id="root"></div></body></html>`;
 
 describe('analyzeSeo', () => {
@@ -46,6 +48,13 @@ describe('analyzeSeo', () => {
   it('does not count an empty description content as present', () => {
     const r = analyzeSeo('<html lang="en"><head><title>X</title><meta name="viewport" content="x"><meta name="description" content=""></head></html>');
     expect(r.findings.some((f) => /description/.test(f.message))).toBe(true);
+  });
+
+  it('flags a page with no Open Graph tags as low, but not when og:title is present', () => {
+    const none = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>X</title><meta name="viewport" content="x"><meta name="description" content="y"></head></html>');
+    expect(none.findings.some((f) => f.level === 'low' && /Open Graph/.test(f.message))).toBe(true);
+    const present = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>X</title><meta name="viewport" content="x"><meta name="description" content="y"><meta property="og:title" content="X"></head></html>');
+    expect(present.findings.some((f) => /Open Graph/.test(f.message))).toBe(false);
   });
 });
 

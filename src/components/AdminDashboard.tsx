@@ -172,26 +172,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/5 pb-6">
-        <div>
+      {/* Header — logout always pinned top-right, visible on all screen sizes */}
+      <div className="relative flex items-start justify-between gap-4 border-b border-white/5 pb-6">
+        <div className="flex-1 min-w-0 pr-24">
           <p className="text-[10px] text-indigo-400 font-black uppercase tracking-widest flex items-center gap-2">
             <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse inline-block" />
             Platform Administration Console
           </p>
           <h1 className="text-2xl font-black text-white uppercase tracking-tight mt-1">navBharatAI Admin</h1>
+          <div className="flex items-center gap-2 mt-3">
+            <button onClick={fetchAnalytics} disabled={loading} className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 hover:border-indigo-500 rounded-xl text-[10px] font-black uppercase tracking-widest text-white transition-all active:scale-95">
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+            </button>
+            {analytics?.maintenanceMode && (
+              <span className="px-3 py-2 bg-red-500/20 border border-red-500/30 rounded-xl text-[10px] font-black text-red-400 uppercase tracking-widest">Maintenance ON</span>
+            )}
+          </div>
         </div>
-        <div className="flex gap-2">
-          <button onClick={fetchAnalytics} disabled={loading} className="flex items-center gap-2 px-4 py-2.5 bg-white/5 border border-white/10 hover:border-indigo-500 rounded-xl text-[10px] font-black uppercase tracking-widest text-white transition-all active:scale-95">
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
-          </button>
-          {analytics?.maintenanceMode && (
-            <span className="px-3 py-2.5 bg-red-500/20 border border-red-500/30 rounded-xl text-[10px] font-black text-red-400 uppercase tracking-widest">Maintenance ON</span>
-          )}
-          <button onClick={onLogout} className="px-4 py-2.5 bg-red-500/10 hover:bg-red-500 border border-red-500/20 text-red-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95">
-            Logout
-          </button>
-        </div>
+        {/* Logout — always top-right, never wraps off screen */}
+        <button
+          onClick={() => { sessionStorage.removeItem('admin_token'); onLogout(); }}
+          className="absolute top-0 right-0 px-4 py-2.5 bg-red-500/10 hover:bg-red-500 active:bg-red-600 border border-red-500/30 text-red-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 whitespace-nowrap"
+        >
+          Logout
+        </button>
       </div>
 
       {/* Tabs */}

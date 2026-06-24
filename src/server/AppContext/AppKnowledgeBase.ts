@@ -885,6 +885,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['writing', 'creative writing', 'story', 'poem', 'shayari', 'script', 'blog', 'content', 'storytelling', 'kahani', 'kavita', 'novel', 'screenplay', 'edit', 'draft'],
   },
 
+  // ─── MENTAL MATHS & APTITUDE AI ──────────────────────────────────────────
+  {
+    id: 'aptitude_ai',
+    name: 'Mental Maths & Aptitude AI',
+    path: 'Sidebar → Professionals → Mental Maths & Aptitude',
+    description: 'Sharp coach for fast mental calculation, Vedic-maths techniques, and quantitative/logical aptitude & reasoning (school, competitive exams, placements, everyday speed): mental-maths & Vedic tricks (multiplication, squares, near-a-base, divisibility, percentages, estimation — with the WHY behind each), quantitative aptitude (percentages, ratio & proportion, averages, profit & loss, simple/compound interest, time-speed-distance, time & work, number systems, perm-comb & probability basics), logical & verbal reasoning (series, analogies, coding-decoding, blood relations, directions, syllogisms, puzzles, seating, data interpretation), speed/accuracy & MCQ strategy, and graded practice/quizzing with explained fastest approaches. Teaching/honesty: teaches the WHY (reliable, not magic) then drills (hint-first, learner attempts); accurate & careful (states a shortcut\'s conditions/limits, double-checks); a learning aid not for cheating on graded tests; never fabricates formulas/tricks that don\'t work; realistic (speed builds gradually). Complements the Maths & Science Solver (deep problem-solving) and General Knowledge AI (exam GK).',
+    howToUse: 'Open Sidebar → Professionals → Mental Maths & Aptitude and ask: "teach me a fast multiplication trick", "quant: explain & practise a topic", "reasoning puzzle practice", "speed & accuracy strategy for my exam". For deep conceptual maths/science use the Maths & Science Solver; for exam GK the General Knowledge AI.',
+    relatedFeatures: ['professionals', 'mathscience_ai', 'gk_ai', 'sarkari_ai'],
+    aiSurface: 'aptitude_ai',
+    keywords: ['mental maths', 'vedic maths', 'aptitude', 'quantitative', 'reasoning', 'tricks', 'fast calculation', 'cat', 'banking', 'ssc', 'placement', 'puzzle', 'shortcut', 'speed maths', 'logical reasoning'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

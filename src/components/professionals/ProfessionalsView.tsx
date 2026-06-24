@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone, PartyPopper, Accessibility, Sofa, Globe2, HandHelping, Shirt, ListChecks, Users, Wrench, CandlestickChart, Smartphone, Sigma, Code2, HeartPulse, BriefcaseMedical, TreePine, Lightbulb, Shield, ScrollText, BadgeCheck, Flame, Palette, Star, PenLine } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone, PartyPopper, Accessibility, Sofa, Globe2, HandHelping, Shirt, ListChecks, Users, Wrench, CandlestickChart, Smartphone, Sigma, Code2, HeartPulse, BriefcaseMedical, TreePine, Lightbulb, Shield, ScrollText, BadgeCheck, Flame, Palette, Star, PenLine, Brain } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -69,6 +69,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'crafts_ai', label: 'DIY Crafts & Hobbies', description: 'Step-by-step craft projects, festive DIY (rangoli/diyas/cards), budget upcycling, kids crafts & creative hobbies — affordable & fun, with craft-safety in mind.', icon: Palette, active: true },
   { id: 'festival_ai', label: 'Festival & Culture Guide', description: 'Meaning, stories & traditions of Indian festivals (all communities), celebration ideas, respectful wishing & culture — inclusive info (not religious rulings; verify dates).', icon: Star, active: true },
   { id: 'writing_ai', label: 'Creative Writing & Storytelling', description: 'Stories, poems/shayari, scripts, blogs & social content — ideas, plot/character/dialogue craft, poetry & draft polishing. Co-creates & coaches; keeps your voice; integrity-minded.', icon: PenLine, active: true },
+  { id: 'aptitude_ai', label: 'Mental Maths & Aptitude', description: 'Mental-maths & Vedic tricks, quantitative aptitude, logical/verbal reasoning & speed-accuracy strategy for exams & placements — learn the WHY, then practise (accuracy-first).', icon: Brain, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

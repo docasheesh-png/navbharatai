@@ -5445,6 +5445,10 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'insurance_ai') toggleTab('insurance_ai');
               else if (id === 'chef_ai') toggleTab('chef_ai');
               else if (id === 'travel_ai') toggleTab('travel_ai');
+              else if (id === 'vastu_ai') toggleTab('vastu_ai');
+              else if (id === 'yoga_ai') toggleTab('yoga_ai');
+              else if (id === 'english_ai') toggleTab('english_ai');
+              else if (id === 'resume_ai') toggleTab('resume_ai');
             }} />
           )}
 
@@ -5537,6 +5541,26 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'travel_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.travel_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'vastu_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.vastu_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'yoga_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.yoga_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'english_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.english_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'resume_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.resume_ai} userId={user?.uid} />
             </div>
           )}
 

@@ -17,6 +17,10 @@ import { CYBERSAFETY_AI } from './configs/cybersafety';
 import { INSURANCE_AI } from './configs/insurance';
 import { CHEF_AI } from './configs/chef';
 import { TRAVEL_AI } from './configs/travel';
+import { VASTU_AI } from './configs/vastu';
+import { YOGA_AI } from './configs/yoga';
+import { ENGLISH_AI } from './configs/english';
+import { RESUME_AI } from './configs/resume';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -45,6 +49,10 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [INSURANCE_AI.id]: INSURANCE_AI,
   [CHEF_AI.id]: CHEF_AI,
   [TRAVEL_AI.id]: TRAVEL_AI,
+  [VASTU_AI.id]: VASTU_AI,
+  [YOGA_AI.id]: YOGA_AI,
+  [ENGLISH_AI.id]: ENGLISH_AI,
+  [RESUME_AI.id]: RESUME_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

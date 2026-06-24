@@ -393,6 +393,54 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['travel', 'trip', 'tour', 'itinerary', 'vacation', 'holiday', 'ghumna', 'yatra', 'flight', 'train', 'visa', 'passport', 'tourism', 'destination', 'budget trip'],
   },
 
+  // ─── VASTU CONSULTANT AI ─────────────────────────────────────────────────
+  {
+    id: 'vastu_ai',
+    name: 'Vastu Consultant AI',
+    path: 'Sidebar → Professionals → Vastu Consultant',
+    description: 'Respectful guide to Vastu Shastra (traditional Indian architecture/spatial arrangement): directions (the eight dishas) and suggested placement of entrance, kitchen, bedroom, pooja room, study, toilets, water & staircase; practical harmony framed as natural light, ventilation & de-cluttering; and gentle, no-cost remedies for spaces that can’t change. Safety-first: explicitly cultural/traditional belief, NOT science — no guarantees, NO fear-mongering, NO paid yantras/expensive remedies/demolition; real-world priorities (safety, building bye-laws, structural soundness, budget) and a licensed architect/engineer come first; inclusive of those who don’t follow Vastu; never fabricates rules.',
+    howToUse: 'Open Sidebar → Professionals → Vastu Consultant and ask: "Vastu tips for my entrance", "best direction for kitchen & bedroom", "Vastu for a rented flat", "simple ways to make my space positive". For actual construction consult a licensed architect/engineer.',
+    relatedFeatures: ['professionals', 'astrologer_ai'],
+    aiSurface: 'vastu_ai',
+    keywords: ['vastu', 'vaastu', 'vastu shastra', 'direction', 'disha', 'home', 'ghar', 'kitchen', 'pooja room', 'entrance', 'remedy', 'upay', 'office vastu', 'rashi ghar'],
+  },
+
+  // ─── YOGA & MEDITATION AI ────────────────────────────────────────────────
+  {
+    id: 'yoga_ai',
+    name: 'Yoga & Meditation AI',
+    path: 'Sidebar → Professionals → Yoga & Meditation',
+    description: 'Calm guide to yoga, pranayama & meditation: beginner asana sequences & Surya Namaskar with alignment cues and easier variations, gentle breathwork (deep breathing, Anulom Vilom, Bhramari), meditation/mindfulness/mantra for focus-calm-sleep, and short routines for stress/energy/desk relief. Safety-first: general practice guidance, NOT medical/therapeutic advice; advises doctor clearance for health conditions/pregnancy/elderly/injury and learning advanced asana/pranayama from a qualified teacher; never push through pain; avoids risky inversions for beginners; makes no medical-cure claims. Routes nutrition to Nutritionist AI and emotional crises to Wellness AI.',
+    howToUse: 'Open Sidebar → Professionals → Yoga & Meditation and ask: "15-minute beginner routine", "breathing to reduce stress", "start a meditation habit", "desk stretches for back & neck". Check with a doctor first if you have any health condition.',
+    relatedFeatures: ['professionals', 'fitness_ai', 'wellness_ai'],
+    aiSurface: 'yoga_ai',
+    keywords: ['yoga', 'meditation', 'pranayama', 'asana', 'dhyan', 'breathing', 'mindfulness', 'surya namaskar', 'anulom vilom', 'stretch', 'relax', 'yog', 'meditate', 'om'],
+  },
+
+  // ─── SPOKEN ENGLISH / LANGUAGE TUTOR AI ──────────────────────────────────
+  {
+    id: 'english_ai',
+    name: 'Spoken English / Language Tutor AI',
+    path: 'Sidebar → Professionals → Spoken English / Tutor',
+    description: 'Patient spoken-English & language coach for Indian learners (beginner to advanced): conversation practice & fluency building, gentle grammar & vocabulary correction with reasons, writing help (emails/applications/essays in the learner’s own voice), interview & workplace English with mock interviews, and IELTS/TOEFL-style exam practice & strategies. Encouraging, never shames mistakes; meets learners at their level (uses a Hindi/regional word when it helps). Honesty: a tutor not an exam authority — verify official exam formats/rules with the exam body; no fake "fluent fast" claims or fabricated scores; constructive, accurate feedback (won’t approve wrong English to be nice).',
+    howToUse: 'Open Sidebar → Professionals → Spoken English / Tutor and ask: "let’s practise a conversation", "correct my sentences and explain", "help me write a formal email", "run a mock interview". For official exam rules check the exam body’s website.',
+    relatedFeatures: ['professionals', 'teacher_ai', 'mentor_ai'],
+    aiSurface: 'english_ai',
+    keywords: ['english', 'spoken english', 'grammar', 'vocabulary', 'fluency', 'language', 'tutor', 'ielts', 'toefl', 'interview english', 'angrezi', 'speaking', 'writing', 'translate'],
+  },
+
+  // ─── RESUME & JOB-APPLICATION AI ─────────────────────────────────────────
+  {
+    id: 'resume_ai',
+    name: 'Resume & Job-Application AI',
+    path: 'Sidebar → Professionals → Resume & Job Application',
+    description: 'Career-documents specialist for Indian job seekers (freshers to experienced): resume/CV structure & strong achievement bullet points (action verb + measurable impact), ATS-friendly formatting & keyword matching, tailored cover letters & application emails, LinkedIn headline/About, and application strategy (reading a JD, transferable skills, gaps). Works on the user’s OWN real content. Safety-first: NEVER fabricates qualifications/experience/dates/numbers (lying risks the job); helps phrase gaps/career-changes honestly; does not guarantee interviews/jobs/salaries; warns about job scams (no genuine employer asks for money/OTP/bank details — see Cyber Safety AI); follow each employer’s official instructions.',
+    howToUse: 'Open Sidebar → Professionals → Resume & Job Application and ask: "review & improve my resume", "make it ATS-friendly for this job", "write a cover letter for this role", "turn my duties into strong bullet points". Paste your real experience or current resume + the target job.',
+    relatedFeatures: ['professionals', 'mentor_ai', 'english_ai', 'cybersafety_ai'],
+    aiSurface: 'resume_ai',
+    keywords: ['resume', 'cv', 'biodata', 'cover letter', 'job application', 'ats', 'linkedin', 'job', 'interview', 'naukri', 'apply', 'fresher', 'curriculum vitae', 'bullet points'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

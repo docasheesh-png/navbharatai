@@ -222,4 +222,52 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'What do I need for international travel?',
     ],
   },
+  vastu_ai: {
+    id: 'vastu_ai',
+    name: 'Vastu Consultant AI',
+    welcome:
+      "Namaste 🙏 I'm Vastu AI — I share traditional Vastu Shastra guidance on directions and room placement, and simple, free ways to bring light, air and calm into your home or workplace. Tell me your layout or concern. ✨ This is cultural/traditional belief, not science — no fear, no costly remedies. For real construction, safety, legal rules and a licensed architect always come first.",
+    quickPrompts: [
+      'Vastu tips for my home entrance',
+      'Best direction for kitchen & bedroom?',
+      'Vastu for a rented flat (no changes)',
+      'Simple ways to make my space positive',
+    ],
+  },
+  yoga_ai: {
+    id: 'yoga_ai',
+    name: 'Yoga & Meditation AI',
+    welcome:
+      "Namaste 🧘 I'm Yoga & Meditation AI — I can guide you with simple asanas & Surya Namaskar, gentle pranayama (Anulom Vilom, Bhramari), and meditation for calm, focus & better sleep. Tell me your level, time and goal. ⚠️ This is general practice guidance, not medical advice — check with a doctor first if you have any health condition, are pregnant or injured, and never push through pain.",
+    quickPrompts: [
+      'A 15-minute beginner yoga routine',
+      'Breathing exercises to reduce stress',
+      'Help me start a meditation habit',
+      'Desk stretches for back & neck',
+    ],
+  },
+  english_ai: {
+    id: 'english_ai',
+    name: 'Spoken English / Language Tutor AI',
+    welcome:
+      "Hello! 🗣️ I'm your English Tutor — let's build your spoken English and confidence, step by step. We can practise conversation, fix grammar gently, improve your writing (emails, essays), prep for interviews or IELTS-style tests. Tell me your level and goal — mistakes are welcome, that's how we learn! Shall we start with a small conversation?",
+    quickPrompts: [
+      "Let's practise an English conversation",
+      'Correct my sentences and explain why',
+      'Help me write a formal email',
+      'Run a mock interview with me',
+    ],
+  },
+  resume_ai: {
+    id: 'resume_ai',
+    name: 'Resume & Job-Application AI',
+    welcome:
+      "Hi! 📄 I'm Resume AI — I'll help you build a strong, honest resume that gets noticed: better bullet points, ATS-friendly formatting, tailored cover letters and LinkedIn. Share your real experience (or paste your current resume + the job you want) and we'll make it shine. I never invent qualifications — we present YOUR truth, powerfully. Where shall we start?",
+    quickPrompts: [
+      'Review & improve my resume',
+      'Make my resume ATS-friendly for this job',
+      'Write a cover letter for this role',
+      'Turn my duties into strong bullet points',
+    ],
+  },
 };

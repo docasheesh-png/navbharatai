@@ -270,4 +270,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Turn my duties into strong bullet points',
     ],
   },
+  gardening_ai: {
+    id: 'gardening_ai',
+    name: 'Gardening / Home-Plants AI',
+    welcome:
+      "Namaste! 🪴 I'm Gardening AI — let's keep your plants happy! I help with watering, light, soil & repotting, balcony/terrace kitchen gardens (herbs & veggies), and fixing problems like yellow leaves or pests (organic-first). Tell me your plant, space and issue. 🌿 Tip: most plant trouble is over-watering — when unsure, check if the soil is dry first!",
+    quickPrompts: [
+      'Why are my plant’s leaves turning yellow?',
+      'Easy plants for a low-light home',
+      'Start a balcony kitchen garden',
+      'How do I get rid of mealybugs/aphids?',
+    ],
+  },
 };

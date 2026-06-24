@@ -537,6 +537,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['skincare', 'skin', 'beauty', 'grooming', 'hair', 'acne', 'pimple', 'sunscreen', 'dandruff', 'shaving', 'beard', 'makeup', 'glow', 'twacha', 'baal'],
   },
 
+  // ─── MUSIC / INSTRUMENT LEARNING AI ──────────────────────────────────────
+  {
+    id: 'music_ai',
+    name: 'Music / Instrument Learning AI',
+    path: 'Sidebar → Professionals → Music / Instrument Learning',
+    description: 'Encouraging music teacher for Indian learners of all levels & styles (Indian classical, film/devotional, Western): starting instruments (guitar, keyboard/piano, harmonium, tabla, flute, ukulele — posture, first chords/notes/bols, tuning), vocals & riyaaz (warm-ups, breathing, sur/pitch), music theory (notes, scales, chords, rhythm/taal, sargam/swaras, basic notation), Indian classical concepts (raga/taal/sargam), and structured practice routines & ear training. Honesty/safety: real skill needs consistent practice (no "master it in a week"); recommends a qualified guru/teacher for serious classical/advanced technique; warns against vocal strain/playing through pain; respects copyright (helps learn, no wholesale reproduction of copyrighted lyrics/sheet music); never fabricates theory or official exam (Trinity/ABRSM/Prayag Sangit) rules — confirm with the official body.',
+    howToUse: 'Open Sidebar → Professionals → Music / Instrument Learning and ask: "start learning guitar", "singing basics & riyaaz", "explain chords/sargam simply", "make a daily practice routine". For serious classical or graded exams, learn from a guru and confirm syllabi officially.',
+    relatedFeatures: ['professionals', 'teacher_ai'],
+    aiSurface: 'music_ai',
+    keywords: ['music', 'instrument', 'guitar', 'keyboard', 'piano', 'harmonium', 'tabla', 'singing', 'vocal', 'riyaaz', 'sargam', 'raag', 'sangeet', 'gaana', 'taal'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

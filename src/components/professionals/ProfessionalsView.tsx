@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -40,6 +40,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'driving_ai', label: 'Driving / RTO & Licence', description: 'Learner/Driving Licence process, vehicle papers (RC, insurance, PUC), road rules & safety, e-challans — general info (verify on Parivahan; avoid touts, drive safely).', icon: Car, active: true },
   { id: 'petcare_ai', label: 'Pet-Care / Dog-Training', description: 'Positive reward-based training (commands, potty, leash), behaviour (barking, chewing, anxiety), exercise, grooming & feeding basics — humane methods; vet for medical.', icon: Dog, active: true },
   { id: 'beauty_ai', label: 'Beauty / Skincare & Grooming', description: 'Simple skincare routines, sunscreen, oily/dry/acne & dandruff basics, shaving & grooming, ingredient sense — general cosmetic guidance (dermatologist for conditions).', icon: Gem, active: true },
+  { id: 'music_ai', label: 'Music / Instrument Learning', description: 'Start an instrument (guitar, keyboard, harmonium, tabla…), singing/riyaaz, theory (chords, sargam, taal) & practice routines — for all levels (guru for serious classical).', icon: Music, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

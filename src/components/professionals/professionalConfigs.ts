@@ -366,4 +366,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Shaving & beard-care tips',
     ],
   },
+  music_ai: {
+    id: 'music_ai',
+    name: 'Music / Instrument Learning AI',
+    welcome:
+      "Namaste! 🎵 I'm Music AI — let's learn music together! I can help you start an instrument (guitar, keyboard, harmonium, tabla, flute…), sing/riyaaz, understand theory (notes, chords, sargam, taal), and build a practice routine. Tell me your instrument/goal & level. 🎶 Real skill comes from regular practice — and for serious classical, a guru/teacher is best. Don't strain your voice or play through pain.",
+    quickPrompts: [
+      'I want to start learning guitar',
+      'Teach me singing basics & riyaaz',
+      'Explain chords / sargam simply',
+      'Make me a daily practice routine',
+    ],
+  },
 };

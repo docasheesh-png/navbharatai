@@ -1825,3 +1825,19 @@ orchestrator). What remains before it can go LIVE and actually cut cost:
    real cheap-provider build quality cannot be claimed without a live run.
 
 Gate green: server+frontend tsc 0, **2113 vitest** (+5), boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 v9: new Function() dynamic-code detection (security)
+
+Resumed the Section I march after the cost-routing task. New item:
+
+**Section I #4 v9 — `SecurityAnalysis` dynamic-function rule (medium).** `new Function('…')`
+builds executable code from a string at runtime — eval()'s twin, a code-injection vector — but
+the existing eval-usage rule only matched `eval(`. Now flagged medium. High-precision:
+`\bnew\s+Function\b\s*\(` so a React `new FunctionComponent(...)` or any class whose name merely
+starts with "Function" is NOT flagged. Folds into the existing security dimension.
+AppKnowledgeBase security list synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (`SecurityAnalysis.test.ts`) + 1 dispatcher integration. Gate green:
+server+frontend tsc 0, **2115 vitest** (+2), boot:check PASS.

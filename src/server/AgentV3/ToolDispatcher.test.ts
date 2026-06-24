@@ -318,6 +318,13 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('hardcoded-jwt-secret');
   });
 
+  it('flags new Function() dynamic code', async () => {
+    const dd = makeDispatcher('ws-eval-newfn');
+    await write(dd, 'src/run.ts', 'export const make = (body) => new Function("x", body);');
+    const out = await evalText(dd);
+    expect(out).toContain('dynamic-function');
+  });
+
   it('flags a forEach(async …) loop that does not await', async () => {
     const dd = makeDispatcher('ws-eval-async');
     await write(dd, 'src/sync.ts', 'export const run = (items) => items.forEach(async (it) => { await save(it); });');

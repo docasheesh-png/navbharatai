@@ -32,6 +32,23 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'const u = "https://api.example.com/v1";')).toEqual([]);
   });
 
+  it('flags a hardcoded JWT signing secret (with or without options)', () => {
+    for (const code of [
+      "const t = jwt.sign(payload, 'my-super-secret');",
+      "const t = jwt.sign({ id: 1, role: 'admin' }, 'my-super-secret', { expiresIn: '1h' });",
+      "const t = jsonwebtoken.sign(user, `staticsecret123`);",
+    ]) {
+      const f = scanSecurity('src/auth.ts', code);
+      expect(f.some((x) => x.rule === 'hardcoded-jwt-secret' && x.severity === 'high')).toBe(true);
+    }
+  });
+
+  it('does NOT flag jwt.sign when the secret comes from a variable/env, nor the options string', () => {
+    expect(scanSecurity('a.ts', "jwt.sign(payload, process.env.JWT_SECRET);").some((f) => f.rule === 'hardcoded-jwt-secret')).toBe(false);
+    expect(scanSecurity('a.ts', "jwt.sign(payload, secretKey, { algorithm: 'HS256' });").some((f) => f.rule === 'hardcoded-jwt-secret')).toBe(false);
+    expect(scanSecurity('a.ts', "jwt.sign(payload, 'your-secret-here');").some((f) => f.rule === 'hardcoded-jwt-secret')).toBe(false);
+  });
+
   it('flags command injection from a dynamically-built shell command', () => {
     for (const code of [
       'execSync(`rm -rf ${dir}`);',

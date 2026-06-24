@@ -1690,3 +1690,30 @@ systemPrompt + AppKnowledgeBase synced. v3.0-only, flag-OFF.
 
 Tests: new `EnvSecretValueAnalysis.test.ts` (7) + 2 dispatcher integration cases (45→47).
 Gate green: server+frontend tsc 0, **2079 vitest** (+9), boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 v8: hardcoded JWT signing secret (security)
+
+Continuing the autonomous Section I march. New item:
+
+**Section I #4 v8 — `SecurityAnalysis` hardcoded-jwt-secret rule (high).** A call like
+`jwt.sign(payload, 'my-secret')` bakes the signing key into the source — anyone with the
+code can forge valid tokens (full auth bypass). The assignment-based `hardcoded-secret`
+rule misses this because it's a function-argument literal, not a `secret = "..."`
+assignment. Now flagged high.
+
+High-precision by design:
+- `\b(?:jwt|jsonwebtoken)\.sign\s*\(.*?,\s*(['"`])[^'"`]{4,}\1\s*[,)]` — the `.*?,` skips
+  the payload (an object or variable, possibly containing commas) so the secret argument
+  is matched whether or not an options object follows it.
+- A variable/env secret (`jwt.sign(p, process.env.JWT_SECRET)`), the options string
+  (`{ algorithm: 'HS256' }` — not preceded by `,`), and placeholder values
+  (`'your-secret-here'`, via the module's PLACEHOLDER guard) are NOT flagged.
+
+Folds into the existing security dimension (high security findings already gate readiness,
+so a hardcoded JWT secret blocks "READY"). AppKnowledgeBase security list synced.
+v3.0-only, flag-OFF.
+
+Tests: +2 unit (`SecurityAnalysis.test.ts`, 10→12) + 1 dispatcher integration (47→48).
+Gate green: server+frontend tsc 0, **2082 vitest** (+3), boot:check PASS.

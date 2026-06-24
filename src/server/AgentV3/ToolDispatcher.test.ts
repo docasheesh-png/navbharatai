@@ -311,6 +311,13 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('connection-string-credentials');
   });
 
+  it('flags a hardcoded JWT signing secret', async () => {
+    const dd = makeDispatcher('ws-eval-jwt');
+    await write(dd, 'src/auth.ts', "export const tok = (u) => jwt.sign(u, 'static-signing-secret', { expiresIn: '1h' });");
+    const out = await evalText(dd);
+    expect(out).toContain('hardcoded-jwt-secret');
+  });
+
   it('flags command injection from a dynamically-built shell command', async () => {
     const dd = makeDispatcher('ws-eval-cmdinj');
     await write(dd, 'src/run.ts', 'import { execSync } from "child_process";\nexport const go = (dir) => execSync(`rm -rf ${dir}`);');

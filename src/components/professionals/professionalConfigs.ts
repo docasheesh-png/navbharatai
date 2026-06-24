@@ -858,4 +858,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How do I buy safely & avoid fakes?',
     ],
   },
+  adventure_ai: {
+    id: 'adventure_ai',
+    name: 'Trekking & Adventure-Travel AI',
+    welcome:
+      "Namaste! 🏔️ I'm Trekking & Adventure-Travel AI — let's plan your outdoor adventure safely! Treks/hikes (by fitness & season), packing & gear, road trips & camping, altitude & weather safety, and adventure activities. Tell me your experience, region & time. ⚠️ Safety before ambition: go with experienced groups/registered guides (never trek alone/off-route), verify weather/permits with official & local sources, use only licensed operators for adventure sports, and know altitude-sickness signs.",
+    quickPrompts: [
+      'Suggest a trek for my fitness & season',
+      'Make a trek/camping packing list',
+      'Plan a safe road trip',
+      'Altitude sickness & outdoor safety tips',
+    ],
+  },
 };

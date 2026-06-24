@@ -19,9 +19,27 @@ export interface ArchitectureReport {
   unresolvedImports: string[];
   /** Front-end modules importing back-end modules ("file -> import"). */
   layeringViolations: string[];
+  /** Front-end modules importing a server-only Node builtin ("file -> spec"). */
+  nodeBuiltinsInFrontend: string[];
 }
 
 const CODE_EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
+
+/**
+ * Node core modules that have NO browser equivalent and are not polyfilled by
+ * bundlers — importing one in front-end code breaks the build / crashes at runtime.
+ * Deliberately conservative: commonly-polyfilled builtins (path, crypto, buffer,
+ * stream, events, util, url, process) are excluded to keep precision high.
+ */
+const SERVER_ONLY_BUILTINS = new Set<string>([
+  'fs', 'child_process', 'cluster', 'net', 'tls', 'dns', 'dgram',
+  'worker_threads', 'v8', 'vm', 'readline', 'repl', 'inspector', 'module', 'os', 'http2',
+]);
+
+/** A client/front-end module by its path (src/client|components|pages|app, or App.tsx). */
+function isFrontendFile(file: string): boolean {
+  return /(^|\/)(src\/)?(client|components|pages|app)\b/i.test(file) || /App\.(t|j)sx?$/.test(file);
+}
 
 /** Resolve a local import specifier (./x, ../y) to a known workspace file, or null. */
 export function resolveLocalImport(fromFile: string, spec: string, files: Set<string>): string | null {
@@ -43,12 +61,22 @@ export function analyzeArchitecture(graph: ProjectGraph): ArchitectureReport {
   const adjacency: Record<string, string[]> = {};
   const unresolvedImports: string[] = [];
   const layeringViolations: string[] = [];
+  const nodeBuiltinsInFrontend: string[] = [];
   let edgeCount = 0;
 
   for (const [file, specs] of Object.entries(graph.imports)) {
     const edges: string[] = [];
+    const frontend = isFrontendFile(file);
     for (const spec of specs) {
-      if (!spec.startsWith('.')) continue; // external dep, not part of the local graph
+      if (!spec.startsWith('.')) {
+        // External or Node builtin. A server-only builtin in front-end code breaks
+        // the browser build, so flag it (otherwise an external dep is not local-graph).
+        const root = spec.replace(/^node:/, '').split('/')[0];
+        if (frontend && SERVER_ONLY_BUILTINS.has(root)) {
+          nodeBuiltinsInFrontend.push(`${file} -> ${spec}`);
+        }
+        continue;
+      }
       const resolved = resolveLocalImport(file, spec, files);
       if (!resolved) {
         unresolvedImports.push(`${file} -> ${spec}`);
@@ -57,8 +85,7 @@ export function analyzeArchitecture(graph: ProjectGraph): ArchitectureReport {
       edges.push(resolved);
       edgeCount++;
       // Layering: a client/frontend module importing a server module is a violation.
-      const isFrontend = /(^|\/)(src\/)?(client|components|pages|app)\b/i.test(file) || /App\.(t|j)sx?$/.test(file);
-      if (isFrontend && /(^|\/)(src\/)?server\b/i.test(resolved)) {
+      if (frontend && /(^|\/)(src\/)?server\b/i.test(resolved)) {
         layeringViolations.push(`${file} -> ${resolved}`);
       }
     }
@@ -71,6 +98,7 @@ export function analyzeArchitecture(graph: ProjectGraph): ArchitectureReport {
     cycles: detectCycles(adjacency),
     unresolvedImports,
     layeringViolations,
+    nodeBuiltinsInFrontend,
   };
 }
 
@@ -108,7 +136,7 @@ function detectCycles(adjacency: Record<string, string[]>): string[][] {
 
 /** A concise, honest text report for the agent (and the user). */
 export function architectureSummary(report: ArchitectureReport): string {
-  const problems = report.cycles.length + report.unresolvedImports.length + report.layeringViolations.length;
+  const problems = report.cycles.length + report.unresolvedImports.length + report.layeringViolations.length + report.nodeBuiltinsInFrontend.length;
   const lines = [
     `Architecture analysis: ${report.fileCount} files, ${report.edgeCount} local import edges.`,
   ];
@@ -124,6 +152,10 @@ export function architectureSummary(report: ArchitectureReport): string {
     lines.push(`Layering violations (front-end importing back-end) (${report.layeringViolations.length}):`);
     lines.push(...report.layeringViolations.slice(0, 10).map((v) => `  - ${v}`));
   }
-  if (problems === 0) lines.push('No structural defects found (no unresolved imports, cycles or layering violations).');
+  if (report.nodeBuiltinsInFrontend.length) {
+    lines.push(`Server-only Node builtins imported by front-end code (${report.nodeBuiltinsInFrontend.length}) — these break the browser build:`);
+    lines.push(...report.nodeBuiltinsInFrontend.slice(0, 10).map((v) => `  - ${v}`));
+  }
+  if (problems === 0) lines.push('No structural defects found (no unresolved imports, cycles, layering violations or browser-incompatible Node builtins).');
   return lines.join('\n');
 }

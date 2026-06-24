@@ -487,6 +487,13 @@ describe('ToolDispatcher — evaluate integration (more dimensions + generators)
     expect(out.toLowerCase()).toContain('accessib');
   });
 
+  it('flags a server-only Node builtin (fs) imported by front-end code', async () => {
+    const dd = makeDispatcher('ws-eval-nodebuiltin');
+    await write(dd, 'src/components/Saver.tsx', "import fs from 'fs';\nexport const Saver = () => null;");
+    const out = await evalText(dd);
+    expect(out).toContain('break the browser build');
+  });
+
   it('flags an <iframe> with no accessible title', async () => {
     const dd = makeDispatcher('ws-eval-iframe');
     await write(dd, 'src/Embed.tsx', 'export const E = () => <iframe src="https://x.com/v" />;');

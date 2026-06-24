@@ -2277,3 +2277,21 @@ local + single-line like the existing img-missing-alt rule (high precision; mult
 
 Tests: +1 unit (iframe without title flagged; title/aria-label safe) + 1 dispatcher integration.
 Gate green: server+frontend tsc 0, **2201 vitest** (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 (architecture): server-only Node builtin imported by front-end (build-break)
+
+Continuing the autonomous Section I march — varying into the Architecture/structural dimension. New
+item: `analyzeArchitecture` now flags a server-only Node builtin (`fs`, `child_process`, `cluster`,
+`net`, `tls`, `dns`, `dgram`, `worker_threads`, `v8`, `vm`, `readline`, `repl`, `inspector`, `module`,
+`os`, `http2`) imported by FRONT-END code → `nodeBuiltinsInFrontend`. These have no browser equivalent
+and aren't polyfilled, so the import breaks the Vite/browser build. Deliberately conservative:
+commonly-polyfilled builtins (path, crypto, buffer, stream, events, util, url, process) are NOT flagged
+to keep precision high; back-end files importing them are NOT flagged (reuses the same front-end path
+classifier as the layering check). Folds into the existing architecture report + summary + problem
+count. AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +2 unit (fs-in-frontend flagged; path/crypto + back-end-fs safe) + 1 dispatcher integration;
+Readiness.test.ts literal updated for the new field. Gate green: server+frontend tsc 0, **2204 vitest**
+(+3), build PASS, boot:check PASS.

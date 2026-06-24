@@ -129,6 +129,16 @@ const RULES: Rule[] = [
     message: 'document.write() injects raw HTML (XSS sink) and blocks/overwrites the page — build DOM nodes, set textContent, or render via the framework instead.',
   },
   {
+    rule: 'open-redirect',
+    severity: 'medium',
+    // res.redirect() to a value taken DIRECTLY from the request (req.query/params/body/
+    // headers) is an open redirect — attackers craft a link to send users to a phishing
+    // site. High-precision: the redirect target must START with req.* (optionally after a
+    // status code), so `res.redirect(`/go?to=${req.query.x}`)` (fixed path) is not flagged.
+    re: /\bres(?:ponse)?\.redirect\s*\(\s*(?:\d{3}\s*,\s*)?req\.(?:query|params|body|headers)\b/,
+    message: 'Open redirect — res.redirect() to a value from the request lets attackers send users to a phishing site; validate against an allow-list of paths/hosts.',
+  },
+  {
     rule: 'sql-injection',
     severity: 'high',
     // A SQL statement built by interpolating/concatenating a value straight into the

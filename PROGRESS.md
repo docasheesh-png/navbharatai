@@ -2600,3 +2600,17 @@ High-precision: matches only a quoted first arg; a function argument (`setTimeou
 
 Tests: +1 unit (string args flagged; function/reference args safe). Gate green: server tsc 0,
 **2222 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 (security): open redirect (res.redirect to request input)
+
+Continuing the autonomous Section I march. New item: `SecurityAnalysis` `open-redirect` rule (medium).
+`res.redirect()` to a value taken DIRECTLY from the request (req.query/params/body/headers) is an open
+redirect — attackers craft a link that sends users to a phishing site. High-precision: the redirect
+target must START with req.* (optionally after a 3-digit status), so a fixed-path redirect with the
+user value only as a query param (`res.redirect(`/go?to=${req.query.x}`)`) is NOT flagged. KB synced.
+v3.0-only, flag-OFF.
+
+Tests: +1 unit (req-input + status-code forms flagged; static + fixed-path safe). Gate green:
+server tsc 0, **2223 vitest** (+1), build PASS, boot:check PASS.

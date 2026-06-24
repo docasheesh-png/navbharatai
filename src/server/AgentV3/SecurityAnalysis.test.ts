@@ -153,6 +153,13 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'setTimeout(doStuff, 100);').some((f) => f.rule === 'settimeout-string')).toBe(false);
   });
 
+  it('flags an open redirect to request input, but not a static or fixed-path redirect', () => {
+    expect(scanSecurity('a.ts', 'res.redirect(req.query.url);').some((f) => f.rule === 'open-redirect')).toBe(true);
+    expect(scanSecurity('a.ts', 'res.redirect(302, req.query.next);').some((f) => f.rule === 'open-redirect')).toBe(true);
+    expect(scanSecurity('a.ts', "res.redirect('/login');").some((f) => f.rule === 'open-redirect')).toBe(false);
+    expect(scanSecurity('a.ts', 'res.redirect(`/go?to=${req.query.next}`);').some((f) => f.rule === 'open-redirect')).toBe(false);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

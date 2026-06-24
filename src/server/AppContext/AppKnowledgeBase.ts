@@ -849,6 +849,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['spiritual', 'spirituality', 'philosophy', 'meaning', 'inner peace', 'gita', 'meditation', 'gratitude', 'dharma', 'wisdom', 'adhyatm', 'reflection', 'ethics', 'purpose'],
   },
 
+  // ─── DIY CRAFTS & HOBBIES AI ─────────────────────────────────────────────
+  {
+    id: 'crafts_ai',
+    name: 'DIY Crafts & Hobbies AI',
+    path: 'Sidebar → Professionals → DIY Crafts & Hobbies',
+    description: 'Cheerful guide to creative crafts, DIY projects & hobbies for all ages & budgets: step-by-step craft projects (paper/origami, card-making, painting & drawing, knitting/crochet/embroidery, jewellery, candle/soap, clay/pottery, scrapbooking, home decor), festive & occasion DIY (rangoli, diyas, torans, cards, gift wrap, decorations), upcycling & budget crafts (newspaper/bottles/jars/old clothes/cardboard — eco-friendly), kids\' crafts & school projects, hobbies (sketching, calligraphy, journaling), and technique/troubleshooting — with affordable, easily-available materials. Safety: craft-safety first especially with kids (sharp tools, hot glue/wax/ovens, small-part choking hazards, chemicals/fumes like paints/resin/adhesives — ventilation, labels, away from children/pets, adult supervision); encouraging & inclusive of all skill levels (mistakes are part of learning, no "wrong" art); never fabricates brands/measurements-as-guarantees or unsafe shortcuts (follow product instructions, caution for heat/electrical/power tools).',
+    howToUse: 'Open Sidebar → Professionals → DIY Crafts & Hobbies and ask: "a fun beginner craft project", "festive DIY decoration ideas", "upcycle something I have at home", "easy & safe craft for kids". For full event planning use Events AI; for gardening/photography hobbies the Gardening/Photography AIs.',
+    relatedFeatures: ['professionals', 'events_ai', 'environment_ai', 'gardening_ai'],
+    aiSurface: 'crafts_ai',
+    keywords: ['craft', 'crafts', 'diy', 'hobby', 'art', 'rangoli', 'origami', 'painting', 'knitting', 'upcycle', 'handmade', 'kala', 'decoration', 'kids craft', 'school project'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone, PartyPopper, Accessibility, Sofa, Globe2, HandHelping, Shirt, ListChecks, Users, Wrench, CandlestickChart, Smartphone, Sigma, Code2, HeartPulse, BriefcaseMedical, TreePine, Lightbulb, Shield, ScrollText, BadgeCheck, Flame } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone, PartyPopper, Accessibility, Sofa, Globe2, HandHelping, Shirt, ListChecks, Users, Wrench, CandlestickChart, Smartphone, Sigma, Code2, HeartPulse, BriefcaseMedical, TreePine, Lightbulb, Shield, ScrollText, BadgeCheck, Flame, Palette } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -66,6 +66,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'civic_ai', label: 'Civic / RTI & Grievance Helper', description: 'File RTIs, public grievances (CPGRAMS), consumer complaints (1915/e-Daakhil) & citizen-service guidance — drafts applications/complaints. Official process only; verify on .gov.in.', icon: ScrollText, active: true },
   { id: 'sarkari_ai', label: 'Sarkari / Govt-Job Exam Guide', description: 'Which exam for which job (UPSC/SSC/banking/railway/defence/PSC), eligibility & selection process, prep strategy & motivation — verify official notifications; never pay for a job.', icon: BadgeCheck, active: true },
   { id: 'spiritual_ai', label: 'Spiritual & Philosophy Companion', description: 'Reflection on meaning, values & inner peace, wisdom from many traditions, mindfulness & everyday ethics — inclusive of all beliefs (not a religious authority or therapy).', icon: Flame, active: true },
+  { id: 'crafts_ai', label: 'DIY Crafts & Hobbies', description: 'Step-by-step craft projects, festive DIY (rangoli/diyas/cards), budget upcycling, kids crafts & creative hobbies — affordable & fun, with craft-safety in mind.', icon: Palette, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

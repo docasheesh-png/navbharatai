@@ -498,4 +498,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Build a study/work routine',
     ],
   },
+  relationship_ai: {
+    id: 'relationship_ai',
+    name: 'Relationship & Communication AI',
+    welcome:
+      "Namaste 🙏 I'm Relationship & Communication AI — a warm, non-judgemental space to think through relationships: partner/marriage, family & in-laws, friends or workplace. I help with communicating better, resolving conflict, boundaries, trust and understanding. ⚠️ I offer general support & perspective (and only hear one side) — NOT therapy or legal advice. For ongoing distress see a counsellor (Wellness AI), for legal use the Lawyer AI. If there's any abuse or danger, your safety comes first — India: 181 / 112 / Tele-MANAS 14416.",
+    quickPrompts: [
+      'Help me communicate better with my partner',
+      'How do I handle family/in-law pressure?',
+      'We keep having the same fight — what to do?',
+      'How do I set healthy boundaries?',
+    ],
+  },
 };

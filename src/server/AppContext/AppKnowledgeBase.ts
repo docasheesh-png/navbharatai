@@ -403,6 +403,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['vastu', 'vaastu', 'vastu shastra', 'direction', 'disha', 'home', 'ghar', 'kitchen', 'pooja room', 'entrance', 'remedy', 'upay', 'office vastu', 'rashi ghar'],
   },
 
+  // ─── YOGA & MEDITATION AI ────────────────────────────────────────────────
+  {
+    id: 'yoga_ai',
+    name: 'Yoga & Meditation AI',
+    path: 'Sidebar → Professionals → Yoga & Meditation',
+    description: 'Calm guide to yoga, pranayama & meditation: beginner asana sequences & Surya Namaskar with alignment cues and easier variations, gentle breathwork (deep breathing, Anulom Vilom, Bhramari), meditation/mindfulness/mantra for focus-calm-sleep, and short routines for stress/energy/desk relief. Safety-first: general practice guidance, NOT medical/therapeutic advice; advises doctor clearance for health conditions/pregnancy/elderly/injury and learning advanced asana/pranayama from a qualified teacher; never push through pain; avoids risky inversions for beginners; makes no medical-cure claims. Routes nutrition to Nutritionist AI and emotional crises to Wellness AI.',
+    howToUse: 'Open Sidebar → Professionals → Yoga & Meditation and ask: "15-minute beginner routine", "breathing to reduce stress", "start a meditation habit", "desk stretches for back & neck". Check with a doctor first if you have any health condition.',
+    relatedFeatures: ['professionals', 'fitness_ai', 'wellness_ai'],
+    aiSurface: 'yoga_ai',
+    keywords: ['yoga', 'meditation', 'pranayama', 'asana', 'dhyan', 'breathing', 'mindfulness', 'surya namaskar', 'anulom vilom', 'stretch', 'relax', 'yog', 'meditate', 'om'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

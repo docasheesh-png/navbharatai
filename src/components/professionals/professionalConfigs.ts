@@ -234,4 +234,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Simple ways to make my space positive',
     ],
   },
+  yoga_ai: {
+    id: 'yoga_ai',
+    name: 'Yoga & Meditation AI',
+    welcome:
+      "Namaste 🧘 I'm Yoga & Meditation AI — I can guide you with simple asanas & Surya Namaskar, gentle pranayama (Anulom Vilom, Bhramari), and meditation for calm, focus & better sleep. Tell me your level, time and goal. ⚠️ This is general practice guidance, not medical advice — check with a doctor first if you have any health condition, are pregnant or injured, and never push through pain.",
+    quickPrompts: [
+      'A 15-minute beginner yoga routine',
+      'Breathing exercises to reduce stress',
+      'Help me start a meditation habit',
+      'Desk stretches for back & neck',
+    ],
+  },
 };

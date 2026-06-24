@@ -5446,6 +5446,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'chef_ai') toggleTab('chef_ai');
               else if (id === 'travel_ai') toggleTab('travel_ai');
               else if (id === 'vastu_ai') toggleTab('vastu_ai');
+              else if (id === 'yoga_ai') toggleTab('yoga_ai');
             }} />
           )}
 
@@ -5543,6 +5544,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'vastu_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.vastu_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'yoga_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.yoga_ai} userId={user?.uid} />
             </div>
           )}
 

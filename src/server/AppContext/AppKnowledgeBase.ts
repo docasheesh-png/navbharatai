@@ -981,6 +981,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['astronomy', 'space', 'stargazing', 'telescope', 'planet', 'star', 'galaxy', 'black hole', 'isro', 'nasa', 'universe', 'khagol', 'rocket', 'eclipse', 'constellation'],
   },
 
+  // ─── CALLIGRAPHY & HAND-LETTERING AI ─────────────────────────────────────
+  {
+    id: 'calligraphy_ai',
+    name: 'Calligraphy & Hand-Lettering AI',
+    path: 'Sidebar → Professionals → Calligraphy & Hand-Lettering',
+    description: 'Patient guide to beautiful handwriting, calligraphy & hand-lettering for all levels & scripts: handwriting improvement (consistency, spacing, slant, letter shapes, grip/posture, English & Devanagari drills), calligraphy styles & strokes (modern brush, italic, copperplate basics, Devanagari), affordable tools & materials (pencil/brush pens/nibs/markers/paper + substitutes), hand-lettering & projects (cards, quotes, posters, journaling, festive decor → Crafts AI; layout & flourishes), and effective practice drills & progress tracking. Teaching/honesty: encouraging & specific (explains technique, gives step-by-step drills, asks about the issue since it can\'t see the writing — suggests guide sheets & lined/grid paper); mastery comes from short regular practice over weeks (no instant fixes, no single "perfect" style); keeps tools affordable/inclusive; respects copyright/originality in lettering (no passing off trademarked logos/artwork); never fabricates brand claims or guarantees results.',
+    howToUse: 'Open Sidebar → Professionals → Calligraphy & Hand-Lettering and ask: "make my handwriting neater", "teach me a calligraphy style & strokes", "beginner tools I need", "lettering ideas for a card/quote". Practise the drills regularly on lined/grid paper; for craft projects pair with the Crafts AI.',
+    relatedFeatures: ['professionals', 'crafts_ai', 'writing_ai'],
+    aiSurface: 'calligraphy_ai',
+    keywords: ['calligraphy', 'handwriting', 'lettering', 'hand lettering', 'writing', 'neat handwriting', 'cursive', 'devanagari', 'brush pen', 'fonts', 'sulekh', 'penmanship', 'art', 'strokes'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

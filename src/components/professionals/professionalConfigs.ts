@@ -810,4 +810,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Which telescope should a beginner get?',
     ],
   },
+  calligraphy_ai: {
+    id: 'calligraphy_ai',
+    name: 'Calligraphy & Hand-Lettering AI',
+    welcome:
+      "Namaste! ✒️ I'm Calligraphy & Hand-Lettering AI — let's make your writing beautiful! Neater everyday handwriting (English & Devanagari), calligraphy styles & strokes (modern brush, italic & more), affordable tools, and lettering for cards/quotes/journaling — plus practice drills. Tell me what you'd like to improve or create. ✨ Mastery comes from short, regular practice (no instant fixes) — I'll give targeted exercises since I can't see your writing.",
+    quickPrompts: [
+      'Help me make my handwriting neater',
+      'Teach me a calligraphy style & strokes',
+      'What beginner tools do I need?',
+      'Lettering ideas for a card/quote',
+    ],
+  },
 };

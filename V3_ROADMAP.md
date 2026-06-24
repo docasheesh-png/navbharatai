@@ -258,6 +258,15 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Section I #4 v8 (Security) — hardcoded JWT signing secret. Added a
+  `hardcoded-jwt-secret` rule (high) to `SecurityAnalysis`: `jwt.sign(payload, '<literal>')`
+  bakes the signing key into the source, so anyone with the code can forge tokens — and the
+  assignment-based `hardcoded-secret` rule misses this function-argument form. High-precision:
+  `.*?,` skips the payload (object/variable) so the secret arg is matched whether or not an
+  options object follows; a variable/env secret (`process.env.JWT_SECRET`), the options
+  string (`{ algorithm: 'HS256' }`), and placeholders (`your-secret-here`) are NOT flagged.
+  Folds into the existing security dimension (high → gates readiness). AppKnowledgeBase
+  synced. v3.0-only. Gate green: server+frontend tsc 0, 2082 vitest (+3), boot:check PASS.
 - 2026-06-24: Section I #4 v7 (Security) — real secrets in committed env templates. New
   `AgentV3/EnvSecretValueAnalysis.ts` (PURE): a `.env.example`/`.sample`/`.template` is
   committed and must hold placeholders only; a real secret left inside one is a permanent

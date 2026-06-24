@@ -786,4 +786,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Menstrual hygiene — safe practices',
     ],
   },
+  volunteer_ai: {
+    id: 'volunteer_ai',
+    name: 'Volunteering & Social-Impact AI',
+    welcome:
+      "Namaste! 🤝 I'm Volunteering & Social-Impact AI — let's help you give back meaningfully! Find a cause & way to help (time, skills, money, awareness), volunteer with genuine NGOs, donate safely, or start a small community initiative. Tell me what you care about & what you can give. ⚠️ Always verify a charity before donating & give only through official channels (beware fake-charity scams); for 80G/tax, the CA AI. Help with respect & dignity.",
+    quickPrompts: [
+      'Find a cause & way I can help',
+      'How do I volunteer with a genuine NGO?',
+      'How to donate safely & avoid scams',
+      'Help me start a community initiative',
+    ],
+  },
 };

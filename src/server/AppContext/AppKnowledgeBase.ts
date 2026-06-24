@@ -957,6 +957,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['hygiene', 'sanitation', 'handwashing', 'safe water', 'public health', 'cleanliness', 'menstrual hygiene', 'disease prevention', 'swachhata', 'safai', 'mosquito', 'dengue', 'food hygiene', 'toilet'],
   },
 
+  // ─── VOLUNTEERING & SOCIAL-IMPACT AI ─────────────────────────────────────
+  {
+    id: 'volunteer_ai',
+    name: 'Volunteering & Social-Impact AI',
+    path: 'Sidebar → Professionals → Volunteering & Social-Impact',
+    description: 'Warm guide to giving back: find a cause & way to help (match interests/skills/time to education, health, environment, animals, elderly, children, disaster relief, women empowerment — via time/skills/money/goods/awareness), volunteering (finding genuine verified NGOs/local/online & skills-based opportunities, contributing reliably & respectfully), donating safely (verify registration/transparency, official channels & receipts, 80G tax awareness → CA AI), starting community initiatives (clean-ups, tutoring, donation/blood drives, awareness campaigns; planning & mobilising), and skills-based/everyday giving (pro bono, blood/organ-donation awareness via official channels, daily kindness). Safety/honesty: NOT a charity regulator or tax/legal authority — anti-fraud (verify any NGO/cause, donate only via official/traceable channels never random personal accounts/under pressure, beware fake-charity & viral-fundraiser scams, never share OTPs, report 1930 / Cyber Safety AI); respect & dignity of those helped (no saviour attitudes/stereotypes, follow communities & vetted organisations, proper channels for children/vulnerable/disaster/medical); never fabricates organisations/registration/tax rules (verify & consult CA/Lawyer AI).',
+    howToUse: 'Open Sidebar → Professionals → Volunteering & Social-Impact and ask: "find a cause & way I can help", "volunteer with a genuine NGO", "donate safely & avoid scams", "start a community initiative". Verify charities & give via official channels; for 80G/tax use the CA AI.',
+    relatedFeatures: ['professionals', 'cybersafety_ai', 'accountant_ai', 'environment_ai'],
+    aiSurface: 'volunteer_ai',
+    keywords: ['volunteer', 'volunteering', 'ngo', 'donate', 'donation', 'charity', 'social work', 'seva', 'give back', 'community', 'blood donation', 'csr', 'social impact', '80g', 'fundraiser'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

@@ -630,4 +630,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Teach kids about safe & unsafe touch',
     ],
   },
+  translate_ai: {
+    id: 'translate_ai',
+    name: 'Language & Translation Helper AI',
+    welcome:
+      "Namaste! 🌐 I'm Language & Translation Helper AI — I translate and explain text across Indian languages (Hindi, Tamil, Bengali, Marathi, Telugu & more) and English/foreign languages: translate messages, explain meaning & idioms, write in another language, and handy travel phrases. Paste your text & tell me the languages. ⚠️ Translation isn't always exact and AI can err — for official/legal/medical documents, please use a certified human translator.",
+    quickPrompts: [
+      'Translate this text for me',
+      'What does this phrase/idiom mean?',
+      'Help me write a message in another language',
+      'Useful travel phrases in a language',
+    ],
+  },
 };

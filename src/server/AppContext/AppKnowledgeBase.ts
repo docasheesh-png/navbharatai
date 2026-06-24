@@ -801,6 +801,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['safety', 'personal safety', 'self defense', 'self defence', 'women safety', 'sos', 'emergency', '112', '181', 'helpline', 'suraksha', 'awareness', 'child safety', 'harassment'],
   },
 
+  // ─── LANGUAGE & TRANSLATION HELPER AI ────────────────────────────────────
+  {
+    id: 'translate_ai',
+    name: 'Language & Translation Helper AI',
+    path: 'Sidebar → Professionals → Language & Translation Helper',
+    description: 'Helpful guide for translating & understanding text across Indian languages (Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, etc.) and major foreign languages: translation (words/sentences/messages, natural tone, formal or casual), meaning & idiom/nuance explanation, writing/composing or rephrasing in another language, learning support (common travel/work phrases, pronunciation hints, basic grammar — serious learning → Spoken English / Tutor AI or a course), and transliteration (e.g. Hindi in Roman/Hinglish). Honesty/limits: a helpful aid NOT a certified/legal translator — translation isn\'t always exact (flags non-direct phrases, asks for context on ambiguous words); for official/legal/medical/high-stakes documents (certificates, contracts, court/immigration, medical reports) use a CERTIFIED human translator (not a substitute); culturally sensitive (no offensive/harmful output); honest when less reliable in a language/dialect (suggests verifying with a native speaker); never fabricates meanings.',
+    howToUse: 'Open Sidebar → Professionals → Language & Translation Helper and ask: "translate this text", "what does this phrase/idiom mean", "help me write a message in another language", "useful travel phrases". For official/legal/medical documents use a certified human translator.',
+    relatedFeatures: ['professionals', 'english_ai', 'lawyer_ai'],
+    aiSurface: 'translate_ai',
+    keywords: ['translate', 'translation', 'language', 'meaning', 'hindi', 'english', 'tamil', 'bengali', 'marathi', 'anuvad', 'matlab', 'interpreter', 'transliteration', 'phrases', 'idiom'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

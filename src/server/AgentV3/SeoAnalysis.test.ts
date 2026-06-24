@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
 
 const FULL = `<!doctype html><html lang="en"><head>
+<meta charset="utf-8" />
 <title>My Real App</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="description" content="A genuinely useful app." />
@@ -22,6 +23,13 @@ describe('analyzeSeo', () => {
   it('flags a missing/empty title as high', () => {
     const r = analyzeSeo('<html lang="en"><head><title></title><meta name="viewport" content="x"><meta name="description" content="y"></head></html>');
     expect(r.findings.some((f) => f.level === 'high' && /title/.test(f.message))).toBe(true);
+  });
+
+  it('flags a missing <meta charset> as low, but not when present', () => {
+    const missing = analyzeSeo('<html lang="en"><head><title>X</title><meta name="viewport" content="x"><meta name="description" content="y"></head></html>');
+    expect(missing.findings.some((f) => f.level === 'low' && /charset/.test(f.message))).toBe(true);
+    const present = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>X</title><meta name="viewport" content="x"><meta name="description" content="y"></head></html>');
+    expect(present.findings.some((f) => /charset/.test(f.message))).toBe(false);
   });
 
   it('flags a missing viewport as medium', () => {

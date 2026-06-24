@@ -2433,3 +2433,17 @@ Admin reported four v3.0 issues; all fixed:
    `--host 0.0.0.0`; Next `-H 0.0.0.0`; CRA `HOST=0.0.0.0`).
 
 Gate green: frontend tsc 0, server tsc 0, **2215 vitest**, build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #19 (SEO): missing <meta charset>
+
+Resuming the autonomous Section I march (while admin tests v3.0). New item: `SeoAnalysis` now flags a
+missing `<meta charset>` in the HTML entry (low). Without a declared charset, non-ASCII text (e.g.
+Hindi) can render as mojibake in some browsers/encodings — a real bug for a Bharat-first app. Joins the
+existing high-signal four (title, viewport, description, lang); high-precision tag check. KB synced.
+v3.0-only, flag-OFF. Pushed to branch only (no main-merge — yielding to the concurrent session per
+admin's "pehle aap" / no-race instruction; main-merge will happen in a quiet window).
+
+Tests: +1 unit (charset missing flagged; present safe; FULL fixture updated). Gate green: server tsc 0,
+**2216 vitest** (+1), build PASS, boot:check PASS.

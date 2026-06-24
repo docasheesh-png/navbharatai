@@ -47,6 +47,15 @@ export function analyzeSeo(indexHtml: string | null | undefined): SeoReport {
     });
   }
 
+  // <meta charset> — without a declared charset, non-ASCII text (e.g. Hindi) can
+  // render as mojibake in some browsers/encodings.
+  if (!/<meta[^>]+charset=/i.test(html)) {
+    findings.push({
+      level: 'low',
+      message: 'No <meta charset> in the HTML entry — add <meta charset="utf-8"> as the first <head> tag so non-ASCII (e.g. Hindi) text renders correctly.',
+    });
+  }
+
   // Meta description with real content.
   if (!/<meta[^>]+name=["']description["'][^>]*content=["'][^"']+["']/i.test(html)) {
     findings.push({
@@ -69,7 +78,7 @@ export function analyzeSeo(indexHtml: string | null | undefined): SeoReport {
 /** A short, honest SEO/metadata block for the `evaluate` output. */
 export function seoSummary(report: SeoReport): string {
   if (!report.assessed) return 'SEO/metadata: — (no HTML entry to assess).';
-  if (report.findings.length === 0) return 'SEO/metadata: ✓ title, viewport, description and lang are present.';
+  if (report.findings.length === 0) return 'SEO/metadata: ✓ title, viewport, charset, description and lang are present.';
   const order: Record<SeoLevel, number> = { high: 0, medium: 1, low: 2 };
   const sorted = [...report.findings].sort((a, b) => order[a.level] - order[b.level]);
   const head = `SEO/metadata — ${report.findings.length} item(s) missing:`;

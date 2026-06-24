@@ -471,6 +471,7 @@ declare module 'lucide-react' {
   export const ScrollText: Icon;
   export const Brain: Icon;
   export const Bird: Icon;
+  export const Laptop: Icon;
   export const PlayCircle: Icon;
   export const Hash: Icon;
   export const AtSign: Icon;

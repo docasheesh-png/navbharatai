@@ -921,6 +921,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['nature', 'wildlife', 'bird', 'animal', 'plant', 'tree', 'identify', 'birdwatching', 'insect', 'jungle', 'prakriti', 'conservation', 'snake', 'species', 'ecology'],
   },
 
+  // ─── FREELANCING & ONLINE-INCOME AI ──────────────────────────────────────
+  {
+    id: 'freelance_ai',
+    name: 'Freelancing & Online-Income AI',
+    path: 'Sidebar → Professionals → Freelancing & Online-Income',
+    description: 'Practical, honest mentor for earning through legitimate freelancing, gig work & online income: choosing a path (writing/content, design, web/app dev, digital marketing, video editing, tutoring, translation, virtual assistance, handmade selling), getting started (portfolio, profiles on legit platforms, personal pitch), finding clients (non-spammy proposals/outreach, networking, referrals, not underpricing), pricing & professionalism (hourly/project/value, scope, milestones, deadlines, reviews), getting paid safely + contracts (advance/milestones, escrow, invoices → Lawyer AI for legal) + tax/GST awareness (→ CA AI) & records, and growth/balance (raising rates, emergency fund → Finance AI). Honesty/safety (money & scams): strongly ANTI-SCAM — never endorse "earn ₹X/day"/part-time/task/investment/MLM/Ponzi schemes that ask you to PAY/deposit to join or promise guaranteed earnings (real work = YOU get paid; report to 1930 / Cyber Safety AI); realistic (irregular income, takes skill/effort/time, no get-rich-quick, no promised earnings); professional integrity (quality work, confidentiality, copyright, no deceptive/cheating gigs like writing someone\'s graded assignment); protects bank details/OTPs; never fabricates platform rules/fees/rates.',
+    howToUse: 'Open Sidebar → Professionals → Freelancing & Online-Income and ask: "which freelancing path suits my skills", "build a portfolio & profile", "write a winning client proposal", "how to price my work". Never pay to get a job/task (scam); for tax use CA AI, contracts the Lawyer AI, budgeting the Finance AI.',
+    relatedFeatures: ['professionals', 'business_ai', 'mentor_ai', 'cybersafety_ai', 'accountant_ai'],
+    aiSurface: 'freelance_ai',
+    keywords: ['freelance', 'freelancing', 'online income', 'work from home', 'gig', 'upwork', 'fiverr', 'client', 'side income', 'earn online', 'kamai', 'remote work', 'proposal', 'pricing'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

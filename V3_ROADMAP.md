@@ -258,6 +258,16 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Section I #4 v5 (Security) — connection-string credential leak. Added a
+  `connection-string-credentials` rule (high) to `SecurityAnalysis`: a DB/queue URI with
+  embedded credentials (`mongodb|postgres|mysql|mariadb|redis|amqp://user:pass@host`) is
+  a real secret leak the assignment-based `hardcoded-secret` rule misses entirely (no
+  `password =` keyword in a URI). High-precision: requires the `scheme://[user]:pass@`
+  shape with a 3+ char password, only the known DB/queue schemes (so ordinary https URLs
+  are ignored), and the existing PLACEHOLDER guard suppresses env-interpolated
+  (`${process.env.X}`) and placeholder (`<password>`, `your-…`) forms. Folds into the
+  existing security dimension. AppKnowledgeBase synced. v3.0-only. Gate green:
+  server+frontend tsc 0, 2056 vitest (+3), boot:check PASS.
 - 2026-06-24: Section I #22 v2 (DX / hygiene) — .gitignore node_modules coverage.
   Extended `ProjectHygieneAnalysis`: a `.gitignore` that EXISTS but does not actually
   ignore `node_modules` is now flagged medium — otherwise node_modules gets committed

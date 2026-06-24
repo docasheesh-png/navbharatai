@@ -37,6 +37,15 @@ const RULES: Rule[] = [
     ignore: (_m, line) => PLACEHOLDER.test(line),
   },
   {
+    rule: 'connection-string-credentials',
+    severity: 'high',
+    // user:password baked into a DB/queue connection-string URI (scheme://user:pass@host).
+    // The assignment-based hardcoded-secret rule misses this URI form entirely.
+    re: /\b(mongodb(?:\+srv)?|postgres(?:ql)?|mysql|mariadb|rediss?|amqps?):\/\/[^\s:'"`@/]*:([^\s:'"`@/]{3,})@/i,
+    message: 'Credentials embedded in a connection string — move the user/password to environment variables; never commit live DB/queue credentials.',
+    ignore: (_m, line) => PLACEHOLDER.test(line),
+  },
+  {
     rule: 'aws-access-key',
     severity: 'high',
     re: /\bAKIA[0-9A-Z]{16}\b/,

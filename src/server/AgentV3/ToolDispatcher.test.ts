@@ -487,6 +487,13 @@ describe('ToolDispatcher — evaluate integration (more dimensions + generators)
     expect(out.toLowerCase()).toContain('accessib');
   });
 
+  it('flags a placeholder-image service left in the markup', async () => {
+    const dd = makeDispatcher('ws-eval-phimg');
+    await write(dd, 'src/Hero.tsx', 'export const Hero = () => <img src="https://via.placeholder.com/640" alt="h" />;');
+    const out = await evalText(dd);
+    expect(out).toContain('placeholder-image');
+  });
+
   it('flags a server-only Node builtin (fs) imported by front-end code', async () => {
     const dd = makeDispatcher('ws-eval-nodebuiltin');
     await write(dd, 'src/components/Saver.tsx', "import fs from 'fs';\nexport const Saver = () => null;");

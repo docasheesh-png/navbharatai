@@ -2295,3 +2295,18 @@ count. AppKnowledgeBase synced. v3.0-only, flag-OFF.
 Tests: +2 unit (fs-in-frontend flagged; path/crypto + back-end-fs safe) + 1 dispatcher integration;
 Readiness.test.ts literal updated for the new field. Gate green: server+frontend tsc 0, **2204 vitest**
 (+3), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I (authenticity): placeholder-image services left in markup
+
+Continuing the autonomous Section I march — varying into the Authenticity dimension (the "real
+features only, no fakes" rule). New item: `AuthenticityAnalysis` `placeholder-image` rule (medium).
+Unambiguous placeholder-image generators (`via.placeholder.com`, `placehold.co/.it`, `placekitten.com`,
+`placeimg.com`, `dummyimage.com`, `lorempixel.com`) left in an `<img src>`/url are fake content shipped
+as real. Conservative: real photo services (picsum.photos, unsplash) are NOT flagged — they serve real
+images and ship in real apps. Folds into the existing authenticity dimension. AppKnowledgeBase synced.
+v3.0-only, flag-OFF.
+
+Tests: +1 unit (via.placeholder/placehold.co flagged; picsum + local asset safe) + 1 dispatcher
+integration. Gate green: server+frontend tsc 0, **2206 vitest** (+2), build PASS, boot:check PASS.

@@ -20,6 +20,15 @@ describe('scanAuthenticity', () => {
     expect(fixme.some((x) => x.kind === 'todo-marker')).toBe(true);
   });
 
+  it('flags a placeholder-image service in an <img src> (medium) but not a real photo service', () => {
+    const bad = scanAuthenticity('src/Hero.tsx', '<img src="https://via.placeholder.com/640x480" alt="hero" />');
+    expect(bad.some((x) => x.kind === 'placeholder-image' && x.severity === 'medium')).toBe(true);
+    expect(scanAuthenticity('src/Hero.tsx', '<img src="https://placehold.co/600x400" alt="x" />').some((x) => x.kind === 'placeholder-image')).toBe(true);
+    // Real photo services are not flagged (used in shipping apps).
+    expect(scanAuthenticity('src/Hero.tsx', '<img src="https://picsum.photos/600/400" alt="x" />').some((x) => x.kind === 'placeholder-image')).toBe(false);
+    expect(scanAuthenticity('src/Hero.tsx', '<img src="/assets/hero.png" alt="x" />').some((x) => x.kind === 'placeholder-image')).toBe(false);
+  });
+
   it('flags a console.log-only handler as an empty handler (medium)', () => {
     const issues = scanAuthenticity(
       'src/handler.ts',

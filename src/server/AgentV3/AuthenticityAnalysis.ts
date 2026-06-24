@@ -64,6 +64,15 @@ const RULES: Rule[] = [
     re: /(?:\/\/|\/\*|#|["'`])\s*(this is a )?(placeholder|stub)\b/i,
   },
   {
+    kind: 'placeholder-image',
+    severity: 'medium',
+    // Unambiguous placeholder-image generators left in an <img src>/url — fake
+    // content shipped as real, against the "real features only" rule. Conservative:
+    // only services whose name IS "placeholder/dummy" (picsum/unsplash are excluded —
+    // they serve real photos and are used in shipping apps).
+    re: /\b(via\.placeholder\.com|placehold\.(co|it)|placekitten\.com|placeimg\.com|dummyimage\.com|lorempixel\.com)\b/i,
+  },
+  {
     kind: 'coming-soon',
     severity: 'high',
     re: /\b(coming\s+soon|not\s+available\s+yet)\b/i,

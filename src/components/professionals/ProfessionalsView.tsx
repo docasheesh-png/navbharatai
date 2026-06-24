@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -36,6 +36,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'pharmacist_ai', label: 'Pharmacist / Medicine-Info', description: 'General medicine information — what a medicine is for, safe use & storage, generics/Jan Aushadhi, antibiotic safety. Information only — never diagnoses, prescribes or gives doses.', icon: Pill, active: true },
   { id: 'business_ai', label: 'Small-Business / Startup', description: 'Validate ideas, plan, pricing & cash flow, low-cost marketing, registration (Udyam/MSME) & funding awareness — practical mentoring (tax→CA, legal→lawyer; beware scams).', icon: Briefcase, active: true },
   { id: 'homerepair_ai', label: 'Home Repair / Handyman', description: 'Simple safe DIY fixes (tap, drain, flush, tripped MCB), understanding a problem before calling a technician, and maintenance — strong electrical/gas safety, pro when risky.', icon: Hammer, active: true },
+  { id: 'realestate_ai', label: 'Real-Estate / Property', description: 'Buy vs rent, buying due diligence (title, RERA, approvals), home-loan basics, rent agreements & avoiding fraud — honest education (lawyer/CA verify; not valuation).', icon: Home, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

@@ -318,4 +318,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Monsoon home-maintenance checklist',
     ],
   },
+  realestate_ai: {
+    id: 'realestate_ai',
+    name: 'Real-Estate / Property Advisor AI',
+    welcome:
+      "Namaste! 🏠 I'm Property AI — I help you make smart, safe property decisions: buy vs rent, what to check before buying (title, RERA, approvals), home-loan basics, rent agreements, and avoiding fraud. Tell me your situation. ⚠️ This is general guidance, not legal/financial advice — always get documents vetted by a property lawyer, verify projects on your state RERA portal, and beware advance-fee & fake-listing scams.",
+    quickPrompts: [
+      'Should I buy or rent right now?',
+      'What to check before buying a flat?',
+      'How does a home loan & EMI work?',
+      'What should a rent agreement include?',
+    ],
+  },
 };

@@ -258,6 +258,17 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Section I #5 v2 (Frontend runtime) — Vite client-env exposure. New
+  `AgentV3/ViteEnvAnalysis.ts` (PURE): a non-VITE_-prefixed `import.meta.env.X`
+  reference is `undefined` in the browser (Vite only exposes `VITE_*` + the builtins
+  MODE/DEV/PROD/BASE_URL/SSR to client code), so it is flagged to be renamed — a silent
+  "compiles but breaks at runtime" footgun AI-generated frontends hit constantly.
+  High-precision: only uppercase-snake `import.meta.env` refs; `process.env` (server) is
+  ignored; and the dispatcher SKIPS the whole check when the project's `vite.config`
+  customises `envPrefix` (then other prefixes are valid). Folded into `evaluate` as the
+  20th dimension (new `collectViteEnvIssues` + best-effort vite.config read) + a medium
+  readiness warning; systemPrompt + AppKnowledgeBase synced. v3.0-only. Gate green:
+  server+frontend tsc 0, 2070 vitest (+11), boot:check PASS.
 - 2026-06-24: Section I #4 v6 (Security) — command-injection detection. Added a
   `command-injection` rule (high) to `SecurityAnalysis`: a child_process shell sink
   (`exec`/`execFile`/`spawn`, sync or async) whose command is built from a template

@@ -318,6 +318,22 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('command-injection');
   });
 
+  it('flags a non-VITE_ import.meta.env reference (undefined in the browser)', async () => {
+    const dd = makeDispatcher('ws-eval-viteenv');
+    await write(dd, 'src/api.ts', 'export const key = import.meta.env.API_KEY;');
+    const out = await evalText(dd);
+    expect(out).toContain('non-VITE_ import.meta.env');
+    expect(out).toContain('VITE_API_KEY');
+  });
+
+  it('skips the Vite client-env check when vite config customises envPrefix', async () => {
+    const dd = makeDispatcher('ws-eval-viteenv-prefix');
+    await write(dd, 'vite.config.ts', "export default { envPrefix: ['VITE_', 'APP_'] };");
+    await write(dd, 'src/api.ts', 'export const key = import.meta.env.APP_KEY;');
+    const out = await evalText(dd);
+    expect(out).toContain('Vite client env: ✓');
+  });
+
   it('flags insecure security config (disabled TLS verification)', async () => {
     const dd = makeDispatcher('ws-eval-sec');
     await write(dd, 'src/http.ts', 'const agent = new Agent({ rejectUnauthorized: false });');

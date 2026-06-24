@@ -160,6 +160,14 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'res.redirect(`/go?to=${req.query.next}`);').some((f) => f.rule === 'open-redirect')).toBe(false);
   });
 
+  it('flags the legacy createCipher/createDecipher but not the correct createCipheriv', () => {
+    expect(scanSecurity('a.ts', "const c = crypto.createCipher('aes-256-cbc', pass);").some((f) => f.rule === 'weak-crypto-cipher')).toBe(true);
+    expect(scanSecurity('a.ts', 'const d = crypto.createDecipher(algo, pass);').some((f) => f.rule === 'weak-crypto-cipher')).toBe(true);
+    // The correct IV-based API is not flagged.
+    expect(scanSecurity('a.ts', "const c = crypto.createCipheriv('aes-256-cbc', key, iv);").some((f) => f.rule === 'weak-crypto-cipher')).toBe(false);
+    expect(scanSecurity('a.ts', 'const d = crypto.createDecipheriv(algo, key, iv);').some((f) => f.rule === 'weak-crypto-cipher')).toBe(false);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

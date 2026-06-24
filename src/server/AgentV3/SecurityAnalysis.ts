@@ -105,6 +105,16 @@ const RULES: Rule[] = [
     message: 'Shell command built from dynamic input — this enables command injection; validate/escape the input or use execFile with an args array (no shell).',
   },
   {
+    rule: 'weak-crypto-cipher',
+    severity: 'high',
+    // crypto.createCipher()/createDecipher() (no IV) are deprecated and insecure:
+    // they derive the key/IV from a password with a single MD5 pass, producing the
+    // SAME ciphertext for the same input every time (no randomness). The `\s*\(`
+    // right after the name excludes the correct `createCipheriv(`/`createDecipheriv(`.
+    re: /\.create(?:De)?[Cc]ipher\s*\(/,
+    message: 'crypto.createCipher()/createDecipher() are insecure (no IV, MD5 key derivation) — use createCipheriv()/createDecipheriv() with a random IV instead.',
+  },
+  {
     rule: 'dangerous-html',
     severity: 'medium',
     re: /dangerouslySetInnerHTML/,

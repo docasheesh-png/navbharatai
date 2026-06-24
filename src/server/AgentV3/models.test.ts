@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { resolveModel, sonnetModel, opusModel } from './models';
+import { resolveModel, sonnetModel, opusModel, haikuModel, opusNormalModel, ladderModel } from './models';
 import { architectSystemPrompt } from './systemPrompt';
 
 describe('model resolution (D5/D6)', () => {
@@ -23,6 +23,26 @@ describe('model resolution (D5/D6)', () => {
     process.env.AGENTV3_OPUS_MODEL = 'opus-y';
     expect(resolveModel(false)).toBe('sonnet-x');
     expect(resolveModel(true)).toBe('opus-y');
+  });
+
+  it('exposes the full ladder: haiku < sonnet < opus-4.7 (normal) and opus-4.8 (power)', () => {
+    // Normal-mode escalation ceiling is Opus 4.7; power / only-opus is Opus 4.8.
+    expect(opusNormalModel()).not.toBe(opusModel());
+    expect(haikuModel()).toBeTruthy();
+    expect(ladderModel('haiku')).toBe(haikuModel());
+    expect(ladderModel('sonnet')).toBe(sonnetModel());
+    expect(ladderModel('opus')).toBe(opusNormalModel());
+  });
+
+  it('the ladder honours env overrides for haiku and normal-opus', () => {
+    const prevH = process.env.AGENTV3_HAIKU_MODEL;
+    const prevON = process.env.AGENTV3_OPUS_NORMAL_MODEL;
+    process.env.AGENTV3_HAIKU_MODEL = 'haiku-x';
+    process.env.AGENTV3_OPUS_NORMAL_MODEL = 'opus47-x';
+    expect(ladderModel('haiku')).toBe('haiku-x');
+    expect(ladderModel('opus')).toBe('opus47-x');
+    if (prevH === undefined) delete process.env.AGENTV3_HAIKU_MODEL; else process.env.AGENTV3_HAIKU_MODEL = prevH;
+    if (prevON === undefined) delete process.env.AGENTV3_OPUS_NORMAL_MODEL; else process.env.AGENTV3_OPUS_NORMAL_MODEL = prevON;
   });
 });
 

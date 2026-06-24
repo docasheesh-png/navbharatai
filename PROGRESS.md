@@ -1841,3 +1841,31 @@ AppKnowledgeBase security list synced. v3.0-only, flag-OFF.
 
 Tests: +1 unit (`SecurityAnalysis.test.ts`) + 1 dispatcher integration. Gate green:
 server+frontend tsc 0, **2115 vitest** (+2), boot:check PASS.
+
+---
+
+### 2026-06-24 — Multi-Model Orchestration: Phase 1 — Gemini/Vertex tool-use runner + full ladder
+
+Admin locked the cost ladder: Gemini/Vertex(1) → Haiku(2) → Sonnet(3) → Opus 4.7(4); POWER =
+Opus 4.8 only. Agreed core mechanism: cheap-first, the existing 22-dim evaluate engine is the
+objective gate, escalate +1 tier only on failure (so a Gemini-built calculator that passes the
+gate ships cheap; a complex app fails fast and climbs to Claude). Full plan persisted to
+NAVBHARATAI_PRO_V3_DESIGN.md §11. Billing change (P5) is gated on explicit admin sign-off;
+everything else is off-default and billing-neutral.
+
+**Phase 1 built (REAL + tested, OFF the default path):**
+- `providers/GeminiToolAdapter.ts` (PURE): Anthropic⇄Gemini (`@google/genai`) translation —
+  `toolDefsToGemini` + `sanitizeGeminiSchema` (strips JSON-Schema keys Gemini rejects),
+  `transcriptToGemini` (text/tool_use/tool_result → contents/functionCall/functionResponse,
+  resolving tool_use_id→name since Gemini matches results by NAME, not id), `parseGeminiResponse`
+  (synthesizes gemcall_<i> ids; rawContent stays Anthropic-shaped so providers interleave).
+- `providers/GeminiToolRunner.ts`: a TurnRunner over an injectable @google/genai client; errors
+  propagate for the orchestrator. Works for Gemini direct and (same content/tool shape) Vertex.
+- `models.ts`: full ladder ids — `haikuModel()` (claude-haiku-4-5), `opusNormalModel()` (4.7,
+  normal ceiling), `opusModel()` (4.8, power), `ladderModel(tier)`; all env-overridable.
+
+Strangler-fig isolation preserved (imports only ClaudeClient types). 21 new tests (12 adapter +
+5 runner + 4 models). Now ALL cheap tiers (Gemini/Vertex + Grok) have native tool-use runners,
+and every Claude tier is addressable. Next: P2 analyser/router.
+
+Gate green: server+frontend tsc 0, **2134 vitest** (+21), boot:check PASS.

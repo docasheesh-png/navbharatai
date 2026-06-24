@@ -352,3 +352,54 @@ All five are now locked as decisions D4–D9 in §0. P1 is unblocked.
 ---
 
 *Grounded in a structural audit of `src/server/{EngineerAI,AI,AppContext,routes,PreviewRunner,runtime}` and `src/components/{engineer,panels,ide}` on 2026-06-22. No runtime behavior changed by this document.*
+
+---
+
+# §11 — Multi-Model Intelligent Orchestration Engine (admin-directed, 2026-06-24)
+
+**Admin (aashishcpmt09) directive:** route v3.0 across a cost ladder so every task runs on
+the cheapest CAPABLE model, Claude only when needed — maximum quality at minimum API cost.
+A new user asking for a calculator/clock/ludo/3D-ball must NOT cost ₹1600 or they never
+return. Gemini/Vertex DO handle simple coding (like Cursor/others); they only break on
+complex multi-file apps — so match model to complexity, with an objective safety net.
+
+## Ladder (low → high)
+| Tier | Model | Scope | Target traffic |
+|------|-------|-------|----------------|
+| 1 | Gemini / Vertex | chat, translate, summary, **simple apps** | 70-90% |
+| 2 | Claude Haiku | light coding, components, bug-fix, SQL | 5-15% |
+| 3 | Claude Sonnet | full/multi-file apps, refactor, backend | 1-5% |
+| 4 | Claude Opus 4.7 | architecture, deep debug, critical | 0.1-1% |
+| ⚡ POWER | **Opus 4.8 only** | everything (premium, ×5 billing) | toggle |
+
+## Core mechanism (agreed design)
+**Cheap-first, evaluate-gate decides, escalate only on objective failure.** Do NOT guess
+complexity upfront and commit. Start at the analyser's tier; after the build run the
+EXISTING 22-dimension evaluate engine (build/readiness/security/tests = objective, free,
+no LLM call); pass → deliver, fail → escalate +1 tier (budget-capped). A wasted cheap
+attempt costs ~₹0 (Gemini ≪ Opus), so the math wins: simple apps succeed cheap, complex
+apps fail the gate fast and climb to Claude. The gate is the safety net → never ship a
+broken calculator.
+
+## Phases
+- **P0 ✅** OpenAiToolAdapter + OpenAiToolRunner (Grok) + MultiProviderTurnRunner (orchestrator, Claude backstop). Off-default, tested.
+- **P1 ✅** Gemini/Vertex native tool-use runner (GeminiToolAdapter + GeminiToolRunner) + full ladder model-ids (haiku / sonnet / opus-4.7 normal / opus-4.8 power) in models.ts. Off-default, tested.
+- **P2** Analyser/router — hybrid: deterministic features (length, file-count, code-blocks, simple-app keywords, task-type) → complexity score + startTier; LLM-analyser (on Gemini) only for ambiguous. Pure + testable.
+- **P3** Evaluate-gated escalation orchestrator: start at startTier → build → evaluate-gate → pass/deliver or escalate +1 (budget cap + circuit-breaker + fail-cache).
+- **P4** Power mode: bypass ladder → Opus 4.8 (existing only-opus path).
+- **P5** ⚠️ Billing-follows-actual-model (constitution-locked — needs explicit admin sign-off before pricing.ts changes; this is the lever that makes a Gemini calculator cost ₹20 not ₹1600).
+- **P6** Cost dashboard: per-model/task/user cost, savings-vs-always-Opus, escalation/fallback rate (extend UserCostStore + UI).
+- **P7** Failover hardening (Opus→Sonnet→Haiku→Gemini→Vertex; reuse AIRouter + orchestrator).
+- **P8** LIVE verification + gradual flag-gated rollout (measure cheap-tier quality + Claude-fallback rate per task-type, then flip default tier-by-tier). Claude stays default until proven — "preview is EARNED".
+- **P9** (optional) New-user free onboarding builds (Gemini → ~₹0 cost → retention).
+- **Advice (shadow-mode):** before flipping default, run the analyser decision (+ optional cheap attempt) in the BACKGROUND while Claude still builds, and LOG what would have happened — real success data, zero user risk.
+
+## Reuse, don't rebuild
+AIRouter (failover/cooldown), MultiProviderTurnRunner (the chain), the 22-dim evaluate
+engine (= the Quality Control Engine), AgentRegistry/SubAgent/Consensus (multi-agent
+workers), UserCostStore (cost tracking), ONLY_OPUS_MULTIPLIER (Power ×5 billing).
+
+## Strangler-fig isolation (unchanged constraint)
+All new runners/adapters live under `src/server/AgentV3/providers/`, import only
+ClaudeClient TYPES, and stay OFF the default path (Claude primary in routes/agentv3.ts)
+until P8 live-verification. No live behaviour changes before then.

@@ -131,6 +131,24 @@ function emptyHandlerLine(lines: string[]): number {
   return 0;
 }
 
+/**
+ * Detect empty catch blocks — `catch {}`, `catch (e) {}`, or a multiline catch whose
+ * body is only whitespace — which silently SWALLOW the error: the app looks like it
+ * works while a real failure is hidden (directly against "the app must never break").
+ * A catch whose body contains a comment is NOT flagged — that is an explicitly
+ * documented, intentional ignore. Returns the 1-based line numbers of the `catch`.
+ */
+function emptyCatchLines(content: string): number[] {
+  if (content.length > 500_000) return []; // skip pathologically large/minified files
+  const out: number[] = [];
+  const re = /catch\s*(?:\([^)]*\))?\s*\{[ \t\r\n]*\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    out.push(content.slice(0, m.index).split('\n').length);
+  }
+  return out;
+}
+
 /** Scan one file's content for authenticity/completeness issues. Returns [] for non-issues. */
 export function scanAuthenticity(file: string, content: string): AuthenticityIssue[] {
   if (SKIP_PATH.test(file)) return [];
@@ -160,6 +178,15 @@ export function scanAuthenticity(file: string, content: string): AuthenticityIss
       kind: 'empty-handler',
       severity: 'medium',
       snippet: trimSnippet(lines[emptyLine - 1] ?? ''),
+    });
+  }
+  for (const catchLine of emptyCatchLines(content)) {
+    issues.push({
+      file,
+      line: catchLine,
+      kind: 'empty-catch',
+      severity: 'low',
+      snippet: trimSnippet(lines[catchLine - 1] ?? ''),
     });
   }
   return issues;

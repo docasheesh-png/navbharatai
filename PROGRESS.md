@@ -1525,3 +1525,32 @@ Tests: new `PortBindingAnalysis.test.ts` (11) + 2 dispatcher integration cases
 
 Gate green: server tsc 0, frontend tsc 0, **2044 vitest** (+13 across both items this
 session), boot:check PASS. Pushed to ride the next CI with the rest of the batch.
+
+---
+
+### 2026-06-24 — DEPLOY: #289 v3.0 batch merged to main + Section I #9 v2 (empty-catch)
+
+**Deploy landed.** The #289 v3.0 quality-engine batch (debugger/fake-blocks/logged-
+secret/compliance-blocks readiness + single-pass refactor + Section I #13 unpinned-deps
++ Section I #11 v2 hardcoded-port + the full dispatcher integration suite) went GREEN on
+the exact head SHA (31688257…, run 28070796432 success) and was squash-merged to main
+(0752865) → Cloud Build auto-deploy triggered. CI block earlier was the documented
+Actions spending-limit exhaustion; admin cleared billing and (temporarily) made the repo
+public so Actions runs on unlimited free minutes — TO BE REVERTED to private once stable.
+
+**Cross-session sync (safeguard #1):** while this branch was in flight, a parallel session
+merged PR #290 (professionals batch — Parenting/Cyber-Safety/Insurance/Chef/Travel) to
+main. The #289 squash merged cleanly on top. The feature branch was then re-based onto the
+new main (0752865) so it carries BOTH #290 and #289 — nothing lost, clean base for the next
+item.
+
+**Section I #9 v2 — empty-catch detection (this commit).** Added an `empty-catch` rule
+(low) to `AuthenticityAnalysis`: a `catch {}` / `catch (e) {}` / multiline-whitespace-only
+catch silently swallows the error — the app looks like it works while a real failure is
+hidden. High-precision multiline scan; a comment in the body (documented intentional
+ignore) or any real handling is NOT flagged. Folds into the existing authenticity
+dimension; low severity (reports without hard-blocking readiness). AppKnowledgeBase synced;
+systemPrompt unchanged (it does not enumerate authenticity sub-checks).
+
+Tests: +4 in `AuthenticityAnalysis.test.ts`. Gate green: server+frontend tsc 0, 2047
+vitest, boot:check PASS.

@@ -258,6 +258,17 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Section I #9 v2 (Code quality / honest failures) — empty-catch detection.
+  Added an `empty-catch` rule (low) to `AuthenticityAnalysis`: a `catch {}` / `catch
+  (e) {}` / multiline-whitespace-only catch silently SWALLOWS the error — the app looks
+  like it works while a real failure is hidden (directly against "the app must never
+  break"). High-precision multiline scan; a catch whose body has a comment is NOT
+  flagged (an explicitly documented, intentional ignore), and a catch that handles the
+  error is not flagged. Folds into the existing authenticity dimension (no new
+  dimension); reports without hard-blocking readiness (low severity). AppKnowledgeBase
+  synced. v3.0-only. Gate green: server+frontend tsc 0, 2047 vitest, boot:check PASS.
+  (Merged separately after the #289 batch; branch re-based onto main which had also
+  taken PR #290 professionals batch from a parallel session — no work lost.)
 - 2026-06-24: Section I #11 v2 (Deployment readiness) — hardcoded-port check. New
   `AgentV3/PortBindingAnalysis.ts` (PURE): flags a server bound to a literal port
   (`app.listen(3000)`) instead of `process.env.PORT` — managed hosts (Cloud Run,

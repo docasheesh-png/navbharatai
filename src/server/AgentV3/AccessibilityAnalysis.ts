@@ -83,6 +83,13 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
         push('html-missing-lang', 'medium');
       }
 
+      // ── medium: <iframe> with no accessible name (screen readers announce only
+      // "iframe" with no context — WCAG 4.1.2). title is the standard fix; an
+      // aria-label is accepted as an equivalent name. ────────────────────────────
+      if (name === 'iframe' && !hasAttr(tag, 'title') && !hasAttr(tag, 'aria-label')) {
+        push('iframe-missing-title', 'medium');
+      }
+
       // ── medium: form control with no accessible name ─────────────────────────
       // Conservative: only flag when there is NO labelling hint at all — no
       // aria-label / aria-labelledby / title, AND no id (an id may be the target

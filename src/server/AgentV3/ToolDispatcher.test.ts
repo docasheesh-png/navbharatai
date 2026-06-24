@@ -487,6 +487,13 @@ describe('ToolDispatcher — evaluate integration (more dimensions + generators)
     expect(out.toLowerCase()).toContain('accessib');
   });
 
+  it('flags an <iframe> with no accessible title', async () => {
+    const dd = makeDispatcher('ws-eval-iframe');
+    await write(dd, 'src/Embed.tsx', 'export const E = () => <iframe src="https://x.com/v" />;');
+    const out = await evalText(dd);
+    expect(out).toContain('iframe-missing-title');
+  });
+
   it('flags a requested feature that was not built (requirement coverage)', async () => {
     const ws = 'ws-eval-req';
     const dd = makeDispatcher(ws);

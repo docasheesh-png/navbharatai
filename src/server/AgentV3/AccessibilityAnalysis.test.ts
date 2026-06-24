@@ -18,6 +18,13 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('index.html', '<html lang="en">')).toEqual([]);
   });
 
+  it('flags <iframe> without a title (medium) but not one with title or aria-label', () => {
+    const issues = scanAccessibility('src/Embed.tsx', '<iframe src="https://x.com/v" />');
+    expect(issues.some((x) => x.kind === 'iframe-missing-title' && x.severity === 'medium')).toBe(true);
+    expect(scanAccessibility('src/Embed.tsx', '<iframe src="https://x.com/v" title="Demo video" />')).toEqual([]);
+    expect(scanAccessibility('src/Embed.tsx', '<iframe src="https://x.com/v" aria-label="Demo" />')).toEqual([]);
+  });
+
   it('flags a form control with no accessible name (medium) but not one with aria-label or id', () => {
     const bad = scanAccessibility('src/Form.tsx', '<input type="text" />');
     expect(bad.some((x) => x.kind === 'control-unlabeled' && x.severity === 'medium')).toBe(true);

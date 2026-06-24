@@ -2264,3 +2264,16 @@ is not flagged. AppKnowledgeBase already covers the async family. v3.0-only, fla
 
 Tests: +1 unit (useEffect(async) flagged, sync effect safe) + 1 dispatcher integration. Gate green:
 server+frontend tsc 0, **2199 vitest** (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #7 (a11y): iframe-missing-title (accessibility)
+
+Continuing the autonomous Section I march — varying into the Accessibility (Layer 78) dimension. New
+item: `AccessibilityAnalysis` `iframe-missing-title` rule (medium). An `<iframe>` with no `title` (and
+no `aria-label`) is announced by screen readers as just "iframe" with no context — WCAG 4.1.2. Tag-
+local + single-line like the existing img-missing-alt rule (high precision; multi-line tags skipped).
+`title` or `aria-label` satisfies it. AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (iframe without title flagged; title/aria-label safe) + 1 dispatcher integration.
+Gate green: server+frontend tsc 0, **2201 vitest** (+2), build PASS, boot:check PASS.

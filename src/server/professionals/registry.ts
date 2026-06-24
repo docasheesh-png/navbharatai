@@ -23,6 +23,7 @@ import { ENGLISH_AI } from './configs/english';
 import { RESUME_AI } from './configs/resume';
 import { GARDENING_AI } from './configs/gardening';
 import { PHARMACIST_AI } from './configs/pharmacist';
+import { BUSINESS_AI } from './configs/business';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -57,6 +58,7 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [RESUME_AI.id]: RESUME_AI,
   [GARDENING_AI.id]: GARDENING_AI,
   [PHARMACIST_AI.id]: PHARMACIST_AI,
+  [BUSINESS_AI.id]: BUSINESS_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

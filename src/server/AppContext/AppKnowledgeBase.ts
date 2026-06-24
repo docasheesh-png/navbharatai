@@ -1017,6 +1017,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['games', 'board game', 'card game', 'puzzle', 'riddle', 'family fun', 'chess', 'carrom', 'ludo', 'tambola', 'antakshari', 'khel', 'brain teaser', 'party games', 'trivia'],
   },
 
+  // ─── TECH BUYING ADVISOR AI ──────────────────────────────────────────────
+  {
+    id: 'techbuy_ai',
+    name: 'Tech Buying Advisor AI',
+    path: 'Sidebar → Professionals → Tech Buying Advisor',
+    description: 'Independent, commission-free helper to choose electronics & gadgets in India (phones, laptops, TVs, home appliances — fridge/washer/AC, audio, smartwatches, accessories): match a device to the user\'s needs & budget by asking the right questions, understand specs in plain language & which actually matter vs marketing hype (RAM/processor/storage/display/battery; appliance capacity & BEE star rating; TV panel/resolution), compare options objectively & read reviews critically, value/warranty/timing & running cost, and safe buying. Honesty/safety: NEUTRAL & independent (never pushes a brand for commission, honest about trade-offs); prices/models/specs change fast (won\'t fabricate current prices/exact specs/"latest model" — verify on reliable/official sources before buying); anti-scam (genuine sellers, proper bill/warranty, beware fake deals/counterfeits/used-as-new, never share OTP/card on unverified sites → Cyber Safety AI); budget-respectful (no upselling). For fixing devices use the Gadget & Tech-Help AI.',
+    howToUse: 'Open Sidebar → Professionals → Tech Buying Advisor and ask: "which phone/laptop for my needs & budget", "which specs actually matter", "compare these options", "how to buy safely & avoid fakes". Verify current prices/specs/reviews before buying; for repairs use the Gadget & Tech-Help AI.',
+    relatedFeatures: ['professionals', 'techhelp_ai', 'cybersafety_ai', 'finance_ai'],
+    aiSurface: 'techbuy_ai',
+    keywords: ['buy', 'tech', 'gadget', 'phone', 'laptop', 'tv', 'appliance', 'fridge', 'ac', 'washing machine', 'which to buy', 'specs', 'electronics', 'kharidna', 'recommendation'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

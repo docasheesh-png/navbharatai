@@ -20,11 +20,20 @@ export interface UseAgentV3Build {
   restore: (sha: string) => Promise<boolean>;
   stop: () => void;
   reset: () => void;
+  /** True when a build is running server-side but this UI is NOT attached to it
+   *  (e.g. the original connection was lost) — the panel offers "Resume". */
+  serverBuildRunning: boolean;
+  /** Re-attach to a build that is already running for this account (replays its
+   *  events so the UI catches up, then streams live). */
+  resume: (opts?: { userId?: string; email?: string }) => Promise<void>;
+  /** Ask the server whether a build is running for this account (sets serverBuildRunning). */
+  checkRunning: (opts?: { userId?: string; email?: string }) => Promise<void>;
 }
 
 export function useAgentV3Build(): UseAgentV3Build {
   const [state, setState] = useState<AgentV3ClientState>(initialAgentV3State);
   const [running, setRunning] = useState(false);
+  const [serverBuildRunning, setServerBuildRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const userIdRef = useRef<string | undefined>(undefined);
@@ -43,7 +52,101 @@ export function useAgentV3Build(): UseAgentV3Build {
     abortRef.current?.abort();
     abortRef.current = null;
     setRunning(false);
+    setServerBuildRunning(false);
+    // Truly stop the SERVER build (not just this local stream), so it cannot keep
+    // running and block the next build.
+    fetch('/api/agentv3/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current }),
+    }).catch(() => { /* best-effort */ });
   }, []);
+
+  // Read the NDJSON event stream line by line and fold each event into the reducer.
+  // Shared by start() and resume(). Surfaces a non-event body so silent failures show.
+  const pumpStream = useCallback(async (res: Response): Promise<void> => {
+    if (!res.body) return;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let gotEvent = false;
+    let rawSample = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let event: AgentV3WireEvent;
+        try {
+          event = JSON.parse(trimmed) as AgentV3WireEvent;
+        } catch {
+          if (rawSample.length < 400) rawSample += trimmed + '\n';
+          continue;
+        }
+        gotEvent = true;
+        setState((prev) => agentV3Reducer(prev, event));
+      }
+    }
+    if (!gotEvent) {
+      const sample = (rawSample || buffer).trim();
+      setError(
+        sample
+          ? `The server did not return v3.0 events. It replied with:\n${sample.slice(0, 300)}`
+          : 'No response from the v3.0 engine.',
+      );
+    }
+  }, []);
+
+  const checkRunning = useCallback(async (opts?: { userId?: string; email?: string }) => {
+    if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
+    try {
+      const params = new URLSearchParams();
+      if (userIdRef.current) params.set('userId', userIdRef.current);
+      if (emailRef.current) params.set('email', emailRef.current);
+      const r = await fetch(`/api/agentv3/status?${params.toString()}`);
+      const j = await r.json().catch(() => ({}));
+      setServerBuildRunning(j?.buildRunning === true);
+    } catch {
+      /* best-effort probe — stay as-is on failure */
+    }
+  }, []);
+
+  const resume = useCallback(async (opts?: { userId?: string; email?: string }) => {
+    if (running) return;
+    if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
+    setState(initialAgentV3State());   // the replayed buffer rebuilds the live state
+    setError(null);
+    setServerBuildRunning(false);
+    setRunning(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const res = await fetch('/api/agentv3/attach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current }),
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) {
+        const j = await res.json().catch(() => ({}));
+        setError(typeof j?.error === 'string' ? j.error : `Resume failed (HTTP ${res.status}).`);
+        setRunning(false);
+        return;
+      }
+      await pumpStream(res);
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setRunning(false);
+      abortRef.current = null;
+    }
+  }, [running, pumpStream]);
 
   const respond = useCallback(async (requestId: string, approved: boolean) => {
     // Clear the gate immediately so the UI is responsive; the build resumes.
@@ -161,11 +264,12 @@ export function useAgentV3Build(): UseAgentV3Build {
         }
       } finally {
         setRunning(false);
+        setServerBuildRunning(false);
         abortRef.current = null;
       }
     },
     [running],
   );
 
-  return { state, running, error, start, respond, restore, stop, reset };
+  return { state, running, error, start, respond, restore, stop, reset, serverBuildRunning, resume, checkRunning };
 }

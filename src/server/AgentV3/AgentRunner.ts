@@ -38,6 +38,8 @@ export interface AgentRunnerOptions {
   maxBudgetUsd?: number;
   /** Which agent this loop represents (for event attribution). Default 'architect'. */
   agentRole?: AgentRole;
+  /** When aborted (e.g. the user pressed Stop), the loop stops between turns. */
+  signal?: AbortSignal;
 }
 
 export interface AgentRunResult {
@@ -90,6 +92,13 @@ export class AgentRunner {
     try {
       while (steps < maxSteps) {
         steps++;
+
+        // User pressed Stop (or the build was cancelled) — end honestly between turns.
+        if (this.opts.signal?.aborted) {
+          const summary = 'Build stopped by the user.';
+          events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
+          return { ok: false, summary, steps, usage, billedUsd: billed() };
+        }
 
         // A unique id for this turn — ties the streamed deltas to their final
         // narration line so the client can finalize (not duplicate) the line.

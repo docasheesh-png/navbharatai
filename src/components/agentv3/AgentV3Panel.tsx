@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
-  History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw,
+  History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
   SlidersHorizontal, Check, X, Paperclip, FileText,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
@@ -27,7 +27,7 @@ interface ChatMsg {
 }
 
 export function AgentV3Panel({ userId, email, resume }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null }) {
-  const { state, running, error, start, respond, restore, stop, reset } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   const [onlyOpus, setOnlyOpus] = useState(false);
   const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default
@@ -97,6 +97,13 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [convo.length, state.narration, running]);
+
+  // Detect a build that is running server-side but is NOT attached here (its original
+  // connection was lost) — so the header can offer "Resume". Re-checks when the account
+  // loads and whenever this UI goes idle.
+  useEffect(() => {
+    if (!running) checkRunning({ userId, email });
+  }, [userId, email, running, checkRunning]);
 
   // Resume a saved v3.0 conversation opened from History ("open chat"). Adopt its
   // sessionId so the backend continues with the SAME workspace/memory (best-effort,
@@ -261,14 +268,43 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
           <span className="font-semibold">NavBharatAI Pro v3.0</span>
           <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
           <span className="text-[9px] text-zinc-600 font-mono" title="Deployed build time — if this doesn't change after a deploy, your browser is serving cached code.">{(() => { try { return 'b:' + (typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '').slice(5, 16).replace('T', ' '); } catch { return ''; } })()}</span>
-          <button
-            onClick={startNewSession}
-            disabled={running}
-            title="Start a new project (fresh sandbox + memory)"
-            className="ml-auto flex items-center gap-1 text-xs text-zinc-400 hover:text-white disabled:opacity-40 border border-zinc-700 rounded px-2 py-1"
-          >
-            <RotateCcw className="w-3.5 h-3.5" /> New
-          </button>
+          {running ? (
+            // Attached + streaming here → Stop.
+            <button
+              onClick={stop}
+              title="Stop the running build"
+              className="ml-auto flex items-center gap-1 text-xs text-white bg-red-600 hover:bg-red-500 rounded px-2 py-1"
+            >
+              <Square className="w-3.5 h-3.5" /> Stop
+            </button>
+          ) : serverBuildRunning ? (
+            // A build is running server-side but this UI isn't attached → Resume + Stop.
+            <div className="ml-auto flex items-center gap-1.5">
+              <button
+                onClick={() => resumeBuild({ userId, email })}
+                title="Open the running build — resume where it left off"
+                className="flex items-center gap-1 text-xs text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2 py-1"
+              >
+                <Play className="w-3.5 h-3.5" /> Resume
+              </button>
+              <button
+                onClick={stop}
+                title="Stop the running build"
+                className="flex items-center gap-1 text-xs text-red-200 border border-red-700 hover:bg-red-950 rounded px-2 py-1"
+              >
+                <Square className="w-3.5 h-3.5" /> Stop
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={startNewSession}
+              disabled={running}
+              title="Start a new project (fresh sandbox + memory)"
+              className="ml-auto flex items-center gap-1 text-xs text-zinc-400 hover:text-white disabled:opacity-40 border border-zinc-700 rounded px-2 py-1"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> New
+            </button>
+          )}
         </div>
         <div className="flex gap-1 px-3 pb-2 overflow-x-auto whitespace-nowrap" style={{ WebkitOverflowScrolling: 'touch' }}>
           <TabPill active={showWorkspace && tab === 'preview'} onClick={() => openTab('preview')} icon={<Globe className="w-3.5 h-3.5" />}>Preview</TabPill>

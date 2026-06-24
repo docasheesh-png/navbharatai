@@ -40,7 +40,7 @@ function scriptedClient(messages: unknown[]): MessagesCreateClient {
   };
 }
 
-function buildRunner(script: unknown[], opts: { maxSteps?: number; maxBudgetUsd?: number } = {}) {
+function buildRunner(script: unknown[], opts: { maxSteps?: number; maxBudgetUsd?: number; signal?: AbortSignal } = {}) {
   const actuator = new FakeActuator();
   const stream = new AgentEventStream();
   const events: AgentEvent[] = [];
@@ -128,6 +128,24 @@ describe('AgentRunner (native tool-use loop)', () => {
     expect(result.ok).toBe(false);
     expect(result.steps).toBe(3);
     expect(result.summary).toContain('Step limit');
+  });
+
+  it('stops between turns when the abort signal fires (user pressed Stop)', async () => {
+    const looping = [{
+      content: [{ type: 'tool_use', id: 'tu', name: 'write_file', input: { path: 'a.ts', content: 'x' } }],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    }];
+    const controller = new AbortController();
+    controller.abort(); // already aborted → the loop stops on its first turn
+    const { runner, events } = buildRunner(
+      Array.from({ length: 10 }, () => looping[0]),
+      { signal: controller.signal },
+    );
+    const result = await runner.run('build something big');
+    expect(result.ok).toBe(false);
+    expect(result.summary).toMatch(/stopped by the user/i);
+    expect(events.some((e) => e.type === 'done')).toBe(true);
   });
 
   it('stops honestly when the budget cap is reached', async () => {

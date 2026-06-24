@@ -126,6 +126,38 @@ export function providerDebugTag(label: string): string {
 const activeBuilds = new Set<string>();
 const MAX_PROMPT_LEN = 20_000;
 
+// ── Resumable / stoppable builds ────────────────────────────────────────────────
+// A running BUILD's events are buffered and fanned out to subscribers, so the user can
+// (a) RE-ATTACH to a build whose original connection was lost ("Resume"), and
+// (b) actually STOP it server-side ("Stop") — not just abort their own local fetch.
+interface BuildSubscriber { write: (e: unknown) => void; end: () => void; }
+interface RunningBuild {
+  abort: AbortController;
+  buffer: unknown[];
+  subscribers: Set<BuildSubscriber>;
+  ended: boolean;
+  startedTs: number;
+}
+const runningBuilds = new Map<string, RunningBuild>();
+const MAX_BUILD_BUFFER = 4000;
+
+/** Push an event into a build's replay buffer and fan it out to every subscriber. */
+function broadcastBuild(rb: RunningBuild, e: unknown): void {
+  if (rb.buffer.length < MAX_BUILD_BUFFER) rb.buffer.push(e);
+  for (const s of rb.subscribers) { try { s.write(e); } catch { /* drop a dead subscriber */ } }
+}
+/** End every subscriber stream for a finished/stopped build. */
+function endBuild(rb: RunningBuild): void {
+  rb.ended = true;
+  for (const s of rb.subscribers) { try { s.end(); } catch { /* already closed */ } }
+  rb.subscribers.clear();
+}
+/** Is a build currently running for this account? */
+function isBuildRunning(buildKey: string): boolean {
+  const rb = runningBuilds.get(buildKey);
+  return !!rb && !rb.ended;
+}
+
 /**
  * Non-secret diagnosis of the Claude provider configuration. Surfaces ONLY what
  * is needed to tell whether the wrong key is set — never the secret itself. The
@@ -206,7 +238,9 @@ export function registerAgentV3Routes(app: Express): void {
   app.get('/api/agentv3/status', (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
-    res.json({ enabled: isAgentV3Enabled(userId, email), ...agentV3Status(), team: agentLifecycle.snapshot() });
+    // buildRunning lets the UI detect an orphaned build (started elsewhere / lost its
+    // connection) and offer "Resume" + "Stop".
+    res.json({ enabled: isAgentV3Enabled(userId, email), buildRunning: isBuildRunning(userId ?? 'anon'), ...agentV3Status(), team: agentLifecycle.snapshot() });
   });
 
   // Provider diagnosis — confirms whether a real Anthropic key is configured.
@@ -262,6 +296,56 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     res.json({ ok: resolveApproval(requestId, approved) });
+  });
+
+  // Stop the running build for this account — aborts the agent loop (between turns),
+  // ends every attached stream, and frees the slot so a fresh build can start.
+  app.post('/api/agentv3/stop', (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const buildKey = userId ?? 'anon';
+    const rb = runningBuilds.get(buildKey);
+    const wasRunning = !!rb && !rb.ended;
+    if (rb) {
+      rb.abort.abort();                                         // loop stops between turns
+      endBuild(rb);                                             // close all attached streams now
+      if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
+    }
+    activeBuilds.delete(buildKey);                              // unblock a fresh start immediately
+    res.json({ stopped: wasRunning });
+  });
+
+  // Resume: re-attach to a running build whose original connection was lost. Replays the
+  // buffered events so the UI catches up, then streams live ones — same NDJSON contract.
+  app.post('/api/agentv3/attach', (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const buildKey = userId ?? 'anon';
+    const rb = runningBuilds.get(buildKey);
+    if (!rb || rb.ended) {
+      res.status(404).json({ error: 'No running build to resume.' });
+      return;
+    }
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    const sub: BuildSubscriber = {
+      write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
+      end: () => { if (!res.writableEnded) res.end(); },
+    };
+    for (const e of rb.buffer) sub.write(e);                   // replay so the UI catches up to "now"
+    rb.subscribers.add(sub);
+    req.on('close', () => { rb.subscribers.delete(sub); });
   });
 
   // History → restore: roll the workspace back to a checkpoint commit (P-git).
@@ -364,7 +448,7 @@ export function registerAgentV3Routes(app: Express): void {
     }
     const buildKey = userId ?? 'anon';
     if (activeBuilds.has(buildKey)) {
-      res.status(409).json({ error: 'A build is already running for this account. Stop it before starting another.' });
+      res.status(409).json({ error: 'A build is already running for this account. Stop it before starting another.', resumable: isBuildRunning(buildKey) });
       return;
     }
     activeBuilds.add(buildKey);
@@ -459,8 +543,22 @@ export function registerAgentV3Routes(app: Express): void {
       }
     }
 
+    // Register this build so it can be STOPPED and RE-ATTACHED to ("Resume") after the
+    // original connection is lost. The client's response is the first subscriber; if it
+    // disconnects we keep the build alive (still buffering) so the user can resume it.
+    const abort = new AbortController();
+    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now() };
+    const primary: BuildSubscriber = {
+      write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
+      end: () => { if (!res.writableEnded) res.end(); },
+    };
+    rb.subscribers.add(primary);
+    runningBuilds.set(buildKey, rb);
+    req.on('close', () => { rb.subscribers.delete(primary); });
+    const emit = (e: unknown): void => broadcastBuild(rb, e);
+
     const events = new AgentEventStream();
-    events.subscribe((e) => send(e), false);
+    events.subscribe((e) => emit(e), false);
     const state = new WorkspaceState(events);
 
     const actuator = buildActuator();
@@ -538,6 +636,7 @@ export function registerAgentV3Routes(app: Express): void {
         maxBudgetUsd: budget,
         maxSteps,
         agentRole: 'architect',
+        signal: abort.signal,
       });
 
       let buildPrompt = prompt;
@@ -590,6 +689,7 @@ export function registerAgentV3Routes(app: Express): void {
           maxBudgetUsd: budget,
           maxSteps: 4,
           agentRole: 'architect',
+          signal: abort.signal,
         });
         await planRunner.run(prompt);
 
@@ -621,7 +721,7 @@ export function registerAgentV3Routes(app: Express): void {
         if (!approved) {
           const summary = 'Plan was not approved — build cancelled.';
           events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
-          send({ type: 'result', ok: false, summary, steps: 0, billedUsd: 0, billedInr: 0 });
+          emit({ type: 'result', ok: false, summary, steps: 0, billedUsd: 0, billedInr: 0 });
           return;
         }
         const todos = state.snapshot().todos;
@@ -670,12 +770,15 @@ export function registerAgentV3Routes(app: Express): void {
       // resilient runner already self-labels in the text if it fell back to a free provider).
       const buildTag = providerDebugTag(`Claude (${model})`);
       if (buildTag) events.emit({ type: 'narration', agent: 'architect', text: buildTag.trim(), ts: Date.now() });
-      send({ type: 'result', ...result, billedInr: Math.round(result.billedUsd * usdInrRate() * 100) / 100 });
+      emit({ type: 'result', ...result, billedInr: Math.round(result.billedUsd * usdInrRate() * 100) / 100 });
     } catch (err) {
-      send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+      emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {
       activeBuilds.delete(buildKey);
-      if (!res.writableEnded) res.end();
+      // Only clear the registry slot if it is STILL this build — a Stop may have already
+      // replaced it with a newer run. End every attached stream.
+      if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
+      endBuild(rb);
     }
   });
 }

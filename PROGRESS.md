@@ -2447,3 +2447,32 @@ admin's "pehle aap" / no-race instruction; main-merge will happen in a quiet win
 
 Tests: +1 unit (charset missing flagged; present safe; FULL fixture updated). Gate green: server tsc 0,
 **2216 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — v3.0 Stop & Resume for orphaned builds (admin-requested)
+
+Admin report: a v3.0 build whose UI connection was lost left the user STUCK — "A build is already
+running for this account" (409) with no way to stop OR re-open the running build. Root cause:
+`activeBuilds` is server-side per-account; the client "stop" only aborted the local fetch (server build
+kept running), and build events streamed only to the original connection (no buffer → no re-attach).
+
+Shipped (full Resume + Stop):
+- **Backend (agentv3.ts):** a `runningBuilds` registry per account — each build's events are buffered
+  (cap 4000) and fanned out to subscribers; the client res is the first subscriber, and on disconnect we
+  KEEP the build alive (still buffering) so it can be resumed. New endpoints: `POST /api/agentv3/stop`
+  (aborts the loop via AbortController + ends all streams + frees the slot immediately) and
+  `POST /api/agentv3/attach` (replays the buffer then streams live — true re-attach). `/status` now
+  returns `buildRunning`; the 409 carries `resumable`. Registry cleanup is guarded
+  (`runningBuilds.get(key) === rb`) so a Stop-then-new-build can't be clobbered by the old loop's finally.
+- **AgentRunner:** accepts an `AbortSignal`; stops honestly BETWEEN turns ("Build stopped by the user.")
+  so Stop actually halts server compute, not just the UI.
+- **Frontend (useAgentV3Build):** `stop()` now also calls `/stop` (true server stop); new `resume()`
+  (attach + shared `pumpStream`), `checkRunning()`, and `serverBuildRunning` state.
+- **Frontend (AgentV3Panel header, top-right):** replaces the single "New" with state-aware buttons —
+  attached+streaming → **Stop**; a build running but not attached → **Resume + Stop**; idle → **New**.
+  On mount/idle it polls `/status` to detect an orphaned build. KB synced.
+
+Tests: +1 AgentRunner (abort signal stops the loop). Gate green: frontend tsc 0, server tsc 0,
+**2217 vitest** (+1), build PASS, boot:check PASS. Pushed to branch (no main-merge — yielding to the
+concurrent session; will merge in a quiet window).

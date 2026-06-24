@@ -606,4 +606,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Explain climate change simply',
     ],
   },
+  gk_ai: {
+    id: 'gk_ai',
+    name: 'General Knowledge & Current-Affairs AI',
+    welcome:
+      "Namaste! 💡 I'm GK & Current-Affairs AI — your study companion for competitive exams (UPSC, SSC, banking, railways, state PSC) & quizzes: static GK (history, geography, polity, economy, science, culture) explained with context, current-affairs concepts, study strategy, and MCQ practice. Tell me a topic or 'quiz me'. ⚠️ I'm a study aid, not an official source — I may not know the very latest news/dates, so verify current facts from reliable up-to-date sources.",
+    quickPrompts: [
+      'Explain a static GK topic with context',
+      'Quiz me with MCQs on a subject',
+      'How to study GK & current affairs?',
+      'Background of a current-affairs topic',
+    ],
+  },
 };

@@ -777,6 +777,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['environment', 'sustainability', 'climate', 'eco', 'plastic', 'recycle', 'compost', 'waste', 'save water', 'pollution', 'green', 'paryavaran', 'energy saving', 'segregation'],
   },
 
+  // ─── GENERAL KNOWLEDGE & CURRENT-AFFAIRS AI ──────────────────────────────
+  {
+    id: 'gk_ai',
+    name: 'General Knowledge & Current-Affairs AI',
+    path: 'Sidebar → Professionals → General Knowledge & Current Affairs',
+    description: 'Exam-friendly study companion for Indian learners & competitive-exam aspirants (UPSC, SSC, banking, railways, state PSC, school quizzes): static GK with context (history, geography, polity & constitution, economy basics, general science, art & culture, sports, awards, important days, India/world facts), current-affairs CONCEPTS & background/significance, exam-prep strategy (syllabus-wise study, notes, spaced revision), and quiz/MCQ practice with explained reasoning — focused on understanding over rote. Honesty/accuracy: an educational aid NOT an official source — accuracy-first (says when unsure rather than guessing; never fabricates names/dates/statistics/records/events); honest current-affairs LIMIT (may not have the latest news/appointments/winners/dates — verify recent facts from up-to-date reliable sources); confirm official syllabus/patterns/vacancies/dates on the official commission/board site; unbiased & factual on history/polity/sensitive topics. For deep maths/science problems use the Maths & Science Solver; for subject teaching the Teacher AI.',
+    howToUse: 'Open Sidebar → Professionals → General Knowledge & Current Affairs and ask: "explain a static GK topic with context", "quiz me with MCQs", "how to study GK & current affairs", "background of a current-affairs topic". Verify the latest current-affairs facts and official exam details from up-to-date official sources.',
+    relatedFeatures: ['professionals', 'teacher_ai', 'mathscience_ai', 'mentor_ai'],
+    aiSurface: 'gk_ai',
+    keywords: ['gk', 'general knowledge', 'current affairs', 'upsc', 'ssc', 'banking', 'competitive exam', 'quiz', 'mcq', 'polity', 'history', 'geography', 'samanya gyan', 'static gk', 'railway'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

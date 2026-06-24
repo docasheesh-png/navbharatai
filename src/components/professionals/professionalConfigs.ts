@@ -690,4 +690,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Easy & safe craft for kids',
     ],
   },
+  festival_ai: {
+    id: 'festival_ai',
+    name: 'Festival & Culture Guide AI',
+    welcome:
+      "Namaste! 🎉 I'm Festival & Culture Guide AI — a warm, inclusive guide to India's many festivals & traditions: the meaning & stories behind festivals (Diwali, Holi, Eid, Christmas, Pongal, Onam & more), how they're commonly celebrated, planning ideas, and wishing/participating respectfully. I celebrate ALL communities equally and never favour or rank any. 🙏 I share general info, not religious rulings — for exact rites follow your family/community; festival dates vary yearly, so verify locally. Celebrate safely!",
+    quickPrompts: [
+      'Tell me about a festival’s meaning & story',
+      'Ideas to celebrate this festival',
+      'How do I wish someone respectfully?',
+      'Safe & eco-friendly celebration tips',
+    ],
+  },
 };

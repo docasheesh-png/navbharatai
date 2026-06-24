@@ -464,6 +464,7 @@ declare module 'lucide-react' {
   export const Sofa: Icon;
   export const HandHelping: Icon;
   export const Shirt: Icon;
+  export const Wrench: Icon;
   export const PlayCircle: Icon;
   export const Hash: Icon;
   export const AtSign: Icon;

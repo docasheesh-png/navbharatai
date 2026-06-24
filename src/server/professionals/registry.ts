@@ -41,6 +41,7 @@ import { DISABILITY_AI } from './configs/disability';
 import { FASHION_AI } from './configs/fashion';
 import { PRODUCTIVITY_AI } from './configs/productivity';
 import { RELATIONSHIP_AI } from './configs/relationship';
+import { VEHICLE_AI } from './configs/vehicle';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -93,6 +94,7 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [FASHION_AI.id]: FASHION_AI,
   [PRODUCTIVITY_AI.id]: PRODUCTIVITY_AI,
   [RELATIONSHIP_AI.id]: RELATIONSHIP_AI,
+  [VEHICLE_AI.id]: VEHICLE_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

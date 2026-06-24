@@ -76,6 +76,17 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.tsx', 'const c = new FunctionComponent(props);').some((x) => x.rule === 'dynamic-function')).toBe(false);
   });
 
+  it('flags vanilla-DOM XSS sinks (innerHTML/outerHTML/insertAdjacentHTML) but not safe uses', () => {
+    expect(scanSecurity('a.ts', 'el.innerHTML = userInput;').some((f) => f.rule === 'unsafe-html-sink')).toBe(true);
+    expect(scanSecurity('a.ts', 'node.outerHTML = `<b>${x}</b>`;').some((f) => f.rule === 'unsafe-html-sink')).toBe(true);
+    expect(scanSecurity('a.ts', 'box.insertAdjacentHTML("beforeend", html);').some((f) => f.rule === 'unsafe-html-sink')).toBe(true);
+    // Safe: clearing via empty string, reading innerHTML, and == comparisons are not flagged.
+    expect(scanSecurity('a.ts', 'el.innerHTML = "";').some((f) => f.rule === 'unsafe-html-sink')).toBe(false);
+    expect(scanSecurity('a.ts', "el.innerHTML = '';").some((f) => f.rule === 'unsafe-html-sink')).toBe(false);
+    expect(scanSecurity('a.ts', 'const h = el.innerHTML;').some((f) => f.rule === 'unsafe-html-sink')).toBe(false);
+    expect(scanSecurity('a.ts', 'if (el.innerHTML === "x") {}').some((f) => f.rule === 'unsafe-html-sink')).toBe(false);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

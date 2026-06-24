@@ -102,6 +102,16 @@ const RULES: Rule[] = [
     message: 'dangerouslySetInnerHTML — sanitise the HTML or it enables XSS.',
   },
   {
+    rule: 'unsafe-html-sink',
+    severity: 'medium',
+    // Vanilla-DOM XSS sinks the React rule misses: assigning to innerHTML/outerHTML, or
+    // insertAdjacentHTML. `=(?!=)` excludes ==/=== comparisons; empty-string clears are
+    // ignored below.
+    re: /\.(inner|outer)HTML\s*=(?!=)|\.insertAdjacentHTML\s*\(/,
+    message: 'Writing raw HTML (innerHTML/outerHTML/insertAdjacentHTML) enables XSS — sanitise the HTML or use textContent.',
+    ignore: (_m, line) => /\.(?:inner|outer)HTML\s*=\s*(['"`])\s*\1/.test(line),
+  },
+  {
     rule: 'insecure-http',
     severity: 'low',
     re: /['"`]http:\/\/(?!localhost|127\.0\.0\.1)[^'"`]+['"`]/,

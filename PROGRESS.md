@@ -1932,3 +1932,80 @@ editing pricing.ts. Not built yet.
 
 Next: P4 (Power mode + effort selector, billing-gated) or P5 (billing, on confirm). Gate green:
 server+frontend tsc 0, **2154 vitest** (+7), boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 v10: vanilla-DOM XSS sinks (security)
+
+Resumed the Section I march (orchestration architecture done; money-phases await admin billing
+confirm). New item: `SecurityAnalysis` `unsafe-html-sink` rule (medium). Assigning to
+`innerHTML`/`outerHTML`, or calling `insertAdjacentHTML`, injects raw HTML → XSS — but the
+existing `dangerous-html` rule only caught React's `dangerouslySetInnerHTML`. Now the vanilla-DOM
+sinks are flagged too. High-precision: `=(?!=)` excludes ==/=== comparisons; empty-string clears
+(`el.innerHTML = ''`) and reads (`const h = el.innerHTML`) are ignored. Folds into the existing
+security dimension. AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit + 1 dispatcher integration. Gate green: server+frontend tsc 0, **2157 vitest**
+(+2), boot:check PASS.
+
+---
+
+### 2026-06-24 — Multi-Model Orchestration: P5-core — billing reshaped to the admin model
+
+Admin locked + authorized the billing change (constitution-locked area, explicit sign-off this
+session). `pricing.ts` reshaped to the new model (this CHANGES live v3.0 billing):
+- NORMAL_MULTIPLIER = 3.5, POWER_MULTIPLIER = 2.5.
+- sonnetRate() / sonnetEquivalentUsd() added (the normal-mode base = assume-Sonnet).
+- billedAmountUsd(usage, powerMode) = powerMode ? opusEquivalentUsd × 2.5 : sonnetEquivalentUsd × 3.5.
+- billedAmountInr(usage, powerMode, usdInrRate) = billedAmountUsd × rate (pure; rate injected).
+The existing `onlyOpus` toggle (req.body.onlyOpus → resolveModel → AgentRunner → recorded
+billedUsd) IS the power-mode flag — verified wired, so the new math applies correctly: normal
+builds bill Sonnet-equiv × 3.5 (Sonnet rate ≪ Opus → much cheaper than the old Opus-equiv × 2.5),
+power builds bill real Opus × 2.5. Margin positive both modes. index.ts exports updated
+(STANDARD_/ONLY_OPUS_MULTIPLIER → NORMAL_/POWER_MULTIPLIER + sonnet helpers); the stale D5/D6
+pricing block removed from ClaudeClient.test.ts (now covered by pricing.test.ts, 11 tests).
+
+NEXT P5-inr: a UsdInrRate module (env default USD_INR_RATE + best-effort real-time refresh with
+fallback, never throws in the billing path) + wire billedAmountInr to the customer-facing ₹
+display. Then P4 (Power effort UI). Gate green: server tsc 0, **2165 vitest**, boot:check PASS.
+
+---
+
+### 2026-06-24 — Multi-Model Orchestration: P5-inr — real-time USD→INR + customer ₹
+
+`src/server/lib/UsdInrRate.ts` — a cached USD→INR rate for customer billing. `usdInrRate()` is
+synchronous and NEVER throws/blocks (the billing path must never break on FX). Best-effort hourly
+refresh from a free no-key FX source (open.er-api.com); on any failure keeps the last good value;
+fallback = env `USD_INR_RATE` or 85. Auto-refresh is skipped under tests (no network in CI).
+Helpers: `usdToInr`, `setUsdInrRate`, `refreshUsdInrRate(fetchJson)` (injectable for tests).
+
+The agentv3 route now computes `billedInr = round(result.billedUsd × usdInrRate(), 2)` and adds it
+to the `result` message — the customer-facing amount in ₹. Internal accounting still records
+`billedUsd` (USD, currency-stable, no data migration). Strangler-fig isolation kept (the INR
+conversion is at the route/composition-root, not inside the AgentV3 module). 5 tests.
+
+So the full billing is now live: NORMAL = Sonnet-equiv × 3.5, POWER = real Opus × 2.5, shown to the
+customer in ₹ at the real-time rate. NEXT: frontend ₹ display + P4 (Power effort UI: 5x/mini,
+10x?/medium, 20x?/max — actually flat 2.5× per admin, effort = thinking depth). Gate green:
+server+frontend tsc 0, **2170 vitest** (+5), boot:check PASS.
+
+---
+
+### 2026-06-24 — CRITICAL: main build was broken (Languages2) + frontend ₹ display + CI hardening
+
+**Critical find while building the frontend ₹ display:** `main`'s production build was BROKEN since
+PR #336 — `ProfessionalsView.tsx` imported `Languages2` from lucide-react, which it does not export.
+CI never ran `npm run build` (only tsc + vitest + boot), and tsc passed (lucide's types are permissive),
+so it slipped to main. **Cloud Build runs `npm run build`**, so every merge since #336 (incl. the new
+billing P5-core/P5-inr) would have FAILED to deploy — the live site was stuck on the pre-#336 build.
+
+Fixes in this PR:
+1. **Build unblocked:** `Languages2` → `Languages` (valid icon; translate_ai now shares the Languages
+   icon). `npm run build` now passes (✓ built). This lets ALL the recent merges actually deploy.
+2. **CI hardening:** added a `npm run build` step to `.github/workflows/ci.yml` — so a build-only break
+   (that tsc + vitest miss) can never reach main again.
+3. **Frontend ₹ display (P5-inr finish):** the v3.0 panel now shows the customer bill in **₹**
+   (billedInr) instead of $ — agentV3Types result event + state gained `billedInr`, the reducer copies
+   it, AgentV3Panel renders `₹{billedInr}` (falls back to $ if INR absent). Reducer test covers it.
+
+Gate green: server+frontend tsc 0, **2170 vitest**, **npm run build PASS**, boot:check PASS.

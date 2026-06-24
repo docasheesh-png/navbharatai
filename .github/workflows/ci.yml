@@ -33,5 +33,8 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Build (frontend bundle + server bundle — catches build-only breaks)
+        run: npm run build
+
       - name: Boot smoke-check (server starts without crash)
         run: npm run boot:check

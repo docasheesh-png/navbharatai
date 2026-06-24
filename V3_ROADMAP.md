@@ -258,6 +258,12 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Section I #4 v10 (Security) — vanilla-DOM XSS sinks. Added an `unsafe-html-sink`
+  rule (medium) to `SecurityAnalysis`: assigning to `innerHTML`/`outerHTML` or using
+  `insertAdjacentHTML` injects raw HTML (XSS) — the existing rule only caught React's
+  `dangerouslySetInnerHTML`. High-precision: `=(?!=)` excludes ==/=== comparisons, empty-string
+  clears (`innerHTML = ''`) and reads are ignored. AppKnowledgeBase synced. v3.0-only. Gate
+  green: server+frontend tsc 0, 2157 vitest (+2), boot:check PASS.
 - 2026-06-24: Multi-Model Orchestration P3 — evaluate-gated escalation orchestrator. New
   `AgentV3/EscalationOrchestrator.ts` (PURE policy): `runWithEscalation(path, deps)` builds on
   the cheapest tier, runs the OBJECTIVE evaluate-gate, and climbs the path ONLY on failure —
@@ -1503,3 +1509,21 @@ section):**
   partial, BUILD what's absent — never faked, one PR per increment, v3.0-only. To be
   executed when the build march reaches this section; cross-reference Sections A–H +
   `UCUE_V2_GAP_AUDIT.md` to avoid duplicating work already done/planned. Roadmap only.
+
+- 2026-06-24: Multi-Model Orchestration P5-core — BILLING reshaped (admin-locked). pricing.ts
+  now: NORMAL_MULTIPLIER=3.5 (Sonnet-equivalent × 3.5), POWER_MULTIPLIER=2.5 (real Opus 4.8 ×
+  2.5); added sonnetRate()/sonnetEquivalentUsd() and billedAmountInr(usage, powerMode, rate).
+  billedAmountUsd(usage, powerMode) = power ? Opus×2.5 : Sonnet×3.5. The existing `onlyOpus`
+  Power toggle is the mode flag (already wired to resolveModel + the recorded billedUsd). This
+  CHANGES live v3.0 billing per the admin model (normal-mode bills drop ~from Opus-equiv×2.5 to
+  Sonnet-equiv×3.5 ≈ much cheaper since Sonnet rate ≪ Opus). 11 pricing tests; removed the stale
+  D5/D6 pricing block from ClaudeClient.test.ts. NEXT P5-inr: UsdInrRate module (real-time rate)
+  + customer-facing ₹ display. Gate green: server tsc 0, 2165 vitest, boot:check PASS.
+
+- 2026-06-24: Multi-Model Orchestration P5-inr — real-time USD→INR + customer ₹. New
+  `src/server/lib/UsdInrRate.ts`: cached rate (sync `usdInrRate()`, never throws), best-effort
+  hourly refresh from a free no-key FX API (open.er-api.com) with fallback to env `USD_INR_RATE`
+  (or 85); auto-refresh skipped under tests; `usdToInr`/`setUsdInrRate`/`refreshUsdInrRate`
+  (injectable fetch). The agentv3 route now adds `billedInr = round(billedUsd × usdInrRate(), 2)`
+  to the result message — internal accounting stays USD (no migration), customer-facing amount
+  is ₹. 5 tests. Gate green: server+frontend tsc 0, 2170 vitest, boot:check PASS.

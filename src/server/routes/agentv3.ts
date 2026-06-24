@@ -38,6 +38,7 @@ import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
 import { DockerActuator } from '../EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
+import { usdInrRate } from '../lib/UsdInrRate';
 import { makeResilientTurnRunner } from './agentv3Resilient';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
@@ -325,7 +326,7 @@ export function registerAgentV3Routes(app: Express): void {
         chatEvents.emit({ type: 'narration', agent: 'architect', text: reply, ts: Date.now() });
         chatEvents.emit({ type: 'done', ok: true, summary: reply, ts: Date.now() });
         // billedUsd: 0 — the cheap free router is not billed to the user as a build.
-        send({ type: 'result', ok: true, summary: reply, steps: 0, billedUsd: 0 });
+        send({ type: 'result', ok: true, summary: reply, steps: 0, billedUsd: 0, billedInr: 0 });
         activeBuilds.delete(buildKey);
         if (!res.writableEnded) res.end();
         return;
@@ -492,7 +493,7 @@ export function registerAgentV3Routes(app: Express): void {
         if (!approved) {
           const summary = 'Plan was not approved — build cancelled.';
           events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
-          send({ type: 'result', ok: false, summary, steps: 0, billedUsd: 0 });
+          send({ type: 'result', ok: false, summary, steps: 0, billedUsd: 0, billedInr: 0 });
           return;
         }
         const todos = state.snapshot().todos;
@@ -531,11 +532,13 @@ export function registerAgentV3Routes(app: Express): void {
 
       // Bill the user the marked-up cost (D5/D6), recorded in the same place the
       // platform records every build's cost. Best-effort — never blocks the run.
+      // Internal accounting stays in USD (currency-stable); the customer-facing amount
+      // is shown in INR (billedInr = billedUsd × the real-time USD→INR rate).
       if (userId && result.billedUsd > 0) {
         userCostStore.record(userId, result.billedUsd).catch(() => {});
       }
 
-      send({ type: 'result', ...result });
+      send({ type: 'result', ...result, billedInr: Math.round(result.billedUsd * usdInrRate() * 100) / 100 });
     } catch (err) {
       send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {

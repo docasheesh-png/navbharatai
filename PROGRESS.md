@@ -2575,3 +2575,15 @@ and wipes the whole page if called after load. Distinct from the existing `unsaf
 
 Tests: +1 unit (document.write/writeln flagged; stream.write safe). Gate green: server tsc 0,
 **2220 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #7 (a11y): autoplaying media with sound (WCAG 1.4.2)
+
+Continuing the autonomous Section I march. New item: `AccessibilityAnalysis` `media-autoplay` rule
+(medium). Flags `<audio autoplay>` (always) or a `<video autoplay>` that is NOT muted — sound starts
+without user action (WCAG 1.4.2). A muted video autoplay (common background loop) is intentionally NOT
+flagged. Tag-local, high precision. KB synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (autoplay audio + unmuted autoplay video flagged; muted autoplay + no-autoplay safe).
+Gate green: server tsc 0, **2221 vitest** (+1), build PASS, boot:check PASS.

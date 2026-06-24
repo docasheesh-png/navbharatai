@@ -90,6 +90,17 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
         push('iframe-missing-title', 'medium');
       }
 
+      // ── medium: media that auto-plays SOUND without user action (WCAG 1.4.2) —
+      // <audio autoplay> always, or a <video autoplay> that is NOT muted. (A muted
+      // video autoplay — common for background loops — is fine and not flagged.) ────
+      if (
+        (name === 'audio' || name === 'video') &&
+        hasAttr(tag, 'autoplay') &&
+        !(name === 'video' && hasAttr(tag, 'muted'))
+      ) {
+        push('media-autoplay', 'medium');
+      }
+
       // ── medium: form control with no accessible name ─────────────────────────
       // Conservative: only flag when there is NO labelling hint at all — no
       // aria-label / aria-labelledby / title, AND no id (an id may be the target

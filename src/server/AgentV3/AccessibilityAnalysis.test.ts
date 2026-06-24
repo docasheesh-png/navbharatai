@@ -18,6 +18,15 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('index.html', '<html lang="en">')).toEqual([]);
   });
 
+  it('flags autoplaying audio / unmuted autoplay video (WCAG 1.4.2), but not muted video autoplay', () => {
+    expect(scanAccessibility('src/P.tsx', '<audio src="/s.mp3" autoplay />').some((x) => x.kind === 'media-autoplay')).toBe(true);
+    expect(scanAccessibility('src/P.tsx', '<video src="/v.mp4" autoplay />').some((x) => x.kind === 'media-autoplay')).toBe(true);
+    // Muted video autoplay (common background loop) is fine.
+    expect(scanAccessibility('src/P.tsx', '<video src="/v.mp4" autoplay muted loop />').some((x) => x.kind === 'media-autoplay')).toBe(false);
+    // No autoplay → not flagged.
+    expect(scanAccessibility('src/P.tsx', '<video src="/v.mp4" controls />').some((x) => x.kind === 'media-autoplay')).toBe(false);
+  });
+
   it('flags an icon-only <a href> link with no accessible name, but not a text/aria-label link', () => {
     expect(scanAccessibility('src/Nav.tsx', '<a href="/home"><svg /></a>').some((x) => x.kind === 'link-no-accessible-name')).toBe(true);
     expect(scanAccessibility('src/Nav.tsx', '<a href="/home">Home</a>').some((x) => x.kind === 'link-no-accessible-name')).toBe(false);

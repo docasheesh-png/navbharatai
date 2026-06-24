@@ -62,6 +62,7 @@ import { APTITUDE_AI } from './configs/aptitude';
 import { DISASTER_AI } from './configs/disaster';
 import { NATURE_AI } from './configs/nature';
 import { FREELANCE_AI } from './configs/freelance';
+import { BABYNAMES_AI } from './configs/babynames';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -135,6 +136,7 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [DISASTER_AI.id]: DISASTER_AI,
   [NATURE_AI.id]: NATURE_AI,
   [FREELANCE_AI.id]: FREELANCE_AI,
+  [BABYNAMES_AI.id]: BABYNAMES_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

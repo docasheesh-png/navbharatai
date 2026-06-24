@@ -933,6 +933,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['freelance', 'freelancing', 'online income', 'work from home', 'gig', 'upwork', 'fiverr', 'client', 'side income', 'earn online', 'kamai', 'remote work', 'proposal', 'pricing'],
   },
 
+  // ─── BABY-NAMES & NAMING HELPER AI ───────────────────────────────────────
+  {
+    id: 'babynames_ai',
+    name: 'Baby-Names & Naming Helper AI',
+    path: 'Sidebar → Professionals → Baby-Names & Naming Helper',
+    description: 'Warm, joyful helper for choosing a baby name across India\'s many languages, religions & cultures: name suggestions (by gender/unisex, starting letter/sound, meaning/theme, language/community — Hindu/Muslim/Christian/Sikh/regional, modern or traditional), meanings/origins/pronunciation & variants, shortlisting (surname/sibling fit, initials, nicknames, sound), respectful awareness of naming customs (namkaran, nakshatra/rashi-syllable as a tradition, etc.), and practical tips (unique vs easy, avoiding unintended negative meanings). Approach/honesty: strictly inclusive & respectful (all communities equally, follows the family\'s faith/traditions, never favours/ranks/disparages); meanings given as commonly understood (can vary by source — says "commonly means…", verify if important, never fabricates a meaning/origin); NOT a religious/astrology authority (nakshatra/rashi-syllable is a family/priest custom not a requirement — no lucky/unlucky claims, Astrologer AI is entertainment-only); the name is entirely the family\'s choice, offered without pressure.',
+    howToUse: 'Open Sidebar → Professionals → Baby-Names & Naming Helper and ask: "suggest names with a meaning I like", "names starting with a letter", "what does this name mean & origin", "help me shortlist". Verify a meaning that matters with elders/your community; the choice is your family\'s.',
+    relatedFeatures: ['professionals', 'parenting_ai', 'maternity_ai'],
+    aiSurface: 'babynames_ai',
+    keywords: ['baby name', 'names', 'naming', 'name meaning', 'naamkaran', 'naam', 'baby', 'newborn name', 'name suggestion', 'meaning', 'rashi name', 'nakshatra name', 'boy name', 'girl name'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

@@ -84,6 +84,63 @@ describe('analyzeDependencies', () => {
     expect(issues.some((x) => x.kind === 'unused')).toBe(false);
   });
 
+  it('flags a floating dependency version (*, latest, x, empty) as medium unpinned', () => {
+    const pkg = JSON.stringify({
+      dependencies: { react: '*', axios: 'latest', lodash: 'x', dayjs: '' },
+    });
+    const issues = analyzeDependencies(['react', 'axios', 'lodash', 'dayjs'], pkg);
+    const unpinned = issues.filter((x) => x.kind === 'unpinned');
+    expect(unpinned.map((x) => x.package).sort()).toEqual(['axios', 'dayjs', 'lodash', 'react']);
+    expect(unpinned.every((x) => x.severity === 'medium')).toBe(true);
+    expect(unpinned.find((x) => x.package === 'react')!.detail).toContain('not reproducible');
+  });
+
+  it('flags an unpinned devDependency and is case-insensitive', () => {
+    const pkg = JSON.stringify({ devDependencies: { vitest: 'LATEST' } });
+    const issues = analyzeDependencies(['vitest'], pkg);
+    expect(issues.some((x) => x.kind === 'unpinned' && x.package === 'vitest')).toBe(true);
+  });
+
+  it('does not flag normal version ranges, exact pins, or partial wildcards as unpinned', () => {
+    const pkg = JSON.stringify({
+      dependencies: {
+        react: '^18.0.0',
+        axios: '~1.6.0',
+        lodash: '1.2.3',
+        dayjs: '1.x',
+        zod: '>=3.0.0 <4',
+      },
+    });
+    const issues = analyzeDependencies(
+      ['react', 'axios', 'lodash', 'dayjs', 'zod'],
+      pkg,
+    );
+    expect(issues.some((x) => x.kind === 'unpinned')).toBe(false);
+  });
+
+  it('does not flag special protocols (workspace:/file:/git/npm) as unpinned', () => {
+    const pkg = JSON.stringify({
+      dependencies: {
+        a: 'workspace:*',
+        b: 'file:../b',
+        c: 'github:user/repo',
+        d: 'npm:other@*',
+      },
+    });
+    const issues = analyzeDependencies(['a', 'b', 'c', 'd'], pkg);
+    expect(issues.some((x) => x.kind === 'unpinned')).toBe(false);
+  });
+
+  it('does not flag a floating peer/optional range as unpinned (a * peer is normal)', () => {
+    const pkg = JSON.stringify({
+      dependencies: { react: '^18.0.0' },
+      peerDependencies: { 'react-dom': '*' },
+      optionalDependencies: { fsevents: '*' },
+    });
+    const issues = analyzeDependencies(['react'], pkg);
+    expect(issues.some((x) => x.kind === 'unpinned')).toBe(false);
+  });
+
   it('does not flag a dependency declared only in devDependencies as missing', () => {
     const pkg = JSON.stringify({ devDependencies: { vitest: '^1.0.0' } });
     const issues = analyzeDependencies(['vitest'], pkg);
@@ -126,5 +183,12 @@ describe('dependencySummary', () => {
     expect(out).toContain('Dependency check: 1 issue(s)');
     expect(out).toContain('1 high');
     expect(out).toContain('[high] missing: axios');
+  });
+
+  it('reports a medium count and the unpinned line', () => {
+    const pkg = JSON.stringify({ dependencies: { react: 'latest' } });
+    const out = dependencySummary(analyzeDependencies(['react'], pkg));
+    expect(out).toContain('1 medium');
+    expect(out).toContain('[medium] unpinned: react');
   });
 });

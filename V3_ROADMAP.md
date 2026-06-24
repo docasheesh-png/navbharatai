@@ -258,6 +258,17 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Section I #13 (Dependencies / reproducibility) — unpinned-version rule.
+  Added a third rule to `DependencyAnalysis`: a `dependencies`/`devDependencies` entry
+  pinned to a floating version (`*` / `latest` / `x` / empty) is flagged medium — such
+  builds are non-reproducible, so a transitive breaking change silently breaks a build
+  that worked yesterday (the #1 "worked on my machine, broke on reinstall" trap, and a
+  pattern AI-generated package.json files fall into). High-precision: scans only
+  runtime+build deps (peer/optional `*` is normal), and special protocols
+  (`workspace:*`, `file:`, git/url, `npm:`) and partially-locked ranges (`1.x`,
+  `^1.2`, `~1.2`) are NOT flagged. Folds into the existing dependency dimension (no new
+  dimension); AppKnowledgeBase synced. v3.0-only. Gate green: server+frontend tsc 0,
+  2031 vitest (+6), boot:check PASS.
 - 2026-06-23: Section I #19 (SEO) — SEO/metadata check. New `AgentV3/SeoAnalysis.ts`
   (PURE): reads the HTML entry and reports the missing discoverability essentials —
   non-empty <title> (high), viewport meta (medium), meta description (low), <html lang>

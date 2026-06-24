@@ -1462,3 +1462,35 @@ fully LOCALLY verified (tsc ×2 + 2025 vitest + build + boot:check) but its MERG
 queued until the admin raises the Actions spending limit / the quota resets. No red
 CI was merged. Held off the (otherwise-ready) single-pass evaluate I/O refactor until
 CI is back — too risky to land a critical-path refactor without the independent gate.
+
+---
+
+### 2026-06-24 — Section I #13: unpinned-dependency-version rule (reproducibility)
+
+CI restored (the Actions block was the documented spending-limit/quota exhaustion;
+admin cleared past-due + the repo was temporarily made public so Actions runs on
+unlimited free minutes — to be reverted to private once the batch is merged). PR #289
+batch is now actually running CI (runner allocated, no more 3-sec instant-fail).
+
+Continuing the Section I march. New item built real + tested + green:
+
+**Section I #13 — `DependencyAnalysis` unpinned-version rule.** A third rule on the
+existing dependency dimension: a `dependencies`/`devDependencies` entry pinned to a
+floating version (`*` / `latest` / `x` / empty) is flagged **medium** — the build is
+non-reproducible, so a transitive breaking change silently breaks a build that worked
+yesterday. This is the classic "worked on my machine, broke on reinstall" trap and a
+pattern AI-generated package.json files fall into (LLMs emit `"latest"`), so it directly
+serves the one absolute rule (the app must never break). High-precision by design:
+- Scans only runtime + build deps; `peerDependencies`/`optionalDependencies` are skipped
+  (a `*` peer range is normal and intentional).
+- Special protocols (`workspace:*`, `file:..`, git/url refs, `npm:pkg@*`) and
+  partially-locked ranges (`1.x`, `^1.2`, `~1.2`, exact pins) are NOT flagged.
+- Case-insensitive match against a tight allow-list (`*`,`latest`,`x`,``).
+
+Folds into the existing dependency dimension (no new evaluate wiring), surfaces via
+`dependencySummary`. `DependencySeverity` gained `'medium'`; summary ordering updated.
+AppKnowledgeBase dependency-check description synced. systemPrompt unchanged (it does
+not enumerate dependency sub-checks). v3.0-only, flag-OFF — live app unaffected.
+
+Gate green: server tsc 0, frontend tsc 0, **2031 vitest** (+6), boot:check PASS.
+Pushed to the feature branch to ride the next CI with the #289 batch.

@@ -2203,3 +2203,19 @@ WORK DUE:
 4. **Vertex/Gemini live status** — probe shipped (`/api/agentv3/diag?test=1&admin=…`). Admin will read
    the Cloud Run startup logs (`[VERTEX] … disabled`, `[GeminiProvider] Key present:`) / run the probe.
 5. **Merge the 8 branch commits → main → Cloud Build deploy** — to make any of the above live.
+
+---
+
+### 2026-06-24 — Section I #4 v13: hardcoded provider tokens in source (security)
+
+Resumed the autonomous Section I march. New item: `SecurityAnalysis` `hardcoded-provider-token`
+rule (high). Distinctive provider credential formats — GitHub (`gh[posru]_…`), Google (`AIza…`),
+Slack (`xox[baprs]-…`), Stripe-live (`[rs]k_live_…`) — hardcoded in SOURCE code. Gap (verified):
+`EnvSecretValueAnalysis` already covers these formats but ONLY inside `.env` templates, and
+`SecurityAnalysis.hardcoded-secret` needs a recognized key NAME, so a token under an arbitrary
+variable (`const k = "ghp_…"`) in `.ts/.tsx` was missed. These formats are unmistakable → matching
+one is almost certainly a real leaked credential. PLACEHOLDER ignore excludes obvious examples.
+Folds into the existing security dimension. AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (4 token formats flagged; env/placeholder/URL safe) + 1 dispatcher integration.
+Gate green: server+frontend tsc 0, **2193 vitest** (+2), build PASS, boot:check PASS.

@@ -135,6 +135,19 @@ const RULES: Rule[] = [
     ignore: (_m, line) => PLACEHOLDER.test(line),
   },
   {
+    rule: 'hardcoded-provider-token',
+    severity: 'high',
+    // Distinctive provider credential formats (GitHub / Google / Slack / Stripe-live)
+    // hardcoded in SOURCE. The assignment-based hardcoded-secret rule needs a known
+    // key NAME, so a token stored under an arbitrary variable (`const k = "ghp_…"`) is
+    // missed; these formats are unmistakable, so matching one is almost certainly a
+    // real leaked credential. (EnvSecretValueAnalysis covers the same formats, but only
+    // inside .env templates — this covers code.)
+    re: /\bgh[posru]_[A-Za-z0-9]{30,}|\bAIza[0-9A-Za-z_-]{30,}|\bxox[baprs]-[A-Za-z0-9-]{10,}|\b[rs]k_live_[A-Za-z0-9]{16,}/,
+    message: 'Hardcoded API credential (GitHub/Google/Slack/Stripe token) in source — remove it, load it from an environment variable, and rotate the key since it was committed.',
+    ignore: (_m, line) => PLACEHOLDER.test(line),
+  },
+  {
     rule: 'insecure-http',
     severity: 'low',
     re: /['"`]http:\/\/(?!localhost|127\.0\.0\.1)[^'"`]+['"`]/,

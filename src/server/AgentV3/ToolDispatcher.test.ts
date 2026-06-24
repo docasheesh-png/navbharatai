@@ -360,6 +360,15 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('hardcoded-auth-header');
   });
 
+  it('flags a hardcoded provider token (e.g. a GitHub token) in source', async () => {
+    const dd = makeDispatcher('ws-eval-token');
+    // Assembled at runtime so no contiguous token literal lives in this test file.
+    const token = 'gh' + 'p_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8';
+    await write(dd, 'src/gh.ts', `export const tok = "${token}";`);
+    const out = await evalText(dd);
+    expect(out).toContain('hardcoded-provider-token');
+  });
+
   it('flags a forEach(async …) loop that does not await', async () => {
     const dd = makeDispatcher('ws-eval-async');
     await write(dd, 'src/sync.ts', 'export const run = (items) => items.forEach(async (it) => { await save(it); });');

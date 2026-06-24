@@ -105,6 +105,21 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', "const h = { Authorization: 'Bearer YOUR_TOKEN_HERE' };").some((f) => f.rule === 'hardcoded-auth-header')).toBe(false);
   });
 
+  it('flags distinctive provider tokens hardcoded in source (GitHub/Google/Slack/Stripe)', () => {
+    // Tokens are assembled at runtime so no contiguous secret-format literal lives in
+    // this file (which would trip secret-scanning push protection) — the scanner only
+    // ever sees the joined string.
+    const body = 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'; // 36 alphanumerics, not a token by itself
+    expect(scanSecurity('a.ts', `const t = "${'gh' + 'p_' + body}";`).some((f) => f.rule === 'hardcoded-provider-token')).toBe(true);
+    expect(scanSecurity('a.ts', `const g = "${'AI' + 'za' + body}";`).some((f) => f.rule === 'hardcoded-provider-token')).toBe(true);
+    expect(scanSecurity('a.ts', `const s = "${'xo' + 'xb-' + body}";`).some((f) => f.rule === 'hardcoded-provider-token')).toBe(true);
+    expect(scanSecurity('a.ts', `const k = "${'sk' + '_live_' + body}";`).some((f) => f.rule === 'hardcoded-provider-token')).toBe(true);
+    // Safe: env-injected, a placeholder/example, and an ordinary URL are not flagged.
+    expect(scanSecurity('a.ts', 'const t = process.env.GITHUB_TOKEN;').some((f) => f.rule === 'hardcoded-provider-token')).toBe(false);
+    expect(scanSecurity('a.ts', `const ex = "${'gh' + 'p_' + 'EXAMPLE' + body}";`).some((f) => f.rule === 'hardcoded-provider-token')).toBe(false);
+    expect(scanSecurity('a.ts', 'const u = "https://github.com/user/repo";').some((f) => f.rule === 'hardcoded-provider-token')).toBe(false);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

@@ -1901,3 +1901,34 @@ explicit admin sign-off (with P5). Not built yet.
 Next: P3 — evaluate-gated escalation orchestrator (start at analyser tier → build → 22-dim
 evaluate-gate → deliver or escalate +1, budget-capped). Gate green: server+frontend tsc 0,
 **2147 vitest** (+13), boot:check PASS.
+
+---
+
+### 2026-06-24 — Multi-Model Orchestration: Phase 3 — evaluate-gated escalation orchestrator
+
+**Phase 3 built (REAL + tested, OFF default, billing-neutral):** `AgentV3/EscalationOrchestrator.ts`
+(PURE policy) — `runWithEscalation(path, deps, opts)`. The keystone of "cheap-first, escalate only
+on objective failure":
+- builds on the cheapest tier (deps.buildOnTier), runs the OBJECTIVE gate (deps.gate = the 22-dim
+  evaluate engine in production); gate PASS → deliver (cheap win); gate FAIL or a thrown build
+  error → escalate +1 tier and rebuild.
+- The LAST tier (Opus) is the ceiling BACKSTOP: even if its gate does not pass, its build is
+  delivered best-effort (gatePassed:false) — the build never "breaks".
+- Budget cap via `maxTiers`; a gate that THROWS is non-fatal (never blocks delivery — the build
+  itself succeeded). onAttempt/onEscalate telemetry hooks (cost data: how often cheap carried it
+  vs. how far it escalated).
+- build + gate are INJECTED → policy fully unit-tested (7 tests: cheap-pass, escalate-then-pass,
+  build-throw→escalate, all-fail→Opus-backstop, maxTiers cap, gate-crash resilience, empty-path /
+  last-tier-throw errors) without any live model/sandbox/key.
+
+Wiring to the real AgentRunner build loop + evaluate tool is P8 (behind the rollout flag). The
+analyser (P2) supplies the path; this consumes it. Now P0-P3 give the full off-default pipeline:
+analyse → pick start tier → build on tier runner → evaluate-gate → escalate/deliver, Claude backstop.
+
+**Billing (P5):** admin supplied the spec this session — Normal mode: assume-Sonnet, bill
+Sonnet-equivalent × 2 (× 5 if escalated to Opus); Power mode: real Opus 4.8 cost × 5 (any effort).
+Awaiting a final 2-point confirm (normal-Opus base = Sonnet-equiv; Power base = real-Opus) before
+editing pricing.ts. Not built yet.
+
+Next: P4 (Power mode + effort selector, billing-gated) or P5 (billing, on confirm). Gate green:
+server+frontend tsc 0, **2154 vitest** (+7), boot:check PASS.

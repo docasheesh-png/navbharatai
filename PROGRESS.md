@@ -1787,3 +1787,41 @@ the adapters are protocol-correct and unit-proven, but real cheap-provider build
 measured live before it becomes default). No live behaviour changed yet.
 
 Gate green: server+frontend tsc 0, **2108 vitest** (+19), boot:check PASS.
+
+---
+
+### 2026-06-24 — Multi-provider cost routing: ORCHESTRATOR (phase 3) — architecture complete
+
+Continued the admin-directed cost-routing build. Phase 3 keystone shipped:
+
+**`AgentV3/providers/MultiProviderTurnRunner.ts` (PURE).** `makeMultiProviderTurnRunner(chain)`
+wraps an ORDERED chain of TurnRunners (intended order Vertex→Gemini→Grok→Claude) and returns
+the first that succeeds; on a thrown provider error it falls through to the next, with the LAST
+runner as a GUARANTEED backstop (Claude). This is the inverse of the existing
+makeResilientTurnRunner (Claude-primary → text fallback): here the CHEAP providers go first and
+Claude only catches hard failures — so v3.0 runs each turn on the cheapest provider that works,
+NavBharatAI's real Claude cost drops to a minimum, and the build never breaks.
+
+Design decisions:
+- Selection is by ERROR only (a thrown provider error → try the next). Quality-based fallback
+  (a cheap model returns a valid-but-poor turn) is intentionally NOT done here — it needs live
+  measurement and would risk false fallbacks; the agent loop's own validation + the Claude
+  backstop cover hard failures.
+- `onProviderUsed(used, fellBackFrom)` / `onProviderError(name, err)` hooks for cost telemetry
+  (how often the cheap chain carried the turn vs. how often Claude was needed) and diagnostics.
+- Throws an aggregated error ONLY if every provider including the backstop fails.
+
+Injected runners → 5 unit tests, no key needed. Still OFF the default path (Claude stays primary
+in routes/agentv3.ts; live billed path unchanged; pricing.ts untouched).
+
+**v3.0 multi-provider architecture is now COMPLETE + unit-tested** (adapter + Grok runner +
+orchestrator). What remains before it can go LIVE and actually cut cost:
+1. Gemini/Vertex native tool-use adapters (Google functionDeclarations) — so the cheap chain has
+   more than just Grok.
+2. LIVE verification (ops/admin): set real GROK_API_KEY (+ Gemini/Vertex), run a real sandbox
+   build through the orchestrator, and MEASURE (a) cheap-provider build quality and (b) the
+   Claude-fallback rate. Only after that proves out should the orchestrator be wired as the
+   v3.0 default in routes/agentv3.ts. Per "preview is EARNED" — the protocol is unit-proven, but
+   real cheap-provider build quality cannot be claimed without a live run.
+
+Gate green: server+frontend tsc 0, **2113 vitest** (+5), boot:check PASS.

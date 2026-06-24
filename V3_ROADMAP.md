@@ -258,6 +258,20 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: COST ROUTING (admin-directed) — multi-provider ORCHESTRATOR (phase 3). New
+  `AgentV3/providers/MultiProviderTurnRunner.ts` (PURE control flow): wraps an ordered chain
+  of TurnRunners (Vertex→Gemini→Grok→Claude) and returns the first that succeeds, falling
+  through on a thrown provider error, with the LAST runner as a GUARANTEED backstop (Claude)
+  — the inverse of makeResilientTurnRunner. So v3.0 runs each turn on the cheapest provider
+  that works and Claude only catches hard failures → real Claude cost minimised, build never
+  breaks. Per-turn selection is by ERROR only (quality-based fallback deliberately deferred
+  to live measurement — it would risk false fallbacks). onProviderUsed/onProviderError hooks
+  drive cost telemetry (how often cheap carried the turn vs Claude was needed). Injected
+  runners → 5 unit tests, no key needed. Still OFF the default path. The v3.0 architecture is
+  now COMPLETE + tested; NEXT: Gemini/Vertex native tool-use adapters (Google
+  functionDeclarations), then LIVE verification (real keys + a real sandbox build measuring
+  cheap-provider build quality + the Claude-fallback rate) before any default-path rollout —
+  per "preview is EARNED". Gate green: server+frontend tsc 0, 2113 vitest (+5), boot:check PASS.
 - 2026-06-24: COST ROUTING (admin-directed, aashishcpmt09) — multi-provider tool-use
   FOUNDATION (phase 1+2). Goal: run v3.0's build loop on the cheap providers
   (Vertex→Gemini→Grok) and fall through to Claude ONLY when needed, so NavBharatAI's real

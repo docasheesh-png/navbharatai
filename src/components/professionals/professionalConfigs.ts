@@ -558,4 +558,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Give me practice problems & check my work',
     ],
   },
+  coding_ai: {
+    id: 'coding_ai',
+    name: 'Coding & Programming Tutor AI',
+    welcome:
+      "Namaste! 💻 I'm Coding & Programming Tutor AI — I'll teach you to CODE and understand CS, from zero to intermediate: pick a first language (Python/JavaScript), core concepts, debugging, data structures & algorithms (placements), and project ideas. Tell me your goal & level. ✏️ I teach for understanding (hints first — please don't just copy for graded work). I aim to be accurate but test code & check the docs. To BUILD a full app, use the Engineer AI.",
+    quickPrompts: [
+      'How do I start learning to code?',
+      'Explain this code / concept simply',
+      'Help me debug my code',
+      'A roadmap for DSA / placements',
+    ],
+  },
 };

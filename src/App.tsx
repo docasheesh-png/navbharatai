@@ -5473,6 +5473,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'stocks_ai') toggleTab('stocks_ai');
               else if (id === 'techhelp_ai') toggleTab('techhelp_ai');
               else if (id === 'mathscience_ai') toggleTab('mathscience_ai');
+              else if (id === 'coding_ai') toggleTab('coding_ai');
             }} />
           )}
 
@@ -5705,6 +5706,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'mathscience_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.mathscience_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'coding_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.coding_ai} userId={user?.uid} />
             </div>
           )}
 

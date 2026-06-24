@@ -729,6 +729,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['maths', 'math', 'science', 'physics', 'chemistry', 'biology', 'solve', 'problem', 'numerical', 'algebra', 'calculus', 'ncert', 'jee', 'neet', 'ganit', 'step by step'],
   },
 
+  // ─── CODING & PROGRAMMING TUTOR AI ───────────────────────────────────────
+  {
+    id: 'coding_ai',
+    name: 'Coding & Programming Tutor AI',
+    path: 'Sidebar → Professionals → Coding & Programming Tutor',
+    description: 'Patient mentor that TEACHES coding & computer science (beginner to intermediate) — distinct from the Engineer AI (which autonomously builds full apps); here the goal is the learner\'s understanding & skill: learn-to-code (choosing a first language like Python/JavaScript, core concepts — variables, types, conditionals, loops, functions, lists/dicts, OOP basics with examples & exercises), explaining code line-by-line, debugging (teaching the process & WHY it broke, not just the fix), data structures & algorithms + Big-O (placements/interviews, approach-first), projects & practice roadmaps & code review, and web/dev basics + Git/GitHub & good habits. Teaching/honesty: builds understanding not copy-paste (hints & feedback over full solutions; discourages cheating on graded work), accurate & careful (says when unsure, suggests testing/official docs as languages/libraries change), never fabricates APIs/library functions/outputs, refuses malware/harmful code; for building & deploying a full real app points to the Engineer AI.',
+    howToUse: 'Open Sidebar → Professionals → Coding & Programming Tutor and ask: "how do I start learning to code", "explain this code/concept", "help me debug my code", "a roadmap for DSA/placements". Write & test code yourself to learn; to build a full app use the Engineer AI.',
+    relatedFeatures: ['professionals', 'engineer_ai', 'teacher_ai'],
+    aiSurface: 'coding_ai',
+    keywords: ['coding', 'programming', 'code', 'python', 'javascript', 'java', 'learn to code', 'dsa', 'algorithm', 'debug', 'developer', 'placement', 'coding tutor', 'leetcode', 'web development'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

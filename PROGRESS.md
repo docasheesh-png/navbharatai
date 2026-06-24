@@ -2562,3 +2562,16 @@ single-line). KB synced. v3.0-only, flag-OFF.
 
 Tests: +1 unit (icon-only link flagged; text/aria-label/no-href safe) + 1 dispatcher integration.
 Gate green: server tsc 0, **2219 vitest** (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 (security): document.write() XSS sink
+
+Continuing the autonomous Section I march. New item: `SecurityAnalysis` `document-write` rule (medium).
+`document.write()`/`.writeln()` injects raw HTML (an XSS sink when fed dynamic data), blocks the parser,
+and wipes the whole page if called after load. Distinct from the existing `unsafe-html-sink`
+(innerHTML/outerHTML/insertAdjacentHTML). High-precision (`\bdocument.write(ln)?(`); a plain
+`stream.write(...)` is not matched. KB synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (document.write/writeln flagged; stream.write safe). Gate green: server tsc 0,
+**2220 vitest** (+1), build PASS, boot:check PASS.

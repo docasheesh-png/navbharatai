@@ -112,6 +112,14 @@ const RULES: Rule[] = [
     ignore: (_m, line) => /\.(?:inner|outer)HTML\s*=\s*(['"`])\s*\1/.test(line),
   },
   {
+    rule: 'document-write',
+    severity: 'medium',
+    // document.write()/.writeln() injects raw HTML (an XSS sink when fed dynamic data),
+    // blocks the parser, and silently wipes the whole page if called after load.
+    re: /\bdocument\.write(?:ln)?\s*\(/,
+    message: 'document.write() injects raw HTML (XSS sink) and blocks/overwrites the page — build DOM nodes, set textContent, or render via the framework instead.',
+  },
+  {
     rule: 'sql-injection',
     severity: 'high',
     // A SQL statement built by interpolating/concatenating a value straight into the

@@ -140,6 +140,12 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', "win.postMessage(payload, 'https://app.example.com');").some((f) => f.rule === 'postmessage-wildcard-origin')).toBe(false);
   });
 
+  it('flags document.write/document.writeln but not an unrelated .write', () => {
+    expect(scanSecurity('a.ts', 'document.write("<h1>" + userInput + "</h1>");').some((f) => f.rule === 'document-write')).toBe(true);
+    expect(scanSecurity('a.ts', 'document.writeln(html);').some((f) => f.rule === 'document-write')).toBe(true);
+    expect(scanSecurity('a.ts', 'stream.write(buf);').some((f) => f.rule === 'document-write')).toBe(false);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

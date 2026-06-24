@@ -24,6 +24,7 @@ import { RESUME_AI } from './configs/resume';
 import { GARDENING_AI } from './configs/gardening';
 import { PHARMACIST_AI } from './configs/pharmacist';
 import { BUSINESS_AI } from './configs/business';
+import { HOMEREPAIR_AI } from './configs/homerepair';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -59,6 +60,7 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [GARDENING_AI.id]: GARDENING_AI,
   [PHARMACIST_AI.id]: PHARMACIST_AI,
   [BUSINESS_AI.id]: BUSINESS_AI,
+  [HOMEREPAIR_AI.id]: HOMEREPAIR_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

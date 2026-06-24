@@ -51,7 +51,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • PROJECT HYGIENE check (Section I #22 — Developer Experience): v3.0 checks your project has the basics — a .gitignore (so node_modules/.env/secrets don't get committed) AND that an existing .gitignore actually ignores node_modules (or it gets committed anyway — huge, platform-specific, breaks installs), a tsconfig.json for TypeScript, and a lockfile for reproducible installs — and flags what's missing.
 • ERROR BOUNDARY check (Section I #5 — Frontend resilience): for a real React app, v3.0 checks there's an error boundary so one component crash degrades gracefully instead of white-screening the whole app — and flags it if missing (the app-must-never-break rule, applied to the apps you build).
 • SECURITY CONFIG check (Section I #4 — Security): v3.0 scans for insecure configuration — disabled TLS certificate verification (man-in-the-middle risk), wildcard "*" CORS (any site can call your API), and Math.random() used to make tokens/secrets (predictable, guessable) — and flags them so your app isn't shipped with an open security hole.
-• SECRET LEAK check (Section I #4 — Security): v3.0 flags a real .env file (with live API keys / passwords) that isn't covered by .gitignore — the #1 way secrets get committed to git forever — so you fix it before it leaks. It ALSO scans committed env templates (.env.example/.sample/.template) for real secret VALUES left inside them (sk-…, AKIA…, GitHub tokens, JWTs, etc.) — templates must contain placeholders only — and flags any so the key can be rotated and replaced with a placeholder.
+• SECRET LEAK check (Section I #4 — Security): v3.0 flags a real .env file (with live API keys / passwords) that isn't covered by .gitignore — the #1 way secrets get committed to git forever — so you fix it before it leaks.
 • HARDCODED URL check (Section I #11 — Deployment readiness): v3.0 flags hardcoded http://localhost URLs baked into code (the classic "works locally, breaks when deployed" bug) so they're read from an env var instead — it does NOT flag the correct env-var-fallback pattern.
 • HARDCODED PORT check (Section I #11 — Deployment readiness): v3.0 flags a server bound to a hardcoded port (e.g. app.listen(3000)) instead of process.env.PORT — managed hosts (Cloud Run, Heroku, Render) inject the port and route traffic only to it, so a hardcoded port means the app starts but receives no traffic when deployed. It does NOT flag the correct process.env.PORT || 3000 fallback.
 • AUTO README (Phase 4 — Docs engine): v3.0 can generate an accurate README.md for your app from the real project — detected tech stack, how to install and run, project structure (components/routes/files) and the available scripts — so every app ships with real, honest documentation (nothing invented).
@@ -475,6 +475,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     relatedFeatures: ['professionals', 'accountant_ai', 'finance_ai', 'govt_schemes_ai'],
     aiSurface: 'business_ai',
     keywords: ['business', 'startup', 'shop', 'dukaan', 'entrepreneur', 'small business', 'msme', 'udyam', 'company', 'marketing', 'pricing', 'funding', 'loan', 'vyapar', 'idea'],
+  },
+
+  // ─── HOME REPAIR / HANDYMAN AI ───────────────────────────────────────────
+  {
+    id: 'homerepair_ai',
+    name: 'Home Repair / Handyman AI',
+    path: 'Sidebar → Professionals → Home Repair / Handyman',
+    description: 'Practical home-maintenance helper for Indian households: simple SAFE DIY fixes (dripping tap washer, blocked drain, running flush, tripped MCB reset, loose handle/hinge, bulb/tubelight), diagnosing a problem so you can describe it to a technician (and avoid overcharging), and preventive maintenance (RO filters, AC service, monsoon/seepage prep, tools). Safety-first (can be lethal): NOT a licensed electrician/plumber/gas technician — always switch off power/water first; never guides live-wire/rewiring/switchboard work or gas pipe/regulator DIY; for sparking/burning smell → mains off + licensed electrician; gas smell → no switches/flames, turn regulator off, ventilate, leave, call the gas agency; flags water+electricity/height/structural jobs to a pro; never fabricates wiring colours/ratings/steps; emergencies → 112.',
+    howToUse: 'Open Sidebar → Professionals → Home Repair / Handyman and ask: "my tap is dripping", "clear a blocked drain safely", "my MCB keeps tripping", "monsoon maintenance checklist". For electrical faults, gas smells or anything risky, call a qualified professional.',
+    relatedFeatures: ['professionals', 'cybersafety_ai'],
+    aiSurface: 'homerepair_ai',
+    keywords: ['repair', 'home repair', 'handyman', 'plumber', 'electrician', 'tap', 'leak', 'mcb', 'fan', 'gas', 'lpg', 'maintenance', 'fix', 'mistri', 'drain'],
   },
 
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────

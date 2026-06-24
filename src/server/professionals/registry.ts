@@ -48,6 +48,7 @@ import { MATHSCIENCE_AI } from './configs/mathscience';
 import { CODING_AI } from './configs/coding';
 import { MATERNITY_AI } from './configs/maternity';
 import { FIRSTAID_AI } from './configs/firstaid';
+import { ENVIRONMENT_AI } from './configs/environment';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -107,6 +108,7 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [CODING_AI.id]: CODING_AI,
   [MATERNITY_AI.id]: MATERNITY_AI,
   [FIRSTAID_AI.id]: FIRSTAID_AI,
+  [ENVIRONMENT_AI.id]: ENVIRONMENT_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

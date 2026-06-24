@@ -594,4 +594,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'What should be in a first-aid kit?',
     ],
   },
+  environment_ai: {
+    id: 'environment_ai',
+    name: 'Environment & Sustainability AI',
+    welcome:
+      "Namaste! 🌍 I'm Environment & Sustainability AI — practical, no-guilt ways to live greener and understand environmental issues: reduce waste & plastic, save water & electricity (and money!), home composting & segregation, eco-friendly choices, and understanding climate/pollution honestly. Tell me your goal or question. 🌱 Small consistent steps matter — and so do systemic changes; I keep it realistic, affordable & science-based.",
+    quickPrompts: [
+      'Easy ways to reduce my plastic & waste',
+      'Save electricity & water at home',
+      'How do I start home composting?',
+      'Explain climate change simply',
+    ],
+  },
 };

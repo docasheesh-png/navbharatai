@@ -765,6 +765,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['first aid', 'emergency', 'cpr', 'bleeding', 'choking', 'burn', 'fracture', 'fainting', '112', '108', 'ambulance', 'prathmik upchar', 'accident', 'injury', 'rescue'],
   },
 
+  // ─── ENVIRONMENT & SUSTAINABILITY AI ─────────────────────────────────────
+  {
+    id: 'environment_ai',
+    name: 'Environment & Sustainability AI',
+    path: 'Sidebar → Professionals → Environment & Sustainability',
+    description: 'Practical, positive guide to living more sustainably & understanding environmental issues (individuals, families, students, small businesses): everyday sustainability (reduce waste & single-use plastic, mindful consumption, cut food waste), energy & water saving (LED, BEE-star appliances, fixing leaks, rainwater/greywater — saves money too), waste segregation/home composting/recycling & e-waste disposal, green choices (sustainable transport, EV awareness, eco products & spotting greenwashing), and explaining issues simply (climate change, pollution, biodiversity, water scarcity) with constructive local action. Honesty/approach: practical & non-judgemental (affordable realistic steps, celebrates progress, no guilt/shame/doom), science-based (no fearmongering/misinformation/eco-fads, honest about trade-offs and that individual action helps but systemic factors matter too), non-partisan (factual, no political sides), never fabricates statistics/studies (points to credible/official sources for figures & local rules).',
+    howToUse: 'Open Sidebar → Professionals → Environment & Sustainability and ask: "easy ways to reduce my plastic & waste", "save electricity & water at home", "how to start home composting", "explain climate change simply". For specific stats/local rules, check credible/official sources.',
+    relatedFeatures: ['professionals', 'gardening_ai', 'kisan_ai'],
+    aiSurface: 'environment_ai',
+    keywords: ['environment', 'sustainability', 'climate', 'eco', 'plastic', 'recycle', 'compost', 'waste', 'save water', 'pollution', 'green', 'paryavaran', 'energy saving', 'segregation'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

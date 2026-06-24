@@ -304,6 +304,13 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('<title>');
   });
 
+  it('flags credentials embedded in a connection string', async () => {
+    const dd = makeDispatcher('ws-eval-connstr');
+    await write(dd, 'src/db.ts', 'export const url = "mongodb://admin:s3cret99@cluster0.abcd.mongodb.net/db";');
+    const out = await evalText(dd);
+    expect(out).toContain('connection-string-credentials');
+  });
+
   it('flags insecure security config (disabled TLS verification)', async () => {
     const dd = makeDispatcher('ws-eval-sec');
     await write(dd, 'src/http.ts', 'const agent = new Agent({ rejectUnauthorized: false });');

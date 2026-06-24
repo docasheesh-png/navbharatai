@@ -1579,3 +1579,31 @@ one fewer actuator read. AppKnowledgeBase hygiene entry synced; systemPrompt unc
 
 Tests: +6 unit (`ProjectHygieneAnalysis.test.ts`) + 1 dispatcher integration (40→41).
 Gate green: server+frontend tsc 0, **2053 vitest** (+6), boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 v5: connection-string credential leak (security)
+
+Continuing the autonomous Section I march. New item:
+
+**Section I #4 v5 — `SecurityAnalysis` connection-string-credentials rule (high).** A
+DB/queue connection-string URI with embedded credentials — `mongodb://user:pass@host`,
+`postgres://…`, `mysql://…`, `mariadb://…`, `redis(s)://…`, `amqp(s)://…` — is a real
+secret leak that the existing assignment-based `hardcoded-secret` rule misses entirely
+(a URI has no `password =` keyword). Now flagged high.
+
+High-precision by design:
+- Requires the `scheme://[user]:password@` shape with a 3+ char password.
+- Only the known DB/queue schemes — ordinary `https://` URLs and credential-less
+  connection strings (`mongodb://localhost:27017/db`) are NOT flagged.
+- Reuses the module's existing PLACEHOLDER guard, so env-interpolated
+  (`mongodb://admin:${process.env.DB_PASS}@host`) and placeholder (`<password>`,
+  `your-…`) forms are suppressed.
+
+Folds into the existing security evaluate dimension (high security findings already feed
+the readiness gate, so a committed DB credential blocks "READY"). AppKnowledgeBase
+security list synced; systemPrompt unchanged (it does not enumerate SecurityAnalysis
+secret rules). v3.0-only, flag-OFF.
+
+Tests: +2 unit (`SecurityAnalysis.test.ts`, 6→8) + 1 dispatcher integration (41→42).
+Gate green: server+frontend tsc 0, **2056 vitest** (+3), boot:check PASS.

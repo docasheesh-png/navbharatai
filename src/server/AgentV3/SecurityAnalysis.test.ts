@@ -10,6 +10,28 @@ describe('scanSecurity', () => {
     expect(scanSecurity('b.ts', 'const password = "your-password-here";')).toEqual([]);
   });
 
+  it('flags credentials embedded in a DB/queue connection string', () => {
+    for (const uri of [
+      'const url = "mongodb://admin:s3cret99@cluster0.mongodb.net/db";',
+      'const pg = "postgres://user:p4ssword@db.host:5432/app";',
+      'const r = "redis://:hunter2pw@redis.host:6379";',
+      'const a = "amqps://guest:secretpw@rabbit.host";',
+      'const m = "mongodb+srv://admin:topSecret1@cluster0.abcd.mongodb.net";',
+    ]) {
+      const f = scanSecurity('src/db.ts', uri);
+      expect(f.some((x) => x.rule === 'connection-string-credentials' && x.severity === 'high')).toBe(true);
+    }
+  });
+
+  it('does NOT flag connection strings without credentials or with env/placeholder values', () => {
+    expect(scanSecurity('a.ts', 'const url = "mongodb://localhost:27017/db";')).toEqual([]);
+    expect(scanSecurity('a.ts', 'const url = "postgres://db.host:5432/app";')).toEqual([]);
+    expect(scanSecurity('a.ts', 'const url = `mongodb://admin:${process.env.DB_PASS}@host`;')).toEqual([]);
+    expect(scanSecurity('a.ts', 'const url = "mysql://user:<password>@host";')).toEqual([]);
+    // a non-DB scheme with a colon/at is not a DB credential leak
+    expect(scanSecurity('a.ts', 'const u = "https://api.example.com/v1";')).toEqual([]);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

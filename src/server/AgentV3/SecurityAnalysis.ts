@@ -84,6 +84,15 @@ const RULES: Rule[] = [
     message: 'new Function() builds code from a string — like eval(), it enables code injection; avoid it.',
   },
   {
+    rule: 'settimeout-string',
+    severity: 'medium',
+    // setTimeout/setInterval with a STRING first argument runs it as code (an eval) —
+    // code injection + a CSP violation. Matches only a quoted first arg; a function
+    // argument (setTimeout(() => …) / setTimeout(fn, …)) is not matched.
+    re: /\bset(?:Timeout|Interval)\s*\(\s*['"`]/,
+    message: 'setTimeout/setInterval with a string argument runs it as code (an eval — code injection, breaks CSP); pass a function instead.',
+  },
+  {
     rule: 'command-injection',
     severity: 'high',
     // A child_process shell sink (exec/execFile/spawn, sync or async) whose command is

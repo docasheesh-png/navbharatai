@@ -146,6 +146,13 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'stream.write(buf);').some((f) => f.rule === 'document-write')).toBe(false);
   });
 
+  it('flags setTimeout/setInterval with a string (eval) but not a function argument', () => {
+    expect(scanSecurity('a.ts', 'setTimeout("doStuff()", 100);').some((f) => f.rule === 'settimeout-string')).toBe(true);
+    expect(scanSecurity('a.ts', "setInterval('tick()', 1000);").some((f) => f.rule === 'settimeout-string')).toBe(true);
+    expect(scanSecurity('a.ts', 'setTimeout(() => doStuff(), 100);').some((f) => f.rule === 'settimeout-string')).toBe(false);
+    expect(scanSecurity('a.ts', 'setTimeout(doStuff, 100);').some((f) => f.rule === 'settimeout-string')).toBe(false);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

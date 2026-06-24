@@ -2587,3 +2587,16 @@ flagged. Tag-local, high precision. KB synced. v3.0-only, flag-OFF.
 
 Tests: +1 unit (autoplay audio + unmuted autoplay video flagged; muted autoplay + no-autoplay safe).
 Gate green: server tsc 0, **2221 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 (security): setTimeout/setInterval string argument (eval)
+
+Continuing the autonomous Section I march. New item: `SecurityAnalysis` `settimeout-string` rule
+(medium). `setTimeout`/`setInterval` with a STRING first argument runs it as code (an eval) — code
+injection + a CSP violation. The `eval-usage`/`dynamic-function` rules miss this third eval form.
+High-precision: matches only a quoted first arg; a function argument (`setTimeout(() => …)` /
+`setTimeout(fn, …)`) is not matched. KB synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (string args flagged; function/reference args safe). Gate green: server tsc 0,
+**2222 vitest** (+1), build PASS, boot:check PASS.

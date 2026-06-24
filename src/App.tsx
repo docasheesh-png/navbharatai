@@ -5440,6 +5440,11 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'wellness_ai') toggleTab('wellness_ai');
               else if (id === 'fitness_ai') toggleTab('fitness_ai');
               else if (id === 'vet_ai') toggleTab('vet_ai');
+              else if (id === 'parenting_ai') toggleTab('parenting_ai');
+              else if (id === 'cybersafety_ai') toggleTab('cybersafety_ai');
+              else if (id === 'insurance_ai') toggleTab('insurance_ai');
+              else if (id === 'chef_ai') toggleTab('chef_ai');
+              else if (id === 'travel_ai') toggleTab('travel_ai');
             }} />
           )}
 
@@ -5507,6 +5512,31 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'vet_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.vet_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'parenting_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.parenting_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'cybersafety_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.cybersafety_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'insurance_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.insurance_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'chef_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.chef_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'travel_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.travel_ai} userId={user?.uid} />
             </div>
           )}
 

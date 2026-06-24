@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -23,6 +23,11 @@ const CARDS: ProfessionalCard[] = [
   { id: 'wellness_ai', label: 'Wellness / Counsellor', description: 'A caring space for stress, anxiety & low mood — listening, coping & self-care, crisis helplines. AI companion, not a therapist or a substitute for professional care.', icon: HeartHandshake, active: true },
   { id: 'fitness_ai', label: 'Fitness / Personal Trainer', description: 'Home/gym workout plans for your goal, exercise form, warm-up & recovery, staying consistent — general fitness guidance (not medical/physio advice).', icon: Activity, active: true },
   { id: 'vet_ai', label: 'Veterinary / Pashu Advisor', description: 'Livestock (cattle, buffalo, goat, poultry) & pet (dog, cat) care, hygiene, nutrition & vaccination awareness — general guidance, not a vet diagnosis (see a vet for sick animals).', icon: PawPrint, active: true },
+  { id: 'parenting_ai', label: 'Parenting / Child-Care', description: 'Development & milestones, routines (sleep, screen-time), positive discipline & tantrums, study stress & teens — general parenting guidance (not medical; see a paediatrician).', icon: Baby, active: true },
+  { id: 'cybersafety_ai', label: 'Cyber Safety / Digital Suraksha', description: 'Spot scams (UPI/OTP, fake KYC, "digital arrest", loan apps, phishing), secure accounts, and act fast if scammed — reporting via 1930 & cybercrime.gov.in. Defensive only.', icon: ShieldCheck, active: true },
+  { id: 'insurance_ai', label: 'Insurance Advisor', description: 'Term/health/motor/home/travel/crop insurance explained, choosing the right cover, policy terms & claims, avoiding mis-selling — honest education, not a product pitch.', icon: Umbrella, active: true },
+  { id: 'chef_ai', label: 'Chef / Recipe AI', description: 'Step-by-step Indian & world recipes, cook with what you have, substitutions, fixing a dish, quick tiffin & budget meals — adapts veg/Jain/lighter. Food-safety aware.', icon: ChefHat, active: true },
+  { id: 'travel_ai', label: 'Travel Planner', description: 'Day-by-day itineraries, budgets & transport, packing, best season & safety, India & international visa/passport awareness — planning guidance, not live bookings.', icon: Map, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

@@ -162,4 +162,64 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Why are vaccination & deworming important?',
     ],
   },
+  parenting_ai: {
+    id: 'parenting_ai',
+    name: 'Parenting / Child-Care AI',
+    welcome:
+      "Namaste! 👶 I'm Parenting AI — a supportive space for raising kids: development & milestones, routines (sleep, feeding, screen-time), positive discipline & tantrums, study stress, and connecting with teens. Tell me your child's age and what's on your mind. ⚠️ This is general parenting guidance, not medical advice — for fever, illness, vaccination or any growth/developmental worry, please see a paediatrician.",
+    quickPrompts: [
+      'Is my child meeting milestones?',
+      'How do I handle tantrums calmly?',
+      'Build a good bedtime routine',
+      'Help me support my teen during exams',
+    ],
+  },
+  cybersafety_ai: {
+    id: 'cybersafety_ai',
+    name: 'Cyber Safety / Digital Suraksha AI',
+    welcome:
+      "Namaste! 🛡️ I'm Digital Suraksha AI — I help you stay safe online: spot scams (UPI/OTP fraud, fake KYC calls, 'digital arrest', loan apps, phishing), secure your accounts, and know exactly what to do if you've been targeted. ⚠️ I will NEVER ask for your password, OTP, UPI PIN or card details — and neither will any real bank. If you've lost money, call 1930 and your bank right away. How can I help?",
+    quickPrompts: [
+      'Is this message/call a scam?',
+      'How do I keep my UPI & bank safe?',
+      "I've been scammed — what do I do now?",
+      'Make my accounts more secure',
+    ],
+  },
+  insurance_ai: {
+    id: 'insurance_ai',
+    name: 'Insurance Advisor AI',
+    welcome:
+      "Namaste! 🛡️ I'm Insurance AI — I explain insurance honestly so you can choose well: term life vs ULIP/endowment, health/mediclaim, motor, accident, home, travel & crop cover, plus how claims work and why they get rejected. I don't sell or push any policy. ⚠️ This is general education, not personalised advice — verify current terms, read the policy wording, and always disclose your details truthfully when buying.",
+    quickPrompts: [
+      'How much term life cover do I need?',
+      'What to look for in a health policy?',
+      'Why do insurance claims get rejected?',
+      'Term plan vs LIC endowment — which is better?',
+    ],
+  },
+  chef_ai: {
+    id: 'chef_ai',
+    name: 'Chef / Recipe AI',
+    welcome:
+      "Namaste! 👨‍🍳 I'm Chef AI — tell me what's in your kitchen or what you're craving and I'll give you a clear step-by-step recipe. Indian or world dishes, veg or non-veg, quick tiffin or festive feast — I can adapt it lighter, Jain (no onion-garlic), or milder/spicier. I'll also help fix a dish that went too salty/spicy/watery. What are we cooking today?",
+    quickPrompts: [
+      'What can I make with these ingredients?',
+      'A quick 15-minute dinner idea',
+      'My curry is too salty — how to fix it?',
+      'Easy tiffin/lunchbox recipes',
+    ],
+  },
+  travel_ai: {
+    id: 'travel_ai',
+    name: 'Travel Planner AI',
+    welcome:
+      "Namaste! ✈️ I'm Travel AI — tell me where you want to go (or your interests), how many days, your month and budget, and I'll plan a day-by-day itinerary with rough costs, transport and packing tips. India or abroad, family, solo or pilgrimage. ⚠️ I give planning guidance, not live bookings — always verify current fares, timings and visa/entry rules on official sources, and never share passport/card/OTP details.",
+    quickPrompts: [
+      'Plan a 5-day trip for me',
+      'Budget breakdown for a Goa trip',
+      'Best time & itinerary for Ladakh',
+      'What do I need for international travel?',
+    ],
+  },
 };

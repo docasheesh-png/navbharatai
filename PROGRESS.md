@@ -2340,3 +2340,16 @@ existing launch-safe certificate. AppKnowledgeBase synced. v3.0-only, flag-OFF.
 
 Tests: +1 unit (res.cookie without httpOnly flagged; with httpOnly + cookieParser safe). Gate green:
 server+frontend tsc 0, **2209 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 (security): postMessage wildcard target origin
+
+Continuing the autonomous Section I march. New item: `SecurityAnalysis` `postmessage-wildcard-origin`
+rule (medium). `window.postMessage(data, '*')` broadcasts the message to a frame at ANY origin — a
+malicious/compromised iframe can read it; always target a specific origin. High-precision regex
+(matches the `, '*')` second argument); a specific-origin call is not flagged. Folds into the existing
+security dimension. AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (wildcard '*' flagged; specific origin safe). Gate green: server+frontend tsc 0,
+**2210 vitest** (+1), build PASS, boot:check PASS.

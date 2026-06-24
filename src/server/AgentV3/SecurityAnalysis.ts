@@ -159,6 +159,14 @@ const RULES: Rule[] = [
     ignore: (_m, line) => /noopener/i.test(line),
   },
   {
+    rule: 'postmessage-wildcard-origin',
+    severity: 'medium',
+    // window.postMessage(data, '*') broadcasts the message to a frame at ANY origin —
+    // a malicious/compromised iframe can read it. Always target a specific origin.
+    re: /\.postMessage\s*\(\s*[^,]+,\s*['"]\*['"]\s*\)/,
+    message: "postMessage(..., '*') sends data to any origin — pass the exact target origin instead of '*'.",
+  },
+  {
     rule: 'javascript-uri',
     severity: 'medium',
     // A `javascript:` URL in an href/src/action executes script when followed — an XSS

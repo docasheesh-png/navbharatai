@@ -135,6 +135,11 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.tsx', '<a href="https://x.com">x</a>').some((f) => f.rule === 'javascript-uri')).toBe(false);
   });
 
+  it('flags postMessage with a wildcard target origin but not a specific one', () => {
+    expect(scanSecurity('a.ts', "iframe.contentWindow.postMessage(data, '*');").some((f) => f.rule === 'postmessage-wildcard-origin')).toBe(true);
+    expect(scanSecurity('a.ts', "win.postMessage(payload, 'https://app.example.com');").some((f) => f.rule === 'postmessage-wildcard-origin')).toBe(false);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

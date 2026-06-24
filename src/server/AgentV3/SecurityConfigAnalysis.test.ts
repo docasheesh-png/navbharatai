@@ -37,6 +37,16 @@ describe('scanSecurityConfig', () => {
     expect(issues.some((i) => i.rule === 'insecure-randomness')).toBe(false);
   });
 
+  it('flags a secret env var logged to the console (medium)', () => {
+    const issues = scanSecurityConfig('src/a.ts', 'console.log(process.env.STRIPE_SECRET_KEY);');
+    expect(issues.some((i) => i.rule === 'logged-secret' && i.severity === 'medium')).toBe(true);
+  });
+
+  it('does not flag logging a non-secret env var', () => {
+    const issues = scanSecurityConfig('src/a.ts', 'console.log(process.env.NODE_ENV);');
+    expect(issues.some((i) => i.rule === 'logged-secret')).toBe(false);
+  });
+
   it('does not flag a restricted CORS origin', () => {
     const issues = scanSecurityConfig('src/server.ts', "app.use(cors({ origin: 'https://example.com' }));");
     expect(issues).toHaveLength(0);

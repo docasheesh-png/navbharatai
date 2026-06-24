@@ -46,6 +46,13 @@ const RULES: Rule[] = [
     re: /\b(token|secret|password|passwd|otp|nonce|session|apikey|api_key|private_?key)\b[^\n]{0,40}Math\.random\s*\(|Math\.random\s*\([^\n]{0,40}\b(token|secret|password|passwd|otp|nonce|session|apikey|api_key|private_?key)\b/i,
     message: 'Math.random() is used to generate a security value (token/secret/password/etc.) — it is predictable, not cryptographically secure. Use crypto.randomUUID() or crypto.randomBytes() instead.',
   },
+  {
+    rule: 'logged-secret',
+    severity: 'medium',
+    // Logging an env var whose name looks like a secret leaks it into logs/console.
+    re: /console\.(?:log|info|debug|warn|error)\s*\([^)]*\b(?:process\.env|import\.meta\.env)\.\w*(?:KEY|SECRET|TOKEN|PASSWORD|PRIVATE|CREDENTIAL)/i,
+    message: 'A secret env var is being logged to the console — secrets must never be written to logs. Remove the log or redact the value.',
+  },
 ];
 
 const CODE_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;

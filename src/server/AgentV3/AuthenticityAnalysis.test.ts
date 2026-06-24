@@ -57,6 +57,36 @@ describe('scanAuthenticity', () => {
     expect(scanAuthenticity('src/__tests__/foo.ts', code)).toEqual([]);
     expect(scanAuthenticity('node_modules/pkg/index.js', code)).toEqual([]);
   });
+
+  it('flags a left-in debugger statement (medium)', () => {
+    const issues = scanAuthenticity('src/app.ts', 'function f() {\n  debugger;\n  return 1;\n}');
+    expect(issues.some((i) => i.kind === 'debugger-statement' && i.severity === 'medium')).toBe(true);
+  });
+
+  it('does not flag debugger in a comment or as part of an identifier', () => {
+    expect(scanAuthenticity('src/a.ts', '// debugger; left a note')).toEqual([]);
+    expect(scanAuthenticity('src/a.ts', 'const debuggerMode = true;')).toEqual([]);
+    expect(scanAuthenticity('src/a.ts', 'logger.debugger;')).toEqual([]);
+  });
+
+  it('flags an empty catch block (low) that silently swallows the error', () => {
+    const issues = scanAuthenticity('src/a.ts', 'try {\n  risky();\n} catch (e) {}');
+    const hit = issues.find((i) => i.kind === 'empty-catch');
+    expect(hit).toBeTruthy();
+    expect(hit!.severity).toBe('low');
+    expect(hit!.line).toBe(3);
+  });
+
+  it('flags empty catch variants (no binding, multiline whitespace body)', () => {
+    expect(scanAuthenticity('src/a.ts', 'try { f() } catch {}').some((i) => i.kind === 'empty-catch')).toBe(true);
+    expect(scanAuthenticity('src/a.ts', 'try {\n f()\n} catch (err) {\n   \n}').some((i) => i.kind === 'empty-catch')).toBe(true);
+  });
+
+  it('does NOT flag a catch that handles or documents the error', () => {
+    expect(scanAuthenticity('src/a.ts', 'try { f() } catch (e) { console.error(e); }').some((i) => i.kind === 'empty-catch')).toBe(false);
+    // a comment in the body is an explicit, intentional ignore — not flagged.
+    expect(scanAuthenticity('src/a.ts', 'try { f() } catch { /* best-effort, ignore */ }').some((i) => i.kind === 'empty-catch')).toBe(false);
+  });
 });
 
 describe('authenticitySummary', () => {

@@ -390,4 +390,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Sport fitness & agility plan',
     ],
   },
+  photography_ai: {
+    id: 'photography_ai',
+    name: 'Photography & Videography AI',
+    welcome:
+      "Namaste! 📸 I'm Photography & Video AI — phone or camera, hobby or going pro, I'll help you shoot better: exposure (aperture/shutter/ISO), composition & light, portraits/travel/product, reels & video, and editing. Tell me your gear & goal. 🎥 Great shots come from seeing light & practice, not just expensive gear — and always respect privacy/consent, no-photo rules & your own safety while shooting.",
+    quickPrompts: [
+      'Explain aperture, shutter & ISO simply',
+      'Composition tips for better photos',
+      'Smartphone photography & reels tips',
+      'How do I start as a paid photographer?',
+    ],
+  },
 };

@@ -561,6 +561,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['sports', 'cricket', 'batting', 'bowling', 'fielding', 'football', 'badminton', 'kabaddi', 'athletics', 'coach', 'training', 'khel', 'practice', 'fitness', 'drills'],
   },
 
+  // ─── PHOTOGRAPHY & VIDEOGRAPHY AI ────────────────────────────────────────
+  {
+    id: 'photography_ai',
+    name: 'Photography & Videography AI',
+    path: 'Sidebar → Professionals → Photography & Videography',
+    description: 'Practical mentor for Indian photographers & videographers (phone & camera, hobby to pro): camera/phone basics (exposure triangle — aperture/shutter/ISO, focus, white balance, lenses, smartphone pro mode), composition & light (rule of thirds, leading lines, framing, golden hour), genres (portrait, landscape/travel, events/weddings, product/food, street), video & reels (stability, framing, audio, lighting, shot types), editing workflow (Lightroom/Snapseed; natural look), and gear/going-pro (budget buying, portfolio, pricing, client comms, backups). Honesty/safety: skill grows with practice (gear alone doesn’t make great photos); settings are scene-dependent starting points; respect privacy/consent (candid/street/children), no-photography areas, copyright, and personal safety while shooting; client work needs permissions/contracts (Lawyer AI) & backups; never fabricates specs/prices or guarantees income.',
+    howToUse: 'Open Sidebar → Professionals → Photography & Videography and ask: "explain aperture/shutter/ISO", "composition tips", "smartphone & reels tips", "how to start as a paid photographer". For client contracts use the Lawyer AI.',
+    relatedFeatures: ['professionals', 'business_ai', 'lawyer_ai'],
+    aiSurface: 'photography_ai',
+    keywords: ['photography', 'photo', 'camera', 'videography', 'video', 'reels', 'editing', 'lightroom', 'composition', 'exposure', 'wedding photography', 'photoshoot', 'dslr', 'mobile photography'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

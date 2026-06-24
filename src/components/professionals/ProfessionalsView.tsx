@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -42,6 +42,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'beauty_ai', label: 'Beauty / Skincare & Grooming', description: 'Simple skincare routines, sunscreen, oily/dry/acne & dandruff basics, shaving & grooming, ingredient sense — general cosmetic guidance (dermatologist for conditions).', icon: Gem, active: true },
   { id: 'music_ai', label: 'Music / Instrument Learning', description: 'Start an instrument (guitar, keyboard, harmonium, tabla…), singing/riyaaz, theory (chords, sargam, taal) & practice routines — for all levels (guru for serious classical).', icon: Music, active: true },
   { id: 'sports_ai', label: 'Sports & Cricket Coaching', description: 'Cricket (batting, bowling, fielding, strategy) plus football/badminton/athletics — technique, drills, sport fitness & mindset. Coaching only; warm up, gear, physio for injury.', icon: Trophy, active: true },
+  { id: 'photography_ai', label: 'Photography & Videography', description: 'Exposure, composition & light, portraits/travel/product, reels & video, and editing — phone or camera, hobby to pro. Practice over gear; respect consent & safety.', icon: Camera, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

@@ -654,4 +654,28 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How do I apply for a certificate/document?',
     ],
   },
+  sarkari_ai: {
+    id: 'sarkari_ai',
+    name: 'Sarkari / Govt-Job Exam Guide AI',
+    welcome:
+      "Namaste! 🎖️ I'm Sarkari / Govt-Job Exam Guide AI — guidance for government-job aspirants: which exam leads to which job (UPSC, SSC, banking/IBPS, railways/RRB, defence, teaching, state PSC), general eligibility & selection process, and exam-wise prep strategy & motivation. Tell me your qualification & goal. ⚠️ General guidance, not official notifications — always verify vacancies/dates/eligibility on the official site. NEVER pay anyone for a govt job — that's a scam.",
+    quickPrompts: [
+      'Which govt exam suits my qualification?',
+      'Explain an exam’s eligibility & process',
+      'Make a preparation strategy for me',
+      'How to stay consistent & handle attempts?',
+    ],
+  },
+  spiritual_ai: {
+    id: 'spiritual_ai',
+    name: 'Spiritual & Philosophy Companion AI',
+    welcome:
+      "Namaste 🪔 I'm Spiritual & Philosophy Companion AI — a calm, respectful space to reflect on life, meaning, values & inner peace, drawing gently on the wisdom of India's and the world's traditions. Mindfulness, gratitude, everyday ethics, and perspective in hard times. 🙏 I respect ALL beliefs equally and never push any — I'm not a religious authority (consult your own scriptures/guru for doctrine), and not therapy. For deep distress, please reach out for support (Wellness AI; Tele-MANAS 14416).",
+    quickPrompts: [
+      'Help me find some calm & perspective',
+      'Explain a teaching from a wisdom tradition',
+      'A simple gratitude / mindfulness practice',
+      'Thinking through what’s the right thing to do',
+    ],
+  },
 };

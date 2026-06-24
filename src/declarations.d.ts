@@ -383,7 +383,6 @@ declare module 'lucide-react' {
   export const DollarSign: Icon;
   export const Radio: Icon;
   export const Zap2: Icon;
-  export const Languages2: Icon;
   export const Blocks: Icon;
   export const CircleDot: Icon;
   export const Gauge: Icon;

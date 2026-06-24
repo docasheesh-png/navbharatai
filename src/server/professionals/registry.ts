@@ -53,6 +53,8 @@ import { GK_AI } from './configs/gk';
 import { SAFETY_AI } from './configs/safety';
 import { TRANSLATE_AI } from './configs/translate';
 import { CIVIC_AI } from './configs/civic';
+import { SARKARI_AI } from './configs/sarkari';
+import { SPIRITUAL_AI } from './configs/spiritual';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -117,6 +119,8 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [SAFETY_AI.id]: SAFETY_AI,
   [TRANSLATE_AI.id]: TRANSLATE_AI,
   [CIVIC_AI.id]: CIVIC_AI,
+  [SARKARI_AI.id]: SARKARI_AI,
+  [SPIRITUAL_AI.id]: SPIRITUAL_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

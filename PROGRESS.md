@@ -2080,3 +2080,28 @@ Shipped (real, tested, isolated):
 
 Tests: PreviewDomain.test.ts (6) + 1 dispatcher integration. Gate green: server+frontend tsc 0,
 **2181 vitest** (+7), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — §12.2 v3.0 durable deploy + git (backend): workspace-files collector (reuse existing deploy stack)
+
+Admin chose "Git + multi-platform deploy" for v3.0 durable deploy — reuse the EXISTING, real deploy
+stack (verified live this session: `/api/pro/deploy` → ProDeploy Vercel/Netlify/Cloudflare/GitHub
+Pages; `/api/github/push-enhanced` + GitHub OAuth; all registered in server.ts L413/423/436), NOT
+rebuild it. AgentV3 was fully isolated from all of it (grep-confirmed zero refs), so the only new
+backend needed is a way to hand v3.0's sandbox files to those routes.
+
+Shipped (increment 1, backend):
+- `src/server/AgentV3/WorkspaceFiles.ts` — PURE `collectWorkspaceFiles(actuator, workspaceId)` →
+  `{ files: Record<path,content>, skipped }`, the EXACT shape `/api/pro/deploy` and
+  `/api/github/push-enhanced` already accept. Security filtering mirrors the ZIP/GitHub paths:
+  excludes node_modules / .git / dist / build / live `.env*` secrets (keeps `.env.example/.sample/
+  .template`), skips binary (NUL) + oversized files, bounded by file count + total size. Best-effort:
+  an unreadable file is skipped, never fatal.
+- `POST /api/agentv3/workspace-files` — gated by isAgentV3Enabled; reads the sandbox via the shared
+  actuator singleton; returns `{ files, count, skipped }`. Read-only; zero change to any live route.
+
+NEXT (increment 2, frontend): a Deploy action in AgentV3Panel that fetches these files and reuses the
+existing MultiCloudDeploy UI + `/api/pro/deploy` + `/api/github/push-enhanced` (GitHub OAuth) — git
+push + 4-platform deploy, no new deploy backend. Tests: WorkspaceFiles.test.ts (5). Gate green:
+server tsc 0, **2186 vitest** (+5), build PASS, boot:check PASS.

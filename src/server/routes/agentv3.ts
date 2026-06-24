@@ -44,6 +44,7 @@ import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
+import { collectWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 
 /**
  * AgentV3 (Vargen 3.0) routes.
@@ -222,6 +223,32 @@ export function registerAgentV3Routes(app: Express): void {
     }
     const ok = await restoreSession(workspaceId, sha, userId ?? undefined);
     res.json({ ok });
+  });
+
+  // §12.2 — deploy/git support: return the built app's source files as a
+  // path→content map. This is exactly the shape the EXISTING deploy + git routes
+  // accept (`/api/pro/deploy`, `/api/github/push-enhanced`), so v3.0 reuses that
+  // backend for durable deploy + GitHub push instead of rebuilding any of it.
+  // Read-only; never returns node_modules / build output / live .env secrets.
+  app.post('/api/agentv3/workspace-files', async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    try {
+      const actuator = buildActuator();
+      const { files, skipped } = await collectWorkspaceFiles(actuator, workspaceId);
+      res.json({ files, count: Object.keys(files).length, skipped: skipped.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to read the workspace files.' });
+    }
   });
 
   // Build entry — runs the native tool-use loop and streams events as NDJSON.

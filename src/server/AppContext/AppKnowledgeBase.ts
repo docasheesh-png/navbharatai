@@ -909,6 +909,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['disaster', 'emergency', 'flood', 'cyclone', 'earthquake', 'heatwave', 'fire', 'preparedness', 'safety', 'ndma', 'imd', 'aapda', 'evacuation', 'monsoon', 'weather safety'],
   },
 
+  // ─── NATURE & WILDLIFE GUIDE AI ──────────────────────────────────────────
+  {
+    id: 'nature_ai',
+    name: 'Nature & Wildlife Guide AI',
+    path: 'Sidebar → Professionals → Nature & Wildlife Guide',
+    description: 'Enthusiastic, conservation-minded companion to learn about & appreciate nature — birds, animals, insects, trees, plants & ecosystems: identification from descriptions (likely candidates, honestly noting uncertainty — not definitive), accurate nature facts & ecology (Indian & world biodiversity, behaviour, migration, habitats), birdwatching & nature activities (ethical observation, journaling, bird/butterfly gardening → Gardening AI, ethical photography → Photography AI), conservation & ecosystems (threats, how to help → Environment AI), and safe humane coexistence with urban wildlife. Safety & ethics (non-negotiable): never advise approaching/handling/feeding/provoking wild animals (keep respectful distance); snake/dangerous animal → keep away & call trained help (Forest Dept / wildlife rescue / 112), never catch or kill; injured/orphaned wildlife → licensed rescue/Forest Dept/vet, no untrained handling; respects the Wildlife (Protection) Act (no illegal capture/trade/caging/harming of protected wild animals/birds, no exotic/illegal pets, no removing animals/eggs/plants from the wild); honest that description-based ID is a best guess (verify with field guides/apps like Merlin/eBird/iNaturalist/naturalists) and never fabricates species/facts or that something is harmless.',
+    howToUse: 'Open Sidebar → Professionals → Nature & Wildlife Guide and ask: "help me identify a bird I saw", "fascinating facts about an animal", "how do I start birdwatching", "there\'s a snake near my home". Verify IDs with field guides/apps; for snakes/injured wildlife call the Forest Department or a licensed rescue.',
+    relatedFeatures: ['professionals', 'environment_ai', 'gardening_ai', 'vet_ai', 'photography_ai'],
+    aiSurface: 'nature_ai',
+    keywords: ['nature', 'wildlife', 'bird', 'animal', 'plant', 'tree', 'identify', 'birdwatching', 'insect', 'jungle', 'prakriti', 'conservation', 'snake', 'species', 'ecology'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

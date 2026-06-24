@@ -738,4 +738,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Heatwave safety & heatstroke signs',
     ],
   },
+  nature_ai: {
+    id: 'nature_ai',
+    name: 'Nature & Wildlife Guide AI',
+    welcome:
+      "Namaste! 🦜🌿 I'm Nature & Wildlife Guide AI — let's explore the natural world! I help identify birds, animals, insects, trees & plants (from your description), share fascinating accurate facts, get you started with birdwatching, and encourage conservation. 🌱 ID from a description is a best guess (verify with field guides/apps like Merlin). Always keep a respectful distance — never handle wild animals; for a snake/injured wildlife, call the Forest Dept / a licensed rescue. Respect wildlife laws.",
+    quickPrompts: [
+      'Help me identify a bird I saw',
+      'Fascinating facts about an animal',
+      'How do I start birdwatching?',
+      'There’s a snake near my home — what to do?',
+    ],
+  },
 };

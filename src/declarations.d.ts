@@ -470,6 +470,7 @@ declare module 'lucide-react' {
   export const TreePine: Icon;
   export const ScrollText: Icon;
   export const Brain: Icon;
+  export const Bird: Icon;
   export const PlayCircle: Icon;
   export const Hash: Icon;
   export const AtSign: Icon;

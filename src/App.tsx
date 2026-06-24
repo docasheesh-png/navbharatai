@@ -5458,6 +5458,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'petcare_ai') toggleTab('petcare_ai');
               else if (id === 'beauty_ai') toggleTab('beauty_ai');
               else if (id === 'music_ai') toggleTab('music_ai');
+              else if (id === 'sports_ai') toggleTab('sports_ai');
             }} />
           )}
 
@@ -5615,6 +5616,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'music_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.music_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'sports_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.sports_ai} userId={user?.uid} />
             </div>
           )}
 

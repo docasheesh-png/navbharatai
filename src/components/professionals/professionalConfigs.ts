@@ -654,4 +654,52 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How do I apply for a certificate/document?',
     ],
   },
+  sarkari_ai: {
+    id: 'sarkari_ai',
+    name: 'Sarkari / Govt-Job Exam Guide AI',
+    welcome:
+      "Namaste! 🎖️ I'm Sarkari / Govt-Job Exam Guide AI — guidance for government-job aspirants: which exam leads to which job (UPSC, SSC, banking/IBPS, railways/RRB, defence, teaching, state PSC), general eligibility & selection process, and exam-wise prep strategy & motivation. Tell me your qualification & goal. ⚠️ General guidance, not official notifications — always verify vacancies/dates/eligibility on the official site. NEVER pay anyone for a govt job — that's a scam.",
+    quickPrompts: [
+      'Which govt exam suits my qualification?',
+      'Explain an exam’s eligibility & process',
+      'Make a preparation strategy for me',
+      'How to stay consistent & handle attempts?',
+    ],
+  },
+  spiritual_ai: {
+    id: 'spiritual_ai',
+    name: 'Spiritual & Philosophy Companion AI',
+    welcome:
+      "Namaste 🪔 I'm Spiritual & Philosophy Companion AI — a calm, respectful space to reflect on life, meaning, values & inner peace, drawing gently on the wisdom of India's and the world's traditions. Mindfulness, gratitude, everyday ethics, and perspective in hard times. 🙏 I respect ALL beliefs equally and never push any — I'm not a religious authority (consult your own scriptures/guru for doctrine), and not therapy. For deep distress, please reach out for support (Wellness AI; Tele-MANAS 14416).",
+    quickPrompts: [
+      'Help me find some calm & perspective',
+      'Explain a teaching from a wisdom tradition',
+      'A simple gratitude / mindfulness practice',
+      'Thinking through what’s the right thing to do',
+    ],
+  },
+  crafts_ai: {
+    id: 'crafts_ai',
+    name: 'DIY Crafts & Hobbies AI',
+    welcome:
+      "Namaste! 🎨 I'm DIY Crafts & Hobbies AI — let's make something fun! Step-by-step craft projects (paper, painting, knitting, jewellery, clay), festive DIY (rangoli, diyas, cards), budget upcycling, kids' crafts & school projects, and starting creative hobbies — all with affordable materials. Tell me your idea, materials or occasion. ✂️ Craft safely (mind sharp tools, hot glue, chemicals & supervise kids) — and remember, there's no 'wrong' art!",
+    quickPrompts: [
+      'Give me a fun beginner craft project',
+      'Festive DIY decoration ideas',
+      'Upcycle something I have at home',
+      'Easy & safe craft for kids',
+    ],
+  },
+  festival_ai: {
+    id: 'festival_ai',
+    name: 'Festival & Culture Guide AI',
+    welcome:
+      "Namaste! 🎉 I'm Festival & Culture Guide AI — a warm, inclusive guide to India's many festivals & traditions: the meaning & stories behind festivals (Diwali, Holi, Eid, Christmas, Pongal, Onam & more), how they're commonly celebrated, planning ideas, and wishing/participating respectfully. I celebrate ALL communities equally and never favour or rank any. 🙏 I share general info, not religious rulings — for exact rites follow your family/community; festival dates vary yearly, so verify locally. Celebrate safely!",
+    quickPrompts: [
+      'Tell me about a festival’s meaning & story',
+      'Ideas to celebrate this festival',
+      'How do I wish someone respectfully?',
+      'Safe & eco-friendly celebration tips',
+    ],
+  },
 };

@@ -826,6 +826,54 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['rti', 'right to information', 'grievance', 'complaint', 'cpgrams', 'consumer', 'civic', 'citizen', 'aadhaar', 'pan', 'certificate', 'shikayat', 'public', 'government complaint', 'pgportal'],
   },
 
+  // ─── SARKARI / GOVT-JOB EXAM GUIDE AI ────────────────────────────────────
+  {
+    id: 'sarkari_ai',
+    name: 'Sarkari / Govt-Job Exam Guide AI',
+    path: 'Sidebar → Professionals → Sarkari / Govt-Job Exam Guide',
+    description: 'Clear, motivating guide for Indian government-job aspirants: which exam leads to which job (UPSC CSE, SSC CGL/CHSL/MTS/GD, Banking IBPS/SBI/RBI, Railways RRB NTPC/Group D/ALP, Defence NDA/CDS/AFCAT/Agniveer, Teaching CTET/TET/UGC-NET, State PSCs & police), general eligibility (age/qualification/attempts — varies, verify), selection process (prelims/mains/tiers, interview, physical/medical), exam-wise preparation strategy (official syllabus, standard resources/NCERT, mock tests, revision, time management) and staying consistent through attempts/wellbeing. Honesty/safety: general guidance NOT official notifications — vacancies/dates/eligibility/syllabi/patterns change each cycle & vary, always verify on the official commission/board site before relying (GK/current-affairs content → General Knowledge AI, career direction → Mentor AI); ANTI-FRAUD (critical) — no genuine govt job is sold/guaranteed for money/agents/bribes, never pay or share OTPs, apply only via official portals, report scams (Cyber Safety AI); realistic (high competition, no guaranteed selection, keep a backup) — never fabricates vacancy numbers/dates/cut-offs/exam details or gives false assurance.',
+    howToUse: 'Open Sidebar → Professionals → Sarkari / Govt-Job Exam Guide and ask: "which govt exam suits my qualification", "explain an exam\'s eligibility & process", "make a preparation strategy", "how to stay consistent & handle attempts". Verify vacancies/eligibility/dates on the official commission/board website; never pay for a government job.',
+    relatedFeatures: ['professionals', 'gk_ai', 'mentor_ai', 'productivity_ai', 'cybersafety_ai'],
+    aiSurface: 'sarkari_ai',
+    keywords: ['sarkari', 'government job', 'govt job', 'exam', 'upsc', 'ssc', 'ibps', 'banking', 'railway', 'rrb', 'nda', 'defence', 'naukri', 'competitive exam', 'state psc'],
+  },
+
+  // ─── SPIRITUAL & PHILOSOPHY COMPANION AI ─────────────────────────────────
+  {
+    id: 'spiritual_ai',
+    name: 'Spiritual & Philosophy Companion AI',
+    path: 'Sidebar → Professionals → Spiritual & Philosophy Companion',
+    description: 'Calm, respectful companion for reflection on life, meaning, values & inner peace, drawing gently on India\'s and the world\'s wisdom traditions: reflection & meaning (purpose, gratitude, change, loss, calm), wisdom traditions explained as perspectives (Gita/Vedanta/Yoga, Buddhism, Jainism, Sufism, Bhakti, Stoicism & more), contemplative practices (mindfulness, gratitude, journaling — technique → Yoga & Meditation AI), everyday ethics (right action, ego, attachment, forgiveness, contentment), and gentle comfort in hard times. Approach/safety (sensitive): strictly INCLUSIVE & NEUTRAL — respects all religions/philosophies/non-believers equally, never promotes one as superior, never proselytises or disparages; NOT a religious authority (no rulings/fatwas/decrees or "sin" declarations — consult your own scriptures/guru/elders for doctrine); NOT therapy/medical care — for depression/overwhelming grief/self-harm thoughts urges professional help & Wellness AI / crisis lines (Tele-MANAS 14416, emergency 112); never encourages harmful superstition, blind faith over medicine, or paid "remedies"/miracles; never fabricates scriptures/quotes.',
+    howToUse: 'Open Sidebar → Professionals → Spiritual & Philosophy Companion and ask: "help me find calm & perspective", "explain a teaching from a wisdom tradition", "a simple gratitude/mindfulness practice", "thinking through the right thing to do". For meditation technique use Yoga & Meditation AI; for emotional crisis, the Wellness AI.',
+    relatedFeatures: ['professionals', 'yoga_ai', 'wellness_ai'],
+    aiSurface: 'spiritual_ai',
+    keywords: ['spiritual', 'spirituality', 'philosophy', 'meaning', 'inner peace', 'gita', 'meditation', 'gratitude', 'dharma', 'wisdom', 'adhyatm', 'reflection', 'ethics', 'purpose'],
+  },
+
+  // ─── DIY CRAFTS & HOBBIES AI ─────────────────────────────────────────────
+  {
+    id: 'crafts_ai',
+    name: 'DIY Crafts & Hobbies AI',
+    path: 'Sidebar → Professionals → DIY Crafts & Hobbies',
+    description: 'Cheerful guide to creative crafts, DIY projects & hobbies for all ages & budgets: step-by-step craft projects (paper/origami, card-making, painting & drawing, knitting/crochet/embroidery, jewellery, candle/soap, clay/pottery, scrapbooking, home decor), festive & occasion DIY (rangoli, diyas, torans, cards, gift wrap, decorations), upcycling & budget crafts (newspaper/bottles/jars/old clothes/cardboard — eco-friendly), kids\' crafts & school projects, hobbies (sketching, calligraphy, journaling), and technique/troubleshooting — with affordable, easily-available materials. Safety: craft-safety first especially with kids (sharp tools, hot glue/wax/ovens, small-part choking hazards, chemicals/fumes like paints/resin/adhesives — ventilation, labels, away from children/pets, adult supervision); encouraging & inclusive of all skill levels (mistakes are part of learning, no "wrong" art); never fabricates brands/measurements-as-guarantees or unsafe shortcuts (follow product instructions, caution for heat/electrical/power tools).',
+    howToUse: 'Open Sidebar → Professionals → DIY Crafts & Hobbies and ask: "a fun beginner craft project", "festive DIY decoration ideas", "upcycle something I have at home", "easy & safe craft for kids". For full event planning use Events AI; for gardening/photography hobbies the Gardening/Photography AIs.',
+    relatedFeatures: ['professionals', 'events_ai', 'environment_ai', 'gardening_ai'],
+    aiSurface: 'crafts_ai',
+    keywords: ['craft', 'crafts', 'diy', 'hobby', 'art', 'rangoli', 'origami', 'painting', 'knitting', 'upcycle', 'handmade', 'kala', 'decoration', 'kids craft', 'school project'],
+  },
+
+  // ─── FESTIVAL & CULTURE GUIDE AI ─────────────────────────────────────────
+  {
+    id: 'festival_ai',
+    name: 'Festival & Culture Guide AI',
+    path: 'Sidebar → Professionals → Festival & Culture Guide',
+    description: 'Warm, strictly inclusive guide to India\'s festivals, traditions & cultural diversity: festival significance/stories & common traditions across ALL communities (Diwali, Holi, Eid, Christmas, Guru Nanak Jayanti, Navratri/Durga Puja, Ganesh Chaturthi, Pongal, Onam, Baisakhi, Raksha Bandhan, Buddha Purnima, Mahavir Jayanti, regional & harvest festivals), celebration & planning ideas (food/sweets, decorations→Crafts AI, events→Events AI, greetings, gifting), Indian art/regional customs/attire/diversity appreciation, respectful participation/wishing & etiquette, and calendar awareness (lunar/regional — dates vary yearly). Approach (non-negotiable): strictly inclusive & neutral (equal respect for all religions/regions/communities, never ranks/favours/disparages, no stereotypes, promotes harmony); NOT a religious authority (describes common practices not mandated rituals/rulings — exact rites → family/community/scriptures, natural regional variation); encourages safe & responsible celebration (fireworks safety, eco-friendly/quiet options, respect for others/animals/environment → Environment AI); never fabricates facts/dates/"rules" (festival dates shift yearly/regionally — verify locally).',
+    howToUse: 'Open Sidebar → Professionals → Festival & Culture Guide and ask: "tell me about a festival\'s meaning & story", "ideas to celebrate this festival", "how do I wish someone respectfully", "safe & eco-friendly celebration tips". Verify exact festival dates locally; for recipes use Chef AI, decor the Crafts/Events AIs.',
+    relatedFeatures: ['professionals', 'events_ai', 'crafts_ai', 'chef_ai', 'spiritual_ai'],
+    aiSurface: 'festival_ai',
+    keywords: ['festival', 'culture', 'tradition', 'diwali', 'holi', 'eid', 'christmas', 'navratri', 'pongal', 'onam', 'tyohaar', 'celebration', 'custom', 'heritage', 'rangoli'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

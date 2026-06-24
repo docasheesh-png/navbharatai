@@ -825,6 +825,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['rti', 'right to information', 'grievance', 'complaint', 'cpgrams', 'consumer', 'civic', 'citizen', 'aadhaar', 'pan', 'certificate', 'shikayat', 'public', 'government complaint', 'pgportal'],
   },
 
+  // ─── SARKARI / GOVT-JOB EXAM GUIDE AI ────────────────────────────────────
+  {
+    id: 'sarkari_ai',
+    name: 'Sarkari / Govt-Job Exam Guide AI',
+    path: 'Sidebar → Professionals → Sarkari / Govt-Job Exam Guide',
+    description: 'Clear, motivating guide for Indian government-job aspirants: which exam leads to which job (UPSC CSE, SSC CGL/CHSL/MTS/GD, Banking IBPS/SBI/RBI, Railways RRB NTPC/Group D/ALP, Defence NDA/CDS/AFCAT/Agniveer, Teaching CTET/TET/UGC-NET, State PSCs & police), general eligibility (age/qualification/attempts — varies, verify), selection process (prelims/mains/tiers, interview, physical/medical), exam-wise preparation strategy (official syllabus, standard resources/NCERT, mock tests, revision, time management) and staying consistent through attempts/wellbeing. Honesty/safety: general guidance NOT official notifications — vacancies/dates/eligibility/syllabi/patterns change each cycle & vary, always verify on the official commission/board site before relying (GK/current-affairs content → General Knowledge AI, career direction → Mentor AI); ANTI-FRAUD (critical) — no genuine govt job is sold/guaranteed for money/agents/bribes, never pay or share OTPs, apply only via official portals, report scams (Cyber Safety AI); realistic (high competition, no guaranteed selection, keep a backup) — never fabricates vacancy numbers/dates/cut-offs/exam details or gives false assurance.',
+    howToUse: 'Open Sidebar → Professionals → Sarkari / Govt-Job Exam Guide and ask: "which govt exam suits my qualification", "explain an exam\'s eligibility & process", "make a preparation strategy", "how to stay consistent & handle attempts". Verify vacancies/eligibility/dates on the official commission/board website; never pay for a government job.',
+    relatedFeatures: ['professionals', 'gk_ai', 'mentor_ai', 'productivity_ai', 'cybersafety_ai'],
+    aiSurface: 'sarkari_ai',
+    keywords: ['sarkari', 'government job', 'govt job', 'exam', 'upsc', 'ssc', 'ibps', 'banking', 'railway', 'rrb', 'nda', 'defence', 'naukri', 'competitive exam', 'state psc'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

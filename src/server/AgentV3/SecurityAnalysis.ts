@@ -76,6 +76,14 @@ const RULES: Rule[] = [
     ignore: (_m, line) => /\/\/|\*/.test(line.slice(0, line.indexOf('eval'))),
   },
   {
+    rule: 'dynamic-function',
+    severity: 'medium',
+    // `new Function('...')` builds code from a string at runtime — eval()'s twin. The
+    // \b after Function avoids matching `new FunctionComponent(...)` and similar.
+    re: /\bnew\s+Function\b\s*\(/,
+    message: 'new Function() builds code from a string — like eval(), it enables code injection; avoid it.',
+  },
+  {
     rule: 'command-injection',
     severity: 'high',
     // A child_process shell sink (exec/execFile/spawn, sync or async) whose command is

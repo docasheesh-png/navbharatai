@@ -258,6 +258,12 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Section I #4 v9 (Security) — new Function() dynamic code. Added a
+  `dynamic-function` rule (medium) to `SecurityAnalysis`: `new Function('…')` builds code from
+  a string at runtime — eval()'s twin (code injection) — but the eval-usage rule only matched
+  `eval(`. High-precision: `\bnew\s+Function\b\s*\(` so a React `new FunctionComponent(...)` (and
+  similar) is NOT flagged. Folds into the existing security dimension. AppKnowledgeBase synced.
+  v3.0-only. Gate green: server+frontend tsc 0, 2115 vitest (+2), boot:check PASS.
 - 2026-06-24: COST ROUTING (admin-directed) — multi-provider ORCHESTRATOR (phase 3). New
   `AgentV3/providers/MultiProviderTurnRunner.ts` (PURE control flow): wraps an ordered chain
   of TurnRunners (Vertex→Gemini→Grok→Claude) and returns the first that succeeds, falling

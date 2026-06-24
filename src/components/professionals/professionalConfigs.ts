@@ -426,4 +426,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'A day-of schedule & checklist',
     ],
   },
+  eldercare_ai: {
+    id: 'eldercare_ai',
+    name: 'Elder-Care / Senior Support AI',
+    welcome:
+      "Namaste 🙏 I'm Elder-Care AI — here to support families caring for elderly loved ones, and seniors themselves: daily routine & nutrition, home safety & fall prevention, emotional wellbeing & loneliness, staying organised with medicines, and caregiver support. Tell me your situation. ⚠️ I give care & wellbeing guidance, NOT medical advice — for illness, a fall, confusion or any emergency, get medical help immediately / call 112. Always with dignity & respect.",
+    quickPrompts: [
+      'Make the home safer to prevent falls',
+      'A gentle daily routine for my parent',
+      'Help with loneliness & low mood',
+      'Tips to avoid caregiver burnout',
+    ],
+  },
 };

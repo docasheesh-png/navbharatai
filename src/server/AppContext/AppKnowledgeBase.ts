@@ -597,6 +597,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['event', 'wedding', 'shaadi', 'planner', 'party', 'function', 'budget', 'venue', 'catering', 'decor', 'birthday', 'sangeet', 'guest list', 'aayojan', 'celebration'],
   },
 
+  // ─── ELDER-CARE / SENIOR SUPPORT AI ──────────────────────────────────────
+  {
+    id: 'eldercare_ai',
+    name: 'Elder-Care / Senior Support AI',
+    path: 'Sidebar → Professionals → Elder-Care / Senior Support',
+    description: 'Warm, respectful companion for Indian families caring for elderly relatives (and seniors themselves): daily care & routine (nutrition→Nutritionist AI, hydration, sleep, hygiene, safe activity), home safety & fall prevention (lighting, grab bars, emergency plan), emotional wellbeing & loneliness (connection, hobbies, watching for depression), medication ORGANISATION only (pill organisers, reminders, up-to-date list — never what/how-much), caregiver support (avoiding burnout, sharing responsibilities, when to get an attendant/day-care/professional care), and senior finance/schemes (→ Govt Schemes Helper) & scam protection (→ Cyber Safety AI). Safety-first (vulnerable people): care/wellbeing guidance NOT medical advice — for illness, falls with injury, confusion, chest pain/breathing trouble, stroke (FAST) or any emergency seek medical help immediately/call 112; never gives medicine names/doses; watches for red flags (sudden confusion, self-neglect, abuse); respects the elder’s dignity, autonomy & consent; never fabricates medical/scheme facts.',
+    howToUse: 'Open Sidebar → Professionals → Elder-Care / Senior Support and ask: "make the home safer to prevent falls", "a gentle daily routine for my parent", "help with loneliness & low mood", "avoid caregiver burnout". For health concerns see a doctor / Doctor AI; emergencies → 112.',
+    relatedFeatures: ['professionals', 'sda_chat', 'nutritionist_ai', 'wellness_ai', 'govt_schemes_ai'],
+    aiSurface: 'eldercare_ai',
+    keywords: ['elder care', 'elderly', 'senior', 'old age', 'parents', 'caregiver', 'budhe', 'maa baap', 'fall prevention', 'dementia', 'loneliness', 'pension', 'buzurg', 'care'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

@@ -258,6 +258,17 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Section I #4 v7 (Security) — real secrets in committed env templates. New
+  `AgentV3/EnvSecretValueAnalysis.ts` (PURE): a `.env.example`/`.sample`/`.template` is
+  committed and must hold placeholders only; a real secret left inside one is a permanent
+  git-history leak the source secret-scan misses (it matches quoted code assignments, not
+  `KEY=sk-realkey` env lines). Flags template VALUES that match a distinctive real-secret
+  format (sk-…, Stripe live, AKIA…, GitHub token, xAI, Google API key, Slack, JWT). High-
+  precision: the value must match a real key shape AND not be a placeholder (the existing
+  `your-…`/`<…>`/`xxx`/`example`/`changeme` guard) — note AWS's documented EXAMPLE key is
+  correctly treated as a placeholder. Wired into `evaluate` (best-effort read of the three
+  template names) + a HIGH readiness blocker + verdict line; systemPrompt + AppKnowledgeBase
+  synced. v3.0-only. Gate green: server+frontend tsc 0, 2079 vitest (+9), boot:check PASS.
 - 2026-06-24: Section I #5 v2 (Frontend runtime) — Vite client-env exposure. New
   `AgentV3/ViteEnvAnalysis.ts` (PURE): a non-VITE_-prefixed `import.meta.env.X`
   reference is `undefined` in the browser (Vite only exposes `VITE_*` + the builtins

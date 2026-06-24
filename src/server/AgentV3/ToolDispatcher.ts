@@ -38,6 +38,7 @@ import { analyzeSecretLeak, secretLeakSummary } from './SecretLeakAnalysis';
 import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
 import { scanPortBinding, portBindingSummary, type PortBindingIssue } from './PortBindingAnalysis';
 import { scanViteEnvExposure, hasCustomEnvPrefix, viteEnvSummary, type ViteEnvIssue } from './ViteEnvAnalysis';
+import { scanEnvTemplateSecrets, envTemplateSecretSummary, type EnvTemplateSecretIssue } from './EnvSecretValueAnalysis';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
 
@@ -606,6 +607,18 @@ export class ToolDispatcher {
         const securityConfig = this.collectSecurityConfigIssues(snap.sources);
         // Best-effort secret-leak pass (Section I #4): a real .env not gitignored.
         const secretLeak = analyzeSecretLeak(hygieneFiles, gitignoreContent);
+        // Best-effort env-template-secret pass (Section I #4 v7): a REAL secret left in a
+        // committed .env.example/.sample/.template is a permanent git-history leak.
+        const envTemplateSecrets: EnvTemplateSecretIssue[] = [];
+        for (const name of ['.env.example', '.env.sample', '.env.template']) {
+          let tplContent: string | null = null;
+          try {
+            tplContent = await this.actuator.readFile(this.workspaceId, name);
+          } catch {
+            tplContent = null;
+          }
+          if (tplContent) envTemplateSecrets.push(...scanEnvTemplateSecrets(name, tplContent));
+        }
         // Best-effort hardcoded-URL pass (Section I #11): localhost baked into code.
         const hardcodedUrls = this.collectHardcodedUrlIssues(snap.sources);
         // Best-effort port-binding pass (Section I #11 v2): a hardcoded listen port
@@ -637,6 +650,7 @@ export class ToolDispatcher {
         const complianceHigh = complianceIssues.filter((i) => i.severity === ('high' as ComplianceSeverity)).length;
         if (complianceHigh) extra.push({ severity: 'high', label: `${complianceHigh} serious privacy/compliance issue(s)` });
         if (secretLeak.findings.length) extra.push({ severity: 'high', label: 'Secret leak: a real .env is not gitignored' });
+        if (envTemplateSecrets.length) extra.push({ severity: 'high', label: `${envTemplateSecrets.length} real secret(s) committed in an .env template` });
         for (const f of runnability.findings) extra.push({ severity: f.level === 'high' ? 'high' : 'medium', label: `Runnability: ${f.message}` });
         for (const i of securityConfig) extra.push({ severity: i.severity === 'high' ? 'high' : 'medium', label: `Security config (${i.rule})` });
         if (hardcodedUrls.length) extra.push({ severity: 'medium', label: `${hardcodedUrls.length} hardcoded localhost URL(s)` });
@@ -665,7 +679,7 @@ export class ToolDispatcher {
           accessibility: tally(a11yIssues),
           compliance: complianceTally,
         });
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}`;
       }
 
       case 'update_todo': {

@@ -445,3 +445,12 @@ sonnetRate()/sonnetEquivalentUsd added, billedAmountUsd(usage, powerMode) = powe
 Sonnet×3.5, + billedAmountInr(usage, powerMode, rate). NEXT (P5-inr): a UsdInrRate module
 (env default + best-effort real-time refresh + fallback) and wire billedAmountInr to the
 customer-facing ₹ display.
+
+## §11.4 — P5-inr: real-time USD→INR + customer ₹ (2026-06-24)
+`src/server/lib/UsdInrRate.ts`: a cached USD→INR rate, refreshed best-effort hourly from a
+free no-key FX source (open.er-api.com), with synchronous `usdInrRate()` readers that NEVER
+throw/block (billing must never break on FX). Fallback = env `USD_INR_RATE` or 85; auto-refresh
+skipped under tests. The route computes `billedInr = round(billedUsd × usdInrRate(), 2)` and
+adds it to the `result` message (customer-facing ₹). Internal accounting stays in USD
+(currency-stable, no migration); INR is the display. Frontend ₹ display + the Power effort UI
+(P4) are next.

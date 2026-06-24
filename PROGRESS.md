@@ -1968,3 +1968,23 @@ pricing block removed from ClaudeClient.test.ts (now covered by pricing.test.ts,
 NEXT P5-inr: a UsdInrRate module (env default USD_INR_RATE + best-effort real-time refresh with
 fallback, never throws in the billing path) + wire billedAmountInr to the customer-facing ₹
 display. Then P4 (Power effort UI). Gate green: server tsc 0, **2165 vitest**, boot:check PASS.
+
+---
+
+### 2026-06-24 — Multi-Model Orchestration: P5-inr — real-time USD→INR + customer ₹
+
+`src/server/lib/UsdInrRate.ts` — a cached USD→INR rate for customer billing. `usdInrRate()` is
+synchronous and NEVER throws/blocks (the billing path must never break on FX). Best-effort hourly
+refresh from a free no-key FX source (open.er-api.com); on any failure keeps the last good value;
+fallback = env `USD_INR_RATE` or 85. Auto-refresh is skipped under tests (no network in CI).
+Helpers: `usdToInr`, `setUsdInrRate`, `refreshUsdInrRate(fetchJson)` (injectable for tests).
+
+The agentv3 route now computes `billedInr = round(result.billedUsd × usdInrRate(), 2)` and adds it
+to the `result` message — the customer-facing amount in ₹. Internal accounting still records
+`billedUsd` (USD, currency-stable, no data migration). Strangler-fig isolation kept (the INR
+conversion is at the route/composition-root, not inside the AgentV3 module). 5 tests.
+
+So the full billing is now live: NORMAL = Sonnet-equiv × 3.5, POWER = real Opus × 2.5, shown to the
+customer in ₹ at the real-time rate. NEXT: frontend ₹ display + P4 (Power effort UI: 5x/mini,
+10x?/medium, 20x?/max — actually flat 2.5× per admin, effort = thinking depth). Gate green:
+server+frontend tsc 0, **2170 vitest** (+5), boot:check PASS.

@@ -1519,3 +1519,11 @@ section):**
   Sonnet-equiv×3.5 ≈ much cheaper since Sonnet rate ≪ Opus). 11 pricing tests; removed the stale
   D5/D6 pricing block from ClaudeClient.test.ts. NEXT P5-inr: UsdInrRate module (real-time rate)
   + customer-facing ₹ display. Gate green: server tsc 0, 2165 vitest, boot:check PASS.
+
+- 2026-06-24: Multi-Model Orchestration P5-inr — real-time USD→INR + customer ₹. New
+  `src/server/lib/UsdInrRate.ts`: cached rate (sync `usdInrRate()`, never throws), best-effort
+  hourly refresh from a free no-key FX API (open.er-api.com) with fallback to env `USD_INR_RATE`
+  (or 85); auto-refresh skipped under tests; `usdToInr`/`setUsdInrRate`/`refreshUsdInrRate`
+  (injectable fetch). The agentv3 route now adds `billedInr = round(billedUsd × usdInrRate(), 2)`
+  to the result message — internal accounting stays USD (no migration), customer-facing amount
+  is ₹. 5 tests. Gate green: server+frontend tsc 0, 2170 vitest, boot:check PASS.

@@ -51,6 +51,7 @@ import { FIRSTAID_AI } from './configs/firstaid';
 import { ENVIRONMENT_AI } from './configs/environment';
 import { GK_AI } from './configs/gk';
 import { SAFETY_AI } from './configs/safety';
+import { TRANSLATE_AI } from './configs/translate';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -113,6 +114,7 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [ENVIRONMENT_AI.id]: ENVIRONMENT_AI,
   [GK_AI.id]: GK_AI,
   [SAFETY_AI.id]: SAFETY_AI,
+  [TRANSLATE_AI.id]: TRANSLATE_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

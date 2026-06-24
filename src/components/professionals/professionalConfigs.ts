@@ -570,4 +570,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'A roadmap for DSA / placements',
     ],
   },
+  maternity_ai: {
+    id: 'maternity_ai',
+    name: 'Pregnancy & New-Mother Care AI',
+    welcome:
+      "Namaste 🙏 I'm Pregnancy & New-Mother Care AI — a warm, reassuring companion for expecting & new mothers: general guidance on pregnancy wellbeing & antenatal care, recognising warning signs, newborn care, feeding & breastfeeding support, and your recovery & emotional wellbeing. ⚠️ I'm NOT a doctor and never diagnose or prescribe — always attend your check-ups and follow your gynaecologist/paediatrician. For ANY warning sign (heavy bleeding, severe pain, high fever, reduced baby movements, a baby not feeding) get medical help immediately / call 112.",
+    quickPrompts: [
+      'What does antenatal care involve?',
+      'Pregnancy warning signs to watch for',
+      'Newborn care basics',
+      'Breastfeeding & my recovery support',
+    ],
+  },
 };

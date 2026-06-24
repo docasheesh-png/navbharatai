@@ -741,6 +741,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['coding', 'programming', 'code', 'python', 'javascript', 'java', 'learn to code', 'dsa', 'algorithm', 'debug', 'developer', 'placement', 'coding tutor', 'leetcode', 'web development'],
   },
 
+  // ─── PREGNANCY & NEW-MOTHER CARE AI ──────────────────────────────────────
+  {
+    id: 'maternity_ai',
+    name: 'Pregnancy & New-Mother Care AI',
+    path: 'Sidebar → Professionals → Pregnancy & New-Mother Care',
+    description: 'Warm, reassuring companion for expecting & new mothers (and families): general info on pregnancy wellbeing & antenatal (ANC) check-ups, balanced nutrition (→ Nutritionist AI) & rest, danger-sign AWARENESS (heavy bleeding, severe pain/headache/blurred vision/swelling, high fever, fits, reduced fetal movements, fluid leaking → urgent care), newborn care basics (warmth, hygiene, cord/skin, safe sleep, immunisation awareness, when to see a paediatrician), breastfeeding/feeding support, and the mother\'s postpartum recovery & emotional wellbeing (incl. postpartum-depression awareness). Safety-first (two lives): general information & support NOT medical advice/diagnosis/prescription — always attend check-ups & follow the gynaecologist/paediatrician, take only prescribed medicines (never suggests medicines/doses); any warning sign in mother or baby = EMERGENCY, get medical help immediately/call 112; discourages unsafe traditional practices/myths; never fabricates medical facts/schedules (every pregnancy & baby differs — only the doctor knows specifics); postpartum distress → Wellness AI / Tele-MANAS 14416.',
+    howToUse: 'Open Sidebar → Professionals → Pregnancy & New-Mother Care and ask: "what does antenatal care involve", "pregnancy warning signs to watch for", "newborn care basics", "breastfeeding & my recovery support". Always follow your doctor; for any danger sign call 112 / go to hospital.',
+    relatedFeatures: ['professionals', 'sda_chat', 'nutritionist_ai', 'parenting_ai', 'wellness_ai'],
+    aiSurface: 'maternity_ai',
+    keywords: ['pregnancy', 'pregnant', 'maternity', 'new mother', 'newborn', 'baby care', 'antenatal', 'breastfeeding', 'postpartum', 'garbhavastha', 'delivery', 'infant', 'mother', 'janani'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

@@ -127,6 +127,14 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.tsx', '<a href="/x" target="_self">go</a>').some((f) => f.rule === 'unsafe-target-blank')).toBe(false);
   });
 
+  it('flags a javascript: URL in href/src (XSS) but not the void(0) no-op placeholder', () => {
+    expect(scanSecurity('a.tsx', '<a href="javascript:stealCookies()">x</a>').some((f) => f.rule === 'javascript-uri')).toBe(true);
+    expect(scanSecurity('a.tsx', '<iframe src="javascript:alert(1)" />').some((f) => f.rule === 'javascript-uri')).toBe(true);
+    // Safe: the common no-op placeholder and a real URL are not flagged.
+    expect(scanSecurity('a.tsx', '<a href="javascript:void(0)" onClick={go}>x</a>').some((f) => f.rule === 'javascript-uri')).toBe(false);
+    expect(scanSecurity('a.tsx', '<a href="https://x.com">x</a>').some((f) => f.rule === 'javascript-uri')).toBe(false);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

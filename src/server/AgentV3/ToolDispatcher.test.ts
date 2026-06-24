@@ -487,6 +487,13 @@ describe('ToolDispatcher — evaluate integration (more dimensions + generators)
     expect(out.toLowerCase()).toContain('accessib');
   });
 
+  it('flags a javascript: URL in an href (XSS sink)', async () => {
+    const dd = makeDispatcher('ws-eval-jsuri');
+    await write(dd, 'src/Nav.tsx', 'export const Nav = () => <a href="javascript:doEvil()">click</a>;');
+    const out = await evalText(dd);
+    expect(out).toContain('javascript-uri');
+  });
+
   it('flags a placeholder-image service left in the markup', async () => {
     const dd = makeDispatcher('ws-eval-phimg');
     await write(dd, 'src/Hero.tsx', 'export const Hero = () => <img src="https://via.placeholder.com/640" alt="h" />;');

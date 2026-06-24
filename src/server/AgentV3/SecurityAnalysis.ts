@@ -159,6 +159,17 @@ const RULES: Rule[] = [
     ignore: (_m, line) => /noopener/i.test(line),
   },
   {
+    rule: 'javascript-uri',
+    severity: 'medium',
+    // A `javascript:` URL in an href/src/action executes script when followed — an XSS
+    // sink (especially when the URL is built from data) and a CSP violation. The common
+    // no-op placeholders `javascript:void(0)` / `javascript:;` are ignored to keep
+    // precision on the dangerous, script-bearing forms.
+    re: /(?:href|src|to|action|formaction|xlink:href)\s*=\s*['"{]?\s*javascript:/i,
+    message: 'javascript: URL in an href/src — following it executes script (XSS sink, breaks CSP); use an onClick handler or a real URL.',
+    ignore: (_m, line) => /javascript:\s*(?:void\s*\(\s*0\s*\)|;)/i.test(line),
+  },
+  {
     rule: 'insecure-http',
     severity: 'low',
     re: /['"`]http:\/\/(?!localhost|127\.0\.0\.1)[^'"`]+['"`]/,

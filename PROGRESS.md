@@ -2310,3 +2310,18 @@ v3.0-only, flag-OFF.
 
 Tests: +1 unit (via.placeholder/placehold.co flagged; picsum + local asset safe) + 1 dispatcher
 integration. Gate green: server+frontend tsc 0, **2206 vitest** (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 (security): javascript: URL in href/src (XSS sink)
+
+Continuing the autonomous Section I march. New item: `SecurityAnalysis` `javascript-uri` rule (medium).
+A `javascript:` URL in an href/src/action/formaction/xlink:href executes script when followed — an XSS
+sink (worse when the URL is built from data) and a CSP violation. High-precision: the common no-op
+placeholders `javascript:void(0)` / `javascript:;` are ignored to keep focus on the dangerous,
+script-bearing forms; a real URL is not flagged. Folds into the existing security dimension.
+AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (javascript:fn() in href + javascript:alert in iframe flagged; void(0) + real URL safe)
++ 1 dispatcher integration. Gate green: server+frontend tsc 0, **2208 vitest** (+2), build PASS,
+boot:check PASS.

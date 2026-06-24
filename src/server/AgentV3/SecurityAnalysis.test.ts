@@ -160,6 +160,12 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'res.redirect(`/go?to=${req.query.next}`);').some((f) => f.rule === 'open-redirect')).toBe(false);
   });
 
+  it('flags Vue v-html as an XSS sink but not a normal attribute', () => {
+    expect(scanSecurity('App.vue', '<div v-html="userBio"></div>').some((f) => f.rule === 'vue-v-html')).toBe(true);
+    expect(scanSecurity('App.vue', '<div v-text="userBio"></div>').some((f) => f.rule === 'vue-v-html')).toBe(false);
+    expect(scanSecurity('App.vue', '<div>{{ userBio }}</div>').some((f) => f.rule === 'vue-v-html')).toBe(false);
+  });
+
   it('flags the legacy createCipher/createDecipher but not the correct createCipheriv', () => {
     expect(scanSecurity('a.ts', "const c = crypto.createCipher('aes-256-cbc', pass);").some((f) => f.rule === 'weak-crypto-cipher')).toBe(true);
     expect(scanSecurity('a.ts', 'const d = crypto.createDecipher(algo, pass);').some((f) => f.rule === 'weak-crypto-cipher')).toBe(true);

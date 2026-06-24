@@ -121,6 +121,14 @@ const RULES: Rule[] = [
     message: 'dangerouslySetInnerHTML — sanitise the HTML or it enables XSS.',
   },
   {
+    rule: 'vue-v-html',
+    severity: 'medium',
+    // Vue's v-html binding renders a raw HTML string into the DOM — the framework
+    // equivalent of dangerouslySetInnerHTML and an XSS sink when the value is dynamic.
+    re: /\bv-html\s*=/,
+    message: 'Vue v-html renders raw HTML (XSS sink) — sanitise the HTML or render text with {{ }} / v-text instead.',
+  },
+  {
     rule: 'unsafe-html-sink',
     severity: 'medium',
     // Vanilla-DOM XSS sinks the React rule misses: assigning to innerHTML/outerHTML, or

@@ -25,12 +25,19 @@ const NEW_PROMISE_ASYNC_RE = /\bnew\s+Promise\s*(<[^>]*>)?\s*\(\s*async\b/;
 // as cleanup, so cleanup silently never runs (leaks/stale state) — the eslint-react
 // rule flags this too.
 const USEEFFECT_ASYNC_RE = /\buseEffect\s*\(\s*async\b/;
+// `array.filter/find/findIndex/some/every/sort(async …)` — these methods use the
+// callback's return value SYNCHRONOUSLY, but an async callback returns a Promise (always
+// truthy / NaN for sort). So filter keeps every element, find returns the first, some is
+// always true, sort does nothing — an always-wrong, silent bug. (`.map(async …)` is NOT
+// included: it is correct when wrapped in `await Promise.all(arr.map(async …))`.)
+const ASYNC_PREDICATE_RE = /\.(filter|find|findIndex|findLast|findLastIndex|some|every|sort)\s*\(\s*async\b/;
 
 /** Human-readable fix guidance per footgun kind. */
 const FIX: Record<string, string> = {
   'async-foreach': 'forEach(async …) → use for...of with await, or await Promise.all(arr.map(...)).',
   'new-promise-async': 'new Promise(async …) → the async executor\'s errors are swallowed (the promise never rejects); do the async work before the Promise, or call resolve/reject from .then/.catch.',
   'async-useeffect': 'useEffect(async …) → the effect returns a Promise, so React never runs cleanup; define an async function inside and call it (and return a real cleanup if needed).',
+  'async-array-predicate': 'filter/find/some/every/sort(async …) → the method uses the return synchronously but an async callback returns a Promise (always truthy), so the predicate is always-wrong; resolve the async values first (await Promise.all(arr.map(...))) then filter/find synchronously.',
 };
 
 /** Scan one file for async-pattern footguns. PURE. */
@@ -49,6 +56,9 @@ export function scanAsyncPatterns(file: string, content: string): AsyncPatternIs
     }
     if (USEEFFECT_ASYNC_RE.test(line)) {
       issues.push({ file, line: i + 1, kind: 'async-useeffect' });
+    }
+    if (ASYNC_PREDICATE_RE.test(line)) {
+      issues.push({ file, line: i + 1, kind: 'async-array-predicate' });
     }
   }
   return issues;

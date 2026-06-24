@@ -41,6 +41,19 @@ describe('scanAsyncPatterns', () => {
     expect(scanAsyncPatterns('App.tsx', 'useEffect(() => { void load(); }, []);')).toEqual([]);
   });
 
+  it('flags filter/find/some/every/sort with an async callback (always-wrong predicate) but not .map', () => {
+    expect(scanAsyncPatterns('a.ts', 'const open = items.filter(async (x) => await isOpen(x));')[0])
+      .toMatchObject({ kind: 'async-array-predicate', line: 1 });
+    expect(scanAsyncPatterns('a.ts', 'const hit = list.find(async (x) => await match(x));')[0]?.kind)
+      .toBe('async-array-predicate');
+    expect(scanAsyncPatterns('a.ts', 'arr.sort(async (a, b) => await cmp(a, b));')[0]?.kind)
+      .toBe('async-array-predicate');
+    // .map(async …) is correct when awaited via Promise.all — not flagged here.
+    expect(scanAsyncPatterns('a.ts', 'await Promise.all(items.map(async (x) => save(x)));').some((i) => i.kind === 'async-array-predicate')).toBe(false);
+    // a synchronous predicate is fine.
+    expect(scanAsyncPatterns('a.ts', 'items.filter((x) => x.open);')).toEqual([]);
+  });
+
   it('ignores comments and non-code files', () => {
     expect(scanAsyncPatterns('a.ts', '// items.forEach(async (x) => await f(x))')).toEqual([]);
     expect(scanAsyncPatterns('README.md', 'items.forEach(async (x) => await f(x))')).toEqual([]);

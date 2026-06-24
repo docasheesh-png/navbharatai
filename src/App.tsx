@@ -5463,6 +5463,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'speaking_ai') toggleTab('speaking_ai');
               else if (id === 'events_ai') toggleTab('events_ai');
               else if (id === 'eldercare_ai') toggleTab('eldercare_ai');
+              else if (id === 'interior_ai') toggleTab('interior_ai');
             }} />
           )}
 
@@ -5645,6 +5646,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'eldercare_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.eldercare_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'interior_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.interior_ai} userId={user?.uid} />
             </div>
           )}
 

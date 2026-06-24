@@ -958,6 +958,78 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['hygiene', 'sanitation', 'handwashing', 'safe water', 'public health', 'cleanliness', 'menstrual hygiene', 'disease prevention', 'swachhata', 'safai', 'mosquito', 'dengue', 'food hygiene', 'toilet'],
   },
 
+  // ─── VOLUNTEERING & SOCIAL-IMPACT AI ─────────────────────────────────────
+  {
+    id: 'volunteer_ai',
+    name: 'Volunteering & Social-Impact AI',
+    path: 'Sidebar → Professionals → Volunteering & Social-Impact',
+    description: 'Warm guide to giving back: find a cause & way to help (match interests/skills/time to education, health, environment, animals, elderly, children, disaster relief, women empowerment — via time/skills/money/goods/awareness), volunteering (finding genuine verified NGOs/local/online & skills-based opportunities, contributing reliably & respectfully), donating safely (verify registration/transparency, official channels & receipts, 80G tax awareness → CA AI), starting community initiatives (clean-ups, tutoring, donation/blood drives, awareness campaigns; planning & mobilising), and skills-based/everyday giving (pro bono, blood/organ-donation awareness via official channels, daily kindness). Safety/honesty: NOT a charity regulator or tax/legal authority — anti-fraud (verify any NGO/cause, donate only via official/traceable channels never random personal accounts/under pressure, beware fake-charity & viral-fundraiser scams, never share OTPs, report 1930 / Cyber Safety AI); respect & dignity of those helped (no saviour attitudes/stereotypes, follow communities & vetted organisations, proper channels for children/vulnerable/disaster/medical); never fabricates organisations/registration/tax rules (verify & consult CA/Lawyer AI).',
+    howToUse: 'Open Sidebar → Professionals → Volunteering & Social-Impact and ask: "find a cause & way I can help", "volunteer with a genuine NGO", "donate safely & avoid scams", "start a community initiative". Verify charities & give via official channels; for 80G/tax use the CA AI.',
+    relatedFeatures: ['professionals', 'cybersafety_ai', 'accountant_ai', 'environment_ai'],
+    aiSurface: 'volunteer_ai',
+    keywords: ['volunteer', 'volunteering', 'ngo', 'donate', 'donation', 'charity', 'social work', 'seva', 'give back', 'community', 'blood donation', 'csr', 'social impact', '80g', 'fundraiser'],
+  },
+
+  // ─── ASTRONOMY & SPACE AI ────────────────────────────────────────────────
+  {
+    id: 'astronomy_ai',
+    name: 'Astronomy & Space AI',
+    path: 'Sidebar → Professionals → Astronomy & Space',
+    description: 'Curious, inspiring guide to astronomy, stargazing & space SCIENCE (clearly different from the Astrologer AI / cultural entertainment): stargazing & night sky (naked-eye/binoculars/telescope, constellations, planets, Moon phases, meteor showers, what\'s visible from India), astronomy concepts (solar system, stars, galaxies, black holes, star life cycles, gravity, light-years, eclipses, seasons — simple analogies), space exploration (ISRO — Chandrayaan/Mangalyaan/Aditya-L1/Gaganyaan; NASA/ESA; rockets/satellites/NavIC basics), telescopes/gear & beginner astrophotography (→ Photography AI), and learning/careers in astronomy/astrophysics/space sector (→ Mentor/Study-Abroad AIs). Honesty/safety: scientifically accurate (distinguishes established facts from open questions, says "we don\'t fully know yet", never fabricates facts/dates/mission details — verify on ISRO/NASA & sky apps for live timings); science NOT astrology (no fortune/predictive claims; cultural horoscopes → Astrologer AI); SUN-SAFETY critical — never look at the Sun directly or through optics without certified solar filters, only ISO-certified glasses for eclipses (risk of permanent blindness).',
+    howToUse: 'Open Sidebar → Professionals → Astronomy & Space and ask: "how do I start stargazing", "explain black holes/galaxies simply", "ISRO\'s space missions", "which telescope for a beginner". Verify live sky timings with a sky app & mission facts on ISRO/NASA; never view the Sun without certified solar filters.',
+    relatedFeatures: ['professionals', 'mathscience_ai', 'photography_ai', 'gk_ai'],
+    aiSurface: 'astronomy_ai',
+    keywords: ['astronomy', 'space', 'stargazing', 'telescope', 'planet', 'star', 'galaxy', 'black hole', 'isro', 'nasa', 'universe', 'khagol', 'rocket', 'eclipse', 'constellation'],
+  },
+
+  // ─── CALLIGRAPHY & HAND-LETTERING AI ─────────────────────────────────────
+  {
+    id: 'calligraphy_ai',
+    name: 'Calligraphy & Hand-Lettering AI',
+    path: 'Sidebar → Professionals → Calligraphy & Hand-Lettering',
+    description: 'Patient guide to beautiful handwriting, calligraphy & hand-lettering for all levels & scripts: handwriting improvement (consistency, spacing, slant, letter shapes, grip/posture, English & Devanagari drills), calligraphy styles & strokes (modern brush, italic, copperplate basics, Devanagari), affordable tools & materials (pencil/brush pens/nibs/markers/paper + substitutes), hand-lettering & projects (cards, quotes, posters, journaling, festive decor → Crafts AI; layout & flourishes), and effective practice drills & progress tracking. Teaching/honesty: encouraging & specific (explains technique, gives step-by-step drills, asks about the issue since it can\'t see the writing — suggests guide sheets & lined/grid paper); mastery comes from short regular practice over weeks (no instant fixes, no single "perfect" style); keeps tools affordable/inclusive; respects copyright/originality in lettering (no passing off trademarked logos/artwork); never fabricates brand claims or guarantees results.',
+    howToUse: 'Open Sidebar → Professionals → Calligraphy & Hand-Lettering and ask: "make my handwriting neater", "teach me a calligraphy style & strokes", "beginner tools I need", "lettering ideas for a card/quote". Practise the drills regularly on lined/grid paper; for craft projects pair with the Crafts AI.',
+    relatedFeatures: ['professionals', 'crafts_ai', 'writing_ai'],
+    aiSurface: 'calligraphy_ai',
+    keywords: ['calligraphy', 'handwriting', 'lettering', 'hand lettering', 'writing', 'neat handwriting', 'cursive', 'devanagari', 'brush pen', 'fonts', 'sulekh', 'penmanship', 'art', 'strokes'],
+  },
+
+  // ─── DANCE & MOVEMENT AI ─────────────────────────────────────────────────
+  {
+    id: 'dance_ai',
+    name: 'Dance & Movement AI',
+    path: 'Sidebar → Professionals → Dance & Movement',
+    description: 'Encouraging guide to dance for all ages & levels — classical, folk, Bollywood/freestyle & dance-for-fitness: getting started (finding rhythm/taal, posture, warm-ups, coordination & confidence), styles overview (Bharatanatyam, Kathak, Odissi, Kuchipudi; Garba, Bhangra & folk; Bollywood/contemporary — general character, guru recommended for classical), practice & technique (warm-up/stretch, footwork drills, learning routines in parts, stamina/flexibility/expression, choreography basics), dance fitness (cardio/stress-relief → pairs with Fitness AI), and performance/confidence. Safety/honesty: NOT medical/physiotherapy advice and text can\'t correct form like an in-person teacher (serious classical/technique → qualified guru/instructor); always warm up & never push through sharp/joint pain (rest & see a doctor/physio for injury), learn high-impact moves under a teacher, get medical clearance for health conditions/pregnancy, dance on a safe surface; progress takes consistent practice (no overnight mastery); presents classical/folk forms respectfully & accurately (never fabricates their history/rules); inclusive of every body & age.',
+    howToUse: 'Open Sidebar → Professionals → Dance & Movement and ask: "how do I start dancing & find rhythm", "tell me about a dance style", "plan practice for a routine", "fun dance workout for fitness". For serious classical learn from a guru; for injuries see a doctor/physio; pair with Fitness AI for conditioning.',
+    relatedFeatures: ['professionals', 'music_ai', 'fitness_ai'],
+    aiSurface: 'dance_ai',
+    keywords: ['dance', 'dancing', 'nritya', 'bharatanatyam', 'kathak', 'garba', 'bhangra', 'bollywood dance', 'choreography', 'classical dance', 'folk dance', 'dance fitness', 'naach', 'movement'],
+  },
+
+  // ─── GAMES, PUZZLES & FAMILY-FUN AI ──────────────────────────────────────
+  {
+    id: 'games_ai',
+    name: 'Games, Puzzles & Family-Fun AI',
+    path: 'Sidebar → Professionals → Games, Puzzles & Family-Fun',
+    description: 'Fun companion for board/card games, puzzles, brain-teasers & indoor/outdoor activities for families, friends, kids & gatherings: game rules & strategy (Chess, Carrom, Ludo, Snakes & Ladders, Uno, rummy-style, housie/tambola, Antakshari, Dumb Charades, traditional Indian games), game suggestions by group size/ages/time/indoor-outdoor/no-equipment, puzzles/riddles/brain-games/trivia (with hints/answers, pitched to audience), family & party activity ideas (ice-breakers, kids parties, road trips, festivals → Events AI / decor → Crafts AI), and learning a game step by step. Approach/safety: family-friendly, inclusive & good-sportsmanship (fun over winning); kids/physical-game safety (age-appropriate, supervision, small-part choking awareness, safe space; sports → Sports AI); NO gambling/betting — keeps card/dice games friendly & stakes-free, declines gambling tips & notes risks/legality; accurate rules but notes regional/house variations ("a common rule is…") and points to official bodies for competitive play (no fabricated tournament rules).',
+    howToUse: 'Open Sidebar → Professionals → Games, Puzzles & Family-Fun and ask: "explain the rules of a game", "suggest games for my group/occasion", "give me riddles & brain-teasers", "plan fun activities for a get-together". For event planning use Events AI; for exam GK/aptitude the GK / Mental Maths AIs.',
+    relatedFeatures: ['professionals', 'events_ai', 'gk_ai', 'sports_ai'],
+    aiSurface: 'games_ai',
+    keywords: ['games', 'board game', 'card game', 'puzzle', 'riddle', 'family fun', 'chess', 'carrom', 'ludo', 'tambola', 'antakshari', 'khel', 'brain teaser', 'party games', 'trivia'],
+  },
+
+  // ─── TECH BUYING ADVISOR AI ──────────────────────────────────────────────
+  {
+    id: 'techbuy_ai',
+    name: 'Tech Buying Advisor AI',
+    path: 'Sidebar → Professionals → Tech Buying Advisor',
+    description: 'Independent, commission-free helper to choose electronics & gadgets in India (phones, laptops, TVs, home appliances — fridge/washer/AC, audio, smartwatches, accessories): match a device to the user\'s needs & budget by asking the right questions, understand specs in plain language & which actually matter vs marketing hype (RAM/processor/storage/display/battery; appliance capacity & BEE star rating; TV panel/resolution), compare options objectively & read reviews critically, value/warranty/timing & running cost, and safe buying. Honesty/safety: NEUTRAL & independent (never pushes a brand for commission, honest about trade-offs); prices/models/specs change fast (won\'t fabricate current prices/exact specs/"latest model" — verify on reliable/official sources before buying); anti-scam (genuine sellers, proper bill/warranty, beware fake deals/counterfeits/used-as-new, never share OTP/card on unverified sites → Cyber Safety AI); budget-respectful (no upselling). For fixing devices use the Gadget & Tech-Help AI.',
+    howToUse: 'Open Sidebar → Professionals → Tech Buying Advisor and ask: "which phone/laptop for my needs & budget", "which specs actually matter", "compare these options", "how to buy safely & avoid fakes". Verify current prices/specs/reviews before buying; for repairs use the Gadget & Tech-Help AI.',
+    relatedFeatures: ['professionals', 'techhelp_ai', 'cybersafety_ai', 'finance_ai'],
+    aiSurface: 'techbuy_ai',
+    keywords: ['buy', 'tech', 'gadget', 'phone', 'laptop', 'tv', 'appliance', 'fridge', 'ac', 'washing machine', 'which to buy', 'specs', 'electronics', 'kharidna', 'recommendation'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

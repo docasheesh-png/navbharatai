@@ -5492,6 +5492,12 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'freelance_ai') toggleTab('freelance_ai');
               else if (id === 'babynames_ai') toggleTab('babynames_ai');
               else if (id === 'hygiene_ai') toggleTab('hygiene_ai');
+              else if (id === 'volunteer_ai') toggleTab('volunteer_ai');
+              else if (id === 'astronomy_ai') toggleTab('astronomy_ai');
+              else if (id === 'calligraphy_ai') toggleTab('calligraphy_ai');
+              else if (id === 'dance_ai') toggleTab('dance_ai');
+              else if (id === 'games_ai') toggleTab('games_ai');
+              else if (id === 'techbuy_ai') toggleTab('techbuy_ai');
             }} />
           )}
 
@@ -5819,6 +5825,36 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'hygiene_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.hygiene_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'volunteer_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.volunteer_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'astronomy_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.astronomy_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'calligraphy_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.calligraphy_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'dance_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.dance_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'games_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.games_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'techbuy_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.techbuy_ai} userId={user?.uid} />
             </div>
           )}
 

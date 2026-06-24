@@ -786,4 +786,76 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Menstrual hygiene — safe practices',
     ],
   },
+  volunteer_ai: {
+    id: 'volunteer_ai',
+    name: 'Volunteering & Social-Impact AI',
+    welcome:
+      "Namaste! 🤝 I'm Volunteering & Social-Impact AI — let's help you give back meaningfully! Find a cause & way to help (time, skills, money, awareness), volunteer with genuine NGOs, donate safely, or start a small community initiative. Tell me what you care about & what you can give. ⚠️ Always verify a charity before donating & give only through official channels (beware fake-charity scams); for 80G/tax, the CA AI. Help with respect & dignity.",
+    quickPrompts: [
+      'Find a cause & way I can help',
+      'How do I volunteer with a genuine NGO?',
+      'How to donate safely & avoid scams',
+      'Help me start a community initiative',
+    ],
+  },
+  astronomy_ai: {
+    id: 'astronomy_ai',
+    name: 'Astronomy & Space AI',
+    welcome:
+      "Namaste! 🔭🚀 I'm Astronomy & Space AI — let's explore the universe! Stargazing tips (constellations, planets, the Moon, meteor showers), astronomy concepts (stars, galaxies, black holes, eclipses), space missions (ISRO's Chandrayaan/Mangalyaan/Gaganyaan, NASA & more), and telescopes/astrophotography. This is SCIENCE (not astrology!). ⚠️ NEVER look at the Sun directly or through optics without certified solar filters. Verify live sky timings with a sky app. What would you like to explore?",
+    quickPrompts: [
+      'How do I start stargazing?',
+      'Explain black holes / galaxies simply',
+      'Tell me about ISRO’s space missions',
+      'Which telescope should a beginner get?',
+    ],
+  },
+  calligraphy_ai: {
+    id: 'calligraphy_ai',
+    name: 'Calligraphy & Hand-Lettering AI',
+    welcome:
+      "Namaste! ✒️ I'm Calligraphy & Hand-Lettering AI — let's make your writing beautiful! Neater everyday handwriting (English & Devanagari), calligraphy styles & strokes (modern brush, italic & more), affordable tools, and lettering for cards/quotes/journaling — plus practice drills. Tell me what you'd like to improve or create. ✨ Mastery comes from short, regular practice (no instant fixes) — I'll give targeted exercises since I can't see your writing.",
+    quickPrompts: [
+      'Help me make my handwriting neater',
+      'Teach me a calligraphy style & strokes',
+      'What beginner tools do I need?',
+      'Lettering ideas for a card/quote',
+    ],
+  },
+  dance_ai: {
+    id: 'dance_ai',
+    name: 'Dance & Movement AI',
+    welcome:
+      "Namaste! 💃🕺 I'm Dance & Movement AI — let's dance! Start at any age/level, find your rhythm, explore styles (classical like Bharatanatyam/Kathak, folk like Garba/Bhangra, Bollywood & freestyle), practise routines, or dance for fitness & joy. Tell me your goal & level. ⚠️ Always warm up & never push through sharp pain (rest/see a physio); text can't fix your form like a teacher — for serious classical, learn from a guru. Progress comes with practice!",
+    quickPrompts: [
+      'How do I start dancing & find rhythm?',
+      'Tell me about a dance style',
+      'Plan practice for a routine/performance',
+      'Fun dance workout for fitness',
+    ],
+  },
+  games_ai: {
+    id: 'games_ai',
+    name: 'Games, Puzzles & Family-Fun AI',
+    welcome:
+      "Namaste! 🎲🧩 I'm Games, Puzzles & Family-Fun AI — let's play! I explain game rules (chess, carrom, ludo, rummy, tambola, antakshari & more), suggest games for any group/occasion (even no-equipment ones), give riddles & brain-teasers, and plan family/party fun. Tell me your group, time & vibe. 😊 Keeping it family-friendly & good-natured — and stakes-free: no betting or real-money gambling here. Let's have fun!",
+    quickPrompts: [
+      'Explain the rules of a game',
+      'Suggest games for my group/occasion',
+      'Give me riddles & brain-teasers',
+      'Plan fun activities for a get-together',
+    ],
+  },
+  techbuy_ai: {
+    id: 'techbuy_ai',
+    name: 'Tech Buying Advisor AI',
+    welcome:
+      "Namaste! 🛒 I'm Tech Buying Advisor AI — independent, commission-free help to choose electronics & appliances: phones, laptops, TVs, fridge/washing-machine/AC, audio & more. I match a device to YOUR needs & budget, explain which specs actually matter (vs hype), and help you compare & buy safely. Tell me what you want & your budget. ⚠️ Prices & models change fast — I won't quote exact prices or 'the latest model'; verify current specs/prices/reviews before buying. Beware fake deals!",
+    quickPrompts: [
+      'Which phone/laptop for my needs & budget?',
+      'Explain which specs actually matter',
+      'Compare these options for me',
+      'How do I buy safely & avoid fakes?',
+    ],
+  },
 };

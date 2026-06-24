@@ -40,6 +40,10 @@ import { DockerActuator } from '../EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { makeResilientTurnRunner } from './agentv3Resilient';
+import { GoogleGenAI } from '@google/genai';
+import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
+import { makeMultiProviderTurnRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
+import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { describeVisionAttachments } from '../lib/visionDescribe';
@@ -156,6 +160,43 @@ function endBuild(rb: RunningBuild): void {
 function isBuildRunning(buildKey: string): boolean {
   const rb = runningBuilds.get(buildKey);
   return !!rb && !rb.ended;
+}
+
+/**
+ * The v3.0 BUILD turn-runner. Multi-provider cost-routing: the cheap function-calling
+ * builders (Vertex → Gemini, REAL tool-use) take each turn first, with Claude as the
+ * guaranteed backstop — so builds keep WORKING (and NavBharatAI's Claude cost stays
+ * minimal) even when Claude is throttled or out of credits. Set
+ * AGENTV3_BUILD_CLAUDE_FIRST=1 to prefer Claude (with Vertex/Gemini as the fallback);
+ * if no Gemini/Vertex provider is configured, falls back to the Claude-only resilient
+ * runner. Build models are env-overridable (AGENTV3_{VERTEX,GEMINI}_BUILD_MODEL).
+ */
+function buildTurnRunner(): TurnRunner {
+  const buildModel = (envName: string): string =>
+    process.env[envName] || process.env.AGENTV3_BUILD_MODEL || 'gemini-2.5-pro';
+  const cheap: NamedRunner[] = [];
+  // Vertex (function-calling, via the Cloud Run service account / ADC).
+  const project = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID;
+  if (project) {
+    try {
+      const vertex = new GoogleGenAI({ vertexai: true, project, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
+      cheap.push({ name: 'VERTEX', runner: new GeminiToolRunner(vertex as unknown as GeminiGenAiClient, { model: buildModel('AGENTV3_VERTEX_BUILD_MODEL') }) });
+    } catch { /* not constructable in this env — skip */ }
+  }
+  // Gemini direct (GEMINI_API_KEY).
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      cheap.push({ name: 'GEMINI', runner: new GeminiToolRunner(gemini as unknown as GeminiGenAiClient, { model: buildModel('AGENTV3_GEMINI_BUILD_MODEL') }) });
+    } catch { /* skip */ }
+  }
+  if (cheap.length === 0) return makeResilientTurnRunner(new ClaudeClient()); // Claude-only env
+  const claude: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient() };
+  const chain = process.env.AGENTV3_BUILD_CLAUDE_FIRST === '1' ? [claude, ...cheap] : [...cheap, claude];
+  return makeMultiProviderTurnRunner(chain, {
+    onProviderUsed: (used, from) => { if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`); },
+    onProviderError: (name, err) => console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
+  });
 }
 
 /**
@@ -566,7 +607,9 @@ export function registerAgentV3Routes(app: Express): void {
     try {
       // Native Claude for real tool-use, with a multi-provider text fallback
       // (Vertex → Gemini → Grok) so chat never dies if Claude is down/misconfigured.
-      const client = makeResilientTurnRunner(new ClaudeClient());
+      // Multi-provider build engine: Vertex/Gemini do the REAL build (function-calling),
+      // Claude is the backstop — so builds work even when Claude is out of credits.
+      const client = buildTurnRunner();
       const model = resolveModel(onlyOpus);
       const budget = maxBuildBudgetUsd();
       const maxSteps = envInt('AGENTV3_MAX_STEPS', 80);

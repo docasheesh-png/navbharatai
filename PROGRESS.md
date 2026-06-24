@@ -2476,3 +2476,31 @@ Shipped (full Resume + Stop):
 Tests: +1 AgentRunner (abort signal stops the loop). Gate green: frontend tsc 0, server tsc 0,
 **2217 vitest** (+1), build PASS, boot:check PASS. Pushed to branch (no main-merge — yielding to the
 concurrent session; will merge in a quiet window).
+
+---
+
+### 2026-06-24 — v3.0 multi-provider BUILD engine (Vertex/Gemini can now actually build, not just chat)
+
+Admin hit "Your credit balance is too low to access the Anthropic API" on live — Claude out of credits,
+so v3.0 builds fell back to a TEXT-only reply (GROK) and produced NOTHING real (no files, no dev server,
+no preview). Root cause: the build tool-use loop was Claude-only; the fallback couldn't call tools.
+
+Discovery: a prior session had ALREADY built the pieces (unwired) — `GeminiToolRunner` (real Gemini/Vertex
+function-calling TurnRunner) + `makeMultiProviderTurnRunner` (cheap-first chain with a Claude backstop),
+both tested. Wired them into the build path:
+- New `buildTurnRunner()` in agentv3.ts builds a chain: **VERTEX → GEMINI → CLAUDE (backstop)**, each a
+  real tool-use runner, so Vertex/Gemini do the ACTUAL building (write_file, bash, run dev server…) and
+  Claude only catches hard failures. Replaces `makeResilientTurnRunner(new ClaudeClient())` (which was
+  Claude-primary + text-only fallback).
+- Vertex via `new GoogleGenAI({ vertexai: true, project, location })` (Cloud Run ADC / the SA roles the
+  admin already granted); Gemini via `GEMINI_API_KEY`. Falls back to the Claude-only resilient runner if
+  neither is configured.
+- Env knobs: `AGENTV3_BUILD_CLAUDE_FIRST=1` (prefer Claude, Gemini/Vertex as fallback — for when credits
+  return), `AGENTV3_{VERTEX,GEMINI}_BUILD_MODEL` (default `gemini-2.5-pro`). Billing unchanged
+  (Claude-equivalent markup regardless of model → margin only improves with the cheaper model).
+- Bonus: this also fixes the dishonest "✅ Here's what I built" — if every provider fails the turn now
+  throws → the loop emits an honest `error`, never a fake success.
+
+NEEDS DEPLOY to take effect (build path is live). Caveat: Gemini build quality vs Claude is unverified
+end-to-end; the adapter is unit-tested but real builds need a live test. Gate green: frontend+server
+tsc 0, **2217 vitest**, build PASS, boot:check PASS, 41 provider tests pass. Pushed to branch.

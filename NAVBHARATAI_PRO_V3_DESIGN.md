@@ -498,3 +498,32 @@ The admin chose "not sure / I'll check" for the E2B↔mitrify link mechanism. Pe
 the admin confirms the real mechanism (E2B dashboard custom-domain setting + mitrify DNS records +
 which Cloud env vars are set). Verification steps were given to the admin. Once confirmed, wire the
 real format — never a guessed one.
+
+### §12.1 — Preview-on-mitrify IMPLEMENTED (2026-06-24); durable deploy still pending
+
+Admin confirmed (2026-06-24) the E2B link mechanism: **mitrify.xyz is an E2B-native custom domain**
+(it shows in the E2B dashboard "Domains/Custom domain" setting) and said "preview/deploy me mitrify
+show hone do, chalega". E2B custom domains are an ADDITIVE alias — the sandbox keeps running on the
+same infra and the SDK API endpoint (`api.e2b.app`) is unchanged; only the user-facing host suffix
+differs (`{port}-{id}.e2b.app` ↔ `{port}-{id}.mitrify.xyz`).
+
+Verified the E2B SDK (v2.30.0): `sandbox.getHost(port)` →
+`connectionConfig.getHost(id, port, sandboxDomain)` → `${port}-${id}.${domain}`, where `domain`
+defaults to `E2B_DOMAIN || 'e2b.app'`. Reconfiguring the SDK `domain` is the WRONG lever — it also
+rewrites `apiUrl = https://api.${domain}` and would break sandbox creation. So the correct, surgical
+fix is a host-suffix swap on the user-facing preview URL only.
+
+Shipped:
+- `src/server/AgentV3/PreviewDomain.ts` — PURE `applyPreviewDomain(url, domain?)`: swaps a `*.e2b.app`
+  host suffix → `*.<previewDomain>` (default `mitrify.xyz`, override `E2B_PREVIEW_DOMAIN`, set it to
+  `e2b.app` to disable). Idempotent; leaves localhost / already-custom / non-e2b hosts untouched.
+- Wired ONLY in `ToolDispatcher.update_preview` (v3.0 path) — the live Engineer AI builder's
+  `E2BActuator.getPortUrl` is untouched, so zero blast radius on the existing production builder.
+- Tests: PreviewDomain.test.ts (6) + a dispatcher integration test (e2b host → mitrify.xyz).
+
+STILL PENDING (the "deploy" half of §12): a DURABLE host + hostname→app serving layer so a finished
+app stays live after the ephemeral E2B sandbox closes, plus the publish-target resolver
+(mitrify vs the user's own connected domain). E2B sandboxes pause/expire, so they cannot BE the
+durable host — this needs real infra (a persistent runtime or a static/SSR deploy target) and is the
+next build step once the durable-host target is chosen. Preview is real now; durable deploy is not
+yet built (honest state — not faked).

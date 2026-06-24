@@ -7,6 +7,7 @@ import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { analyzeArchitecture, architectureSummary } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
+import { applyPreviewDomain } from './PreviewDomain';
 import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
@@ -778,7 +779,10 @@ export class ToolDispatcher {
         if (!this.actuator.getPortUrl) {
           throw new Error('Live preview is not available in this sandbox.');
         }
-        const url = await this.actuator.getPortUrl(this.workspaceId, port);
+        const rawUrl = await this.actuator.getPortUrl(this.workspaceId, port);
+        // §12: v3.0-built apps are previewed under the platform's E2B custom domain
+        // (mitrify.xyz) instead of the raw *.e2b.app host. Idempotent + scoped to v3.0.
+        const url = applyPreviewDomain(rawUrl);
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
         return `Live preview published at ${url}`;
       }

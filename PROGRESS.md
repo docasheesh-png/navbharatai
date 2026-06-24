@@ -2054,3 +2054,29 @@ connects their own domain. DESIGN LOCKED but BUILD GATED — the E2B↔mitrify l
 unconfirmed, so no preview/deploy URL change ships until the admin verifies it (real format, never
 a guess). Audited ground truth: cloudflare.ts already uses mitrify.xyz as the Cloudflare-SaaS zone;
 no hostname→app serving layer exists yet; v3.0 preview still returns raw *.e2b.app.
+
+---
+
+### 2026-06-24 — mitrify.xyz: preview-on-mitrify IMPLEMENTED (v3.0-scoped, real)
+
+Admin confirmed mitrify.xyz is an **E2B-native custom domain** (shows in E2B dashboard Domains
+setting) and approved showing it for preview/deploy. Verified E2B SDK v2.30.0: `sandbox.getHost`
+returns `{port}-{id}.${domain}` with domain defaulting to `E2B_DOMAIN||'e2b.app'`; reconfiguring the
+SDK `domain` would ALSO rewrite `api.${domain}` and break sandbox creation — so the correct fix is a
+user-facing host-suffix swap (E2B custom domains are additive aliases to the same sandbox).
+
+Shipped (real, tested, isolated):
+- `src/server/AgentV3/PreviewDomain.ts` — PURE `applyPreviewDomain(url, domain?)`: swaps a `*.e2b.app`
+  host → `*.mitrify.xyz` (override `E2B_PREVIEW_DOMAIN`; `=e2b.app` disables). Idempotent; localhost /
+  non-e2b / already-custom hosts untouched.
+- Wired ONLY in `ToolDispatcher.update_preview` (v3.0 path) → the `preview` event now carries the
+  mitrify URL. The live Engineer AI builder (`E2BActuator.getPortUrl`) is UNTOUCHED — zero blast
+  radius on the existing production builder.
+- AppKnowledgeBase: added the mitrify preview bullet AND corrected the now-stale billing line
+  (was "Opus-equiv ×2.5 / ×5 Only-Opus" → real shipped model: Normal Sonnet-equiv ×3.5, Power real
+  Opus ×2.5, shown in ₹ at real-time FX; also fixed the "5× cost" in howToUse).
+- Design doc §12.1: preview implemented; durable DEPLOY half still pending (needs a persistent host
+  + hostname→app serving layer + publish-target resolver — E2B sandboxes are ephemeral, honest state).
+
+Tests: PreviewDomain.test.ts (6) + 1 dispatcher integration. Gate green: server+frontend tsc 0,
+**2181 vitest** (+7), build PASS, boot:check PASS.

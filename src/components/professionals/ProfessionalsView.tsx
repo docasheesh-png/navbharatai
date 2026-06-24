@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone, PartyPopper, Accessibility, Sofa, Globe2, HandHelping, Shirt, ListChecks, Users, Wrench, CandlestickChart, Smartphone, Sigma, Code2, HeartPulse } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone, PartyPopper, Accessibility, Sofa, Globe2, HandHelping, Shirt, ListChecks, Users, Wrench, CandlestickChart, Smartphone, Sigma, Code2, HeartPulse, BriefcaseMedical } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -58,6 +58,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'mathscience_ai', label: 'Maths & Science Solver', description: 'Step-by-step solutions & concepts for maths (algebra/trig/calculus) & science (physics/chemistry/biology), school to NEET/JEE — learn the method (hints first, not just answers).', icon: Sigma, active: true },
   { id: 'coding_ai', label: 'Coding & Programming Tutor', description: 'Learn to code (Python/JS), core concepts, debugging, data structures & algorithms (placements) & projects — teaches for understanding (hints first). To build apps, use Engineer AI.', icon: Code2, active: true },
   { id: 'maternity_ai', label: 'Pregnancy & New-Mother Care', description: 'Pregnancy wellbeing & antenatal care, warning-sign awareness, newborn care, feeding & recovery support — warm general info (not medical; always follow your doctor, 112 for danger).', icon: HeartPulse, active: true },
+  { id: 'firstaid_ai', label: 'First-Aid & Emergency Response', description: 'General first-aid for bleeding, burns, choking, fainting, fractures & recognising emergencies — always alongside calling 112/108. Not a doctor; take a certified course.', icon: BriefcaseMedical, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

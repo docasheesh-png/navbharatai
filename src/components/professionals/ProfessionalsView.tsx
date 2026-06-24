@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone, PartyPopper, Accessibility, Sofa, Globe2, HandHelping, Shirt, ListChecks, Users, Wrench, CandlestickChart } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone, PartyPopper, Accessibility, Sofa, Globe2, HandHelping, Shirt, ListChecks, Users, Wrench, CandlestickChart, Smartphone } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -54,6 +54,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'relationship_ai', label: 'Relationship & Communication', description: 'Communicating better, resolving conflict, boundaries, trust & family/in-law dynamics — warm, non-judgemental support (not therapy/legal; safety-first on abuse).', icon: Users, active: true },
   { id: 'vehicle_ai', label: 'Vehicle & Auto-Maintenance', description: 'Car & bike service schedules, safe owner checks, understanding warning lights & noises, mileage tips & service-centre sense — general guidance (mechanic for safety-critical work).', icon: Wrench, active: true },
   { id: 'stocks_ai', label: 'Stock-Market & Investing', description: 'How markets work — shares, Sensex/Nifty, demat, mutual funds/SIP/ETFs, risk/diversification/compounding & scam-avoidance. Education only — no tips, calls or guaranteed returns.', icon: CandlestickChart, active: true },
+  { id: 'techhelp_ai', label: 'Gadget & Tech-Help', description: 'Simple-language fixes for phones, laptops, apps & Wi-Fi — slow device, storage, battery, internet, accounts & backups, buying & care. Beware tech-support scams; pro for hardware.', icon: Smartphone, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

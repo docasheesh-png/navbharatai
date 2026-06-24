@@ -534,4 +534,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How do I avoid investment scams?',
     ],
   },
+  techhelp_ai: {
+    id: 'techhelp_ai',
+    name: 'Gadget & Tech-Help AI',
+    welcome:
+      "Namaste! 📱💻 I'm Gadget & Tech-Help AI — patient help in simple language for phones, laptops, apps & Wi-Fi: fix a slow/hanging device, storage full, battery drain, app crashes, internet issues, accounts & backups, and choosing/caring for gadgets. Tell me your device & problem. ⚠️ I'll never ask for passwords/OTPs or to install remote apps (neither will real support) — beware tech-support scams. For hardware/water damage or warranty, see an authorised service centre.",
+    quickPrompts: [
+      'My phone is slow / hanging — fix it',
+      'Free up storage on my device',
+      'Wi-Fi / internet not working',
+      'Help me back up my phone',
+    ],
+  },
 };

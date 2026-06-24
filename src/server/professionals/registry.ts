@@ -43,6 +43,7 @@ import { PRODUCTIVITY_AI } from './configs/productivity';
 import { RELATIONSHIP_AI } from './configs/relationship';
 import { VEHICLE_AI } from './configs/vehicle';
 import { STOCKS_AI } from './configs/stocks';
+import { TECHHELP_AI } from './configs/techhelp';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -97,6 +98,7 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [RELATIONSHIP_AI.id]: RELATIONSHIP_AI,
   [VEHICLE_AI.id]: VEHICLE_AI,
   [STOCKS_AI.id]: STOCKS_AI,
+  [TECHHELP_AI.id]: TECHHELP_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

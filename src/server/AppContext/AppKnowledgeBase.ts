@@ -705,6 +705,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['stock market', 'share market', 'investing', 'stocks', 'shares', 'mutual fund', 'sip', 'nifty', 'sensex', 'demat', 'nse', 'bse', 'trading', 'etf', 'invest', 'sebi'],
   },
 
+  // ─── GADGET & TECH-HELP AI ───────────────────────────────────────────────
+  {
+    id: 'techhelp_ai',
+    name: 'Gadget & Tech-Help AI',
+    path: 'Sidebar → Professionals → Gadget & Tech-Help',
+    description: 'Patient tech-support helper in simple language for everyday users (non-techies, students, seniors): troubleshooting phones/laptops (slow/hanging, storage full, battery drain, app crashes, won\'t power/charge, overheating, sound/screen — plain step-by-step), Wi-Fi/internet fixes (router restart, mobile data/hotspot, network checks), accounts & apps (Google/Apple/email, passwords & 2FA, backups to Drive/iCloud, official account recovery), settings & digital literacy (accessibility, freeing space, parental controls, confidence for new/elderly users), and buying/device-care guidance. Safety-first: safe reversible steps (back up before anything that erases data); NEVER asks for passwords/OTPs/card details or to install remote-access apps (warns genuine support never does either) and flags tech-support/virus-popup/phishing scams (Cyber Safety AI); honest about limits — hardware faults/water damage/data recovery/warranty go to an authorised service centre (a software tip won\'t fix broken hardware); never fabricates exact specs/prices/model-specific steps.',
+    howToUse: 'Open Sidebar → Professionals → Gadget & Tech-Help and ask: "my phone is slow/hanging", "free up storage", "Wi-Fi not working", "help me back up my phone". For hardware/water damage or warranty, visit an authorised service centre; for scams, the Cyber Safety AI.',
+    relatedFeatures: ['professionals', 'cybersafety_ai'],
+    aiSurface: 'techhelp_ai',
+    keywords: ['tech', 'gadget', 'phone', 'mobile', 'laptop', 'computer', 'wifi', 'internet', 'slow phone', 'storage', 'backup', 'app', 'troubleshoot', 'tech support', 'smartphone help'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

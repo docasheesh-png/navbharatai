@@ -330,4 +330,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'What should a rent agreement include?',
     ],
   },
+  driving_ai: {
+    id: 'driving_ai',
+    name: 'Driving / RTO & Licence AI',
+    welcome:
+      "Namaste! 🚗 I'm Driving & RTO AI — I explain how to get a Learner's/Driving Licence, vehicle papers (RC, insurance, PUC), road rules & safety, and checking/paying challans. Tell me what you need. ⚠️ Rules, fees & steps vary by state and change — always apply & verify on the official Parivahan/RTO portal. Avoid touts/bribes, drive safely (helmet/seatbelt, never drink-drive), and beware fake-RTO & OTP scams.",
+    quickPrompts: [
+      'How do I get a driving licence?',
+      'Which documents must I carry while driving?',
+      'Explain important road rules & signs',
+      'How do I check & pay an e-challan?',
+    ],
+  },
 };

@@ -457,6 +457,7 @@ declare module 'lucide-react' {
   export const ChefHat: Icon;
   export const Flower2: Icon;
   export const Sprout: Icon;
+  export const Car: Icon;
   export const PlayCircle: Icon;
   export const Hash: Icon;
   export const AtSign: Icon;

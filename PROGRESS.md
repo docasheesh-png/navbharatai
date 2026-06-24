@@ -1947,3 +1947,24 @@ security dimension. AppKnowledgeBase synced. v3.0-only, flag-OFF.
 
 Tests: +1 unit + 1 dispatcher integration. Gate green: server+frontend tsc 0, **2157 vitest**
 (+2), boot:check PASS.
+
+---
+
+### 2026-06-24 — Multi-Model Orchestration: P5-core — billing reshaped to the admin model
+
+Admin locked + authorized the billing change (constitution-locked area, explicit sign-off this
+session). `pricing.ts` reshaped to the new model (this CHANGES live v3.0 billing):
+- NORMAL_MULTIPLIER = 3.5, POWER_MULTIPLIER = 2.5.
+- sonnetRate() / sonnetEquivalentUsd() added (the normal-mode base = assume-Sonnet).
+- billedAmountUsd(usage, powerMode) = powerMode ? opusEquivalentUsd × 2.5 : sonnetEquivalentUsd × 3.5.
+- billedAmountInr(usage, powerMode, usdInrRate) = billedAmountUsd × rate (pure; rate injected).
+The existing `onlyOpus` toggle (req.body.onlyOpus → resolveModel → AgentRunner → recorded
+billedUsd) IS the power-mode flag — verified wired, so the new math applies correctly: normal
+builds bill Sonnet-equiv × 3.5 (Sonnet rate ≪ Opus → much cheaper than the old Opus-equiv × 2.5),
+power builds bill real Opus × 2.5. Margin positive both modes. index.ts exports updated
+(STANDARD_/ONLY_OPUS_MULTIPLIER → NORMAL_/POWER_MULTIPLIER + sonnet helpers); the stale D5/D6
+pricing block removed from ClaudeClient.test.ts (now covered by pricing.test.ts, 11 tests).
+
+NEXT P5-inr: a UsdInrRate module (env default USD_INR_RATE + best-effort real-time refresh with
+fallback, never throws in the billing path) + wire billedAmountInr to the customer-facing ₹
+display. Then P4 (Power effort UI). Gate green: server tsc 0, **2165 vitest**, boot:check PASS.

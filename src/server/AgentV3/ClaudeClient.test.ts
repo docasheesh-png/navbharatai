@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ClaudeClient, parseMessage, isRetryableError, type MessagesCreateClient } from './ClaudeClient';
-import { opusEquivalentUsd, billedAmountUsd, STANDARD_MULTIPLIER, ONLY_OPUS_MULTIPLIER } from './pricing';
 
 describe('parseMessage', () => {
   it('extracts text, tool_use blocks, stop reason and usage', () => {
@@ -241,27 +240,8 @@ describe('isRetryableError', () => {
   });
 });
 
-describe('pricing (D5/D6) — margin is structurally positive', () => {
-  it('computes Opus-equivalent cost from default $15/$75 per MTok', () => {
-    // 1M input + 1M output = $15 + $75 = $90
-    expect(opusEquivalentUsd({ inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBeCloseTo(90, 6);
-  });
-
-  it('applies 2.5x standard markup and 5x only-opus markup', () => {
-    const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000 };
-    const base = opusEquivalentUsd(usage);
-    expect(billedAmountUsd(usage, false)).toBeCloseTo(base * STANDARD_MULTIPLIER, 6);
-    expect(billedAmountUsd(usage, true)).toBeCloseTo(base * ONLY_OPUS_MULTIPLIER, 6);
-    // 5x > 2.5x > raw cost → user always pays at least the real cost.
-    expect(billedAmountUsd(usage, true)).toBeGreaterThan(billedAmountUsd(usage, false));
-    expect(billedAmountUsd(usage, false)).toBeGreaterThan(base);
-  });
-
-  it('never goes negative on zero/garbage token counts', () => {
-    expect(billedAmountUsd({ inputTokens: 0, outputTokens: 0 })).toBe(0);
-    expect(billedAmountUsd({ inputTokens: -5, outputTokens: -5 })).toBe(0);
-  });
-});
+// Pricing is covered comprehensively in pricing.test.ts (new admin model:
+// Normal = Sonnet-equivalent × 3.5, Power = real Opus × 2.5, + INR conversion).
 
 import { sanitizeApiKey } from './ClaudeClient';
 

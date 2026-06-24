@@ -31,13 +31,16 @@ export { resolveModel, sonnetModel, opusModel } from './models';
 export { architectSystemPrompt, planSystemPrompt } from './systemPrompt';
 export { awaitApproval, resolveApproval, pendingApprovalCount } from './Approvals';
 export {
-  STANDARD_MULTIPLIER,
-  ONLY_OPUS_MULTIPLIER,
+  NORMAL_MULTIPLIER,
+  POWER_MULTIPLIER,
   opusRate,
+  sonnetRate,
   opusEquivalentUsd,
+  sonnetEquivalentUsd,
   billedAmountUsd,
+  billedAmountInr,
 } from './pricing';
-export type { BilledUsage } from './pricing';
+export type { BilledUsage, TokenRate } from './pricing';
 export { defaultToolCatalog, CATALOG_TOOL_NAMES, taskToolDef, secondOpinionToolDef, consensusToolDef, catalogForTools } from './ToolCatalog';
 export { ToolDispatcher } from './ToolDispatcher';
 export type { ActuatorPort, ToolResult, SubAgentSpawn } from './ToolDispatcher';

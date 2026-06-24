@@ -1633,3 +1633,32 @@ systemPrompt unchanged. v3.0-only, flag-OFF.
 
 Tests: +2 unit (`SecurityAnalysis.test.ts`, 8→10) + 1 dispatcher integration (42→43).
 Gate green: server+frontend tsc 0, **2059 vitest** (+3), boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #5 v2: Vite client-env exposure check (20th dimension)
+
+Continuing the autonomous Section I march. New item:
+
+**Section I #5 v2 — `ViteEnvAnalysis` (new evaluate dimension, 20th).** A PURE,
+deterministic scanner that flags a non-VITE_-prefixed `import.meta.env.X` reference. In a
+Vite app, ONLY `VITE_*` vars (plus the builtins MODE/DEV/PROD/BASE_URL/SSR) are exposed
+to client code via `import.meta.env`; reading `import.meta.env.API_KEY` yields `undefined`
+in the browser at runtime — a silent "compiles but breaks" footgun AI-generated frontends
+hit constantly. Now flagged with the VITE_ rename hint.
+
+High-precision by design:
+- Only uppercase-snake `import.meta.env.NAME` / bracket-form refs; `process.env` (server)
+  is ignored; comments skipped.
+- The dispatcher SKIPS the whole check when the project's `vite.config.{ts,js,mjs}`
+  customises `envPrefix` (then a different prefix may be valid and we cannot be sure) —
+  guarded by `hasCustomEnvPrefix`.
+
+Wired end-to-end into `evaluate`: new `collectViteEnvIssues` collector + a best-effort
+vite.config read, appended to the verdict, and a **medium readiness warning**. systemPrompt
++ AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: new `ViteEnvAnalysis.test.ts` (9) + 2 dispatcher integration cases (flags a
+non-VITE_ ref; skips when envPrefix is customised) — dispatcher suite 43→45.
+
+Gate green: server+frontend tsc 0, **2070 vitest** (+11), boot:check PASS.

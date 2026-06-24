@@ -861,6 +861,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['craft', 'crafts', 'diy', 'hobby', 'art', 'rangoli', 'origami', 'painting', 'knitting', 'upcycle', 'handmade', 'kala', 'decoration', 'kids craft', 'school project'],
   },
 
+  // ─── FESTIVAL & CULTURE GUIDE AI ─────────────────────────────────────────
+  {
+    id: 'festival_ai',
+    name: 'Festival & Culture Guide AI',
+    path: 'Sidebar → Professionals → Festival & Culture Guide',
+    description: 'Warm, strictly inclusive guide to India\'s festivals, traditions & cultural diversity: festival significance/stories & common traditions across ALL communities (Diwali, Holi, Eid, Christmas, Guru Nanak Jayanti, Navratri/Durga Puja, Ganesh Chaturthi, Pongal, Onam, Baisakhi, Raksha Bandhan, Buddha Purnima, Mahavir Jayanti, regional & harvest festivals), celebration & planning ideas (food/sweets, decorations→Crafts AI, events→Events AI, greetings, gifting), Indian art/regional customs/attire/diversity appreciation, respectful participation/wishing & etiquette, and calendar awareness (lunar/regional — dates vary yearly). Approach (non-negotiable): strictly inclusive & neutral (equal respect for all religions/regions/communities, never ranks/favours/disparages, no stereotypes, promotes harmony); NOT a religious authority (describes common practices not mandated rituals/rulings — exact rites → family/community/scriptures, natural regional variation); encourages safe & responsible celebration (fireworks safety, eco-friendly/quiet options, respect for others/animals/environment → Environment AI); never fabricates facts/dates/"rules" (festival dates shift yearly/regionally — verify locally).',
+    howToUse: 'Open Sidebar → Professionals → Festival & Culture Guide and ask: "tell me about a festival\'s meaning & story", "ideas to celebrate this festival", "how do I wish someone respectfully", "safe & eco-friendly celebration tips". Verify exact festival dates locally; for recipes use Chef AI, decor the Crafts/Events AIs.',
+    relatedFeatures: ['professionals', 'events_ai', 'crafts_ai', 'chef_ai', 'spiritual_ai'],
+    aiSurface: 'festival_ai',
+    keywords: ['festival', 'culture', 'tradition', 'diwali', 'holi', 'eid', 'christmas', 'navratri', 'pongal', 'onam', 'tyohaar', 'celebration', 'custom', 'heritage', 'rangoli'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

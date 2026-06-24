@@ -5484,6 +5484,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'sarkari_ai') toggleTab('sarkari_ai');
               else if (id === 'spiritual_ai') toggleTab('spiritual_ai');
               else if (id === 'crafts_ai') toggleTab('crafts_ai');
+              else if (id === 'festival_ai') toggleTab('festival_ai');
             }} />
           )}
 
@@ -5771,6 +5772,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'crafts_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.crafts_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'festival_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.festival_ai} userId={user?.uid} />
             </div>
           )}
 

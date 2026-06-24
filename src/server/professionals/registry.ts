@@ -56,6 +56,7 @@ import { CIVIC_AI } from './configs/civic';
 import { SARKARI_AI } from './configs/sarkari';
 import { SPIRITUAL_AI } from './configs/spiritual';
 import { CRAFTS_AI } from './configs/crafts';
+import { FESTIVAL_AI } from './configs/festival';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -123,6 +124,7 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [SARKARI_AI.id]: SARKARI_AI,
   [SPIRITUAL_AI.id]: SPIRITUAL_AI,
   [CRAFTS_AI.id]: CRAFTS_AI,
+  [FESTIVAL_AI.id]: FESTIVAL_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

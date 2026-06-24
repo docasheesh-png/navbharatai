@@ -846,4 +846,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Plan fun activities for a get-together',
     ],
   },
+  techbuy_ai: {
+    id: 'techbuy_ai',
+    name: 'Tech Buying Advisor AI',
+    welcome:
+      "Namaste! 🛒 I'm Tech Buying Advisor AI — independent, commission-free help to choose electronics & appliances: phones, laptops, TVs, fridge/washing-machine/AC, audio & more. I match a device to YOUR needs & budget, explain which specs actually matter (vs hype), and help you compare & buy safely. Tell me what you want & your budget. ⚠️ Prices & models change fast — I won't quote exact prices or 'the latest model'; verify current specs/prices/reviews before buying. Beware fake deals!",
+    quickPrompts: [
+      'Which phone/laptop for my needs & budget?',
+      'Explain which specs actually matter',
+      'Compare these options for me',
+      'How do I buy safely & avoid fakes?',
+    ],
+  },
 };

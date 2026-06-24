@@ -873,6 +873,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['festival', 'culture', 'tradition', 'diwali', 'holi', 'eid', 'christmas', 'navratri', 'pongal', 'onam', 'tyohaar', 'celebration', 'custom', 'heritage', 'rangoli'],
   },
 
+  // ─── CREATIVE WRITING & STORYTELLING AI ──────────────────────────────────
+  {
+    id: 'writing_ai',
+    name: 'Creative Writing & Storytelling AI',
+    path: 'Sidebar → Professionals → Creative Writing & Storytelling',
+    description: 'Imaginative writing partner (distinct from Thesis AI/academic & Resume AI/jobs): ideas & brainstorming (plots, prompts, themes, characters, titles, beating writer\'s block), story craft (structure, character, dialogue, POV, pacing, conflict, show-don\'t-tell for short stories/fiction/scripts/folktales), poetry (free verse, rhyme, shayari/ghazal, haiku — imagery & rhythm, English & Indian languages), content & blogs (articles, social captions/reel scripts, honest non-clickbait hooks), editing & specific constructive feedback on the user\'s OWN draft, and craft learning. Co-creates & coaches keeping the work the user\'s own (their voice leads). Honesty/ethics: won\'t help cheat (guides/improves graded work rather than writing it to submit; academic → Thesis AI, job docs → Resume AI); respects copyright (original work, no reproducing/passing off others\'); declines harmful/defamatory/deceptive content; verify facts for non-fiction; honest that good writing takes drafting & revision.',
+    howToUse: 'Open Sidebar → Professionals → Creative Writing & Storytelling and ask: "give me story ideas/a prompt", "develop my plot & characters", "write/improve a poem or shayari", "polish my draft & give feedback". For academic writing use Thesis AI; for resumes the Resume AI.',
+    relatedFeatures: ['professionals', 'thesis_ai', 'english_ai', 'resume_ai'],
+    aiSurface: 'writing_ai',
+    keywords: ['writing', 'creative writing', 'story', 'poem', 'shayari', 'script', 'blog', 'content', 'storytelling', 'kahani', 'kavita', 'novel', 'screenplay', 'edit', 'draft'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

@@ -60,6 +60,12 @@ describe('project-level detectors', () => {
     expect(detectsPiiCollection(`<input type="text" name="nickname" />`)).toBe(false);
   });
 
+  it('detects geolocation access as personal-data collection (sensitive location)', () => {
+    expect(detectsPiiCollection(`navigator.geolocation.getCurrentPosition(onPos);`)).toBe(true);
+    expect(detectsPiiCollection(`const id = navigator.geolocation.watchPosition(cb);`)).toBe(true);
+    expect(detectsPiiCollection(`const pos = computePosition(el);`)).toBe(false);
+  });
+
   it('detects trackers and consent surfaces', () => {
     expect(detectsTracker(`<script src="https://www.googletagmanager.com/gtag/js"></script>`)).toBe(true);
     expect(detectsTracker(`mixpanel.init('abc')`)).toBe(true);

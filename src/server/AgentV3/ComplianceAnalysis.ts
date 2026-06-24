@@ -40,6 +40,9 @@ const SENSITIVE = /\b(password|passwd|aadhaar|aadhar|\bpan\b|cvv|\bssn\b|credit[
 // (and therefore needs a privacy policy). Names/types a real form would use.
 const PII_FIELD = /\b(name\s*=\s*['"`{]?\s*)?(email|e-mail|phone|mobile|aadhaar|aadhar|\bpan\b|passport|address|dob|date[_-]?of[_-]?birth|credit[_-]?card|card[_-]?number|ssn)\b/i;
 const PII_INPUT_TYPE = /type\s*=\s*['"{]?\s*(email|tel|password)\b/i;
+// Geolocation access — precise location is sensitive personal data (DPDP/GDPR), so an
+// app reading it is collecting PII and needs consent + a privacy policy.
+const GEOLOCATION = /navigator\.geolocation|\b(?:getCurrentPosition|watchPosition)\s*\(/;
 
 // Known third-party analytics / trackers that set cookies or fingerprint users.
 const TRACKER = /(google-analytics\.com|googletagmanager\.com|\bgtag\s*\(|\bga\s*\(\s*['"](send|create)|analytics\.track\s*\(|mixpanel|hotjar|\bfbq\s*\(|facebook[^\n]*pixel|cdn\.segment\.com|amplitude\.com|clarity\.ms|matomo|plausible\.io)/i;
@@ -47,9 +50,9 @@ const TRACKER = /(google-analytics\.com|googletagmanager\.com|\bgtag\s*\(|\bga\s
 // A cookie-consent / CMP surface that legitimises trackers.
 const CONSENT_UI = /(cookie[\s-]?consent|cookie[\s-]?banner|consent[_-]?manager|gdpr[_-]?consent|CookieConsent|onetrust|cookiebot|tarteaucitron|usercentrics|\bconsent(Given|State|Mode)\b)/i;
 
-/** Does a file's content collect personal data (PII form fields / inputs)? */
+/** Does a file's content collect personal data (PII form fields / inputs / geolocation)? */
 export function detectsPiiCollection(content: string): boolean {
-  return PII_INPUT_TYPE.test(content) || PII_FIELD.test(content);
+  return PII_INPUT_TYPE.test(content) || PII_FIELD.test(content) || GEOLOCATION.test(content);
 }
 
 /** Does a file load a known third-party tracker? */

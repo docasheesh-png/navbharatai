@@ -1744,3 +1744,46 @@ flag-OFF.
 
 Tests: new `AsyncPatternAnalysis.test.ts` (6) + 1 dispatcher integration (48→49).
 Gate green: server+frontend tsc 0, **2089 vitest** (+7), boot:check PASS.
+
+---
+
+### 2026-06-24 — Multi-provider cost routing for v3.0: tool-use FOUNDATION (admin-directed)
+
+Admin (aashishcpmt09) directed: v3.0 should use a synced Vertex→Gemini→Grok→Claude chain
+where the agent gets each piece of work done by whichever provider can handle it, so the
+expensive Claude is used as little as possible and NavBharatAI's real cost is minimised.
+USER-FACING BILLING STAYS EXACTLY AS IT IS (`pricing.ts` Opus-equivalent × 2.5 untouched —
+admin's explicit call: "user ke liye billing abhi jaise hai vaise hi rahne do"). So this is
+a COST/margin change (which model actually runs), NOT a user-price change.
+
+**Critical finding (surfaced before touching anything):** v3.0's build loop requires NATIVE
+tool-use (the model must call write_file / evaluate / … as real tool calls). Only ClaudeClient
+implements that. Every AIRouter provider (Grok/Gemini/Vertex) is TEXT-ONLY (`execute()→string`,
+no function-calling), and v3.0's existing "multi-provider fallback" is a text-only degradation
+that cannot build apps. So "use Free's routing in v3.0" is NOT a config flip — naively making a
+cheap provider primary would make every build drop to text-mode and build nothing. It is real
+engineering: native tool-use adapters per provider + cross-format transcript translation, with
+Claude kept as the guaranteed backstop so a build never breaks.
+
+**Built this session (phase 1+2, REAL + fully unit-tested, OFF the default path so the live,
+billed path is unchanged — Claude stays primary in routes/agentv3.ts):**
+- `AgentV3/providers/OpenAiToolAdapter.ts` (PURE, no SDK/network): the intricate, breakage-prone
+  translation core — `toolDefsToOpenAI`, `transcriptToOpenAI` (maps Anthropic text/tool_use/
+  tool_result blocks ↔ OpenAI messages + tool_calls + tool role), `mapFinishReason`,
+  `parseOpenAiCompletion` (OpenAI reply → Anthropic-shaped TurnResult; rawContent stays
+  Anthropic-shaped so Claude and a cheap provider can interleave turn-by-turn in one build).
+- `AgentV3/providers/OpenAiToolRunner.ts`: a `TurnRunner` (same contract as ClaudeClient) over an
+  injectable OpenAI-compatible client (Grok/xAI native function-calling). Errors propagate so a
+  future orchestrator can fall through to the next provider.
+
+19 new tests (14 adapter + 5 runner), all via injected mocks (no live key needed). Strangler-fig
+isolation preserved (imports only ClaudeClient TYPES; no live-router coupling).
+
+**NEXT phases (not yet built):** (3) a multi-provider orchestrator `TurnRunner` that tries
+Vertex→Gemini→Grok and uses Claude as the guaranteed backstop (build never breaks); (4) Gemini/
+Vertex native tool-use adapters (Google functionDeclarations); (5) LIVE verification with real
+provider keys + a real sandbox build before any default-path rollout (per "preview is EARNED" —
+the adapters are protocol-correct and unit-proven, but real cheap-provider build quality must be
+measured live before it becomes default). No live behaviour changed yet.
+
+Gate green: server+frontend tsc 0, **2108 vitest** (+19), boot:check PASS.

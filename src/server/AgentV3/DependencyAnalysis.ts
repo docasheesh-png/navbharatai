@@ -3,17 +3,20 @@
 // Real static scanning over the project's actual imports vs its package.json, for
 // the #1 silent build-breaker: a source file imports an npm package that is NOT
 // declared in package.json (install/runtime "module not found"). Also flags
-// declared dependencies never imported (low severity, conservative). Findings are
-// computed deterministically from real content so the `evaluate` tool can report
-// concrete dependency defects for the team to fix — never a synthetic "looks fine".
+// declared dependencies never imported (low severity, conservative) and
+// dependencies pinned to a floating, non-reproducible version (`*` / `latest` /
+// `x` / empty — medium), the classic "worked yesterday, broke on reinstall" trap.
+// Findings are computed deterministically from real content so the `evaluate` tool
+// can report concrete dependency defects for the team to fix — never a synthetic
+// "looks fine".
 //
 // Pure and deterministic: no I/O. The caller (ToolDispatcher.evaluate) collects the
 // external imports from the project graph and reads package.json best-effort.
 
-export type DependencySeverity = 'high' | 'low';
+export type DependencySeverity = 'high' | 'medium' | 'low';
 
 export interface DependencyIssue {
-  kind: 'missing' | 'unused';
+  kind: 'missing' | 'unused' | 'unpinned';
   package: string;
   severity: DependencySeverity;
   detail: string;
@@ -40,6 +43,15 @@ const IMPLICIT_DEPS = new Set<string>([
   'typescript', 'vite', 'eslint', 'prettier', 'tailwindcss', 'postcss',
   'autoprefixer',
 ]);
+
+/**
+ * Version specifiers that pin nothing — every `npm install` can resolve to a
+ * different release, so a transitive breaking change silently breaks a build that
+ * worked yesterday. Matched case-insensitively against the trimmed version string,
+ * so special protocols (`workspace:*`, `file:..`, git/url refs, `npm:pkg@1`) and
+ * partially-locked ranges (`1.x`, `^1.2`, `~1.2`) are intentionally NOT flagged.
+ */
+const UNPINNED_VERSIONS = new Set<string>(['*', 'latest', 'x', '']);
 
 /**
  * Map an import specifier to its npm package name, or null if it is NOT an
@@ -93,6 +105,22 @@ function collectNames(section: unknown): Set<string> {
   return out;
 }
 
+/** Collect [name, versionSpec] pairs from a manifest section (string versions only). */
+function collectVersionEntries(section: unknown): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  if (section && typeof section === 'object' && !Array.isArray(section)) {
+    for (const [name, version] of Object.entries(section as Record<string, unknown>)) {
+      if (typeof version === 'string') out.push([name, version]);
+    }
+  }
+  return out;
+}
+
+/** True for a floating/non-reproducible version specifier (`*`, `latest`, `x`, ''). */
+function isUnpinnedVersion(version: string): boolean {
+  return UNPINNED_VERSIONS.has(version.trim().toLowerCase());
+}
+
 /** True for packages we never flag as "unused" (implicit toolchain + all @types/*). */
 function isImplicitDep(name: string): boolean {
   return IMPLICIT_DEPS.has(name) || name.startsWith('@types/');
@@ -107,6 +135,11 @@ function isImplicitDep(name: string): boolean {
  * - `unused` (low): a declared `dependencies` entry no source file imports.
  *   Conservative: only `dependencies` are considered (not dev/peer/optional),
  *   and implicit toolchain packages (typescript, vite, @types/*, …) are skipped.
+ * - `unpinned` (medium): a `dependencies`/`devDependencies` entry whose version is
+ *   floating (`*` / `latest` / `x` / empty) — builds are not reproducible.
+ *   `peerDependencies`/`optionalDependencies` are skipped (a `*` peer range is
+ *   normal), as are special protocols and partially-locked ranges (see
+ *   UNPINNED_VERSIONS).
  *
  * On a null or unparseable manifest, returns [] — we cannot judge without one.
  */
@@ -158,6 +191,25 @@ export function analyzeDependencies(
     }
   }
 
+  // Unpinned (medium): a floating version in dependencies/devDependencies makes the
+  // build non-reproducible. Scan both runtime and build deps; skip peer/optional.
+  const seenUnpinned = new Set<string>();
+  for (const [name, version] of [
+    ...collectVersionEntries(pkg.dependencies),
+    ...collectVersionEntries(pkg.devDependencies),
+  ]) {
+    if (seenUnpinned.has(name)) continue;
+    if (isUnpinnedVersion(version)) {
+      seenUnpinned.add(name);
+      issues.push({
+        kind: 'unpinned',
+        package: name,
+        severity: 'medium',
+        detail: `'${name}' uses a floating version "${version}" — builds are not reproducible; pin an exact version or a ^/~ range`,
+      });
+    }
+  }
+
   // Unused (low): declared in `dependencies` but never imported (conservative).
   for (const name of manifest.dependencies) {
     if (isImplicitDep(name)) continue;
@@ -179,14 +231,14 @@ export function dependencySummary(issues: DependencyIssue[]): string {
   if (issues.length === 0) {
     return 'Dependency check: ✓ Dependencies consistent with package.json.';
   }
-  const order: Record<DependencySeverity, number> = { high: 0, low: 1 };
+  const order: Record<DependencySeverity, number> = { high: 0, medium: 1, low: 2 };
   const sorted = [...issues].sort((a, b) => order[a.severity] - order[b.severity]);
   const counts = issues.reduce(
     (acc, x) => ((acc[x.severity] = (acc[x.severity] || 0) + 1), acc),
     {} as Record<DependencySeverity, number>,
   );
   const head = `Dependency check: ${issues.length} issue(s) — ` +
-    (['high', 'low'] as DependencySeverity[])
+    (['high', 'medium', 'low'] as DependencySeverity[])
       .filter((s) => counts[s])
       .map((s) => `${counts[s]} ${s}`)
       .join(', ') + '.';

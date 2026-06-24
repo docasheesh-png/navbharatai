@@ -1423,3 +1423,105 @@ App Targets": UT-1 Desktop (Electron/Tauri → .exe/.dmg/.AppImage), UT-2 Native
 Mobile (React Native/Capacitor/Flutter → Play/App Store), UT-3 Browser Extension.
 Admin reviewed and DROPPED PowerShell/CMD (no reach gain); kept out-of-scope in the
 audit. Roadmap only — no UT code yet.
+
+---
+
+### 2026-06-23/24 — v3.0 Quality Engine: evaluate 8→18 dimensions + full-suite readiness gate + integration net
+
+Big push on NavBharatAI Pro v3.0 (`src/server/AgentV3/`, flag-OFF, zero live-path
+imports → live app unaffected). Roadmap march: 48-capability phases + the admin's
+300+ point "Section I" list (audit-first triage: ignore solid / complete partial /
+build absent). Every change shipped real, tested, one PR at a time, CI-green-then-merge.
+
+**Phases completed & merged (green CI):** 6.1 test-coverage, 10.1 requirement-coverage,
+6.2 recurring-error (thrash) detection, 4.2 README generator, 4.3 .env.example
+generator, 6.3 runnability, then the readiness gate now spans the FULL evaluate suite.
+
+**Section I items built (ABSENT → solid), merged green:** #19 SEO/metadata, #22 project
+hygiene, #5 error-boundary, #4 security-config (TLS/CORS), #22 .gitignore generator,
+#4 insecure-randomness, #4 secret-leak (.env), #11 hardcoded-URL.
+
+**`evaluate` now runs 18 dimensions** (was 8): readiness, build-confidence,
+architecture, security, authenticity, dependencies, env-vars, accessibility,
+compliance, test-coverage, requirement-coverage, runnability, SEO, project-hygiene,
+error-boundary, security-config, secret-leak, hardcoded-URL. The **readiness gate**
+now hard-blocks on: fake/incomplete code, serious privacy/compliance violation,
+secret leak, can't-run, high-severity security misconfig. 3 generators wired as real
+tools: generate_readme / generate_env_example / generate_gitignore.
+
+**Tests 1884 → 2025** (+141), including a complete end-to-end integration suite that
+drives `evaluate` + all 3 generators through the real ToolDispatcher + WorkspaceMemory
++ a fake actuator — a full regression net for every dimension.
+
+**CI INFRA NOTE (2026-06-23 ~22:24 onward):** GitHub Actions began failing at job
+startup (~3s, zero logs, HTTP 404 on logs) = the documented **Actions spending-limit/
+quota exhaustion**. Everything merged BEFORE that was green. After it, PR #289 (outage
+batch: leftover-debugger detection, fake-code-blocks-readiness, logged-secret
+detection, compliance-blocks-readiness, + the integration test suite) is pushed and
+fully LOCALLY verified (tsc ×2 + 2025 vitest + build + boot:check) but its MERGE is
+queued until the admin raises the Actions spending limit / the quota resets. No red
+CI was merged. Held off the (otherwise-ready) single-pass evaluate I/O refactor until
+CI is back — too risky to land a critical-path refactor without the independent gate.
+
+---
+
+### 2026-06-24 — Section I #13: unpinned-dependency-version rule (reproducibility)
+
+CI restored (the Actions block was the documented spending-limit/quota exhaustion;
+admin cleared past-due + the repo was temporarily made public so Actions runs on
+unlimited free minutes — to be reverted to private once the batch is merged). PR #289
+batch is now actually running CI (runner allocated, no more 3-sec instant-fail).
+
+Continuing the Section I march. New item built real + tested + green:
+
+**Section I #13 — `DependencyAnalysis` unpinned-version rule.** A third rule on the
+existing dependency dimension: a `dependencies`/`devDependencies` entry pinned to a
+floating version (`*` / `latest` / `x` / empty) is flagged **medium** — the build is
+non-reproducible, so a transitive breaking change silently breaks a build that worked
+yesterday. This is the classic "worked on my machine, broke on reinstall" trap and a
+pattern AI-generated package.json files fall into (LLMs emit `"latest"`), so it directly
+serves the one absolute rule (the app must never break). High-precision by design:
+- Scans only runtime + build deps; `peerDependencies`/`optionalDependencies` are skipped
+  (a `*` peer range is normal and intentional).
+- Special protocols (`workspace:*`, `file:..`, git/url refs, `npm:pkg@*`) and
+  partially-locked ranges (`1.x`, `^1.2`, `~1.2`, exact pins) are NOT flagged.
+- Case-insensitive match against a tight allow-list (`*`,`latest`,`x`,``).
+
+Folds into the existing dependency dimension (no new evaluate wiring), surfaces via
+`dependencySummary`. `DependencySeverity` gained `'medium'`; summary ordering updated.
+AppKnowledgeBase dependency-check description synced. systemPrompt unchanged (it does
+not enumerate dependency sub-checks). v3.0-only, flag-OFF — live app unaffected.
+
+Gate green: server tsc 0, frontend tsc 0, **2031 vitest** (+6), boot:check PASS.
+Pushed to the feature branch to ride the next CI with the #289 batch.
+
+---
+
+### 2026-06-24 — Section I #11 v2: hardcoded server-port check (deployment readiness)
+
+Continuing the Section I march (CI now live on the public repo; #289 batch + the
+unpinned-deps commit are riding CI). New item built real + tested + green:
+
+**Section I #11 v2 — `PortBindingAnalysis` (new evaluate dimension, 19th).** A PURE,
+deterministic scanner that flags a server bound to a hardcoded literal port
+(`app.listen(3000)`) instead of `process.env.PORT`. Every managed host — Cloud Run,
+Heroku, Render, Railway, Fly — assigns the port via the PORT env var and routes
+traffic only to it; a hardcoded port means the container boots but the platform can
+never reach it (the "deploys-but-silent" production failure). Directly serves the one
+absolute rule (the app must never break) for the apps v3.0 ships.
+
+High-precision by design (mirrors the hardcoded-URL precedent exactly):
+- Line-level: a `.listen(<2–5 digit literal>)` with no env reference on the line.
+- Skips the correct `process.env.PORT || 3000` / `import.meta.env` fallback, comments,
+  and variable / no-arg listens. No `addEventListener` confusion (requires `.listen(`).
+
+Wired end-to-end into `evaluate`: new `collectPortBindingIssues` collector (CODE/SKIP
+filters like the URL collector), appended to the verdict, and a **medium readiness
+warning** in the `extra` gate (a hardcoded port lowers the score, does not hard-block).
+systemPrompt + AppKnowledgeBase synced (new HARDCODED PORT entry). v3.0-only, flag-OFF.
+
+Tests: new `PortBindingAnalysis.test.ts` (11) + 2 dispatcher integration cases
+(flags a literal listen; passes with process.env.PORT) — dispatcher suite 38→40.
+
+Gate green: server tsc 0, frontend tsc 0, **2044 vitest** (+13 across both items this
+session), boot:check PASS. Pushed to ride the next CI with the rest of the batch.

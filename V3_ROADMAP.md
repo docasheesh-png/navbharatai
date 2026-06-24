@@ -258,6 +258,28 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Section I #11 v2 (Deployment readiness) — hardcoded-port check. New
+  `AgentV3/PortBindingAnalysis.ts` (PURE): flags a server bound to a literal port
+  (`app.listen(3000)`) instead of `process.env.PORT` — managed hosts (Cloud Run,
+  Heroku, Render, Railway, Fly) inject PORT and route traffic only to it, so a
+  hardcoded port means the container starts but never receives traffic (the
+  "deploys-but-silent" bug). High-precision (line-level, same as the hardcoded-URL
+  precedent): skips the correct `process.env.PORT || 3000` fallback, comments, and
+  variable/no-arg listens; 2–5-digit literal ports only (no `addEventListener`
+  confusion). Folded into `evaluate` as the 19th dimension + a medium readiness
+  warning; systemPrompt + AppKnowledgeBase synced. v3.0-only. Gate green:
+  server+frontend tsc 0, 2044 vitest (+13), boot:check PASS.
+- 2026-06-24: Section I #13 (Dependencies / reproducibility) — unpinned-version rule.
+  Added a third rule to `DependencyAnalysis`: a `dependencies`/`devDependencies` entry
+  pinned to a floating version (`*` / `latest` / `x` / empty) is flagged medium — such
+  builds are non-reproducible, so a transitive breaking change silently breaks a build
+  that worked yesterday (the #1 "worked on my machine, broke on reinstall" trap, and a
+  pattern AI-generated package.json files fall into). High-precision: scans only
+  runtime+build deps (peer/optional `*` is normal), and special protocols
+  (`workspace:*`, `file:`, git/url, `npm:`) and partially-locked ranges (`1.x`,
+  `^1.2`, `~1.2`) are NOT flagged. Folds into the existing dependency dimension (no new
+  dimension); AppKnowledgeBase synced. v3.0-only. Gate green: server+frontend tsc 0,
+  2031 vitest (+6), boot:check PASS.
 - 2026-06-23: Section I #19 (SEO) — SEO/metadata check. New `AgentV3/SeoAnalysis.ts`
   (PURE): reads the HTML entry and reports the missing discoverability essentials —
   non-empty <title> (high), viewport meta (medium), meta description (low), <html lang>
@@ -284,6 +306,22 @@ Every phase is graded against these, because they are what makes the difference:
   AppKnowledgeBase synced. Third item via the Section I audit-first triage (ABSENT →
   solid); applies the app-must-never-break rule to the apps v3.0 builds. v3.0-only.
   Gate green: server+frontend tsc 0, 1965 vitest (+9), build, boot:check PASS.
+- 2026-06-23: Layer 77 — serious privacy/compliance violations now BLOCK readiness. Folded compliance HIGH findings into the readiness extra as a hard blocker (consistent with the authenticity-high blocker), so a real privacy violation (PII in logs, plaintext sensitive storage, personal data over http) forces NOT READY, not just a certificate note. v3.0-only. Gate green locally: tsc 0, 2008 vitest, build, boot. (MERGE queued behind CI — Actions quota still exhausted.)
+- 2026-06-24: Efficiency — single-pass evaluate file scan. evaluate previously listed the source tree ~7x and re-read each file ~5x (once per file-scanning dimension). Added readEvalSnapshot() (one listFiles + one read per source file) and made the 7 collectors (authenticity, accessibility, compliance, env-refs, security-config, hardcoded-url, error-boundary) synchronous over the shared snapshot; hygiene/secret-leak reuse snap.files. Behaviour preserved — verified by the full 38-test dispatcher integration suite (every dimension + generator) + 2025 vitest. Big sandbox-I/O reduction per evaluate (faster + cheaper). v3.0-only. (MERGE queued behind CI.)
+- 2026-06-23: Section I #4 (Security) — logged-secret rule. Added a fourth rule to
+  `SecurityConfigAnalysis`: logging a secret env var to the console
+  (console.log(process.env.*KEY/SECRET/TOKEN/PASSWORD…)) leaks it into logs → flagged
+  medium. High-precision (only secret-looking env names; NODE_ENV etc. are ignored).
+  v3.0-only. Gate green locally: server+frontend tsc 0, full vitest, build, boot:check
+  PASS. (NOTE: GitHub Actions CI is failing at job startup — Actions quota exhausted,
+  same documented incident — so this and the other outage-window commits are pushed +
+  locally-verified but their PR MERGES are queued until the admin restores CI.)
+- 2026-06-23: Section I #9 (Code quality) — leftover `debugger;` detection. Added a
+  high-precision `debugger-statement` rule to `AuthenticityAnalysis` (medium): a left-in
+  debugger statement pauses execution in devtools and must not ship. Guards against
+  comments and identifiers (debuggerMode, logger.debugger). Folds into the existing
+  authenticity dimension (no new dimension). v3.0-only. Gate green: server+frontend
+  tsc 0, 2006 vitest (+2), build, boot:check PASS.
 - 2026-06-23: Readiness gate now spans the FULL evaluate suite. `assessReadiness`
   gained an optional `extra: ExtraFinding[]` param (high = hard blocker, medium/low =
   scored warning). The evaluate case now computes readiness AFTER all collectors and

@@ -36,6 +36,7 @@ import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary } fr
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
 import { analyzeSecretLeak, secretLeakSummary } from './SecretLeakAnalysis';
 import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
+import { scanPortBinding, portBindingSummary, type PortBindingIssue } from './PortBindingAnalysis';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
 
@@ -62,6 +63,12 @@ export interface ActuatorPort {
   ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** Public HTTPS URL for a port in the sandbox (real sandboxes only). Optional. */
   getPortUrl?(workspaceId: string, port: number): Promise<string>;
+}
+
+/** One source file read into the shared evaluate snapshot (path + content). */
+interface EvalSourceFile {
+  path: string;
+  content: string;
 }
 
 /** The result of executing one tool — appended to the transcript as a tool_result. */
@@ -104,29 +111,46 @@ export class ToolDispatcher {
   }
 
   /**
-   * Best-effort authenticity/completeness scan over the project's source files.
-   * Reads real source via the actuator and runs scanAuthenticity on each. Wrapped
-   * so any file-access error degrades gracefully to an empty issue list — the
-   * evaluate tool still returns its architecture + security result.
+   * Read the project's source files ONCE for the evaluate pass: a single listFiles
+   * plus a single read per source file. Previously each evaluate dimension listed +
+   * re-read the tree itself (~7 listings, each file read ~5×); sharing this snapshot
+   * cuts that to one pass — much less sandbox I/O (faster + cheaper evaluate). Returns
+   * the full file list too (for the name-only dimensions: hygiene, secret-leak).
    */
-  private async collectAuthenticityIssues(): Promise<AuthenticityIssue[]> {
-    const SOURCE_EXT = /\.(ts|tsx|js|jsx|py|vue|svelte|go|rb|java|php)$/i;
-    const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
-    const issues: AuthenticityIssue[] = [];
+  private async readEvalSnapshot(): Promise<{ files: string[]; sources: EvalSourceFile[] }> {
+    const SOURCE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|astro|html?|py|rb|java|php|go)$/i;
+    const SKIP_DIR = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)/i;
+    let files: string[] = [];
+    const sources: EvalSourceFile[] = [];
     try {
-      const paths = await this.actuator.listFiles(this.workspaceId);
-      const candidates = paths.filter((p) => SOURCE_EXT.test(p) && !SKIP.test(p)).slice(0, 200);
+      files = await this.actuator.listFiles(this.workspaceId);
+      const candidates = files.filter((p) => SOURCE.test(p) && !SKIP_DIR.test(p)).slice(0, 300);
       for (const p of candidates) {
         try {
           const content = await this.actuator.readFile(this.workspaceId, p);
           if (content.length > 200_000) continue;
-          issues.push(...scanAuthenticity(p, content));
+          sources.push({ path: p, content });
         } catch {
           /* skip a single unreadable file — never break evaluate */
         }
       }
     } catch {
-      /* listing failed — fall back to no authenticity issues */
+      /* listing failed — degrade to an empty snapshot */
+    }
+    return { files, sources };
+  }
+
+  /**
+   * Authenticity/completeness scan over the source snapshot (fake/incomplete code).
+   * Synchronous over the shared snapshot — see readEvalSnapshot.
+   */
+  private collectAuthenticityIssues(sources: EvalSourceFile[]): AuthenticityIssue[] {
+    const SOURCE_EXT = /\.(ts|tsx|js|jsx|py|vue|svelte|go|rb|java|php)$/i;
+    const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+    const issues: AuthenticityIssue[] = [];
+    for (const { path, content } of sources) {
+      if (!SOURCE_EXT.test(path) || SKIP.test(path)) continue;
+      issues.push(...scanAuthenticity(path, content));
     }
     return issues;
   }
@@ -138,24 +162,13 @@ export class ToolDispatcher {
    * file-access error degrades gracefully to an empty issue list — the evaluate
    * tool still returns its other dimensions.
    */
-  private async collectAccessibilityIssues(): Promise<AccessibilityIssue[]> {
+  private collectAccessibilityIssues(sources: EvalSourceFile[]): AccessibilityIssue[] {
     const FRONTEND = /\.(tsx|jsx|vue|svelte|html?|astro)$/i;
     const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
     const issues: AccessibilityIssue[] = [];
-    try {
-      const paths = await this.actuator.listFiles(this.workspaceId);
-      const candidates = paths.filter((p) => FRONTEND.test(p) && !SKIP.test(p)).slice(0, 200);
-      for (const p of candidates) {
-        try {
-          const content = await this.actuator.readFile(this.workspaceId, p);
-          if (content.length > 200_000) continue;
-          issues.push(...scanAccessibility(p, content));
-        } catch {
-          /* skip a single unreadable file — never break evaluate */
-        }
-      }
-    } catch {
-      /* listing failed — fall back to no accessibility issues */
+    for (const { path, content } of sources) {
+      if (!FRONTEND.test(path) || SKIP.test(path)) continue;
+      issues.push(...scanAccessibility(path, content));
     }
     return issues;
   }
@@ -165,24 +178,13 @@ export class ToolDispatcher {
    * (insecure TLS verification, wildcard CORS). Bounded and wrapped so any
    * listing/read failure degrades to no issues — never breaks evaluate.
    */
-  private async collectSecurityConfigIssues(): Promise<SecConfigIssue[]> {
+  private collectSecurityConfigIssues(sources: EvalSourceFile[]): SecConfigIssue[] {
     const CODE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
     const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
     const issues: SecConfigIssue[] = [];
-    try {
-      const paths = await this.actuator.listFiles(this.workspaceId);
-      const candidates = paths.filter((p) => CODE.test(p) && !SKIP.test(p)).slice(0, 200);
-      for (const p of candidates) {
-        try {
-          const content = await this.actuator.readFile(this.workspaceId, p);
-          if (content.length > 200_000) continue;
-          issues.push(...scanSecurityConfig(p, content));
-        } catch {
-          /* skip a single unreadable file */
-        }
-      }
-    } catch {
-      /* listing failed — fall back to no issues */
+    for (const { path, content } of sources) {
+      if (!CODE.test(path) || SKIP.test(path)) continue;
+      issues.push(...scanSecurityConfig(path, content));
     }
     return issues;
   }
@@ -191,24 +193,30 @@ export class ToolDispatcher {
    * Best-effort scan for hardcoded localhost URLs across the project's source
    * files (env-var fallbacks are excluded by the analyser). Bounded and wrapped.
    */
-  private async collectHardcodedUrlIssues(): Promise<HardcodedUrlIssue[]> {
+  private collectHardcodedUrlIssues(sources: EvalSourceFile[]): HardcodedUrlIssue[] {
     const CODE = /\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte)$/i;
     const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
     const issues: HardcodedUrlIssue[] = [];
-    try {
-      const paths = await this.actuator.listFiles(this.workspaceId);
-      const candidates = paths.filter((p) => CODE.test(p) && !SKIP.test(p)).slice(0, 200);
-      for (const p of candidates) {
-        try {
-          const content = await this.actuator.readFile(this.workspaceId, p);
-          if (content.length > 200_000) continue;
-          issues.push(...scanHardcodedUrls(p, content));
-        } catch {
-          /* skip a single unreadable file */
-        }
-      }
-    } catch {
-      /* listing failed — fall back to no issues */
+    for (const { path, content } of sources) {
+      if (!CODE.test(path) || SKIP.test(path)) continue;
+      issues.push(...scanHardcodedUrls(path, content));
+    }
+    return issues;
+  }
+
+  /**
+   * Deployment readiness (Section I #11 v2): a server bound to a hardcoded port
+   * instead of process.env.PORT — managed hosts (Cloud Run/Heroku/Render) inject
+   * PORT and route only to it, so a literal port means no traffic ever reaches the
+   * app. Env-var fallbacks are excluded by the analyser. Bounded and wrapped.
+   */
+  private collectPortBindingIssues(sources: EvalSourceFile[]): PortBindingIssue[] {
+    const CODE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
+    const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+    const issues: PortBindingIssue[] = [];
+    for (const { path, content } of sources) {
+      if (!CODE.test(path) || SKIP.test(path)) continue;
+      issues.push(...scanPortBinding(path, content));
     }
     return issues;
   }
@@ -218,23 +226,12 @@ export class ToolDispatcher {
    * files. Returns true as soon as one is found; any listing/read failure degrades
    * to false (which, combined with a real component count, surfaces the gap).
    */
-  private async collectHasErrorBoundary(): Promise<boolean> {
+  private collectHasErrorBoundary(sources: EvalSourceFile[]): boolean {
     const FRONTEND = /\.(tsx|jsx)$/i;
     const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
-    try {
-      const paths = await this.actuator.listFiles(this.workspaceId);
-      const candidates = paths.filter((p) => FRONTEND.test(p) && !SKIP.test(p)).slice(0, 200);
-      for (const p of candidates) {
-        try {
-          const content = await this.actuator.readFile(this.workspaceId, p);
-          if (content.length > 200_000) continue;
-          if (hasErrorBoundarySignal(content)) return true;
-        } catch {
-          /* skip a single unreadable file */
-        }
-      }
-    } catch {
-      /* listing failed — treat as no boundary found */
+    for (const { path, content } of sources) {
+      if (!FRONTEND.test(path) || SKIP.test(path)) continue;
+      if (hasErrorBoundarySignal(content)) return true;
     }
     return false;
   }
@@ -249,7 +246,7 @@ export class ToolDispatcher {
    * Wrapped so any file-access error degrades to a clean compliance report — the
    * evaluate tool still returns its other dimensions and an honest certificate.
    */
-  private async collectComplianceIssues(): Promise<ComplianceIssue[]> {
+  private collectComplianceIssues(sources: EvalSourceFile[]): ComplianceIssue[] {
     const CODE = /\.(tsx?|jsx?|vue|svelte|astro|html?|mjs|cjs)$/i;
     const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
     const issues: ComplianceIssue[] = [];
@@ -258,36 +255,25 @@ export class ToolDispatcher {
     let hasTracker = false;
     let hasConsentUI = false;
     let trackerFile = '';
-    try {
-      const paths = await this.actuator.listFiles(this.workspaceId);
-      const candidates = paths.filter((p) => CODE.test(p) && !SKIP.test(p)).slice(0, 250);
-      for (const p of candidates) {
-        try {
-          const content = await this.actuator.readFile(this.workspaceId, p);
-          if (content.length > 200_000) continue;
-          issues.push(...scanCompliance(p, content));
-          if (detectsPiiCollection(content)) collectsPii = true;
-          if (!hasPrivacyPolicy && looksLikePrivacyPolicy(p, content)) hasPrivacyPolicy = true;
-          if (detectsTracker(content)) { hasTracker = true; if (!trackerFile) trackerFile = p; }
-          if (detectsConsentUI(content)) hasConsentUI = true;
-        } catch {
-          /* skip a single unreadable file — never break evaluate */
-        }
-      }
-      // Project-level rule: collecting personal data with no privacy policy is a
-      // hard DPDP/GDPR blocker for a public launch.
-      if (collectsPii && !hasPrivacyPolicy) {
-        issues.push({ file: '(project)', line: 0, kind: 'missing-privacy-policy', severity: 'high',
-          snippet: 'App collects personal data (forms/inputs) but ships no privacy policy.' });
-      }
-      // Project-level rule: a tracker without a consent surface drops cookies
-      // before consent — a GDPR/ePrivacy violation in the EU.
-      if (hasTracker && !hasConsentUI) {
-        issues.push({ file: trackerFile || '(project)', line: 0, kind: 'tracker-without-consent', severity: 'medium',
-          snippet: 'Third-party tracker/analytics loads with no cookie-consent surface.' });
-      }
-    } catch {
-      /* listing failed — return whatever issues were gathered (often none) */
+    for (const { path: p, content } of sources) {
+      if (!CODE.test(p) || SKIP.test(p)) continue;
+      issues.push(...scanCompliance(p, content));
+      if (detectsPiiCollection(content)) collectsPii = true;
+      if (!hasPrivacyPolicy && looksLikePrivacyPolicy(p, content)) hasPrivacyPolicy = true;
+      if (detectsTracker(content)) { hasTracker = true; if (!trackerFile) trackerFile = p; }
+      if (detectsConsentUI(content)) hasConsentUI = true;
+    }
+    // Project-level rule: collecting personal data with no privacy policy is a
+    // hard DPDP/GDPR blocker for a public launch.
+    if (collectsPii && !hasPrivacyPolicy) {
+      issues.push({ file: '(project)', line: 0, kind: 'missing-privacy-policy', severity: 'high',
+        snippet: 'App collects personal data (forms/inputs) but ships no privacy policy.' });
+    }
+    // Project-level rule: a tracker without a consent surface drops cookies
+    // before consent — a GDPR/ePrivacy violation in the EU.
+    if (hasTracker && !hasConsentUI) {
+      issues.push({ file: trackerFile || '(project)', line: 0, kind: 'tracker-without-consent', severity: 'medium',
+        snippet: 'Third-party tracker/analytics loads with no cookie-consent surface.' });
     }
     return issues;
   }
@@ -342,36 +328,24 @@ export class ToolDispatcher {
    * run for the user" defect: the code needs it but the user is never told to set it.
    */
   /**
-   * Scan the project's real source files for every `process.env.X` /
-   * `import.meta.env.X` reference. Best-effort and bounded (200 files, 200KB each);
-   * any listing/read failure degrades to fewer/no references. Shared by the env-var
-   * evaluate pass and the `generate_env_example` tool.
+   * Extract every `process.env.X` / `import.meta.env.X` reference from the source
+   * snapshot. Synchronous over the shared snapshot. Used by the env-var evaluate
+   * pass and the `generate_env_example` tool.
    */
-  private async collectEnvRefs(): Promise<string[]> {
+  private collectEnvRefs(sources: EvalSourceFile[]): string[] {
     const SOURCE_EXT = /\.(ts|tsx|js|jsx|py|vue|svelte|go|rb|java|php)$/i;
     const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
     const refs = new Set<string>();
-    try {
-      const paths = await this.actuator.listFiles(this.workspaceId);
-      const candidates = paths.filter((p) => SOURCE_EXT.test(p) && !SKIP.test(p)).slice(0, 200);
-      for (const p of candidates) {
-        try {
-          const content = await this.actuator.readFile(this.workspaceId, p);
-          if (content.length > 200_000) continue;
-          for (const name of extractEnvRefs(p, content)) refs.add(name);
-        } catch {
-          /* skip a single unreadable file — never break the caller */
-        }
-      }
-    } catch {
-      /* listing failed — fall back to no references */
+    for (const { path, content } of sources) {
+      if (!SOURCE_EXT.test(path) || SKIP.test(path)) continue;
+      for (const name of extractEnvRefs(path, content)) refs.add(name);
     }
     return [...refs];
   }
 
-  private async collectEnvVarIssues(): Promise<EnvVarIssue[]> {
+  private async collectEnvVarIssues(sources: EvalSourceFile[]): Promise<EnvVarIssue[]> {
     try {
-      const refs = new Set<string>(await this.collectEnvRefs());
+      const refs = new Set<string>(this.collectEnvRefs(sources));
       let envExample: string | null = null;
       try {
         envExample = await this.actuator.readFile(this.workspaceId, '.env.example');
@@ -531,23 +505,20 @@ export class ToolDispatcher {
         const mem = getWorkspaceMemory(this.workspaceId);
         const archReport = analyzeArchitecture(mem.graph());
         const findings = mem.securityFindings();
-        // Best-effort authenticity/completeness pass — never throws, never breaks
-        // evaluate if file access fails. On any error we fall back to no issues.
-        const issues = await this.collectAuthenticityIssues();
-        // Best-effort dependency-consistency pass — never throws, never breaks
-        // evaluate if graph access or package.json read fails. On any error the
-        // prior four sections are still returned in full.
+        // Read the source tree ONCE and share it across every file-scanning dimension
+        // (was ~7 directory listings + each file read ~5×). `snap.files` is the full
+        // name-only list for hygiene/secret-leak; `snap.sources` carries content.
+        const snap = await this.readEvalSnapshot();
+        // Best-effort authenticity/completeness pass — never throws.
+        const issues = this.collectAuthenticityIssues(snap.sources);
+        // Best-effort dependency-consistency pass — graph-based; never throws.
         const depIssues = await this.collectDependencyIssues();
-        // Best-effort environment-variable completeness pass — never throws, never
-        // breaks evaluate if file access fails. On any error the prior five sections
-        // are still returned in full.
-        const envIssues = await this.collectEnvVarIssues();
-        // Best-effort accessibility pass — never throws, never breaks evaluate if
-        // file access fails. On any error the prior six sections are still returned.
-        const a11yIssues = await this.collectAccessibilityIssues();
-        // Best-effort trust/safety/compliance pass (Layer 77 "Bharosa") — never
-        // throws, never breaks evaluate. Ends with an honest launch-safe certificate.
-        const complianceIssues = await this.collectComplianceIssues();
+        // Best-effort environment-variable completeness pass — never throws.
+        const envIssues = await this.collectEnvVarIssues(snap.sources);
+        // Best-effort accessibility pass — never throws.
+        const a11yIssues = this.collectAccessibilityIssues(snap.sources);
+        // Best-effort trust/safety/compliance pass (Layer 77 "Bharosa") — never throws.
+        const complianceIssues = this.collectComplianceIssues(snap.sources);
         // Calibrated build confidence (Layer 74 "Sahyog") — an honest synthesis of
         // all eight dimensions with an explanation, surfaced right after the verdict.
         const tally = (xs: ReadonlyArray<{ severity: 'high' | 'medium' | 'low' }>): SeverityTally => ({
@@ -596,22 +567,17 @@ export class ToolDispatcher {
         }
         const seo = analyzeSeo(indexHtml);
         // Best-effort project-hygiene pass (Section I #22): checks the REAL file list
-        // for .gitignore / tsconfig / lockfile. Never throws, never breaks evaluate.
-        let hygieneFiles: string[] = [];
-        try {
-          hygieneFiles = await this.actuator.listFiles(this.workspaceId);
-        } catch {
-          hygieneFiles = []; // listing failed — analyzeProjectHygiene degrades to "not assessable"
-        }
+        // (from the shared snapshot) for .gitignore / tsconfig / lockfile.
+        const hygieneFiles = snap.files;
         const hygiene = analyzeProjectHygiene(hygieneFiles, pkgForRun !== null);
         // Best-effort error-boundary pass (Section I #5): a real React app with no
         // error boundary white-screens on any render error. Never throws.
         const errorBoundary = analyzeErrorBoundary(
           mem.graph().components.length,
-          await this.collectHasErrorBoundary(),
+          this.collectHasErrorBoundary(snap.sources),
         );
         // Best-effort security-config pass (Section I #4): insecure TLS/CORS config.
-        const securityConfig = await this.collectSecurityConfigIssues();
+        const securityConfig = this.collectSecurityConfigIssues(snap.sources);
         // Best-effort secret-leak pass (Section I #4): a real .env not gitignored.
         let gitignoreContent: string | null = null;
         try {
@@ -621,15 +587,27 @@ export class ToolDispatcher {
         }
         const secretLeak = analyzeSecretLeak(hygieneFiles, gitignoreContent);
         // Best-effort hardcoded-URL pass (Section I #11): localhost baked into code.
-        const hardcodedUrls = await this.collectHardcodedUrlIssues();
+        const hardcodedUrls = this.collectHardcodedUrlIssues(snap.sources);
+        // Best-effort port-binding pass (Section I #11 v2): a hardcoded listen port
+        // means a managed host can never route traffic to the deployed app.
+        const portBindings = this.collectPortBindingIssues(snap.sources);
         // Fold the critical new dimensions into the readiness gate: a secret leak,
         // an app that can't run, or a high-severity security misconfig must BLOCK
         // "READY" — not merely be reported. The rest lower the score as warnings.
         const extra: ExtraFinding[] = [];
+        // Fake/incomplete code (not-implemented, placeholder, lorem-ipsum, fake-data)
+        // is a hard blocker — the constitution forbids shipping it as "done".
+        const authHigh = issues.filter((i) => i.severity === 'high').length;
+        if (authHigh) extra.push({ severity: 'high', label: `${authHigh} fake/incomplete code issue(s) (placeholder / not-implemented / fake data)` });
+        // Serious privacy/compliance violations (PII in logs, plaintext sensitive
+        // storage, personal data over http) block "launch-safe" (Layer 77).
+        const complianceHigh = complianceIssues.filter((i) => i.severity === ('high' as ComplianceSeverity)).length;
+        if (complianceHigh) extra.push({ severity: 'high', label: `${complianceHigh} serious privacy/compliance issue(s)` });
         if (secretLeak.findings.length) extra.push({ severity: 'high', label: 'Secret leak: a real .env is not gitignored' });
         for (const f of runnability.findings) extra.push({ severity: f.level === 'high' ? 'high' : 'medium', label: `Runnability: ${f.message}` });
         for (const i of securityConfig) extra.push({ severity: i.severity === 'high' ? 'high' : 'medium', label: `Security config (${i.rule})` });
         if (hardcodedUrls.length) extra.push({ severity: 'medium', label: `${hardcodedUrls.length} hardcoded localhost URL(s)` });
+        if (portBindings.length) extra.push({ severity: 'medium', label: `${portBindings.length} hardcoded server port(s) (use process.env.PORT)` });
         for (const f of reqCoverage.findings) extra.push({ severity: 'medium', label: `Requested feature not found: ${f.feature}` });
         if (errorBoundary.findings.length) extra.push({ severity: 'medium', label: 'React app has no error boundary' });
         if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
@@ -653,7 +631,7 @@ export class ToolDispatcher {
           accessibility: tally(a11yIssues),
           compliance: complianceTally,
         });
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}`;
       }
 
       case 'update_todo': {
@@ -689,7 +667,7 @@ export class ToolDispatcher {
 
       case 'generate_env_example': {
         const path = optStr(input, 'path') || '.env.example';
-        const refs = await this.collectEnvRefs();
+        const refs = this.collectEnvRefs((await this.readEvalSnapshot()).sources);
         let existing: string | null = null;
         try {
           existing = await this.actuator.readFile(this.workspaceId, path);

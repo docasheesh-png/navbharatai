@@ -74,6 +74,13 @@ const RULES: Rule[] = [
     severity: 'medium',
     re: /(?:\/\/|\/\*|#|<!--)\s*(TODO|FIXME)\b|\b(XXX|HACK)\s*:/,
   },
+  // ── medium: a left-in `debugger;` statement (pauses in devtools; must not ship)
+  {
+    kind: 'debugger-statement',
+    severity: 'medium',
+    re: /(?:^|[^.\w])debugger\s*;/,
+    ignore: (_m, line) => /^\s*(\/\/|\*|\/\*)/.test(line),
+  },
   // ── low: hardcoded obviously-fake return values left in code ──────────────
   {
     kind: 'fake-return',

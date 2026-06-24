@@ -57,6 +57,17 @@ describe('scanAuthenticity', () => {
     expect(scanAuthenticity('src/__tests__/foo.ts', code)).toEqual([]);
     expect(scanAuthenticity('node_modules/pkg/index.js', code)).toEqual([]);
   });
+
+  it('flags a left-in debugger statement (medium)', () => {
+    const issues = scanAuthenticity('src/app.ts', 'function f() {\n  debugger;\n  return 1;\n}');
+    expect(issues.some((i) => i.kind === 'debugger-statement' && i.severity === 'medium')).toBe(true);
+  });
+
+  it('does not flag debugger in a comment or as part of an identifier', () => {
+    expect(scanAuthenticity('src/a.ts', '// debugger; left a note')).toEqual([]);
+    expect(scanAuthenticity('src/a.ts', 'const debuggerMode = true;')).toEqual([]);
+    expect(scanAuthenticity('src/a.ts', 'logger.debugger;')).toEqual([]);
+  });
 });
 
 describe('authenticitySummary', () => {

@@ -5,6 +5,7 @@ import { WorkspaceState } from './WorkspaceState';
 import { AgentEventStream } from './AgentEventStream';
 import type { ToolUse } from './ClaudeClient';
 import type { AgentEvent } from './types';
+import { getWorkspaceMemory } from './WorkspaceMemory';
 
 /** An in-memory fake sandbox implementing just the ActuatorPort slice. */
 class FakeActuator implements ActuatorPort {
@@ -222,5 +223,209 @@ describe('ToolDispatcher', () => {
     const res = await d.dispatch(call('consensus', { question: 'decide this' }));
     expect(res.is_error).toBe(false);
     expect(res.content).toContain('not available');
+  });
+});
+
+describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
+  function makeDispatcher(ws: string): ToolDispatcher {
+    const a = new FakeActuator();
+    const s = new AgentEventStream();
+    return new ToolDispatcher(a, ws, new WorkspaceState(s), s);
+  }
+  const evalText = async (dd: ToolDispatcher): Promise<string> =>
+    (await dd.dispatch(call('evaluate', {}))).content;
+  const write = (dd: ToolDispatcher, path: string, content: string) =>
+    dd.dispatch(call('write_file', { path, content }));
+
+  it('flags a secret leak (.env not gitignored) and blocks readiness', async () => {
+    const dd = makeDispatcher('ws-eval-leak-1');
+    await write(dd, '.env', 'API_KEY=secret123');
+    await write(dd, '.gitignore', 'node_modules/\ndist/');
+    await write(dd, 'src/App.tsx', 'export const App = () => null;');
+    const out = await evalText(dd);
+    expect(out).toContain('Secret leak');
+    expect(out).toContain('not covered by .gitignore');
+    expect(out).toContain('NOT READY');
+  });
+
+  it('passes the secret-leak check when .env is gitignored', async () => {
+    const dd = makeDispatcher('ws-eval-leak-2');
+    await write(dd, '.env', 'API_KEY=x');
+    await write(dd, '.gitignore', '.env\nnode_modules/');
+    const out = await evalText(dd);
+    expect(out).toContain('Secret leak: ✓');
+  });
+
+  it('flags a hardcoded localhost URL', async () => {
+    const dd = makeDispatcher('ws-eval-url');
+    await write(dd, 'src/api.ts', "export const API = 'http://localhost:3000/api';");
+    const out = await evalText(dd);
+    expect(out).toContain('hardcoded localhost URL');
+  });
+
+  it('flags a hardcoded server listen port (no process.env.PORT)', async () => {
+    const dd = makeDispatcher('ws-eval-port');
+    await write(dd, 'server.ts', 'import express from "express";\nconst app = express();\napp.listen(3000);');
+    const out = await evalText(dd);
+    expect(out).toContain('hardcoded listen port');
+    expect(out).toContain('process.env.PORT');
+  });
+
+  it('passes the port check when the listen port comes from process.env.PORT', async () => {
+    const dd = makeDispatcher('ws-eval-port-ok');
+    await write(dd, 'server.ts', 'const app = require("express")();\napp.listen(process.env.PORT || 3000);');
+    const out = await evalText(dd);
+    expect(out).toContain('Server port: ✓');
+  });
+
+  it('flags runnability when there is no run script', async () => {
+    const dd = makeDispatcher('ws-eval-run');
+    await write(dd, 'package.json', JSON.stringify({ dependencies: { react: '^18' }, scripts: { lint: 'eslint .' } }));
+    await write(dd, 'src/App.tsx', 'export const App = () => null;');
+    const out = await evalText(dd);
+    expect(out).toContain('Runnability');
+    expect(out).toContain('no defined way to start');
+  });
+
+  it('flags missing SEO metadata in index.html', async () => {
+    const dd = makeDispatcher('ws-eval-seo');
+    await write(dd, 'index.html', '<html><head></head><body><div id="root"></div></body></html>');
+    const out = await evalText(dd);
+    expect(out).toContain('SEO/metadata');
+    expect(out).toContain('<title>');
+  });
+
+  it('flags insecure security config (disabled TLS verification)', async () => {
+    const dd = makeDispatcher('ws-eval-sec');
+    await write(dd, 'src/http.ts', 'const agent = new Agent({ rejectUnauthorized: false });');
+    const out = await evalText(dd);
+    expect(out).toContain('Security config');
+    expect(out).toContain('NOT READY'); // high security-config issue blocks readiness
+  });
+
+  it('reports READY for a clean, runnable, well-configured project', async () => {
+    const dd = makeDispatcher('ws-eval-clean');
+    await write(dd, 'package.json', JSON.stringify({ scripts: { dev: 'vite', build: 'vite build' }, devDependencies: { vite: '^5' } }));
+    await write(dd, 'index.html', '<html lang="en"><head><title>App</title><meta name="viewport" content="width=device-width"><meta name="description" content="A real app."></head><body></body></html>');
+    await write(dd, '.gitignore', 'node_modules/\n.env');
+    await write(dd, 'tsconfig.json', '{ "compilerOptions": { "strict": true } }');
+    await write(dd, 'package-lock.json', '{}');
+    await write(dd, 'src/App.tsx', 'export const App = () => null;');
+    const out = await evalText(dd);
+    expect(out).toContain('readiness: READY');
+    expect(out).not.toContain('NOT READY');
+  });
+});
+
+describe('ToolDispatcher — evaluate integration (more dimensions + generators)', () => {
+  function makeDispatcher(ws: string): ToolDispatcher {
+    const a = new FakeActuator();
+    const s = new AgentEventStream();
+    return new ToolDispatcher(a, ws, new WorkspaceState(s), s);
+  }
+  const evalText = async (dd: ToolDispatcher): Promise<string> =>
+    (await dd.dispatch(call('evaluate', {}))).content;
+  const write = (dd: ToolDispatcher, path: string, content: string) =>
+    dd.dispatch(call('write_file', { path, content }));
+  const read = async (dd: ToolDispatcher, path: string): Promise<string> =>
+    (await dd.dispatch(call('read_file', { path }))).content;
+
+  it('flags fake/incomplete code (authenticity) and blocks readiness', async () => {
+    const dd = makeDispatcher('ws-eval-auth');
+    await write(dd, 'src/api.ts', 'export function getUser() { throw new Error("Not implemented"); }');
+    const out = await evalText(dd);
+    expect(out).toContain('Authenticity');
+    expect(out).toContain('NOT READY');
+  });
+
+  it('flags an accessibility issue (image with no alt text)', async () => {
+    const dd = makeDispatcher('ws-eval-a11y');
+    await write(dd, 'src/Logo.tsx', 'export const Logo = () => <img src="/logo.png" />;');
+    const out = await evalText(dd);
+    expect(out.toLowerCase()).toContain('accessib');
+  });
+
+  it('flags a requested feature that was not built (requirement coverage)', async () => {
+    const ws = 'ws-eval-req';
+    const dd = makeDispatcher(ws);
+    getWorkspaceMemory(ws).recordRequest('build a todo app with a dashboard');
+    await write(dd, 'src/TodoList.tsx', 'export const TodoList = () => null;');
+    const out = await evalText(dd);
+    expect(out).toContain('Requirement coverage');
+    expect(out).toContain('dashboard');
+  });
+
+  it('flags a real React app with no error boundary', async () => {
+    const dd = makeDispatcher('ws-eval-eb');
+    await write(dd, 'src/App.tsx', 'export const App = () => null;');
+    await write(dd, 'src/Header.tsx', 'export const Header = () => null;');
+    const out = await evalText(dd);
+    expect(out).toContain('Error boundary');
+    expect(out).toContain('no error boundary');
+  });
+
+  it('flags zero test coverage on a multi-module project', async () => {
+    const dd = makeDispatcher('ws-eval-tc');
+    await write(dd, 'src/a.ts', 'export const a = 1;');
+    await write(dd, 'src/b.ts', 'export const b = 2;');
+    await write(dd, 'src/c.ts', 'export const c = 3;');
+    const out = await evalText(dd);
+    expect(out).toContain('Test coverage');
+    expect(out).toContain('No tests at all');
+  });
+
+  it('generate_readme writes a README derived from package.json', async () => {
+    const dd = makeDispatcher('ws-gen-readme');
+    await write(dd, 'package.json', JSON.stringify({ name: 'my-app', dependencies: { react: '^18' }, scripts: { dev: 'vite' } }));
+    await dd.dispatch(call('generate_readme', {}));
+    const readme = await read(dd, 'README.md');
+    expect(readme).toContain('# my-app');
+    expect(readme).toContain('React');
+  });
+
+  it('generate_gitignore writes a valid .gitignore', async () => {
+    const dd = makeDispatcher('ws-gen-gi');
+    await write(dd, 'src/App.tsx', 'export const App = () => null;');
+    await dd.dispatch(call('generate_gitignore', {}));
+    const gi = await read(dd, '.gitignore');
+    expect(gi).toContain('node_modules/');
+    expect(gi).toContain('.env');
+  });
+
+  it('generate_env_example documents the referenced env vars', async () => {
+    const dd = makeDispatcher('ws-gen-env');
+    await write(dd, 'src/config.ts', 'export const url = process.env.API_URL; export const key = process.env.SECRET_KEY;');
+    await dd.dispatch(call('generate_env_example', {}));
+    const env = await read(dd, '.env.example');
+    expect(env).toContain('API_URL=');
+    expect(env).toContain('SECRET_KEY=');
+  });
+});
+
+describe('ToolDispatcher — evaluate integration (compliance + env vars)', () => {
+  function makeDispatcher(ws: string): ToolDispatcher {
+    const a = new FakeActuator();
+    const s = new AgentEventStream();
+    return new ToolDispatcher(a, ws, new WorkspaceState(s), s);
+  }
+  const evalText = async (dd: ToolDispatcher): Promise<string> =>
+    (await dd.dispatch(call('evaluate', {}))).content;
+  const write = (dd: ToolDispatcher, path: string, content: string) =>
+    dd.dispatch(call('write_file', { path, content }));
+
+  it('flags secrets/PII written to logs (compliance) and blocks readiness', async () => {
+    const dd = makeDispatcher('ws-eval-comp');
+    await write(dd, 'src/auth.ts', "console.log('user password is', password);");
+    const out = await evalText(dd);
+    expect(out.toLowerCase()).toContain('compliance');
+    expect(out).toContain('NOT READY');
+  });
+
+  it('flags an undocumented env var read in code', async () => {
+    const dd = makeDispatcher('ws-eval-env');
+    await write(dd, 'src/config.ts', 'export const k = process.env.MISSING_SECRET_TOKEN;');
+    const out = await evalText(dd);
+    expect(out).toContain('Env var check');
+    expect(out).toContain('MISSING_SECRET_TOKEN');
   });
 });

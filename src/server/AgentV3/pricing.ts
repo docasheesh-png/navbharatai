@@ -1,19 +1,22 @@
-// AgentV3 pricing (D5/D6).
+// AgentV3 pricing — multi-model billing (admin model, 2026-06-24).
 //
-// The user is billed at the Claude **Opus-equivalent** token rate × a multiplier,
-// regardless of which model actually ran (Sonnet / Opus / Vertex). NavBharatAI
-// pays the real provider cost and keeps the spread → margin is structurally
-// positive (billed ≥ real cost, since the real model price ≤ Opus price).
+// NORMAL mode (Power OFF): whichever provider actually answered (Gemini/Vertex/Haiku/
+// Sonnet — the user never knows), the engine bills AS IF SONNET ran — it prices the real
+// token usage at Sonnet's rate and applies the NORMAL markup (× 3.5). Opus is power-only,
+// so normal-mode billing is flat & predictable and never surprises the user.
 //
-// IMPORTANT: the Opus rates below are the billing source-of-truth and MUST be
-// kept in sync with Anthropic's current Opus pricing. They are overridable via
-// env so ops can update them without a code change. Admin should confirm the
-// live Opus price before GA.
+// POWER mode (Power ON): the user is on Opus 4.8; bill the REAL Opus cost × the POWER
+// markup (× 2.5). The effort selector (mini/medium/max) only changes how many real tokens
+// are spent → the bill scales naturally; the multiplier stays 2.5×.
+//
+// The customer-facing amount is shown in INR: billedAmountInr() = billedAmountUsd() × the
+// (real-time) USD→INR rate. Margin is structurally positive in both modes (billed ≥ real
+// cost). Rates are env-overridable so ops can track live Anthropic prices without a deploy.
 
-/** Standard markup: user pays Opus-equivalent × 2.5 (D5). */
-export const STANDARD_MULTIPLIER = 2.5;
-/** "Only Opus" super toggle: user pays Opus-equivalent × 5 (D6). */
-export const ONLY_OPUS_MULTIPLIER = 5.0;
+/** Normal-mode markup: Sonnet-equivalent × 3.5. */
+export const NORMAL_MULTIPLIER = 3.5;
+/** Power-mode markup: real Opus 4.8 cost × 2.5. */
+export const POWER_MULTIPLIER = 2.5;
 
 function envRate(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -22,11 +25,24 @@ function envRate(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+export interface TokenRate {
+  inputPerMTok: number;
+  outputPerMTok: number;
+}
+
 /** Claude Opus token rates, USD per 1,000,000 tokens. Override via env. */
-export function opusRate(): { inputPerMTok: number; outputPerMTok: number } {
+export function opusRate(): TokenRate {
   return {
     inputPerMTok: envRate('OPUS_INPUT_PER_MTOK', 15),
     outputPerMTok: envRate('OPUS_OUTPUT_PER_MTOK', 75),
+  };
+}
+
+/** Claude Sonnet token rates, USD per 1,000,000 tokens. Override via env. */
+export function sonnetRate(): TokenRate {
+  return {
+    inputPerMTok: envRate('SONNET_INPUT_PER_MTOK', 3),
+    outputPerMTok: envRate('SONNET_OUTPUT_PER_MTOK', 15),
   };
 }
 
@@ -35,20 +51,38 @@ export interface BilledUsage {
   outputTokens: number;
 }
 
-/** Raw Opus-equivalent cost (USD) for the given token usage — before the markup. */
-export function opusEquivalentUsd(usage: BilledUsage): number {
-  const rate = opusRate();
+function costUsd(usage: BilledUsage, rate: TokenRate): number {
   return (
     (Math.max(0, usage.inputTokens) / 1_000_000) * rate.inputPerMTok +
     (Math.max(0, usage.outputTokens) / 1_000_000) * rate.outputPerMTok
   );
 }
 
+/** Real Opus 4.8 cost (USD) for the usage — the POWER-mode billing base. */
+export function opusEquivalentUsd(usage: BilledUsage): number {
+  return costUsd(usage, opusRate());
+}
+
+/** Sonnet-equivalent cost (USD) for the usage — the NORMAL-mode billing base. */
+export function sonnetEquivalentUsd(usage: BilledUsage): number {
+  return costUsd(usage, sonnetRate());
+}
+
 /**
- * The amount (USD) to bill the user for this usage. Standard mode applies the
- * 2.5× markup; the "Only Opus" super toggle applies 5× (D6).
+ * The USD amount to bill the user.
+ * - POWER mode → real Opus 4.8 cost × 2.5
+ * - NORMAL mode → Sonnet-equivalent cost × 3.5
  */
-export function billedAmountUsd(usage: BilledUsage, onlyOpus = false): number {
-  const multiplier = onlyOpus ? ONLY_OPUS_MULTIPLIER : STANDARD_MULTIPLIER;
-  return opusEquivalentUsd(usage) * multiplier;
+export function billedAmountUsd(usage: BilledUsage, powerMode = false): number {
+  return powerMode
+    ? opusEquivalentUsd(usage) * POWER_MULTIPLIER
+    : sonnetEquivalentUsd(usage) * NORMAL_MULTIPLIER;
+}
+
+/**
+ * The INR amount to bill the user = billedAmountUsd × the (real-time) USD→INR rate.
+ * The rate is passed in (resolved from UsdInrRate) so this stays pure/testable.
+ */
+export function billedAmountInr(usage: BilledUsage, powerMode: boolean, usdInrRate: number): number {
+  return billedAmountUsd(usage, powerMode) * Math.max(0, usdInrRate);
 }

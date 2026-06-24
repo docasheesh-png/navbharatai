@@ -430,3 +430,18 @@ SUGGEST "enable Power for Opus-grade" instead of silently spending more (high co
 preserved for this). `opusNormalModel()` (4.7) is retired from the normal ladder; Power uses
 `opusModel()` (4.8). Billing rules (Normal Sonnet-equiv×2 / Power real-Opus×5) and the Power
 effort multiplier (flat 5× vs 5/10/20×) are P5 — still pending admin confirm before pricing.ts.
+
+## §11.3 — Billing LOCKED (admin sign-off, 2026-06-24)
+Final customer billing (always shown in INR; USD→INR at the real-time rate):
+- **NORMAL (Power OFF):** whichever provider answered (user never knows), bill AS IF Sonnet ran
+  → price the real tokens at Sonnet's rate × **3.5** → INR. (Opus is power-only, so this is flat
+  and never surprises the user.)
+- **POWER (Power ON):** bill the REAL Opus 4.8 cost (what Claude charges us) × **2.5** → INR. The
+  effort selector (mini/medium/max) only changes real tokens; the multiplier stays 2.5×.
+Margin positive in both modes (billed ≥ real cost). `onlyOpus` (the existing Power toggle,
+req.body.onlyOpus) is the mode flag — already wired to resolveModel + billing.
+P5-core (this change): pricing.ts reshaped — NORMAL_MULTIPLIER=3.5, POWER_MULTIPLIER=2.5,
+sonnetRate()/sonnetEquivalentUsd added, billedAmountUsd(usage, powerMode) = power? Opus×2.5 :
+Sonnet×3.5, + billedAmountInr(usage, powerMode, rate). NEXT (P5-inr): a UsdInrRate module
+(env default + best-effort real-time refresh + fallback) and wire billedAmountInr to the
+customer-facing ₹ display.

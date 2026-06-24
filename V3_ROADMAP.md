@@ -1509,3 +1509,13 @@ section):**
   partial, BUILD what's absent — never faked, one PR per increment, v3.0-only. To be
   executed when the build march reaches this section; cross-reference Sections A–H +
   `UCUE_V2_GAP_AUDIT.md` to avoid duplicating work already done/planned. Roadmap only.
+
+- 2026-06-24: Multi-Model Orchestration P5-core — BILLING reshaped (admin-locked). pricing.ts
+  now: NORMAL_MULTIPLIER=3.5 (Sonnet-equivalent × 3.5), POWER_MULTIPLIER=2.5 (real Opus 4.8 ×
+  2.5); added sonnetRate()/sonnetEquivalentUsd() and billedAmountInr(usage, powerMode, rate).
+  billedAmountUsd(usage, powerMode) = power ? Opus×2.5 : Sonnet×3.5. The existing `onlyOpus`
+  Power toggle is the mode flag (already wired to resolveModel + the recorded billedUsd). This
+  CHANGES live v3.0 billing per the admin model (normal-mode bills drop ~from Opus-equiv×2.5 to
+  Sonnet-equiv×3.5 ≈ much cheaper since Sonnet rate ≪ Opus). 11 pricing tests; removed the stale
+  D5/D6 pricing block from ClaudeClient.test.ts. NEXT P5-inr: UsdInrRate module (real-time rate)
+  + customer-facing ₹ display. Gate green: server tsc 0, 2165 vitest, boot:check PASS.

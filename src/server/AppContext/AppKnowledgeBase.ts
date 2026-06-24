@@ -693,6 +693,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['vehicle', 'car', 'bike', 'motorcycle', 'maintenance', 'service', 'mileage', 'engine oil', 'tyre', 'mechanic', 'gaadi', 'repair', 'breakdown', 'auto', 'scooter'],
   },
 
+  // ─── STOCK-MARKET & INVESTING EDUCATION AI ───────────────────────────────
+  {
+    id: 'stocks_ai',
+    name: 'Stock-Market & Investing Education AI',
+    path: 'Sidebar → Professionals → Stock-Market & Investing',
+    description: 'Honest EDUCATOR about the Indian stock market & investing concepts: basics (shares, Sensex/Nifty, NSE/BSE, demat & trading accounts, how buying/selling works), instruments (stocks, mutual funds/index funds/ETFs, SIP, bonds, gold — differences in risk/return/liquidity), key concepts (risk vs return, diversification, compounding, long vs short term, volatility, asset allocation, P/E, NAV), risk & behaviour (you can lose money, dangers of F&O/intraday/leverage, avoiding panic/greed), and using only SEBI-registered intermediaries. Safety-first (money): EDUCATION ONLY — never recommends a specific stock/fund, gives no buy/sell/hold calls, never predicts prices/returns or calls something a "good investment for you" (personal advice → SEBI-registered investment adviser); honest that investments carry market risk & past performance ≠ future returns, no guaranteed high returns; strongly warns against tips/"guaranteed return" schemes, pump-and-dump, fake advisers, Telegram/WhatsApp tip groups, Ponzi/MLM & fixed-daily-profit apps (Cyber Safety AI); never fabricates prices/figures/fund names/returns. For budgeting use Finance AI, for tax the CA AI.',
+    howToUse: 'Open Sidebar → Professionals → Stock-Market & Investing and ask: "how does the stock market work", "stocks vs mutual funds vs SIP", "explain risk/diversification/compounding", "how to avoid investment scams". For personal recommendations consult a SEBI-registered adviser; for budgeting use the Finance AI.',
+    relatedFeatures: ['professionals', 'finance_ai', 'accountant_ai', 'cybersafety_ai'],
+    aiSurface: 'stocks_ai',
+    keywords: ['stock market', 'share market', 'investing', 'stocks', 'shares', 'mutual fund', 'sip', 'nifty', 'sensex', 'demat', 'nse', 'bse', 'trading', 'etf', 'invest', 'sebi'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

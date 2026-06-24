@@ -5471,6 +5471,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'relationship_ai') toggleTab('relationship_ai');
               else if (id === 'vehicle_ai') toggleTab('vehicle_ai');
               else if (id === 'stocks_ai') toggleTab('stocks_ai');
+              else if (id === 'techhelp_ai') toggleTab('techhelp_ai');
             }} />
           )}
 
@@ -5693,6 +5694,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'stocks_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.stocks_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'techhelp_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.techhelp_ai} userId={user?.uid} />
             </div>
           )}
 

@@ -417,3 +417,16 @@ mini/medium/max → thinking budget; (3) billing multiplier 5/10/20 (extends ONL
 UX: per-option label + estimated cost; 20x behind a confirm; default 5x. This is a P4 (Power
 mode) enhancement. ⚠️ The 10x/20x multipliers are NEW billing — gated on explicit admin sign-off
 (with P5). Build after sign-off.
+
+## §11.2 — Opus removed from NORMAL mode (admin decision, 2026-06-24)
+Admin confirmed: NORMAL mode (Power OFF) tops out at **Sonnet** — Opus is **POWER-only**.
+Normal ladder is now **Gemini → Haiku → Sonnet** (Sonnet is the ceiling/backstop). Rationale:
+(1) billing stays flat & predictable (Normal = Sonnet-equivalent × 2, no surprise Opus bill);
+(2) margin-safe — Sonnet-equivalent × 5 ≈ Opus real cost, so a normal-mode Opus would have been
+~break-even; (3) clean premium upsell (Opus = Power); (4) Sonnet handles 99% of normal requests.
+RequestAnalyser now caps normal-mode tier at Sonnet and, on `powerMode:true`, bypasses the ladder
+→ Opus 4.8 (no escalation). UX: when Sonnet's gate keeps failing on a genuinely complex request,
+SUGGEST "enable Power for Opus-grade" instead of silently spending more (high complexityScore is
+preserved for this). `opusNormalModel()` (4.7) is retired from the normal ladder; Power uses
+`opusModel()` (4.8). Billing rules (Normal Sonnet-equiv×2 / Power real-Opus×5) and the Power
+effort multiplier (flat 5× vs 5/10/20×) are P5 — still pending admin confirm before pricing.ts.

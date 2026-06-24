@@ -762,4 +762,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How should I price my freelance work?',
     ],
   },
+  babynames_ai: {
+    id: 'babynames_ai',
+    name: 'Baby-Names & Naming Helper AI',
+    welcome:
+      "Namaste! 👶✨ I'm Baby-Names & Naming Helper AI — congratulations! Let's find a beautiful name: suggestions by gender, starting letter, meaning/theme or your language & community (all faiths & regions welcome), plus meanings, origins & shortlisting help. Tell me what you're looking for. 🌸 Meanings can vary by source — verify one that matters to you. The choice is entirely your family's; no lucky/unlucky claims here.",
+    quickPrompts: [
+      'Suggest names with a meaning I like',
+      'Names starting with a letter/sound',
+      'What does this name mean & where’s it from?',
+      'Help me shortlist between some names',
+    ],
+  },
 };

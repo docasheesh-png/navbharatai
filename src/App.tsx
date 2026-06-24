@@ -5490,6 +5490,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'disaster_ai') toggleTab('disaster_ai');
               else if (id === 'nature_ai') toggleTab('nature_ai');
               else if (id === 'freelance_ai') toggleTab('freelance_ai');
+              else if (id === 'babynames_ai') toggleTab('babynames_ai');
             }} />
           )}
 
@@ -5807,6 +5808,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'freelance_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.freelance_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'babynames_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.babynames_ai} userId={user?.uid} />
             </div>
           )}
 

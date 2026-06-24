@@ -258,6 +258,16 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Section I #22 v2 (DX / hygiene) — .gitignore node_modules coverage.
+  Extended `ProjectHygieneAnalysis`: a `.gitignore` that EXISTS but does not actually
+  ignore `node_modules` is now flagged medium — otherwise node_modules gets committed
+  (huge, platform-specific binaries, breaks installs) even though the presence check
+  passed. Tolerant of the common forms (`node_modules`, `node_modules/`,
+  `/node_modules`, `**/node_modules`); a sub-path entry (`node_modules/.cache`) does
+  NOT count as covering the whole directory; backward-compatible (the check only runs
+  when the .gitignore body is available). The dispatcher now reads .gitignore once and
+  shares it between hygiene and the secret-leak pass (DRY). AppKnowledgeBase synced.
+  v3.0-only. Gate green: server+frontend tsc 0, 2053 vitest (+6), boot:check PASS.
 - 2026-06-24: Section I #9 v2 (Code quality / honest failures) — empty-catch detection.
   Added an `empty-catch` rule (low) to `AuthenticityAnalysis`: a `catch {}` / `catch
   (e) {}` / multiline-whitespace-only catch silently SWALLOWS the error — the app looks

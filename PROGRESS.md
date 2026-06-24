@@ -1554,3 +1554,28 @@ systemPrompt unchanged (it does not enumerate authenticity sub-checks).
 
 Tests: +4 in `AuthenticityAnalysis.test.ts`. Gate green: server+frontend tsc 0, 2047
 vitest, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #22 v2: .gitignore node_modules coverage (hygiene)
+
+Continuing the autonomous Section I march (each item: real → tested → gate-green →
+branch → PR → CI-green → squash-merge → deploy). New item:
+
+**Section I #22 v2 — `ProjectHygieneAnalysis` node_modules coverage.** The hygiene
+dimension previously only checked that a `.gitignore` EXISTS. Gap: a `.gitignore` that
+exists but forgot `node_modules` passes the presence check yet still commits
+node_modules (huge, platform-specific binaries, broken cross-platform installs). Now a
+`.gitignore` that exists but does not actually ignore node_modules is flagged medium.
+Tolerant of the common forms (`node_modules`, `node_modules/`, `/node_modules`,
+`**/node_modules`); a sub-path entry (`node_modules/.cache`) does NOT count as covering
+the whole directory. Backward-compatible: the new check only runs when the .gitignore
+body is passed (optional 3rd param), so existing 2-arg callers/tests are unaffected.
+
+Wiring: the dispatcher now reads `.gitignore` ONCE and shares the body between
+project-hygiene (node_modules coverage) and the secret-leak pass (.env coverage) — DRY,
+one fewer actuator read. AppKnowledgeBase hygiene entry synced; systemPrompt unchanged
+(no hygiene sub-check enumeration). v3.0-only, flag-OFF.
+
+Tests: +6 unit (`ProjectHygieneAnalysis.test.ts`) + 1 dispatcher integration (40→41).
+Gate green: server+frontend tsc 0, **2053 vitest** (+6), boot:check PASS.

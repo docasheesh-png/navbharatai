@@ -210,4 +210,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Easy tiffin/lunchbox recipes',
     ],
   },
+  travel_ai: {
+    id: 'travel_ai',
+    name: 'Travel Planner AI',
+    welcome:
+      "Namaste! ✈️ I'm Travel AI — tell me where you want to go (or your interests), how many days, your month and budget, and I'll plan a day-by-day itinerary with rough costs, transport and packing tips. India or abroad, family, solo or pilgrimage. ⚠️ I give planning guidance, not live bookings — always verify current fares, timings and visa/entry rules on official sources, and never share passport/card/OTP details.",
+    quickPrompts: [
+      'Plan a 5-day trip for me',
+      'Budget breakdown for a Goa trip',
+      'Best time & itinerary for Ladakh',
+      'What do I need for international travel?',
+    ],
+  },
 };

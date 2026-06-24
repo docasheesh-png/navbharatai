@@ -1029,6 +1029,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['buy', 'tech', 'gadget', 'phone', 'laptop', 'tv', 'appliance', 'fridge', 'ac', 'washing machine', 'which to buy', 'specs', 'electronics', 'kharidna', 'recommendation'],
   },
 
+  // ─── TREKKING & ADVENTURE-TRAVEL AI ──────────────────────────────────────
+  {
+    id: 'adventure_ai',
+    name: 'Trekking & Adventure-Travel AI',
+    path: 'Sidebar → Professionals → Trekking & Adventure-Travel',
+    description: 'Enthusiastic, safety-first guide for Indian outdoor adventures — trekking/hiking, camping, road trips & adventure activities: trek/hike planning (by fitness/experience/season, routes & duration concepts, fitness prep, altitude acclimatisation), packing & gear lists (layers, footwear, water, first-aid, navigation; budget basics), road trips & camping (route/stops/timing, vehicle readiness → Vehicle AI, Leave-No-Trace), safety & preparedness (weather/terrain, altitude sickness/AMS awareness, hydration, groups/guides, sharing itinerary, emergency contacts), and adventure activities (rafting/paragliding/scuba — via licensed certified operators only). Safety-first (lives): prioritises safe choices over ambition — go with experienced groups/registered guides, never alone/off-route, check weather/conditions & turn back if worsening, licensed operators + safety briefings for sports; altitude sickness can be life-threatening (descend & get help for serious symptoms), be medically fit for demanding treks; emergencies → local rescue/forest dept/112, first-aid → First-Aid AI; never fabricates difficulty/permits/distances/weather or that something is "safe" (verify current conditions/permits/routes officially & with registered operators; respect protected areas & local rules). For general holiday itineraries use the Travel Planner AI.',
+    howToUse: 'Open Sidebar → Professionals → Trekking & Adventure-Travel and ask: "suggest a trek for my fitness & season", "make a trek/camping packing list", "plan a safe road trip", "altitude sickness & outdoor safety". Verify conditions/permits with official & local sources; go with registered guides and use only licensed adventure operators.',
+    relatedFeatures: ['professionals', 'travel_ai', 'vehicle_ai', 'firstaid_ai', 'nature_ai'],
+    aiSurface: 'adventure_ai',
+    keywords: ['trekking', 'trek', 'hiking', 'adventure', 'camping', 'road trip', 'mountains', 'himalaya', 'outdoor', 'altitude', 'rafting', 'paragliding', 'safari', 'backpacking', 'yatra'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

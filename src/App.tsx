@@ -5455,6 +5455,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'homerepair_ai') toggleTab('homerepair_ai');
               else if (id === 'realestate_ai') toggleTab('realestate_ai');
               else if (id === 'driving_ai') toggleTab('driving_ai');
+              else if (id === 'petcare_ai') toggleTab('petcare_ai');
             }} />
           )}
 
@@ -5597,6 +5598,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'driving_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.driving_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'petcare_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.petcare_ai} userId={user?.uid} />
             </div>
           )}
 

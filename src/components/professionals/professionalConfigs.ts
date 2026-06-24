@@ -342,4 +342,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How do I check & pay an e-challan?',
     ],
   },
+  petcare_ai: {
+    id: 'petcare_ai',
+    name: 'Pet-Care / Dog-Training AI',
+    welcome:
+      "Namaste! 🐶🐱 I'm Pet-Care AI — your positive-training & care companion. I help with training (sit, potty, leash), behaviour (barking, chewing, anxiety), exercise & enrichment, grooming, and general feeding. Tell me about your pet. ⚠️ I'm not a vet — for illness, injury, vaccines or any health concern, please see a vet. I only use kind, reward-based methods — never punishment.",
+    quickPrompts: [
+      'How do I potty-train my puppy?',
+      'My dog barks/chews too much — help',
+      'Teach basic commands with rewards',
+      'What foods are unsafe for my pet?',
+    ],
+  },
 };

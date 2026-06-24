@@ -258,6 +258,12 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Section I #4 v10 (Security) — vanilla-DOM XSS sinks. Added an `unsafe-html-sink`
+  rule (medium) to `SecurityAnalysis`: assigning to `innerHTML`/`outerHTML` or using
+  `insertAdjacentHTML` injects raw HTML (XSS) — the existing rule only caught React's
+  `dangerouslySetInnerHTML`. High-precision: `=(?!=)` excludes ==/=== comparisons, empty-string
+  clears (`innerHTML = ''`) and reads are ignored. AppKnowledgeBase synced. v3.0-only. Gate
+  green: server+frontend tsc 0, 2157 vitest (+2), boot:check PASS.
 - 2026-06-24: Multi-Model Orchestration P3 — evaluate-gated escalation orchestrator. New
   `AgentV3/EscalationOrchestrator.ts` (PURE policy): `runWithEscalation(path, deps)` builds on
   the cheapest tier, runs the OBJECTIVE evaluate-gate, and climbs the path ONLY on failure —

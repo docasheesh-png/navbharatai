@@ -1932,3 +1932,18 @@ editing pricing.ts. Not built yet.
 
 Next: P4 (Power mode + effort selector, billing-gated) or P5 (billing, on confirm). Gate green:
 server+frontend tsc 0, **2154 vitest** (+7), boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 v10: vanilla-DOM XSS sinks (security)
+
+Resumed the Section I march (orchestration architecture done; money-phases await admin billing
+confirm). New item: `SecurityAnalysis` `unsafe-html-sink` rule (medium). Assigning to
+`innerHTML`/`outerHTML`, or calling `insertAdjacentHTML`, injects raw HTML → XSS — but the
+existing `dangerous-html` rule only caught React's `dangerouslySetInnerHTML`. Now the vanilla-DOM
+sinks are flagged too. High-precision: `=(?!=)` excludes ==/=== comparisons; empty-string clears
+(`el.innerHTML = ''`) and reads (`const h = el.innerHTML`) are ignored. Folds into the existing
+security dimension. AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit + 1 dispatcher integration. Gate green: server+frontend tsc 0, **2157 vitest**
+(+2), boot:check PASS.

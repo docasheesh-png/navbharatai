@@ -24,10 +24,30 @@ export interface HygieneReport {
 const base = (p: string): string => p.split('/').pop() || p;
 
 /**
- * Report missing project-hygiene files. PURE & deterministic. `files` is the real
- * file list; `hasPackageJson` is whether a package.json exists.
+ * Does a .gitignore actually ignore the given directory entry (e.g. 'node_modules')?
+ * Tolerant of the common forms: `node_modules`, `node_modules/`, `/node_modules`,
+ * `**​/node_modules`. Comment and blank lines are skipped; a sub-path entry
+ * (`node_modules/foo`) does NOT count as ignoring the whole directory.
  */
-export function analyzeProjectHygiene(files: string[], hasPackageJson: boolean): HygieneReport {
+function gitignoreCovers(content: string, entry: string): boolean {
+  return content.split(/\r?\n/).some((raw) => {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) return false;
+    const norm = line.replace(/^!/, '').replace(/^\/+/, '').replace(/^\*\*\//, '').replace(/\/+$/, '');
+    return norm === entry;
+  });
+}
+
+/**
+ * Report missing project-hygiene files. PURE & deterministic. `files` is the real
+ * file list; `hasPackageJson` is whether a package.json exists; `gitignoreContent`
+ * (optional) is the .gitignore body, used to check it actually covers node_modules.
+ */
+export function analyzeProjectHygiene(
+  files: string[],
+  hasPackageJson: boolean,
+  gitignoreContent?: string | null,
+): HygieneReport {
   const list = Array.isArray(files) ? files : [];
   const names = list.map(base);
   const usesTs = list.some((f) => /\.tsx?$/.test(f));
@@ -46,6 +66,11 @@ export function analyzeProjectHygiene(files: string[], hasPackageJson: boolean):
     findings.push({
       level: 'medium',
       message: 'No .gitignore — without it node_modules, build output and .env secrets can get committed. Add one.',
+    });
+  } else if (typeof gitignoreContent === 'string' && !gitignoreCovers(gitignoreContent, 'node_modules')) {
+    findings.push({
+      level: 'medium',
+      message: '.gitignore exists but does not ignore node_modules — it will be committed (huge, platform-specific, breaks installs). Add a node_modules/ line.',
     });
   }
   if (usesTs && !hasTsconfig) {

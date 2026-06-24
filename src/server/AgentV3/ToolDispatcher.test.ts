@@ -278,6 +278,15 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('Server port: ✓');
   });
 
+  it('flags a .gitignore that exists but does not cover node_modules', async () => {
+    const dd = makeDispatcher('ws-eval-hygiene-nm');
+    await write(dd, 'package.json', JSON.stringify({ scripts: { dev: 'vite' } }));
+    await write(dd, '.gitignore', 'dist/\n.env');
+    await write(dd, 'src/App.tsx', 'export const App = () => null;');
+    const out = await evalText(dd);
+    expect(out).toContain('does not ignore node_modules');
+  });
+
   it('flags runnability when there is no run script', async () => {
     const dd = makeDispatcher('ws-eval-run');
     await write(dd, 'package.json', JSON.stringify({ dependencies: { react: '^18' }, scripts: { lint: 'eslint .' } }));

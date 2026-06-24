@@ -566,10 +566,19 @@ export class ToolDispatcher {
           indexHtml = null; // no HTML entry (e.g. a pure API) — SEO is "not assessable"
         }
         const seo = analyzeSeo(indexHtml);
+        // Read .gitignore once — reused by both project-hygiene (does it cover
+        // node_modules?) and the secret-leak pass (does it cover .env?).
+        let gitignoreContent: string | null = null;
+        try {
+          gitignoreContent = await this.actuator.readFile(this.workspaceId, '.gitignore');
+        } catch {
+          gitignoreContent = null;
+        }
         // Best-effort project-hygiene pass (Section I #22): checks the REAL file list
-        // (from the shared snapshot) for .gitignore / tsconfig / lockfile.
+        // (from the shared snapshot) for .gitignore / tsconfig / lockfile, and whether
+        // an existing .gitignore actually covers node_modules.
         const hygieneFiles = snap.files;
-        const hygiene = analyzeProjectHygiene(hygieneFiles, pkgForRun !== null);
+        const hygiene = analyzeProjectHygiene(hygieneFiles, pkgForRun !== null, gitignoreContent);
         // Best-effort error-boundary pass (Section I #5): a real React app with no
         // error boundary white-screens on any render error. Never throws.
         const errorBoundary = analyzeErrorBoundary(
@@ -579,12 +588,6 @@ export class ToolDispatcher {
         // Best-effort security-config pass (Section I #4): insecure TLS/CORS config.
         const securityConfig = this.collectSecurityConfigIssues(snap.sources);
         // Best-effort secret-leak pass (Section I #4): a real .env not gitignored.
-        let gitignoreContent: string | null = null;
-        try {
-          gitignoreContent = await this.actuator.readFile(this.workspaceId, '.gitignore');
-        } catch {
-          gitignoreContent = null;
-        }
         const secretLeak = analyzeSecretLeak(hygieneFiles, gitignoreContent);
         // Best-effort hardcoded-URL pass (Section I #11): localhost baked into code.
         const hardcodedUrls = this.collectHardcodedUrlIssues(snap.sources);

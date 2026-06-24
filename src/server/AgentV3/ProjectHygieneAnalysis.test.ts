@@ -41,6 +41,37 @@ describe('analyzeProjectHygiene', () => {
     const r = analyzeProjectHygiene(['repo/src/App.tsx', 'repo/.gitignore', 'repo/tsconfig.json', 'repo/package.json', 'repo/yarn.lock'], true);
     expect(r.findings).toHaveLength(0);
   });
+
+  const wellSetUp = ['src/App.tsx', '.gitignore', 'tsconfig.json', 'package.json', 'package-lock.json'];
+
+  it('flags a .gitignore that exists but does not cover node_modules', () => {
+    const r = analyzeProjectHygiene(wellSetUp, true, 'dist/\n.env\n*.log');
+    expect(r.findings.some((f) => f.level === 'medium' && /does not ignore node_modules/.test(f.message))).toBe(true);
+  });
+
+  it('does NOT flag node_modules when the .gitignore covers it (various forms)', () => {
+    for (const body of ['node_modules', 'node_modules/', '/node_modules', '**/node_modules', 'dist/\n# deps\nnode_modules/\n']) {
+      const r = analyzeProjectHygiene(wellSetUp, true, body);
+      expect(r.findings.some((f) => /node_modules/.test(f.message))).toBe(false);
+    }
+  });
+
+  it('treats a node_modules sub-path entry as NOT covering the whole directory', () => {
+    const r = analyzeProjectHygiene(wellSetUp, true, 'node_modules/.cache');
+    expect(r.findings.some((f) => /does not ignore node_modules/.test(f.message))).toBe(true);
+  });
+
+  it('skips the node_modules coverage check when gitignore content is not provided', () => {
+    const r = analyzeProjectHygiene(wellSetUp, true);
+    expect(r.findings.some((f) => /node_modules/.test(f.message))).toBe(false);
+  });
+
+  it('does not double-report: missing .gitignore takes priority over coverage', () => {
+    const r = analyzeProjectHygiene(['src/App.tsx', 'tsconfig.json', 'package.json', 'package-lock.json'], true, null);
+    const gitignoreFindings = r.findings.filter((f) => /\.gitignore/.test(f.message) || /node_modules/.test(f.message));
+    expect(gitignoreFindings).toHaveLength(1);
+    expect(gitignoreFindings[0].message).toMatch(/No \.gitignore/);
+  });
 });
 
 describe('projectHygieneSummary', () => {

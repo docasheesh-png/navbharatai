@@ -360,8 +360,14 @@ export function registerAgentV3Routes(app: Express): void {
       } catch { /* best-effort — a bad file never blocks the turn */ }
     }
 
-    const isPlainChatTurn =
-      classifyIntent(prompt) === 'chat' && planFirst === false;
+    // A clearly-conversational turn (greeting, thanks, small-talk) has NOTHING to
+    // plan, so it takes the cheap chat path EVEN when plan-mode is on. classifyIntent
+    // is conservative (defaults to 'build' on any doubt), so a real build request is
+    // unaffected. This keeps a "hi" cheap AND avoids running the heavy build loop
+    // (E2B sandbox + Claude) for small-talk — that heavy path sat silent during
+    // sandbox setup and could reset the stream on Cloud Run / mobile Safari ("Load
+    // failed") instead of just replying.
+    const isPlainChatTurn = classifyIntent(prompt) === 'chat';
     if (isPlainChatTurn) {
       try {
         const chatRouter = AIRouterManager.getRouter('free');
@@ -418,6 +424,11 @@ export function registerAgentV3Routes(app: Express): void {
       // to build. This is what makes v3.0 conversational like Claude Code.
       let git: GitManager | undefined;
       try {
+        // Emit an immediate status so the NDJSON stream is never silent while the
+        // sandbox is being created (E2B VM setup can take several seconds). A long
+        // silent gap after the headers is what trips Cloud Run / mobile-Safari
+        // request timeouts and surfaces as a bare "Load failed" on the client.
+        events.emit({ type: 'narration', agent: 'architect', text: 'Setting up your workspace…', ts: Date.now() });
         await actuator.ensureWorkspace(workspaceId, 'react');
         // Real git repo → real checkpoints/History/restore (best-effort on
         // sandboxes without a shell).

@@ -2127,3 +2127,35 @@ So the backend round-trip is ready: fetch (existing /api/github/fetch) → impor
 → collect (new) → push/deploy (existing /api/github/push-enhanced + /api/pro/deploy). NEXT
 (increment 3, frontend): expose ALL options in the v3.0 panel. Tests: WorkspaceFiles.test.ts now 9.
 Gate green: server tsc 0, **2190 vitest** (+4), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — FIX: v3.0 "Load failed" on a plain "hi" (heavy build path + silent stream)
+
+Admin reported (live screenshot) that sending "hi" in v3.0 on navbharatai.com shows a red
+"Load failed". Diagnosis (grounded in code, not guessed):
+- `useAgentV3Build.ts:160` surfaces a network-level fetch failure as its message → Safari's
+  `TypeError: Load failed`. A clean 4xx/5xx is handled separately (shows the JSON error), so
+  "Load failed" specifically means the streaming connection reset / idle-timed-out with no
+  complete response.
+- Root cause: the cheap-chat cost-routing gate was `classifyIntent==='chat' && planFirst===false`,
+  but plan-mode defaults ON — so even a greeting fell through to the FULL build loop. That path
+  sits SILENT from `res.flushHeaders()` until the E2B sandbox finishes creating (`workspace`
+  event), a multi-second gap with no bytes sent → Cloud Run / mobile-Safari reset the stream →
+  "Load failed". (The build try/catch emits a visible `error` event, so a normal throw would NOT
+  look like "Load failed" — confirming it's a connection reset, i.e. the silent gap.)
+
+Two safe, clearly-correct fixes (v3.0 route only, flag-OFF feature):
+1. `isPlainChatTurn = classifyIntent(prompt) === 'chat'` — a conversational turn has nothing to
+   plan, so it takes the cheap path even when plan-mode is on. classifyIntent is conservative
+   (defaults to 'build' on doubt), so real build requests are unaffected. "hi" now gets a fast
+   cheap reply and never spins up a sandbox.
+2. Emit an immediate "Setting up your workspace…" narration BEFORE `ensureWorkspace`, so the build
+   stream is never silent during sandbox setup (prevents the idle-timeout "Load failed" on real
+   builds too).
+
+HONEST status: I cannot reproduce the live failure (no gcloud, proxy blocks the live domain), so
+this is my best-confidence fix addressing the most likely cause. Definitive confirmation needs the
+Cloud Run log error for that request, or a post-deploy test. On the branch only — live (e0d3ab4)
+is untouched until verified + merged. Gate green: server tsc 0, **2190 vitest**, build PASS,
+boot:check PASS.

@@ -325,6 +325,13 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('dynamic-function');
   });
 
+  it('flags an unsafe innerHTML assignment (XSS sink)', async () => {
+    const dd = makeDispatcher('ws-eval-xss');
+    await write(dd, 'src/ui.ts', 'export const render = (el, data) => { el.innerHTML = data; };');
+    const out = await evalText(dd);
+    expect(out).toContain('unsafe-html-sink');
+  });
+
   it('flags a forEach(async …) loop that does not await', async () => {
     const dd = makeDispatcher('ws-eval-async');
     await write(dd, 'src/sync.ts', 'export const run = (items) => items.forEach(async (it) => { await save(it); });');

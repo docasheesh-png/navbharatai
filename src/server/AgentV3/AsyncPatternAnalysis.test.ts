@@ -25,9 +25,19 @@ describe('scanAsyncPatterns', () => {
     expect(scanAsyncPatterns('a.ts', 'await Promise.all(items.map(async (x) => save(x)));')).toEqual([]);
   });
 
+  it('flags a new Promise(async …) executor (errors are swallowed) but not the sync form', () => {
+    expect(scanAsyncPatterns('a.ts', 'return new Promise(async (resolve) => { resolve(await f()); });')[0])
+      .toMatchObject({ kind: 'new-promise-async', line: 1 });
+    expect(scanAsyncPatterns('a.ts', 'const p = new Promise<string>(async (resolve, reject) => {});')[0]?.kind)
+      .toBe('new-promise-async');
+    // Safe: a normal (synchronous) executor is not flagged.
+    expect(scanAsyncPatterns('a.ts', 'const p = new Promise((resolve) => setTimeout(resolve, 10));')).toEqual([]);
+  });
+
   it('ignores comments and non-code files', () => {
     expect(scanAsyncPatterns('a.ts', '// items.forEach(async (x) => await f(x))')).toEqual([]);
     expect(scanAsyncPatterns('README.md', 'items.forEach(async (x) => await f(x))')).toEqual([]);
+    expect(scanAsyncPatterns('a.ts', '// new Promise(async (r) => r())')).toEqual([]);
   });
 });
 

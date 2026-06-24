@@ -16,6 +16,16 @@ export interface AsyncPatternIssue {
 const CODE_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
 // `.forEach(async ...)` — an async callback passed to forEach (arrow or function form).
 const FOREACH_ASYNC_RE = /\.forEach\s*\(\s*async\b/;
+// `new Promise(async ...)` — an async executor. If it throws, the promise never
+// rejects (the throw becomes an unhandled rejection) and resolve/reject do not see
+// the error — a classic, silent correctness bug.
+const NEW_PROMISE_ASYNC_RE = /\bnew\s+Promise\s*(<[^>]*>)?\s*\(\s*async\b/;
+
+/** Human-readable fix guidance per footgun kind. */
+const FIX: Record<string, string> = {
+  'async-foreach': 'forEach(async …) → use for...of with await, or await Promise.all(arr.map(...)).',
+  'new-promise-async': 'new Promise(async …) → the async executor\'s errors are swallowed (the promise never rejects); do the async work before the Promise, or call resolve/reject from .then/.catch.',
+};
 
 /** Scan one file for async-pattern footguns. PURE. */
 export function scanAsyncPatterns(file: string, content: string): AsyncPatternIssue[] {
@@ -28,16 +38,19 @@ export function scanAsyncPatterns(file: string, content: string): AsyncPatternIs
     if (FOREACH_ASYNC_RE.test(line)) {
       issues.push({ file, line: i + 1, kind: 'async-foreach' });
     }
+    if (NEW_PROMISE_ASYNC_RE.test(line)) {
+      issues.push({ file, line: i + 1, kind: 'new-promise-async' });
+    }
   }
   return issues;
 }
 
 /** A short, honest async-pattern block for the `evaluate` output. */
 export function asyncPatternSummary(issues: AsyncPatternIssue[]): string {
-  if (issues.length === 0) return 'Async patterns: ✓ no await-in-forEach footguns.';
-  const head = `Async patterns — ${issues.length} forEach(async …) (the loop does not await; errors are swallowed):`;
+  if (issues.length === 0) return 'Async patterns: ✓ no async footguns (await-in-forEach / async Promise executor).';
+  const head = `Async patterns — ${issues.length} footgun(s) (the loop does not await / the executor swallows errors):`;
   const body = issues
     .slice(0, 10)
-    .map((x) => `  ⚠ ${x.file}:${x.line} — forEach(async …) → use for...of with await, or await Promise.all(arr.map(...)).`);
+    .map((x) => `  ⚠ ${x.file}:${x.line} — ${FIX[x.kind] ?? x.kind}`);
   return [head, ...body].join('\n');
 }

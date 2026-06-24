@@ -2219,3 +2219,19 @@ Folds into the existing security dimension. AppKnowledgeBase synced. v3.0-only, 
 
 Tests: +1 unit (4 token formats flagged; env/placeholder/URL safe) + 1 dispatcher integration.
 Gate green: server+frontend tsc 0, **2193 vitest** (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #6 v3: new Promise(async …) executor (correctness)
+
+Continuing the autonomous Section I march — varying from the security run back into a correctness
+check. New item: `AsyncPatternAnalysis` `new-promise-async` kind (joins `async-foreach`). A
+`new Promise(async (resolve, reject) => …)` executor is a classic silent bug: if the async executor
+throws, the promise NEVER rejects (the throw becomes an unhandled rejection) and resolve/reject never
+see the error — the code "compiles" but errors vanish at runtime, directly against "the app must
+never break". High-precision regex (`new Promise(<generics>)?(  async`), comments skipped, the
+synchronous executor form is NOT flagged. The scanner + summary are now multi-kind with per-kind fix
+guidance. AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (async executor flagged, sync form safe, comment ignored) + 1 dispatcher integration.
+Gate green: server+frontend tsc 0, **2195 vitest** (+2), build PASS, boot:check PASS.

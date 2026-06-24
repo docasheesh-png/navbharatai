@@ -377,6 +377,13 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('Promise.all');
   });
 
+  it('flags a new Promise(async …) executor that swallows errors', async () => {
+    const dd = makeDispatcher('ws-eval-promexec');
+    await write(dd, 'src/p.ts', 'export const go = () => new Promise(async (resolve) => { resolve(await fetchData()); });');
+    const out = await evalText(dd);
+    expect(out).toContain('async executor');
+  });
+
   it('flags command injection from a dynamically-built shell command', async () => {
     const dd = makeDispatcher('ws-eval-cmdinj');
     await write(dd, 'src/run.ts', 'import { execSync } from "child_process";\nexport const go = (dir) => execSync(`rm -rf ${dir}`);');

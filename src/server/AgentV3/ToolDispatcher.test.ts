@@ -386,3 +386,31 @@ describe('ToolDispatcher — evaluate integration (more dimensions + generators)
     expect(env).toContain('SECRET_KEY=');
   });
 });
+
+describe('ToolDispatcher — evaluate integration (compliance + env vars)', () => {
+  function makeDispatcher(ws: string): ToolDispatcher {
+    const a = new FakeActuator();
+    const s = new AgentEventStream();
+    return new ToolDispatcher(a, ws, new WorkspaceState(s), s);
+  }
+  const evalText = async (dd: ToolDispatcher): Promise<string> =>
+    (await dd.dispatch(call('evaluate', {}))).content;
+  const write = (dd: ToolDispatcher, path: string, content: string) =>
+    dd.dispatch(call('write_file', { path, content }));
+
+  it('flags secrets/PII written to logs (compliance) and blocks readiness', async () => {
+    const dd = makeDispatcher('ws-eval-comp');
+    await write(dd, 'src/auth.ts', "console.log('user password is', password);");
+    const out = await evalText(dd);
+    expect(out.toLowerCase()).toContain('compliance');
+    expect(out).toContain('NOT READY');
+  });
+
+  it('flags an undocumented env var read in code', async () => {
+    const dd = makeDispatcher('ws-eval-env');
+    await write(dd, 'src/config.ts', 'export const k = process.env.MISSING_SECRET_TOKEN;');
+    const out = await evalText(dd);
+    expect(out).toContain('Env var check');
+    expect(out).toContain('MISSING_SECRET_TOKEN');
+  });
+});

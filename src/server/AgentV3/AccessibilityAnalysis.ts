@@ -132,6 +132,18 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
       if (name === 'a' && !hasAttr(tag, 'href')) {
         push('anchor-missing-href', 'low');
       }
+
+      // ── medium: aria-hidden="true" on an interactive element (WCAG 4.1.2) ─────
+      // The element stays focusable but is hidden from assistive tech — a keyboard
+      // user tabs to a control a screen reader never announces (a "ghost" focus
+      // trap). Buttons, links with href, and form controls are interactive.
+      if (
+        (name === 'button' || name === 'select' || name === 'textarea' ||
+          (name === 'a' && hasAttr(tag, 'href')) || name === 'input') &&
+        /\baria-hidden\s*=\s*['"{]?\s*true\b/i.test(tag)
+      ) {
+        push('aria-hidden-interactive', 'medium');
+      }
     }
 
     // ── low: <button> with no accessible name (e.g. an icon-only button) ───────

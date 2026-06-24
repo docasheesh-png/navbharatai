@@ -35,6 +35,16 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('src/Nav.tsx', '<a><svg /></a>').some((x) => x.kind === 'link-no-accessible-name')).toBe(false);
   });
 
+  it('flags aria-hidden="true" on an interactive element (focusable but hidden from AT)', () => {
+    expect(scanAccessibility('src/B.tsx', '<button aria-hidden="true" onClick={go}>X</button>').some((x) => x.kind === 'aria-hidden-interactive')).toBe(true);
+    expect(scanAccessibility('src/B.tsx', '<a href="/x" aria-hidden="true">link</a>').some((x) => x.kind === 'aria-hidden-interactive')).toBe(true);
+    expect(scanAccessibility('src/B.tsx', '<input type="text" aria-hidden="true" aria-label="x" />').some((x) => x.kind === 'aria-hidden-interactive')).toBe(true);
+    // aria-hidden on a non-interactive decorative element (e.g. an icon) is fine.
+    expect(scanAccessibility('src/B.tsx', '<span aria-hidden="true">★</span>').some((x) => x.kind === 'aria-hidden-interactive')).toBe(false);
+    // a button without aria-hidden is fine.
+    expect(scanAccessibility('src/B.tsx', '<button onClick={go}>Save</button>').some((x) => x.kind === 'aria-hidden-interactive')).toBe(false);
+  });
+
   it('flags <iframe> without a title (medium) but not one with title or aria-label', () => {
     const issues = scanAccessibility('src/Embed.tsx', '<iframe src="https://x.com/v" />');
     expect(issues.some((x) => x.kind === 'iframe-missing-title' && x.severity === 'medium')).toBe(true);

@@ -198,4 +198,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Term plan vs LIC endowment — which is better?',
     ],
   },
+  chef_ai: {
+    id: 'chef_ai',
+    name: 'Chef / Recipe AI',
+    welcome:
+      "Namaste! 👨‍🍳 I'm Chef AI — tell me what's in your kitchen or what you're craving and I'll give you a clear step-by-step recipe. Indian or world dishes, veg or non-veg, quick tiffin or festive feast — I can adapt it lighter, Jain (no onion-garlic), or milder/spicier. I'll also help fix a dish that went too salty/spicy/watery. What are we cooking today?",
+    quickPrompts: [
+      'What can I make with these ingredients?',
+      'A quick 15-minute dinner idea',
+      'My curry is too salty — how to fix it?',
+      'Easy tiffin/lunchbox recipes',
+    ],
+  },
 };

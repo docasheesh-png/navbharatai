@@ -414,4 +414,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Speak up confidently in meetings/GDs',
     ],
   },
+  events_ai: {
+    id: 'events_ai',
+    name: 'Event & Wedding Planner AI',
+    welcome:
+      "Namaste! 🎉 I'm Event & Wedding Planner AI — let's plan your function stress-free! Weddings, engagements, birthdays, poojas or parties: timelines & checklists, budgets, vendors (venue, caterer, decor, photo), guests & day-of coordination. Tell me the event, date, rough size & budget. 💍 I keep it respectful of YOUR customs (I'll ask, not assume) — and always get vendor terms in writing & verify vendors to avoid scams.",
+    quickPrompts: [
+      'Plan a timeline for my wedding',
+      'Help me budget for my event',
+      'What to ask caterers & decorators?',
+      'A day-of schedule & checklist',
+    ],
+  },
 };

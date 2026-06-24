@@ -460,6 +460,7 @@ declare module 'lucide-react' {
   export const Car: Icon;
   export const Dog: Icon;
   export const Gem: Icon;
+  export const PartyPopper: Icon;
   export const PlayCircle: Icon;
   export const Hash: Icon;
   export const AtSign: Icon;

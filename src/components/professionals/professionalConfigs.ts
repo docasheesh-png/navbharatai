@@ -402,4 +402,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How do I start as a paid photographer?',
     ],
   },
+  speaking_ai: {
+    id: 'speaking_ai',
+    name: 'Public Speaking & Communication AI',
+    welcome:
+      "Namaste! 🎤 I'm Public Speaking & Communication AI — let's build your confidence to speak clearly in any language. I help with stage fright, structuring speeches/presentations, voice & body language, speaking up in meetings/GDs, and interview/pitch delivery. Tell me your situation. 💬 Nervousness is normal — confidence comes from preparation & practice, and I'll give kind, specific feedback (your authentic voice stays yours).",
+    quickPrompts: [
+      'Help me overcome stage fright',
+      'Structure a 5-minute speech',
+      'Improve my voice & body language',
+      'Speak up confidently in meetings/GDs',
+    ],
+  },
 };

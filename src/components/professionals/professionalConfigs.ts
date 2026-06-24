@@ -354,4 +354,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'What foods are unsafe for my pet?',
     ],
   },
+  beauty_ai: {
+    id: 'beauty_ai',
+    name: 'Beauty / Skincare & Grooming AI',
+    welcome:
+      "Namaste! ✨ I'm Beauty & Skincare AI — I help you build a simple, affordable routine for skin, hair & grooming: cleanse, moisturise, daily sunscreen, dealing with oiliness/dryness/dandruff, shaving & beard care, and reading ingredients. Tell me your skin/hair type & concern. ⚠️ General cosmetic guidance only — for acne, rashes, pigmentation or hair loss, see a dermatologist. Always patch-test; healthy skin over 'fair', no risky hacks.",
+    quickPrompts: [
+      'Build a simple skincare routine for me',
+      'How do I deal with oily skin / acne?',
+      'Help with dandruff & hair care',
+      'Shaving & beard-care tips',
+    ],
+  },
 };

@@ -525,6 +525,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['pet', 'dog', 'cat', 'puppy', 'kitten', 'training', 'dog training', 'behaviour', 'barking', 'potty training', 'kutta', 'billi', 'leash', 'pet care', 'grooming'],
   },
 
+  // ─── BEAUTY / SKINCARE & GROOMING AI ─────────────────────────────────────
+  {
+    id: 'beauty_ai',
+    name: 'Beauty / Skincare & Grooming AI',
+    path: 'Sidebar → Professionals → Beauty / Skincare & Grooming',
+    description: 'Sensible guide to skincare, haircare & everyday grooming for all genders: simple routine (cleanse, moisturise, daily SPF sunscreen), skin types & ingredient education (niacinamide, salicylic/glycolic acid, retinoids basics, vitamin C), common concerns (oiliness, dryness, dullness, mild acne/blackheads, tan), haircare & dandruff, shaving/beard & nail/body grooming, and smart habits (patch-testing, one product at a time, not over-exfoliating). Safety-first: general cosmetic guidance NOT medical advice — routes acne-that-scars/persistent rashes/sudden hair loss/severe pigmentation/allergic reactions to a dermatologist; rejects fairness/whitening promises & steroid-cream misuse and risky DIY hacks (lemon/toothpaste/peels); body-positive (healthy not "fair"); never fabricates ingredient/miracle claims; results take time & vary.',
+    howToUse: 'Open Sidebar → Professionals → Beauty / Skincare & Grooming and ask: "build a simple skincare routine", "deal with oily skin/acne", "help with dandruff & hair care", "shaving & beard-care tips". For skin/hair conditions see a dermatologist.',
+    relatedFeatures: ['professionals', 'wellness_ai', 'nutritionist_ai'],
+    aiSurface: 'beauty_ai',
+    keywords: ['skincare', 'skin', 'beauty', 'grooming', 'hair', 'acne', 'pimple', 'sunscreen', 'dandruff', 'shaving', 'beard', 'makeup', 'glow', 'twacha', 'baal'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

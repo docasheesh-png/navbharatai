@@ -1662,3 +1662,31 @@ Tests: new `ViteEnvAnalysis.test.ts` (9) + 2 dispatcher integration cases (flags
 non-VITE_ ref; skips when envPrefix is customised) — dispatcher suite 43→45.
 
 Gate green: server+frontend tsc 0, **2070 vitest** (+11), boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 v7: real secrets in committed env templates (security)
+
+Continuing the autonomous Section I march. New item:
+
+**Section I #4 v7 — `EnvSecretValueAnalysis`.** A `.env.example`/`.sample`/`.template`
+is COMMITTED and must contain placeholders only; a real key left inside one (a common
+copy-paste slip) is a permanent git-history leak. The source-code secret scan misses this
+— it matches quoted assignments in code, not `KEY=sk-realkey` env-file lines. The new PURE
+scanner flags template VALUES that match a distinctive real-secret format: OpenAI/Anthropic
+`sk-…`, Stripe `[rs]k_live_…`, AWS `AKIA…`, GitHub `gh[posru]_…`, xAI `xai-…`, Google
+`AIza…`, Slack `xox[baprs]-…`, and JWTs.
+
+High-precision by design:
+- The value must match a real key shape AND not be a placeholder (the `your-…` / `<…>` /
+  `xxx` / `example` / `changeme` / `redacted` / `...` guard). Note: AWS's documented EXAMPLE
+  key (AKIAIOSFODNN7EXAMPLE) is correctly treated as a placeholder (it contains "EXAMPLE").
+- Only scans env-TEMPLATE files; a real secret-bearing `.env` is handled separately by the
+  secret-leak (not-gitignored) check, and code files by SecurityAnalysis.
+
+Wired into `evaluate`: best-effort read of the three template names, scanned and appended to
+the verdict, with a HIGH readiness blocker (a committed live secret must force NOT READY).
+systemPrompt + AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: new `EnvSecretValueAnalysis.test.ts` (7) + 2 dispatcher integration cases (45→47).
+Gate green: server+frontend tsc 0, **2079 vitest** (+9), boot:check PASS.

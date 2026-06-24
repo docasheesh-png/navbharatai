@@ -334,6 +334,22 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('Vite client env: ✓');
   });
 
+  it('flags a real secret committed in .env.example and blocks readiness', async () => {
+    const dd = makeDispatcher('ws-eval-envtpl');
+    await write(dd, '.env.example', 'OPENAI_API_KEY=sk-proj-AbCdEf0123456789ghIJklMNop');
+    await write(dd, 'src/App.tsx', 'export const App = () => null;');
+    const out = await evalText(dd);
+    expect(out).toContain('REAL secret value');
+    expect(out).toContain('NOT READY');
+  });
+
+  it('passes the env-template check when .env.example holds only placeholders', async () => {
+    const dd = makeDispatcher('ws-eval-envtpl-ok');
+    await write(dd, '.env.example', 'OPENAI_API_KEY=your-key-here\nDATABASE_URL=postgres://user:pass@host/db');
+    const out = await evalText(dd);
+    expect(out).toContain('Env template secrets: ✓');
+  });
+
   it('flags insecure security config (disabled TLS verification)', async () => {
     const dd = makeDispatcher('ws-eval-sec');
     await write(dd, 'src/http.ts', 'const agent = new Agent({ rejectUnauthorized: false });');

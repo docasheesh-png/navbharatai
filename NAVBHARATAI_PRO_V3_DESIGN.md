@@ -403,3 +403,17 @@ workers), UserCostStore (cost tracking), ONLY_OPUS_MULTIPLIER (Power ×5 billing
 All new runners/adapters live under `src/server/AgentV3/providers/`, import only
 ClaudeClient TYPES, and stay OFF the default path (Claude primary in routes/agentv3.ts)
 until P8 live-verification. No live behaviour changes before then.
+
+## §11.1 — Power-mode effort selector (admin-directed, 2026-06-24)
+When the user ticks POWER (Opus 4.8 only), reveal a 5x / 10x / 20x selector near the chat
+input that maps to Opus 4.8 reasoning EFFORT and the billing multiplier:
+- **5x → mini effort** (Power default — fast, least thinking)
+- **10x → medium effort** (deeper reasoning)
+- **20x → max effort** (deepest — architecture/critical)
+Effort = Opus 4.8 thinking/reasoning budget, so higher effort = genuinely higher real cost →
+the 10x/20x multipliers are honest (margin preserved). Pieces: (1) AgentV3Panel reveals the
+selector on Power tick; (2) ClaudeClient `thinking:boolean` extended to an effort level
+mini/medium/max → thinking budget; (3) billing multiplier 5/10/20 (extends ONLY_OPUS_MULTIPLIER).
+UX: per-option label + estimated cost; 20x behind a confirm; default 5x. This is a P4 (Power
+mode) enhancement. ⚠️ The 10x/20x multipliers are NEW billing — gated on explicit admin sign-off
+(with P5). Build after sign-off.

@@ -2030,3 +2030,27 @@ flag-OFF.
 Tests: +1 unit (interpolation/concat flagged; parameterised/static/literal-join safe) + 1
 dispatcher integration. Gate green: server+frontend tsc 0, **2172 vitest** (+2), build PASS,
 boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 v12: hardcoded Authorization Bearer/Basic header (security)
+
+Continuing the autonomous Section I march. New item: `SecurityAnalysis` `hardcoded-auth-header`
+rule (high). An `Authorization` header set to a literal `Bearer <token>` / `Basic <creds>` is a
+committed API/access credential — but the assignment-based `hardcoded-secret` rule misses it (its
+key-set has no "Authorization", and the value form is a header, not a `key = '…'` assignment).
+High-precision: requires the literal to actually start with `Bearer`/`Basic` + 8+ chars; the
+PLACEHOLDER ignore excludes the correct env form (`Bearer ${token}`) and obvious placeholders
+(`Bearer YOUR_TOKEN_HERE`). An optional quote after the key name handles both `Authorization:`
+and `"Authorization":` shapes. Folds into the existing security dimension. AppKnowledgeBase
+synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (Bearer/Basic literal flagged; env form + placeholder safe) + 1 dispatcher
+integration. Gate green: server+frontend tsc 0, **2174 vitest** (+2), build PASS, boot:check PASS.
+
+Also this session: §12 of NAVBHARATAI_PRO_V3_DESIGN.md — the mitrify.xyz app-hosting decision
+(admin 2026-06-24): mitrify = preview+deploy by default, demoted to preview-only once the user
+connects their own domain. DESIGN LOCKED but BUILD GATED — the E2B↔mitrify link mechanism is
+unconfirmed, so no preview/deploy URL change ships until the admin verifies it (real format, never
+a guess). Audited ground truth: cloudflare.ts already uses mitrify.xyz as the Cloudflare-SaaS zone;
+no hostname→app serving layer exists yet; v3.0 preview still returns raw *.e2b.app.

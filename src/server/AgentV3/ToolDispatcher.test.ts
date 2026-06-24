@@ -339,6 +339,13 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('sql-injection');
   });
 
+  it('flags a hardcoded Authorization Bearer header', async () => {
+    const dd = makeDispatcher('ws-eval-authhdr');
+    await write(dd, 'src/api.ts', "export const call = () => fetch('/x', { headers: { Authorization: 'Bearer sk_live_abc123def456' } });");
+    const out = await evalText(dd);
+    expect(out).toContain('hardcoded-auth-header');
+  });
+
   it('flags a forEach(async …) loop that does not await', async () => {
     const dd = makeDispatcher('ws-eval-async');
     await write(dd, 'src/sync.ts', 'export const run = (items) => items.forEach(async (it) => { await save(it); });');

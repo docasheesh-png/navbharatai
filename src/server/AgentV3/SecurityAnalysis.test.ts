@@ -97,6 +97,14 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'db.query("SELECT id FROM " + "users");').some((f) => f.rule === 'sql-injection')).toBe(false);
   });
 
+  it('flags a hardcoded Authorization Bearer/Basic header but not the env form', () => {
+    expect(scanSecurity('a.ts', "fetch(u, { headers: { Authorization: 'Bearer eyJhbGciOiJIUzI1NiJ9' } });").some((f) => f.rule === 'hardcoded-auth-header')).toBe(true);
+    expect(scanSecurity('a.ts', 'const h = { "Authorization": "Basic dXNlcjpwYXNzd29yZA==" };').some((f) => f.rule === 'hardcoded-auth-header')).toBe(true);
+    // Safe: env-injected token and placeholders are not flagged.
+    expect(scanSecurity('a.ts', 'const h = { Authorization: `Bearer ${token}` };').some((f) => f.rule === 'hardcoded-auth-header')).toBe(false);
+    expect(scanSecurity('a.ts', "const h = { Authorization: 'Bearer YOUR_TOKEN_HERE' };").some((f) => f.rule === 'hardcoded-auth-header')).toBe(false);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

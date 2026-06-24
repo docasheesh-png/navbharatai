@@ -124,6 +124,17 @@ const RULES: Rule[] = [
     message: 'SQL query built from interpolated/concatenated input — this enables SQL injection; use parameterised queries (placeholders + a values array) instead.',
   },
   {
+    rule: 'hardcoded-auth-header',
+    severity: 'high',
+    // An Authorization header set to a literal `Bearer <token>` / `Basic <creds>` — a
+    // hardcoded API/access credential the assignment-based hardcoded-secret rule misses
+    // (its key-set has no "Authorization"). The PLACEHOLDER ignore excludes the correct
+    // env form (`Bearer ${token}`) and obvious placeholders.
+    re: /\bauthorization\b['"`]?\s*[:=]\s*(['"`])\s*(?:bearer|basic)\s+[^'"`]{8,}\1/i,
+    message: 'Hardcoded Authorization credential (Bearer/Basic literal) — load the token from an environment variable instead of committing it.',
+    ignore: (_m, line) => PLACEHOLDER.test(line),
+  },
+  {
     rule: 'insecure-http',
     severity: 'low',
     re: /['"`]http:\/\/(?!localhost|127\.0\.0\.1)[^'"`]+['"`]/,

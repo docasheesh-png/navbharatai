@@ -678,4 +678,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Thinking through what’s the right thing to do',
     ],
   },
+  crafts_ai: {
+    id: 'crafts_ai',
+    name: 'DIY Crafts & Hobbies AI',
+    welcome:
+      "Namaste! 🎨 I'm DIY Crafts & Hobbies AI — let's make something fun! Step-by-step craft projects (paper, painting, knitting, jewellery, clay), festive DIY (rangoli, diyas, cards), budget upcycling, kids' crafts & school projects, and starting creative hobbies — all with affordable materials. Tell me your idea, materials or occasion. ✂️ Craft safely (mind sharp tools, hot glue, chemicals & supervise kids) — and remember, there's no 'wrong' art!",
+    quickPrompts: [
+      'Give me a fun beginner craft project',
+      'Festive DIY decoration ideas',
+      'Upcycle something I have at home',
+      'Easy & safe craft for kids',
+    ],
+  },
 };

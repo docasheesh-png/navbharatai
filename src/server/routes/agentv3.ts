@@ -45,6 +45,9 @@ import { buildDocumentContext } from '../lib/attachmentText';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
+import { VertexProvider } from '../AI/Router/providers/VertexProvider';
+import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
+import { GrokProvider } from '../AI/Router/providers/GrokProvider';
 
 /**
  * AgentV3 (Vargen 3.0) routes.
@@ -126,6 +129,12 @@ export function agentV3KeyDiag(): {
   sharedProxyBaseUrlSet: boolean;
   sonnetModel: string;
   opusModel: string;
+  // FREE-router (cheap chat) provider configuration — presence only, never values.
+  // If all three are false on live, a plain "hi" cannot be answered cheaply and the
+  // request falls through to the heavy build loop (a known "Load failed" trigger).
+  vertexConfigured: boolean;
+  geminiKeySet: boolean;
+  grokKeySet: boolean;
 } {
   const raw = process.env.ANTHROPIC_API_KEY ?? '';
   const key = sanitizeApiKey(raw) ?? '';
@@ -141,7 +150,37 @@ export function agentV3KeyDiag(): {
     sharedProxyBaseUrlSet: !!process.env.ANTHROPIC_BASE_URL,
     sonnetModel: resolveModel(false),
     opusModel: resolveModel(true),
+    vertexConfigured: !!(process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID),
+    geminiKeySet: !!process.env.GEMINI_API_KEY,
+    grokKeySet: !!(process.env.GROK_API_KEY || process.env.XAI_API_KEY),
   };
+}
+
+/**
+ * Live health probe of the FREE-router providers (Vertex / Gemini / Grok). Makes
+ * one tiny real call per provider and reports ok/error for each, so an admin can
+ * tell — on the live environment — whether Vertex and Gemini are actually WORKING
+ * (not merely configured). Each provider failure is caught and reported, never
+ * thrown. Admin-only (real calls cost money).
+ */
+async function probeFreeProviders(): Promise<Array<{ name: string; ok: boolean; latencyMs?: number; error?: string }>> {
+  const factories: Array<{ name: string; make: () => { execute: (p: string, s?: unknown, m?: string, sys?: string) => Promise<{ content: string; latencyMs: number }> } }> = [
+    { name: 'VERTEX', make: () => new VertexProvider() },
+    { name: 'GEMINI', make: () => new GeminiProvider() },
+    { name: 'GROK', make: () => new GrokProvider() },
+  ];
+  const results: Array<{ name: string; ok: boolean; latencyMs?: number; error?: string }> = [];
+  for (const f of factories) {
+    try {
+      const provider = f.make();
+      const r = await provider.execute('Reply with exactly one word: pong', undefined, undefined, 'You are a health check. Reply with a single word.');
+      results.push({ name: f.name, ok: !!r.content, latencyMs: r.latencyMs });
+    } catch (err) {
+      const e = err as { message?: string };
+      results.push({ name: f.name, ok: false, error: (e?.message ? String(e.message) : String(err)).slice(0, 300) });
+    }
+  }
+  return results;
 }
 
 /** Throttle the public live-probe so it can't be abused for cost (one per 30s). */
@@ -193,7 +232,10 @@ export function registerAgentV3Routes(app: Express): void {
       const e = err as { status?: number; message?: string };
       live = { ok: false, status: e?.status, error: e?.message ? String(e.message).slice(0, 300) : String(err).slice(0, 300) };
     }
-    res.json({ ...diag, live });
+    // Admin-only: also probe the FREE-router providers (Vertex / Gemini / Grok) with
+    // one tiny real call each, so the admin sees which of them actually WORK on live.
+    const freeProviders = adminOk ? await probeFreeProviders() : undefined;
+    res.json({ ...diag, live, freeProviders });
   });
 
   // Approve/reject a pending gate (plan mode / permission prompt, P4).

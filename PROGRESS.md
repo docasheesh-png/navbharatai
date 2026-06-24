@@ -2159,3 +2159,26 @@ this is my best-confidence fix addressing the most likely cause. Definitive conf
 Cloud Run log error for that request, or a post-deploy test. On the branch only — live (e0d3ab4)
 is untouched until verified + merged. Gate green: server tsc 0, **2190 vitest**, build PASS,
 boot:check PASS.
+
+---
+
+### 2026-06-24 — Diagnostic: live Vertex/Gemini/Grok health probe (answers "are the free providers working?")
+
+Admin asked to check whether Vertex and Gemini are actually working — directly relevant to the
+"Load failed" bug, because the cheap "hi" reply runs on the FREE router (Vertex → Gemini → Grok) and
+falls into the heavy build path only if ALL of them fail. Could not check from the dev container (no
+keys set here — verified all unset; proxy blocks the live domain), so built the means to check on live:
+
+- `agentV3KeyDiag()` now also reports FREE-router provider PRESENCE (no secrets): `vertexConfigured`
+  (GOOGLE_CLOUD_PROJECT/_ID set), `geminiKeySet` (GEMINI_API_KEY set), `grokKeySet` (GROK/XAI key set).
+  Available on the public `GET /api/agentv3/diag` (presence booleans only, like anthropicKeySet).
+- `GET /api/agentv3/diag?test=1&admin=<ADMIN_PASSWORD>` now also returns `freeProviders`: a live probe
+  that makes ONE tiny real call to Vertex, Gemini and Grok each and reports `{ name, ok, latencyMs,
+  error }` per provider — so the admin sees which actually WORK on live (not merely configured). Each
+  provider failure is caught + reported, never thrown. Admin-only (real calls cost money).
+
+Provider config requirements (for reference): Vertex = GOOGLE_CLOUD_PROJECT(+ADC); Gemini =
+GEMINI_API_KEY; Grok = GROK_API_KEY or XAI_API_KEY. The Cloud Run STARTUP logs already print
+`[VERTEX] … disabled`, `[GeminiProvider] … Key present: true/false`, `[ROUTER_MGR] Building FREE
+chain …` — an immediate no-deploy way to see provider status. Tests: agentv3.test.ts +1 (now 9).
+Gate green: server tsc 0, **2191 vitest** (+1), build PASS, boot:check PASS.

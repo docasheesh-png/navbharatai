@@ -67,4 +67,28 @@ describe('agentV3KeyDiag (provider diagnosis)', () => {
     expect(d.anthropicKeyPrefix).toBeNull();
     expect(d.looksLikeAnthropicKey).toBe(false);
   });
+
+  it('reports FREE-router (Vertex/Gemini/Grok) provider configuration presence', () => {
+    const keys = ['GOOGLE_CLOUD_PROJECT', 'GOOGLE_CLOUD_PROJECT_ID', 'GEMINI_API_KEY', 'GROK_API_KEY', 'XAI_API_KEY'] as const;
+    const saved: Record<string, string | undefined> = {};
+    for (const k of keys) { saved[k] = process.env[k]; delete process.env[k]; }
+    try {
+      expect(agentV3KeyDiag().vertexConfigured).toBe(false);
+      expect(agentV3KeyDiag().geminiKeySet).toBe(false);
+      expect(agentV3KeyDiag().grokKeySet).toBe(false);
+
+      process.env.GOOGLE_CLOUD_PROJECT = 'my-proj';
+      process.env.GEMINI_API_KEY = 'gm-key';
+      process.env.XAI_API_KEY = 'xai-key';
+      const d = agentV3KeyDiag();
+      expect(d.vertexConfigured).toBe(true);
+      expect(d.geminiKeySet).toBe(true);
+      expect(d.grokKeySet).toBe(true); // XAI_API_KEY counts for Grok
+    } finally {
+      for (const k of keys) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    }
+  });
 });

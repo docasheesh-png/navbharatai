@@ -1423,3 +1423,42 @@ App Targets": UT-1 Desktop (Electron/Tauri → .exe/.dmg/.AppImage), UT-2 Native
 Mobile (React Native/Capacitor/Flutter → Play/App Store), UT-3 Browser Extension.
 Admin reviewed and DROPPED PowerShell/CMD (no reach gain); kept out-of-scope in the
 audit. Roadmap only — no UT code yet.
+
+---
+
+### 2026-06-23/24 — v3.0 Quality Engine: evaluate 8→18 dimensions + full-suite readiness gate + integration net
+
+Big push on NavBharatAI Pro v3.0 (`src/server/AgentV3/`, flag-OFF, zero live-path
+imports → live app unaffected). Roadmap march: 48-capability phases + the admin's
+300+ point "Section I" list (audit-first triage: ignore solid / complete partial /
+build absent). Every change shipped real, tested, one PR at a time, CI-green-then-merge.
+
+**Phases completed & merged (green CI):** 6.1 test-coverage, 10.1 requirement-coverage,
+6.2 recurring-error (thrash) detection, 4.2 README generator, 4.3 .env.example
+generator, 6.3 runnability, then the readiness gate now spans the FULL evaluate suite.
+
+**Section I items built (ABSENT → solid), merged green:** #19 SEO/metadata, #22 project
+hygiene, #5 error-boundary, #4 security-config (TLS/CORS), #22 .gitignore generator,
+#4 insecure-randomness, #4 secret-leak (.env), #11 hardcoded-URL.
+
+**`evaluate` now runs 18 dimensions** (was 8): readiness, build-confidence,
+architecture, security, authenticity, dependencies, env-vars, accessibility,
+compliance, test-coverage, requirement-coverage, runnability, SEO, project-hygiene,
+error-boundary, security-config, secret-leak, hardcoded-URL. The **readiness gate**
+now hard-blocks on: fake/incomplete code, serious privacy/compliance violation,
+secret leak, can't-run, high-severity security misconfig. 3 generators wired as real
+tools: generate_readme / generate_env_example / generate_gitignore.
+
+**Tests 1884 → 2025** (+141), including a complete end-to-end integration suite that
+drives `evaluate` + all 3 generators through the real ToolDispatcher + WorkspaceMemory
++ a fake actuator — a full regression net for every dimension.
+
+**CI INFRA NOTE (2026-06-23 ~22:24 onward):** GitHub Actions began failing at job
+startup (~3s, zero logs, HTTP 404 on logs) = the documented **Actions spending-limit/
+quota exhaustion**. Everything merged BEFORE that was green. After it, PR #289 (outage
+batch: leftover-debugger detection, fake-code-blocks-readiness, logged-secret
+detection, compliance-blocks-readiness, + the integration test suite) is pushed and
+fully LOCALLY verified (tsc ×2 + 2025 vitest + build + boot:check) but its MERGE is
+queued until the admin raises the Actions spending limit / the quota resets. No red
+CI was merged. Held off the (otherwise-ready) single-pass evaluate I/O refactor until
+CI is back — too risky to land a critical-path refactor without the independent gate.

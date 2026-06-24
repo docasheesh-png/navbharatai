@@ -2182,3 +2182,24 @@ GEMINI_API_KEY; Grok = GROK_API_KEY or XAI_API_KEY. The Cloud Run STARTUP logs a
 `[VERTEX] … disabled`, `[GeminiProvider] … Key present: true/false`, `[ROUTER_MGR] Building FREE
 chain …` — an immediate no-deploy way to see provider status. Tests: agentv3.test.ts +1 (now 9).
 Gate green: server tsc 0, **2191 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — WORK DUE (admin-deferred — do later, not abandoned)
+
+Admin parked these to do later; resuming the autonomous Section I march in the meantime. All current
+session work is on branch `claude/navbharatai-pro-testing-p2mgr5` (8 commits ahead of main), gate-green,
+but NOT merged → NOTHING from this session is live yet (live = e0d3ab4 #341).
+
+WORK DUE:
+1. **v3.0 deploy/git FRONTEND UI (increment 3)** — backend done (workspace-files collect + import
+   endpoints). Remaining: expose ALL options in the v3.0 panel (GitHub fetch/push via existing
+   `/api/github/fetch` + `/api/github/push-enhanced` + OAuth; deploy via existing `/api/pro/deploy`
+   Vercel/Netlify/Cloudflare/GitHub Pages). Reuse MultiCloudDeploy/GitPanel; no new deploy backend.
+2. **mitrify.xyz DURABLE DEPLOY (§12 "deploy" half)** — preview already shipped (§12.1). Remaining:
+   a durable host + hostname→app serving layer + publish-target resolver (mitrify vs user's own domain).
+3. **"Load failed" live confirmation** — fix shipped on branch (greeting cheap path + stream keep-alive).
+   Remaining: confirm via the Cloud Run log error for the failed "hi" request, then merge+deploy+retest.
+4. **Vertex/Gemini live status** — probe shipped (`/api/agentv3/diag?test=1&admin=…`). Admin will read
+   the Cloud Run startup logs (`[VERTEX] … disabled`, `[GeminiProvider] Key present:`) / run the probe.
+5. **Merge the 8 branch commits → main → Cloud Build deploy** — to make any of the above live.

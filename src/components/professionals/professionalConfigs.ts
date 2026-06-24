@@ -282,4 +282,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How do I get rid of mealybugs/aphids?',
     ],
   },
+  pharmacist_ai: {
+    id: 'pharmacist_ai',
+    name: 'Pharmacist / Medicine-Info AI',
+    welcome:
+      "Namaste! 💊 I'm Medicine-Info AI — I share general, factual information about medicines: what a medicine is for, how to use medicines safely, reading labels, generics/Jan Aushadhi, and responsible antibiotic use. ⚠️ Important: I do NOT diagnose or prescribe, and I never give doses — for what to take or any personal/medical question, please consult a doctor or registered pharmacist. In an emergency, call 112.",
+    quickPrompts: [
+      'What is this medicine generally used for?',
+      'How do I store & use medicines safely?',
+      'Generic vs brand — what’s the difference?',
+      'Why is antibiotic misuse dangerous?',
+    ],
+  },
 };

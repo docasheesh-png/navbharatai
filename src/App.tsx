@@ -5450,6 +5450,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'english_ai') toggleTab('english_ai');
               else if (id === 'resume_ai') toggleTab('resume_ai');
               else if (id === 'gardening_ai') toggleTab('gardening_ai');
+              else if (id === 'pharmacist_ai') toggleTab('pharmacist_ai');
             }} />
           )}
 
@@ -5567,6 +5568,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'gardening_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.gardening_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'pharmacist_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.pharmacist_ai} userId={user?.uid} />
             </div>
           )}
 

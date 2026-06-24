@@ -454,3 +454,47 @@ skipped under tests. The route computes `billedInr = round(billedUsd × usdInrRa
 adds it to the `result` message (customer-facing ₹). Internal accounting stays in USD
 (currency-stable, no migration); INR is the display. Frontend ₹ display + the Power effort UI
 (P4) are next.
+
+## §12 — App hosting on mitrify.xyz (admin-directed, 2026-06-24) — DESIGN LOCKED, BUILD GATED ON VERIFY
+
+Admin (aashishcpmt09) owns a web-hosting domain **mitrify.xyz** which is "linked to E2B".
+Separate from NavBharatAI's OWN platform site (navbharatai.com / the Cloud Run service
+`navbharat-ai-prod`) — mitrify.xyz is purely for the **end-user apps that v3.0 builds**.
+
+### Decision (admin, 2026-06-24)
+- **Default — user has NOT connected their own domain:** mitrify.xyz serves BOTH roles for the
+  built app: (a) **live preview** while building, and (b) **durable deploy/hosting** that stays
+  live after the build sandbox closes.
+- **After the user connects their own website** (via GitHub or DNS, the existing "Connect my
+  website" flow → `/api/domains/connect`, Cloudflare-for-SaaS): the user's own domain becomes the
+  production/deploy home, and mitrify.xyz is demoted to **preview only**.
+- So the publish-target resolver is: `userOwnDomainConnected ? deployTo(userDomain), previewOn(mitrify)
+  : deployTo(mitrify), previewOn(mitrify)`.
+
+### Ground-truth state of the code (audited 2026-06-24, NOT assumed)
+- `src/server/lib/cloudflare.ts` ALREADY uses mitrify.xyz as the Cloudflare-for-SaaS zone name
+  (`CLOUDFLARE_SAAS_ZONE_NAME` default `mitrify.xyz`; fallback origin `connect.mitrify.xyz`).
+- `/api/domains/connect` (`src/server/routes/domains.ts`) creates the Cloudflare custom hostname
+  and returns DNS records, and persists a `custom_domains` mapping — BUT there is **no serving
+  layer yet** that routes an incoming hostname (`connect.mitrify.xyz` / a user domain) → the
+  running user app. AppKnowledgeBase honestly states the connect backend "is being finalized".
+- v3.0 live preview currently returns the RAW E2B host: `E2BActuator.getPortUrl` →
+  `https://${sandbox.getHost(port)}` (i.e. `{port}-{sandboxId}.e2b.app`), NOT a mitrify URL.
+
+### The gap (what must be built — but only after the link is verified)
+1. **Preview on mitrify**: swap/override the preview URL from `*.e2b.app` to a `*.mitrify.xyz`
+   form. The EXACT URL format depends on HOW mitrify is linked to E2B (E2B-native custom domain =
+   host-suffix swap; a reverse proxy = proxy URL scheme; Cloudflare-SaaS = a serving layer). This
+   is unconfirmed, so it is NOT yet implemented — guessing the format would ship a broken/fake URL,
+   which violates the "real features only" rule.
+2. **Durable deploy**: a publish step at build completion that puts the built artifact on a
+   permanent home (E2B sandboxes are ephemeral and pause/expire, so they cannot be the durable
+   host) + a hostname→app serving/routing layer behind mitrify.xyz.
+3. **Publish-target resolver**: pick mitrify vs the user's connected domain per the decision above.
+
+### BUILD GATE (why nothing is shipped yet)
+The admin chose "not sure / I'll check" for the E2B↔mitrify link mechanism. Per safeguard #3
+(0.01% doubt → stop) and the "real features only" rule, NO preview/deploy URL change ships until
+the admin confirms the real mechanism (E2B dashboard custom-domain setting + mitrify DNS records +
+which Cloud env vars are set). Verification steps were given to the admin. Once confirmed, wire the
+real format — never a guessed one.

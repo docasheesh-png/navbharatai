@@ -714,4 +714,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Polish my draft & give feedback',
     ],
   },
+  aptitude_ai: {
+    id: 'aptitude_ai',
+    name: 'Mental Maths & Aptitude AI',
+    welcome:
+      "Namaste! 🧠 I'm Mental Maths & Aptitude AI — let's get fast & sharp! Mental-maths & Vedic tricks (with the WHY behind them), quantitative aptitude (percentages, ratio, time-speed-distance, interest…), logical & verbal reasoning (series, puzzles, syllogisms), and speed/accuracy strategy for exams & placements. Tell me a topic or 'quiz me'. ✏️ I teach so you build real skill — attempt steps yourself; I keep the maths accurate and note when a trick only applies in certain cases.",
+    quickPrompts: [
+      'Teach me a fast multiplication trick',
+      'Quant: explain & practise a topic',
+      'Reasoning puzzle practice',
+      'Speed & accuracy strategy for my exam',
+    ],
+  },
 };

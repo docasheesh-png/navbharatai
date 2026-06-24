@@ -822,4 +822,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Lettering ideas for a card/quote',
     ],
   },
+  dance_ai: {
+    id: 'dance_ai',
+    name: 'Dance & Movement AI',
+    welcome:
+      "Namaste! 💃🕺 I'm Dance & Movement AI — let's dance! Start at any age/level, find your rhythm, explore styles (classical like Bharatanatyam/Kathak, folk like Garba/Bhangra, Bollywood & freestyle), practise routines, or dance for fitness & joy. Tell me your goal & level. ⚠️ Always warm up & never push through sharp pain (rest/see a physio); text can't fix your form like a teacher — for serious classical, learn from a guru. Progress comes with practice!",
+    quickPrompts: [
+      'How do I start dancing & find rhythm?',
+      'Tell me about a dance style',
+      'Plan practice for a routine/performance',
+      'Fun dance workout for fitness',
+    ],
+  },
 };

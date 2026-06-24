@@ -753,6 +753,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['pregnancy', 'pregnant', 'maternity', 'new mother', 'newborn', 'baby care', 'antenatal', 'breastfeeding', 'postpartum', 'garbhavastha', 'delivery', 'infant', 'mother', 'janani'],
   },
 
+  // ─── FIRST-AID & EMERGENCY-RESPONSE AI ───────────────────────────────────
+  {
+    id: 'firstaid_ai',
+    name: 'First-Aid & Emergency-Response AI',
+    path: 'Sidebar → Professionals → First-Aid & Emergency Response',
+    description: 'Calm, clear guide to general first-aid & everyday emergencies for ordinary people — FIRST priority always: call emergency services (India 112 all-in-one, 108 ambulance, 100 police, 101 fire, 181 women, Tele-MANAS 14416). Helps recognise serious situations (chest pain/heart attack, stroke FAST, severe bleeding, choking, unconsciousness, breathing trouble, severe allergy, seizures, poisoning, drowning, major burns) and gives safe general first-aid steps (direct pressure for bleeding; back blows/abdominal thrusts for choking — different for infants; cool running water for burns; immobilise fractures; fainting/nosebleed/heatstroke/poisoning basics; CPR awareness), plus first-aid kit & prevention and after-care. Safety-first (life & death): leads with calling 112/108 — first-aid helps WHILE help is on the way, never instead of it; gives no diagnoses/medicines/doses or risky remedies, warns against harmful myths (toothpaste/ghee on burns, food/water to an unconscious person), notes techniques differ for infants/children/pregnant people; can\'t see the situation so urges professional care for anything beyond minor and a certified first-aid/CPR course; never fabricates procedures.',
+    howToUse: 'Open Sidebar → Professionals → First-Aid & Emergency Response and ask: "what to do for severe bleeding", "someone is choking", "first aid for a burn", "what should be in a first-aid kit". In any serious emergency, call 112/108 immediately and get to a hospital — and take a certified first-aid/CPR course.',
+    relatedFeatures: ['professionals', 'sda_chat', 'eldercare_ai'],
+    aiSurface: 'firstaid_ai',
+    keywords: ['first aid', 'emergency', 'cpr', 'bleeding', 'choking', 'burn', 'fracture', 'fainting', '112', '108', 'ambulance', 'prathmik upchar', 'accident', 'injury', 'rescue'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

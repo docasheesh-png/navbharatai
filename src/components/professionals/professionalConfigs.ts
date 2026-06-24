@@ -582,4 +582,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Breastfeeding & my recovery support',
     ],
   },
+  firstaid_ai: {
+    id: 'firstaid_ai',
+    name: 'First-Aid & Emergency-Response AI',
+    welcome:
+      "Namaste! ⛑️ I'm First-Aid & Emergency-Response AI — calm, clear general first-aid for everyday emergencies (bleeding, burns, choking, fainting, heatstroke, fractures) and recognising what's serious. ⚠️ In ANY serious situation, CALL 112 (or 108 ambulance) and get to a hospital NOW — first-aid helps WHILE help is coming, it doesn't replace it. I'm not a doctor and can't see you; please also take a certified first-aid/CPR course. What's the situation?",
+    quickPrompts: [
+      'What to do for severe bleeding?',
+      'Someone is choking — what do I do?',
+      'First aid for a burn',
+      'What should be in a first-aid kit?',
+    ],
+  },
 };

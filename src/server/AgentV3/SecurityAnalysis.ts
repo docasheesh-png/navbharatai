@@ -46,6 +46,17 @@ const RULES: Rule[] = [
     ignore: (_m, line) => PLACEHOLDER.test(line),
   },
   {
+    rule: 'hardcoded-jwt-secret',
+    severity: 'high',
+    // jwt.sign(payload, '<literal>'[, opts]) — a hardcoded signing secret lets anyone
+    // with the source forge tokens. The assignment-based hardcoded-secret rule misses
+    // this function-argument form. `.*?,` skips the payload (object/variable) so the
+    // secret arg is matched whether or not an options object follows.
+    re: /\b(?:jwt|jsonwebtoken)\.sign\s*\(.*?,\s*(['"`])[^'"`]{4,}\1\s*[,)]/,
+    message: 'Hardcoded JWT signing secret — anyone with the source can forge tokens; load it from an environment variable.',
+    ignore: (_m, line) => PLACEHOLDER.test(line),
+  },
+  {
     rule: 'aws-access-key',
     severity: 'high',
     re: /\bAKIA[0-9A-Z]{16}\b/,

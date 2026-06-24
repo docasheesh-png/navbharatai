@@ -2105,3 +2105,25 @@ NEXT (increment 2, frontend): a Deploy action in AgentV3Panel that fetches these
 existing MultiCloudDeploy UI + `/api/pro/deploy` + `/api/github/push-enhanced` (GitHub OAuth) — git
 push + 4-platform deploy, no new deploy backend. Tests: WorkspaceFiles.test.ts (5). Gate green:
 server tsc 0, **2186 vitest** (+5), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — §12.2 v3.0 import side: writeWorkspaceFiles + import endpoint (full fetch→edit→deploy loop)
+
+Admin expanded the scope: v3.0 must FETCH files from git (GitHub/Firebase/other), EDIT/UPDATE, and
+DEPLOY/PUSH back — with ALL options available (not rigid to one). The export collector (prev entry)
+plus this import side complete the round-trip backend, all reusing existing routes.
+
+Shipped (increment 2, backend import side):
+- `writeWorkspaceFiles(sink, workspaceId, files)` in WorkspaceFiles.ts — writes an imported project
+  (e.g. from the existing `/api/github/fetch` route) into the sandbox. Path-safe: rejects absolute
+  paths, `..` traversal and NUL; never imports node_modules/.git or live `.env` secrets (templates
+  kept); same size/count caps. Best-effort — an unsafe path or write error is skipped, never fatal.
+- `POST /api/agentv3/import-files` — gated; ensureWorkspace('import') best-effort (unknown type →
+  empty sandbox so the repo lands cleanly) then writes. Returns `{ imported, skipped }`. No change to
+  any live route — the frontend orchestrates fetch (existing) → import (new).
+
+So the backend round-trip is ready: fetch (existing /api/github/fetch) → import (new) → edit (agent)
+→ collect (new) → push/deploy (existing /api/github/push-enhanced + /api/pro/deploy). NEXT
+(increment 3, frontend): expose ALL options in the v3.0 panel. Tests: WorkspaceFiles.test.ts now 9.
+Gate green: server tsc 0, **2190 vitest** (+4), build PASS, boot:check PASS.

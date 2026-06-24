@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { collectWorkspaceFiles, type WorkspaceFileSource } from './WorkspaceFiles';
+import { collectWorkspaceFiles, writeWorkspaceFiles, type WorkspaceFileSource, type WorkspaceFileSink } from './WorkspaceFiles';
 
 /** A fake actuator backed by an in-memory path→content map. */
 function fakeSource(map: Record<string, string>): WorkspaceFileSource {
@@ -72,5 +72,63 @@ describe('collectWorkspaceFiles', () => {
     const src = fakeSource({ 'index.html': '<h1>hi</h1>' });
     const { files } = await collectWorkspaceFiles(src, 'ws-1');
     expect(files).toEqual({ 'index.html': '<h1>hi</h1>' });
+  });
+});
+
+/** A fake sink recording every writeFile into an in-memory map. */
+function fakeSink(): WorkspaceFileSink & { written: Record<string, string> } {
+  const written: Record<string, string> = {};
+  return {
+    written,
+    writeFile: async (_ws: string, p: string, c: string) => { written[p] = c; },
+  };
+}
+
+describe('writeWorkspaceFiles (import from GitHub/other into the sandbox)', () => {
+  it('writes safe project files into the sandbox', async () => {
+    const sink = fakeSink();
+    const { written } = await writeWorkspaceFiles(sink, 'ws-1', {
+      'src/App.tsx': 'export const App = () => null;',
+      'package.json': '{"name":"app"}',
+    });
+    expect(written.sort()).toEqual(['package.json', 'src/App.tsx']);
+    expect(sink.written['src/App.tsx']).toContain('export const App');
+  });
+
+  it('rejects path traversal, absolute paths and NUL — never escapes the workspace', async () => {
+    const sink = fakeSink();
+    const { written, skipped } = await writeWorkspaceFiles(sink, 'ws-1', {
+      '../etc/passwd': 'root:x:0:0',
+      '/abs/secret': 'x',
+      'a/../../b': 'y',
+      'ok.txt': 'fine',
+    });
+    expect(written).toEqual(['ok.txt']);
+    expect(skipped).toEqual(expect.arrayContaining(['../etc/passwd', '/abs/secret', 'a/../../b']));
+    expect(Object.keys(sink.written)).toEqual(['ok.txt']);
+  });
+
+  it('does not import node_modules / .git or live .env secrets', async () => {
+    const sink = fakeSink();
+    const { written } = await writeWorkspaceFiles(sink, 'ws-1', {
+      'node_modules/x/i.js': 'm',
+      '.git/config': 'c',
+      '.env': 'API_KEY=sk_live',
+      '.env.example': 'API_KEY=',
+      'index.html': '<h1>ok</h1>',
+    });
+    expect(written.sort()).toEqual(['.env.example', 'index.html']);
+  });
+
+  it('never fails on a write error — that path is skipped, not fatal', async () => {
+    const sink: WorkspaceFileSink = {
+      writeFile: async (_ws, p) => { if (p === 'bad.ts') throw new Error('disk full'); },
+    };
+    const { written, skipped } = await writeWorkspaceFiles(sink, 'ws-1', {
+      'good.ts': 'export const x = 1;',
+      'bad.ts': 'export const y = 2;',
+    });
+    expect(written).toEqual(['good.ts']);
+    expect(skipped).toContain('bad.ts');
   });
 });

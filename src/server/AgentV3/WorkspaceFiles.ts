@@ -15,9 +15,21 @@ export interface WorkspaceFileSource {
   readFile(workspaceId: string, filePath: string): Promise<string>;
 }
 
+/** The minimal slice of the sandbox actuator the importer needs. */
+export interface WorkspaceFileSink {
+  writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
+}
+
 export interface CollectedFiles {
   files: Record<string, string>;
   /** Paths intentionally skipped (excluded dir, secret, binary, or too large). */
+  skipped: string[];
+}
+
+export interface ImportedFiles {
+  /** Paths successfully written into the sandbox. */
+  written: string[];
+  /** Paths rejected (unsafe path, excluded, secret, or too large). */
   skipped: string[];
 }
 
@@ -90,4 +102,61 @@ export async function collectWorkspaceFiles(
   }
 
   return { files, skipped };
+}
+
+/**
+ * A path is safe to import only if it stays inside the workspace: no absolute
+ * paths, no `..` traversal, no NUL, and not a dependency/build/VCS dir or a live
+ * `.env` secret. Templates (`.env.example` etc.) are allowed.
+ */
+function isSafeImportPath(path: string): boolean {
+  if (!path || path.includes(NUL)) return false;
+  if (path.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(path)) return false; // absolute
+  const segments = path.split(/[\\/]/);
+  if (segments.some((s) => s === '..')) return false;                     // traversal
+  if (EXCLUDED_DIR.test(path)) return false;
+  if (SECRET_ENV.test(path) && !ENV_TEMPLATE.test(path)) return false;
+  return true;
+}
+
+/**
+ * Write an imported project (e.g. fetched from GitHub via the existing
+ * `/api/github/fetch` route) into the v3.0 sandbox so the agent can edit/update and
+ * then deploy/push it back. Best-effort + bounded: an unsafe path or a failed write
+ * is skipped, never fatal. Reuses the same size/exclusion guards as the collector.
+ */
+export async function writeWorkspaceFiles(
+  sink: WorkspaceFileSink,
+  workspaceId: string,
+  files: Record<string, string>,
+): Promise<ImportedFiles> {
+  const written: string[] = [];
+  const skipped: string[] = [];
+  let totalBytes = 0;
+
+  for (const [path, content] of Object.entries(files)) {
+    if (written.length >= MAX_FILES) {
+      skipped.push(path);
+      continue;
+    }
+    if (!isSafeImportPath(path) || typeof content !== 'string') {
+      skipped.push(path);
+      continue;
+    }
+    const bytes = Buffer.byteLength(content, 'utf8');
+    if (bytes > MAX_FILE_BYTES || totalBytes + bytes > MAX_TOTAL_BYTES) {
+      skipped.push(path);
+      continue;
+    }
+    try {
+      await sink.writeFile(workspaceId, path, content);
+    } catch {
+      skipped.push(path);
+      continue;
+    }
+    written.push(path);
+    totalBytes += bytes;
+  }
+
+  return { written, skipped };
 }

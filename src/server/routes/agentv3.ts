@@ -44,7 +44,7 @@ import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
-import { collectWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
+import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 
 /**
  * AgentV3 (Vargen 3.0) routes.
@@ -248,6 +248,39 @@ export function registerAgentV3Routes(app: Express): void {
       res.json({ files, count: Object.keys(files).length, skipped: skipped.length });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to read the workspace files.' });
+    }
+  });
+
+  // §12.2 — import an existing project (e.g. fetched from GitHub via the existing
+  // `/api/github/fetch` route, or any source) into the v3.0 sandbox so the agent can
+  // edit/update and then deploy/push it back. Path-safe (no traversal/absolute), and
+  // never imports node_modules / .git / live .env secrets.
+  app.post('/api/agentv3/import-files', async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const files = req.body?.files;
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!files || typeof files !== 'object' || Array.isArray(files)) {
+      res.status(400).json({ error: 'files (a path→content object) is required.' });
+      return;
+    }
+    try {
+      const actuator = buildActuator();
+      // Best-effort: make sure the sandbox exists (an unknown type starts empty, so an
+      // imported repo lands cleanly without scaffolded template files mixed in).
+      try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
+      const { written, skipped } = await writeWorkspaceFiles(actuator, workspaceId, files as Record<string, string>);
+      res.json({ imported: written.length, skipped: skipped.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to import the files.' });
     }
   });
 

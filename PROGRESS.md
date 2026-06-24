@@ -2548,3 +2548,17 @@ Fixes:
 
 Admin will set up mitrify custom domain themselves (E2B docs: https://e2b.dev/docs/sandbox/custom-domain).
 Gate green: server tsc 0, **2217 vitest**, build PASS, boot:check PASS. Pushed to branch.
+
+---
+
+### 2026-06-24 — Section I #7 (a11y): icon-only link with no accessible name
+
+Resumed the autonomous Section I march after deploying the e2b.app/Node-loop fixes. New item:
+`AccessibilityAnalysis` `link-no-accessible-name` rule (low) — a same-line `<a href>` whose inner
+content (child tags stripped) has no visible text and no aria-label/aria-labelledby/title is an
+icon-only link a screen reader announces as nothing. Mirrors the existing button-no-accessible-name;
+distinct from anchor-missing-href (which is for links WITHOUT href). High-precision (tag-local,
+single-line). KB synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (icon-only link flagged; text/aria-label/no-href safe) + 1 dispatcher integration.
+Gate green: server tsc 0, **2219 vitest** (+2), build PASS, boot:check PASS.

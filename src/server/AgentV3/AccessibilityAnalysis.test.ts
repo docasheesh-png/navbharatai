@@ -18,6 +18,14 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('index.html', '<html lang="en">')).toEqual([]);
   });
 
+  it('flags an icon-only <a href> link with no accessible name, but not a text/aria-label link', () => {
+    expect(scanAccessibility('src/Nav.tsx', '<a href="/home"><svg /></a>').some((x) => x.kind === 'link-no-accessible-name')).toBe(true);
+    expect(scanAccessibility('src/Nav.tsx', '<a href="/home">Home</a>').some((x) => x.kind === 'link-no-accessible-name')).toBe(false);
+    expect(scanAccessibility('src/Nav.tsx', '<a href="/home" aria-label="Home"><svg /></a>').some((x) => x.kind === 'link-no-accessible-name')).toBe(false);
+    // No href → handled by anchor-missing-href, not this rule.
+    expect(scanAccessibility('src/Nav.tsx', '<a><svg /></a>').some((x) => x.kind === 'link-no-accessible-name')).toBe(false);
+  });
+
   it('flags <iframe> without a title (medium) but not one with title or aria-label', () => {
     const issues = scanAccessibility('src/Embed.tsx', '<iframe src="https://x.com/v" />');
     expect(issues.some((x) => x.kind === 'iframe-missing-title' && x.severity === 'medium')).toBe(true);

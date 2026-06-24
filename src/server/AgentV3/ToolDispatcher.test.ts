@@ -515,6 +515,13 @@ describe('ToolDispatcher — evaluate integration (more dimensions + generators)
     expect(out).toContain('break the browser build');
   });
 
+  it('flags an icon-only <a href> link with no accessible name', async () => {
+    const dd = makeDispatcher('ws-eval-linkname');
+    await write(dd, 'src/Nav.tsx', 'export const N = () => <a href="/home"><svg /></a>;');
+    const out = await evalText(dd);
+    expect(out).toContain('link-no-accessible-name');
+  });
+
   it('flags an <iframe> with no accessible title', async () => {
     const dd = makeDispatcher('ws-eval-iframe');
     await write(dd, 'src/Embed.tsx', 'export const E = () => <iframe src="https://x.com/v" />;');

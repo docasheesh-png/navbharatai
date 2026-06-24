@@ -136,6 +136,21 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
     ) {
       issues.push({ file, line: i + 1, kind: 'button-no-accessible-name', severity: 'low', snippet: trimSnippet(line) });
     }
+
+    // ── low: <a href> link with no accessible name (e.g. an icon-only link) ────
+    // A link that opens and closes on the same line, HAS an href (a real link), whose
+    // inner content (child tags stripped) has no visible text, and whose opening tag
+    // has no aria-label / aria-labelledby / title — a screen reader announces nothing.
+    // Catches `<a href="/x"><svg/></a>` but not `<a href="/x">Home</a>`.
+    const lnk = /<\s*a\b([^>]*)>(.*?)<\/\s*a\s*>/i.exec(line);
+    if (
+      lnk &&
+      /\bhref\s*=/i.test(lnk[1]) &&
+      !/\b(aria-label|aria-labelledby|title)\s*=/i.test(lnk[1]) &&
+      lnk[2].replace(/<[^>]*>/g, '').trim() === ''
+    ) {
+      issues.push({ file, line: i + 1, kind: 'link-no-accessible-name', severity: 'low', snippet: trimSnippet(line) });
+    }
   }
   return issues;
 }

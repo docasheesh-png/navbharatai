@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone, PartyPopper, Accessibility, Sofa, Globe2, HandHelping } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone, PartyPopper, Accessibility, Sofa, Globe2, HandHelping, Shirt } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -49,6 +49,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'interior_ai', label: 'Interior Design & Home-Decor', description: 'Space planning, colour & lighting, affordable decor & DIY, storage & decluttering, room-by-room ideas — for rented or owned homes on any budget (pro for structural).', icon: Sofa, active: true },
   { id: 'studyabroad_ai', label: 'Study-Abroad & Education', description: 'Course/country/university choice, exams (IELTS/GRE/GMAT), applications & SOPs, scholarships & loans, student-visa process — honest guidance (verify officially; beware agent scams).', icon: Globe2, active: true },
   { id: 'disability_ai', label: 'Disability & Accessibility Support', description: 'Rights (RPwD Act), schemes & benefits (UDID/ADIP), assistive technology, inclusion at school/work & caregiver support — respectful info (verify officially; not medical/legal).', icon: HandHelping, active: true },
+  { id: 'fashion_ai', label: 'Fashion & Personal Styling', description: 'Outfit & occasion ideas, versatile wardrobe, fit/colour for every body, ethnic wear & draping, accessories — body-positive, inclusive styling on any budget (options, not rules).', icon: Shirt, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

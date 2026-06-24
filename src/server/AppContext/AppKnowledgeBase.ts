@@ -645,6 +645,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['disability', 'disabled', 'pwd', 'divyang', 'accessibility', 'rpwd', 'udid', 'wheelchair', 'blind', 'deaf', 'special needs', 'assistive', 'viklang', 'inclusion'],
   },
 
+  // ─── FASHION & PERSONAL STYLING AI ───────────────────────────────────────
+  {
+    id: 'fashion_ai',
+    name: 'Fashion & Personal Styling AI',
+    path: 'Sidebar → Professionals → Fashion & Personal Styling',
+    description: 'Friendly, body-positive personal stylist for all genders, body types & budgets: outfit & occasion dressing (office/interview, wedding/festival, casual, date, travel — Indian/Western/fusion), versatile capsule-wardrobe building & smart budget shopping, fit/colour/body-type guidance (flattering without shaming), ethnic wear & draping (saree/kurta/lehenga/sherwani/suit + accessories), accessories & layering, and confidence/sustainability (personal style over trends, clothing care, thrifting). Honesty/safety: styling ideas — taste is personal (options not rules, no guaranteed results); body-positive & inclusive (never body-shames or pushes "fairness"/unrealistic ideals; respects culture/religion/modesty & budget, no pushing expensive brands); routes skincare/hair to Beauty AI and online-shopping scams to Cyber Safety AI; never fabricates brand prices/"rules"-as-facts.',
+    howToUse: 'Open Sidebar → Professionals → Fashion & Personal Styling and ask: "what should I wear for this occasion", "build a versatile wardrobe", "outfit ideas for my body type", "style my ethnic wear & accessories". For skincare/hair use the Beauty AI.',
+    relatedFeatures: ['professionals', 'beauty_ai'],
+    aiSurface: 'fashion_ai',
+    keywords: ['fashion', 'style', 'styling', 'outfit', 'clothes', 'wardrobe', 'kapde', 'saree', 'kurta', 'ethnic wear', 'dress', 'what to wear', 'accessories', 'pehnava'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

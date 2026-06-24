@@ -38,6 +38,7 @@ import { ELDERCARE_AI } from './configs/eldercare';
 import { INTERIOR_AI } from './configs/interior';
 import { STUDYABROAD_AI } from './configs/studyabroad';
 import { DISABILITY_AI } from './configs/disability';
+import { FASHION_AI } from './configs/fashion';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -87,6 +88,7 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [INTERIOR_AI.id]: INTERIOR_AI,
   [STUDYABROAD_AI.id]: STUDYABROAD_AI,
   [DISABILITY_AI.id]: DISABILITY_AI,
+  [FASHION_AI.id]: FASHION_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

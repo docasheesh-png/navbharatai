@@ -474,4 +474,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Accommodations at school/work',
     ],
   },
+  fashion_ai: {
+    id: 'fashion_ai',
+    name: 'Fashion & Personal Styling AI',
+    welcome:
+      "Namaste! 👗 I'm Fashion & Styling AI — let's help you dress well & feel confident, on any budget! Outfit ideas for any occasion (office, wedding, casual, festive), building a versatile wardrobe, fit & colours, ethnic wear & draping, and accessories. Tell me the occasion, your style & budget. ✨ I'm body-positive & inclusive — style is to express YOU, not to judge. Taste is personal, so I'll give options, not rules.",
+    quickPrompts: [
+      'What should I wear for this occasion?',
+      'Help me build a versatile wardrobe',
+      'Outfit ideas for my body type',
+      'Style my ethnic wear & accessories',
+    ],
+  },
 };

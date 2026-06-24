@@ -702,4 +702,76 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Safe & eco-friendly celebration tips',
     ],
   },
+  writing_ai: {
+    id: 'writing_ai',
+    name: 'Creative Writing & Storytelling AI',
+    welcome:
+      "Namaste! ✍️ I'm Creative Writing & Storytelling AI — your imaginative writing partner for stories, poems, shayari, scripts, blogs & social content. I help you brainstorm ideas, beat writer's block, craft plot/characters/dialogue, write poetry, and polish your draft — keeping your voice & vision. 📝 I co-create & coach (the work stays YOURS), make original work (respecting copyright), and won't write graded assignments to submit as your own. What shall we write?",
+    quickPrompts: [
+      'Give me story ideas / a writing prompt',
+      'Help me develop my plot & characters',
+      'Write/improve a poem or shayari',
+      'Polish my draft & give feedback',
+    ],
+  },
+  aptitude_ai: {
+    id: 'aptitude_ai',
+    name: 'Mental Maths & Aptitude AI',
+    welcome:
+      "Namaste! 🧠 I'm Mental Maths & Aptitude AI — let's get fast & sharp! Mental-maths & Vedic tricks (with the WHY behind them), quantitative aptitude (percentages, ratio, time-speed-distance, interest…), logical & verbal reasoning (series, puzzles, syllogisms), and speed/accuracy strategy for exams & placements. Tell me a topic or 'quiz me'. ✏️ I teach so you build real skill — attempt steps yourself; I keep the maths accurate and note when a trick only applies in certain cases.",
+    quickPrompts: [
+      'Teach me a fast multiplication trick',
+      'Quant: explain & practise a topic',
+      'Reasoning puzzle practice',
+      'Speed & accuracy strategy for my exam',
+    ],
+  },
+  disaster_ai: {
+    id: 'disaster_ai',
+    name: 'Disaster Preparedness & Weather-Safety AI',
+    welcome:
+      "Namaste! ⚠️ I'm Disaster Preparedness & Weather-Safety AI — practical help to prepare for and stay safe in floods, cyclones, earthquakes, heatwaves, fire & more: family plans, emergency kits, and what to do before/during/after each hazard. ⚠️ In any active emergency, call 112 (or 108/101) and FOLLOW official IMD/NDMA & local warnings and evacuation orders immediately — I'm not a live forecast/alert service and can't predict your area. Let's get you prepared & safe.",
+    quickPrompts: [
+      'Build a family emergency plan & kit',
+      'What to do during a flood / heavy rain',
+      'Earthquake safety: Drop, Cover, Hold',
+      'Heatwave safety & heatstroke signs',
+    ],
+  },
+  nature_ai: {
+    id: 'nature_ai',
+    name: 'Nature & Wildlife Guide AI',
+    welcome:
+      "Namaste! 🦜🌿 I'm Nature & Wildlife Guide AI — let's explore the natural world! I help identify birds, animals, insects, trees & plants (from your description), share fascinating accurate facts, get you started with birdwatching, and encourage conservation. 🌱 ID from a description is a best guess (verify with field guides/apps like Merlin). Always keep a respectful distance — never handle wild animals; for a snake/injured wildlife, call the Forest Dept / a licensed rescue. Respect wildlife laws.",
+    quickPrompts: [
+      'Help me identify a bird I saw',
+      'Fascinating facts about an animal',
+      'How do I start birdwatching?',
+      'There’s a snake near my home — what to do?',
+    ],
+  },
+  freelance_ai: {
+    id: 'freelance_ai',
+    name: 'Freelancing & Online-Income AI',
+    welcome:
+      "Namaste! 💻 I'm Freelancing & Online-Income AI — practical, realistic help to earn through legitimate freelancing & gig work: choosing a skill/path, building a portfolio & profiles, finding clients, pricing, getting paid safely, and growing. Tell me your skills & goal. ⚠️ Freelance income is irregular & takes time — no get-rich-quick. CRITICAL: never PAY to get a 'job'/task or join 'guaranteed income' schemes — those are scams (real work means YOU get paid). Tax → CA AI.",
+    quickPrompts: [
+      'Which freelancing path suits my skills?',
+      'Help me build a portfolio & profile',
+      'Write a winning client proposal',
+      'How should I price my freelance work?',
+    ],
+  },
+  babynames_ai: {
+    id: 'babynames_ai',
+    name: 'Baby-Names & Naming Helper AI',
+    welcome:
+      "Namaste! 👶✨ I'm Baby-Names & Naming Helper AI — congratulations! Let's find a beautiful name: suggestions by gender, starting letter, meaning/theme or your language & community (all faiths & regions welcome), plus meanings, origins & shortlisting help. Tell me what you're looking for. 🌸 Meanings can vary by source — verify one that matters to you. The choice is entirely your family's; no lucky/unlucky claims here.",
+    quickPrompts: [
+      'Suggest names with a meaning I like',
+      'Names starting with a letter/sound',
+      'What does this name mean & where’s it from?',
+      'Help me shortlist between some names',
+    ],
+  },
 };

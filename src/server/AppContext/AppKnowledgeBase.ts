@@ -874,6 +874,78 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['festival', 'culture', 'tradition', 'diwali', 'holi', 'eid', 'christmas', 'navratri', 'pongal', 'onam', 'tyohaar', 'celebration', 'custom', 'heritage', 'rangoli'],
   },
 
+  // ─── CREATIVE WRITING & STORYTELLING AI ──────────────────────────────────
+  {
+    id: 'writing_ai',
+    name: 'Creative Writing & Storytelling AI',
+    path: 'Sidebar → Professionals → Creative Writing & Storytelling',
+    description: 'Imaginative writing partner (distinct from Thesis AI/academic & Resume AI/jobs): ideas & brainstorming (plots, prompts, themes, characters, titles, beating writer\'s block), story craft (structure, character, dialogue, POV, pacing, conflict, show-don\'t-tell for short stories/fiction/scripts/folktales), poetry (free verse, rhyme, shayari/ghazal, haiku — imagery & rhythm, English & Indian languages), content & blogs (articles, social captions/reel scripts, honest non-clickbait hooks), editing & specific constructive feedback on the user\'s OWN draft, and craft learning. Co-creates & coaches keeping the work the user\'s own (their voice leads). Honesty/ethics: won\'t help cheat (guides/improves graded work rather than writing it to submit; academic → Thesis AI, job docs → Resume AI); respects copyright (original work, no reproducing/passing off others\'); declines harmful/defamatory/deceptive content; verify facts for non-fiction; honest that good writing takes drafting & revision.',
+    howToUse: 'Open Sidebar → Professionals → Creative Writing & Storytelling and ask: "give me story ideas/a prompt", "develop my plot & characters", "write/improve a poem or shayari", "polish my draft & give feedback". For academic writing use Thesis AI; for resumes the Resume AI.',
+    relatedFeatures: ['professionals', 'thesis_ai', 'english_ai', 'resume_ai'],
+    aiSurface: 'writing_ai',
+    keywords: ['writing', 'creative writing', 'story', 'poem', 'shayari', 'script', 'blog', 'content', 'storytelling', 'kahani', 'kavita', 'novel', 'screenplay', 'edit', 'draft'],
+  },
+
+  // ─── MENTAL MATHS & APTITUDE AI ──────────────────────────────────────────
+  {
+    id: 'aptitude_ai',
+    name: 'Mental Maths & Aptitude AI',
+    path: 'Sidebar → Professionals → Mental Maths & Aptitude',
+    description: 'Sharp coach for fast mental calculation, Vedic-maths techniques, and quantitative/logical aptitude & reasoning (school, competitive exams, placements, everyday speed): mental-maths & Vedic tricks (multiplication, squares, near-a-base, divisibility, percentages, estimation — with the WHY behind each), quantitative aptitude (percentages, ratio & proportion, averages, profit & loss, simple/compound interest, time-speed-distance, time & work, number systems, perm-comb & probability basics), logical & verbal reasoning (series, analogies, coding-decoding, blood relations, directions, syllogisms, puzzles, seating, data interpretation), speed/accuracy & MCQ strategy, and graded practice/quizzing with explained fastest approaches. Teaching/honesty: teaches the WHY (reliable, not magic) then drills (hint-first, learner attempts); accurate & careful (states a shortcut\'s conditions/limits, double-checks); a learning aid not for cheating on graded tests; never fabricates formulas/tricks that don\'t work; realistic (speed builds gradually). Complements the Maths & Science Solver (deep problem-solving) and General Knowledge AI (exam GK).',
+    howToUse: 'Open Sidebar → Professionals → Mental Maths & Aptitude and ask: "teach me a fast multiplication trick", "quant: explain & practise a topic", "reasoning puzzle practice", "speed & accuracy strategy for my exam". For deep conceptual maths/science use the Maths & Science Solver; for exam GK the General Knowledge AI.',
+    relatedFeatures: ['professionals', 'mathscience_ai', 'gk_ai', 'sarkari_ai'],
+    aiSurface: 'aptitude_ai',
+    keywords: ['mental maths', 'vedic maths', 'aptitude', 'quantitative', 'reasoning', 'tricks', 'fast calculation', 'cat', 'banking', 'ssc', 'placement', 'puzzle', 'shortcut', 'speed maths', 'logical reasoning'],
+  },
+
+  // ─── DISASTER PREPAREDNESS & WEATHER-SAFETY AI ───────────────────────────
+  {
+    id: 'disaster_ai',
+    name: 'Disaster Preparedness & Weather-Safety AI',
+    path: 'Sidebar → Professionals → Disaster Preparedness & Weather-Safety',
+    description: 'Calm, practical guide to prepare for & stay safe in natural hazards & extreme weather (floods, cyclones, earthquakes, heatwaves, heavy rain, landslides, fire, lightning): BEFORE (family emergency plan, go-kit, knowing local risks/safe spots, official alerts), DURING per-hazard safety actions (floods — higher ground, never cross floodwater; earthquake — Drop-Cover-Hold On; cyclone — evacuate/indoors; heatwave — hydrate/cool & heatstroke signs; lightning/fire safety), AFTER (return only when safe, beware structural damage/live wires/contaminated water, recovery & aid), and protecting vulnerable groups & animals. Safety-first (lives): FIRST priority is official warnings (IMD/NDMA/SDMA/local) & emergency services (112/108/101) — follow evacuation orders without delay; NOT an emergency service or live forecast/alert authority (can\'t predict real-time weather or whether your area is affected — rely on IMD/official; never fabricates forecasts/warnings/numbers); only safe widely-accepted guidance (never advise crossing floodwater or returning before declared safe); injuries → First-Aid AI + 108/112, distress → Wellness AI.',
+    howToUse: 'Open Sidebar → Professionals → Disaster Preparedness & Weather-Safety and ask: "build a family emergency plan & kit", "what to do during a flood", "earthquake Drop-Cover-Hold", "heatwave safety & heatstroke signs". In an emergency call 112 and follow official IMD/NDMA & local warnings immediately.',
+    relatedFeatures: ['professionals', 'firstaid_ai', 'wellness_ai', 'safety_ai'],
+    aiSurface: 'disaster_ai',
+    keywords: ['disaster', 'emergency', 'flood', 'cyclone', 'earthquake', 'heatwave', 'fire', 'preparedness', 'safety', 'ndma', 'imd', 'aapda', 'evacuation', 'monsoon', 'weather safety'],
+  },
+
+  // ─── NATURE & WILDLIFE GUIDE AI ──────────────────────────────────────────
+  {
+    id: 'nature_ai',
+    name: 'Nature & Wildlife Guide AI',
+    path: 'Sidebar → Professionals → Nature & Wildlife Guide',
+    description: 'Enthusiastic, conservation-minded companion to learn about & appreciate nature — birds, animals, insects, trees, plants & ecosystems: identification from descriptions (likely candidates, honestly noting uncertainty — not definitive), accurate nature facts & ecology (Indian & world biodiversity, behaviour, migration, habitats), birdwatching & nature activities (ethical observation, journaling, bird/butterfly gardening → Gardening AI, ethical photography → Photography AI), conservation & ecosystems (threats, how to help → Environment AI), and safe humane coexistence with urban wildlife. Safety & ethics (non-negotiable): never advise approaching/handling/feeding/provoking wild animals (keep respectful distance); snake/dangerous animal → keep away & call trained help (Forest Dept / wildlife rescue / 112), never catch or kill; injured/orphaned wildlife → licensed rescue/Forest Dept/vet, no untrained handling; respects the Wildlife (Protection) Act (no illegal capture/trade/caging/harming of protected wild animals/birds, no exotic/illegal pets, no removing animals/eggs/plants from the wild); honest that description-based ID is a best guess (verify with field guides/apps like Merlin/eBird/iNaturalist/naturalists) and never fabricates species/facts or that something is harmless.',
+    howToUse: 'Open Sidebar → Professionals → Nature & Wildlife Guide and ask: "help me identify a bird I saw", "fascinating facts about an animal", "how do I start birdwatching", "there\'s a snake near my home". Verify IDs with field guides/apps; for snakes/injured wildlife call the Forest Department or a licensed rescue.',
+    relatedFeatures: ['professionals', 'environment_ai', 'gardening_ai', 'vet_ai', 'photography_ai'],
+    aiSurface: 'nature_ai',
+    keywords: ['nature', 'wildlife', 'bird', 'animal', 'plant', 'tree', 'identify', 'birdwatching', 'insect', 'jungle', 'prakriti', 'conservation', 'snake', 'species', 'ecology'],
+  },
+
+  // ─── FREELANCING & ONLINE-INCOME AI ──────────────────────────────────────
+  {
+    id: 'freelance_ai',
+    name: 'Freelancing & Online-Income AI',
+    path: 'Sidebar → Professionals → Freelancing & Online-Income',
+    description: 'Practical, honest mentor for earning through legitimate freelancing, gig work & online income: choosing a path (writing/content, design, web/app dev, digital marketing, video editing, tutoring, translation, virtual assistance, handmade selling), getting started (portfolio, profiles on legit platforms, personal pitch), finding clients (non-spammy proposals/outreach, networking, referrals, not underpricing), pricing & professionalism (hourly/project/value, scope, milestones, deadlines, reviews), getting paid safely + contracts (advance/milestones, escrow, invoices → Lawyer AI for legal) + tax/GST awareness (→ CA AI) & records, and growth/balance (raising rates, emergency fund → Finance AI). Honesty/safety (money & scams): strongly ANTI-SCAM — never endorse "earn ₹X/day"/part-time/task/investment/MLM/Ponzi schemes that ask you to PAY/deposit to join or promise guaranteed earnings (real work = YOU get paid; report to 1930 / Cyber Safety AI); realistic (irregular income, takes skill/effort/time, no get-rich-quick, no promised earnings); professional integrity (quality work, confidentiality, copyright, no deceptive/cheating gigs like writing someone\'s graded assignment); protects bank details/OTPs; never fabricates platform rules/fees/rates.',
+    howToUse: 'Open Sidebar → Professionals → Freelancing & Online-Income and ask: "which freelancing path suits my skills", "build a portfolio & profile", "write a winning client proposal", "how to price my work". Never pay to get a job/task (scam); for tax use CA AI, contracts the Lawyer AI, budgeting the Finance AI.',
+    relatedFeatures: ['professionals', 'business_ai', 'mentor_ai', 'cybersafety_ai', 'accountant_ai'],
+    aiSurface: 'freelance_ai',
+    keywords: ['freelance', 'freelancing', 'online income', 'work from home', 'gig', 'upwork', 'fiverr', 'client', 'side income', 'earn online', 'kamai', 'remote work', 'proposal', 'pricing'],
+  },
+
+  // ─── BABY-NAMES & NAMING HELPER AI ───────────────────────────────────────
+  {
+    id: 'babynames_ai',
+    name: 'Baby-Names & Naming Helper AI',
+    path: 'Sidebar → Professionals → Baby-Names & Naming Helper',
+    description: 'Warm, joyful helper for choosing a baby name across India\'s many languages, religions & cultures: name suggestions (by gender/unisex, starting letter/sound, meaning/theme, language/community — Hindu/Muslim/Christian/Sikh/regional, modern or traditional), meanings/origins/pronunciation & variants, shortlisting (surname/sibling fit, initials, nicknames, sound), respectful awareness of naming customs (namkaran, nakshatra/rashi-syllable as a tradition, etc.), and practical tips (unique vs easy, avoiding unintended negative meanings). Approach/honesty: strictly inclusive & respectful (all communities equally, follows the family\'s faith/traditions, never favours/ranks/disparages); meanings given as commonly understood (can vary by source — says "commonly means…", verify if important, never fabricates a meaning/origin); NOT a religious/astrology authority (nakshatra/rashi-syllable is a family/priest custom not a requirement — no lucky/unlucky claims, Astrologer AI is entertainment-only); the name is entirely the family\'s choice, offered without pressure.',
+    howToUse: 'Open Sidebar → Professionals → Baby-Names & Naming Helper and ask: "suggest names with a meaning I like", "names starting with a letter", "what does this name mean & origin", "help me shortlist". Verify a meaning that matters with elders/your community; the choice is your family\'s.',
+    relatedFeatures: ['professionals', 'parenting_ai', 'maternity_ai'],
+    aiSurface: 'babynames_ai',
+    keywords: ['baby name', 'names', 'naming', 'name meaning', 'naamkaran', 'naam', 'baby', 'newborn name', 'name suggestion', 'meaning', 'rashi name', 'nakshatra name', 'boy name', 'girl name'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

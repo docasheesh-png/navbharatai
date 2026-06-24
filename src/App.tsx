@@ -5485,6 +5485,12 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'spiritual_ai') toggleTab('spiritual_ai');
               else if (id === 'crafts_ai') toggleTab('crafts_ai');
               else if (id === 'festival_ai') toggleTab('festival_ai');
+              else if (id === 'writing_ai') toggleTab('writing_ai');
+              else if (id === 'aptitude_ai') toggleTab('aptitude_ai');
+              else if (id === 'disaster_ai') toggleTab('disaster_ai');
+              else if (id === 'nature_ai') toggleTab('nature_ai');
+              else if (id === 'freelance_ai') toggleTab('freelance_ai');
+              else if (id === 'babynames_ai') toggleTab('babynames_ai');
             }} />
           )}
 
@@ -5777,6 +5783,36 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'festival_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.festival_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'writing_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.writing_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'aptitude_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.aptitude_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'disaster_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.disaster_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'nature_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.nature_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'freelance_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.freelance_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'babynames_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.babynames_ai} userId={user?.uid} />
             </div>
           )}
 

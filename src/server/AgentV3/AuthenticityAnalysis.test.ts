@@ -78,6 +78,15 @@ describe('scanAuthenticity', () => {
     expect(scanAuthenticity('src/a.ts', 'logger.debugger;')).toEqual([]);
   });
 
+  it('flags @ts-nocheck (medium) and a blind @ts-ignore (low), but not @ts-expect-error', () => {
+    const noCheck = scanAuthenticity('src/a.ts', '// @ts-nocheck\nconst x: number = "bad";');
+    expect(noCheck.some((i) => i.kind === 'ts-nocheck' && i.severity === 'medium')).toBe(true);
+    const ignore = scanAuthenticity('src/b.ts', '// @ts-ignore\nfoo.bar();');
+    expect(ignore.some((i) => i.kind === 'ts-ignore' && i.severity === 'low')).toBe(true);
+    // @ts-expect-error is intentional and self-verifying — not flagged.
+    expect(scanAuthenticity('src/c.ts', '// @ts-expect-error known gap\nfoo.bar();').some((i) => i.kind === 'ts-ignore' || i.kind === 'ts-nocheck')).toBe(false);
+  });
+
   it('flags an empty catch block (low) that silently swallows the error', () => {
     const issues = scanAuthenticity('src/a.ts', 'try {\n  risky();\n} catch (e) {}');
     const hit = issues.find((i) => i.kind === 'empty-catch');

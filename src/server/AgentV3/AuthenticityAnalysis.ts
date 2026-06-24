@@ -90,6 +90,21 @@ const RULES: Rule[] = [
     re: /(?:^|[^.\w])debugger\s*;/,
     ignore: (_m, line) => /^\s*(\/\/|\*|\/\*)/.test(line),
   },
+  // ── medium: `@ts-nocheck` disables type-checking for the WHOLE file, hiding
+  // every real type error in it — fake "it compiles" against "real features only".
+  {
+    kind: 'ts-nocheck',
+    severity: 'medium',
+    re: /@ts-nocheck\b/,
+  },
+  // ── low: a blind `@ts-ignore` silences the next line's type error without
+  // proving one exists (unlike `@ts-expect-error`, which is intentional and is
+  // NOT flagged). Often hides a real bug behind a green build. ─────────────────
+  {
+    kind: 'ts-ignore',
+    severity: 'low',
+    re: /@ts-ignore\b/,
+  },
   // ── low: hardcoded obviously-fake return values left in code ──────────────
   {
     kind: 'fake-return',

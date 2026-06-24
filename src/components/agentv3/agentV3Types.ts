@@ -54,7 +54,7 @@ export type AgentV3WireEvent =
   | { type: 'preview'; url: string; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number }
   | { type: 'error'; message: string; ts: number }
-  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number };
+  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number };
 
 /** One live agent card in the "AI Team" tracker (D9 — driven by REAL events only). */
 export interface AgentCard {
@@ -108,6 +108,8 @@ export interface AgentV3ClientState {
   ok?: boolean;
   summary?: string;
   billedUsd?: number;
+  /** Customer-facing bill in INR (billedUsd × the real-time USD→INR rate). */
+  billedInr?: number;
   error?: string;
 }
 

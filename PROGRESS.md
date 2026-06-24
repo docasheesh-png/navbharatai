@@ -1988,3 +1988,24 @@ So the full billing is now live: NORMAL = Sonnet-equiv × 3.5, POWER = real Opus
 customer in ₹ at the real-time rate. NEXT: frontend ₹ display + P4 (Power effort UI: 5x/mini,
 10x?/medium, 20x?/max — actually flat 2.5× per admin, effort = thinking depth). Gate green:
 server+frontend tsc 0, **2170 vitest** (+5), boot:check PASS.
+
+---
+
+### 2026-06-24 — CRITICAL: main build was broken (Languages2) + frontend ₹ display + CI hardening
+
+**Critical find while building the frontend ₹ display:** `main`'s production build was BROKEN since
+PR #336 — `ProfessionalsView.tsx` imported `Languages2` from lucide-react, which it does not export.
+CI never ran `npm run build` (only tsc + vitest + boot), and tsc passed (lucide's types are permissive),
+so it slipped to main. **Cloud Build runs `npm run build`**, so every merge since #336 (incl. the new
+billing P5-core/P5-inr) would have FAILED to deploy — the live site was stuck on the pre-#336 build.
+
+Fixes in this PR:
+1. **Build unblocked:** `Languages2` → `Languages` (valid icon; translate_ai now shares the Languages
+   icon). `npm run build` now passes (✓ built). This lets ALL the recent merges actually deploy.
+2. **CI hardening:** added a `npm run build` step to `.github/workflows/ci.yml` — so a build-only break
+   (that tsc + vitest miss) can never reach main again.
+3. **Frontend ₹ display (P5-inr finish):** the v3.0 panel now shows the customer bill in **₹**
+   (billedInr) instead of $ — agentV3Types result event + state gained `billedInr`, the reducer copies
+   it, AgentV3Panel renders `₹{billedInr}` (falls back to $ if INR absent). Reducer test covers it.
+
+Gate green: server+frontend tsc 0, **2170 vitest**, **npm run build PASS**, boot:check PASS.

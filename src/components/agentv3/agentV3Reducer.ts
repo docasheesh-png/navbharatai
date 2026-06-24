@@ -160,7 +160,7 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       return { ...state, done: true, ok: event.ok, summary: event.summary, pendingPermission: undefined };
 
     case 'result':
-      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, pendingPermission: undefined };
+      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, billedInr: event.billedInr, pendingPermission: undefined };
 
     case 'error':
       return { ...state, done: true, ok: false, error: event.message, pendingPermission: undefined };

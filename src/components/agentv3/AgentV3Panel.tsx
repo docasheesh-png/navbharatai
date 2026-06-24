@@ -320,9 +320,12 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
                 </div>
               </div>
             )}
-            {state.done && typeof state.billedUsd === 'number' && (
-              <div className="flex items-center gap-1 text-[11px] text-zinc-500">
-                <Rocket className="w-3 h-3" /> ${state.billedUsd.toFixed(4)}
+            {state.done && (typeof state.billedInr === 'number' || typeof state.billedUsd === 'number') && (
+              <div className="flex items-center gap-1 text-[11px] text-zinc-500" title="Customer bill (INR)">
+                <Rocket className="w-3 h-3" />{' '}
+                {typeof state.billedInr === 'number'
+                  ? `₹${state.billedInr.toFixed(2)}`
+                  : `$${(state.billedUsd as number).toFixed(4)}`}
               </div>
             )}
           </div>

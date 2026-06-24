@@ -92,10 +92,12 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
       summary: 'built',
       steps: 4,
       billedUsd: 1.23,
+      billedInr: 104.55,
     });
     expect(done.done).toBe(true);
     expect(done.ok).toBe(true);
     expect(done.billedUsd).toBe(1.23);
+    expect(done.billedInr).toBe(104.55);
 
     const errored = agentV3Reducer(initialAgentV3State(), { type: 'error', message: 'boom', ts: 1 });
     expect(errored.done).toBe(true);

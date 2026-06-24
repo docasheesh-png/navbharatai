@@ -294,4 +294,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Why is antibiotic misuse dangerous?',
     ],
   },
+  business_ai: {
+    id: 'business_ai',
+    name: 'Small-Business / Startup Advisor AI',
+    welcome:
+      "Namaste! 🚀 I'm Business AI — your small-business & startup mentor. I can help you validate an idea, plan, price & manage cash, market on a budget (Google/WhatsApp/social), understand registration (Udyam/MSME, structure) and funding options. Tell me your business & stage. ⚠️ This is general guidance — for tax/GST use the CA AI, for legal use a lawyer/CS, and beware pay-to-join/MLM & fake-loan scams.",
+    quickPrompts: [
+      'Validate my business idea',
+      'How should I price my product/service?',
+      'Low-cost ways to get customers',
+      'How do I register my small business?',
+    ],
+  },
 };

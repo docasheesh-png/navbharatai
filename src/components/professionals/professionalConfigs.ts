@@ -750,4 +750,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'There’s a snake near my home — what to do?',
     ],
   },
+  freelance_ai: {
+    id: 'freelance_ai',
+    name: 'Freelancing & Online-Income AI',
+    welcome:
+      "Namaste! 💻 I'm Freelancing & Online-Income AI — practical, realistic help to earn through legitimate freelancing & gig work: choosing a skill/path, building a portfolio & profiles, finding clients, pricing, getting paid safely, and growing. Tell me your skills & goal. ⚠️ Freelance income is irregular & takes time — no get-rich-quick. CRITICAL: never PAY to get a 'job'/task or join 'guaranteed income' schemes — those are scams (real work means YOU get paid). Tax → CA AI.",
+    quickPrompts: [
+      'Which freelancing path suits my skills?',
+      'Help me build a portfolio & profile',
+      'Write a winning client proposal',
+      'How should I price my freelance work?',
+    ],
+  },
 };

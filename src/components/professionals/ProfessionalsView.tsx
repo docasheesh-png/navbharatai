@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone, PartyPopper, Accessibility, Sofa, Globe2, HandHelping, Shirt, ListChecks, Users, Wrench, CandlestickChart, Smartphone, Sigma, Code2, HeartPulse, BriefcaseMedical, TreePine, Lightbulb } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone, PartyPopper, Accessibility, Sofa, Globe2, HandHelping, Shirt, ListChecks, Users, Wrench, CandlestickChart, Smartphone, Sigma, Code2, HeartPulse, BriefcaseMedical, TreePine, Lightbulb, Shield } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -61,6 +61,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'firstaid_ai', label: 'First-Aid & Emergency Response', description: 'General first-aid for bleeding, burns, choking, fainting, fractures & recognising emergencies — always alongside calling 112/108. Not a doctor; take a certified course.', icon: BriefcaseMedical, active: true },
   { id: 'environment_ai', label: 'Environment & Sustainability', description: 'Practical no-guilt ways to cut waste & plastic, save water & power, compost & segregate, green choices, and understand climate/pollution honestly — realistic & science-based.', icon: TreePine, active: true },
   { id: 'gk_ai', label: 'General Knowledge & Current Affairs', description: 'Static GK (history/geography/polity/economy/science) with context, current-affairs concepts, exam study strategy & MCQ practice for UPSC/SSC/banking — accurate, verify latest facts.', icon: Lightbulb, active: true },
+  { id: 'safety_ai', label: 'Personal Safety & Self-Defense', description: 'Situational awareness, safe travel, phone SOS & helplines (112/181/1098), women & children safety — empowering awareness (escape & get help first; never victim-blaming).', icon: Shield, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

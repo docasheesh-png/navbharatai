@@ -36,6 +36,7 @@ import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary } fr
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
 import { analyzeSecretLeak, secretLeakSummary } from './SecretLeakAnalysis';
 import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
+import { scanPortBinding, portBindingSummary, type PortBindingIssue } from './PortBindingAnalysis';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
 
@@ -199,6 +200,23 @@ export class ToolDispatcher {
     for (const { path, content } of sources) {
       if (!CODE.test(path) || SKIP.test(path)) continue;
       issues.push(...scanHardcodedUrls(path, content));
+    }
+    return issues;
+  }
+
+  /**
+   * Deployment readiness (Section I #11 v2): a server bound to a hardcoded port
+   * instead of process.env.PORT — managed hosts (Cloud Run/Heroku/Render) inject
+   * PORT and route only to it, so a literal port means no traffic ever reaches the
+   * app. Env-var fallbacks are excluded by the analyser. Bounded and wrapped.
+   */
+  private collectPortBindingIssues(sources: EvalSourceFile[]): PortBindingIssue[] {
+    const CODE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
+    const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+    const issues: PortBindingIssue[] = [];
+    for (const { path, content } of sources) {
+      if (!CODE.test(path) || SKIP.test(path)) continue;
+      issues.push(...scanPortBinding(path, content));
     }
     return issues;
   }
@@ -570,6 +588,9 @@ export class ToolDispatcher {
         const secretLeak = analyzeSecretLeak(hygieneFiles, gitignoreContent);
         // Best-effort hardcoded-URL pass (Section I #11): localhost baked into code.
         const hardcodedUrls = this.collectHardcodedUrlIssues(snap.sources);
+        // Best-effort port-binding pass (Section I #11 v2): a hardcoded listen port
+        // means a managed host can never route traffic to the deployed app.
+        const portBindings = this.collectPortBindingIssues(snap.sources);
         // Fold the critical new dimensions into the readiness gate: a secret leak,
         // an app that can't run, or a high-severity security misconfig must BLOCK
         // "READY" — not merely be reported. The rest lower the score as warnings.
@@ -586,6 +607,7 @@ export class ToolDispatcher {
         for (const f of runnability.findings) extra.push({ severity: f.level === 'high' ? 'high' : 'medium', label: `Runnability: ${f.message}` });
         for (const i of securityConfig) extra.push({ severity: i.severity === 'high' ? 'high' : 'medium', label: `Security config (${i.rule})` });
         if (hardcodedUrls.length) extra.push({ severity: 'medium', label: `${hardcodedUrls.length} hardcoded localhost URL(s)` });
+        if (portBindings.length) extra.push({ severity: 'medium', label: `${portBindings.length} hardcoded server port(s) (use process.env.PORT)` });
         for (const f of reqCoverage.findings) extra.push({ severity: 'medium', label: `Requested feature not found: ${f.feature}` });
         if (errorBoundary.findings.length) extra.push({ severity: 'medium', label: 'React app has no error boundary' });
         if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
@@ -609,7 +631,7 @@ export class ToolDispatcher {
           accessibility: tally(a11yIssues),
           compliance: complianceTally,
         });
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}`;
       }
 
       case 'update_todo': {

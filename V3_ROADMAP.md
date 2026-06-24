@@ -258,6 +258,17 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Section I #11 v2 (Deployment readiness) — hardcoded-port check. New
+  `AgentV3/PortBindingAnalysis.ts` (PURE): flags a server bound to a literal port
+  (`app.listen(3000)`) instead of `process.env.PORT` — managed hosts (Cloud Run,
+  Heroku, Render, Railway, Fly) inject PORT and route traffic only to it, so a
+  hardcoded port means the container starts but never receives traffic (the
+  "deploys-but-silent" bug). High-precision (line-level, same as the hardcoded-URL
+  precedent): skips the correct `process.env.PORT || 3000` fallback, comments, and
+  variable/no-arg listens; 2–5-digit literal ports only (no `addEventListener`
+  confusion). Folded into `evaluate` as the 19th dimension + a medium readiness
+  warning; systemPrompt + AppKnowledgeBase synced. v3.0-only. Gate green:
+  server+frontend tsc 0, 2044 vitest (+13), boot:check PASS.
 - 2026-06-24: Section I #13 (Dependencies / reproducibility) — unpinned-version rule.
   Added a third rule to `DependencyAnalysis`: a `dependencies`/`devDependencies` entry
   pinned to a floating version (`*` / `latest` / `x` / empty) is flagged medium — such

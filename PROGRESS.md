@@ -1494,3 +1494,34 @@ not enumerate dependency sub-checks). v3.0-only, flag-OFF — live app unaffecte
 
 Gate green: server tsc 0, frontend tsc 0, **2031 vitest** (+6), boot:check PASS.
 Pushed to the feature branch to ride the next CI with the #289 batch.
+
+---
+
+### 2026-06-24 — Section I #11 v2: hardcoded server-port check (deployment readiness)
+
+Continuing the Section I march (CI now live on the public repo; #289 batch + the
+unpinned-deps commit are riding CI). New item built real + tested + green:
+
+**Section I #11 v2 — `PortBindingAnalysis` (new evaluate dimension, 19th).** A PURE,
+deterministic scanner that flags a server bound to a hardcoded literal port
+(`app.listen(3000)`) instead of `process.env.PORT`. Every managed host — Cloud Run,
+Heroku, Render, Railway, Fly — assigns the port via the PORT env var and routes
+traffic only to it; a hardcoded port means the container boots but the platform can
+never reach it (the "deploys-but-silent" production failure). Directly serves the one
+absolute rule (the app must never break) for the apps v3.0 ships.
+
+High-precision by design (mirrors the hardcoded-URL precedent exactly):
+- Line-level: a `.listen(<2–5 digit literal>)` with no env reference on the line.
+- Skips the correct `process.env.PORT || 3000` / `import.meta.env` fallback, comments,
+  and variable / no-arg listens. No `addEventListener` confusion (requires `.listen(`).
+
+Wired end-to-end into `evaluate`: new `collectPortBindingIssues` collector (CODE/SKIP
+filters like the URL collector), appended to the verdict, and a **medium readiness
+warning** in the `extra` gate (a hardcoded port lowers the score, does not hard-block).
+systemPrompt + AppKnowledgeBase synced (new HARDCODED PORT entry). v3.0-only, flag-OFF.
+
+Tests: new `PortBindingAnalysis.test.ts` (11) + 2 dispatcher integration cases
+(flags a literal listen; passes with process.env.PORT) — dispatcher suite 38→40.
+
+Gate green: server tsc 0, frontend tsc 0, **2044 vitest** (+13 across both items this
+session), boot:check PASS. Pushed to ride the next CI with the rest of the batch.

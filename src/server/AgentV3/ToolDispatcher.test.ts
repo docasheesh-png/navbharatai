@@ -263,6 +263,21 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('hardcoded localhost URL');
   });
 
+  it('flags a hardcoded server listen port (no process.env.PORT)', async () => {
+    const dd = makeDispatcher('ws-eval-port');
+    await write(dd, 'server.ts', 'import express from "express";\nconst app = express();\napp.listen(3000);');
+    const out = await evalText(dd);
+    expect(out).toContain('hardcoded listen port');
+    expect(out).toContain('process.env.PORT');
+  });
+
+  it('passes the port check when the listen port comes from process.env.PORT', async () => {
+    const dd = makeDispatcher('ws-eval-port-ok');
+    await write(dd, 'server.ts', 'const app = require("express")();\napp.listen(process.env.PORT || 3000);');
+    const out = await evalText(dd);
+    expect(out).toContain('Server port: ✓');
+  });
+
   it('flags runnability when there is no run script', async () => {
     const dd = makeDispatcher('ws-eval-run');
     await write(dd, 'package.json', JSON.stringify({ dependencies: { react: '^18' }, scripts: { lint: 'eslint .' } }));

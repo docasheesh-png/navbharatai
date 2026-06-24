@@ -42,9 +42,20 @@ describe('analyzeRequest — task classification & tiering', () => {
     expect(tier('create an e-commerce checkout with stripe payment and a backend api')).toBe('sonnet');
   });
 
-  it('routes architecture/system-design to Opus', () => {
-    expect(tier('design a scalable microservice architecture for high-availability')).toBe('opus');
-    expect(tier('refactor the entire system into a distributed production-grade design')).toBe('opus');
+  it('caps architecture/system-design at Sonnet in NORMAL mode (Opus is power-only)', () => {
+    expect(tier('design a scalable microservice architecture for high-availability')).toBe('sonnet');
+    expect(tier('refactor the entire system into a distributed production-grade design')).toBe('sonnet');
+    // The complexity score is still high (for telemetry / "suggest Power" UX), tier just caps.
+    expect(analyzeRequest({ prompt: 'design a scalable microservice architecture' }).complexityScore).toBeGreaterThan(70);
+  });
+
+  it('POWER mode bypasses the ladder → Opus 4.8 for everything, no escalation', () => {
+    const simple = analyzeRequest({ prompt: 'make a calculator', powerMode: true });
+    expect(simple.startTier).toBe('opus');
+    expect(simple.escalationPath).toEqual(['opus']);
+    expect(simple.reasoning).toContain('POWER');
+    // Even a greeting goes to Opus under Power.
+    expect(analyzeRequest({ prompt: 'hi', powerMode: true }).startTier).toBe('opus');
   });
 });
 
@@ -69,9 +80,9 @@ describe('analyzeRequest — feature adjustments', () => {
 });
 
 describe('analyzeRequest — escalation path & ambiguity', () => {
-  it('escalation path runs from the start tier up to opus', () => {
-    expect(analyzeRequest({ prompt: 'make a calculator' }).escalationPath).toEqual(['gemini', 'haiku', 'sonnet', 'opus']);
-    expect(analyzeRequest({ prompt: 'design a scalable microservice architecture' }).escalationPath).toEqual(['opus']);
+  it('escalation path runs from the start tier up to Sonnet (Opus is power-only)', () => {
+    expect(analyzeRequest({ prompt: 'make a calculator' }).escalationPath).toEqual(['gemini', 'haiku', 'sonnet']);
+    expect(analyzeRequest({ prompt: 'design a scalable microservice architecture' }).escalationPath).toEqual(['sonnet']);
   });
 
   it('flags borderline scores as ambiguous and always returns a safe default tier', () => {

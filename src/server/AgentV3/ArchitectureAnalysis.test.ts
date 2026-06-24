@@ -60,6 +60,16 @@ describe('analyzeArchitecture', () => {
     expect(architectureSummary(r)).toContain('break the browser build');
   });
 
+  it('flags other unpolyfilled server-only builtins (async_hooks, perf_hooks) in front-end code', () => {
+    const g = graphOf({
+      'src/components/Trace.tsx': "import { AsyncLocalStorage } from 'node:async_hooks';\nexport function Trace(){return null;}",
+      'src/components/Perf.tsx': "import { performance } from 'perf_hooks';\nexport function Perf(){return null;}",
+    });
+    const r = analyzeArchitecture(g);
+    expect(r.nodeBuiltinsInFrontend.some((v) => v.includes('Trace.tsx') && v.includes('async_hooks'))).toBe(true);
+    expect(r.nodeBuiltinsInFrontend.some((v) => v.includes('Perf.tsx') && v.includes('perf_hooks'))).toBe(true);
+  });
+
   it('does NOT flag a server-only builtin imported by back-end code', () => {
     const g = graphOf({ 'src/server/store.ts': "import fs from 'fs';\nexport const store = {};" });
     expect(analyzeArchitecture(g).nodeBuiltinsInFrontend).toEqual([]);

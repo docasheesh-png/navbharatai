@@ -34,6 +34,7 @@ const CODE_EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
 const SERVER_ONLY_BUILTINS = new Set<string>([
   'fs', 'child_process', 'cluster', 'net', 'tls', 'dns', 'dgram',
   'worker_threads', 'v8', 'vm', 'readline', 'repl', 'inspector', 'module', 'os', 'http2',
+  'async_hooks', 'diagnostics_channel', 'perf_hooks', 'trace_events',
 ]);
 
 /** A client/front-end module by its path (src/client|components|pages|app, or App.tsx). */

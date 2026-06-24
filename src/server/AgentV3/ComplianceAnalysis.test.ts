@@ -30,6 +30,13 @@ describe('scanCompliance — file-local rules', () => {
     expect(scanCompliance('src/auth.ts', `app.use(res.cookieParser());`).some((i) => i.kind === 'cookie-no-httponly')).toBe(false);
   });
 
+  it('flags a server cookie set without the Secure flag, but not when secure is present', () => {
+    expect(scanCompliance('src/auth.ts', `res.cookie('session', token, { httpOnly: true });`).some((i) => i.kind === 'cookie-no-secure')).toBe(true);
+    expect(scanCompliance('src/auth.ts', `res.cookie('session', token, { httpOnly: true, secure: true });`).some((i) => i.kind === 'cookie-no-secure')).toBe(false);
+    // Not a cookie set — must not false-positive.
+    expect(scanCompliance('src/auth.ts', `app.use(res.cookieParser());`).some((i) => i.kind === 'cookie-no-secure')).toBe(false);
+  });
+
   it('flags personal data over plain http but ignores localhost', () => {
     expect(scanCompliance('a.ts', `fetch('http://api.example.com/u')`).some((i) => i.kind === 'insecure-http-endpoint')).toBe(true);
     expect(scanCompliance('a.ts', `fetch('http://localhost:3000/u')`).some((i) => i.kind === 'insecure-http-endpoint')).toBe(false);

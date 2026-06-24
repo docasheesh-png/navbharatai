@@ -111,6 +111,13 @@ export function scanCompliance(file: string, content: string): ComplianceIssue[]
       push('cookie-no-httponly', 'medium');
     }
 
+    // ── medium: server cookie set without the Secure flag — the browser will send it
+    // over plain http where it can be intercepted on the wire (DPDP/GDPR security-of-
+    // processing). The `secure:` option (or a "Secure" attribute) resolves it. ───────
+    if (/\bres(?:ponse)?\.cookie\s*\(/.test(line) && !/\bsecure\b/i.test(line)) {
+      push('cookie-no-secure', 'medium');
+    }
+
     // ── high: personal data over plain http:// (in the clear on the network) ─────
     // Only flag a real network call to a non-local host.
     if (/(fetch|axios|\.(get|post|put|patch)|url\s*:)\s*\(?\s*['"`]http:\/\//i.test(line) &&

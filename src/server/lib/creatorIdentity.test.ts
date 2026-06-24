@@ -7,6 +7,10 @@ describe('CREATOR_IDENTITY (shared creator attribution)', () => {
   it('credits Dr Asheesh and team, asks for natural variation, and forbids provider attribution', () => {
     expect(CREATOR_IDENTITY).toMatch(/Dr Asheesh/);
     expect(CREATOR_IDENTITY.toLowerCase()).toContain('team');
+    // Creator location (admin-provided): Budaun, Uttar Pradesh, India.
+    expect(CREATOR_IDENTITY).toContain('Budaun');
+    expect(CREATOR_IDENTITY).toContain('Uttar Pradesh');
+    expect(CREATOR_IDENTITY).toContain('India');
     // Must instruct the model to vary the wording (not repeat the same sentence).
     expect(CREATOR_IDENTITY.toLowerCase()).toMatch(/vary|never repeat/);
     // Must stop the model from claiming an AI provider/model company made it.

@@ -2379,3 +2379,27 @@ constant, all agents stay consistent).
 Tests: new creatorIdentity.test.ts (+3) — constant credits Dr Asheesh + asks variation + forbids provider
 attribution; professionals + agentv3 builders include the attribution. Gate green: frontend tsc 0,
 server tsc 0, **2213 vitest** (+3), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Creator address added + TEMPORARY env-gated v3.0 provider-debug (admin)
+
+Two admin (Dr Asheesh) requests:
+
+1. **Creator address in CREATOR_IDENTITY** — the shared attribution now also says Dr Asheesh is based
+   in Budaun, Uttar Pradesh, India, and instructs the agent to mention that location if the user asks
+   where the creator/team is from (still naturally varied, same core facts). Applies to every agent via
+   the single source of truth (lib/prompts.ts).
+
+2. **TEMPORARY provider-debug (testing only)** — `providerDebugTag(label)` in agentv3.ts, gated by env
+   `AGENTV3_DEBUG_PROVIDER` (OFF by default). When ON, every v3.0 reply is tagged `_[debug · replied
+   via <provider>]_` so the admin can verify WHERE each reply came from:
+   • cheap-chat / "hi" path → the real free-router provider (VERTEX / GEMINI / GROK) from response.provider
+   • build path → `Claude (<model>)` (the resilient runner already self-labels in the text if it fell
+     back to a free provider).
+   "Hide later" = just unset the env var on Cloud Run — no code change, users never see it (default OFF).
+   The helper + call sites are marked TEMPORARY for clean removal once testing is done.
+
+Tests: creatorIdentity.test.ts asserts the address; agentv3.test.ts asserts providerDebugTag is empty
+when OFF and tags the provider when ON (+2). Gate green: frontend tsc 0, server tsc 0, **2215 vitest**
+(+2), build PASS, boot:check PASS.

@@ -1,5 +1,26 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag } from './agentv3';
+
+describe('providerDebugTag (temporary admin provider-debug, env-gated)', () => {
+  const prev = process.env.AGENTV3_DEBUG_PROVIDER;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTV3_DEBUG_PROVIDER;
+    else process.env.AGENTV3_DEBUG_PROVIDER = prev;
+  });
+
+  it('is OFF by default — no tag, so users never see the provider', () => {
+    delete process.env.AGENTV3_DEBUG_PROVIDER;
+    expect(providerDebugTag('VERTEX')).toBe('');
+  });
+
+  it('tags the reply with the provider when AGENTV3_DEBUG_PROVIDER is enabled', () => {
+    process.env.AGENTV3_DEBUG_PROVIDER = '1';
+    expect(providerDebugTag('VERTEX')).toContain('VERTEX');
+    expect(providerDebugTag('GEMINI')).toContain('replied via GEMINI');
+    // An empty label still produces no tag.
+    expect(providerDebugTag('')).toBe('');
+  });
+});
 
 describe('deriveWorkspaceId (session continuity)', () => {
   it('uses a stable session id so the same session reuses one workspace', () => {

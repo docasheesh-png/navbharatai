@@ -108,6 +108,20 @@ function envInt(name: string, fallback: number): number {
   return Number.isInteger(raw) && raw > 0 ? raw : fallback;
 }
 
+// ── TEMPORARY DEBUG (admin test) ────────────────────────────────────────────────
+// When AGENTV3_DEBUG_PROVIDER is enabled, every v3.0 reply is tagged with the
+// provider/model that produced it, so the admin can verify WHERE each reply came
+// from (e.g. confirm Vertex is answering). It is OFF by default, so users never see
+// it; turn it ON by setting the env var on Cloud Run, and OFF again by unsetting it —
+// no code change, no leak. Remove this helper and its call sites once testing is done.
+function isProviderDebugOn(): boolean {
+  const v = process.env.AGENTV3_DEBUG_PROVIDER;
+  return v === '1' || v === 'true';
+}
+export function providerDebugTag(label: string): string {
+  return isProviderDebugOn() && label ? `\n\n_[debug · replied via ${label}]_` : '';
+}
+
 /** One concurrent build per account — guards against runaway cost / abuse. */
 const activeBuilds = new Set<string>();
 const MAX_PROMPT_LEN = 20_000;
@@ -422,7 +436,7 @@ export function registerAgentV3Routes(app: Express): void {
           "You are NavBharatAI's friendly assistant. Reply briefly and warmly in " +
             "the user's language. Do not mention which model you are.\n\n" + CREATOR_IDENTITY,
         );
-        const reply = response.content;
+        const reply = response.content + providerDebugTag(response.provider);
         // Record the turn in project memory so iterative context is preserved
         // (mirrors the build path's recordRequest). Best-effort.
         try {
@@ -652,6 +666,10 @@ export function registerAgentV3Routes(app: Express): void {
         userCostStore.record(userId, result.billedUsd).catch(() => {});
       }
 
+      // TEMP DEBUG: tag the build reply with the provider/model (Claude primary; the
+      // resilient runner already self-labels in the text if it fell back to a free provider).
+      const buildTag = providerDebugTag(`Claude (${model})`);
+      if (buildTag) events.emit({ type: 'narration', agent: 'architect', text: buildTag.trim(), ts: Date.now() });
       send({ type: 'result', ...result, billedInr: Math.round(result.billedUsd * usdInrRate() * 100) / 100 });
     } catch (err) {
       send({ type: 'error', message: err instanceof Error ? err.message : String(err) });

@@ -35,6 +35,11 @@ export interface AnalyserInput {
   fileCount?: number;
   /** Whether the request includes image attachments. */
   hasImages?: boolean;
+  /**
+   * POWER mode (admin: Opus is power-only). When true the ladder is bypassed — every
+   * request runs on Opus 4.8 with no escalation. NORMAL mode tops out at Sonnet.
+   */
+  powerMode?: boolean;
 }
 
 export interface AnalysisResult {
@@ -46,7 +51,10 @@ export interface AnalysisResult {
   reasoning: string;
 }
 
-const LADDER: StartTier[] = ['gemini', 'haiku', 'sonnet', 'opus'];
+// NORMAL-mode ladder tops out at Sonnet — Opus is POWER-only (admin decision, 2026-06-24):
+// keeps normal-mode billing flat/predictable (Sonnet-equivalent × 2, no surprise Opus bill)
+// and the margin safe (Sonnet-equivalent × 5 ≈ Opus break-even). Sonnet is the backstop.
+const NORMAL_LADDER: StartTier[] = ['gemini', 'haiku', 'sonnet'];
 
 // ── Keyword signals (lowercased, word-ish boundaries kept loose for Hinglish) ──────
 const RE = {
@@ -88,16 +96,16 @@ const BASE_SCORE: Record<TaskType, number> = {
   architecture: 80, // Opus
 };
 
+/** Normal-mode tier from score. Tops at Sonnet (Opus is power-only). */
 function scoreToTier(score: number): StartTier {
   if (score <= 20) return 'gemini';
   if (score <= 40) return 'haiku';
-  if (score <= 70) return 'sonnet';
-  return 'opus';
+  return 'sonnet';
 }
 
-/** True when the score sits within `margin` of a tier boundary (20/40/70). */
+/** True when the score sits within `margin` of a normal-mode tier boundary (20/40). */
 function isNearBoundary(score: number, margin = 3): boolean {
-  return [20, 40, 70].some((b) => Math.abs(score - b) <= margin);
+  return [20, 40].some((b) => Math.abs(score - b) <= margin);
 }
 
 /**
@@ -108,6 +116,19 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
   const prompt = (input?.prompt ?? '').toString();
   const p = prompt.toLowerCase();
   const taskType = detectTaskType(p);
+
+  // POWER mode bypasses the ladder entirely: everything runs on Opus 4.8, no escalation.
+  if (input?.powerMode) {
+    return {
+      complexityScore: 100,
+      taskType,
+      startTier: 'opus',
+      escalationPath: ['opus'],
+      ambiguous: false,
+      reasoning: `POWER mode → Opus 4.8 (task=${taskType}, ladder bypassed)`,
+    };
+  }
+
   let score = BASE_SCORE[taskType];
   const reasons: string[] = [`task=${taskType} (base ${score})`];
 
@@ -149,7 +170,7 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
 
   score = Math.max(0, Math.min(100, Math.round(score)));
   const startTier = scoreToTier(score);
-  const escalationPath = LADDER.slice(LADDER.indexOf(startTier));
+  const escalationPath = NORMAL_LADDER.slice(NORMAL_LADDER.indexOf(startTier));
   const ambiguous = isNearBoundary(score);
 
   return {

@@ -1717,3 +1717,30 @@ v3.0-only, flag-OFF.
 
 Tests: +2 unit (`SecurityAnalysis.test.ts`, 10→12) + 1 dispatcher integration (47→48).
 Gate green: server+frontend tsc 0, **2082 vitest** (+3), boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #6 v2: await-in-forEach correctness check (21st dimension)
+
+Continuing the autonomous Section I march (varying from the security run into a correctness
+check). New item:
+
+**Section I #6 v2 — `AsyncPatternAnalysis` (new evaluate dimension, 21st).** A PURE,
+deterministic scanner that flags `array.forEach(async (x) => { await … })`. This is a classic
+JS footgun: forEach ignores the promise each callback returns, so the loop does NOT await the
+iterations (they race), and any rejection becomes an unhandled, silently-swallowed promise
+rejection. The code compiles and looks correct but breaks at runtime — directly against "the
+app must never break". Flagged with the fix (for...of + await, or await Promise.all(map)).
+
+High-precision by design:
+- A single-line `.forEach(\s*async\b` signature (arrow or function form); comments and
+  non-code files skipped.
+- `.map(async …)` inside `await Promise.all(...)` (the correct pattern) is NOT flagged, nor
+  is a synchronous forEach or a for...of-with-await.
+
+Wired end-to-end into `evaluate`: new `collectAsyncPatternIssues` collector, appended to the
+verdict, + a medium readiness warning. systemPrompt + AppKnowledgeBase synced. v3.0-only,
+flag-OFF.
+
+Tests: new `AsyncPatternAnalysis.test.ts` (6) + 1 dispatcher integration (48→49).
+Gate green: server+frontend tsc 0, **2089 vitest** (+7), boot:check PASS.

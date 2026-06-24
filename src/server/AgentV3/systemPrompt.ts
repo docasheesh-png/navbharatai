@@ -103,6 +103,8 @@ export function architectSystemPrompt(): string {
     '  VITE_-prefixed vars are exposed to the browser, so import.meta.env.API_KEY is',
     '  undefined at runtime. Rename it to VITE_API_KEY (and never expose real secrets',
     '  to the client).',
+    '- evaluate also reports forEach(async …) — the loop does not await, so it races and',
+    '  swallows errors. Use for...of with await, or await Promise.all(arr.map(...)).',
     '- Before finishing a real app, call generate_readme to write an accurate',
     '  README.md (stack, how to run, structure) derived from the real project.',
     '- If the app reads any env vars, call generate_env_example so .env.example',

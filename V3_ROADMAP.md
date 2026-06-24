@@ -258,6 +258,16 @@ Every phase is graded against these, because they are what makes the difference:
   as the 12th dimension; systemPrompt + AppKnowledgeBase synced. "Preview is EARNED" —
   a build that compiles can still not run. v3.0-only. Gate green: server+frontend tsc 0,
   1937 vitest (+10), build, boot:check PASS. (Resumed from the 54b17cd WIP checkpoint.)
+- 2026-06-24: Section I #6 v2 (Correctness / execution quality) — await-in-forEach. New
+  `AgentV3/AsyncPatternAnalysis.ts` (PURE): `array.forEach(async … await …)` is a classic
+  bug — forEach ignores the promise each callback returns, so the loop does NOT await, the
+  iterations race, and any rejection becomes an unhandled (swallowed) promise rejection. The
+  code compiles and "looks" right but breaks at runtime. Flagged with the fix (for...of +
+  await, or `await Promise.all(arr.map(...))`). High-precision (a single-line `.forEach(
+  async` signature; comments and `.map(async …)` are not flagged). Folded into `evaluate`
+  as the 21st dimension (new `collectAsyncPatternIssues`) + a medium readiness warning;
+  systemPrompt + AppKnowledgeBase synced. v3.0-only. Gate green: server+frontend tsc 0,
+  2089 vitest (+7), boot:check PASS.
 - 2026-06-24: Section I #4 v8 (Security) — hardcoded JWT signing secret. Added a
   `hardcoded-jwt-secret` rule (high) to `SecurityAnalysis`: `jwt.sign(payload, '<literal>')`
   bakes the signing key into the source, so anyone with the code can forge tokens — and the

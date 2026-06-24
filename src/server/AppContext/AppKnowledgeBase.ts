@@ -621,6 +621,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['interior', 'interior design', 'decor', 'home decor', 'decorate', 'furniture', 'colour', 'paint', 'storage', 'declutter', 'room', 'ghar sajawat', 'styling', 'small space'],
   },
 
+  // ─── STUDY-ABROAD & EDUCATION CONSULTANT AI ──────────────────────────────
+  {
+    id: 'studyabroad_ai',
+    name: 'Study-Abroad & Education Consultant AI',
+    path: 'Sidebar → Professionals → Study-Abroad & Education',
+    description: 'Honest guide for Indian students planning higher education abroad or in India: course/country/university choice (fit over rankings; US/UK/Canada/Australia/Germany & strong Indian options), exams (IELTS/TOEFL/PTE, GRE/GMAT, SAT — which & prep strategy), applications (timelines, shortlisting, SOP/personal statement & LOR guidance on the student’s OWN writing, CV→Resume AI), scholarships & funding (finding awards, education-loan basics→Finance AI, total cost & budgeting, Indian schemes→Govt Schemes Helper), and general student-visa awareness. Safety-first: general guidance NOT official admissions/immigration advice — deadlines/fees/eligibility/visa & post-study-work rules change & vary, always verify on official university & government/embassy sites before deciding/paying; never writes a fake SOP or fabricates experiences/grades (misrepresentation → rejection/revocation); warns about dishonest agents & "guaranteed admission/visa"/pay-for-seat scams (Cyber Safety AI), prefers official channels; realistic (no admission/visa/job guarantees); never fabricates fees/scholarship amounts/rankings/visa rules.',
+    howToUse: 'Open Sidebar → Professionals → Study-Abroad & Education and ask: "help me choose a course & country", "which exams & how to prep", "guide me on my SOP", "scholarships & education-loan basics". Verify deadlines/fees/visa rules on official sites; use Finance AI for loans and English Tutor AI for exam-language prep.',
+    relatedFeatures: ['professionals', 'mentor_ai', 'english_ai', 'resume_ai', 'finance_ai'],
+    aiSurface: 'studyabroad_ai',
+    keywords: ['study abroad', 'education', 'university', 'college', 'masters', 'mba', 'ielts', 'gre', 'gmat', 'sop', 'scholarship', 'student visa', 'foreign study', 'admission', 'videsh padhai'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

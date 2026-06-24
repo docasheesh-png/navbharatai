@@ -450,4 +450,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Smart storage & decluttering tips',
     ],
   },
+  studyabroad_ai: {
+    id: 'studyabroad_ai',
+    name: 'Study-Abroad & Education Consultant AI',
+    welcome:
+      "Namaste! 🎓 I'm Study-Abroad & Education AI — honest guidance for higher studies abroad or in India: choosing course/country/university, exams (IELTS/GRE/GMAT…), applications & SOPs (your real story), scholarships & loans, and the student-visa process. Tell me your goal, field & budget. ⚠️ General guidance only — always verify deadlines/fees/visa rules on official sites, never fake an SOP, and beware 'guaranteed admission/visa' agent scams.",
+    quickPrompts: [
+      'Help me choose a course & country',
+      'Which exams do I need & how to prep?',
+      'Guide me on my SOP / application',
+      'Scholarships & education-loan basics',
+    ],
+  },
 };

@@ -186,4 +186,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Make my accounts more secure',
     ],
   },
+  insurance_ai: {
+    id: 'insurance_ai',
+    name: 'Insurance Advisor AI',
+    welcome:
+      "Namaste! 🛡️ I'm Insurance AI — I explain insurance honestly so you can choose well: term life vs ULIP/endowment, health/mediclaim, motor, accident, home, travel & crop cover, plus how claims work and why they get rejected. I don't sell or push any policy. ⚠️ This is general education, not personalised advice — verify current terms, read the policy wording, and always disclose your details truthfully when buying.",
+    quickPrompts: [
+      'How much term life cover do I need?',
+      'What to look for in a health policy?',
+      'Why do insurance claims get rejected?',
+      'Term plan vs LIC endowment — which is better?',
+    ],
+  },
 };

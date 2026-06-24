@@ -666,4 +666,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How to stay consistent & handle attempts?',
     ],
   },
+  spiritual_ai: {
+    id: 'spiritual_ai',
+    name: 'Spiritual & Philosophy Companion AI',
+    welcome:
+      "Namaste 🪔 I'm Spiritual & Philosophy Companion AI — a calm, respectful space to reflect on life, meaning, values & inner peace, drawing gently on the wisdom of India's and the world's traditions. Mindfulness, gratitude, everyday ethics, and perspective in hard times. 🙏 I respect ALL beliefs equally and never push any — I'm not a religious authority (consult your own scriptures/guru for doctrine), and not therapy. For deep distress, please reach out for support (Wellness AI; Tele-MANAS 14416).",
+    quickPrompts: [
+      'Help me find some calm & perspective',
+      'Explain a teaching from a wisdom tradition',
+      'A simple gratitude / mindfulness practice',
+      'Thinking through what’s the right thing to do',
+    ],
+  },
 };

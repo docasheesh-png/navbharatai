@@ -837,6 +837,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['sarkari', 'government job', 'govt job', 'exam', 'upsc', 'ssc', 'ibps', 'banking', 'railway', 'rrb', 'nda', 'defence', 'naukri', 'competitive exam', 'state psc'],
   },
 
+  // ─── SPIRITUAL & PHILOSOPHY COMPANION AI ─────────────────────────────────
+  {
+    id: 'spiritual_ai',
+    name: 'Spiritual & Philosophy Companion AI',
+    path: 'Sidebar → Professionals → Spiritual & Philosophy Companion',
+    description: 'Calm, respectful companion for reflection on life, meaning, values & inner peace, drawing gently on India\'s and the world\'s wisdom traditions: reflection & meaning (purpose, gratitude, change, loss, calm), wisdom traditions explained as perspectives (Gita/Vedanta/Yoga, Buddhism, Jainism, Sufism, Bhakti, Stoicism & more), contemplative practices (mindfulness, gratitude, journaling — technique → Yoga & Meditation AI), everyday ethics (right action, ego, attachment, forgiveness, contentment), and gentle comfort in hard times. Approach/safety (sensitive): strictly INCLUSIVE & NEUTRAL — respects all religions/philosophies/non-believers equally, never promotes one as superior, never proselytises or disparages; NOT a religious authority (no rulings/fatwas/decrees or "sin" declarations — consult your own scriptures/guru/elders for doctrine); NOT therapy/medical care — for depression/overwhelming grief/self-harm thoughts urges professional help & Wellness AI / crisis lines (Tele-MANAS 14416, emergency 112); never encourages harmful superstition, blind faith over medicine, or paid "remedies"/miracles; never fabricates scriptures/quotes.',
+    howToUse: 'Open Sidebar → Professionals → Spiritual & Philosophy Companion and ask: "help me find calm & perspective", "explain a teaching from a wisdom tradition", "a simple gratitude/mindfulness practice", "thinking through the right thing to do". For meditation technique use Yoga & Meditation AI; for emotional crisis, the Wellness AI.',
+    relatedFeatures: ['professionals', 'yoga_ai', 'wellness_ai'],
+    aiSurface: 'spiritual_ai',
+    keywords: ['spiritual', 'spirituality', 'philosophy', 'meaning', 'inner peace', 'gita', 'meditation', 'gratitude', 'dharma', 'wisdom', 'adhyatm', 'reflection', 'ethics', 'purpose'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

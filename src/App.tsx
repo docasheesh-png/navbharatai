@@ -5246,7 +5246,7 @@ ${buildLanguageRule(preferredLanguage)}`;
           </div>
         }>
         <div className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
-          ['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem)] supports-[height:100dvh]:h-[calc(100dvh-3.5rem)] max-h-[calc(100vh-3.5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem)]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
+          ['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell', 'engine_builder'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem)] supports-[height:100dvh]:h-[calc(100dvh-3.5rem)] max-h-[calc(100vh-3.5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem)]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
           // 8.1 — space for bottom nav on mobile (all views including chat)
           effectiveDeviceMode !== 'desktop' ? "pb-14" : ""
         )}>
@@ -5952,7 +5952,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               chat/history are preserved. It is unmounted (and fully reset) ONLY when
               its tab is closed via the ✕. */}
           {openTabs.includes('engine_builder') && (
-            <div className="flex-1" style={{ height: '100vh', display: activeView === 'engine_builder' ? undefined : 'none' }}>
+            <div className="flex-1 min-h-0" style={{ display: activeView === 'engine_builder' ? undefined : 'none' }}>
               <AgentV3Panel userId={user?.uid} email={user?.email} resume={v3Resume} />
             </div>
           )}

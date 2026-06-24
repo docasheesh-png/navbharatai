@@ -334,7 +334,7 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
           <div className="shrink-0 sticky bottom-0 bg-zinc-950 border-t border-zinc-800 pb-[env(safe-area-inset-bottom)]">
             {agents.length > 0 && (
               <div className="px-3 pt-2 flex gap-1.5 overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
-                {agents.map((a) => <AgentChip key={a.agent} card={a} />)}
+                {agents.map((a) => <AgentChip key={a.agent} card={a} running={running} />)}
               </div>
             )}
             {files.length > 0 && (
@@ -358,7 +358,7 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
               className="hidden"
               onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
             />
-            <div className="flex items-end gap-2 p-3">
+            <div className="flex items-end gap-2 px-2 py-1.5">
               {/* Build-options popover (Planning / Thinking / Power) — anchored above the input */}
               <div className="relative shrink-0">
                 {settingsOpen && (
@@ -566,10 +566,15 @@ function PreviewSurface({ url }: { url?: string }) {
   );
 }
 
-function AgentChip({ card }: { card: AgentCard }) {
+function AgentChip({ card, running }: { card: AgentCard; running: boolean }) {
+  // While the build is running, every team member shows a spinning ring (work in
+  // progress). Once the build finishes, it turns into a green check. (Per-tool-call
+  // active flags flicker between tools, so the chip tracks the whole-build state.)
   return (
     <div className="flex items-center gap-1 text-[11px] bg-zinc-900 rounded-full px-2 py-1" title={card.lastAction}>
-      {card.active ? <Loader2 className="w-3 h-3 text-indigo-400 animate-spin" /> : <CheckCircle2 className="w-3 h-3 text-zinc-600" />}
+      {running
+        ? <Loader2 className="w-3 h-3 text-indigo-400 animate-spin" />
+        : <CheckCircle2 className="w-3 h-3 text-emerald-500" />}
       <span className="font-medium capitalize text-zinc-200">{card.agent}</span>
     </div>
   );

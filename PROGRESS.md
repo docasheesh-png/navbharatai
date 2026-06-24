@@ -2403,3 +2403,33 @@ Two admin (Dr Asheesh) requests:
 Tests: creatorIdentity.test.ts asserts the address; agentv3.test.ts asserts providerDebugTag is empty
 when OFF and tags the provider when ON (+2). Gate green: frontend tsc 0, server tsc 0, **2215 vitest**
 (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — v3.0 UX fixes (4): agent spinner/tick, input padding, sticky header, preview port
+
+Admin reported four v3.0 issues; all fixed:
+
+1. **Agent chips never spin / done-tick is gray** — `AgentChip` showed a static gray `CheckCircle2`
+   because the reducer flips `card.active=false` after EVERY tool_result (flickers between tools). Now
+   the chip tracks the whole-build state: spins (`Loader2 animate-spin`) while the build is `running`,
+   then a GREEN check (`text-emerald-500`) when done. (AgentV3Panel.tsx — AgentChip takes `running`.)
+
+2a. **Input box eats too much space** — the input row padding `p-3` → `px-2 py-1.5` (tighter).
+
+2b. **v3.0 header (title + Preview/Files/Diff/Terminal tabs) scrolls away** — root cause: the App
+   content area is viewport-bounded (`h-[calc(100dvh-3.5rem)] overflow-hidden`) only for a fixed list of
+   views, and `engine_builder` was NOT in it → it used `overflow-y-auto` (page-scrolls), and the panel
+   wrapper's `height:100vh` was taller than the visible area, so the whole panel (header included)
+   scrolled. Fix: added `engine_builder` to the bounded list, and changed the wrapper from
+   `height:100vh` to `flex-1 min-h-0` so it fills the bounded area; the chat scrolls internally and the
+   header stays put. (App.tsx)
+
+3. **Preview "Closed Port Error" on port 5173** — the dev server bound to localhost only, so the E2B
+   preview URL (`5173-<sandbox>.e2b.app`, reached over the network) got connection-refused even though
+   `nc -z localhost 5173` passed. Fixed binding to 0.0.0.0 in two places: the scaffolded
+   `vite.config.ts` template now sets `server/preview: { host: true, port: 5173 }`, and the v3.0 system
+   prompt now instructs the agent that the dev server MUST listen on 0.0.0.0 (Vite `server.host=true` or
+   `--host 0.0.0.0`; Next `-H 0.0.0.0`; CRA `HOST=0.0.0.0`).
+
+Gate green: frontend tsc 0, server tsc 0, **2215 vitest**, build PASS, boot:check PASS.

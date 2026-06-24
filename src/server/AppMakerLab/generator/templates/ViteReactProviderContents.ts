@@ -22,6 +22,11 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  // Bind to 0.0.0.0 so the dev server is reachable through the cloud sandbox's
+  // preview URL (e.g. https://5173-<sandbox>.e2b.app). A localhost-only bind makes
+  // the preview show "connection refused" even though the server is running.
+  server: { host: true, port: 5173 },
+  preview: { host: true, port: 5173 },
 });
 `;
 

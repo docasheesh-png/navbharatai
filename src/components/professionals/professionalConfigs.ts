@@ -222,4 +222,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'What do I need for international travel?',
     ],
   },
+  vastu_ai: {
+    id: 'vastu_ai',
+    name: 'Vastu Consultant AI',
+    welcome:
+      "Namaste 🙏 I'm Vastu AI — I share traditional Vastu Shastra guidance on directions and room placement, and simple, free ways to bring light, air and calm into your home or workplace. Tell me your layout or concern. ✨ This is cultural/traditional belief, not science — no fear, no costly remedies. For real construction, safety, legal rules and a licensed architect always come first.",
+    quickPrompts: [
+      'Vastu tips for my home entrance',
+      'Best direction for kitchen & bedroom?',
+      'Vastu for a rented flat (no changes)',
+      'Simple ways to make my space positive',
+    ],
+  },
 };

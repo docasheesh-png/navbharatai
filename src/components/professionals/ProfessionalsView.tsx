@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -28,6 +28,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'insurance_ai', label: 'Insurance Advisor', description: 'Term/health/motor/home/travel/crop insurance explained, choosing the right cover, policy terms & claims, avoiding mis-selling — honest education, not a product pitch.', icon: Umbrella, active: true },
   { id: 'chef_ai', label: 'Chef / Recipe AI', description: 'Step-by-step Indian & world recipes, cook with what you have, substitutions, fixing a dish, quick tiffin & budget meals — adapts veg/Jain/lighter. Food-safety aware.', icon: ChefHat, active: true },
   { id: 'travel_ai', label: 'Travel Planner', description: 'Day-by-day itineraries, budgets & transport, packing, best season & safety, India & international visa/passport awareness — planning guidance, not live bookings.', icon: Map, active: true },
+  { id: 'vastu_ai', label: 'Vastu Consultant', description: 'Traditional Vastu directions & room placement, plus simple free ways to add light, air & calm — cultural belief, not science. No fear, no paid remedies; architect first.', icon: LayoutGrid, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

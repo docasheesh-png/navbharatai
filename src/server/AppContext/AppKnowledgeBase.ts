@@ -609,6 +609,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['elder care', 'elderly', 'senior', 'old age', 'parents', 'caregiver', 'budhe', 'maa baap', 'fall prevention', 'dementia', 'loneliness', 'pension', 'buzurg', 'care'],
   },
 
+  // ─── INTERIOR DESIGN & HOME-DECOR AI ─────────────────────────────────────
+  {
+    id: 'interior_ai',
+    name: 'Interior Design & Home-Decor AI',
+    path: 'Sidebar → Professionals → Interior Design & Home-Decor',
+    description: 'Practical, creative guide to decorating & organising Indian homes on any budget (rented or owned, small flats to houses): space planning (furniture flow, making small/rented spaces feel bigger, multi-use zoning), colour & lighting (palettes, accent walls, layered light & mood), affordable decor & DIY (cushions/curtains/rugs/plants→Gardening AI/art/lighting, upcycling), storage & decluttering, and room-by-room ideas (living, bedroom, kitchen, study/WFH, kids, balcony, pooja space). Safety-first: decor/design IDEAS NOT structural/electrical/architectural advice — walls/load-bearing/false ceilings/electrical/plumbing need a qualified architect/engineer/licensed tradesperson (Home Repair AI for safe DIY; never DIY electrical/gas/structural); rented homes → reversible, landlord-friendly changes (check the agreement); Vastu placement → Vastu AI; taste is personal (options not rules); never fabricates prices/brand claims or guarantees outcomes.',
+    howToUse: 'Open Sidebar → Professionals → Interior Design & Home-Decor and ask: "make my small room feel bigger", "suggest a colour palette", "budget decor for my living room", "smart storage & decluttering tips". For structural/electrical work hire a qualified professional; for Vastu placement use the Vastu AI.',
+    relatedFeatures: ['professionals', 'homerepair_ai', 'gardening_ai', 'vastu_ai'],
+    aiSurface: 'interior_ai',
+    keywords: ['interior', 'interior design', 'decor', 'home decor', 'decorate', 'furniture', 'colour', 'paint', 'storage', 'declutter', 'room', 'ghar sajawat', 'styling', 'small space'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

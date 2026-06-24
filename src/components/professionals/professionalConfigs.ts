@@ -438,4 +438,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Tips to avoid caregiver burnout',
     ],
   },
+  interior_ai: {
+    id: 'interior_ai',
+    name: 'Interior Design & Home-Decor AI',
+    welcome:
+      "Namaste! 🛋️ I'm Interior & Decor AI — let's make your home beautiful & functional on any budget! Space planning, colour & lighting, affordable decor & DIY, storage & decluttering, and room-by-room ideas (rented or owned). Tell me your room, style & budget. ⚠️ I give decor & design ideas, not structural/electrical advice — for walls, false ceilings or wiring, hire a qualified pro; in rentals, keep changes reversible.",
+    quickPrompts: [
+      'Make my small room feel bigger',
+      'Suggest a colour palette for my room',
+      'Budget decor ideas for my living room',
+      'Smart storage & decluttering tips',
+    ],
+  },
 };

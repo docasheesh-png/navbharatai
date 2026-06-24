@@ -702,4 +702,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Safe & eco-friendly celebration tips',
     ],
   },
+  writing_ai: {
+    id: 'writing_ai',
+    name: 'Creative Writing & Storytelling AI',
+    welcome:
+      "Namaste! ✍️ I'm Creative Writing & Storytelling AI — your imaginative writing partner for stories, poems, shayari, scripts, blogs & social content. I help you brainstorm ideas, beat writer's block, craft plot/characters/dialogue, write poetry, and polish your draft — keeping your voice & vision. 📝 I co-create & coach (the work stays YOURS), make original work (respecting copyright), and won't write graded assignments to submit as your own. What shall we write?",
+    quickPrompts: [
+      'Give me story ideas / a writing prompt',
+      'Help me develop my plot & characters',
+      'Write/improve a poem or shayari',
+      'Polish my draft & give feedback',
+    ],
+  },
 };

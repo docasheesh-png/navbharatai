@@ -2526,3 +2526,25 @@ iteration:infinite }` inside the reduced-motion block — decorative motion stay
 spinners keep turning.
 
 Gate green: frontend+server tsc 0, **2217 vitest**, build PASS, boot:check PASS. Pushed to branch.
+
+---
+
+### 2026-06-24 — v3.0: preview default → e2b.app + stop the Node/tooling-version loop
+
+Admin live test: Vertex/Gemini IS building now (Files 7, Diff 3, History 13, Stop button live), but two
+bugs: (a) preview showed "5173-…mitrify.xyz's server IP address could not be found" — mitrify.xyz custom
+domain isn't set up (it needs a Caddy reverse-proxy VM + Cloudflare wildcard DNS per E2B's docs, not just
+a DNS record); (b) the agent looped 20+ min on `SyntaxError: node:util does not provide styleText` — the
+sandbox Node is OLD and the agent kept trying to upgrade vite/vitest (unfixable) instead of shipping.
+
+Fixes:
+- `PreviewDomain.ts`: DEFAULT_PREVIEW_DOMAIN `mitrify.xyz` → **`e2b.app`** (always resolvable → previews
+  work out of the box). mitrify is now opt-in: set `E2B_PREVIEW_DOMAIN=mitrify.xyz` once the custom domain
+  + wildcard DNS are configured. Tests updated (default = e2b.app; swap still tested with the env set).
+- `systemPrompt.ts`: told the agent the sandbox NODE VERSION IS FIXED — on a Node-version tool error
+  (node:util/styleText, ESM/engine, create-* failure) do NOT loop upgrading Node/tooling; pin an older
+  tool version or SKIP that step. And: a WORKING PREVIEW is the goal, not a green test suite — never block
+  on running vitest if the sandbox Node can't; build → run dev server → update_preview first.
+
+Admin will set up mitrify custom domain themselves (E2B docs: https://e2b.dev/docs/sandbox/custom-domain).
+Gate green: server tsc 0, **2217 vitest**, build PASS, boot:check PASS. Pushed to branch.

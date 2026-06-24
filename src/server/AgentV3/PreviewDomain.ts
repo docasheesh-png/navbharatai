@@ -10,7 +10,11 @@
 // The swap is PURE and idempotent: a URL already on the custom domain, or any
 // non-e2b host (localhost / *.example.dev in dev/CI), is returned unchanged.
 
-const DEFAULT_PREVIEW_DOMAIN = 'mitrify.xyz';
+// Default is the raw E2B host (`e2b.app`) — ALWAYS resolvable, so previews work out of
+// the box. To serve previews under a custom domain (e.g. mitrify.xyz), set
+// `E2B_PREVIEW_DOMAIN=mitrify.xyz` AND configure that domain as an E2B custom domain with
+// a wildcard `*.mitrify.xyz` DNS record — otherwise the preview URL won't resolve.
+const DEFAULT_PREVIEW_DOMAIN = 'e2b.app';
 
 /**
  * The configured preview domain for v3.0 apps. Override with `E2B_PREVIEW_DOMAIN`;

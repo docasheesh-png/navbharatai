@@ -156,18 +156,25 @@ describe('ToolDispatcher', () => {
     expect(ev && ev.type === 'preview' && ev.url).toBe('https://sandbox-5173.example.dev');
   });
 
-  it('update_preview maps an *.e2b.app sandbox host to the mitrify.xyz preview domain (§12)', async () => {
-    const e2bAct = {
-      readFile: act.readFile.bind(act), writeFile: act.writeFile.bind(act),
-      listFiles: act.listFiles.bind(act), runCommand: act.runCommand.bind(act),
-      getPortUrl: async (_ws: string, port: number) => `https://${port}-sbx9.e2b.app`,
-    };
-    const dd = new ToolDispatcher(e2bAct, 'ws-1', state, stream);
-    const res = await dd.dispatch(call('update_preview', { port: 5173 }));
-    expect(res.is_error).toBe(false);
-    expect(res.content).toContain('https://5173-sbx9.mitrify.xyz');
-    const ev = events.find((e) => e.type === 'preview');
-    expect(ev && ev.type === 'preview' && ev.url).toBe('https://5173-sbx9.mitrify.xyz');
+  it('update_preview maps an *.e2b.app sandbox host to a configured custom preview domain (§12)', async () => {
+    const prev = process.env.E2B_PREVIEW_DOMAIN;
+    process.env.E2B_PREVIEW_DOMAIN = 'mitrify.xyz'; // custom domain configured → swap applies
+    try {
+      const e2bAct = {
+        readFile: act.readFile.bind(act), writeFile: act.writeFile.bind(act),
+        listFiles: act.listFiles.bind(act), runCommand: act.runCommand.bind(act),
+        getPortUrl: async (_ws: string, port: number) => `https://${port}-sbx9.e2b.app`,
+      };
+      const dd = new ToolDispatcher(e2bAct, 'ws-1', state, stream);
+      const res = await dd.dispatch(call('update_preview', { port: 5173 }));
+      expect(res.is_error).toBe(false);
+      expect(res.content).toContain('https://5173-sbx9.mitrify.xyz');
+      const ev = events.find((e) => e.type === 'preview');
+      expect(ev && ev.type === 'preview' && ev.url).toBe('https://5173-sbx9.mitrify.xyz');
+    } finally {
+      if (prev === undefined) delete process.env.E2B_PREVIEW_DOMAIN;
+      else process.env.E2B_PREVIEW_DOMAIN = prev;
+    }
   });
 
   it('update_preview errors honestly when the sandbox has no port mapping', async () => {

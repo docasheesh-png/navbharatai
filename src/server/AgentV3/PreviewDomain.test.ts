@@ -25,12 +25,12 @@ describe('applyPreviewDomain', () => {
     expect(applyPreviewDomain('', 'mitrify.xyz')).toBe('');
   });
 
-  it('previewDomain() defaults to mitrify.xyz and honours the env override', () => {
+  it('previewDomain() defaults to the always-resolvable e2b.app and honours the env override', () => {
     const prev = process.env.E2B_PREVIEW_DOMAIN;
     delete process.env.E2B_PREVIEW_DOMAIN;
+    expect(previewDomain()).toBe('e2b.app');
+    process.env.E2B_PREVIEW_DOMAIN = 'mitrify.xyz';
     expect(previewDomain()).toBe('mitrify.xyz');
-    process.env.E2B_PREVIEW_DOMAIN = 'preview.example.com';
-    expect(previewDomain()).toBe('preview.example.com');
     if (prev === undefined) delete process.env.E2B_PREVIEW_DOMAIN;
     else process.env.E2B_PREVIEW_DOMAIN = prev;
   });

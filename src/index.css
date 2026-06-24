@@ -151,6 +151,13 @@ html, body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  /* …but KEEP functional loading spinners turning. A loading spinner conveys live
+     status ("working…"); frozen, it reads as broken. This is an allowed exception to
+     reduced-motion (status indicators), not decorative motion. */
+  .animate-spin {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
+  }
 }
 
 /* L18: Visible focus outline for keyboard navigation */

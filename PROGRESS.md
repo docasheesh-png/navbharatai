@@ -2504,3 +2504,25 @@ both tested. Wired them into the build path:
 NEEDS DEPLOY to take effect (build path is live). Caveat: Gemini build quality vs Claude is unverified
 end-to-end; the adapter is unit-tested but real builds need a live test. Gate green: frontend+server
 tsc 0, **2217 vitest**, build PASS, boot:check PASS, 41 provider tests pass. Pushed to branch.
+
+---
+
+### 2026-06-24 — v3.0 fixes: create-vite/Node, loading spinner under reduced-motion
+
+Admin (live test) hit 3 issues; 2 fixed here (#1, #3), #2 (full-app theme) scoped separately.
+
+#1 — Build said "create-vite failed … Node.js version incompatibility" (NOTE: this confirms Vertex/Gemini
+is NOW actually BUILDING — running real tool commands). The agent shouldn't scaffold with create-vite at
+all: the workspace is already pre-scaffolded (vite-react template) and the sandbox Node is older than the
+latest create-vite needs. Fix: system prompt now tells the agent the Vite+React+TS project is ALREADY
+scaffolded — edit/add files, NEVER run `npm create vite`/`create-vite`/`npx create-*` (write config files
+directly for a different stack). Unblocks builds + faster (no scaffolder step).
+
+#3 — The "working…" loading spinner (and agent-chip spinners) didn't rotate. Root cause: index.css's
+`prefers-reduced-motion: reduce` block froze ALL animations (animation-duration 0.01ms / iteration 1) —
+so on a device with "reduce motion" ON, every spinner stops. A loading spinner conveys live status, not
+decoration, so it's an allowed reduced-motion exception. Fix: re-assert `.animate-spin { duration:1s;
+iteration:infinite }` inside the reduced-motion block — decorative motion stays reduced, functional
+spinners keep turning.
+
+Gate green: frontend+server tsc 0, **2217 vitest**, build PASS, boot:check PASS. Pushed to branch.

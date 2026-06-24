@@ -311,6 +311,13 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('connection-string-credentials');
   });
 
+  it('flags command injection from a dynamically-built shell command', async () => {
+    const dd = makeDispatcher('ws-eval-cmdinj');
+    await write(dd, 'src/run.ts', 'import { execSync } from "child_process";\nexport const go = (dir) => execSync(`rm -rf ${dir}`);');
+    const out = await evalText(dd);
+    expect(out).toContain('command-injection');
+  });
+
   it('flags insecure security config (disabled TLS verification)', async () => {
     const dd = makeDispatcher('ws-eval-sec');
     await write(dd, 'src/http.ts', 'const agent = new Agent({ rejectUnauthorized: false });');

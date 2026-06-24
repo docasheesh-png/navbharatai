@@ -32,6 +32,26 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'const u = "https://api.example.com/v1";')).toEqual([]);
   });
 
+  it('flags command injection from a dynamically-built shell command', () => {
+    for (const code of [
+      'execSync(`rm -rf ${dir}`);',
+      'exec("git clone " + repoUrl);',
+      'exec(`ls ${userPath}`);',
+      'spawnSync(`sh -c ${cmd}`);',
+      'execFile(`tool ${arg}`);',
+    ]) {
+      const f = scanSecurity('src/run.ts', code);
+      expect(f.some((x) => x.rule === 'command-injection' && x.severity === 'high')).toBe(true);
+    }
+  });
+
+  it('does NOT flag a constant exec command or RegExp.exec / member exec', () => {
+    expect(scanSecurity('a.ts', 'execSync("ls -la");').some((f) => f.rule === 'command-injection')).toBe(false);
+    expect(scanSecurity('a.ts', 'const m = /ab+c/.exec(`${input}`);').some((f) => f.rule === 'command-injection')).toBe(false);
+    expect(scanSecurity('a.ts', 'const m = pattern.exec("foo" + bar);').some((f) => f.rule === 'command-injection')).toBe(false);
+    expect(scanSecurity('a.ts', 'exec(commandVariable);').some((f) => f.rule === 'command-injection')).toBe(false);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

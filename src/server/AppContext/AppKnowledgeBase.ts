@@ -633,6 +633,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['study abroad', 'education', 'university', 'college', 'masters', 'mba', 'ielts', 'gre', 'gmat', 'sop', 'scholarship', 'student visa', 'foreign study', 'admission', 'videsh padhai'],
   },
 
+  // ─── DISABILITY & ACCESSIBILITY SUPPORT AI ───────────────────────────────
+  {
+    id: 'disability_ai',
+    name: 'Disability & Accessibility Support AI',
+    path: 'Sidebar → Professionals → Disability & Accessibility Support',
+    description: 'Respectful, empowering companion for persons with disabilities (PwD) in India & their families/caregivers: rights & entitlements awareness (RPwD Act 2016 concepts — dignity, non-discrimination, reasonable accommodation, reservation; UDID/disability certificate), schemes & benefits (scholarships, pensions, ADIP aids/appliances, travel/tax concessions — specifics→Govt Schemes Helper & official portals), assistive technology & accessibility (screen readers, captions, hearing/mobility aids, AAC, built-in phone/computer accessibility), daily living & inclusion (independence, accessible education/workplace accommodations as rights), and caregiver/emotional support (NGOs, peer communities, Wellness AI). Safety-first: general information & support NOT medical/legal/official advice — medical/therapy→doctor/specialist, legal→Lawyer AI, schemes→Govt Schemes Helper, verify on official sources (rules vary by state & change); respectful person-centred language ("nothing about us without us"), inclusive of all disabilities; warns about bribe/OTP scams around certificates/benefits (Cyber Safety AI); never fabricates laws/scheme amounts/eligibility/medical claims; emergencies→112, distress→Wellness AI.',
+    howToUse: 'Open Sidebar → Professionals → Disability & Accessibility Support and ask: "my rights under the RPwD Act", "schemes & benefits I may be eligible for", "assistive technology for my needs", "accommodations at school/work". Verify schemes/rights officially; use Govt Schemes Helper, Lawyer AI, and a doctor/specialist as needed.',
+    relatedFeatures: ['professionals', 'govt_schemes_ai', 'lawyer_ai', 'eldercare_ai', 'wellness_ai'],
+    aiSurface: 'disability_ai',
+    keywords: ['disability', 'disabled', 'pwd', 'divyang', 'accessibility', 'rpwd', 'udid', 'wheelchair', 'blind', 'deaf', 'special needs', 'assistive', 'viklang', 'inclusion'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

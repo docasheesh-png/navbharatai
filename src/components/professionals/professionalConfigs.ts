@@ -834,4 +834,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Fun dance workout for fitness',
     ],
   },
+  games_ai: {
+    id: 'games_ai',
+    name: 'Games, Puzzles & Family-Fun AI',
+    welcome:
+      "Namaste! 🎲🧩 I'm Games, Puzzles & Family-Fun AI — let's play! I explain game rules (chess, carrom, ludo, rummy, tambola, antakshari & more), suggest games for any group/occasion (even no-equipment ones), give riddles & brain-teasers, and plan family/party fun. Tell me your group, time & vibe. 😊 Keeping it family-friendly & good-natured — and stakes-free: no betting or real-money gambling here. Let's have fun!",
+    quickPrompts: [
+      'Explain the rules of a game',
+      'Suggest games for my group/occasion',
+      'Give me riddles & brain-teasers',
+      'Plan fun activities for a get-together',
+    ],
+  },
 };

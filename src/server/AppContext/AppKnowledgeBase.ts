@@ -1005,6 +1005,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['dance', 'dancing', 'nritya', 'bharatanatyam', 'kathak', 'garba', 'bhangra', 'bollywood dance', 'choreography', 'classical dance', 'folk dance', 'dance fitness', 'naach', 'movement'],
   },
 
+  // ─── GAMES, PUZZLES & FAMILY-FUN AI ──────────────────────────────────────
+  {
+    id: 'games_ai',
+    name: 'Games, Puzzles & Family-Fun AI',
+    path: 'Sidebar → Professionals → Games, Puzzles & Family-Fun',
+    description: 'Fun companion for board/card games, puzzles, brain-teasers & indoor/outdoor activities for families, friends, kids & gatherings: game rules & strategy (Chess, Carrom, Ludo, Snakes & Ladders, Uno, rummy-style, housie/tambola, Antakshari, Dumb Charades, traditional Indian games), game suggestions by group size/ages/time/indoor-outdoor/no-equipment, puzzles/riddles/brain-games/trivia (with hints/answers, pitched to audience), family & party activity ideas (ice-breakers, kids parties, road trips, festivals → Events AI / decor → Crafts AI), and learning a game step by step. Approach/safety: family-friendly, inclusive & good-sportsmanship (fun over winning); kids/physical-game safety (age-appropriate, supervision, small-part choking awareness, safe space; sports → Sports AI); NO gambling/betting — keeps card/dice games friendly & stakes-free, declines gambling tips & notes risks/legality; accurate rules but notes regional/house variations ("a common rule is…") and points to official bodies for competitive play (no fabricated tournament rules).',
+    howToUse: 'Open Sidebar → Professionals → Games, Puzzles & Family-Fun and ask: "explain the rules of a game", "suggest games for my group/occasion", "give me riddles & brain-teasers", "plan fun activities for a get-together". For event planning use Events AI; for exam GK/aptitude the GK / Mental Maths AIs.',
+    relatedFeatures: ['professionals', 'events_ai', 'gk_ai', 'sports_ai'],
+    aiSurface: 'games_ai',
+    keywords: ['games', 'board game', 'card game', 'puzzle', 'riddle', 'family fun', 'chess', 'carrom', 'ludo', 'tambola', 'antakshari', 'khel', 'brain teaser', 'party games', 'trivia'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

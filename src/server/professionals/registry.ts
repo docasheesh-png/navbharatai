@@ -68,6 +68,7 @@ import { VOLUNTEER_AI } from './configs/volunteer';
 import { ASTRONOMY_AI } from './configs/astronomy';
 import { CALLIGRAPHY_AI } from './configs/calligraphy';
 import { DANCE_AI } from './configs/dance';
+import { GAMES_AI } from './configs/games';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -147,6 +148,7 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [ASTRONOMY_AI.id]: ASTRONOMY_AI,
   [CALLIGRAPHY_AI.id]: CALLIGRAPHY_AI,
   [DANCE_AI.id]: DANCE_AI,
+  [GAMES_AI.id]: GAMES_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

@@ -21,6 +21,17 @@ export interface ReadinessReport {
   warnings: string[];
 }
 
+/**
+ * An additional readiness signal from another evaluate dimension (runnability,
+ * secret-leak, security-config, requirement-coverage, …). `high` is a hard blocker;
+ * `medium`/`low` lower the score as warnings. Lets the readiness gate account for
+ * the full evaluate suite, not just architecture + security.
+ */
+export interface ExtraFinding {
+  severity: 'high' | 'medium' | 'low';
+  label: string;
+}
+
 // Per-defect penalties (points off 100).
 const PENALTY = {
   unresolvedImport: 25, // breaks the build
@@ -31,7 +42,11 @@ const PENALTY = {
   securityLow: 2,
 } as const;
 
-export function assessReadiness(arch: ArchitectureReport, security: SecurityFinding[]): ReadinessReport {
+export function assessReadiness(
+  arch: ArchitectureReport,
+  security: SecurityFinding[],
+  extra: ExtraFinding[] = [],
+): ReadinessReport {
   const blockers: string[] = [];
   const warnings: string[] = [];
   let score = 100;
@@ -63,6 +78,20 @@ export function assessReadiness(arch: ArchitectureReport, security: SecurityFind
   if (low) {
     score -= PENALTY.securityLow * low;
     warnings.push(`${low} low-severity security issue(s)`);
+  }
+
+  // Extra signals from the rest of the evaluate suite. High = hard blocker.
+  for (const e of extra) {
+    if (e.severity === 'high') {
+      score -= PENALTY.securityHigh;
+      blockers.push(e.label);
+    } else if (e.severity === 'medium') {
+      score -= PENALTY.securityMedium;
+      warnings.push(e.label);
+    } else {
+      score -= PENALTY.securityLow;
+      warnings.push(e.label);
+    }
   }
 
   score = Math.max(0, Math.min(100, Math.round(score)));

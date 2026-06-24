@@ -284,6 +284,23 @@ Every phase is graded against these, because they are what makes the difference:
   AppKnowledgeBase synced. Third item via the Section I audit-first triage (ABSENT →
   solid); applies the app-must-never-break rule to the apps v3.0 builds. v3.0-only.
   Gate green: server+frontend tsc 0, 1965 vitest (+9), build, boot:check PASS.
+- 2026-06-23: Readiness gate now spans the FULL evaluate suite. `assessReadiness`
+  gained an optional `extra: ExtraFinding[]` param (high = hard blocker, medium/low =
+  scored warning). The evaluate case now computes readiness AFTER all collectors and
+  feeds the critical new dimensions in: a secret leak, an app that can't run, or a
+  high-severity security misconfig now BLOCK "READY" (not merely reported); hardcoded
+  URLs, missing requested features, a missing error boundary, and "no tests at all"
+  lower the score as warnings. Closes the gap where 18 dimensions were reported but
+  only architecture+security gated. Backward-compatible (extra defaults to []).
+  v3.0-only. Gate green: server+frontend tsc 0, 2004 vitest (+3), build, boot:check PASS.
+- 2026-06-23: Section I #11 (Deployment readiness) — hardcoded-URL check. New
+  `AgentV3/HardcodedUrlAnalysis.ts` (PURE): flags hardcoded http://localhost / 127.0.0.1
+  URLs baked into source (the "works locally, breaks when deployed" bug), but excludes
+  the correct env-var-fallback pattern (process.env.X || 'http://localhost') so good
+  code isn't nagged. Folded into `evaluate` as the 18th dimension (new
+  collectHardcodedUrlIssues scan); systemPrompt + AppKnowledgeBase synced. v3.0-only.
+  Gate green: server+frontend tsc 0, 2001 vitest (+8, crossed 2000), build,
+  boot:check PASS.
 - 2026-06-23: Section I #4 (Security) — secret-leak check. New
   `AgentV3/SecretLeakAnalysis.ts` (PURE): flags a real `.env` (not .env.example/
   .sample/.template) that the project's .gitignore does not cover — the #1 way live

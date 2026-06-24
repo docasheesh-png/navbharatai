@@ -23,7 +23,7 @@ import { classifyCommandRisk, governanceNote } from './CommandGovernance';
 import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
-import { assessReadiness, readinessVerdict } from './Readiness';
+import { assessReadiness, readinessVerdict, type ExtraFinding } from './Readiness';
 import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
 import { analyzeRequirementCoverage, requirementCoverageSummary } from './RequirementCoverage';
 import { generateReadme } from './ReadmeGenerator';
@@ -35,6 +35,7 @@ import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAn
 import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary } from './ErrorBoundaryAnalysis';
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
 import { analyzeSecretLeak, secretLeakSummary } from './SecretLeakAnalysis';
+import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
 
@@ -176,6 +177,32 @@ export class ToolDispatcher {
           const content = await this.actuator.readFile(this.workspaceId, p);
           if (content.length > 200_000) continue;
           issues.push(...scanSecurityConfig(p, content));
+        } catch {
+          /* skip a single unreadable file */
+        }
+      }
+    } catch {
+      /* listing failed — fall back to no issues */
+    }
+    return issues;
+  }
+
+  /**
+   * Best-effort scan for hardcoded localhost URLs across the project's source
+   * files (env-var fallbacks are excluded by the analyser). Bounded and wrapped.
+   */
+  private async collectHardcodedUrlIssues(): Promise<HardcodedUrlIssue[]> {
+    const CODE = /\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte)$/i;
+    const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+    const issues: HardcodedUrlIssue[] = [];
+    try {
+      const paths = await this.actuator.listFiles(this.workspaceId);
+      const candidates = paths.filter((p) => CODE.test(p) && !SKIP.test(p)).slice(0, 200);
+      for (const p of candidates) {
+        try {
+          const content = await this.actuator.readFile(this.workspaceId, p);
+          if (content.length > 200_000) continue;
+          issues.push(...scanHardcodedUrls(p, content));
         } catch {
           /* skip a single unreadable file */
         }
@@ -504,8 +531,6 @@ export class ToolDispatcher {
         const mem = getWorkspaceMemory(this.workspaceId);
         const archReport = analyzeArchitecture(mem.graph());
         const findings = mem.securityFindings();
-        const readiness = assessReadiness(archReport, findings);
-        const verdict = readinessVerdict(readiness);
         // Best-effort authenticity/completeness pass — never throws, never breaks
         // evaluate if file access fails. On any error we fall back to no issues.
         const issues = await this.collectAuthenticityIssues();
@@ -595,6 +620,21 @@ export class ToolDispatcher {
           gitignoreContent = null;
         }
         const secretLeak = analyzeSecretLeak(hygieneFiles, gitignoreContent);
+        // Best-effort hardcoded-URL pass (Section I #11): localhost baked into code.
+        const hardcodedUrls = await this.collectHardcodedUrlIssues();
+        // Fold the critical new dimensions into the readiness gate: a secret leak,
+        // an app that can't run, or a high-severity security misconfig must BLOCK
+        // "READY" — not merely be reported. The rest lower the score as warnings.
+        const extra: ExtraFinding[] = [];
+        if (secretLeak.findings.length) extra.push({ severity: 'high', label: 'Secret leak: a real .env is not gitignored' });
+        for (const f of runnability.findings) extra.push({ severity: f.level === 'high' ? 'high' : 'medium', label: `Runnability: ${f.message}` });
+        for (const i of securityConfig) extra.push({ severity: i.severity === 'high' ? 'high' : 'medium', label: `Security config (${i.rule})` });
+        if (hardcodedUrls.length) extra.push({ severity: 'medium', label: `${hardcodedUrls.length} hardcoded localhost URL(s)` });
+        for (const f of reqCoverage.findings) extra.push({ severity: 'medium', label: `Requested feature not found: ${f.feature}` });
+        if (errorBoundary.findings.length) extra.push({ severity: 'medium', label: 'React app has no error boundary' });
+        if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
+        const readiness = assessReadiness(archReport, findings, extra);
+        const verdict = readinessVerdict(readiness);
         const confidence = computeBuildConfidence({
           readinessScore: readiness.score,
           ready: readiness.ready,
@@ -613,7 +653,7 @@ export class ToolDispatcher {
           accessibility: tally(a11yIssues),
           compliance: complianceTally,
         });
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}`;
       }
 
       case 'update_todo': {

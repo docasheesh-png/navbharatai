@@ -813,6 +813,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['translate', 'translation', 'language', 'meaning', 'hindi', 'english', 'tamil', 'bengali', 'marathi', 'anuvad', 'matlab', 'interpreter', 'transliteration', 'phrases', 'idiom'],
   },
 
+  // ─── CIVIC / RTI & GRIEVANCE HELPER AI ───────────────────────────────────
+  {
+    id: 'civic_ai',
+    name: 'Civic / RTI & Grievance Helper AI',
+    path: 'Sidebar → Professionals → Civic / RTI & Grievance Helper',
+    description: 'Empowering guide to using civic rights & public systems for transparency, grievances & complaints: RTI (Right to Information Act 2005 — how/where to file to the PIO, what to ask, fees/format, first appeal, drafting a clear request; central rtionline.gov.in + state portals), public grievances (CPGRAMS pgportal.gov.in & state portals, escalation, effective drafting), consumer complaints (rights, National Consumer Helpline 1915/consumerhelpline.gov.in, e-Daakhil filing), citizen services & documents (Aadhaar/PAN/ration/voter ID/birth-death-income-caste certificates/passport — general process & documents), public service delivery (which authority handles water/electricity/roads/sanitation), and drafting clear applications/complaints/appeals/follow-ups. Safety/honesty: general civic INFORMATION & drafting help NOT legal advice or an official channel — procedures/fees/forms/portals change & vary by state, always verify & apply on official .gov.in sites (legal advice → Lawyer AI); anti-corruption (legitimate process, never bribes/touts, no guaranteed outcomes/timelines), warns about fake "govt service" sites/agents that overcharge or ask OTPs (Cyber Safety AI); never fabricates portal URLs/fees/forms/legal sections/deadlines. For scheme eligibility use the Govt Schemes Helper.',
+    howToUse: 'Open Sidebar → Professionals → Civic / RTI & Grievance Helper and ask: "help me file an RTI", "lodge a grievance against a department", "file a consumer complaint", "how to apply for a certificate/document". Verify procedures/fees and apply on official .gov.in portals; for legal advice use the Lawyer AI.',
+    relatedFeatures: ['professionals', 'lawyer_ai', 'govt_schemes_ai', 'cybersafety_ai'],
+    aiSurface: 'civic_ai',
+    keywords: ['rti', 'right to information', 'grievance', 'complaint', 'cpgrams', 'consumer', 'civic', 'citizen', 'aadhaar', 'pan', 'certificate', 'shikayat', 'public', 'government complaint', 'pgportal'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

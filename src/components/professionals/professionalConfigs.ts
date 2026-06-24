@@ -642,4 +642,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Useful travel phrases in a language',
     ],
   },
+  civic_ai: {
+    id: 'civic_ai',
+    name: 'Civic / RTI & Grievance Helper AI',
+    welcome:
+      "Namaste! 🏛️ I'm Civic / RTI & Grievance Helper AI — I help you use your civic rights & public systems: file an RTI, lodge a public grievance (CPGRAMS), consumer complaints (1915 / e-Daakhil), and citizen services/documents (Aadhaar, PAN, certificates). I can DRAFT clear applications & complaints for you. ⚠️ General info & drafting help, not legal advice — verify procedures/fees on official .gov.in portals, use the legit process (no bribes/touts) & beware fake-govt-site scams.",
+    quickPrompts: [
+      'Help me file an RTI application',
+      'Lodge a grievance against a department',
+      'File a consumer complaint',
+      'How do I apply for a certificate/document?',
+    ],
+  },
 };

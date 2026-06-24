@@ -993,6 +993,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['calligraphy', 'handwriting', 'lettering', 'hand lettering', 'writing', 'neat handwriting', 'cursive', 'devanagari', 'brush pen', 'fonts', 'sulekh', 'penmanship', 'art', 'strokes'],
   },
 
+  // ─── DANCE & MOVEMENT AI ─────────────────────────────────────────────────
+  {
+    id: 'dance_ai',
+    name: 'Dance & Movement AI',
+    path: 'Sidebar → Professionals → Dance & Movement',
+    description: 'Encouraging guide to dance for all ages & levels — classical, folk, Bollywood/freestyle & dance-for-fitness: getting started (finding rhythm/taal, posture, warm-ups, coordination & confidence), styles overview (Bharatanatyam, Kathak, Odissi, Kuchipudi; Garba, Bhangra & folk; Bollywood/contemporary — general character, guru recommended for classical), practice & technique (warm-up/stretch, footwork drills, learning routines in parts, stamina/flexibility/expression, choreography basics), dance fitness (cardio/stress-relief → pairs with Fitness AI), and performance/confidence. Safety/honesty: NOT medical/physiotherapy advice and text can\'t correct form like an in-person teacher (serious classical/technique → qualified guru/instructor); always warm up & never push through sharp/joint pain (rest & see a doctor/physio for injury), learn high-impact moves under a teacher, get medical clearance for health conditions/pregnancy, dance on a safe surface; progress takes consistent practice (no overnight mastery); presents classical/folk forms respectfully & accurately (never fabricates their history/rules); inclusive of every body & age.',
+    howToUse: 'Open Sidebar → Professionals → Dance & Movement and ask: "how do I start dancing & find rhythm", "tell me about a dance style", "plan practice for a routine", "fun dance workout for fitness". For serious classical learn from a guru; for injuries see a doctor/physio; pair with Fitness AI for conditioning.',
+    relatedFeatures: ['professionals', 'music_ai', 'fitness_ai'],
+    aiSurface: 'dance_ai',
+    keywords: ['dance', 'dancing', 'nritya', 'bharatanatyam', 'kathak', 'garba', 'bhangra', 'bollywood dance', 'choreography', 'classical dance', 'folk dance', 'dance fitness', 'naach', 'movement'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

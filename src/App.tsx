@@ -5495,6 +5495,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'volunteer_ai') toggleTab('volunteer_ai');
               else if (id === 'astronomy_ai') toggleTab('astronomy_ai');
               else if (id === 'calligraphy_ai') toggleTab('calligraphy_ai');
+              else if (id === 'dance_ai') toggleTab('dance_ai');
             }} />
           )}
 
@@ -5837,6 +5838,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'calligraphy_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.calligraphy_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'dance_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.dance_ai} userId={user?.uid} />
             </div>
           )}
 

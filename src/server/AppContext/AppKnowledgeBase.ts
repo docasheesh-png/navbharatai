@@ -415,6 +415,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['yoga', 'meditation', 'pranayama', 'asana', 'dhyan', 'breathing', 'mindfulness', 'surya namaskar', 'anulom vilom', 'stretch', 'relax', 'yog', 'meditate', 'om'],
   },
 
+  // ─── SPOKEN ENGLISH / LANGUAGE TUTOR AI ──────────────────────────────────
+  {
+    id: 'english_ai',
+    name: 'Spoken English / Language Tutor AI',
+    path: 'Sidebar → Professionals → Spoken English / Tutor',
+    description: 'Patient spoken-English & language coach for Indian learners (beginner to advanced): conversation practice & fluency building, gentle grammar & vocabulary correction with reasons, writing help (emails/applications/essays in the learner’s own voice), interview & workplace English with mock interviews, and IELTS/TOEFL-style exam practice & strategies. Encouraging, never shames mistakes; meets learners at their level (uses a Hindi/regional word when it helps). Honesty: a tutor not an exam authority — verify official exam formats/rules with the exam body; no fake "fluent fast" claims or fabricated scores; constructive, accurate feedback (won’t approve wrong English to be nice).',
+    howToUse: 'Open Sidebar → Professionals → Spoken English / Tutor and ask: "let’s practise a conversation", "correct my sentences and explain", "help me write a formal email", "run a mock interview". For official exam rules check the exam body’s website.',
+    relatedFeatures: ['professionals', 'teacher_ai', 'mentor_ai'],
+    aiSurface: 'english_ai',
+    keywords: ['english', 'spoken english', 'grammar', 'vocabulary', 'fluency', 'language', 'tutor', 'ielts', 'toefl', 'interview english', 'angrezi', 'speaking', 'writing', 'translate'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

@@ -246,4 +246,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Desk stretches for back & neck',
     ],
   },
+  english_ai: {
+    id: 'english_ai',
+    name: 'Spoken English / Language Tutor AI',
+    welcome:
+      "Hello! 🗣️ I'm your English Tutor — let's build your spoken English and confidence, step by step. We can practise conversation, fix grammar gently, improve your writing (emails, essays), prep for interviews or IELTS-style tests. Tell me your level and goal — mistakes are welcome, that's how we learn! Shall we start with a small conversation?",
+    quickPrompts: [
+      "Let's practise an English conversation",
+      'Correct my sentences and explain why',
+      'Help me write a formal email',
+      'Run a mock interview with me',
+    ],
+  },
 };

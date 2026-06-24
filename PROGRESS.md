@@ -2325,3 +2325,18 @@ AppKnowledgeBase synced. v3.0-only, flag-OFF.
 Tests: +1 unit (javascript:fn() in href + javascript:alert in iframe flagged; void(0) + real URL safe)
 + 1 dispatcher integration. Gate green: server+frontend tsc 0, **2208 vitest** (+2), build PASS,
 boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #8 (compliance): server cookie without httpOnly
+
+Continuing the autonomous Section I march — varying into the Trust/Compliance dimension (Layer 77
+"Bharosa"). New item: `ComplianceAnalysis` `cookie-no-httponly` rule (medium). A server cookie set via
+`res.cookie(...)` / `response.cookie(...)` without `httpOnly` is readable by any script, so an XSS can
+steal the session/auth token (DPDP/GDPR security-of-processing). Distinct from the existing
+`cookie-no-samesite` (client `document.cookie` + SameSite) — different API and different protection.
+High-precision: `res.cookieParser()` and other similarly-named calls are NOT matched. Feeds the
+existing launch-safe certificate. AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (res.cookie without httpOnly flagged; with httpOnly + cookieParser safe). Gate green:
+server+frontend tsc 0, **2209 vitest** (+1), build PASS, boot:check PASS.

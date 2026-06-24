@@ -105,6 +105,12 @@ export function scanCompliance(file: string, content: string): ComplianceIssue[]
       push('cookie-no-samesite', 'medium');
     }
 
+    // ── medium: server cookie set without httpOnly — readable by any script, so an
+    // XSS can steal the session/auth token (DPDP/GDPR security-of-processing) ───────
+    if (/\bres(?:ponse)?\.cookie\s*\(/.test(line) && !/httponly/i.test(line)) {
+      push('cookie-no-httponly', 'medium');
+    }
+
     // ── high: personal data over plain http:// (in the clear on the network) ─────
     // Only flag a real network call to a non-local host.
     if (/(fetch|axios|\.(get|post|put|patch)|url\s*:)\s*\(?\s*['"`]http:\/\//i.test(line) &&

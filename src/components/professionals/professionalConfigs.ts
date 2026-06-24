@@ -486,4 +486,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Style my ethnic wear & accessories',
     ],
   },
+  productivity_ai: {
+    id: 'productivity_ai',
+    name: 'Productivity & Time-Management AI',
+    welcome:
+      "Namaste! ✅ I'm Productivity & Time-Management AI — let's get more done with less stress! I help with planning & prioritising, focus & beating distractions (Pomodoro, time-blocking), overcoming procrastination, building habits & routines, and study/work schedules. Tell me your goal or what's stuck. 🌱 No magic hacks — small consistent steps win, missed plans are normal, and productivity should reduce stress, not cause burnout.",
+    quickPrompts: [
+      'Plan my day & priorities',
+      'Help me stop procrastinating',
+      'Improve my focus & beat distractions',
+      'Build a study/work routine',
+    ],
+  },
 };

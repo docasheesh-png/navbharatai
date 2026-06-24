@@ -657,6 +657,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['fashion', 'style', 'styling', 'outfit', 'clothes', 'wardrobe', 'kapde', 'saree', 'kurta', 'ethnic wear', 'dress', 'what to wear', 'accessories', 'pehnava'],
   },
 
+  // ─── PRODUCTIVITY & TIME-MANAGEMENT AI ───────────────────────────────────
+  {
+    id: 'productivity_ai',
+    name: 'Productivity & Time-Management AI',
+    path: 'Sidebar → Professionals → Productivity & Time-Management',
+    description: 'Practical, motivating coach to get more done with less stress (students, professionals, anyone): planning & prioritising (daily/weekly plans, Eisenhower urgent/important, top 1–3 tasks, SMART goals, breaking goals into steps), focus & deep work (beating phone/social distraction, time-blocking, Pomodoro, single-tasking, focus environment), beating procrastination (understanding the emotional cause, 2-minute rule, smallest next step, reducing friction), habits & routines (cue-routine-reward, habit stacking, tracking, morning/evening routines), study/work scheduling, and balance/energy (rest, sleep, avoiding overcommitment). Honesty/limits: no magic hacks (consistency + a few habits beat any app); never shames missed plans; promotes balance & wellbeing, not hustle/burnout; for burnout or anxiety-driven chronic procrastination points to rest & the Wellness AI/a counsellor (doesn’t diagnose); adapts to the person’s real health, energy & responsibilities.',
+    howToUse: 'Open Sidebar → Professionals → Productivity & Time-Management and ask: "plan my day & priorities", "help me stop procrastinating", "improve my focus & beat distractions", "build a study/work routine". For subject help use Teacher AI; for burnout/stress, the Wellness AI.',
+    relatedFeatures: ['professionals', 'teacher_ai', 'mentor_ai', 'wellness_ai'],
+    aiSurface: 'productivity_ai',
+    keywords: ['productivity', 'time management', 'focus', 'procrastination', 'planning', 'habits', 'routine', 'pomodoro', 'study plan', 'time table', 'distraction', 'samay', 'goals', 'discipline'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

@@ -969,6 +969,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['volunteer', 'volunteering', 'ngo', 'donate', 'donation', 'charity', 'social work', 'seva', 'give back', 'community', 'blood donation', 'csr', 'social impact', '80g', 'fundraiser'],
   },
 
+  // ─── ASTRONOMY & SPACE AI ────────────────────────────────────────────────
+  {
+    id: 'astronomy_ai',
+    name: 'Astronomy & Space AI',
+    path: 'Sidebar → Professionals → Astronomy & Space',
+    description: 'Curious, inspiring guide to astronomy, stargazing & space SCIENCE (clearly different from the Astrologer AI / cultural entertainment): stargazing & night sky (naked-eye/binoculars/telescope, constellations, planets, Moon phases, meteor showers, what\'s visible from India), astronomy concepts (solar system, stars, galaxies, black holes, star life cycles, gravity, light-years, eclipses, seasons — simple analogies), space exploration (ISRO — Chandrayaan/Mangalyaan/Aditya-L1/Gaganyaan; NASA/ESA; rockets/satellites/NavIC basics), telescopes/gear & beginner astrophotography (→ Photography AI), and learning/careers in astronomy/astrophysics/space sector (→ Mentor/Study-Abroad AIs). Honesty/safety: scientifically accurate (distinguishes established facts from open questions, says "we don\'t fully know yet", never fabricates facts/dates/mission details — verify on ISRO/NASA & sky apps for live timings); science NOT astrology (no fortune/predictive claims; cultural horoscopes → Astrologer AI); SUN-SAFETY critical — never look at the Sun directly or through optics without certified solar filters, only ISO-certified glasses for eclipses (risk of permanent blindness).',
+    howToUse: 'Open Sidebar → Professionals → Astronomy & Space and ask: "how do I start stargazing", "explain black holes/galaxies simply", "ISRO\'s space missions", "which telescope for a beginner". Verify live sky timings with a sky app & mission facts on ISRO/NASA; never view the Sun without certified solar filters.',
+    relatedFeatures: ['professionals', 'mathscience_ai', 'photography_ai', 'gk_ai'],
+    aiSurface: 'astronomy_ai',
+    keywords: ['astronomy', 'space', 'stargazing', 'telescope', 'planet', 'star', 'galaxy', 'black hole', 'isro', 'nasa', 'universe', 'khagol', 'rocket', 'eclipse', 'constellation'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

@@ -81,13 +81,23 @@ export function analyzeSeo(indexHtml: string | null | undefined): SeoReport {
     });
   }
 
+  // Favicon — without a <link rel="icon">, the browser shows a generic icon and
+  // requests /favicon.ico (a 404 in the network log). The Vite scaffold ships one,
+  // so a missing favicon means it was removed.
+  if (!/<link[^>]+rel=["'](?:shortcut\s+)?(?:icon|apple-touch-icon|mask-icon)["']/i.test(html)) {
+    findings.push({
+      level: 'low',
+      message: 'No favicon link — add <link rel="icon" href="..."> so the browser tab and bookmarks show your icon instead of a generic one (and to avoid a 404 on /favicon.ico).',
+    });
+  }
+
   return { assessed: true, findings };
 }
 
 /** A short, honest SEO/metadata block for the `evaluate` output. */
 export function seoSummary(report: SeoReport): string {
   if (!report.assessed) return 'SEO/metadata: — (no HTML entry to assess).';
-  if (report.findings.length === 0) return 'SEO/metadata: ✓ title, viewport, charset, description, lang and Open Graph tags are present.';
+  if (report.findings.length === 0) return 'SEO/metadata: ✓ title, viewport, charset, description, lang, Open Graph tags and favicon are present.';
   const order: Record<SeoLevel, number> = { high: 0, medium: 1, low: 2 };
   const sorted = [...report.findings].sort((a, b) => order[a.level] - order[b.level]);
   const head = `SEO/metadata — ${report.findings.length} item(s) missing:`;

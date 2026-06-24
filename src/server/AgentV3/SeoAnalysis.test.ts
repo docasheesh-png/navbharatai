@@ -8,6 +8,7 @@ const FULL = `<!doctype html><html lang="en"><head>
 <meta name="description" content="A genuinely useful app." />
 <meta property="og:title" content="My Real App" />
 <meta property="og:image" content="/og.png" />
+<link rel="icon" type="image/svg+xml" href="/vite.svg" />
 </head><body><div id="root"></div></body></html>`;
 
 describe('analyzeSeo', () => {
@@ -55,6 +56,13 @@ describe('analyzeSeo', () => {
     expect(none.findings.some((f) => f.level === 'low' && /Open Graph/.test(f.message))).toBe(true);
     const present = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>X</title><meta name="viewport" content="x"><meta name="description" content="y"><meta property="og:title" content="X"></head></html>');
     expect(present.findings.some((f) => /Open Graph/.test(f.message))).toBe(false);
+  });
+
+  it('flags a page with no favicon link as low, but not when one is present', () => {
+    const none = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>X</title><meta name="viewport" content="x"><meta name="description" content="y"><meta property="og:title" content="X"></head></html>');
+    expect(none.findings.some((f) => f.level === 'low' && /favicon/.test(f.message))).toBe(true);
+    const present = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><link rel="icon" href="/favicon.ico"><title>X</title><meta name="viewport" content="x"><meta name="description" content="y"><meta property="og:title" content="X"></head></html>');
+    expect(present.findings.some((f) => /favicon/.test(f.message))).toBe(false);
   });
 });
 

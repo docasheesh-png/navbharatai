@@ -1,0 +1,208 @@
+// AgentV3 — OpenAI-compatible tool-use adapter (multi-provider cost routing, phase 1).
+//
+// v3.0's agent loop keeps its canonical transcript in ANTHROPIC shape (each turn's
+// rawContent is appended verbatim as Anthropic content blocks). To let a cheaper,
+// OpenAI-compatible provider (Grok / any OpenAI-style endpoint) take a turn, we must
+// translate that Anthropic transcript + tool definitions INTO the OpenAI Chat
+// Completions shape on the way in, and translate the OpenAI assistant reply BACK into
+// an Anthropic-shaped TurnResult (text + tool_use blocks) on the way out. Keeping the
+// canonical transcript Anthropic-shaped is what lets Claude and a cheaper provider
+// interleave turn-by-turn in the same build.
+//
+// This module is PURE and provider-agnostic (no SDK import, no network) so the
+// translation — the intricate, breakage-prone part — is fully unit-testable without
+// any live key. The runner that actually calls a provider wraps these functions.
+
+import type { ClaudeToolDef, ToolUse, TurnResult, TurnUsage } from '../ClaudeClient';
+
+// ── Minimal structural OpenAI shapes (we depend on fields, not the SDK types) ──────
+
+export interface OpenAiTool {
+  type: 'function';
+  function: { name: string; description: string; parameters: Record<string, unknown> };
+}
+
+export interface OpenAiToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
+export interface OpenAiMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | null;
+  tool_calls?: OpenAiToolCall[];
+  tool_call_id?: string;
+}
+
+export interface OpenAiCompletionLike {
+  choices: Array<{
+    message: { role: string; content: string | null; tool_calls?: OpenAiToolCall[] };
+    finish_reason: string | null;
+  }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+}
+
+// ── Anthropic transcript block shapes (the canonical format) ──────────────────────
+
+interface AnthropicBlock {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  tool_use_id?: string;
+  content?: unknown;
+}
+
+interface AnthropicMessage {
+  role?: string;
+  content?: unknown;
+}
+
+/** Convert native Anthropic tool definitions to OpenAI `tools` (function defs). */
+export function toolDefsToOpenAI(tools: ClaudeToolDef[] | undefined): OpenAiTool[] {
+  if (!Array.isArray(tools)) return [];
+  return tools.map((t) => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description ?? '',
+      parameters: (t.input_schema as unknown as Record<string, unknown>) ?? {
+        type: 'object',
+        properties: {},
+      },
+    },
+  }));
+}
+
+/** Stringify a tool_result block's content (string passthrough; else JSON). */
+function toolResultText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    // Anthropic tool_result content can be an array of {type:'text',text} blocks.
+    const text = content
+      .map((b) => (b && typeof b === 'object' && (b as AnthropicBlock).type === 'text' ? (b as AnthropicBlock).text ?? '' : ''))
+      .filter(Boolean)
+      .join('\n');
+    if (text) return text;
+  }
+  try {
+    return JSON.stringify(content ?? '');
+  } catch {
+    return String(content ?? '');
+  }
+}
+
+/**
+ * Translate the Anthropic-shaped transcript (+ optional system prompt) into an
+ * OpenAI Chat Completions `messages` array. Tool-use/tool-result blocks are mapped to
+ * OpenAI `assistant.tool_calls` / `role:'tool'` messages so a function-calling model
+ * sees a well-formed conversation.
+ */
+export function transcriptToOpenAI(messages: unknown[], system?: string): OpenAiMessage[] {
+  const out: OpenAiMessage[] = [];
+  if (system && system.trim()) out.push({ role: 'system', content: system });
+  if (!Array.isArray(messages)) return out;
+
+  for (const raw of messages) {
+    const m = raw as AnthropicMessage;
+    const role = m.role === 'assistant' ? 'assistant' : 'user';
+
+    if (typeof m.content === 'string') {
+      out.push({ role, content: m.content });
+      continue;
+    }
+    if (!Array.isArray(m.content)) continue;
+
+    const blocks = m.content as AnthropicBlock[];
+
+    if (role === 'assistant') {
+      const text = blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('');
+      const toolCalls: OpenAiToolCall[] = blocks
+        .filter((b) => b.type === 'tool_use')
+        .map((b) => ({
+          id: b.id ?? '',
+          type: 'function',
+          function: { name: b.name ?? '', arguments: JSON.stringify(b.input ?? {}) },
+        }));
+      const msg: OpenAiMessage = { role: 'assistant', content: text || null };
+      if (toolCalls.length) msg.tool_calls = toolCalls;
+      out.push(msg);
+      continue;
+    }
+
+    // role === 'user': may carry tool_result blocks (→ tool messages) and/or text.
+    const userText: string[] = [];
+    for (const b of blocks) {
+      if (b.type === 'tool_result') {
+        out.push({ role: 'tool', tool_call_id: b.tool_use_id ?? '', content: toolResultText(b.content) });
+      } else if (b.type === 'text') {
+        userText.push(b.text ?? '');
+      }
+    }
+    if (userText.length) out.push({ role: 'user', content: userText.join('') });
+  }
+  return out;
+}
+
+/** Map an OpenAI finish_reason to the Anthropic stop_reason vocabulary. */
+export function mapFinishReason(reason: string | null | undefined): string {
+  switch (reason) {
+    case 'tool_calls':
+    case 'function_call':
+      return 'tool_use';
+    case 'length':
+      return 'max_tokens';
+    case 'stop':
+      return 'end_turn';
+    default:
+      return reason ?? 'end_turn';
+  }
+}
+
+/** Parse one tool call's arguments JSON; tolerate empty / malformed by returning {}. */
+function parseArgs(args: string | undefined): Record<string, unknown> {
+  if (!args || !args.trim()) return {};
+  try {
+    const parsed = JSON.parse(args);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Translate an OpenAI chat completion BACK into an Anthropic-shaped TurnResult. The
+ * `rawContent` is emitted as Anthropic content blocks (text + tool_use) so appending it
+ * keeps the canonical transcript Anthropic-shaped for the next turn (Claude or otherwise).
+ */
+export function parseOpenAiCompletion(completion: OpenAiCompletionLike): TurnResult {
+  const choice = completion?.choices?.[0];
+  const message = choice?.message ?? { role: 'assistant', content: null };
+  const text = typeof message.content === 'string' ? message.content : '';
+
+  const toolUses: ToolUse[] = Array.isArray(message.tool_calls)
+    ? message.tool_calls.map((tc) => ({
+        id: tc.id,
+        name: tc.function?.name ?? '',
+        input: parseArgs(tc.function?.arguments),
+      }))
+    : [];
+
+  const rawContent: unknown[] = [];
+  if (text) rawContent.push({ type: 'text', text });
+  for (const tu of toolUses) rawContent.push({ type: 'tool_use', id: tu.id, name: tu.name, input: tu.input });
+
+  const usage: TurnUsage = {
+    inputTokens: completion?.usage?.prompt_tokens ?? 0,
+    outputTokens: completion?.usage?.completion_tokens ?? 0,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+  };
+
+  // If the model returned tool calls, the agent loop must run them: force tool_use.
+  const stopReason = toolUses.length ? 'tool_use' : mapFinishReason(choice?.finish_reason);
+
+  return { text, toolUses, stopReason, usage, rawContent };
+}

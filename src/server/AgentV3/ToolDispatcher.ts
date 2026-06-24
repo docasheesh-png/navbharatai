@@ -39,6 +39,7 @@ import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from '
 import { scanPortBinding, portBindingSummary, type PortBindingIssue } from './PortBindingAnalysis';
 import { scanViteEnvExposure, hasCustomEnvPrefix, viteEnvSummary, type ViteEnvIssue } from './ViteEnvAnalysis';
 import { scanEnvTemplateSecrets, envTemplateSecretSummary, type EnvTemplateSecretIssue } from './EnvSecretValueAnalysis';
+import { scanAsyncPatterns, asyncPatternSummary, type AsyncPatternIssue } from './AsyncPatternAnalysis';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
 
@@ -235,6 +236,21 @@ export class ToolDispatcher {
     for (const { path, content } of sources) {
       if (!CODE.test(path) || SKIP.test(path)) continue;
       issues.push(...scanViteEnvExposure(path, content));
+    }
+    return issues;
+  }
+
+  /**
+   * Correctness (Section I #6): `forEach(async …)` does not await — the loop races and
+   * rejections are swallowed. Bounded and wrapped.
+   */
+  private collectAsyncPatternIssues(sources: EvalSourceFile[]): AsyncPatternIssue[] {
+    const CODE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
+    const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
+    const issues: AsyncPatternIssue[] = [];
+    for (const { path, content } of sources) {
+      if (!CODE.test(path) || SKIP.test(path)) continue;
+      issues.push(...scanAsyncPatterns(path, content));
     }
     return issues;
   }
@@ -637,6 +653,8 @@ export class ToolDispatcher {
           }
         }
         const viteEnv = hasCustomEnvPrefix(viteConfig) ? [] : this.collectViteEnvIssues(snap.sources);
+        // Best-effort async-pattern pass (Section I #6): forEach(async …) does not await.
+        const asyncPatterns = this.collectAsyncPatternIssues(snap.sources);
         // Fold the critical new dimensions into the readiness gate: a secret leak,
         // an app that can't run, or a high-severity security misconfig must BLOCK
         // "READY" — not merely be reported. The rest lower the score as warnings.
@@ -656,6 +674,7 @@ export class ToolDispatcher {
         if (hardcodedUrls.length) extra.push({ severity: 'medium', label: `${hardcodedUrls.length} hardcoded localhost URL(s)` });
         if (portBindings.length) extra.push({ severity: 'medium', label: `${portBindings.length} hardcoded server port(s) (use process.env.PORT)` });
         if (viteEnv.length) extra.push({ severity: 'medium', label: `${viteEnv.length} non-VITE_ import.meta.env reference(s) (undefined in the browser)` });
+        if (asyncPatterns.length) extra.push({ severity: 'medium', label: `${asyncPatterns.length} forEach(async …) loop(s) that do not await` });
         for (const f of reqCoverage.findings) extra.push({ severity: 'medium', label: `Requested feature not found: ${f.feature}` });
         if (errorBoundary.findings.length) extra.push({ severity: 'medium', label: 'React app has no error boundary' });
         if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
@@ -679,7 +698,7 @@ export class ToolDispatcher {
           accessibility: tally(a11yIssues),
           compliance: complianceTally,
         });
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}`;
       }
 
       case 'update_todo': {

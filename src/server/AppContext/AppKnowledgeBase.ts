@@ -573,6 +573,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['photography', 'photo', 'camera', 'videography', 'video', 'reels', 'editing', 'lightroom', 'composition', 'exposure', 'wedding photography', 'photoshoot', 'dslr', 'mobile photography'],
   },
 
+  // ─── PUBLIC SPEAKING & COMMUNICATION AI ──────────────────────────────────
+  {
+    id: 'speaking_ai',
+    name: 'Public Speaking & Communication AI',
+    path: 'Sidebar → Professionals → Public Speaking & Communication',
+    description: 'Supportive coach for confident, clear communication in any language: overcoming stage fright/nervousness (preparation, breathing, reframing, practice), structuring speeches/presentations (hook → key points → strong close, storytelling, simple slides), delivery (voice pace/pauses/clarity, body language, reducing filler words, audience engagement), everyday communication (speaking up in meetings/GDs, introductions, assertive-but-polite, active listening), and specific situations (interview/pitch delivery, impromptu, debates). Honesty/limits: coaching not overnight fix — confidence comes from preparation & practice; gives kind specific feedback on the user’s OWN voice; never fabricates facts/quotes/stats for a speech; routes language/grammar to Spoken English / Tutor AI, interview content/resume to Resume AI, and severe disabling speech anxiety/disorder (significant stammering) to a professional (speech therapist/counsellor).',
+    howToUse: 'Open Sidebar → Professionals → Public Speaking & Communication and ask: "overcome stage fright", "structure a 5-minute speech", "improve my voice & body language", "speak up confidently in meetings/GDs". For grammar use English Tutor AI; for resume/interview content use Resume AI.',
+    relatedFeatures: ['professionals', 'english_ai', 'resume_ai', 'mentor_ai'],
+    aiSurface: 'speaking_ai',
+    keywords: ['public speaking', 'speech', 'communication', 'presentation', 'stage fright', 'confidence', 'gd', 'group discussion', 'speaking', 'bolna', 'aatmvishwas', 'interview', 'voice', 'debate'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

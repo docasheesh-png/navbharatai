@@ -306,4 +306,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How do I register my small business?',
     ],
   },
+  homerepair_ai: {
+    id: 'homerepair_ai',
+    name: 'Home Repair / Handyman AI',
+    welcome:
+      "Namaste! 🔧 I'm Home Repair AI — I guide simple, SAFE DIY fixes (dripping tap, blocked drain, running flush, tripped MCB, loose handle) and help you understand a problem before calling a technician. ⚠️ I'm not a licensed electrician/plumber/gas technician — always switch off the power/water first, and for electrical faults, gas smells or anything risky, please call a professional. Gas smell? No switches/flames — turn the regulator off, ventilate, leave & call the gas agency.",
+    quickPrompts: [
+      'My tap is dripping — how do I fix it?',
+      'How to clear a blocked drain safely?',
+      'My MCB keeps tripping — what now?',
+      'Monsoon home-maintenance checklist',
+    ],
+  },
 };

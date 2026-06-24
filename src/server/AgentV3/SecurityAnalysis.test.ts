@@ -120,6 +120,13 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'const u = "https://github.com/user/repo";').some((f) => f.rule === 'hardcoded-provider-token')).toBe(false);
   });
 
+  it('flags target="_blank" without rel="noopener" (reverse tabnabbing) but not the safe form', () => {
+    expect(scanSecurity('a.tsx', '<a href="https://x.com" target="_blank">go</a>').some((f) => f.rule === 'unsafe-target-blank')).toBe(true);
+    // Safe: rel="noopener" present, and a non-_blank target.
+    expect(scanSecurity('a.tsx', '<a href="https://x.com" target="_blank" rel="noopener noreferrer">go</a>').some((f) => f.rule === 'unsafe-target-blank')).toBe(false);
+    expect(scanSecurity('a.tsx', '<a href="/x" target="_self">go</a>').some((f) => f.rule === 'unsafe-target-blank')).toBe(false);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

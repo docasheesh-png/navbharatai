@@ -2235,3 +2235,18 @@ guidance. AppKnowledgeBase synced. v3.0-only, flag-OFF.
 
 Tests: +1 unit (async executor flagged, sync form safe, comment ignored) + 1 dispatcher integration.
 Gate green: server+frontend tsc 0, **2195 vitest** (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 v14: target="_blank" without rel="noopener" (security)
+
+Continuing the autonomous Section I march. New item: `SecurityAnalysis` `unsafe-target-blank` rule
+(medium). A link with `target="_blank"` but no `rel="noopener"` lets the opened page control the
+original tab via `window.opener` (reverse tabnabbing → it can silently redirect the user's tab to a
+phishing page). Genuinely uncovered. High-precision: the `noopener` guard ignores the safe form, and
+a non-`_blank` target is not flagged; same-line `rel` is the common case (documented precision
+trade-off vs multi-line tags). Folds into the existing security dimension. AppKnowledgeBase synced.
+v3.0-only, flag-OFF.
+
+Tests: +1 unit (unsafe form flagged; rel=noopener + target=_self safe) + 1 dispatcher integration.
+Gate green: server+frontend tsc 0, **2197 vitest** (+2), build PASS, boot:check PASS.

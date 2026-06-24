@@ -391,6 +391,13 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('command-injection');
   });
 
+  it('flags target="_blank" without rel="noopener" (reverse tabnabbing)', async () => {
+    const dd = makeDispatcher('ws-eval-blank');
+    await write(dd, 'src/Link.tsx', 'export const L = () => <a href="https://x.com" target="_blank">x</a>;');
+    const out = await evalText(dd);
+    expect(out).toContain('unsafe-target-blank');
+  });
+
   it('flags a non-VITE_ import.meta.env reference (undefined in the browser)', async () => {
     const dd = makeDispatcher('ws-eval-viteenv');
     await write(dd, 'src/api.ts', 'export const key = import.meta.env.API_KEY;');

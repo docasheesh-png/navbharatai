@@ -148,6 +148,17 @@ const RULES: Rule[] = [
     ignore: (_m, line) => PLACEHOLDER.test(line),
   },
   {
+    rule: 'unsafe-target-blank',
+    severity: 'medium',
+    // A link opened with target="_blank" but no rel="noopener" lets the opened page
+    // control this tab via window.opener (reverse tabnabbing — it can redirect the
+    // original tab to a phishing page). The `noopener` guard below ignores the safe
+    // form; same-line rel is the common case (a documented precision trade-off).
+    re: /target\s*=\s*['"]_blank['"]/i,
+    message: 'target="_blank" without rel="noopener" — the opened page can hijack this tab (reverse tabnabbing); add rel="noopener noreferrer".',
+    ignore: (_m, line) => /noopener/i.test(line),
+  },
+  {
     rule: 'insecure-http',
     severity: 'low',
     re: /['"`]http:\/\/(?!localhost|127\.0\.0\.1)[^'"`]+['"`]/,

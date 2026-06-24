@@ -681,6 +681,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['relationship', 'marriage', 'partner', 'family', 'communication', 'conflict', 'in laws', 'rishta', 'couple', 'breakup', 'trust', 'boundaries', 'pyar', 'shaadi'],
   },
 
+  // ─── VEHICLE & AUTO-MAINTENANCE AI ───────────────────────────────────────
+  {
+    id: 'vehicle_ai',
+    name: 'Vehicle & Auto-Maintenance AI',
+    path: 'Sidebar → Professionals → Vehicle & Auto-Maintenance',
+    description: 'Practical guide to keeping cars & two-wheelers running well in India: routine maintenance & service (oil/filters, coolant, brake fluid, tyres, battery, bike chain, seasonal/monsoon care — manual for exact intervals), simple SAFE owner checks (tyre pressure, oil/coolant level, lights, wipers, pre-trip), symptom understanding (warning lights, noises/vibration, hard starting, overheating, poor mileage, brake feel) to describe to a mechanic & avoid overcharging, fuel-efficiency & vehicle-life habits, and service-centre/used-vehicle sense. Safety-first (road safety): general guidance NOT a repair manual/certified-mechanic advice — safety-critical systems (brakes, steering, airbags, fuel, engine internals, EV high-voltage) must go to a qualified mechanic, never DIY; if a symptom is dangerous (brake failure, smoke/fire, fuel smell, red warning light, overheating) stop safely & get help, don’t keep driving; follow the owner’s manual for exact specs (never fabricates specs/capacities/torque). For licence/RC/insurance/PUC paperwork, the Driving / RTO AI.',
+    howToUse: 'Open Sidebar → Professionals → Vehicle & Auto-Maintenance and ask: "what maintenance does my vehicle need", "safe checks I can do myself", "what might this warning light/noise mean", "how to improve mileage". For repairs see a qualified mechanic; for RC/insurance/PUC use the Driving / RTO AI.',
+    relatedFeatures: ['professionals', 'driving_ai', 'homerepair_ai'],
+    aiSurface: 'vehicle_ai',
+    keywords: ['vehicle', 'car', 'bike', 'motorcycle', 'maintenance', 'service', 'mileage', 'engine oil', 'tyre', 'mechanic', 'gaadi', 'repair', 'breakdown', 'auto', 'scooter'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

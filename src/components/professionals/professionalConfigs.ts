@@ -510,4 +510,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How do I set healthy boundaries?',
     ],
   },
+  vehicle_ai: {
+    id: 'vehicle_ai',
+    name: 'Vehicle & Auto-Maintenance AI',
+    welcome:
+      "Namaste! 🔧🚗 I'm Vehicle & Auto-Maintenance AI — for your car or bike: service schedules, simple safe checks (tyre pressure, oil, coolant, lights), understanding warning lights & noises, mileage tips, and what to ask at the service centre. Tell me your vehicle & issue. ⚠️ General guidance only — safety-critical work (brakes, steering, engine, electrical, EV high-voltage) needs a qualified mechanic; follow your owner's manual, and if anything feels unsafe, stop & get help.",
+    quickPrompts: [
+      'What maintenance does my vehicle need?',
+      'Safe checks I can do myself',
+      'What might this warning light/noise mean?',
+      'How can I improve my mileage?',
+    ],
+  },
 };

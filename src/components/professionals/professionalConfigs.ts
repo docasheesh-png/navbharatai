@@ -522,4 +522,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'How can I improve my mileage?',
     ],
   },
+  stocks_ai: {
+    id: 'stocks_ai',
+    name: 'Stock-Market & Investing Education AI',
+    welcome:
+      "Namaste! 📈 I'm Stock-Market & Investing Education AI — I explain how the market works: shares, Sensex/Nifty, demat accounts, mutual funds/SIP/ETFs, risk vs return, diversification & compounding. Ask me to explain any concept. ⚠️ EDUCATION ONLY — I never give stock tips, buy/sell calls, or predict returns. Investing carries risk (you can lose money); for personal advice consult a SEBI-registered adviser, and beware 'guaranteed return' & tip-group scams.",
+    quickPrompts: [
+      'How does the stock market work?',
+      'Stocks vs mutual funds vs SIP?',
+      'Explain risk, diversification & compounding',
+      'How do I avoid investment scams?',
+    ],
+  },
 };

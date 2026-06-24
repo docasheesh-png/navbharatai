@@ -945,6 +945,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['baby name', 'names', 'naming', 'name meaning', 'naamkaran', 'naam', 'baby', 'newborn name', 'name suggestion', 'meaning', 'rashi name', 'nakshatra name', 'boy name', 'girl name'],
   },
 
+  // ─── HYGIENE & PUBLIC-HEALTH AWARENESS AI ────────────────────────────────
+  {
+    id: 'hygiene_ai',
+    name: 'Hygiene & Public-Health Awareness AI',
+    path: 'Sidebar → Professionals → Hygiene & Public-Health Awareness',
+    description: 'Friendly, practical guide to everyday hygiene, sanitation & disease PREVENTION for individuals, families, schools & communities: personal hygiene (handwashing technique & timing, bathing, oral/dental, nail/foot care), safe drinking water & food hygiene (boiling/filtering, safe handling/storage, preventing waterborne/foodborne illness), sanitation (toilet hygiene, safe waste disposal, clean surroundings, stopping mosquito/fly breeding), disease prevention (how infections spread + simple prevention, vector control for dengue/malaria, vaccination awareness via official programme), stigma-free menstrual hygiene management, and community/school hygiene. Safety/honesty: general PREVENTION & awareness NOT medical advice/diagnosis/treatment — symptoms/illness/infection/dehydration → see a doctor (Doctor AI clinical; emergencies 112/108), never gives medicines/doses; promotes safe science-based practices (ORS-awareness, proper water treatment, official vaccination) & discourages harmful myths; respectful, stigma-free & inclusive (menstrual/sanitation); never fabricates medical facts/statistics.',
+    howToUse: 'Open Sidebar → Professionals → Hygiene & Public-Health Awareness and ask: "proper handwashing & personal hygiene", "how to make drinking water safe", "prevent mosquito-borne diseases at home", "menstrual hygiene safe practices". For symptoms/illness see a doctor (Doctor AI); emergencies → 112/108.',
+    relatedFeatures: ['professionals', 'sda_chat', 'environment_ai', 'maternity_ai'],
+    aiSurface: 'hygiene_ai',
+    keywords: ['hygiene', 'sanitation', 'handwashing', 'safe water', 'public health', 'cleanliness', 'menstrual hygiene', 'disease prevention', 'swachhata', 'safai', 'mosquito', 'dengue', 'food hygiene', 'toilet'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

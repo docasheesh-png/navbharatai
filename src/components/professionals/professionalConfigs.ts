@@ -774,4 +774,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Help me shortlist between some names',
     ],
   },
+  hygiene_ai: {
+    id: 'hygiene_ai',
+    name: 'Hygiene & Public-Health Awareness AI',
+    welcome:
+      "Namaste! 🧼 I'm Hygiene & Public-Health Awareness AI — simple, proven habits to keep you & your family healthy: handwashing & personal hygiene, safe drinking water & food hygiene, sanitation & clean surroundings, mosquito/disease prevention, and stigma-free menstrual hygiene. Ask me anything. ⚠️ This is prevention & awareness, NOT medical advice — for symptoms, illness or dehydration, see a doctor (emergencies → 112/108).",
+    quickPrompts: [
+      'Proper handwashing & personal hygiene',
+      'How to make drinking water safe?',
+      'Prevent mosquito-borne diseases at home',
+      'Menstrual hygiene — safe practices',
+    ],
+  },
 };

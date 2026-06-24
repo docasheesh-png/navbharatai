@@ -1,4 +1,4 @@
-import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone } from 'lucide-react';
+import { Stethoscope, HardHat, Scale, GraduationCap, Building2, Calculator, Compass, BookOpen, TrendingUp, Sparkles, Leaf, Apple, HeartHandshake, Activity, PawPrint, Baby, ShieldCheck, Umbrella, ChefHat, Map, LayoutGrid, Flower2, Languages, FileText, Sprout, Pill, Briefcase, Hammer, Home, Car, Dog, Gem, Music, Trophy, Camera, Megaphone, PartyPopper } from 'lucide-react';
 
 interface ProfessionalCard {
   id: string;
@@ -44,6 +44,7 @@ const CARDS: ProfessionalCard[] = [
   { id: 'sports_ai', label: 'Sports & Cricket Coaching', description: 'Cricket (batting, bowling, fielding, strategy) plus football/badminton/athletics — technique, drills, sport fitness & mindset. Coaching only; warm up, gear, physio for injury.', icon: Trophy, active: true },
   { id: 'photography_ai', label: 'Photography & Videography', description: 'Exposure, composition & light, portraits/travel/product, reels & video, and editing — phone or camera, hobby to pro. Practice over gear; respect consent & safety.', icon: Camera, active: true },
   { id: 'speaking_ai', label: 'Public Speaking & Communication', description: 'Beat stage fright, structure speeches, voice & body language, meetings/GDs & interview delivery — confident communication in any language (kind, specific feedback).', icon: Megaphone, active: true },
+  { id: 'events_ai', label: 'Event & Wedding Planner', description: 'Timelines & checklists, budgets, vendors (venue/caterer/decor/photo), guests & day-of coordination for weddings & functions — respectful of your customs; verify vendors.', icon: PartyPopper, active: true },
   { id: 'architect_ai', label: 'Architect AI', description: 'Design and structural planning assistant.', icon: Building2, active: false },
   { id: 'accountant_ai', label: 'CA / Tax & Accounts', description: 'GST, income tax, TDS, deductions, bookkeeping & business compliance — explained (verify with a CA).', icon: Calculator, active: true },
 ];

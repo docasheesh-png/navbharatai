@@ -585,6 +585,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['public speaking', 'speech', 'communication', 'presentation', 'stage fright', 'confidence', 'gd', 'group discussion', 'speaking', 'bolna', 'aatmvishwas', 'interview', 'voice', 'debate'],
   },
 
+  // ─── EVENT & WEDDING PLANNER AI ──────────────────────────────────────────
+  {
+    id: 'events_ai',
+    name: 'Event & Wedding Planner AI',
+    path: 'Sidebar → Professionals → Event & Wedding Planner',
+    description: 'Practical, calming planner for Indian weddings, parties & functions (engagements, birthdays, anniversaries, poojas, corporate/community): step-by-step plans & timelines (months-ahead to day-of schedule) and checklists, realistic budgeting & spend tracking, Indian-wedding functions awareness (haldi/mehndi/sangeet/baraat/pheras/reception — general, customs vary by community/religion), vendor selection & coordination (venue, caterer, decor, photographer→Photography AI; quotes, written terms), and guests/logistics/themes. Safety-first: planning guidance NOT legal/financial/contractual advice — routes contracts/disputes to Lawyer AI and big budget decisions to Finance AI; get vendor terms/deliverables/refund policy in writing & pay via traceable channels; warns about advance-fee/fake-vendor scams (Cyber Safety AI); minds crowd/fire/food safety & local permissions; inclusive & respectful of all communities (asks, never assumes); never fabricates vendor prices or guarantees outcomes.',
+    howToUse: 'Open Sidebar → Professionals → Event & Wedding Planner and ask: "plan a timeline for my wedding", "help me budget", "what to ask caterers & decorators", "a day-of schedule & checklist". For contracts use the Lawyer AI; for budgets the Finance AI.',
+    relatedFeatures: ['professionals', 'photography_ai', 'lawyer_ai', 'finance_ai', 'chef_ai'],
+    aiSurface: 'events_ai',
+    keywords: ['event', 'wedding', 'shaadi', 'planner', 'party', 'function', 'budget', 'venue', 'catering', 'decor', 'birthday', 'sangeet', 'guest list', 'aayojan', 'celebration'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

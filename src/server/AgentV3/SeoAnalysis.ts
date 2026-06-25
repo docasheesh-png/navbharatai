@@ -81,6 +81,15 @@ export function analyzeSeo(indexHtml: string | null | undefined): SeoReport {
     });
   }
 
+  // A leftover robots "noindex" actively keeps the live site OUT of search results —
+  // a common dev-template footgun. Flag it (medium) so it is removed before launch.
+  if (/<meta[^>]+name=["']robots["'][^>]*content=["'][^"']*\bnoindex\b/i.test(html)) {
+    findings.push({
+      level: 'medium',
+      message: 'The page has <meta name="robots" content="noindex"> — search engines will NOT index it. Remove the noindex before launch (unless you intentionally want this page hidden from search).',
+    });
+  }
+
   // Favicon — without a <link rel="icon">, the browser shows a generic icon and
   // requests /favicon.ico (a 404 in the network log). The Vite scaffold ships one,
   // so a missing favicon means it was removed.

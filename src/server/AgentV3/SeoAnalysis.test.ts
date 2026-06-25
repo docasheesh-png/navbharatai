@@ -58,6 +58,14 @@ describe('analyzeSeo', () => {
     expect(present.findings.some((f) => /Open Graph/.test(f.message))).toBe(false);
   });
 
+  it('flags a leftover robots noindex as medium, but not a normal/index page', () => {
+    const noindex = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>X</title><meta name="viewport" content="x"><meta name="description" content="y"><meta name="robots" content="noindex, nofollow"><meta property="og:title" content="X"><link rel="icon" href="/f.ico"></head></html>');
+    expect(noindex.findings.some((f) => f.level === 'medium' && /noindex/.test(f.message))).toBe(true);
+    // index,follow (or no robots meta) must not be flagged.
+    const ok = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>X</title><meta name="viewport" content="x"><meta name="description" content="y"><meta name="robots" content="index, follow"><meta property="og:title" content="X"><link rel="icon" href="/f.ico"></head></html>');
+    expect(ok.findings.some((f) => /noindex/.test(f.message))).toBe(false);
+  });
+
   it('flags a page with no favicon link as low, but not when one is present', () => {
     const none = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>X</title><meta name="viewport" content="x"><meta name="description" content="y"><meta property="og:title" content="X"></head></html>');
     expect(none.findings.some((f) => f.level === 'low' && /favicon/.test(f.message))).toBe(true);

@@ -2754,3 +2754,17 @@ Batch 7 merged to main 6b021d2. New:
    ResourceUrl/Script/Style explicitly DISABLES built-in sanitisation (XSS risk on untrusted input).
 
 Gate: server tsc 0, frontend tsc 0, **2251 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 9): path traversal + NoSQL injection (server security)
+
+Batch 8 merged to main 19c3029. New:
+
+1. `SecurityAnalysis` **path-traversal** (high) — a file read/response (sendFile/readFile/
+   createReadStream/readdir/unlink) built on request input enables ../../etc/passwd disclosure.
+2. `SecurityAnalysis` **nosql-injection** (high) — a raw req.body/req.query passed straight into a
+   Mongo/Mongoose query (.find/.findOne/.update*/.delete*) lets a user inject $gt/$ne operators to
+   bypass it (classic login auth bypass). Validated explicit fields are not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2253 vitest** PASS, build PASS.

@@ -163,6 +163,21 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'res.redirect(`/go?to=${req.query.next}`);').some((f) => f.rule === 'open-redirect')).toBe(false);
   });
 
+  it('flags a raw request object used as a DB query (NoSQL injection) but not validated fields', () => {
+    expect(scanSecurity('a.ts', 'const u = await User.findOne(req.body);').some((f) => f.rule === 'nosql-injection')).toBe(true);
+    expect(scanSecurity('a.ts', 'db.collection("u").find(req.query);').some((f) => f.rule === 'nosql-injection')).toBe(true);
+    // passing explicit, validated fields is the safe pattern.
+    expect(scanSecurity('a.ts', 'const u = await User.findOne({ email: req.body.email });').some((f) => f.rule === 'nosql-injection')).toBe(false);
+  });
+
+  it('flags a file path built from request input (path traversal) but not a fixed path', () => {
+    expect(scanSecurity('a.ts', 'res.sendFile(req.params.name);').some((f) => f.rule === 'path-traversal')).toBe(true);
+    expect(scanSecurity('a.ts', 'fs.readFile(`./uploads/${req.query.file}`, cb);').some((f) => f.rule === 'path-traversal')).toBe(true);
+    expect(scanSecurity('a.ts', 'createReadStream(req.body.path).pipe(res);').some((f) => f.rule === 'path-traversal')).toBe(true);
+    // a fixed, non-request path is not flagged.
+    expect(scanSecurity('a.ts', "res.sendFile(path.join(__dirname, 'index.html'));").some((f) => f.rule === 'path-traversal')).toBe(false);
+  });
+
   it('flags Angular bypassSecurityTrust* (sanitisation disabled) but not normal sanitizer use', () => {
     expect(scanSecurity('app.ts', 'this.html = this.sanitizer.bypassSecurityTrustHtml(raw);').some((f) => f.rule === 'angular-bypass-security')).toBe(true);
     expect(scanSecurity('app.ts', 'const u = ds.bypassSecurityTrustResourceUrl(src);').some((f) => f.rule === 'angular-bypass-security')).toBe(true);

@@ -132,6 +132,15 @@ const RULES: Rule[] = [
     message: 'crypto.createCipher()/createDecipher() are insecure (no IV, MD5 key derivation) — use createCipheriv()/createDecipheriv() with a random IV instead.',
   },
   {
+    rule: 'path-traversal',
+    severity: 'high',
+    // A filesystem read / file response built from request input (req.query/params/body/
+    // headers) lets an attacker request ../../etc/passwd — path traversal / local file
+    // disclosure. High-precision: the file op's arguments must contain req.* directly.
+    re: /\b(?:sendFile|readFile(?:Sync)?|createReadStream|readdir(?:Sync)?|unlink(?:Sync)?)\s*\([^)]*\breq\.(?:query|params|body|headers)\b/,
+    message: 'File path built from request input — this enables path traversal (e.g. ../../etc/passwd). Validate against an allow-list and resolve+confine the path under a fixed base directory.',
+  },
+  {
     rule: 'dangerous-html',
     severity: 'medium',
     re: /dangerouslySetInnerHTML/,
@@ -193,6 +202,15 @@ const RULES: Rule[] = [
     // they are not flagged. `(?!['"])` after `+` excludes safe literal+literal joins.
     re: /`\s*(?:SELECT|INSERT|UPDATE|DELETE)\b[^`]*\$\{|['"]\s*(?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*['"]\s*\+\s*(?!['"])\S/i,
     message: 'SQL query built from interpolated/concatenated input — this enables SQL injection; use parameterised queries (placeholders + a values array) instead.',
+  },
+  {
+    rule: 'nosql-injection',
+    severity: 'high',
+    // A raw request object passed straight into a Mongo/Mongoose query — a user can send
+    // `{ "$gt": "" }` / `{ "$ne": null }` to match unintended documents (NoSQL injection,
+    // a classic auth bypass on a login query). High-precision: the query arg IS req.*.
+    re: /\.(?:find|findOne|findOneAnd\w+|update(?:One|Many)?|delete(?:One|Many)?|count(?:Documents)?|remove)\s*\(\s*req\.(?:body|query|params)\b/,
+    message: 'Raw request object used as a database query — a user can inject query operators ($gt/$ne) to bypass it (NoSQL injection). Extract and validate the specific fields instead of passing req.body/req.query directly.',
   },
   {
     rule: 'hardcoded-auth-header',

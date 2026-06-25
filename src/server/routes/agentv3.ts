@@ -24,6 +24,12 @@ import {
   awaitApproval,
   resolveApproval,
   GitManager,
+  GitRepoSync,
+  GitHubAppClient,
+  githubConfigFromEnv,
+  githubStorageActive,
+  repoNameForProject,
+  type RepoInfo,
   registerSession,
   restoreSession,
   agentLifecycle,
@@ -749,6 +755,13 @@ export function registerAgentV3Routes(app: Express): void {
       // the build tools will report the real sandbox error only if the user asks
       // to build. This is what makes v3.0 conversational like Claude Code.
       let git: GitManager | undefined;
+      // Git-native storage (Phase 2, flag-gated OFF by default): when active, the user's project
+      // lives in a real private repo in the platform GitHub org — the durable, ~free source of
+      // truth. We clone it into the (empty) sandbox at start and push it back at end. These stay
+      // unset when storage is dormant, so every line below is a no-op on the live build path.
+      let repoSync: GitRepoSync | undefined;
+      let repoAuthedUrl = '';
+      let repoBranch = 'main';
       try {
         // Emit an immediate status so the NDJSON stream is never silent while the
         // sandbox is being created (E2B VM setup can take several seconds). A long
@@ -756,6 +769,28 @@ export function registerAgentV3Routes(app: Express): void {
         // request timeouts and surfaces as a bare "Load failed" on the client.
         events.emit({ type: 'narration', agent: 'architect', text: 'Setting up your workspace…', ts: Date.now() });
         await actuator.ensureWorkspace(workspaceId, 'react');
+        // GIT-NATIVE HYDRATE: when storage is active, ensure the project repo exists and seed the
+        // sandbox from it BEFORE the Firestore fallback. Best-effort — any failure here leaves the
+        // build on the existing (Firestore) durability path, never blocking it.
+        if (githubStorageActive()) {
+          try {
+            const cfg = githubConfigFromEnv();
+            if (cfg) {
+              const projectId = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : workspaceId;
+              const repoName = repoNameForProject(userId, projectId);
+              const ghClient = new GitHubAppClient(cfg);
+              const repo: RepoInfo = await ghClient.ensureRepo(repoName);
+              const token = await ghClient.getInstallationToken();
+              repoAuthedUrl = ghClient.authedCloneUrl(repoName, token);
+              repoBranch = repo.defaultBranch || 'main';
+              repoSync = new GitRepoSync(actuator, workspaceId);
+              const h = await repoSync.hydrateIfEmpty(repoAuthedUrl);
+              if (h.hydrated) {
+                events.emit({ type: 'narration', agent: 'architect', text: 'Loaded your project from its GitHub repo.', ts: Date.now() });
+              }
+            }
+          } catch { /* git-native is best-effort — fall back to Firestore durability below */ }
+        }
         // DURABLE FILE RESTORE: the sandbox is ephemeral — if it was lost/recycled (or this is a
         // later message that got a fresh sandbox), re-seed it with the files we persisted last
         // time so the build continues from where it left off instead of an "empty directory".
@@ -1052,6 +1087,19 @@ export function registerAgentV3Routes(app: Express): void {
           saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
         }
       } catch { /* file persist is best-effort */ }
+
+      // GIT-NATIVE PUSH: when storage is active, commit + push the sandbox back to the project's
+      // GitHub repo so it is the durable source of truth for next session. Best-effort and only
+      // when files were actually produced — never blocks or fails the build.
+      if (repoSync && repoAuthedUrl && writtenFiles.size > 0) {
+        try {
+          const msg = `NavBharatAI build: ${deriveTitle(prompt)}`;
+          const pushed = await repoSync.pushAll(repoAuthedUrl, repoBranch, msg);
+          if (pushed.pushed) {
+            events.emit({ type: 'narration', agent: 'architect', text: 'Saved your project to its GitHub repo.', ts: Date.now() });
+          }
+        } catch { /* git-native push is best-effort */ }
+      }
 
       // Bill the user the marked-up cost (D5/D6), recorded in the same place the
       // platform records every build's cost. Best-effort — never blocks the run.

@@ -52,8 +52,10 @@ export { makeWebSearch, WebSearch, formatSearchResults, parseDuckDuckGo } from '
 export type { WebSearchFn, SearchResult } from './WebSearch';
 export { makeDeploy, FirebaseHostingDeployer, makeChannelId } from './Deployment';
 export type { DeployFn } from './Deployment';
-export { GitHubAppClient, githubConfigFromEnv, githubStorageEnabled, repoNameForProject } from './GitHubAppClient';
+export { GitHubAppClient, githubConfigFromEnv, githubStorageEnabled, githubStorageActive, repoNameForProject } from './GitHubAppClient';
 export type { GitHubConfig, RepoInfo } from './GitHubAppClient';
+export { GitRepoSync } from './GitRepoSync';
+export type { HydrateResult, PushResult } from './GitRepoSync';
 export { roleConfig, isWorkerRole, WORKER_ROLES, allRoles, findRolesByCapability, rolesByLayer, rosterBriefing } from './AgentRegistry';
 export type { RoleConfig } from './AgentRegistry';
 export { agentLifecycle } from './AgentLifecycle';

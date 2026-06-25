@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
-  SlidersHorizontal, Check, X, Paperclip, FileText,
+  SlidersHorizontal, Check, X, Paperclip, FileText, Download,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import type { AgentCard, GitCheckpoint } from './agentV3Types';
@@ -267,6 +267,51 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
   };
   const anyToggleOn = planFirst || thinking || onlyOpus;
 
+  // Portability / no-lock-in (Phase 4): export the WHOLE project as a real .zip the user owns and
+  // can open in any editor or host anywhere. Pulls the live file contents from the sandbox (the
+  // file explorer only carries paths) and zips them in-browser — no server round-trip beyond the
+  // existing read endpoint. Honest about failures; never silent.
+  const [exporting, setExporting] = useState(false);
+  const downloadProjectZip = async () => {
+    if (exporting) return;
+    const wsId = state.workspaceId;
+    if (!wsId) { alert('Open or build a project first — there is nothing to export yet.'); return; }
+    setExporting(true);
+    try {
+      const res = await fetch('/api/agentv3/workspace-files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: wsId }),
+      });
+      if (!res.ok) throw new Error(`server returned ${res.status}`);
+      const data = await res.json() as { files?: Record<string, string> };
+      const files = data.files ?? {};
+      const paths = Object.keys(files);
+      if (paths.length === 0) { alert('No files found to export yet — build something first.'); return; }
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+      // Skip heavy generated dirs so the archive is the SOURCE the user actually owns.
+      const EXCLUDED = /^(node_modules\/|\.git\/|dist\/|build\/|\.next\/|__pycache__\/)/;
+      for (const p of paths) {
+        if (EXCLUDED.test(p)) continue;
+        zip.file(p, files[p] ?? '');
+      }
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `navbharatai-project-${Date.now()}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) {
+      alert(`Export failed: ${e instanceof Error ? e.message : String(e)}. Please try again.`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const agents = Object.values(state.agents).sort((a, b) => b.updatedTs - a.updatedTs);
   const diffPaths = Object.keys(state.diffs);
 
@@ -323,6 +368,15 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
           <TabPill active={showWorkspace && tab === 'diff'} onClick={() => openTab('diff')} icon={<FileDiff className="w-3.5 h-3.5" />}>Diff ({diffPaths.length})</TabPill>
           <TabPill active={showWorkspace && tab === 'terminal'} onClick={() => openTab('terminal')} icon={<Terminal className="w-3.5 h-3.5" />}>Terminal</TabPill>
           <TabPill active={showWorkspace && tab === 'history'} onClick={() => openTab('history')} icon={<History className="w-3.5 h-3.5" />}>History ({allCheckpoints.length})</TabPill>
+          <button
+            onClick={downloadProjectZip}
+            disabled={exporting || !state.workspaceId}
+            title="Download your whole project as a .zip you own — open it in any editor or host it anywhere (no lock-in)"
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            {exporting ? 'Exporting…' : 'Export .zip'}
+          </button>
         </div>
       </div>
 

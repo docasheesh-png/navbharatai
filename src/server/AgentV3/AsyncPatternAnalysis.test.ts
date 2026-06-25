@@ -54,6 +54,22 @@ describe('scanAsyncPatterns', () => {
     expect(scanAsyncPatterns('a.ts', 'items.filter((x) => x.open);')).toEqual([]);
   });
 
+  it('flags useMemo(async …) (memoizes a Promise, not the value) but not useCallback(async …)', () => {
+    expect(scanAsyncPatterns('a.tsx', 'const v = useMemo(async () => await load(id), [id]);')[0])
+      .toMatchObject({ kind: 'async-usememo', line: 1 });
+    // useCallback(async …) is correct — memoizing an async function is fine.
+    expect(scanAsyncPatterns('a.tsx', 'const fn = useCallback(async () => await save(), []);').some((i) => i.kind === 'async-usememo')).toBe(false);
+  });
+
+  it('flags reduce(async …) (the accumulator becomes a Promise) but not a sync reduce', () => {
+    expect(scanAsyncPatterns('a.ts', 'const total = items.reduce(async (acc, x) => (await acc) + x, 0);')[0]?.kind)
+      .toBe('async-reduce');
+    expect(scanAsyncPatterns('a.ts', 'const total = items.reduceRight(async (acc, x) => acc, init);')[0]?.kind)
+      .toBe('async-reduce');
+    // a synchronous reduce is fine.
+    expect(scanAsyncPatterns('a.ts', 'const total = items.reduce((acc, x) => acc + x, 0);')).toEqual([]);
+  });
+
   it('ignores comments and non-code files', () => {
     expect(scanAsyncPatterns('a.ts', '// items.forEach(async (x) => await f(x))')).toEqual([]);
     expect(scanAsyncPatterns('README.md', 'items.forEach(async (x) => await f(x))')).toEqual([]);

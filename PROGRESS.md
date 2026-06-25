@@ -3703,3 +3703,24 @@ Fix — capture-at-write + Firestore + restore (admin OK'd "hamare firebase ke d
 Effect: a build's source survives sandbox loss + carries across messages → no more "files gayab".
 Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2473 vitest** PASS (5 new tests).
 NOTE: requires Firestore (Cloud Run ADC) — works automatically in prod; VITEST/local = best-effort no-op.
+
+---
+
+### 2026-06-25 — v3.0 git-native storage PHASE 1: GitHubAppClient (admin-approved roadmap)
+
+Admin approved the plan to make v3.0 git-native (files live in a real GitHub repo = durable, ~free,
+no Firestore bill, enables CI/merge). Admin completed PHASE 0: created org `navbharatai-apps`,
+registered the "NavBharatAI Builder" GitHub App (App ID 4146547; perms Contents/PRs RW, Checks/Admin),
+installed it on the org, and set Cloud Run secrets GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY / GITHUB_ORG.
+
+PHASE 1 (this PR) — `GitHubAppClient.ts` (standalone, flag-gated OFF, NOT wired to the build path yet):
+- App auth with zero new deps (Node crypto RS256 JWT + fetch): sign App JWT → org installation id →
+  installation access token (cached). `ensureRepo(name)` (GET-or-create, idempotent, private+auto_init),
+  `authedCloneUrl` (token-embedded git URL). `githubConfigFromEnv()`/`githubStorageEnabled()` (null/false
+  until all 3 secrets present → storage stays off), `repoNameForProject()` (deterministic, GitHub-safe).
+- Fully unit-tested (7 tests) incl. a REAL RSA keypair verifying the JWT signature + fake-fetch for the
+  installation/token/repo endpoints (reuse vs create). No live-path coupling → current v3.0 unaffected.
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2503 vitest** PASS (7 new).
+NEXT (Phase 2): wire into the build loop — clone the repo into the sandbox at start, commit+push at
+build end → git becomes the source of truth (replaces the ephemeral-sandbox file loss).

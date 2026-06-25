@@ -3595,3 +3595,38 @@ public URL (not just the ephemeral dev-server preview).
 
 Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2464 vitest** PASS (6 new deploy tests).
 NEXT: generate_tests tool (last of today's ports).
+
+---
+
+### 2026-06-25 — v3.0 feature ports COMPLETE (3 of 5) + generate_tests intentionally SKIPPED
+
+Admin asked to copy the best old-engine features INTO v3.0 (self-contained, so v3.0 owns them and
+they survive the planned deletion of the old engines). DELETION NOT done yet — admin triggers that
+separately (next day). Shipped today, each its own additive PR (no live path touched, old engines
+untouched):
+
+- #411 `web_search` — Brave→DuckDuckGo→npm (WebSearch.ts, v3.0-owned).
+- #412 `screenshot` + `browser_action` + `console_errors` — agent VISION + interactive testing
+  (ActuatorPort optional methods + image-passthrough so the model truly SEES the page).
+- #413 `deploy` — real persistent Firebase Hosting (Deployment.ts, v3.0-owned).
+
+These three were the genuine capability gaps (see/search/ship). All wired through types + catalog +
+dispatcher + architect tool-set + index + route + prompt, with honest "requires a real sandbox"
+fallbacks. None adds an import from EngineerAI/AppMakerLab/pro → v3.0 stays deletion-ready.
+
+INTENTIONALLY SKIPPED (the "ulta bekar"/duplication cases, per admin's own guidance + the speed goal):
+- `generate_tests` (ProTestGen) — REDUNDANT: the v3.0 agent already writes tests with write_file
+  (under its control + normal billing) and `evaluate`/TestCoverageAnalysis already flags untested
+  files. A separate test-gen pipeline fires extra AI calls OUTSIDE the agent loop → SLOWER builds,
+  which directly contradicts the admin's "fast" goal AND the architect prompt's existing
+  "a working preview is the goal, not a green test suite; don't block on tests" philosophy. Do NOT
+  re-port it unless admin explicitly asks.
+- `context file-ranking` (ContextRetriever) — mostly OVERLAPS v3.0's existing grep/glob/recall.
+  Low marginal value; skipped to avoid bloat.
+
+Also SKIPPED earlier (architecture conflicts, do not port): ProCodeReview (evaluate is superior),
+ErrorPatternMatcher (RecalledLessons better), BackendProvisioner/TemplateRegistry as features,
+ProComplexity, WorkspaceMutationEngine/VFS, Engineer AI's ReAct loop, tar.gz checkpoint tool.
+
+NEXT (admin-triggered, NOT today): independence move (extract actuators + helpers + scaffold to
+src/server/sandbox/, see the 2026-06-25 hard-audit) → then delete EngineerAI/AppMakerLab/pro.

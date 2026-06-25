@@ -163,6 +163,21 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'res.redirect(`/go?to=${req.query.next}`);').some((f) => f.rule === 'open-redirect')).toBe(false);
   });
 
+  it('flags prototype pollution via deep-merge of request input but not a safe field merge', () => {
+    expect(scanSecurity('a.ts', 'const cfg = _.merge({}, req.body);').some((f) => f.rule === 'prototype-pollution' && f.severity === 'high')).toBe(true);
+    expect(scanSecurity('a.ts', 'lodash.defaultsDeep(target, req.query);').some((f) => f.rule === 'prototype-pollution')).toBe(true);
+    expect(scanSecurity('a.ts', 'const o = $.extend(true, {}, req.body);').some((f) => f.rule === 'prototype-pollution')).toBe(true);
+    // merging explicit, validated fields is safe.
+    expect(scanSecurity('a.ts', 'const cfg = _.merge({}, { name: req.body.name });').some((f) => f.rule === 'prototype-pollution')).toBe(false);
+  });
+
+  it('flags an open redirect via a Location header from request input but not a fixed path', () => {
+    expect(scanSecurity('a.ts', "res.setHeader('Location', req.query.next);").some((f) => f.rule === 'open-redirect-header' && f.severity === 'medium')).toBe(true);
+    expect(scanSecurity('a.ts', "res.set('location', req.body.url);").some((f) => f.rule === 'open-redirect-header')).toBe(true);
+    // a fixed redirect target is fine.
+    expect(scanSecurity('a.ts', "res.setHeader('Location', '/dashboard');").some((f) => f.rule === 'open-redirect-header')).toBe(false);
+  });
+
   it('flags a raw request object used as a DB query (NoSQL injection) but not validated fields', () => {
     expect(scanSecurity('a.ts', 'const u = await User.findOne(req.body);').some((f) => f.rule === 'nosql-injection')).toBe(true);
     expect(scanSecurity('a.ts', 'db.collection("u").find(req.query);').some((f) => f.rule === 'nosql-injection')).toBe(true);

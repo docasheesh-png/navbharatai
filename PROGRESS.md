@@ -2946,3 +2946,19 @@ Batch 18 merged to main cfbda93 (PR #369). New `SecurityAnalysis` rules:
    disclosure, SSRF, billion-laughs DoS. The safe `false` form is not flagged.
 
 Gate: server tsc 0, frontend tsc 0, **2278 vitest** PASS (43 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 20): prototype-pollution + open-redirect via Location header
+
+Batch 19 + autonomous-cycle CLAUDE.md doc merged to main 2b58cd7 (PR #370). New
+`SecurityAnalysis` rules:
+
+1. **prototype-pollution** (high) — deep-merging untrusted request input (`_.merge`/`mergeWith`/
+   `defaultsDeep`/`set`, or `$.extend(true, …)`) with the WHOLE req object lets a `__proto__`
+   payload poison Object.prototype. `(?!\.\w)` excludes a validated leaf (req.body.name) — a
+   documented precision trade-off (a nested object like req.body.settings is not matched).
+2. **open-redirect-header** (medium) — setting the `Location` header directly from request input
+   (the header twin of res.redirect(req...)). Fixed targets are not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2280 vitest** PASS (45 SecurityAnalysis tests, +2 new).

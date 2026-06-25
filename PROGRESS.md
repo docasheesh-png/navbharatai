@@ -3751,3 +3751,38 @@ NEXT (Phase 3): CI + merge of the user's repo, Claude-Code-style (PR → check s
 Phase 4: auth simplify (Email/Phone primary, remove the failing Google button, optional "Connect
 GitHub" + Export/Transfer for portability). Phase 5: dual preview (in-browser iframe + E2B).
 NOTE: Phases 3–5 touch user-facing auth/preview flows → confirm with admin before each (safeguard #3).
+
+---
+
+## 2026-06-25 — Git-native PHASE 3 + Auth/Export PHASE 4 + Dual Preview PHASE 5 (all DONE, merged)
+
+PHASE 3 (merged PR #422) — Claude-Code-style PR → CI → merge for git-native storage, behind an
+explicit GITHUB_PR_MODE=true opt-in ON TOP of git-native storage (dormant until both flags set).
+- GitHubAppClient: openPullRequest (idempotent, reuses an open PR on 422), combinedStatus (legacy
+  commit-status AND GitHub Actions check-runs → one success/pending/failure/none verdict),
+  mergePullRequest.
+- GitHubPrFlow.mergeViaPullRequest: open PR → read CI on the head sha → merge ONLY on green/none,
+  else leave the PR OPEN with an honest note (never merges red, no fake success). githubPrMode().
+- Route: PR mode pushes to nbi/build-<ts> then open+merge; else the Phase 2 direct push. 15 tests.
+
+PHASE 4 (merged PR #424) — auth simplify + portability.
+- Removed the failing "Sign in with Google" button + its handler/helper/imports + the "ya" divider.
+  Email+Password and Phone(OTP) remain. App-root getRedirectResult left intact (harmless no-op).
+- Real "Export .zip" button in the v3.0 tab row: pulls live files via /api/agentv3/workspace-files
+  and builds a genuine zip in-browser with jszip (excludes node_modules/.git/dist/build/.next/
+  __pycache__). User owns their code — no lock-in.
+- AppKnowledgeBase: login_auth updated (Email/Phone, Google removed); new agentv3_export entry.
+
+PHASE 5 (this PR) — dual preview.
+- New POST /api/agentv3/inbrowser-preview: builds ONE self-contained HTML from the workspace files
+  via the existing runtime renderers (renderPreview → static/React/Vue) and returns it. No dev
+  server needed → works even when the E2B sandbox preview is unavailable ("Blocked request" case).
+- PreviewSurface rewritten for two real modes: "Live server" (E2B running app, full fidelity) and
+  "In-browser" (<iframe srcdoc> of the built files; sandboxed WITHOUT allow-same-origin). Toggle +
+  refresh; in-browser auto-builds and defaults on when there is no live URL yet.
+- AppKnowledgeBase: new agentv3_preview entry (dual preview, blocked-request keywords).
+
+Gate (every phase): frontend tsc 0, server tsc 0, boot:check PASS, vitest PASS
+(2503 → 2512 → 2527 across the phases; Phase 4/5 add UI + a route, covered by existing runtime tests).
+All five git-native/preview/auth phases complete. Git-native storage + PR mode remain DORMANT behind
+their flags; auth simplify + export + dual preview are LIVE.

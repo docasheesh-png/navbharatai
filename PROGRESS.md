@@ -3010,3 +3010,19 @@ flawed pattern):
    results; flagged with its actual length (parallel to the batch-14 over-long title check).
 
 Gate: server tsc 0, frontend tsc 0, **2286 vitest** PASS (19 SeoAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 24): loopback-host bind (preview unreachable)
+
+Batch 23 merged to main cf66b74 (PR #374). Extended `PortBindingAnalysis` to the EXACT
+preview-"connection refused" bug class:
+
+- **loopback-host** (high) — a server bound to `localhost`/`127.0.0.1` (positional
+  `.listen(port, 'localhost')` OR object `.listen({ port, host: '127.0.0.1' })`) is only
+  reachable inside the container, so the cloud host / sandbox preview gets "connection refused".
+  Bind to 0.0.0.0. Flagged even when the PORT comes from env (the host is the bug). A
+  `0.0.0.0` bind or a callback 2nd arg is NOT flagged. Added a `kind` field
+  ('hardcoded-port' | 'loopback-host'); `port` is now optional; severity union medium|high.
+
+Gate: server tsc 0, frontend tsc 0, **2288 vitest** PASS (13 PortBindingAnalysis tests, +2 new).

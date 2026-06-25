@@ -80,6 +80,7 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'el.innerHTML = userInput;').some((f) => f.rule === 'unsafe-html-sink')).toBe(true);
     expect(scanSecurity('a.ts', 'node.outerHTML = `<b>${x}</b>`;').some((f) => f.rule === 'unsafe-html-sink')).toBe(true);
     expect(scanSecurity('a.ts', 'box.insertAdjacentHTML("beforeend", html);').some((f) => f.rule === 'unsafe-html-sink')).toBe(true);
+    expect(scanSecurity('a.ts', 'el.innerHTML += userInput;').some((f) => f.rule === 'unsafe-html-sink')).toBe(true);
     // Safe: clearing via empty string, reading innerHTML, and == comparisons are not flagged.
     expect(scanSecurity('a.ts', 'el.innerHTML = "";').some((f) => f.rule === 'unsafe-html-sink')).toBe(false);
     expect(scanSecurity('a.ts', "el.innerHTML = '';").some((f) => f.rule === 'unsafe-html-sink')).toBe(false);
@@ -160,6 +161,12 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'res.redirect(302, req.query.next);').some((f) => f.rule === 'open-redirect')).toBe(true);
     expect(scanSecurity('a.ts', "res.redirect('/login');").some((f) => f.rule === 'open-redirect')).toBe(false);
     expect(scanSecurity('a.ts', 'res.redirect(`/go?to=${req.query.next}`);').some((f) => f.rule === 'open-redirect')).toBe(false);
+  });
+
+  it('flags Angular bypassSecurityTrust* (sanitisation disabled) but not normal sanitizer use', () => {
+    expect(scanSecurity('app.ts', 'this.html = this.sanitizer.bypassSecurityTrustHtml(raw);').some((f) => f.rule === 'angular-bypass-security')).toBe(true);
+    expect(scanSecurity('app.ts', 'const u = ds.bypassSecurityTrustResourceUrl(src);').some((f) => f.rule === 'angular-bypass-security')).toBe(true);
+    expect(scanSecurity('app.ts', 'const clean = this.sanitizer.sanitize(ctx, raw);').some((f) => f.rule === 'angular-bypass-security')).toBe(false);
   });
 
   it('flags Vue v-html as an XSS sink but not a normal attribute', () => {

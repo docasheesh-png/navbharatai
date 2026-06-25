@@ -2741,3 +2741,16 @@ Batch 6 merged to main d1f4daa. New:
    bare number or a throwaway sentinel ("here"/"test"/"asdf"…); a real log message is not flagged.
 
 Gate: server tsc 0, frontend tsc 0, **2250 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 8): innerHTML += gap-fix + Angular bypassSecurityTrust
+
+Batch 7 merged to main 6b021d2. New:
+
+1. `SecurityAnalysis` **unsafe-html-sink** gap-fix — now also catches `el.innerHTML += userInput`
+   (append), not just `=` assignment; both are XSS sinks.
+2. `SecurityAnalysis` **angular-bypass-security** (medium) — Angular bypassSecurityTrustHtml/Url/
+   ResourceUrl/Script/Style explicitly DISABLES built-in sanitisation (XSS risk on untrusted input).
+
+Gate: server tsc 0, frontend tsc 0, **2251 vitest** PASS, build PASS.

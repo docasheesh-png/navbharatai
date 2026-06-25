@@ -138,6 +138,15 @@ const RULES: Rule[] = [
     message: 'dangerouslySetInnerHTML — sanitise the HTML or it enables XSS.',
   },
   {
+    rule: 'angular-bypass-security',
+    severity: 'medium',
+    // Angular sanitises bindings by default; bypassSecurityTrustHtml/Url/ResourceUrl/
+    // Script/Style explicitly DISABLES that protection, re-opening XSS if the value is
+    // not already trusted. Matching the call is high-precision.
+    re: /\bbypassSecurityTrust(?:Html|Url|ResourceUrl|Script|Style)\s*\(/,
+    message: 'Angular bypassSecurityTrust* disables built-in sanitisation (XSS risk) — only use it on values you fully control, never on user input.',
+  },
+  {
     rule: 'vue-v-html',
     severity: 'medium',
     // Vue's v-html binding renders a raw HTML string into the DOM — the framework
@@ -148,10 +157,10 @@ const RULES: Rule[] = [
   {
     rule: 'unsafe-html-sink',
     severity: 'medium',
-    // Vanilla-DOM XSS sinks the React rule misses: assigning to innerHTML/outerHTML, or
-    // insertAdjacentHTML. `=(?!=)` excludes ==/=== comparisons; empty-string clears are
-    // ignored below.
-    re: /\.(inner|outer)HTML\s*=(?!=)|\.insertAdjacentHTML\s*\(/,
+    // Vanilla-DOM XSS sinks the React rule misses: assigning OR appending to
+    // innerHTML/outerHTML (`=` and `+=`), or insertAdjacentHTML. `\+?=(?!=)` covers both
+    // forms while excluding ==/=== comparisons; empty-string clears are ignored below.
+    re: /\.(inner|outer)HTML\s*\+?=(?!=)|\.insertAdjacentHTML\s*\(/,
     message: 'Writing raw HTML (innerHTML/outerHTML/insertAdjacentHTML) enables XSS — sanitise the HTML or use textContent.',
     ignore: (_m, line) => /\.(?:inner|outer)HTML\s*=\s*(['"`])\s*\1/.test(line),
   },

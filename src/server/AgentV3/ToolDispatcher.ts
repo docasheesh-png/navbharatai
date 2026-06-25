@@ -136,6 +136,13 @@ export class ToolDispatcher {
     private readonly consensus?: Consensus,
     private readonly webSearch?: WebSearchFn,
     private readonly deploy?: DeployFn,
+    /**
+     * Called with the path + FINAL content on every successful write_file/edit_file, so the
+     * composition root can durably persist exactly what the agent wrote (not relying on a later,
+     * sometimes-empty, sandbox listFiles). This is what makes a build's files survive a sandbox
+     * loss / the next message getting a fresh sandbox.
+     */
+    private readonly onFileWrite?: (path: string, content: string) => void,
   ) {}
 
   /**
@@ -556,6 +563,7 @@ export class ToolDispatcher {
           kind = 'create';
         }
         await this.actuator.writeFile(this.workspaceId, path, content);
+        this.onFileWrite?.(path, content);
         this.state?.recordFileChange({ path, kind }, agent);
         const mem = getWorkspaceMemory(this.workspaceId);
         mem.indexFile(path, content);
@@ -598,6 +606,7 @@ export class ToolDispatcher {
         // unique). applyEdit throws the same honest "not found" / "not unique" errors.
         const { updated, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
         await this.actuator.writeFile(this.workspaceId, path, updated);
+        this.onFileWrite?.(path, updated);
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);
         const editMem = getWorkspaceMemory(this.workspaceId);
         editMem.indexFile(path, updated);

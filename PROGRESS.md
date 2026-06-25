@@ -3676,3 +3676,30 @@ Gate: server tsc 0, frontend tsc 0, **2468 vitest** PASS (3 new reviewer-guard t
 NOTE: the underlying "listFiles returned empty when files exist" is an E2B read-reliability issue
 (can't reproduce without E2B here) — this fix removes the user-visible false verdict; flagged for
 follow-up if the empty-listing recurs.
+
+---
+
+### 2026-06-25 — v3.0 BUGFIX: durable file persistence (files no longer vanish)
+
+Admin: v3.0 built 7 files, then on the next (edit) message they all vanished; Files(0)/Diff(0) in the
+UI; reviewer said "missing all source code". Root cause: the sandbox is EPHEMERAL and v3.0 persisted
+only the MEMORY snapshot (file-list hints + episodes), NOT the file CONTENT — so a lost/recycled or
+fresh-next-message sandbox had nothing to restore from. (History(7) showed git commits, proving the
+files WERE written; a flaky listFiles + no content-restore = "gayab".)
+
+Fix — capture-at-write + Firestore + restore (admin OK'd "hamare firebase ke db me"):
+- NEW `WorkspaceFileStore.ts` — Firestore-backed durable file store (collection `workspace_files_v3`,
+  one doc per file in a `files` subcollection to dodge the 1MB limit; a metadata `paths` list is
+  authoritative so deleted files don't resurrect). Mirrors FirestoreWorkspaceMemoryStore (VITEST-skip,
+  best-effort, never throws). `fileDocId` (base64url, slash-free).
+- `ToolDispatcher` — new optional `onFileWrite(path, content)` fired on every successful write_file/
+  edit_file with the FINAL content. Reliable capture straight from the write op — does NOT depend on
+  the sometimes-empty listFiles.
+- Route: a per-build `writtenFiles` accumulator feeds onFileWrite; at build END it saves the union of
+  captured writes (reliable) + a sandbox scan (supplement) to Firestore, skipping if BOTH are empty
+  (so a read hiccup never overwrites a good saved set). At build START, if the sandbox came up empty,
+  it restores the persisted files into it and narrates "Restored N file(s) from your previous session."
+
+Effect: a build's source survives sandbox loss + carries across messages → no more "files gayab".
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2473 vitest** PASS (5 new tests).
+NOTE: requires Firestore (Cloud Run ADC) — works automatically in prod; VITEST/local = best-effort no-op.

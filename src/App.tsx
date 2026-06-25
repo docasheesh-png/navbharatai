@@ -5500,6 +5500,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'techbuy_ai') toggleTab('techbuy_ai');
               else if (id === 'adventure_ai') toggleTab('adventure_ai');
               else if (id === 'budget_ai') toggleTab('budget_ai');
+              else if (id === 'repo_analyst') toggleTab('repo_analyst');
             }} />
           )}
 
@@ -5867,6 +5868,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'budget_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.budget_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'repo_analyst' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.repo_analyst} userId={user?.uid} />
             </div>
           )}
 

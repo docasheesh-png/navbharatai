@@ -11,6 +11,10 @@ export interface ProfessionalChatConfig {
   name: string;
   welcome: string;
   quickPrompts?: string[];
+  /** Optional custom backend endpoint. Defaults to the generic professional
+   *  route. Used by specialised surfaces (e.g. Repo Analyst) that have their
+   *  own backend but reuse this chat UI. */
+  endpoint?: string;
 }
 
 interface Msg { role: 'user' | 'assistant'; content: string; }
@@ -39,7 +43,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
     setLoading(true);
     try {
       const history = next.filter((m) => m.content !== config.welcome).slice(-10);
-      const res = await fetch(`/api/professional/${config.id}/chat`, {
+      const res = await fetch(config.endpoint || `/api/professional/${config.id}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: content, history, userId }),

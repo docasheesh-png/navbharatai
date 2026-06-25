@@ -1053,6 +1053,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['budget', 'budgeting', 'save money', 'expenses', 'frugal', 'household', 'monthly budget', 'emergency fund', 'cut costs', 'bachat', 'kharcha', 'saving', 'money management', 'cheap living'],
   },
 
+  // ─── GITHUB REPO ANALYST & IMPROVER AI ───────────────────────────────────
+  {
+    id: 'repo_analyst',
+    name: 'GitHub Repo Analyst & Improver AI',
+    path: 'Sidebar → Professionals → GitHub Repo Analyst & Improver',
+    description: 'Expert that analyses PUBLIC GitHub repositories for real (read-only) and gives an honest, actionable report & improvement plan: paste a public repo URL (or owner/repo) and it fetches the actual repo — metadata, license, languages, README, file tree & key files — then reports the overview & tech stack, strengths (good patterns to learn from), gaps/weaknesses (missing tests/docs/CI/error handling/structure), visible security & quality flags (noted as a partial view), the license & what it permits, and a prioritised improvement plan with short adoptable code snippets. License-respecting ("copy good things" = LEARN patterns & write your own original code, comply with & attribute per the actual LICENSE — MIT/Apache vs GPL-copyleft vs no-license/default-copyright; general info, not legal advice). Honesty: works only from the real fetched content (says when files/tree are truncated or missing, never invents repo contents/metrics/vulnerabilities); analyses & ADVISES only — cannot push changes to repos you don\'t own (no write access), so "improve" = the plan/guidance/snippets for you to apply in your own fork (suggests Engineer AI to build it out). Works on public repos without a token (rate-limited); handles not-found/private/rate-limit gracefully.',
+    howToUse: 'Open Sidebar → Professionals → GitHub Repo Analyst & Improver and paste a public GitHub repo URL (or owner/repo), then ask: "analyse this repo", "strengths & gaps?", "security/quality issues you can see?", "a prioritised improvement plan". It fetches and analyses the real repo (read-only). To then build the improvements, use the Engineer AI.',
+    relatedFeatures: ['professionals', 'engineer_ai', 'coding_ai'],
+    aiSurface: 'repo_analyst',
+    keywords: ['github', 'repo', 'repository', 'analyse', 'analyze', 'code review', 'open source', 'improve repo', 'audit', 'codebase', 'project review', 'github url', 'license', 'repo analyst'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

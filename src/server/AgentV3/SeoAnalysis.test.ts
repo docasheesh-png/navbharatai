@@ -23,6 +23,21 @@ describe('analyzeSeo', () => {
     expect(r.findings).toHaveLength(0);
   });
 
+  it('flags Open Graph tags present without og:image, but not a complete OG set', () => {
+    const partial = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>My Shop Online</title><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="y"><meta property="og:title" content="X"><link rel="icon" href="/f.ico"></head></html>');
+    expect(partial.findings.some((f) => /og:image is missing/.test(f.message))).toBe(true);
+    // FULL has both og:title and og:image → not flagged.
+    expect(analyzeSeo(FULL).findings.some((f) => /og:image/.test(f.message))).toBe(false);
+  });
+
+  it('flags an over-long <title> (truncated in search results) but not a normal one', () => {
+    const longTitle = 'Best Affordable Handmade Organic Cotton Baby Clothes Store in Budaun Uttar Pradesh';
+    const html = `<html lang="en"><head><meta charset="utf-8"><title>${longTitle}</title><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="y"><meta property="og:title" content="X"><meta property="og:image" content="/o.png"><link rel="icon" href="/f.ico"></head></html>`;
+    expect(analyzeSeo(html).findings.some((f) => /search results truncate it/.test(f.message))).toBe(true);
+    // a concise real title is fine.
+    expect(analyzeSeo(FULL).findings.some((f) => /truncate/.test(f.message))).toBe(false);
+  });
+
   it('flags a leftover template-default title as medium, but not a real title', () => {
     const vite = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>Vite + React</title><meta name="viewport" content="x"><meta name="description" content="y"><meta property="og:title" content="X"><link rel="icon" href="/f.ico"></head></html>');
     expect(vite.findings.some((f) => f.level === 'medium' && /template default/.test(f.message))).toBe(true);
@@ -72,7 +87,10 @@ describe('analyzeSeo', () => {
     const none = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>X</title><meta name="viewport" content="x"><meta name="description" content="y"></head></html>');
     expect(none.findings.some((f) => f.level === 'low' && /Open Graph/.test(f.message))).toBe(true);
     const present = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>X</title><meta name="viewport" content="x"><meta name="description" content="y"><meta property="og:title" content="X"></head></html>');
-    expect(present.findings.some((f) => /Open Graph/.test(f.message))).toBe(false);
+    // The "no Open Graph at all" finding must not fire once any og tag is present…
+    expect(present.findings.some((f) => /No Open Graph tags/.test(f.message))).toBe(false);
+    // …but a partial OG without og:image is flagged by the dedicated rule.
+    expect(present.findings.some((f) => /og:image is missing/.test(f.message))).toBe(true);
   });
 
   it('flags a leftover robots noindex as medium, but not a normal/index page', () => {

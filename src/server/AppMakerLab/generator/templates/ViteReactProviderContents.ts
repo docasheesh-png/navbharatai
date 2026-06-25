@@ -25,8 +25,10 @@ export default defineConfig({
   // Bind to 0.0.0.0 so the dev server is reachable through the cloud sandbox's
   // preview URL (e.g. https://5173-<sandbox>.e2b.app). A localhost-only bind makes
   // the preview show "connection refused" even though the server is running.
-  server: { host: true, port: 5173 },
-  preview: { host: true, port: 5173 },
+  // allowedHosts:true disables Vite's host check — newer Vite otherwise BLOCKS the
+  // sandbox proxy host with "Blocked request. This host is not allowed", breaking the preview.
+  server: { host: true, port: 5173, allowedHosts: true },
+  preview: { host: true, port: 5173, allowedHosts: true },
 });
 `;
 

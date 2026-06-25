@@ -176,6 +176,12 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'const d = crypto.createDecipheriv(algo, key, iv);').some((f) => f.rule === 'weak-crypto-cipher')).toBe(false);
   });
 
+  it('flags the JWT "none" algorithm (auth bypass) but not a real algorithm', () => {
+    expect(scanSecurity('a.ts', `jwt.sign(payload, secret, { algorithm: 'none' });`).some((f) => f.rule === 'jwt-none-algorithm')).toBe(true);
+    expect(scanSecurity('a.ts', `jwt.verify(token, secret, { algorithms: ['HS256', 'none'] });`).some((f) => f.rule === 'jwt-none-algorithm')).toBe(true);
+    expect(scanSecurity('a.ts', `jwt.verify(token, secret, { algorithms: ['RS256'] });`).some((f) => f.rule === 'jwt-none-algorithm')).toBe(false);
+  });
+
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
     expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);

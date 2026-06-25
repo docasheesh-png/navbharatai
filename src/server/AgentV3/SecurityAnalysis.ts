@@ -57,6 +57,15 @@ const RULES: Rule[] = [
     ignore: (_m, line) => PLACEHOLDER.test(line),
   },
   {
+    rule: 'jwt-none-algorithm',
+    severity: 'high',
+    // A JWT configured with the "none" algorithm accepts UNSIGNED tokens — anyone can
+    // forge any token (a classic auth bypass). Matches `algorithm: 'none'` (sign) or an
+    // `algorithms` allow-list that includes 'none' (verify).
+    re: /\balgorithms?\s*:\s*(\[[^\]]*)?['"`]none['"`]/i,
+    message: 'JWT "none" algorithm accepts unsigned tokens — anyone can forge any token (auth bypass). Require a real algorithm (e.g. HS256/RS256) and never allow "none".',
+  },
+  {
     rule: 'aws-access-key',
     severity: 'high',
     re: /\bAKIA[0-9A-Z]{16}\b/,

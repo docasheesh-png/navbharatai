@@ -202,6 +202,22 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'const u = await User.findOne({ email: req.body.email });').some((f) => f.rule === 'nosql-injection')).toBe(false);
   });
 
+  it('flags ECB cipher mode but not an authenticated mode', () => {
+    expect(scanSecurity('a.ts', "const c = crypto.createCipheriv('aes-256-ecb', key, null);").some((f) => f.rule === 'insecure-cipher-ecb' && f.severity === 'high')).toBe(true);
+    expect(scanSecurity('a.ts', "const c = crypto.createCipheriv('des-ecb', key, null);").some((f) => f.rule === 'insecure-cipher-ecb')).toBe(true);
+    // GCM/CBC are not flagged.
+    expect(scanSecurity('a.ts', "const c = crypto.createCipheriv('aes-256-gcm', key, iv);").some((f) => f.rule === 'insecure-cipher-ecb')).toBe(false);
+    expect(scanSecurity('a.ts', "const c = crypto.createCipheriv('aes-256-cbc', key, iv);").some((f) => f.rule === 'insecure-cipher-ecb')).toBe(false);
+  });
+
+  it('flags a weak RSA key size but not a strong one', () => {
+    expect(scanSecurity('a.ts', 'generateKeyPairSync("rsa", { modulusLength: 1024 });').some((f) => f.rule === 'weak-rsa-key-size' && f.severity === 'medium')).toBe(true);
+    expect(scanSecurity('a.ts', 'crypto.generateKeyPair("rsa", { modulusLength: 512 });').some((f) => f.rule === 'weak-rsa-key-size')).toBe(true);
+    // 2048+ is fine.
+    expect(scanSecurity('a.ts', 'generateKeyPairSync("rsa", { modulusLength: 2048 });').some((f) => f.rule === 'weak-rsa-key-size')).toBe(false);
+    expect(scanSecurity('a.ts', 'generateKeyPairSync("rsa", { modulusLength: 4096 });').some((f) => f.rule === 'weak-rsa-key-size')).toBe(false);
+  });
+
   it('flags a file path built from request input (path traversal) but not a fixed path', () => {
     expect(scanSecurity('a.ts', 'res.sendFile(req.params.name);').some((f) => f.rule === 'path-traversal')).toBe(true);
     expect(scanSecurity('a.ts', 'fs.readFile(`./uploads/${req.query.file}`, cb);').some((f) => f.rule === 'path-traversal')).toBe(true);

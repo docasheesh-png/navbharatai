@@ -169,6 +169,21 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.tsx', '<iframe sandbox="allow-scripts allow-forms" />').some((f) => f.rule === 'iframe-sandbox-escape')).toBe(false);
   });
 
+  it('flags a dynamic iframe srcdoc but not a static one', () => {
+    expect(scanSecurity('a.tsx', '<iframe srcdoc={userHtml} />').some((f) => f.rule === 'iframe-srcdoc-dynamic' && f.severity === 'medium')).toBe(true);
+    expect(scanSecurity('a.tsx', '<iframe srcdoc={`<p>${comment}</p>`} />').some((f) => f.rule === 'iframe-srcdoc-dynamic')).toBe(true);
+    // a static srcdoc string is not flagged.
+    expect(scanSecurity('a.tsx', '<iframe srcdoc="<p>Hello</p>" />').some((f) => f.rule === 'iframe-srcdoc-dynamic')).toBe(false);
+  });
+
+  it('flags a data:text/html URI in href/src but not a normal URL', () => {
+    expect(scanSecurity('a.tsx', '<a href="data:text/html,<script>alert(1)</script>">x</a>').some((f) => f.rule === 'data-html-uri' && f.severity === 'medium')).toBe(true);
+    expect(scanSecurity('a.tsx', '<iframe src="data:text/html;base64,PHNjcmlwdD4=" />').some((f) => f.rule === 'data-html-uri')).toBe(true);
+    // a normal URL and a data image are fine.
+    expect(scanSecurity('a.tsx', '<a href="https://x.com">x</a>').some((f) => f.rule === 'data-html-uri')).toBe(false);
+    expect(scanSecurity('a.tsx', '<img src="data:image/png;base64,iVBOR" />').some((f) => f.rule === 'data-html-uri')).toBe(false);
+  });
+
   it('flags postMessage with a wildcard target origin but not a specific one', () => {
     expect(scanSecurity('a.ts', "iframe.contentWindow.postMessage(data, '*');").some((f) => f.rule === 'postmessage-wildcard-origin')).toBe(true);
     expect(scanSecurity('a.ts', "win.postMessage(payload, 'https://app.example.com');").some((f) => f.rule === 'postmessage-wildcard-origin')).toBe(false);

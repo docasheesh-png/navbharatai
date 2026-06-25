@@ -47,6 +47,19 @@ const LABELLED_CONTROLS = new Set(['input', 'select', 'textarea']);
 const NO_LABEL_INPUT_TYPES = /\btype\s*=\s*['"{]?\s*(hidden|submit|button|reset|image)\b/i;
 /** Non-interactive elements that should not be the sole click target. */
 const NONINTERACTIVE = new Set(['div', 'span', 'li', 'td', 'tr', 'section', 'article', 'header', 'footer', 'main', 'nav', 'p']);
+// Abstract ARIA roles exist only to organise the ARIA taxonomy and MUST NOT be used in
+// markup — assistive tech ignores them, so the element is left with no usable role.
+const ABSTRACT_ROLES = new Set([
+  'command', 'composite', 'input', 'landmark', 'range', 'roletype', 'section',
+  'sectionhead', 'select', 'structure', 'widget', 'window',
+]);
+// The implicit ARIA role of a native element. Setting role= to this same value is
+// redundant noise (axe "no-redundant-roles"). Only unambiguous mappings are listed.
+const IMPLICIT_ROLE: Record<string, string> = {
+  button: 'button', a: 'link', nav: 'navigation', ul: 'list', ol: 'list',
+  li: 'listitem', main: 'main', table: 'table', textarea: 'textbox',
+  h1: 'heading', h2: 'heading', h3: 'heading', h4: 'heading', h5: 'heading', h6: 'heading',
+};
 
 /**
  * Scan one file's content for accessibility issues. Returns [] for non-markup
@@ -182,6 +195,19 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
       // semantics — a screen reader no longer announces it as a button/link/control. ──
       if (interactive && /\brole\s*=\s*['"{]?\s*(?:none|presentation)\b/i.test(tag)) {
         push('role-presentation-interactive', 'medium');
+      }
+
+      // ── abstract / redundant ARIA role ───────────────────────────────────────
+      const roleM = /\brole\s*=\s*['"{]?\s*([a-zA-Z-]+)/.exec(tag);
+      if (roleM) {
+        const role = roleM[1].toLowerCase();
+        if (ABSTRACT_ROLES.has(role)) {
+          // medium: an abstract role is ignored by AT — the element ends up with no role.
+          push('abstract-aria-role', 'medium');
+        } else if (IMPLICIT_ROLE[name] === role && (name !== 'a' || hasAttr(tag, 'href'))) {
+          // low: explicit role that just duplicates the element's native role (noise).
+          push('redundant-role', 'low');
+        }
       }
     }
 

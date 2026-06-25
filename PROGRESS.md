@@ -2962,3 +2962,20 @@ Batch 19 + autonomous-cycle CLAUDE.md doc merged to main 2b58cd7 (PR #370). New
    (the header twin of res.redirect(req...)). Fixed targets are not flagged.
 
 Gate: server tsc 0, frontend tsc 0, **2280 vitest** PASS (45 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 21): abstract ARIA role + redundant role (accessibility)
+
+Batch 20 merged to main 5ab8b95 (PR #371). New `AccessibilityAnalysis` rules (axe-core
+precedent — "aria-roles" / "no-redundant-roles"):
+
+1. **abstract-aria-role** (medium) — an abstract ARIA role (widget/input/composite/landmark/
+   range/section/select/structure/window/command/roletype/sectionhead) exists only to organise
+   the ARIA taxonomy and is IGNORED by assistive tech, leaving the element with no usable role.
+2. **redundant-role** (low) — an explicit role that just duplicates the element's native role
+   (button role="button", nav role="navigation", a[href] role="link", ul/ol role="list", …) —
+   harmless noise. Only unambiguous element→role mappings are flagged; `<a>` without href has no
+   implicit link role so role="link" there is not redundant.
+
+Gate: server tsc 0, frontend tsc 0, **2282 vitest** PASS (26 AccessibilityAnalysis tests, +2 new).

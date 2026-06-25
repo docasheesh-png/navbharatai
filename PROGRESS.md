@@ -3200,3 +3200,25 @@ Batch 34 polish merged to main 588133b (PR #385). Two more FP reductions in Secu
    `eval(...)` is.
 
 Gate: server tsc 0, frontend tsc 0, **2306 vitest** PASS (59 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 36, POLISH): overlap audit + dedup 2 redundant rules
+
+Batch 35 polish merged to main ddf8a59 (PR #386). Ran a systematic cross-analyzer overlap
+audit (subagent mapped all rule kinds/regexes across 12 analyzers). Findings:
+
+- **CONFIRMED redundancies removed** (both ran alongside SecurityAnalysis in `evaluate`, so the
+  same line was reported twice):
+  1. SecurityConfigAnalysis `tls-verification-disabled` — exact duplicate of SecurityAnalysis
+     `disable-tls-verification`.
+  2. SecurityConfigAnalysis `insecure-randomness` — SecurityAnalysis `insecure-random-token` is a
+     proven SUPERSET (its SECURITY_CONTEXT keyword set ⊇ this rule's keywords). No coverage lost
+     (SecurityAnalysis's 59 tests still cover both); SecurityConfigAnalysis now owns CORS +
+     logged-secret only.
+- **Refuted (kept as complementary, NOT duplicates):** insecure-http vs insecure-http-endpoint
+  (any URL string vs http network call); cookie-httponly-false vs cookie-no-httponly (explicit
+  false vs absence — verified in batch 28); provider-token vs env-template secret detection
+  (source code vs .env templates).
+
+Gate: server tsc 0, frontend tsc 0, **2301 vitest** PASS (SecurityConfigAnalysis 11 tests).

@@ -3137,3 +3137,19 @@ uncovered; scoped to avoid custom-component false positives):
    pause (WCAG 2.2.2) and are dropped by modern browsers.
 
 Gate: server tsc 0, frontend tsc 0, **2300 vitest** PASS (30 AccessibilityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 32): empty <th> header + empty <label for> (a11y)
+
+Batch 31 merged to main f967a23 (PR #382). New `AccessibilityAnalysis` rules (parallel to the
+empty-heading pattern; verified uncovered):
+
+1. **empty-table-header** (medium) — a `<th>` with no text leaves its row/column unlabeled for
+   screen-reader table navigation (WCAG 1.3.1). Child tags stripped (`<th><Icon/></th>` flagged);
+   text or aria-label accepted.
+2. **empty-label** (medium) — an explicit `<label for="…">` with NO content gives the associated
+   control no accessible name. Only the truly-empty form (no children at all) is flagged, so a
+   wrapping `<label><input/>…</label>` is never a false positive.
+
+Gate: server tsc 0, frontend tsc 0, **2302 vitest** PASS (32 AccessibilityAnalysis tests, +2 new).

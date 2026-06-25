@@ -430,6 +430,15 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'fetch("https://api.example.com/x")')).toEqual([]);
   });
 
+  it('does NOT flag XML/SVG namespace & schema URIs as insecure-http (FP fix)', () => {
+    // every inline SVG carries this xmlns — it is an identifier, not an endpoint.
+    expect(scanSecurity('a.tsx', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">').some((f) => f.rule === 'insecure-http')).toBe(false);
+    expect(scanSecurity('a.ts', 'const NS = "http://www.w3.org/1999/xhtml";').some((f) => f.rule === 'insecure-http')).toBe(false);
+    expect(scanSecurity('a.xml', 'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"').some((f) => f.rule === 'insecure-http')).toBe(false);
+    // a real http endpoint on the same kind of line is still flagged.
+    expect(scanSecurity('a.ts', 'const api = "http://api.acme.com/v1";').some((f) => f.rule === 'insecure-http')).toBe(true);
+  });
+
   it('flags an insecure ws:// websocket to a remote host but allows wss and localhost', () => {
     expect(scanSecurity('a.ts', 'const s = new WebSocket("ws://api.example.com/live");').some((f) => f.rule === 'insecure-websocket')).toBe(true);
     expect(scanSecurity('a.ts', 'const s = new WebSocket("ws://localhost:3000/live");').some((f) => f.rule === 'insecure-websocket')).toBe(false);

@@ -33,6 +33,12 @@ const PLACEHOLDER = /(your[_-]?|example|placeholder|xxx+|<|\$\{|process\.env|imp
 // (jitter, a sample, an animation) or an md5 cache-key/ETag is never flagged.
 const SECURITY_CONTEXT = /\b(secret|token|password|passwd|otp|nonce|session|salt|api[_-]?key|apikey|credential|csrf|signature|hmac|private[_-]?key|access[_-]?token|reset[_-]?code|verification|auth)\b/i;
 
+// Namespace / schema URIs (xmlns declarations, XML/SVG/RDF namespaces) just happen to use an
+// http:// form but are IDENTIFIERS, never network endpoints — so http:// in them is not an
+// "insecure endpoint". Excluded from the insecure-http rule to avoid a noisy false positive on
+// every inline SVG (xmlns="http://www.w3.org/2000/svg") and XML namespace declaration.
+const NAMESPACE_HTTP = /\bxmlns(?::\w+)?\s*=|http:\/\/(?:www\.)?(?:w3\.org|xmlns\.com|purl\.org|sodipodi\.sourceforge\.net|inkscape\.org|ns\.adobe\.com|schemas\.[\w.]+)/i;
+
 const RULES: Rule[] = [
   {
     rule: 'hardcoded-secret',
@@ -533,6 +539,8 @@ const RULES: Rule[] = [
     severity: 'low',
     re: /['"`]http:\/\/(?!localhost|127\.0\.0\.1)[^'"`]+['"`]/,
     message: 'Insecure http:// URL — use https:// for remote endpoints.',
+    // Skip XML/SVG namespace & schema URIs — they are identifiers, not endpoints.
+    ignore: (_m, line) => NAMESPACE_HTTP.test(line),
   },
   {
     rule: 'insecure-websocket',

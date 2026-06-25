@@ -75,6 +75,17 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('src/Embed.tsx', '<iframe src="https://x.com/v" aria-label="Demo" />')).toEqual([]);
   });
 
+  it('flags a duplicate static id within a file but not unique or dynamic ids', () => {
+    const dup = scanAccessibility('src/Form.tsx', '<input id="email" />\n<label htmlFor="email">E</label>\n<input id="email" />');
+    const hit = dup.find((x) => x.kind === 'duplicate-id');
+    expect(hit).toBeTruthy();
+    expect(hit!.severity).toBe('medium');
+    // unique ids are fine.
+    expect(scanAccessibility('src/Form.tsx', '<input id="a" />\n<input id="b" />').some((x) => x.kind === 'duplicate-id')).toBe(false);
+    // dynamic ids (id={...}) are expected to vary — not counted.
+    expect(scanAccessibility('src/List.tsx', '<li id={`row-${i}`} />\n<li id={`row-${i}`} />').some((x) => x.kind === 'duplicate-id')).toBe(false);
+  });
+
   it('flags a form control with no accessible name (medium) but not one with aria-label or id', () => {
     const bad = scanAccessibility('src/Form.tsx', '<input type="text" />');
     expect(bad.some((x) => x.kind === 'control-unlabeled' && x.severity === 'medium')).toBe(true);

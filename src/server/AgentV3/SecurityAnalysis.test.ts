@@ -168,6 +168,11 @@ describe('scanSecurity', () => {
     expect(scanSecurity('App.vue', '<div>{{ userBio }}</div>').some((f) => f.rule === 'vue-v-html')).toBe(false);
   });
 
+  it('flags crypto.pseudoRandomBytes but not the secure randomBytes', () => {
+    expect(scanSecurity('a.ts', 'const t = crypto.pseudoRandomBytes(16);').some((f) => f.rule === 'pseudo-random-bytes')).toBe(true);
+    expect(scanSecurity('a.ts', 'const t = crypto.randomBytes(16);').some((f) => f.rule === 'pseudo-random-bytes')).toBe(false);
+  });
+
   it('flags the legacy createCipher/createDecipher but not the correct createCipheriv', () => {
     expect(scanSecurity('a.ts', "const c = crypto.createCipher('aes-256-cbc', pass);").some((f) => f.rule === 'weak-crypto-cipher')).toBe(true);
     expect(scanSecurity('a.ts', 'const d = crypto.createDecipher(algo, pass);').some((f) => f.rule === 'weak-crypto-cipher')).toBe(true);

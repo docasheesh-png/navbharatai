@@ -114,6 +114,14 @@ const RULES: Rule[] = [
     message: 'Shell command built from dynamic input — this enables command injection; validate/escape the input or use execFile with an args array (no shell).',
   },
   {
+    rule: 'pseudo-random-bytes',
+    severity: 'high',
+    // crypto.pseudoRandomBytes() is explicitly NOT cryptographically secure (deprecated) —
+    // using it for tokens/keys/IVs is predictable. Use crypto.randomBytes() instead.
+    re: /\.pseudoRandomBytes\s*\(/,
+    message: 'crypto.pseudoRandomBytes() is not cryptographically secure (deprecated) — use crypto.randomBytes() for tokens, keys and IVs.',
+  },
+  {
     rule: 'weak-crypto-cipher',
     severity: 'high',
     // crypto.createCipher()/createDecipher() (no IV) are deprecated and insecure:

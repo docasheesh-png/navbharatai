@@ -196,6 +196,31 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
       issues.push({ file, line: i + 1, kind: 'link-no-accessible-name', severity: 'low', snippet: trimSnippet(line) });
     }
   }
+
+  // ── medium: duplicate static id within the same file ─────────────────────────
+  // A repeated id="foo" breaks <label for>/aria-* references (they target the FIRST
+  // match) and is invalid HTML. Only literal string ids are checked — dynamic ids
+  // (id={foo}, id={`row-${i}`}) are expected to vary and are not counted.
+  const idLineByValue = new Map<string, number>();
+  const idCount = new Map<string, number>();
+  const idRe = /\bid\s*=\s*["']([^"'{}\s]+)["']/g;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].length > 4000) continue;
+    let m: RegExpExecArray | null;
+    idRe.lastIndex = 0;
+    while ((m = idRe.exec(lines[i])) !== null) {
+      const val = m[1];
+      idCount.set(val, (idCount.get(val) || 0) + 1);
+      // Record the line of the SECOND occurrence (where the collision first shows).
+      if (idCount.get(val) === 2) idLineByValue.set(val, i + 1);
+    }
+  }
+  for (const [val, count] of idCount) {
+    if (count >= 2) {
+      const ln = idLineByValue.get(val) ?? 1;
+      issues.push({ file, line: ln, kind: 'duplicate-id', severity: 'medium', snippet: `id="${val}" appears ${count} times` });
+    }
+  }
   return issues;
 }
 

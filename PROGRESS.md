@@ -2699,3 +2699,17 @@ Batch 3 merged to main 6985077. New on `claude/navbharatai-pro-testing-p2mgr5`:
    token (auth bypass). A real algorithm allow-list (HS256/RS256) is not flagged.
 
 Gate: server tsc 0, frontend tsc 0, **2244 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 5): duplicate-id (a11y) + pseudoRandomBytes (security)
+
+Batch 4 merged to main b03dfe3. New:
+
+1. `AccessibilityAnalysis` **duplicate-id** (medium) — a repeated static id="foo" in one file breaks
+   <label for>/aria-* references (they resolve to the first match) and is invalid HTML. Only literal
+   string ids are counted; dynamic ids (id={`row-${i}`}) are expected to vary and are skipped.
+2. `SecurityAnalysis` **pseudo-random-bytes** (high) — crypto.pseudoRandomBytes() is explicitly NOT
+   cryptographically secure (deprecated); flagged so tokens/keys/IVs use crypto.randomBytes().
+
+Gate: server tsc 0, frontend tsc 0, **2246 vitest** PASS, build PASS.

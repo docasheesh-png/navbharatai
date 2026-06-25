@@ -1,5 +1,14 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess } from './agentv3';
+
+describe('conversationAccess (D7 ownership gate)', () => {
+  it('allows the owner, forbids others, and reports not-found', () => {
+    expect(conversationAccess({ userId: 'u1' }, 'u1')).toBe('ok');
+    expect(conversationAccess({ userId: 'u1' }, 'u2')).toBe('forbidden');
+    expect(conversationAccess({ userId: 'u1' }, null)).toBe('forbidden'); // anonymous can't read an owned build
+    expect(conversationAccess(null, 'u1')).toBe('not-found');
+  });
+});
 
 describe('providerDebugTag (temporary admin provider-debug, env-gated)', () => {
   const prev = process.env.AGENTV3_DEBUG_PROVIDER;

@@ -73,7 +73,12 @@ export interface ConversationStore {
   appendMessages(id: string, messages: unknown[], patch: ConversationPatch): Promise<void>;
   /** Apply a patch without appending messages (e.g. finalize status). Throws if id is unknown. */
   update(id: string, patch: ConversationPatch): Promise<void>;
-  /** A user's builds, most-recently-updated first, capped at `limit` (default 50). */
+  /**
+   * A user's builds, most-recently-updated first, capped at `limit` (default 50). This is the
+   * LIST view: implementations MAY return records with an empty `messages` array (the full
+   * transcript is fetched on demand via `get(id)`) so listing stays cheap. The in-memory store
+   * returns full records; the Firestore store omits the transcript here.
+   */
   listByUser(userId: string, limit?: number): Promise<ConversationRecord[]>;
   /** Delete a build. No-op if it does not exist. */
   remove(id: string): Promise<void>;

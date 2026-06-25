@@ -3327,3 +3327,26 @@ P-A merged (PR #393, f896199). P-B wires the store into the build loop:
 
 Gate: server tsc 0, frontend tsc 0, **2318 vitest** PASS (4 new AgentRunner persistence tests).
 NEXT (P-C): a Firestore-backed ConversationStore + route load/list/resume endpoints.
+
+---
+
+### 2026-06-25 — v3.0 conversation persistence P-C: Firestore-backed ConversationStore (D7)
+
+P-B merged (PR #394, 53863f6). P-C adds the durable backend:
+
+- NEW `src/server/AgentV3/FirestoreConversationStore.ts` — mirrors the proven FirestoreJobStore
+  pattern (firebase-admin init + databaseId from firebase-applet-config.json). Avoids Firestore's
+  1 MB/doc limit: metadata in `agentv3_conversations/{id}`, transcript in an append-only `turns`
+  subcollection (one doc per appendMessages, monotonic `seq`); get() reassembles the transcript
+  in order. listByUser returns metadata only (empty messages) — cheap listing; get(id) for the
+  full build. The Firestore handle is INJECTABLE.
+- Because the handle is injectable, this is UNIT-TESTED via a compact faithful in-memory fake of
+  the narrow Firestore surface (nested docs/subcollections, get/set-merge/update, where+orderBy+
+  limit, runTransaction, batched delete) — 7 tests proving create/get-reassembly/append-ordering/
+  unknown-id throws/finalize/list-scope-order-cap/remove. (More rigorous than the existing
+  FirestoreJobStore, which is integration-only.) ConversationStore.listByUser contract doc
+  updated to allow an empty transcript in list results.
+
+Gate: server tsc 0, frontend tsc 0, **2325 vitest** PASS (7 new FirestoreConversationStore tests).
+NEXT (P-D): wire store selection (Firestore when available, else in-memory) into the agentv3
+route + load/list/resume endpoints — completing the end-to-end "build survives refresh" feature.

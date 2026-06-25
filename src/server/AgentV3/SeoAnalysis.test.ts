@@ -60,6 +60,22 @@ describe('analyzeSeo', () => {
     expect(present.findings.some((f) => /charset/.test(f.message))).toBe(false);
   });
 
+  it('flags a non-UTF-8 charset (mojibake for Hindi) but not utf-8', () => {
+    const iso = analyzeSeo('<html lang="en"><head><meta charset="ISO-8859-1"><title>X</title><meta name="viewport" content="x"><meta name="description" content="y"><meta property="og:title" content="X"><meta property="og:image" content="/o.png"><link rel="icon" href="/f.ico"></head></html>');
+    expect(iso.findings.some((f) => /not UTF-8/.test(f.message))).toBe(true);
+    // utf-8 (and the utf8 spelling) is fine.
+    expect(analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>X</title></head></html>').findings.some((f) => /not UTF-8/.test(f.message))).toBe(false);
+    expect(analyzeSeo('<html lang="en"><head><meta charset="UTF8"><title>X</title></head></html>').findings.some((f) => /not UTF-8/.test(f.message))).toBe(false);
+  });
+
+  it('flags an over-long meta description (truncated in search results) but not a normal one', () => {
+    const longDesc = 'A'.repeat(200);
+    const html = `<html lang="en"><head><meta charset="utf-8"><title>My Shop</title><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="${longDesc}"><meta property="og:title" content="X"><meta property="og:image" content="/o.png"><link rel="icon" href="/f.ico"></head></html>`;
+    expect(analyzeSeo(html).findings.some((f) => /search results truncate it/.test(f.message))).toBe(true);
+    // a normal-length description is fine.
+    expect(analyzeSeo(FULL).findings.some((f) => /search results truncate it/.test(f.message))).toBe(false);
+  });
+
   it('flags a missing viewport as medium', () => {
     const r = analyzeSeo('<html lang="en"><head><title>X</title><meta name="description" content="y"></head></html>');
     expect(r.findings.some((f) => f.level === 'medium' && /viewport/.test(f.message))).toBe(true);

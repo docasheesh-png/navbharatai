@@ -70,18 +70,33 @@ export function analyzeSeo(indexHtml: string | null | undefined): SeoReport {
 
   // <meta charset> — without a declared charset, non-ASCII text (e.g. Hindi) can
   // render as mojibake in some browsers/encodings.
+  const charsetMatch = /<meta[^>]+charset=["']?\s*([\w-]+)/i.exec(html);
   if (!/<meta[^>]+charset=/i.test(html)) {
     findings.push({
       level: 'low',
       message: 'No <meta charset> in the HTML entry — add <meta charset="utf-8"> as the first <head> tag so non-ASCII (e.g. Hindi) text renders correctly.',
     });
+  } else if (charsetMatch && !/^utf-?8$/i.test(charsetMatch[1].trim())) {
+    // A non-UTF-8 charset (e.g. ISO-8859-1, windows-1252) cannot represent Devanagari, so
+    // Hindi/Hinglish content renders as mojibake. UTF-8 is the only safe choice.
+    findings.push({
+      level: 'low',
+      message: `The declared charset is "${charsetMatch[1].trim()}", not UTF-8 — it cannot represent Hindi/Devanagari (or emoji) and will render as mojibake. Use <meta charset="utf-8">.`,
+    });
   }
 
-  // Meta description with real content.
+  // Meta description — present with real content, and not so long it gets truncated.
+  const descMatch = /<meta[^>]+name=["']description["'][^>]*content=["']([^"']*)["']/i.exec(html);
   if (!/<meta[^>]+name=["']description["'][^>]*content=["'][^"']+["']/i.test(html)) {
     findings.push({
       level: 'low',
       message: 'No meta description — add one so search results and social shares show a meaningful summary.',
+    });
+  } else if (descMatch && descMatch[1].trim().length > 160) {
+    // Google truncates descriptions past ~160 characters, so the tail is lost in results.
+    findings.push({
+      level: 'low',
+      message: `The meta description is ${descMatch[1].trim().length} characters — search results truncate it past ~160, so the end is cut off. Tighten it to one clear sentence.`,
     });
   }
 

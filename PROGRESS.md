@@ -2995,3 +2995,18 @@ Batch 21 merged to main 3d7a99f (PR #372). New `SecurityAnalysis` rules:
    queue schemes). Placeholder/env (${...}, example) forms ignored.
 
 Gate: server tsc 0, frontend tsc 0, **2284 vitest** PASS (47 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 23): non-UTF-8 charset + over-long meta description (SEO)
+
+Batch 22 merged to main c270322 (PR #373). New `SeoAnalysis` checks (extend the present-but-
+flawed pattern):
+
+1. **non-UTF-8 charset** (low) — a declared charset that is not UTF-8 (e.g. ISO-8859-1,
+   windows-1252) cannot represent Devanagari, so Hindi/Hinglish content renders as mojibake.
+   Especially relevant to NavBharatAI's bilingual output. UTF-8/UTF8 not flagged.
+2. **over-long meta description** (low) — a description over 160 chars is truncated in search
+   results; flagged with its actual length (parallel to the batch-14 over-long title check).
+
+Gate: server tsc 0, frontend tsc 0, **2286 vitest** PASS (19 SeoAnalysis tests, +2 new).

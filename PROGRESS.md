@@ -3055,3 +3055,18 @@ Batch 25 merged to main 24c9f32 (PR #376). New `SecurityAnalysis` crypto rules:
    brute-forceable/deprecated; require ≥2048. 2048/4096 not flagged.
 
 Gate: server tsc 0, frontend tsc 0, **2292 vitest** PASS (49 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 27): secret in web storage + httpOnly:false cookie (security)
+
+Batch 26 merged to main e4d4a7b (PR #377). New `SecurityAnalysis` rules:
+
+1. **secret-in-web-storage** (medium) — `localStorage/sessionStorage.setItem(...)` storing a
+   token/secret (any XSS on the page can read web storage). Uses a substring keyword guard
+   (catches camelCase authToken/accessToken; excludes "session" since it's in "sessionStorage").
+   A theme/locale value is not flagged. Prefer an httpOnly, Secure cookie for auth tokens.
+2. **cookie-httponly-false** (medium) — `httpOnly: false` makes a cookie JS-readable, so an XSS
+   can steal a session/auth cookie. The flag defaults off, so an explicit false is a risky opt-out.
+
+Gate: server tsc 0, frontend tsc 0, **2294 vitest** PASS (51 SecurityAnalysis tests, +2 new).

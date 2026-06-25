@@ -202,6 +202,18 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'const u = await User.findOne({ email: req.body.email });').some((f) => f.rule === 'nosql-injection')).toBe(false);
   });
 
+  it('flags a token stored in web storage but not a non-sensitive value', () => {
+    expect(scanSecurity('a.ts', "localStorage.setItem('authToken', jwt);").some((f) => f.rule === 'secret-in-web-storage' && f.severity === 'medium')).toBe(true);
+    expect(scanSecurity('a.ts', "sessionStorage.setItem('user_password', pw);").some((f) => f.rule === 'secret-in-web-storage')).toBe(true);
+    // a non-sensitive value (theme/locale) is fine.
+    expect(scanSecurity('a.ts', "localStorage.setItem('theme', 'dark');").some((f) => f.rule === 'secret-in-web-storage')).toBe(false);
+  });
+
+  it('flags httpOnly:false on a cookie but not httpOnly:true', () => {
+    expect(scanSecurity('a.ts', "res.cookie('sid', id, { httpOnly: false, secure: true });").some((f) => f.rule === 'cookie-httponly-false' && f.severity === 'medium')).toBe(true);
+    expect(scanSecurity('a.ts', "res.cookie('sid', id, { httpOnly: true });").some((f) => f.rule === 'cookie-httponly-false')).toBe(false);
+  });
+
   it('flags ECB cipher mode but not an authenticated mode', () => {
     expect(scanSecurity('a.ts', "const c = crypto.createCipheriv('aes-256-ecb', key, null);").some((f) => f.rule === 'insecure-cipher-ecb' && f.severity === 'high')).toBe(true);
     expect(scanSecurity('a.ts', "const c = crypto.createCipheriv('des-ecb', key, null);").some((f) => f.rule === 'insecure-cipher-ecb')).toBe(true);

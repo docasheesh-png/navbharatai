@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { agentV3Reducer } from '../components/agentv3/agentV3Reducer';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent } from '../components/agentv3/agentV3Types';
+import { conversationToEvents, type PersistedConversation } from '../components/agentv3/agentV3History';
 
 /**
  * useAgentV3Build — drives a v3.0 build and keeps the live client state that all
@@ -28,6 +29,12 @@ export interface UseAgentV3Build {
   resume: (opts?: { userId?: string; email?: string }) => Promise<void>;
   /** Ask the server whether a build is running for this account (sets serverBuildRunning). */
   checkRunning: (opts?: { userId?: string; email?: string }) => Promise<void>;
+  /**
+   * D7 — on (re)load, fetch the user's most recent persisted build and re-display its chat
+   * history (option (a): chat + git-restore). Returns true if a build was loaded. No-op while a
+   * build is running. Best-effort: any failure resolves false and leaves the state untouched.
+   */
+  loadConversation: (opts?: { userId?: string; email?: string }) => Promise<boolean>;
 }
 
 export function useAgentV3Build(): UseAgentV3Build {
@@ -114,6 +121,32 @@ export function useAgentV3Build(): UseAgentV3Build {
       /* best-effort probe — stay as-is on failure */
     }
   }, []);
+
+  const loadConversation = useCallback(async (opts?: { userId?: string; email?: string }): Promise<boolean> => {
+    if (running) return false;
+    if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
+    try {
+      const params = new URLSearchParams();
+      if (userIdRef.current) params.set('userId', userIdRef.current);
+      if (emailRef.current) params.set('email', emailRef.current);
+      const listRes = await fetch(`/api/agentv3/conversations?${params.toString()}`);
+      if (!listRes.ok) return false;
+      const listJson = await listRes.json().catch(() => ({}));
+      const recent = Array.isArray(listJson?.conversations) ? listJson.conversations[0] : undefined;
+      if (!recent?.id) return false;
+      const oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(String(recent.id))}?${params.toString()}`);
+      if (!oneRes.ok) return false;
+      const oneJson = await oneRes.json().catch(() => ({}));
+      const conv = oneJson?.conversation as PersistedConversation | undefined;
+      if (!conv || !Array.isArray(conv.messages)) return false;
+      let next = initialAgentV3State();
+      for (const e of conversationToEvents(conv)) next = agentV3Reducer(next, e);
+      setState(next);
+      return true;
+    } catch {
+      return false; // best-effort — never disrupt the panel on a load failure
+    }
+  }, [running]);
 
   const resume = useCallback(async (opts?: { userId?: string; email?: string }) => {
     if (running) return;
@@ -271,5 +304,5 @@ export function useAgentV3Build(): UseAgentV3Build {
     [running],
   );
 
-  return { state, running, error, start, respond, restore, stop, reset, serverBuildRunning, resume, checkRunning };
+  return { state, running, error, start, respond, restore, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation };
 }

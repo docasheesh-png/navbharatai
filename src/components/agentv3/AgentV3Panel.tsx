@@ -27,7 +27,7 @@ interface ChatMsg {
 }
 
 export function AgentV3Panel({ userId, email, resume }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null }) {
-  const { state, running, error, start, respond, restore, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   const [onlyOpus, setOnlyOpus] = useState(false);
   const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default
@@ -104,6 +104,17 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
   useEffect(() => {
     if (!running) checkRunning({ userId, email });
   }, [userId, email, running, checkRunning]);
+
+  // D7 — on first open with a signed-in account, re-display the most recent persisted build's
+  // chat history so a refresh/reconnect doesn't lose it (option (a): chat + git-restore). Runs
+  // ONCE, and only when nothing is running and the panel is still empty, so it never clobbers a
+  // live build or a thread already opened from History. Best-effort.
+  const loadedConvoRef = useRef(false);
+  useEffect(() => {
+    if (loadedConvoRef.current || running || !userId || state.narration.length > 0) return;
+    loadedConvoRef.current = true;
+    void loadConversation({ userId, email });
+  }, [userId, email, running, state.narration.length, loadConversation]);
 
   // Resume a saved v3.0 conversation opened from History ("open chat"). Adopt its
   // sessionId so the backend continues with the SAME workspace/memory (best-effort,

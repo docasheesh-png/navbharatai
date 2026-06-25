@@ -196,6 +196,25 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'const agent = new https.Agent({ rejectUnauthorized: true });').some((f) => f.rule === 'disable-tls-verification')).toBe(false);
   });
 
+  it("flags window.open() without 'noopener' (reverse tabnabbing) but not the safe forms", () => {
+    expect(scanSecurity('a.ts', "window.open(externalUrl, '_blank');").some((f) => f.rule === 'window-open-no-opener' && f.severity === 'medium')).toBe(true);
+    expect(scanSecurity('a.ts', "window.open('https://x.com');").some((f) => f.rule === 'window-open-no-opener')).toBe(true);
+    // passing 'noopener' in the features arg is safe.
+    expect(scanSecurity('a.ts', "window.open(url, '_blank', 'noopener,noreferrer');").some((f) => f.rule === 'window-open-no-opener')).toBe(false);
+    // an explicit opener cleanup is safe.
+    expect(scanSecurity('a.ts', 'const w = window.open(url); w.opener = null;').some((f) => f.rule === 'window-open-no-opener')).toBe(false);
+    // a no-arg window.open() is not flagged.
+    expect(scanSecurity('a.ts', 'window.open();').some((f) => f.rule === 'window-open-no-opener')).toBe(false);
+  });
+
+  it('flags a deprecated TLS/SSL version but not TLS 1.2+', () => {
+    expect(scanSecurity('a.ts', "const o = { minVersion: 'TLSv1' };").some((f) => f.rule === 'tls-weak-version' && f.severity === 'medium')).toBe(true);
+    expect(scanSecurity('a.ts', "const o = { minVersion: 'TLSv1.1' };").some((f) => f.rule === 'tls-weak-version')).toBe(true);
+    expect(scanSecurity('a.ts', "const o = { secureProtocol: 'TLSv1_method' };").some((f) => f.rule === 'tls-weak-version')).toBe(true);
+    // the modern minimum is not flagged.
+    expect(scanSecurity('a.ts', "const o = { minVersion: 'TLSv1.2' };").some((f) => f.rule === 'tls-weak-version')).toBe(false);
+  });
+
   it('flags Node vm.runIn*/compileFunction code execution but not unrelated calls', () => {
     expect(scanSecurity('a.ts', 'const r = vm.runInNewContext(userCode, ctx);').some((f) => f.rule === 'vm-code-execution' && f.severity === 'high')).toBe(true);
     expect(scanSecurity('a.ts', 'vm.runInThisContext(src);').some((f) => f.rule === 'vm-code-execution')).toBe(true);

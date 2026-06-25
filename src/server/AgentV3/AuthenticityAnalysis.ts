@@ -113,6 +113,14 @@ const RULES: Rule[] = [
     severity: 'low',
     re: /eslint-disable(?:-(?:next-)?line)?\b\s*(?:\*\/\s*)?$/,
   },
+  {
+    // A classic leftover debug print — console.log with a bare number or a throwaway
+    // sentinel string ("here"/"test"/"asdf"…). High-precision: only these unambiguous
+    // debug arguments, never a real log message.
+    kind: 'debug-console-log',
+    severity: 'low',
+    re: /console\.log\s*\(\s*(?:\d+|['"`](?:here|test(?:ing)?|hello|hi|debug|x+|a{3,}|asdf|todo|wip|foo|bar|baz)\d*['"`])\s*\)/i,
+  },
   // ── low: hardcoded obviously-fake return values left in code ──────────────
   {
     kind: 'fake-return',

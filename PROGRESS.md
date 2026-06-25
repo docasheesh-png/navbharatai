@@ -2726,3 +2726,18 @@ Batch 5 merged to main 82329a4. New:
    auto-refresh/redirect disorients users and moves focus without consent (WCAG 2.2.1 / 3.2.5).
 
 Gate: server tsc 0, frontend tsc 0, **2248 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 7): CORS credential-reflection + debug console.log
+
+Batch 6 merged to main d1f4daa. New:
+
+1. `SecurityConfigAnalysis` **cors-credentials-reflect-origin** (high) — cors({ origin: true,
+   credentials: true }) reflects ANY origin while allowing credentials, so any site can make
+   authenticated cross-origin requests with the user's cookies. A pinned origin + credentials
+   (the safe pattern) is not flagged.
+2. `AuthenticityAnalysis` **debug-console-log** (low) — a leftover debug print: console.log of a
+   bare number or a throwaway sentinel ("here"/"test"/"asdf"…); a real log message is not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2250 vitest** PASS, build PASS.

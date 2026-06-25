@@ -22,6 +22,13 @@ describe('scanSecurityConfig', () => {
     expect(issues.some((i) => i.rule === 'wildcard-cors')).toBe(true);
   });
 
+  it('flags CORS reflecting any origin with credentials (high) but not a pinned origin with credentials', () => {
+    expect(scanSecurityConfig('src/server.ts', 'app.use(cors({ origin: true, credentials: true }));').some((i) => i.rule === 'cors-credentials-reflect-origin' && i.severity === 'high')).toBe(true);
+    expect(scanSecurityConfig('src/server.ts', 'app.use(cors({ credentials: true, origin: true }));').some((i) => i.rule === 'cors-credentials-reflect-origin')).toBe(true);
+    // a pinned origin with credentials is the correct, safe pattern.
+    expect(scanSecurityConfig('src/server.ts', "app.use(cors({ origin: 'https://app.example.com', credentials: true }));").some((i) => i.rule === 'cors-credentials-reflect-origin')).toBe(false);
+  });
+
   it('flags Math.random() used for a token (insecure randomness, high)', () => {
     const issues = scanSecurityConfig('src/auth.ts', "const token = Math.random().toString(36).slice(2);");
     expect(issues.some((i) => i.rule === 'insecure-randomness' && i.severity === 'high')).toBe(true);

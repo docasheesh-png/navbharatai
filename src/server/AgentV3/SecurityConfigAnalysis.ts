@@ -40,6 +40,15 @@ const RULES: Rule[] = [
     message: 'CORS is open to all origins ("*") — restrict it to the specific trusted origins your app actually needs.',
   },
   {
+    rule: 'cors-credentials-reflect-origin',
+    severity: 'high',
+    // `cors({ origin: true, credentials: true })` reflects ANY request origin AND allows
+    // credentials — so any website can make authenticated cross-origin requests to your
+    // API with the user's cookies. Both flags on the same line (either order).
+    re: /origin\s*:\s*true[^}\n]*credentials\s*:\s*true|credentials\s*:\s*true[^}\n]*origin\s*:\s*true/,
+    message: 'CORS reflects any origin (origin:true) while allowing credentials — any site can make authenticated requests with the user\'s cookies. Pin origin to an explicit allow-list of trusted origins.',
+  },
+  {
     rule: 'insecure-randomness',
     severity: 'high',
     // Math.random() used near a security-sensitive value (either order, same line).

@@ -95,6 +95,15 @@ describe('scanAuthenticity', () => {
     expect(scanAuthenticity('src/c.ts', '// @ts-expect-error known gap\nfoo.bar();').some((i) => i.kind === 'ts-ignore' || i.kind === 'ts-nocheck')).toBe(false);
   });
 
+  it('flags a leftover debug console.log (bare number / sentinel string) but not a real log', () => {
+    expect(scanAuthenticity('src/a.ts', 'console.log(123);').some((i) => i.kind === 'debug-console-log')).toBe(true);
+    expect(scanAuthenticity('src/a.ts', "console.log('here');").some((i) => i.kind === 'debug-console-log')).toBe(true);
+    expect(scanAuthenticity('src/a.ts', "console.log('test1');").some((i) => i.kind === 'debug-console-log')).toBe(true);
+    // a real, meaningful log message is not flagged.
+    expect(scanAuthenticity('src/a.ts', "console.log('User saved successfully');").some((i) => i.kind === 'debug-console-log')).toBe(false);
+    expect(scanAuthenticity('src/a.ts', 'console.log(user.id);').some((i) => i.kind === 'debug-console-log')).toBe(false);
+  });
+
   it('flags a placeholder @example.com email but not a real one', () => {
     expect(scanAuthenticity('src/Contact.tsx', 'const support = "support@example.com";').some((i) => i.kind === 'placeholder-email')).toBe(true);
     expect(scanAuthenticity('src/Contact.tsx', '<a href="mailto:hello@example.org">Email</a>').some((i) => i.kind === 'placeholder-email')).toBe(true);

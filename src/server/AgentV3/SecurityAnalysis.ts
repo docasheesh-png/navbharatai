@@ -275,6 +275,15 @@ const RULES: Rule[] = [
     message: 'TLS certificate verification disabled (rejectUnauthorized:false / NODE_TLS_REJECT_UNAUTHORIZED=0) — every HTTPS connection now accepts any certificate (man-in-the-middle). Never disable it; trust the proper CA certificate instead.',
   },
   {
+    rule: 'tls-weak-version',
+    severity: 'medium',
+    // Pinning a deprecated TLS/SSL protocol (TLS 1.0/1.1, SSLv3) via minVersion or the
+    // legacy secureProtocol option exposes the connection to known attacks (BEAST/POODLE)
+    // and is disallowed by modern servers. Match the explicit weak values only.
+    re: /\bminVersion\s*:\s*['"`]TLSv1(?:\.1)?['"`]|\bsecureProtocol\s*:\s*['"`](?:TLSv1(?:_1)?|SSLv3)_method['"`]/,
+    message: 'Deprecated TLS/SSL version pinned (TLS 1.0/1.1 or SSLv3) — these are vulnerable (BEAST/POODLE) and rejected by modern servers; require TLS 1.2+ (minVersion: "TLSv1.2").',
+  },
+  {
     rule: 'hardcoded-auth-header',
     severity: 'high',
     // An Authorization header set to a literal `Bearer <token>` / `Basic <creds>` — a
@@ -308,6 +317,17 @@ const RULES: Rule[] = [
     re: /target\s*=\s*['"]_blank['"]/i,
     message: 'target="_blank" without rel="noopener" — the opened page can hijack this tab (reverse tabnabbing); add rel="noopener noreferrer".',
     ignore: (_m, line) => /noopener/i.test(line),
+  },
+  {
+    rule: 'window-open-no-opener',
+    severity: 'medium',
+    // window.open(url) returns a handle and, unlike a modern target="_blank" link, does
+    // NOT imply noopener — the opened page can drive this tab via window.opener (reverse
+    // tabnabbing). High-precision: a non-empty first arg, and the safe form (a third
+    // 'noopener' feature string, or a same-line opener cleanup) is ignored below.
+    re: /\bwindow\.open\s*\(\s*[^)\s]/,
+    message: "window.open() without 'noopener' lets the opened page control this tab via window.opener (reverse tabnabbing) — pass 'noopener' in the features argument (or set the returned handle's opener to null).",
+    ignore: (_m, line) => /noopener/i.test(line) || /\.opener\s*=\s*null/.test(line),
   },
   {
     rule: 'postmessage-wildcard-origin',

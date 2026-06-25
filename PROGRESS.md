@@ -2871,3 +2871,18 @@ present-but-flawed metadata — never nagging a clean page):
 
 Existing "no OG" test made specific (`/No Open Graph tags/`) since a partial OG is now flagged
 by its own rule. Gate: server tsc 0, frontend tsc 0, **2268 vitest** PASS (17 SeoAnalysis tests).
+
+---
+
+### 2026-06-25 — Section I march (batch 15): window.open noopener + deprecated TLS version (security)
+
+Batch 14 merged to main 727a5ac (PR #365). New `SecurityAnalysis` rules:
+
+1. **window-open-no-opener** (medium) — `window.open(url)` does NOT imply noopener (unlike a
+   modern target="_blank" link), so the opened page can drive this tab via window.opener
+   (reverse tabnabbing). Complements the HTML-only unsafe-target-blank rule. Safe forms
+   ('noopener' feature arg, or a `.opener = null` cleanup, or a no-arg call) are ignored.
+2. **tls-weak-version** (medium) — pinning a deprecated protocol (`minVersion: 'TLSv1'/'TLSv1.1'`
+   or `secureProtocol: 'TLSv1_method'/'SSLv3_method'`) exposes BEAST/POODLE; TLS 1.2+ not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2270 vitest** PASS (39 SecurityAnalysis tests, +2 new).

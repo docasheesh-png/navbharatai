@@ -7,7 +7,7 @@ import {
   signInWithPhoneNumber,
   ConfirmationResult,
   GoogleAuthProvider,
-  signInWithPopup,
+
   signInWithRedirect,
 } from 'firebase/auth';
 import { motion } from 'motion/react';
@@ -263,41 +263,12 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
 
-    // Try popup first — instant result, no page reload, works on desktop + modern mobile.
-    // Fall back to redirect only if the popup is explicitly blocked by the browser.
-    try {
-      const result = await signInWithPopup(auth, provider);
-      if (result?.user) {
-        setUser(result.user);
-        onClose();
-      }
-      return;
-    } catch (err: any) {
-      const code = err?.code || '';
-      if (code === 'auth/popup-blocked') {
-        // Browser blocked the popup — fall through to redirect below.
-      } else if (
-        code === 'auth/popup-closed-by-user' ||
-        code === 'auth/popup-cancelled-by-user' ||
-        code === 'auth/cancelled-popup-request'
-      ) {
-        // User dismissed the popup intentionally — stop silently, let them retry.
-        setLoading(false);
-        return;
-      } else {
-        // Real error (disabled provider, bad API key, unauthorized domain, etc.) — show it.
-        if (code === 'auth/internal-error') {
-          setError(`${describeGoogleError(err)}\n${await diagnoseAuth()}`);
-        } else {
-          setError(describeGoogleError(err));
-        }
-        setLoading(false);
-        return;
-      }
-    }
-
-    // Redirect fallback — navigates the whole page to Google.
-    // getRedirectResult() in App.tsx root picks up the result on return.
+    // Always use redirect (no popup). signInWithPopup fails silently on many
+    // browsers — the popup closes before its internal postMessage is received,
+    // throwing auth/popup-closed-by-user even when the user did pick an account.
+    // signInWithRedirect is universally reliable: the whole page navigates to
+    // Google and back; getRedirectResult() in App.tsx captures the result on
+    // return and onAuthStateChanged fires with the authenticated user.
     try {
       await signInWithRedirect(auth, provider);
     } catch (err: any) {

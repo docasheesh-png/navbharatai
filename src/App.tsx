@@ -1303,8 +1303,22 @@ export default function App() {
     // is no longer mounted on return — getRedirectResult MUST be called here, at the
     // app root, or the sign-in is never finalized and the user stays logged out.
     getRedirectResult(auth)
-      .then((result) => { if (result?.user) { setUser(result.user); setLoadingUser(false); } })
-      .catch((e) => { console.error('[auth] redirect sign-in failed:', e?.code || e?.message || e); });
+      .then((result) => {
+        if (result?.user) {
+          setUser(result.user);
+          setLoadingUser(false);
+          setShowAuth(false);
+        }
+      })
+      .catch((e) => {
+        const code = e?.code || '';
+        console.error('[auth] redirect sign-in failed:', code || e?.message || e);
+        // auth/no-auth-event = no pending redirect (normal on most page loads — ignore).
+        if (code && code !== 'auth/no-auth-event') {
+          addToast('Google sign-in failed. Please try again.', 'error');
+          setShowAuth(true);
+        }
+      });
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoadingUser(false);

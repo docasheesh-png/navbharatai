@@ -33,6 +33,12 @@ import {
   classifyIntent,
 } from '../AgentV3';
 import { randomUUID } from 'crypto';
+import {
+  InMemoryConversationStore,
+  deriveTitle,
+  type ConversationStore,
+} from '../AgentV3/ConversationStore';
+import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
@@ -40,10 +46,19 @@ import { DockerActuator } from '../EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { makeResilientTurnRunner } from './agentv3Resilient';
+import { GoogleGenAI } from '@google/genai';
+import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
+import { makeMultiProviderTurnRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
+import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
+import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
+import { CREATOR_IDENTITY } from '../lib/prompts';
+import { VertexProvider } from '../AI/Router/providers/VertexProvider';
+import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
+import { GrokProvider } from '../AI/Router/providers/GrokProvider';
 
 /**
  * AgentV3 (Vargen 3.0) routes.
@@ -76,6 +91,41 @@ function buildActuator(): IEngineerActuator {
   return sharedActuator;
 }
 
+// ── Conversation persistence (D7) ──────────────────────────────────────────────
+let sharedConversationStore: ConversationStore | null = null;
+/**
+ * The durable transcript store: Firestore when explicitly enabled (real cross-instance
+ * durability in Cloud Run), otherwise the in-memory store (dev/CI, and a safe default so a
+ * missing-credentials environment never errors). Singleton. Gated on AGENTV3_PERSIST_FIRESTORE
+ * so CI/local stay on the in-memory store, matching the cautious v3.0 flag-gating.
+ */
+function getConversationStore(): ConversationStore {
+  if (sharedConversationStore) return sharedConversationStore;
+  if (process.env.AGENTV3_PERSIST_FIRESTORE === 'true') {
+    try {
+      sharedConversationStore = new FirestoreConversationStore();
+    } catch {
+      sharedConversationStore = new InMemoryConversationStore();
+    }
+  } else {
+    sharedConversationStore = new InMemoryConversationStore();
+  }
+  return sharedConversationStore;
+}
+
+/**
+ * Access decision for fetching a single conversation. PURE & testable: a build is only
+ * readable by the user who owns it (no userId, or a mismatch, is forbidden).
+ */
+export function conversationAccess(
+  rec: { userId: string } | null,
+  userId: string | null,
+): 'ok' | 'not-found' | 'forbidden' {
+  if (!rec) return 'not-found';
+  if (!userId || rec.userId !== userId) return 'forbidden';
+  return 'ok';
+}
+
 /** A client-supplied session id must be a safe, bounded token (it becomes part of
  *  the workspace id, which is interpolated into sandbox paths/commands). */
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
@@ -103,9 +153,92 @@ function envInt(name: string, fallback: number): number {
   return Number.isInteger(raw) && raw > 0 ? raw : fallback;
 }
 
+// ── TEMPORARY DEBUG (admin test) ────────────────────────────────────────────────
+// When AGENTV3_DEBUG_PROVIDER is enabled, every v3.0 reply is tagged with the
+// provider/model that produced it, so the admin can verify WHERE each reply came
+// from (e.g. confirm Vertex is answering). It is OFF by default, so users never see
+// it; turn it ON by setting the env var on Cloud Run, and OFF again by unsetting it —
+// no code change, no leak. Remove this helper and its call sites once testing is done.
+function isProviderDebugOn(): boolean {
+  const v = process.env.AGENTV3_DEBUG_PROVIDER;
+  return v === '1' || v === 'true';
+}
+export function providerDebugTag(label: string): string {
+  return isProviderDebugOn() && label ? `\n\n_[debug · replied via ${label}]_` : '';
+}
+
 /** One concurrent build per account — guards against runaway cost / abuse. */
 const activeBuilds = new Set<string>();
 const MAX_PROMPT_LEN = 20_000;
+
+// ── Resumable / stoppable builds ────────────────────────────────────────────────
+// A running BUILD's events are buffered and fanned out to subscribers, so the user can
+// (a) RE-ATTACH to a build whose original connection was lost ("Resume"), and
+// (b) actually STOP it server-side ("Stop") — not just abort their own local fetch.
+interface BuildSubscriber { write: (e: unknown) => void; end: () => void; }
+interface RunningBuild {
+  abort: AbortController;
+  buffer: unknown[];
+  subscribers: Set<BuildSubscriber>;
+  ended: boolean;
+  startedTs: number;
+}
+const runningBuilds = new Map<string, RunningBuild>();
+const MAX_BUILD_BUFFER = 4000;
+
+/** Push an event into a build's replay buffer and fan it out to every subscriber. */
+function broadcastBuild(rb: RunningBuild, e: unknown): void {
+  if (rb.buffer.length < MAX_BUILD_BUFFER) rb.buffer.push(e);
+  for (const s of rb.subscribers) { try { s.write(e); } catch { /* drop a dead subscriber */ } }
+}
+/** End every subscriber stream for a finished/stopped build. */
+function endBuild(rb: RunningBuild): void {
+  rb.ended = true;
+  for (const s of rb.subscribers) { try { s.end(); } catch { /* already closed */ } }
+  rb.subscribers.clear();
+}
+/** Is a build currently running for this account? */
+function isBuildRunning(buildKey: string): boolean {
+  const rb = runningBuilds.get(buildKey);
+  return !!rb && !rb.ended;
+}
+
+/**
+ * The v3.0 BUILD turn-runner. Multi-provider cost-routing: the cheap function-calling
+ * builders (Vertex → Gemini, REAL tool-use) take each turn first, with Claude as the
+ * guaranteed backstop — so builds keep WORKING (and NavBharatAI's Claude cost stays
+ * minimal) even when Claude is throttled or out of credits. Set
+ * AGENTV3_BUILD_CLAUDE_FIRST=1 to prefer Claude (with Vertex/Gemini as the fallback);
+ * if no Gemini/Vertex provider is configured, falls back to the Claude-only resilient
+ * runner. Build models are env-overridable (AGENTV3_{VERTEX,GEMINI}_BUILD_MODEL).
+ */
+function buildTurnRunner(): TurnRunner {
+  const buildModel = (envName: string): string =>
+    process.env[envName] || process.env.AGENTV3_BUILD_MODEL || 'gemini-2.5-pro';
+  const cheap: NamedRunner[] = [];
+  // Vertex (function-calling, via the Cloud Run service account / ADC).
+  const project = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID;
+  if (project) {
+    try {
+      const vertex = new GoogleGenAI({ vertexai: true, project, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
+      cheap.push({ name: 'VERTEX', runner: new GeminiToolRunner(vertex as unknown as GeminiGenAiClient, { model: buildModel('AGENTV3_VERTEX_BUILD_MODEL') }) });
+    } catch { /* not constructable in this env — skip */ }
+  }
+  // Gemini direct (GEMINI_API_KEY).
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      cheap.push({ name: 'GEMINI', runner: new GeminiToolRunner(gemini as unknown as GeminiGenAiClient, { model: buildModel('AGENTV3_GEMINI_BUILD_MODEL') }) });
+    } catch { /* skip */ }
+  }
+  if (cheap.length === 0) return makeResilientTurnRunner(new ClaudeClient()); // Claude-only env
+  const claude: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient() };
+  const chain = process.env.AGENTV3_BUILD_CLAUDE_FIRST === '1' ? [claude, ...cheap] : [...cheap, claude];
+  return makeMultiProviderTurnRunner(chain, {
+    onProviderUsed: (used, from) => { if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`); },
+    onProviderError: (name, err) => console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
+  });
+}
 
 /**
  * Non-secret diagnosis of the Claude provider configuration. Surfaces ONLY what
@@ -125,6 +258,12 @@ export function agentV3KeyDiag(): {
   sharedProxyBaseUrlSet: boolean;
   sonnetModel: string;
   opusModel: string;
+  // FREE-router (cheap chat) provider configuration — presence only, never values.
+  // If all three are false on live, a plain "hi" cannot be answered cheaply and the
+  // request falls through to the heavy build loop (a known "Load failed" trigger).
+  vertexConfigured: boolean;
+  geminiKeySet: boolean;
+  grokKeySet: boolean;
 } {
   const raw = process.env.ANTHROPIC_API_KEY ?? '';
   const key = sanitizeApiKey(raw) ?? '';
@@ -140,7 +279,37 @@ export function agentV3KeyDiag(): {
     sharedProxyBaseUrlSet: !!process.env.ANTHROPIC_BASE_URL,
     sonnetModel: resolveModel(false),
     opusModel: resolveModel(true),
+    vertexConfigured: !!(process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID),
+    geminiKeySet: !!process.env.GEMINI_API_KEY,
+    grokKeySet: !!(process.env.GROK_API_KEY || process.env.XAI_API_KEY),
   };
+}
+
+/**
+ * Live health probe of the FREE-router providers (Vertex / Gemini / Grok). Makes
+ * one tiny real call per provider and reports ok/error for each, so an admin can
+ * tell — on the live environment — whether Vertex and Gemini are actually WORKING
+ * (not merely configured). Each provider failure is caught and reported, never
+ * thrown. Admin-only (real calls cost money).
+ */
+async function probeFreeProviders(): Promise<Array<{ name: string; ok: boolean; latencyMs?: number; error?: string }>> {
+  const factories: Array<{ name: string; make: () => { execute: (p: string, s?: unknown, m?: string, sys?: string) => Promise<{ content: string; latencyMs: number }> } }> = [
+    { name: 'VERTEX', make: () => new VertexProvider() },
+    { name: 'GEMINI', make: () => new GeminiProvider() },
+    { name: 'GROK', make: () => new GrokProvider() },
+  ];
+  const results: Array<{ name: string; ok: boolean; latencyMs?: number; error?: string }> = [];
+  for (const f of factories) {
+    try {
+      const provider = f.make();
+      const r = await provider.execute('Reply with exactly one word: pong', undefined, undefined, 'You are a health check. Reply with a single word.');
+      results.push({ name: f.name, ok: !!r.content, latencyMs: r.latencyMs });
+    } catch (err) {
+      const e = err as { message?: string };
+      results.push({ name: f.name, ok: false, error: (e?.message ? String(e.message) : String(err)).slice(0, 300) });
+    }
+  }
+  return results;
 }
 
 /** Throttle the public live-probe so it can't be abused for cost (one per 30s). */
@@ -151,7 +320,60 @@ export function registerAgentV3Routes(app: Express): void {
   app.get('/api/agentv3/status', (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
-    res.json({ enabled: isAgentV3Enabled(userId, email), ...agentV3Status(), team: agentLifecycle.snapshot() });
+    // buildRunning lets the UI detect an orphaned build (started elsewhere / lost its
+    // connection) and offer "Resume" + "Stop".
+    res.json({ enabled: isAgentV3Enabled(userId, email), buildRunning: isBuildRunning(userId ?? 'anon'), ...agentV3Status(), team: agentLifecycle.snapshot() });
+  });
+
+  // D7 — list a user's persisted builds (most-recently-updated first) so the client can
+  // reload one after a refresh/reconnect. Metadata only (no transcript) for a cheap list.
+  app.get('/api/agentv3/conversations', async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      return;
+    }
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required.' });
+      return;
+    }
+    try {
+      const list = await getConversationStore().listByUser(userId, 50);
+      res.json({
+        conversations: list.map((c) => ({
+          id: c.id, title: c.title, status: c.status, workspaceId: c.workspaceId,
+          billedUsd: c.billedUsd, createdAt: c.createdAt, updatedAt: c.updatedAt,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // D7 — load one persisted build (full transcript) for resume. Owner-only.
+  app.get('/api/agentv3/conversations/:id', async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      return;
+    }
+    try {
+      const rec = await getConversationStore().get(req.params.id);
+      const access = conversationAccess(rec, userId);
+      if (access === 'not-found') {
+        res.status(404).json({ error: 'Conversation not found.' });
+        return;
+      }
+      if (access === 'forbidden') {
+        res.status(403).json({ error: 'This build belongs to another account.' });
+        return;
+      }
+      res.json({ conversation: rec });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   // Provider diagnosis — confirms whether a real Anthropic key is configured.
@@ -192,7 +414,10 @@ export function registerAgentV3Routes(app: Express): void {
       const e = err as { status?: number; message?: string };
       live = { ok: false, status: e?.status, error: e?.message ? String(e.message).slice(0, 300) : String(err).slice(0, 300) };
     }
-    res.json({ ...diag, live });
+    // Admin-only: also probe the FREE-router providers (Vertex / Gemini / Grok) with
+    // one tiny real call each, so the admin sees which of them actually WORK on live.
+    const freeProviders = adminOk ? await probeFreeProviders() : undefined;
+    res.json({ ...diag, live, freeProviders });
   });
 
   // Approve/reject a pending gate (plan mode / permission prompt, P4).
@@ -204,6 +429,56 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     res.json({ ok: resolveApproval(requestId, approved) });
+  });
+
+  // Stop the running build for this account — aborts the agent loop (between turns),
+  // ends every attached stream, and frees the slot so a fresh build can start.
+  app.post('/api/agentv3/stop', (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const buildKey = userId ?? 'anon';
+    const rb = runningBuilds.get(buildKey);
+    const wasRunning = !!rb && !rb.ended;
+    if (rb) {
+      rb.abort.abort();                                         // loop stops between turns
+      endBuild(rb);                                             // close all attached streams now
+      if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
+    }
+    activeBuilds.delete(buildKey);                              // unblock a fresh start immediately
+    res.json({ stopped: wasRunning });
+  });
+
+  // Resume: re-attach to a running build whose original connection was lost. Replays the
+  // buffered events so the UI catches up, then streams live ones — same NDJSON contract.
+  app.post('/api/agentv3/attach', (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const buildKey = userId ?? 'anon';
+    const rb = runningBuilds.get(buildKey);
+    if (!rb || rb.ended) {
+      res.status(404).json({ error: 'No running build to resume.' });
+      return;
+    }
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    const sub: BuildSubscriber = {
+      write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
+      end: () => { if (!res.writableEnded) res.end(); },
+    };
+    for (const e of rb.buffer) sub.write(e);                   // replay so the UI catches up to "now"
+    rb.subscribers.add(sub);
+    req.on('close', () => { rb.subscribers.delete(sub); });
   });
 
   // History → restore: roll the workspace back to a checkpoint commit (P-git).
@@ -222,6 +497,65 @@ export function registerAgentV3Routes(app: Express): void {
     }
     const ok = await restoreSession(workspaceId, sha, userId ?? undefined);
     res.json({ ok });
+  });
+
+  // §12.2 — deploy/git support: return the built app's source files as a
+  // path→content map. This is exactly the shape the EXISTING deploy + git routes
+  // accept (`/api/pro/deploy`, `/api/github/push-enhanced`), so v3.0 reuses that
+  // backend for durable deploy + GitHub push instead of rebuilding any of it.
+  // Read-only; never returns node_modules / build output / live .env secrets.
+  app.post('/api/agentv3/workspace-files', async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    try {
+      const actuator = buildActuator();
+      const { files, skipped } = await collectWorkspaceFiles(actuator, workspaceId);
+      res.json({ files, count: Object.keys(files).length, skipped: skipped.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to read the workspace files.' });
+    }
+  });
+
+  // §12.2 — import an existing project (e.g. fetched from GitHub via the existing
+  // `/api/github/fetch` route, or any source) into the v3.0 sandbox so the agent can
+  // edit/update and then deploy/push it back. Path-safe (no traversal/absolute), and
+  // never imports node_modules / .git / live .env secrets.
+  app.post('/api/agentv3/import-files', async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const files = req.body?.files;
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!files || typeof files !== 'object' || Array.isArray(files)) {
+      res.status(400).json({ error: 'files (a path→content object) is required.' });
+      return;
+    }
+    try {
+      const actuator = buildActuator();
+      // Best-effort: make sure the sandbox exists (an unknown type starts empty, so an
+      // imported repo lands cleanly without scaffolded template files mixed in).
+      try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
+      const { written, skipped } = await writeWorkspaceFiles(actuator, workspaceId, files as Record<string, string>);
+      res.json({ imported: written.length, skipped: skipped.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to import the files.' });
+    }
   });
 
   // Build entry — runs the native tool-use loop and streams events as NDJSON.
@@ -247,7 +581,7 @@ export function registerAgentV3Routes(app: Express): void {
     }
     const buildKey = userId ?? 'anon';
     if (activeBuilds.has(buildKey)) {
-      res.status(409).json({ error: 'A build is already running for this account. Stop it before starting another.' });
+      res.status(409).json({ error: 'A build is already running for this account. Stop it before starting another.', resumable: isBuildRunning(buildKey) });
       return;
     }
     activeBuilds.add(buildKey);
@@ -300,8 +634,14 @@ export function registerAgentV3Routes(app: Express): void {
       } catch { /* best-effort — a bad file never blocks the turn */ }
     }
 
-    const isPlainChatTurn =
-      classifyIntent(prompt) === 'chat' && planFirst === false;
+    // A clearly-conversational turn (greeting, thanks, small-talk) has NOTHING to
+    // plan, so it takes the cheap chat path EVEN when plan-mode is on. classifyIntent
+    // is conservative (defaults to 'build' on any doubt), so a real build request is
+    // unaffected. This keeps a "hi" cheap AND avoids running the heavy build loop
+    // (E2B sandbox + Claude) for small-talk — that heavy path sat silent during
+    // sandbox setup and could reset the stream on Cloud Run / mobile Safari ("Load
+    // failed") instead of just replying.
+    const isPlainChatTurn = classifyIntent(prompt) === 'chat';
     if (isPlainChatTurn) {
       try {
         const chatRouter = AIRouterManager.getRouter('free');
@@ -311,9 +651,9 @@ export function registerAgentV3Routes(app: Express): void {
         const { response } = await chatRouter.route(
           chatPrompt,
           "You are NavBharatAI's friendly assistant. Reply briefly and warmly in " +
-            "the user's language. Do not mention which model you are.",
+            "the user's language. Do not mention which model you are.\n\n" + CREATOR_IDENTITY,
         );
-        const reply = response.content;
+        const reply = response.content + providerDebugTag(response.provider);
         // Record the turn in project memory so iterative context is preserved
         // (mirrors the build path's recordRequest). Best-effort.
         try {
@@ -336,8 +676,22 @@ export function registerAgentV3Routes(app: Express): void {
       }
     }
 
+    // Register this build so it can be STOPPED and RE-ATTACHED to ("Resume") after the
+    // original connection is lost. The client's response is the first subscriber; if it
+    // disconnects we keep the build alive (still buffering) so the user can resume it.
+    const abort = new AbortController();
+    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now() };
+    const primary: BuildSubscriber = {
+      write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
+      end: () => { if (!res.writableEnded) res.end(); },
+    };
+    rb.subscribers.add(primary);
+    runningBuilds.set(buildKey, rb);
+    req.on('close', () => { rb.subscribers.delete(primary); });
+    const emit = (e: unknown): void => broadcastBuild(rb, e);
+
     const events = new AgentEventStream();
-    events.subscribe((e) => send(e), false);
+    events.subscribe((e) => emit(e), false);
     const state = new WorkspaceState(events);
 
     const actuator = buildActuator();
@@ -345,7 +699,9 @@ export function registerAgentV3Routes(app: Express): void {
     try {
       // Native Claude for real tool-use, with a multi-provider text fallback
       // (Vertex → Gemini → Grok) so chat never dies if Claude is down/misconfigured.
-      const client = makeResilientTurnRunner(new ClaudeClient());
+      // Multi-provider build engine: Vertex/Gemini do the REAL build (function-calling),
+      // Claude is the backstop — so builds work even when Claude is out of credits.
+      const client = buildTurnRunner();
       const model = resolveModel(onlyOpus);
       const budget = maxBuildBudgetUsd();
       const maxSteps = envInt('AGENTV3_MAX_STEPS', 80);
@@ -358,6 +714,11 @@ export function registerAgentV3Routes(app: Express): void {
       // to build. This is what makes v3.0 conversational like Claude Code.
       let git: GitManager | undefined;
       try {
+        // Emit an immediate status so the NDJSON stream is never silent while the
+        // sandbox is being created (E2B VM setup can take several seconds). A long
+        // silent gap after the headers is what trips Cloud Run / mobile-Safari
+        // request timeouts and surfaces as a bare "Load failed" on the client.
+        events.emit({ type: 'narration', agent: 'architect', text: 'Setting up your workspace…', ts: Date.now() });
         await actuator.ensureWorkspace(workspaceId, 'react');
         // Real git repo → real checkpoints/History/restore (best-effort on
         // sandboxes without a shell).
@@ -410,6 +771,17 @@ export function registerAgentV3Routes(app: Express): void {
         maxBudgetUsd: budget,
         maxSteps,
         agentRole: 'architect',
+        signal: abort.signal,
+        // D7: persist the build transcript so it survives a reconnect/refresh. Best-effort —
+        // a store failure never breaks the build (see AgentRunner). Reloadable via the
+        // GET /api/agentv3/conversations endpoints below.
+        persistence: {
+          store: getConversationStore(),
+          conversationId: randomUUID(),
+          userId: userId ?? 'anon',
+          workspaceId,
+          title: deriveTitle(prompt),
+        },
       });
 
       let buildPrompt = prompt;
@@ -462,6 +834,7 @@ export function registerAgentV3Routes(app: Express): void {
           maxBudgetUsd: budget,
           maxSteps: 4,
           agentRole: 'architect',
+          signal: abort.signal,
         });
         await planRunner.run(prompt);
 
@@ -493,7 +866,7 @@ export function registerAgentV3Routes(app: Express): void {
         if (!approved) {
           const summary = 'Plan was not approved — build cancelled.';
           events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
-          send({ type: 'result', ok: false, summary, steps: 0, billedUsd: 0, billedInr: 0 });
+          emit({ type: 'result', ok: false, summary, steps: 0, billedUsd: 0, billedInr: 0 });
           return;
         }
         const todos = state.snapshot().todos;
@@ -538,12 +911,19 @@ export function registerAgentV3Routes(app: Express): void {
         userCostStore.record(userId, result.billedUsd).catch(() => {});
       }
 
-      send({ type: 'result', ...result, billedInr: Math.round(result.billedUsd * usdInrRate() * 100) / 100 });
+      // TEMP DEBUG: tag the build reply with the provider/model (Claude primary; the
+      // resilient runner already self-labels in the text if it fell back to a free provider).
+      const buildTag = providerDebugTag(`Claude (${model})`);
+      if (buildTag) events.emit({ type: 'narration', agent: 'architect', text: buildTag.trim(), ts: Date.now() });
+      emit({ type: 'result', ...result, billedInr: Math.round(result.billedUsd * usdInrRate() * 100) / 100 });
     } catch (err) {
-      send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+      emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {
       activeBuilds.delete(buildKey);
-      if (!res.writableEnded) res.end();
+      // Only clear the registry slot if it is STILL this build — a Stop may have already
+      // replaced it with a newer run. End every attached stream.
+      if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
+      endBuild(rb);
     }
   });
 }

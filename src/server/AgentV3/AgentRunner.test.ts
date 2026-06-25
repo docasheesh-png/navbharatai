@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { AgentRunner } from './AgentRunner';
+import { AgentRunner, type AgentRunnerOptions } from './AgentRunner';
 import { ClaudeClient, type MessagesCreateClient } from './ClaudeClient';
 import { ToolDispatcher, type ActuatorPort } from './ToolDispatcher';
 import { WorkspaceState } from './WorkspaceState';
 import { AgentEventStream } from './AgentEventStream';
 import { defaultToolCatalog } from './ToolCatalog';
+import { InMemoryConversationStore } from './ConversationStore';
 import type { AgentEvent } from './types';
 
 /** In-memory fake sandbox (ActuatorPort slice). */
@@ -40,7 +41,10 @@ function scriptedClient(messages: unknown[]): MessagesCreateClient {
   };
 }
 
-function buildRunner(script: unknown[], opts: { maxSteps?: number; maxBudgetUsd?: number } = {}) {
+function buildRunner(
+  script: unknown[],
+  opts: { maxSteps?: number; maxBudgetUsd?: number; signal?: AbortSignal; persistence?: AgentRunnerOptions['persistence'] } = {},
+) {
   const actuator = new FakeActuator();
   const stream = new AgentEventStream();
   const events: AgentEvent[] = [];
@@ -130,6 +134,24 @@ describe('AgentRunner (native tool-use loop)', () => {
     expect(result.summary).toContain('Step limit');
   });
 
+  it('stops between turns when the abort signal fires (user pressed Stop)', async () => {
+    const looping = [{
+      content: [{ type: 'tool_use', id: 'tu', name: 'write_file', input: { path: 'a.ts', content: 'x' } }],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    }];
+    const controller = new AbortController();
+    controller.abort(); // already aborted → the loop stops on its first turn
+    const { runner, events } = buildRunner(
+      Array.from({ length: 10 }, () => looping[0]),
+      { signal: controller.signal },
+    );
+    const result = await runner.run('build something big');
+    expect(result.ok).toBe(false);
+    expect(result.summary).toMatch(/stopped by the user/i);
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+  });
+
   it('stops honestly when the budget cap is reached', async () => {
     const looping = {
       content: [{ type: 'tool_use', id: 'tu', name: 'write_file', input: { path: 'a.ts', content: 'x' } }],
@@ -141,5 +163,74 @@ describe('AgentRunner (native tool-use loop)', () => {
     expect(result.ok).toBe(false);
     expect(result.summary).toContain('Budget reached');
     expect(result.billedUsd).toBeGreaterThanOrEqual(100);
+  });
+});
+
+describe('AgentRunner persistence (D7)', () => {
+  const twoTurn = [
+    {
+      content: [
+        { type: 'text', text: 'Creating the entry file.' },
+        { type: 'tool_use', id: 'tu1', name: 'write_file', input: { path: 'index.html', content: '<h1>Hi</h1>' } },
+      ],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 200, output_tokens: 50 },
+    },
+    { content: [{ type: 'text', text: 'Done — the app is built.' }], stop_reason: 'end_turn', usage: { input_tokens: 80, output_tokens: 20 } },
+  ];
+
+  it('persists the build: create → running checkpoint → complete, with the full transcript', async () => {
+    const store = new InMemoryConversationStore();
+    const { runner } = buildRunner(twoTurn, {
+      persistence: { store, conversationId: 'b1', userId: 'u1', workspaceId: 'ws-1', title: 'todo app', now: () => 5000 },
+    });
+    const result = await runner.run('build a todo app');
+    expect(result.ok).toBe(true);
+
+    const rec = await store.get('b1');
+    expect(rec).not.toBeNull();
+    expect(rec?.status).toBe('complete');
+    expect(rec?.userId).toBe('u1');
+    // user prompt + assistant(turn1) + tool_results + assistant(turn2) = 4 messages.
+    expect(rec?.messages).toHaveLength(4);
+    expect((rec?.messages[0] as { role: string }).role).toBe('user');
+    expect(rec?.usage.inputTokens).toBe(280); // 200 + 80
+    expect(rec?.billedUsd).toBeGreaterThan(0);
+    expect(rec?.billedUsd).toBeCloseTo(result.billedUsd, 10);
+    expect(rec?.createdAt).toBe(5000);
+  });
+
+  it('records a stopped status when the user aborts', async () => {
+    const store = new InMemoryConversationStore();
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const { runner } = buildRunner(twoTurn, {
+      signal: ctrl.signal,
+      persistence: { store, conversationId: 'b2', userId: 'u1', workspaceId: 'ws-1', title: 'x', now: () => 1 },
+    });
+    await runner.run('build something');
+    expect((await store.get('b2'))?.status).toBe('stopped');
+  });
+
+  it('is best-effort: a throwing store never breaks the build', async () => {
+    const brokenStore = {
+      create: async () => { throw new Error('db down'); },
+      get: async () => null,
+      appendMessages: async () => { throw new Error('db down'); },
+      update: async () => { throw new Error('db down'); },
+      listByUser: async () => [],
+      remove: async () => {},
+    };
+    const { runner } = buildRunner(twoTurn, {
+      persistence: { store: brokenStore, conversationId: 'b3', userId: 'u1', workspaceId: 'ws-1', title: 'x' },
+    });
+    const result = await runner.run('build despite a broken store');
+    expect(result.ok).toBe(true); // the build completes regardless of persistence failures
+  });
+
+  it('does not touch any store when no persistence is configured (back-compat)', async () => {
+    const { runner } = buildRunner(twoTurn);
+    const result = await runner.run('plain build');
+    expect(result.ok).toBe(true);
   });
 });

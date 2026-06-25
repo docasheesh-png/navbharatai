@@ -43,7 +43,7 @@
 - Test count grew ~1049 → **1602 passing** (~50 new AgentV3 tests). 
 - **To run live (admin):** set `AGENTV3_ENABLED=true` + `AGENTV3_ALLOWLIST=<admin uid>` + `ANTHROPIC_API_KEY` + `E2B_API_KEY` in Cloud Run; a floating "v3.0" button appears for the admin → full multi-agent builder.
 - **GitManager (real git commits) DONE** (pushed to #191): sandbox is a real git repo; every write/edit creates a real commit (sandbox-only; best-effort), History shows real SHAs; step caps now env-configurable (AGENTV3_MAX_STEPS=80, AGENTV3_SUBAGENT_MAX_STEPS=40). 1607 tests.
-- **Remaining/next:** P6 cutover (make v3.0 default, retire old builders) — only after live dogfood; conversation persistence (D7) reconnect-durable backend; wire GitManager.restore to a History→restore endpoint (needs persistent sandbox mapping); editable-todo UI (bidirectional); BYOK option. Live run still requires admin to set keys + flag (real Claude+E2B spend) — not exercised in-session (no keys).
+- **Remaining/next:** P6 cutover (make v3.0 default, retire old builders) — only after live dogfood; conversation persistence (D7) reconnect-durable backend; wire GitManager.restore to a History→restore endpoint (needs persistent sandbox mapping); editable-todo UI (bidirectional). **(BYOK REMOVED — see 2026-06-25 note; not a feature.)** Live run still requires admin to set keys + flag (real Claude+E2B spend) — not exercised in-session (no keys).
 
 **Session 2026-06-22 (c) — Pro v3.0 ("Vargen 3.0") kickoff: parity audit + design doc (DESIGN ONLY, no runtime change):**
 - Earlier this session: 35-bug brutal audit → 28 fixes shipped live (PRs #173–#178, all CI-green) + Cashfree payment-leak fixes.
@@ -2009,3 +2009,1389 @@ Fixes in this PR:
    it, AgentV3Panel renders `₹{billedInr}` (falls back to $ if INR absent). Reducer test covers it.
 
 Gate green: server+frontend tsc 0, **2170 vitest**, **npm run build PASS**, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 v11: SQL-injection detection (security)
+
+Resumed the autonomous Section I march. New item: `SecurityAnalysis` `sql-injection` rule
+(high). A SQL statement built by interpolating (`` `SELECT … ${x}` ``) or concatenating
+(`"SELECT … " + x`) a value straight into the query string is the classic SQL-injection
+vector — and nothing in the evaluate engine caught it before (command-injection covers shell
+sinks; SecurityConfigAnalysis covers TLS/CORS/randomness; none cover SQL). High-precision: the
+string must actually START with a SQL verb (SELECT/INSERT/UPDATE/DELETE) AND contain a template
+`${…}` or be concatenated with a non-literal — so parameterised queries
+(`query('… WHERE id = ?', [id])`), static queries, and literal+literal joins are NOT flagged.
+Redundant-work check (safeguard #6) first caught an almost-added duplicate TLS rule — reverted
+it (SecurityConfigAnalysis already has `tls-verification-disabled`) and built the genuinely-new
+SQL rule instead. Folds into the existing security dimension. AppKnowledgeBase synced. v3.0-only,
+flag-OFF.
+
+Tests: +1 unit (interpolation/concat flagged; parameterised/static/literal-join safe) + 1
+dispatcher integration. Gate green: server+frontend tsc 0, **2172 vitest** (+2), build PASS,
+boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 v12: hardcoded Authorization Bearer/Basic header (security)
+
+Continuing the autonomous Section I march. New item: `SecurityAnalysis` `hardcoded-auth-header`
+rule (high). An `Authorization` header set to a literal `Bearer <token>` / `Basic <creds>` is a
+committed API/access credential — but the assignment-based `hardcoded-secret` rule misses it (its
+key-set has no "Authorization", and the value form is a header, not a `key = '…'` assignment).
+High-precision: requires the literal to actually start with `Bearer`/`Basic` + 8+ chars; the
+PLACEHOLDER ignore excludes the correct env form (`Bearer ${token}`) and obvious placeholders
+(`Bearer YOUR_TOKEN_HERE`). An optional quote after the key name handles both `Authorization:`
+and `"Authorization":` shapes. Folds into the existing security dimension. AppKnowledgeBase
+synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (Bearer/Basic literal flagged; env form + placeholder safe) + 1 dispatcher
+integration. Gate green: server+frontend tsc 0, **2174 vitest** (+2), build PASS, boot:check PASS.
+
+Also this session: §12 of NAVBHARATAI_PRO_V3_DESIGN.md — the mitrify.xyz app-hosting decision
+(admin 2026-06-24): mitrify = preview+deploy by default, demoted to preview-only once the user
+connects their own domain. DESIGN LOCKED but BUILD GATED — the E2B↔mitrify link mechanism is
+unconfirmed, so no preview/deploy URL change ships until the admin verifies it (real format, never
+a guess). Audited ground truth: cloudflare.ts already uses mitrify.xyz as the Cloudflare-SaaS zone;
+no hostname→app serving layer exists yet; v3.0 preview still returns raw *.e2b.app.
+
+---
+
+### 2026-06-24 — mitrify.xyz: preview-on-mitrify IMPLEMENTED (v3.0-scoped, real)
+
+Admin confirmed mitrify.xyz is an **E2B-native custom domain** (shows in E2B dashboard Domains
+setting) and approved showing it for preview/deploy. Verified E2B SDK v2.30.0: `sandbox.getHost`
+returns `{port}-{id}.${domain}` with domain defaulting to `E2B_DOMAIN||'e2b.app'`; reconfiguring the
+SDK `domain` would ALSO rewrite `api.${domain}` and break sandbox creation — so the correct fix is a
+user-facing host-suffix swap (E2B custom domains are additive aliases to the same sandbox).
+
+Shipped (real, tested, isolated):
+- `src/server/AgentV3/PreviewDomain.ts` — PURE `applyPreviewDomain(url, domain?)`: swaps a `*.e2b.app`
+  host → `*.mitrify.xyz` (override `E2B_PREVIEW_DOMAIN`; `=e2b.app` disables). Idempotent; localhost /
+  non-e2b / already-custom hosts untouched.
+- Wired ONLY in `ToolDispatcher.update_preview` (v3.0 path) → the `preview` event now carries the
+  mitrify URL. The live Engineer AI builder (`E2BActuator.getPortUrl`) is UNTOUCHED — zero blast
+  radius on the existing production builder.
+- AppKnowledgeBase: added the mitrify preview bullet AND corrected the now-stale billing line
+  (was "Opus-equiv ×2.5 / ×5 Only-Opus" → real shipped model: Normal Sonnet-equiv ×3.5, Power real
+  Opus ×2.5, shown in ₹ at real-time FX; also fixed the "5× cost" in howToUse).
+- Design doc §12.1: preview implemented; durable DEPLOY half still pending (needs a persistent host
+  + hostname→app serving layer + publish-target resolver — E2B sandboxes are ephemeral, honest state).
+
+Tests: PreviewDomain.test.ts (6) + 1 dispatcher integration. Gate green: server+frontend tsc 0,
+**2181 vitest** (+7), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — §12.2 v3.0 durable deploy + git (backend): workspace-files collector (reuse existing deploy stack)
+
+Admin chose "Git + multi-platform deploy" for v3.0 durable deploy — reuse the EXISTING, real deploy
+stack (verified live this session: `/api/pro/deploy` → ProDeploy Vercel/Netlify/Cloudflare/GitHub
+Pages; `/api/github/push-enhanced` + GitHub OAuth; all registered in server.ts L413/423/436), NOT
+rebuild it. AgentV3 was fully isolated from all of it (grep-confirmed zero refs), so the only new
+backend needed is a way to hand v3.0's sandbox files to those routes.
+
+Shipped (increment 1, backend):
+- `src/server/AgentV3/WorkspaceFiles.ts` — PURE `collectWorkspaceFiles(actuator, workspaceId)` →
+  `{ files: Record<path,content>, skipped }`, the EXACT shape `/api/pro/deploy` and
+  `/api/github/push-enhanced` already accept. Security filtering mirrors the ZIP/GitHub paths:
+  excludes node_modules / .git / dist / build / live `.env*` secrets (keeps `.env.example/.sample/
+  .template`), skips binary (NUL) + oversized files, bounded by file count + total size. Best-effort:
+  an unreadable file is skipped, never fatal.
+- `POST /api/agentv3/workspace-files` — gated by isAgentV3Enabled; reads the sandbox via the shared
+  actuator singleton; returns `{ files, count, skipped }`. Read-only; zero change to any live route.
+
+NEXT (increment 2, frontend): a Deploy action in AgentV3Panel that fetches these files and reuses the
+existing MultiCloudDeploy UI + `/api/pro/deploy` + `/api/github/push-enhanced` (GitHub OAuth) — git
+push + 4-platform deploy, no new deploy backend. Tests: WorkspaceFiles.test.ts (5). Gate green:
+server tsc 0, **2186 vitest** (+5), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — §12.2 v3.0 import side: writeWorkspaceFiles + import endpoint (full fetch→edit→deploy loop)
+
+Admin expanded the scope: v3.0 must FETCH files from git (GitHub/Firebase/other), EDIT/UPDATE, and
+DEPLOY/PUSH back — with ALL options available (not rigid to one). The export collector (prev entry)
+plus this import side complete the round-trip backend, all reusing existing routes.
+
+Shipped (increment 2, backend import side):
+- `writeWorkspaceFiles(sink, workspaceId, files)` in WorkspaceFiles.ts — writes an imported project
+  (e.g. from the existing `/api/github/fetch` route) into the sandbox. Path-safe: rejects absolute
+  paths, `..` traversal and NUL; never imports node_modules/.git or live `.env` secrets (templates
+  kept); same size/count caps. Best-effort — an unsafe path or write error is skipped, never fatal.
+- `POST /api/agentv3/import-files` — gated; ensureWorkspace('import') best-effort (unknown type →
+  empty sandbox so the repo lands cleanly) then writes. Returns `{ imported, skipped }`. No change to
+  any live route — the frontend orchestrates fetch (existing) → import (new).
+
+So the backend round-trip is ready: fetch (existing /api/github/fetch) → import (new) → edit (agent)
+→ collect (new) → push/deploy (existing /api/github/push-enhanced + /api/pro/deploy). NEXT
+(increment 3, frontend): expose ALL options in the v3.0 panel. Tests: WorkspaceFiles.test.ts now 9.
+Gate green: server tsc 0, **2190 vitest** (+4), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — FIX: v3.0 "Load failed" on a plain "hi" (heavy build path + silent stream)
+
+Admin reported (live screenshot) that sending "hi" in v3.0 on navbharatai.com shows a red
+"Load failed". Diagnosis (grounded in code, not guessed):
+- `useAgentV3Build.ts:160` surfaces a network-level fetch failure as its message → Safari's
+  `TypeError: Load failed`. A clean 4xx/5xx is handled separately (shows the JSON error), so
+  "Load failed" specifically means the streaming connection reset / idle-timed-out with no
+  complete response.
+- Root cause: the cheap-chat cost-routing gate was `classifyIntent==='chat' && planFirst===false`,
+  but plan-mode defaults ON — so even a greeting fell through to the FULL build loop. That path
+  sits SILENT from `res.flushHeaders()` until the E2B sandbox finishes creating (`workspace`
+  event), a multi-second gap with no bytes sent → Cloud Run / mobile-Safari reset the stream →
+  "Load failed". (The build try/catch emits a visible `error` event, so a normal throw would NOT
+  look like "Load failed" — confirming it's a connection reset, i.e. the silent gap.)
+
+Two safe, clearly-correct fixes (v3.0 route only, flag-OFF feature):
+1. `isPlainChatTurn = classifyIntent(prompt) === 'chat'` — a conversational turn has nothing to
+   plan, so it takes the cheap path even when plan-mode is on. classifyIntent is conservative
+   (defaults to 'build' on doubt), so real build requests are unaffected. "hi" now gets a fast
+   cheap reply and never spins up a sandbox.
+2. Emit an immediate "Setting up your workspace…" narration BEFORE `ensureWorkspace`, so the build
+   stream is never silent during sandbox setup (prevents the idle-timeout "Load failed" on real
+   builds too).
+
+HONEST status: I cannot reproduce the live failure (no gcloud, proxy blocks the live domain), so
+this is my best-confidence fix addressing the most likely cause. Definitive confirmation needs the
+Cloud Run log error for that request, or a post-deploy test. On the branch only — live (e0d3ab4)
+is untouched until verified + merged. Gate green: server tsc 0, **2190 vitest**, build PASS,
+boot:check PASS.
+
+---
+
+### 2026-06-24 — Diagnostic: live Vertex/Gemini/Grok health probe (answers "are the free providers working?")
+
+Admin asked to check whether Vertex and Gemini are actually working — directly relevant to the
+"Load failed" bug, because the cheap "hi" reply runs on the FREE router (Vertex → Gemini → Grok) and
+falls into the heavy build path only if ALL of them fail. Could not check from the dev container (no
+keys set here — verified all unset; proxy blocks the live domain), so built the means to check on live:
+
+- `agentV3KeyDiag()` now also reports FREE-router provider PRESENCE (no secrets): `vertexConfigured`
+  (GOOGLE_CLOUD_PROJECT/_ID set), `geminiKeySet` (GEMINI_API_KEY set), `grokKeySet` (GROK/XAI key set).
+  Available on the public `GET /api/agentv3/diag` (presence booleans only, like anthropicKeySet).
+- `GET /api/agentv3/diag?test=1&admin=<ADMIN_PASSWORD>` now also returns `freeProviders`: a live probe
+  that makes ONE tiny real call to Vertex, Gemini and Grok each and reports `{ name, ok, latencyMs,
+  error }` per provider — so the admin sees which actually WORK on live (not merely configured). Each
+  provider failure is caught + reported, never thrown. Admin-only (real calls cost money).
+
+Provider config requirements (for reference): Vertex = GOOGLE_CLOUD_PROJECT(+ADC); Gemini =
+GEMINI_API_KEY; Grok = GROK_API_KEY or XAI_API_KEY. The Cloud Run STARTUP logs already print
+`[VERTEX] … disabled`, `[GeminiProvider] … Key present: true/false`, `[ROUTER_MGR] Building FREE
+chain …` — an immediate no-deploy way to see provider status. Tests: agentv3.test.ts +1 (now 9).
+Gate green: server tsc 0, **2191 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — WORK DUE (admin-deferred — do later, not abandoned)
+
+Admin parked these to do later; resuming the autonomous Section I march in the meantime. All current
+session work is on branch `claude/navbharatai-pro-testing-p2mgr5` (8 commits ahead of main), gate-green,
+but NOT merged → NOTHING from this session is live yet (live = e0d3ab4 #341).
+
+WORK DUE:
+1. **v3.0 deploy/git FRONTEND UI (increment 3)** — backend done (workspace-files collect + import
+   endpoints). Remaining: expose ALL options in the v3.0 panel (GitHub fetch/push via existing
+   `/api/github/fetch` + `/api/github/push-enhanced` + OAuth; deploy via existing `/api/pro/deploy`
+   Vercel/Netlify/Cloudflare/GitHub Pages). Reuse MultiCloudDeploy/GitPanel; no new deploy backend.
+2. **mitrify.xyz DURABLE DEPLOY (§12 "deploy" half)** — preview already shipped (§12.1). Remaining:
+   a durable host + hostname→app serving layer + publish-target resolver (mitrify vs user's own domain).
+3. **"Load failed" live confirmation** — fix shipped on branch (greeting cheap path + stream keep-alive).
+   Remaining: confirm via the Cloud Run log error for the failed "hi" request, then merge+deploy+retest.
+4. **Vertex/Gemini live status** — probe shipped (`/api/agentv3/diag?test=1&admin=…`). Admin will read
+   the Cloud Run startup logs (`[VERTEX] … disabled`, `[GeminiProvider] Key present:`) / run the probe.
+5. **Merge the 8 branch commits → main → Cloud Build deploy** — to make any of the above live.
+
+---
+
+### 2026-06-24 — Section I #4 v13: hardcoded provider tokens in source (security)
+
+Resumed the autonomous Section I march. New item: `SecurityAnalysis` `hardcoded-provider-token`
+rule (high). Distinctive provider credential formats — GitHub (`gh[posru]_…`), Google (`AIza…`),
+Slack (`xox[baprs]-…`), Stripe-live (`[rs]k_live_…`) — hardcoded in SOURCE code. Gap (verified):
+`EnvSecretValueAnalysis` already covers these formats but ONLY inside `.env` templates, and
+`SecurityAnalysis.hardcoded-secret` needs a recognized key NAME, so a token under an arbitrary
+variable (`const k = "ghp_…"`) in `.ts/.tsx` was missed. These formats are unmistakable → matching
+one is almost certainly a real leaked credential. PLACEHOLDER ignore excludes obvious examples.
+Folds into the existing security dimension. AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (4 token formats flagged; env/placeholder/URL safe) + 1 dispatcher integration.
+Gate green: server+frontend tsc 0, **2193 vitest** (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #6 v3: new Promise(async …) executor (correctness)
+
+Continuing the autonomous Section I march — varying from the security run back into a correctness
+check. New item: `AsyncPatternAnalysis` `new-promise-async` kind (joins `async-foreach`). A
+`new Promise(async (resolve, reject) => …)` executor is a classic silent bug: if the async executor
+throws, the promise NEVER rejects (the throw becomes an unhandled rejection) and resolve/reject never
+see the error — the code "compiles" but errors vanish at runtime, directly against "the app must
+never break". High-precision regex (`new Promise(<generics>)?(  async`), comments skipped, the
+synchronous executor form is NOT flagged. The scanner + summary are now multi-kind with per-kind fix
+guidance. AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (async executor flagged, sync form safe, comment ignored) + 1 dispatcher integration.
+Gate green: server+frontend tsc 0, **2195 vitest** (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 v14: target="_blank" without rel="noopener" (security)
+
+Continuing the autonomous Section I march. New item: `SecurityAnalysis` `unsafe-target-blank` rule
+(medium). A link with `target="_blank"` but no `rel="noopener"` lets the opened page control the
+original tab via `window.opener` (reverse tabnabbing → it can silently redirect the user's tab to a
+phishing page). Genuinely uncovered. High-precision: the `noopener` guard ignores the safe form, and
+a non-`_blank` target is not flagged; same-line `rel` is the common case (documented precision
+trade-off vs multi-line tags). Folds into the existing security dimension. AppKnowledgeBase synced.
+v3.0-only, flag-OFF.
+
+Tests: +1 unit (unsafe form flagged; rel=noopener + target=_self safe) + 1 dispatcher integration.
+Gate green: server+frontend tsc 0, **2197 vitest** (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #6 v4: useEffect(async …) detection (correctness)
+
+Continuing the autonomous Section I march. New item: `AsyncPatternAnalysis` `async-useeffect` kind
+(joins async-foreach + new-promise-async). `useEffect(async () => …)` is a React footgun: the effect
+callback returns a Promise instead of nothing/a cleanup function, so React can NEVER run the cleanup
+(stale state / leaks) — the eslint-react-hooks rule flags it too. High-precision regex
+(`useEffect(  async`), comments skipped; the correct pattern (sync effect calling an inner async fn)
+is not flagged. AppKnowledgeBase already covers the async family. v3.0-only, flag-OFF.
+
+Tests: +1 unit (useEffect(async) flagged, sync effect safe) + 1 dispatcher integration. Gate green:
+server+frontend tsc 0, **2199 vitest** (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #7 (a11y): iframe-missing-title (accessibility)
+
+Continuing the autonomous Section I march — varying into the Accessibility (Layer 78) dimension. New
+item: `AccessibilityAnalysis` `iframe-missing-title` rule (medium). An `<iframe>` with no `title` (and
+no `aria-label`) is announced by screen readers as just "iframe" with no context — WCAG 4.1.2. Tag-
+local + single-line like the existing img-missing-alt rule (high precision; multi-line tags skipped).
+`title` or `aria-label` satisfies it. AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (iframe without title flagged; title/aria-label safe) + 1 dispatcher integration.
+Gate green: server+frontend tsc 0, **2201 vitest** (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 (architecture): server-only Node builtin imported by front-end (build-break)
+
+Continuing the autonomous Section I march — varying into the Architecture/structural dimension. New
+item: `analyzeArchitecture` now flags a server-only Node builtin (`fs`, `child_process`, `cluster`,
+`net`, `tls`, `dns`, `dgram`, `worker_threads`, `v8`, `vm`, `readline`, `repl`, `inspector`, `module`,
+`os`, `http2`) imported by FRONT-END code → `nodeBuiltinsInFrontend`. These have no browser equivalent
+and aren't polyfilled, so the import breaks the Vite/browser build. Deliberately conservative:
+commonly-polyfilled builtins (path, crypto, buffer, stream, events, util, url, process) are NOT flagged
+to keep precision high; back-end files importing them are NOT flagged (reuses the same front-end path
+classifier as the layering check). Folds into the existing architecture report + summary + problem
+count. AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +2 unit (fs-in-frontend flagged; path/crypto + back-end-fs safe) + 1 dispatcher integration;
+Readiness.test.ts literal updated for the new field. Gate green: server+frontend tsc 0, **2204 vitest**
+(+3), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I (authenticity): placeholder-image services left in markup
+
+Continuing the autonomous Section I march — varying into the Authenticity dimension (the "real
+features only, no fakes" rule). New item: `AuthenticityAnalysis` `placeholder-image` rule (medium).
+Unambiguous placeholder-image generators (`via.placeholder.com`, `placehold.co/.it`, `placekitten.com`,
+`placeimg.com`, `dummyimage.com`, `lorempixel.com`) left in an `<img src>`/url are fake content shipped
+as real. Conservative: real photo services (picsum.photos, unsplash) are NOT flagged — they serve real
+images and ship in real apps. Folds into the existing authenticity dimension. AppKnowledgeBase synced.
+v3.0-only, flag-OFF.
+
+Tests: +1 unit (via.placeholder/placehold.co flagged; picsum + local asset safe) + 1 dispatcher
+integration. Gate green: server+frontend tsc 0, **2206 vitest** (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 (security): javascript: URL in href/src (XSS sink)
+
+Continuing the autonomous Section I march. New item: `SecurityAnalysis` `javascript-uri` rule (medium).
+A `javascript:` URL in an href/src/action/formaction/xlink:href executes script when followed — an XSS
+sink (worse when the URL is built from data) and a CSP violation. High-precision: the common no-op
+placeholders `javascript:void(0)` / `javascript:;` are ignored to keep focus on the dangerous,
+script-bearing forms; a real URL is not flagged. Folds into the existing security dimension.
+AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (javascript:fn() in href + javascript:alert in iframe flagged; void(0) + real URL safe)
++ 1 dispatcher integration. Gate green: server+frontend tsc 0, **2208 vitest** (+2), build PASS,
+boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #8 (compliance): server cookie without httpOnly
+
+Continuing the autonomous Section I march — varying into the Trust/Compliance dimension (Layer 77
+"Bharosa"). New item: `ComplianceAnalysis` `cookie-no-httponly` rule (medium). A server cookie set via
+`res.cookie(...)` / `response.cookie(...)` without `httpOnly` is readable by any script, so an XSS can
+steal the session/auth token (DPDP/GDPR security-of-processing). Distinct from the existing
+`cookie-no-samesite` (client `document.cookie` + SameSite) — different API and different protection.
+High-precision: `res.cookieParser()` and other similarly-named calls are NOT matched. Feeds the
+existing launch-safe certificate. AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (res.cookie without httpOnly flagged; with httpOnly + cookieParser safe). Gate green:
+server+frontend tsc 0, **2209 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 (security): postMessage wildcard target origin
+
+Continuing the autonomous Section I march. New item: `SecurityAnalysis` `postmessage-wildcard-origin`
+rule (medium). `window.postMessage(data, '*')` broadcasts the message to a frame at ANY origin — a
+malicious/compromised iframe can read it; always target a specific origin. High-precision regex
+(matches the `, '*')` second argument); a specific-origin call is not flagged. Folds into the existing
+security dimension. AppKnowledgeBase synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (wildcard '*' flagged; specific origin safe). Gate green: server+frontend tsc 0,
+**2210 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Feature: shared creator attribution across EVERY AI agent (admin Dr Asheesh)
+
+Admin (Dr Asheesh) request: every NavBharatAI agent, when asked "who made/created you", must credit
+"Dr Asheesh and his team" — naturally varied wording each time, same core fact. Implemented as a
+SINGLE SOURCE OF TRUTH and wired into every user-facing AI agent's system prompt (DRY — update one
+constant, all agents stay consistent).
+
+- `CREATOR_IDENTITY` constant in `src/server/lib/prompts.ts` — instructs the model to credit "Dr
+  Asheesh and his team" in the user's own language, vary the wording every time (never repeat the same
+  sentence), never claim an AI provider/model company made it, and not invent extra names/dates.
+- Wired into all agent surfaces (mapped via an Explore agent so none were missed):
+  • Free Chat / NBI + Pro conversation — chat.ts (universal `systemPrompt` fold → covers all its modes)
+  • Pro Chat — pro.ts (Build/Conversation, Auto, Plan — all 3 mode prompts)
+  • Engineer AI — EngineerAgentLoop.ts (effectiveSystemPrompt)
+  • Doctor AI (SDA) — sda.ts (SDA_SYSTEM_FINAL)
+  • ALL 58 Professionals AIs — professionals/engine.ts (extracted testable `buildProfessionalSystemPrompt`)
+  • AgentV3 v3.0 — systemPrompt.ts (architect + plan) AND the v3.0 cheap-chat greeting path in agentv3.ts
+- Language standard respected: the instruction is English; the reply text is AI-generated at runtime in
+  the user's language (the allowed exception). Per the KB rule, an AI-prompt change needs no KB nav entry.
+
+Tests: new creatorIdentity.test.ts (+3) — constant credits Dr Asheesh + asks variation + forbids provider
+attribution; professionals + agentv3 builders include the attribution. Gate green: frontend tsc 0,
+server tsc 0, **2213 vitest** (+3), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Creator address added + TEMPORARY env-gated v3.0 provider-debug (admin)
+
+Two admin (Dr Asheesh) requests:
+
+1. **Creator address in CREATOR_IDENTITY** — the shared attribution now also says Dr Asheesh is based
+   in Budaun, Uttar Pradesh, India, and instructs the agent to mention that location if the user asks
+   where the creator/team is from (still naturally varied, same core facts). Applies to every agent via
+   the single source of truth (lib/prompts.ts).
+
+2. **TEMPORARY provider-debug (testing only)** — `providerDebugTag(label)` in agentv3.ts, gated by env
+   `AGENTV3_DEBUG_PROVIDER` (OFF by default). When ON, every v3.0 reply is tagged `_[debug · replied
+   via <provider>]_` so the admin can verify WHERE each reply came from:
+   • cheap-chat / "hi" path → the real free-router provider (VERTEX / GEMINI / GROK) from response.provider
+   • build path → `Claude (<model>)` (the resilient runner already self-labels in the text if it fell
+     back to a free provider).
+   "Hide later" = just unset the env var on Cloud Run — no code change, users never see it (default OFF).
+   The helper + call sites are marked TEMPORARY for clean removal once testing is done.
+
+Tests: creatorIdentity.test.ts asserts the address; agentv3.test.ts asserts providerDebugTag is empty
+when OFF and tags the provider when ON (+2). Gate green: frontend tsc 0, server tsc 0, **2215 vitest**
+(+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — v3.0 UX fixes (4): agent spinner/tick, input padding, sticky header, preview port
+
+Admin reported four v3.0 issues; all fixed:
+
+1. **Agent chips never spin / done-tick is gray** — `AgentChip` showed a static gray `CheckCircle2`
+   because the reducer flips `card.active=false` after EVERY tool_result (flickers between tools). Now
+   the chip tracks the whole-build state: spins (`Loader2 animate-spin`) while the build is `running`,
+   then a GREEN check (`text-emerald-500`) when done. (AgentV3Panel.tsx — AgentChip takes `running`.)
+
+2a. **Input box eats too much space** — the input row padding `p-3` → `px-2 py-1.5` (tighter).
+
+2b. **v3.0 header (title + Preview/Files/Diff/Terminal tabs) scrolls away** — root cause: the App
+   content area is viewport-bounded (`h-[calc(100dvh-3.5rem)] overflow-hidden`) only for a fixed list of
+   views, and `engine_builder` was NOT in it → it used `overflow-y-auto` (page-scrolls), and the panel
+   wrapper's `height:100vh` was taller than the visible area, so the whole panel (header included)
+   scrolled. Fix: added `engine_builder` to the bounded list, and changed the wrapper from
+   `height:100vh` to `flex-1 min-h-0` so it fills the bounded area; the chat scrolls internally and the
+   header stays put. (App.tsx)
+
+3. **Preview "Closed Port Error" on port 5173** — the dev server bound to localhost only, so the E2B
+   preview URL (`5173-<sandbox>.e2b.app`, reached over the network) got connection-refused even though
+   `nc -z localhost 5173` passed. Fixed binding to 0.0.0.0 in two places: the scaffolded
+   `vite.config.ts` template now sets `server/preview: { host: true, port: 5173 }`, and the v3.0 system
+   prompt now instructs the agent that the dev server MUST listen on 0.0.0.0 (Vite `server.host=true` or
+   `--host 0.0.0.0`; Next `-H 0.0.0.0`; CRA `HOST=0.0.0.0`).
+
+Gate green: frontend tsc 0, server tsc 0, **2215 vitest**, build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #19 (SEO): missing <meta charset>
+
+Resuming the autonomous Section I march (while admin tests v3.0). New item: `SeoAnalysis` now flags a
+missing `<meta charset>` in the HTML entry (low). Without a declared charset, non-ASCII text (e.g.
+Hindi) can render as mojibake in some browsers/encodings — a real bug for a Bharat-first app. Joins the
+existing high-signal four (title, viewport, description, lang); high-precision tag check. KB synced.
+v3.0-only, flag-OFF. Pushed to branch only (no main-merge — yielding to the concurrent session per
+admin's "pehle aap" / no-race instruction; main-merge will happen in a quiet window).
+
+Tests: +1 unit (charset missing flagged; present safe; FULL fixture updated). Gate green: server tsc 0,
+**2216 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — v3.0 Stop & Resume for orphaned builds (admin-requested)
+
+Admin report: a v3.0 build whose UI connection was lost left the user STUCK — "A build is already
+running for this account" (409) with no way to stop OR re-open the running build. Root cause:
+`activeBuilds` is server-side per-account; the client "stop" only aborted the local fetch (server build
+kept running), and build events streamed only to the original connection (no buffer → no re-attach).
+
+Shipped (full Resume + Stop):
+- **Backend (agentv3.ts):** a `runningBuilds` registry per account — each build's events are buffered
+  (cap 4000) and fanned out to subscribers; the client res is the first subscriber, and on disconnect we
+  KEEP the build alive (still buffering) so it can be resumed. New endpoints: `POST /api/agentv3/stop`
+  (aborts the loop via AbortController + ends all streams + frees the slot immediately) and
+  `POST /api/agentv3/attach` (replays the buffer then streams live — true re-attach). `/status` now
+  returns `buildRunning`; the 409 carries `resumable`. Registry cleanup is guarded
+  (`runningBuilds.get(key) === rb`) so a Stop-then-new-build can't be clobbered by the old loop's finally.
+- **AgentRunner:** accepts an `AbortSignal`; stops honestly BETWEEN turns ("Build stopped by the user.")
+  so Stop actually halts server compute, not just the UI.
+- **Frontend (useAgentV3Build):** `stop()` now also calls `/stop` (true server stop); new `resume()`
+  (attach + shared `pumpStream`), `checkRunning()`, and `serverBuildRunning` state.
+- **Frontend (AgentV3Panel header, top-right):** replaces the single "New" with state-aware buttons —
+  attached+streaming → **Stop**; a build running but not attached → **Resume + Stop**; idle → **New**.
+  On mount/idle it polls `/status` to detect an orphaned build. KB synced.
+
+Tests: +1 AgentRunner (abort signal stops the loop). Gate green: frontend tsc 0, server tsc 0,
+**2217 vitest** (+1), build PASS, boot:check PASS. Pushed to branch (no main-merge — yielding to the
+concurrent session; will merge in a quiet window).
+
+---
+
+### 2026-06-24 — v3.0 multi-provider BUILD engine (Vertex/Gemini can now actually build, not just chat)
+
+Admin hit "Your credit balance is too low to access the Anthropic API" on live — Claude out of credits,
+so v3.0 builds fell back to a TEXT-only reply (GROK) and produced NOTHING real (no files, no dev server,
+no preview). Root cause: the build tool-use loop was Claude-only; the fallback couldn't call tools.
+
+Discovery: a prior session had ALREADY built the pieces (unwired) — `GeminiToolRunner` (real Gemini/Vertex
+function-calling TurnRunner) + `makeMultiProviderTurnRunner` (cheap-first chain with a Claude backstop),
+both tested. Wired them into the build path:
+- New `buildTurnRunner()` in agentv3.ts builds a chain: **VERTEX → GEMINI → CLAUDE (backstop)**, each a
+  real tool-use runner, so Vertex/Gemini do the ACTUAL building (write_file, bash, run dev server…) and
+  Claude only catches hard failures. Replaces `makeResilientTurnRunner(new ClaudeClient())` (which was
+  Claude-primary + text-only fallback).
+- Vertex via `new GoogleGenAI({ vertexai: true, project, location })` (Cloud Run ADC / the SA roles the
+  admin already granted); Gemini via `GEMINI_API_KEY`. Falls back to the Claude-only resilient runner if
+  neither is configured.
+- Env knobs: `AGENTV3_BUILD_CLAUDE_FIRST=1` (prefer Claude, Gemini/Vertex as fallback — for when credits
+  return), `AGENTV3_{VERTEX,GEMINI}_BUILD_MODEL` (default `gemini-2.5-pro`). Billing unchanged
+  (Claude-equivalent markup regardless of model → margin only improves with the cheaper model).
+- Bonus: this also fixes the dishonest "✅ Here's what I built" — if every provider fails the turn now
+  throws → the loop emits an honest `error`, never a fake success.
+
+NEEDS DEPLOY to take effect (build path is live). Caveat: Gemini build quality vs Claude is unverified
+end-to-end; the adapter is unit-tested but real builds need a live test. Gate green: frontend+server
+tsc 0, **2217 vitest**, build PASS, boot:check PASS, 41 provider tests pass. Pushed to branch.
+
+---
+
+### 2026-06-24 — v3.0 fixes: create-vite/Node, loading spinner under reduced-motion
+
+Admin (live test) hit 3 issues; 2 fixed here (#1, #3), #2 (full-app theme) scoped separately.
+
+#1 — Build said "create-vite failed … Node.js version incompatibility" (NOTE: this confirms Vertex/Gemini
+is NOW actually BUILDING — running real tool commands). The agent shouldn't scaffold with create-vite at
+all: the workspace is already pre-scaffolded (vite-react template) and the sandbox Node is older than the
+latest create-vite needs. Fix: system prompt now tells the agent the Vite+React+TS project is ALREADY
+scaffolded — edit/add files, NEVER run `npm create vite`/`create-vite`/`npx create-*` (write config files
+directly for a different stack). Unblocks builds + faster (no scaffolder step).
+
+#3 — The "working…" loading spinner (and agent-chip spinners) didn't rotate. Root cause: index.css's
+`prefers-reduced-motion: reduce` block froze ALL animations (animation-duration 0.01ms / iteration 1) —
+so on a device with "reduce motion" ON, every spinner stops. A loading spinner conveys live status, not
+decoration, so it's an allowed reduced-motion exception. Fix: re-assert `.animate-spin { duration:1s;
+iteration:infinite }` inside the reduced-motion block — decorative motion stays reduced, functional
+spinners keep turning.
+
+Gate green: frontend+server tsc 0, **2217 vitest**, build PASS, boot:check PASS. Pushed to branch.
+
+---
+
+### 2026-06-24 — v3.0: preview default → e2b.app + stop the Node/tooling-version loop
+
+Admin live test: Vertex/Gemini IS building now (Files 7, Diff 3, History 13, Stop button live), but two
+bugs: (a) preview showed "5173-…mitrify.xyz's server IP address could not be found" — mitrify.xyz custom
+domain isn't set up (it needs a Caddy reverse-proxy VM + Cloudflare wildcard DNS per E2B's docs, not just
+a DNS record); (b) the agent looped 20+ min on `SyntaxError: node:util does not provide styleText` — the
+sandbox Node is OLD and the agent kept trying to upgrade vite/vitest (unfixable) instead of shipping.
+
+Fixes:
+- `PreviewDomain.ts`: DEFAULT_PREVIEW_DOMAIN `mitrify.xyz` → **`e2b.app`** (always resolvable → previews
+  work out of the box). mitrify is now opt-in: set `E2B_PREVIEW_DOMAIN=mitrify.xyz` once the custom domain
+  + wildcard DNS are configured. Tests updated (default = e2b.app; swap still tested with the env set).
+- `systemPrompt.ts`: told the agent the sandbox NODE VERSION IS FIXED — on a Node-version tool error
+  (node:util/styleText, ESM/engine, create-* failure) do NOT loop upgrading Node/tooling; pin an older
+  tool version or SKIP that step. And: a WORKING PREVIEW is the goal, not a green test suite — never block
+  on running vitest if the sandbox Node can't; build → run dev server → update_preview first.
+
+Admin will set up mitrify custom domain themselves (E2B docs: https://e2b.dev/docs/sandbox/custom-domain).
+Gate green: server tsc 0, **2217 vitest**, build PASS, boot:check PASS. Pushed to branch.
+
+---
+
+### 2026-06-24 — Section I #7 (a11y): icon-only link with no accessible name
+
+Resumed the autonomous Section I march after deploying the e2b.app/Node-loop fixes. New item:
+`AccessibilityAnalysis` `link-no-accessible-name` rule (low) — a same-line `<a href>` whose inner
+content (child tags stripped) has no visible text and no aria-label/aria-labelledby/title is an
+icon-only link a screen reader announces as nothing. Mirrors the existing button-no-accessible-name;
+distinct from anchor-missing-href (which is for links WITHOUT href). High-precision (tag-local,
+single-line). KB synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (icon-only link flagged; text/aria-label/no-href safe) + 1 dispatcher integration.
+Gate green: server tsc 0, **2219 vitest** (+2), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 (security): document.write() XSS sink
+
+Continuing the autonomous Section I march. New item: `SecurityAnalysis` `document-write` rule (medium).
+`document.write()`/`.writeln()` injects raw HTML (an XSS sink when fed dynamic data), blocks the parser,
+and wipes the whole page if called after load. Distinct from the existing `unsafe-html-sink`
+(innerHTML/outerHTML/insertAdjacentHTML). High-precision (`\bdocument.write(ln)?(`); a plain
+`stream.write(...)` is not matched. KB synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (document.write/writeln flagged; stream.write safe). Gate green: server tsc 0,
+**2220 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #7 (a11y): autoplaying media with sound (WCAG 1.4.2)
+
+Continuing the autonomous Section I march. New item: `AccessibilityAnalysis` `media-autoplay` rule
+(medium). Flags `<audio autoplay>` (always) or a `<video autoplay>` that is NOT muted — sound starts
+without user action (WCAG 1.4.2). A muted video autoplay (common background loop) is intentionally NOT
+flagged. Tag-local, high precision. KB synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (autoplay audio + unmuted autoplay video flagged; muted autoplay + no-autoplay safe).
+Gate green: server tsc 0, **2221 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 (security): setTimeout/setInterval string argument (eval)
+
+Continuing the autonomous Section I march. New item: `SecurityAnalysis` `settimeout-string` rule
+(medium). `setTimeout`/`setInterval` with a STRING first argument runs it as code (an eval) — code
+injection + a CSP violation. The `eval-usage`/`dynamic-function` rules miss this third eval form.
+High-precision: matches only a quoted first arg; a function argument (`setTimeout(() => …)` /
+`setTimeout(fn, …)`) is not matched. KB synced. v3.0-only, flag-OFF.
+
+Tests: +1 unit (string args flagged; function/reference args safe). Gate green: server tsc 0,
+**2222 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-24 — Section I #4 (security): open redirect (res.redirect to request input)
+
+Continuing the autonomous Section I march. New item: `SecurityAnalysis` `open-redirect` rule (medium).
+`res.redirect()` to a value taken DIRECTLY from the request (req.query/params/body/headers) is an open
+redirect — attackers craft a link that sends users to a phishing site. High-precision: the redirect
+target must START with req.* (optionally after a 3-digit status), so a fixed-path redirect with the
+user value only as a query param (`res.redirect(`/go?to=${req.query.x}`)`) is NOT flagged. KB synced.
+v3.0-only, flag-OFF.
+
+Tests: +1 unit (req-input + status-code forms flagged; static + fixed-path safe). Gate green:
+server tsc 0, **2223 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch): 11 high-precision quality checks
+
+Continuing the autonomous Section I march (complete→push→next). Eleven new high-precision
+checks added across the existing `evaluate` dimensions — each with a unit test, `AppKnowledgeBase`
+synced where user-facing, and the full gate green (server+frontend tsc, vitest, build). All are
+v3.0-only static scanners (pure, line/tag-local) so precision stays high. Branch
+`claude/navbharatai-pro-testing-p2mgr5`, not merged to main (admin's call):
+
+1. `AuthenticityAnalysis` **ts-nocheck** (medium) + **ts-ignore** (low) — suppressing type errors
+   hides real bugs behind a green build; `@ts-expect-error` (intentional, self-verifying) NOT flagged.
+2. `SecurityAnalysis` **weak-crypto-cipher** (high) — legacy `crypto.createCipher`/`createDecipher`
+   (no IV, MD5 key derivation); the correct `createCipheriv`/`createDecipheriv` NOT flagged.
+3. `AccessibilityAnalysis` **aria-hidden-interactive** (medium) — `aria-hidden="true"` on an
+   interactive element (button / a[href] / input / select / textarea): focusable but unannounced.
+4. `ComplianceAnalysis` **cookie-no-secure** (medium) — server cookie set without the Secure flag.
+5. `SeoAnalysis` **Open Graph** (low) — no `og:` tags → bare link previews on WhatsApp/social.
+6. `AsyncPatternAnalysis` **async-array-predicate** — `filter/find/findIndex/some/every/sort(async …)`
+   are always-wrong (the method uses the return synchronously); `.map(async …)` excluded.
+7. `SecurityAnalysis` **vue-v-html** (medium) — Vue `v-html` raw-HTML XSS sink (closes the Vue gap).
+8. `ArchitectureAnalysis` **nodeBuiltinsInFrontend** expanded — +async_hooks, diagnostics_channel,
+   perf_hooks, trace_events (no browser equivalent, not bundler-polyfilled).
+9. `SeoAnalysis` **favicon** (low) — no `<link rel=icon>` → generic tab icon + /favicon.ico 404.
+10. `ComplianceAnalysis` **geolocation as PII** — `navigator.geolocation`/getCurrentPosition/
+    watchPosition now triggers the "collects personal data → needs privacy policy" launch-safe logic.
+11. `AuthenticityAnalysis` **eslint-disable-all** (low) — a bare `eslint-disable` (no rule named)
+    turns off every lint rule; a disable that names specific rules NOT flagged.
+
+Gate at end of batch: server tsc 0, frontend tsc 0, **2234 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 2, post-deploy): 6 more high-precision checks
+
+Batch 1 (11 checks) merged to `main` 8d08761 (admin: "deploy karo") — clean FF, CI green pre-merge,
+Cloud Run auto-deploy triggered. Continuing the march on `claude/navbharatai-pro-testing-p2mgr5`
+(now ahead of main again). Six more, each unit-tested + KB-synced + full gate green:
+
+1. `AccessibilityAnalysis` **input-image-missing-alt** (high) — `<input type="image">` graphical
+   submit button with no alt (WCAG 1.1.1); plain img-missing-alt only covered `<img>`.
+2. `SeoAnalysis` **robots-noindex** (medium) — a leftover `<meta name=robots content=noindex>`
+   that silently keeps the live site OUT of search results.
+3. `AccessibilityAnalysis` **zoom-disabled** (medium) — viewport `user-scalable=no` / `maximum-scale=1`
+   blocks pinch-zoom, locking out low-vision users (WCAG 1.4.4).
+4. `AuthenticityAnalysis` **empty-promise-catch** (low) — `.catch(() => {})` empty body silently
+   swallows a rejection (promise-chain twin of an empty try/catch).
+5. `AccessibilityAnalysis` **role-presentation-interactive** (medium) — `role=none`/`presentation`
+   on a button/link/control strips its semantics from assistive tech.
+6. `SeoAnalysis` **placeholder-title** (medium) — a leftover template-default `<title>` ("Vite + React"
+   / "React App" / "Document" / "Untitled") — the classic "looks unfinished" tell.
+
+Gate at end of batch 2: server tsc 0, frontend tsc 0, **2240 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 3): 3 checks + standing autonomous-deploy
+
+Admin: "khud ba khud deploy kar diya karo, ruk kyu jate ho" → standing authorization to
+auto-deploy each green batch to `main` (CI-green-before-merge gate still enforced; no asking).
+Batch 2 (6 checks) merged to main f68f1f4. New since:
+
+1. `ComplianceAnalysis` **secret-in-url** (medium) — a password/token/api_key/otp/cvv in a URL query
+   string leaks into server logs, browser history and the Referer header.
+2. `SecurityAnalysis` **insecure-websocket** (low) — a ws:// socket to a remote host (in the clear;
+   an https page can't open it — mixed content); wss:// and localhost not flagged.
+3. `AuthenticityAnalysis` **placeholder-email** (low) — a left-in support@example.com / .org / .net
+   contact email shipped as if real.
+
+Gate: server tsc 0, frontend tsc 0, **2243 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 4): 2 security checks (auth/secret hardening)
+
+Batch 3 merged to main 6985077. New on `claude/navbharatai-pro-testing-p2mgr5`:
+
+1. `SecurityAnalysis` **hardcoded-provider-token** extended — now also matches GitHub fine-grained
+   PATs (github_pat_) and Anthropic keys (sk-ant-), both unmistakable formats.
+2. `SecurityAnalysis` **jwt-none-algorithm** (high) — a JWT configured with the "none" algorithm
+   (sign) or allowing "none" in the verify list accepts UNSIGNED tokens → anyone can forge any
+   token (auth bypass). A real algorithm allow-list (HS256/RS256) is not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2244 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 5): duplicate-id (a11y) + pseudoRandomBytes (security)
+
+Batch 4 merged to main b03dfe3. New:
+
+1. `AccessibilityAnalysis` **duplicate-id** (medium) — a repeated static id="foo" in one file breaks
+   <label for>/aria-* references (they resolve to the first match) and is invalid HTML. Only literal
+   string ids are counted; dynamic ids (id={`row-${i}`}) are expected to vary and are skipped.
+2. `SecurityAnalysis` **pseudo-random-bytes** (high) — crypto.pseudoRandomBytes() is explicitly NOT
+   cryptographically secure (deprecated); flagged so tokens/keys/IVs use crypto.randomBytes().
+
+Gate: server tsc 0, frontend tsc 0, **2246 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 6): viewport-fixed-width (SEO) + meta-refresh (a11y)
+
+Batch 5 merged to main 82329a4. New:
+
+1. `SeoAnalysis` **viewport-fixed-width** (medium) — a viewport pinned to a fixed pixel width
+   (width=1024) instead of width=device-width makes the app non-responsive on mobile.
+2. `AccessibilityAnalysis` **meta-refresh** (medium) — a <meta http-equiv="refresh"> timed
+   auto-refresh/redirect disorients users and moves focus without consent (WCAG 2.2.1 / 3.2.5).
+
+Gate: server tsc 0, frontend tsc 0, **2248 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 7): CORS credential-reflection + debug console.log
+
+Batch 6 merged to main d1f4daa. New:
+
+1. `SecurityConfigAnalysis` **cors-credentials-reflect-origin** (high) — cors({ origin: true,
+   credentials: true }) reflects ANY origin while allowing credentials, so any site can make
+   authenticated cross-origin requests with the user's cookies. A pinned origin + credentials
+   (the safe pattern) is not flagged.
+2. `AuthenticityAnalysis` **debug-console-log** (low) — a leftover debug print: console.log of a
+   bare number or a throwaway sentinel ("here"/"test"/"asdf"…); a real log message is not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2250 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 8): innerHTML += gap-fix + Angular bypassSecurityTrust
+
+Batch 7 merged to main 6b021d2. New:
+
+1. `SecurityAnalysis` **unsafe-html-sink** gap-fix — now also catches `el.innerHTML += userInput`
+   (append), not just `=` assignment; both are XSS sinks.
+2. `SecurityAnalysis` **angular-bypass-security** (medium) — Angular bypassSecurityTrustHtml/Url/
+   ResourceUrl/Script/Style explicitly DISABLES built-in sanitisation (XSS risk on untrusted input).
+
+Gate: server tsc 0, frontend tsc 0, **2251 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 9): path traversal + NoSQL injection (server security)
+
+Batch 8 merged to main 19c3029. New:
+
+1. `SecurityAnalysis` **path-traversal** (high) — a file read/response (sendFile/readFile/
+   createReadStream/readdir/unlink) built on request input enables ../../etc/passwd disclosure.
+2. `SecurityAnalysis` **nosql-injection** (high) — a raw req.body/req.query passed straight into a
+   Mongo/Mongoose query (.find/.findOne/.update*/.delete*) lets a user inject $gt/$ne operators to
+   bypass it (classic login auth bypass). Validated explicit fields are not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2253 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Fix: AgentV3 sandbox create-* scaffolder Node-version failure (live-test bug)
+
+Reported during live v3.0 test ("node.js wali problem abhi bhi h"): the build agent ran
+`npm create vite`, it FAILED on the sandbox's fixed (older) Node, and the agent then
+improvised a nested `todo-app/` subdir and hand-wrote package.json — slow + fragile. The
+system prompt already discouraged create-* generators, but a prompt is advisory and the
+model ignored it.
+
+Real, deterministic backstop (not just a prompt tweak):
+1. NEW `src/server/AgentV3/ScaffoldGuard.ts` — PURE matcher that detects create-* project
+   generators (`npm/yarn/pnpm/bun create`, `npx create-*`, `npm init <generator>`) without
+   matching ordinary `npm install` / `npm run` / `npm init -y` / git commits. + redirect
+   message that steers the agent to the existing ROOT scaffold (never a nested subdir).
+2. `ToolDispatcher` bash handler now intercepts a blocked command BEFORE running it,
+   self-heals the root scaffold (writes the Vite+React+TS starter via ViteReactProvider if
+   package.json is missing), records a governance audit, and returns the redirect — so the
+   doomed command never runs and no build turns are wasted.
+3. `systemPrompt` SCAFFOLDING bullet updated: these commands are now auto-BLOCKED, edit at
+   the ROOT only.
+
+Gate: server tsc 0, frontend tsc 0, **2258 vitest** PASS (5 new ScaffoldGuard tests; 63
+existing ToolDispatcher tests still green — no regression).
+
+---
+
+### 2026-06-25 — Section I march (batch 10): SSRF + disabled-TLS-verification (server security)
+
+Resumed the autonomous Section I march after the scaffold-guard fix (PR #360) merged to main
+df50067. New `SecurityAnalysis` rules:
+
+1. **ssrf** (high) — a server-side HTTP request (`fetch`/`axios`/`axios.get|post|…`/`got`/
+   `http(s).get|request`) whose first arg IS request input (`req.query|params|body|headers`)
+   lets an attacker reach internal services / cloud metadata (169.254.169.254). High-precision:
+   a fixed base with `${req...}` appended doesn't start with `req.`, so it is not flagged.
+2. **disable-tls-verification** (high) — `rejectUnauthorized: false` or
+   `NODE_TLS_REJECT_UNAUTHORIZED=0` turns off TLS cert validation (trivial MITM). Both forms
+   unambiguous → high precision; the secure `rejectUnauthorized: true` is not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2260 vitest** PASS (33 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 11): vm code-execution + insecure Electron webPreferences
+
+Batch 10 merged to main c11bd89 (PR #361). New `SecurityAnalysis` rules:
+
+1. **vm-code-execution** (high) — Node `vm.runInNewContext/runInThisContext/runInContext/
+   compileFunction` runs a STRING as code (like eval) and is explicitly NOT a security
+   sandbox; user input → RCE. The `vm.` prefix keeps it high-precision.
+2. **electron-insecure-webprefs** (high) — `nodeIntegration: true` or `contextIsolation: false`
+   in Electron webPreferences turns any renderer XSS into full code execution on the user's
+   machine. Both forms explicit; the hardened defaults are not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2262 vitest** PASS (35 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 12): Handlebars triple-stache + EJS unescaped output (template XSS)
+
+Batch 11 merged to main 6924b6a (PR #362). New `SecurityAnalysis` rules — template-engine XSS
+sinks parallel to the existing v-html / dangerouslySetInnerHTML / document-write family:
+
+1. **handlebars-triple-stache** (medium) — `{{{ value }}}` renders RAW unescaped HTML (vs the
+   safe escaped `{{ value }}`); XSS sink for user data. The triple-brace form is distinctive →
+   high precision.
+2. **ejs-unescaped-output** (medium) — `<%- value %>` outputs raw unescaped HTML (vs escaped
+   `<%= %>`). The standard `<%- include(...) %>` partial idiom is excluded for precision.
+
+Gate: server tsc 0, frontend tsc 0, **2264 vitest** PASS (37 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 13): empty-heading + autofocus (accessibility)
+
+Batch 12 merged to main b7c69d9 (PR #363). Diversified from security to a11y. New
+`AccessibilityAnalysis` rules (both with axe-core precedent):
+
+1. **empty-heading** (medium) — an `<h1>`–`<h6>` whose stripped inner text is empty breaks the
+   heading-navigation outline screen-reader users rely on (axe "empty-heading", WCAG 1.3.1 /
+   2.4.6). Same-line; `<h2><Icon/></h2>` flagged, `<h2>About</h2>` and an aria-label'd heading not.
+2. **autofocus** (low) — `autofocus`/`autoFocus` on a form control yanks focus on load,
+   disorienting screen-reader users and skipping content (axe "no-autofocus").
+
+Gate: server tsc 0, frontend tsc 0, **2266 vitest** PASS (24 AccessibilityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 14): partial-OG og:image + over-long title (SEO)
+
+Batch 13 merged to main 40dde8b (PR #364). New `SeoAnalysis` checks (both fire only on real,
+present-but-flawed metadata — never nagging a clean page):
+
+1. **og:image missing (partial OG)** (low) — Open Graph tags exist but `og:image` is absent, so
+   a shared link renders a card with text and no image. Distinct from the existing "no OG at
+   all" finding (which only fires when there are zero og tags).
+2. **over-long `<title>`** (low) — a real (non-default) title over 60 characters is truncated in
+   search results; flagged with its actual length so the agent tightens it.
+
+Existing "no OG" test made specific (`/No Open Graph tags/`) since a partial OG is now flagged
+by its own rule. Gate: server tsc 0, frontend tsc 0, **2268 vitest** PASS (17 SeoAnalysis tests).
+
+---
+
+### 2026-06-25 — Section I march (batch 15): window.open noopener + deprecated TLS version (security)
+
+Batch 14 merged to main 727a5ac (PR #365). New `SecurityAnalysis` rules:
+
+1. **window-open-no-opener** (medium) — `window.open(url)` does NOT imply noopener (unlike a
+   modern target="_blank" link), so the opened page can drive this tab via window.opener
+   (reverse tabnabbing). Complements the HTML-only unsafe-target-blank rule. Safe forms
+   ('noopener' feature arg, or a `.opener = null` cleanup, or a no-arg call) are ignored.
+2. **tls-weak-version** (medium) — pinning a deprecated protocol (`minVersion: 'TLSv1'/'TLSv1.1'`
+   or `secureProtocol: 'TLSv1_method'/'SSLv3_method'`) exposes BEAST/POODLE; TLS 1.2+ not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2270 vitest** PASS (39 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 16): async useMemo + async reduce (correctness footguns)
+
+Batch 15 merged to main 293496f (PR #366). Shifted to runtime-correctness. New
+`AsyncPatternAnalysis` footguns (parallel to the existing forEach/Promise-executor/useEffect/
+predicate rules):
+
+1. **async-usememo** — `useMemo(async () => …)` memoizes the returned Promise, so the value is
+   a Promise (always truthy, never the resolved data) — an always-wrong silent bug.
+   `useCallback(async …)` is NOT flagged (memoizing an async function is correct).
+2. **async-reduce** — `reduce(async …)`/`reduceRight(async …)` makes the accumulator a Promise;
+   each step's `acc` is a Promise unless awaited every time, and the result is a Promise.
+
+Gate: server tsc 0, frontend tsc 0, **2272 vitest** PASS (11 AsyncPatternAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 17): insecure randomness + weak hash for security values
+
+Batch 16 merged to main 749a618 (PR #367). New `SecurityAnalysis` rules, both kept precise by a
+shared SECURITY_CONTEXT same-line keyword guard (secret/token/password/otp/session/…):
+
+1. **insecure-random-token** (high) — `Math.random()` on a security-context line builds a
+   predictable token/OTP/session id; ordinary Math.random() (jitter, sampling, animation) is
+   NOT flagged. Use crypto.randomUUID()/randomBytes().
+2. **weak-hash-security** (medium) — `createHash('md5'|'sha1')` on a security-context line
+   (password/token/signature). An md5 ETag/cache-key/checksum (no security keyword) is NOT
+   flagged. Use SHA-256+ for integrity, bcrypt/scrypt/argon2 for passwords.
+
+Gate: server tsc 0, frontend tsc 0, **2274 vitest** PASS (41 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 18): hardcoded private-network IP URLs (deploy readiness)
+
+Batch 17 merged to main 08e5482 (PR #368). Extended `HardcodedUrlAnalysis` beyond localhost:
+
+- **private-ip** (medium) — a hardcoded RFC-1918 private-network URL (`192.168.x.x`,
+  `10.x.x.x`, `172.16–31.x.x`) is the same "works on my machine, breaks in production" bug as
+  localhost — it won't resolve once deployed. Public IPs/domains and env-var fallbacks are NOT
+  flagged. Added a `kind: 'localhost' | 'private-ip'` field to the issue and kind-aware summary.
+
+Gate: server tsc 0, frontend tsc 0, **2276 vitest** PASS (10 HardcodedUrlAnalysis tests, +3 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 19): RegExp-from-request (ReDoS) + XXE entity expansion
+
+Batch 18 merged to main cfbda93 (PR #369). New `SecurityAnalysis` rules:
+
+1. **regexp-from-request** (medium) — `new RegExp(...)` built from request input (req.query/
+   params/body/headers) lets an attacker inject a catastrophically backtracking pattern (ReDoS)
+   that hangs the server. A fixed/literal pattern is not flagged.
+2. **xxe-entity-expansion** (high) — an XML parser told to resolve entities
+   (`noent`/`resolveEntities`/`expandEntities`/`externalEntities: true`) opens XXE: local file
+   disclosure, SSRF, billion-laughs DoS. The safe `false` form is not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2278 vitest** PASS (43 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 20): prototype-pollution + open-redirect via Location header
+
+Batch 19 + autonomous-cycle CLAUDE.md doc merged to main 2b58cd7 (PR #370). New
+`SecurityAnalysis` rules:
+
+1. **prototype-pollution** (high) — deep-merging untrusted request input (`_.merge`/`mergeWith`/
+   `defaultsDeep`/`set`, or `$.extend(true, …)`) with the WHOLE req object lets a `__proto__`
+   payload poison Object.prototype. `(?!\.\w)` excludes a validated leaf (req.body.name) — a
+   documented precision trade-off (a nested object like req.body.settings is not matched).
+2. **open-redirect-header** (medium) — setting the `Location` header directly from request input
+   (the header twin of res.redirect(req...)). Fixed targets are not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2280 vitest** PASS (45 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 21): abstract ARIA role + redundant role (accessibility)
+
+Batch 20 merged to main 5ab8b95 (PR #371). New `AccessibilityAnalysis` rules (axe-core
+precedent — "aria-roles" / "no-redundant-roles"):
+
+1. **abstract-aria-role** (medium) — an abstract ARIA role (widget/input/composite/landmark/
+   range/section/select/structure/window/command/roletype/sectionhead) exists only to organise
+   the ARIA taxonomy and is IGNORED by assistive tech, leaving the element with no usable role.
+2. **redundant-role** (low) — an explicit role that just duplicates the element's native role
+   (button role="button", nav role="navigation", a[href] role="link", ul/ol role="list", …) —
+   harmless noise. Only unambiguous element→role mappings are flagged; `<a>` without href has no
+   implicit link role so role="link" there is not redundant.
+
+Gate: server tsc 0, frontend tsc 0, **2282 vitest** PASS (26 AccessibilityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 22): client-exposed secret + URL-embedded credentials
+
+Batch 21 merged to main 3d7a99f (PR #372). New `SecurityAnalysis` rules:
+
+1. **client-exposed-secret** (high) — an env var with a CLIENT build prefix (VITE_/
+   NEXT_PUBLIC_/REACT_APP_) named like a secret (…SECRET/PASSWORD/PRIVATE) is inlined into
+   the public browser bundle — visible to everyone. Bare *_KEY/_TOKEN (publishable values)
+   are intentionally NOT flagged.
+2. **url-embedded-credentials** (high) — `https://user:pass@host` leaks the credential and is
+   deprecated in browsers. Complements connection-string-credentials (which only covers DB/
+   queue schemes). Placeholder/env (${...}, example) forms ignored.
+
+Gate: server tsc 0, frontend tsc 0, **2284 vitest** PASS (47 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 23): non-UTF-8 charset + over-long meta description (SEO)
+
+Batch 22 merged to main c270322 (PR #373). New `SeoAnalysis` checks (extend the present-but-
+flawed pattern):
+
+1. **non-UTF-8 charset** (low) — a declared charset that is not UTF-8 (e.g. ISO-8859-1,
+   windows-1252) cannot represent Devanagari, so Hindi/Hinglish content renders as mojibake.
+   Especially relevant to NavBharatAI's bilingual output. UTF-8/UTF8 not flagged.
+2. **over-long meta description** (low) — a description over 160 chars is truncated in search
+   results; flagged with its actual length (parallel to the batch-14 over-long title check).
+
+Gate: server tsc 0, frontend tsc 0, **2286 vitest** PASS (19 SeoAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 24): loopback-host bind (preview unreachable)
+
+Batch 23 merged to main cf66b74 (PR #374). Extended `PortBindingAnalysis` to the EXACT
+preview-"connection refused" bug class:
+
+- **loopback-host** (high) — a server bound to `localhost`/`127.0.0.1` (positional
+  `.listen(port, 'localhost')` OR object `.listen({ port, host: '127.0.0.1' })`) is only
+  reachable inside the container, so the cloud host / sandbox preview gets "connection refused".
+  Bind to 0.0.0.0. Flagged even when the PORT comes from env (the host is the bug). A
+  `0.0.0.0` bind or a callback 2nd arg is NOT flagged. Added a `kind` field
+  ('hardcoded-port' | 'loopback-host'); `port` is now optional; severity union medium|high.
+
+Gate: server tsc 0, frontend tsc 0, **2288 vitest** PASS (13 PortBindingAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 25): <area> missing alt + <input type=button> no name (a11y)
+
+Batch 24 merged to main 17f2bf0 (PR #375). New `AccessibilityAnalysis` rules (void elements,
+no child-content false positives; axe "area-alt"):
+
+1. **area-missing-alt** (high) — an `<area href>` (an image-map region = a link) with no alt;
+   a screen reader announces nothing for it (WCAG 1.1.1).
+2. **input-button-no-name** (medium) — `<input type="button">` with no value/aria-label/title.
+   Unlike submit/reset (default "Submit"/"Reset"), a plain button input has no default label,
+   so it is announced as just "button".
+
+Gate: server tsc 0, frontend tsc 0, **2290 vitest** PASS (28 AccessibilityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 26): ECB cipher mode + weak RSA key size (crypto)
+
+Batch 25 merged to main 24c9f32 (PR #376). New `SecurityAnalysis` crypto rules:
+
+1. **insecure-cipher-ecb** (high) — a cipher algorithm in ECB mode (`aes-256-ecb`, `des-ecb`)
+   encrypts identical plaintext blocks to identical ciphertext (the "ECB penguin"), leaking
+   patterns. Use AES-GCM (or CBC + random IV). GCM/CBC not flagged.
+2. **weak-rsa-key-size** (medium) — `modulusLength: 512/768/1024` for RSA/DSA key generation is
+   brute-forceable/deprecated; require ≥2048. 2048/4096 not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2292 vitest** PASS (49 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 27): secret in web storage + httpOnly:false cookie (security)
+
+Batch 26 merged to main e4d4a7b (PR #377). New `SecurityAnalysis` rules:
+
+1. **secret-in-web-storage** (medium) — `localStorage/sessionStorage.setItem(...)` storing a
+   token/secret (any XSS on the page can read web storage). Uses a substring keyword guard
+   (catches camelCase authToken/accessToken; excludes "session" since it's in "sessionStorage").
+   A theme/locale value is not flagged. Prefer an httpOnly, Secure cookie for auth tokens.
+2. **cookie-httponly-false** (medium) — `httpOnly: false` makes a cookie JS-readable, so an XSS
+   can steal a session/auth cookie. The flag defaults off, so an explicit false is a risky opt-out.
+
+Gate: server tsc 0, frontend tsc 0, **2294 vitest** PASS (51 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 28): correction (remove duplicate) + SameSite=None insecure
+
+Batch 27 merged to main c4b72ef (PR #378). HONEST CORRECTION + new check:
+
+- **Removed** `secret-in-web-storage` (added in batch 27) — it DUPLICATED ComplianceAnalysis's
+  existing `sensitive-in-browser-storage` (both fire on localStorage/sessionStorage.setItem +
+  a sensitive keyword), so the same line was reported twice in `evaluate`. Root cause: before
+  batch 27 I grepped only SecurityAnalysis.ts, not the whole AgentV3 dir (safeguard #6 lapse).
+  `cookie-httponly-false` (also batch 27) is KEPT — it is complementary: Compliance's
+  `cookie-no-httponly` checks for ABSENCE of httponly and so misses an explicit `httpOnly:false`.
+- **Added** `samesite-none-insecure` (medium) — a cookie with `sameSite:'none'` and no
+  `secure:true` on the line: modern browsers silently REJECT it (cookie never set → auth
+  breaks) and None alone drops CSRF protection. SameSite=None+Secure and Lax/Strict not flagged.
+  Verified absent from both SecurityAnalysis and ComplianceAnalysis before adding.
+
+Gate: server tsc 0, frontend tsc 0, **2294 vitest** PASS (51 SecurityAnalysis tests).
+
+---
+
+### 2026-06-25 — Section I march (batch 29): document.domain write + iframe sandbox escape (DOM security)
+
+Batch 28 merged to main 4ecdf6f (PR #379). New `SecurityAnalysis` DOM-security rules (both
+verified absent across the whole AgentV3 dir before adding — tightened redundant-work check
+after the batch-27 overlap):
+
+1. **document-domain-write** (medium) — assigning `document.domain` relaxes the same-origin
+   policy (any sibling subdomain can script into the page) and is deprecated. `=(?!=)` matches
+   assignment, not a comparison.
+2. **iframe-sandbox-escape** (medium) — an `<iframe sandbox>` allowing BOTH `allow-scripts` and
+   `allow-same-origin` can remove its own sandbox and escape it. Two lookaheads require both
+   tokens in the same sandbox value (order-independent); allow-scripts alone is not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2296 vitest** PASS (53 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 30): weak bcrypt rounds + trust-proxy:true (security)
+
+Batch 29 merged to main 844c1d5 (PR #380). New `SecurityAnalysis` rules (verified uncovered
+across the whole AgentV3 dir):
+
+1. **weak-bcrypt-rounds** (medium) — a bcrypt cost factor below 10 (single-digit rounds in
+   `bcrypt.hash(data, N)` or `genSalt(N)`) hashes too fast → cheap brute-force of stolen
+   hashes. 10+ (two digits) or a variable is not flagged.
+2. **express-trust-proxy-true** (medium) — `app.set('trust proxy', true)` trusts X-Forwarded-For
+   from any client (IP spoofing → defeats rate limiting / audit logs). A specific hop count or
+   proxy IP is not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2298 vitest** PASS (55 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 31): scope-on-td + deprecated marquee/blink (a11y)
+
+Batch 30 merged to main 453c1dc (PR #381). New `AccessibilityAnalysis` rules (verified
+uncovered; scoped to avoid custom-component false positives):
+
+1. **scope-on-td** (medium) — a `scope` attribute on a `<td>` is ignored (scope is only valid
+   on a `<th>`); the cell was meant to be a header (axe "scope-attr-valid"). Scoped to td to
+   avoid flagging custom JSX components that happen to take a `scope` prop.
+2. **deprecated-marquee-blink** (medium) — `<marquee>`/`<blink>` auto-move/flash content with no
+   pause (WCAG 2.2.2) and are dropped by modern browsers.
+
+Gate: server tsc 0, frontend tsc 0, **2300 vitest** PASS (30 AccessibilityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 32): empty <th> header + empty <label for> (a11y)
+
+Batch 31 merged to main f967a23 (PR #382). New `AccessibilityAnalysis` rules (parallel to the
+empty-heading pattern; verified uncovered):
+
+1. **empty-table-header** (medium) — a `<th>` with no text leaves its row/column unlabeled for
+   screen-reader table navigation (WCAG 1.3.1). Child tags stripped (`<th><Icon/></th>` flagged);
+   text or aria-label accepted.
+2. **empty-label** (medium) — an explicit `<label for="…">` with NO content gives the associated
+   control no accessible name. Only the truly-empty form (no children at all) is flagged, so a
+   wrapping `<label><input/>…</label>` is never a false positive.
+
+Gate: server tsc 0, frontend tsc 0, **2302 vitest** PASS (32 AccessibilityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 33): dynamic iframe srcdoc + data:text/html URI (XSS sinks)
+
+Batch 32 merged to main 84dab44 (PR #383). New `SecurityAnalysis` rules (verified uncovered):
+
+1. **iframe-srcdoc-dynamic** (medium) — `<iframe srcdoc={…}>` (JSX expression or template-literal
+   interpolation) renders the value as a full HTML document in the frame — an XSS sink like
+   innerHTML. A static quoted srcdoc is not flagged.
+2. **data-html-uri** (medium) — a `data:text/html` URI in href/src is parsed as an HTML document
+   and runs inline script when opened (XSS/phishing, CSP bypass). A normal URL or data:image is
+   not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2304 vitest** PASS (57 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 34, POLISH): insecure-http false-positive fix (namespace URIs)
+
+Admin redirected the march from "add new detection rules" (engine is now comprehensive — 44
+checks; candidates coming up already-covered) to "polish existing checks (fewer FPs, audit
+overlaps)". First polish:
+
+- **insecure-http FP fix** — the rule flagged ANY `http://` string, including XML/SVG namespace
+  & schema URIs (`xmlns="http://www.w3.org/2000/svg"`, `http://www.w3.org/1999/xhtml`,
+  `xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"`). These are IDENTIFIERS, never network
+  endpoints — so every inline SVG was a noisy false positive. Added a NAMESPACE_HTTP ignore
+  (xmlns attributes + known namespace authorities: w3.org, xmlns.com, purl.org, schemas.*,
+  ns.adobe.com, inkscape.org, sodipodi). A real http endpoint on a similar line is still flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2305 vitest** PASS (58 SecurityAnalysis tests, +1 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 35, POLISH): hardcoded-secret + eval-usage false-positive fixes
+
+Batch 34 polish merged to main 588133b (PR #385). Two more FP reductions in SecurityAnalysis:
+
+1. **hardcoded-secret** — the value is now 8+ NON-whitespace chars (`[^'"`\s]{8,}`). A real
+   credential has no spaces, so this drops the common FP of a validation/UI message
+   (`password = "Password must be 8 characters"`). A space-free credential is still flagged.
+2. **eval-usage** — added the `(?<![.\w])` lookbehind so member methods named eval
+   (mathjs `math.eval(...)`, MongoDB `db.eval(...)`) are NOT flagged; only the dangerous global
+   `eval(...)` is.
+
+Gate: server tsc 0, frontend tsc 0, **2306 vitest** PASS (59 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 36, POLISH): overlap audit + dedup 2 redundant rules
+
+Batch 35 polish merged to main ddf8a59 (PR #386). Ran a systematic cross-analyzer overlap
+audit (subagent mapped all rule kinds/regexes across 12 analyzers). Findings:
+
+- **CONFIRMED redundancies removed** (both ran alongside SecurityAnalysis in `evaluate`, so the
+  same line was reported twice):
+  1. SecurityConfigAnalysis `tls-verification-disabled` — exact duplicate of SecurityAnalysis
+     `disable-tls-verification`.
+  2. SecurityConfigAnalysis `insecure-randomness` — SecurityAnalysis `insecure-random-token` is a
+     proven SUPERSET (its SECURITY_CONTEXT keyword set ⊇ this rule's keywords). No coverage lost
+     (SecurityAnalysis's 59 tests still cover both); SecurityConfigAnalysis now owns CORS +
+     logged-secret only.
+- **Refuted (kept as complementary, NOT duplicates):** insecure-http vs insecure-http-endpoint
+  (any URL string vs http network call); cookie-httponly-false vs cookie-no-httponly (explicit
+  false vs absence — verified in batch 28); provider-token vs env-template secret detection
+  (source code vs .env templates).
+
+Gate: server tsc 0, frontend tsc 0, **2301 vitest** PASS (SecurityConfigAnalysis 11 tests).
+
+---
+
+### 2026-06-25 — Section I march (batch 37, POLISH): HardcodedUrl skip test/config files (FP fix)
+
+Batch 36 polish merged to main f726674 (PR #388). FP fix in HardcodedUrlAnalysis:
+
+- The localhost/private-IP scanner had no path filter, so it false-flagged `http://localhost`
+  in TEST files (hitting a local test server) and BUILD-CONFIG files (e.g. a Vite dev-server
+  `proxy: { '/api': 'http://localhost:3000' }`) — neither of which ship to production. Added a
+  SKIP_PATH (`.test.`/`.spec.`/`__tests__`/`tests`/`e2e` dirs, `*.config.[cm]?[jt]s`, and
+  vite/vitest/playwright/webpack/next config + setupTests). A normal source file is still scanned.
+
+Gate: server tsc 0, frontend tsc 0, **2302 vitest** PASS (HardcodedUrlAnalysis 11 tests, +1 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 38, POLISH): redundant-role no longer flags <ul role=list>
+
+Batch 37 polish merged to main 7628437 (PR #389). FP/harmful-advice fix in AccessibilityAnalysis:
+
+- The batch-21 `redundant-role` rule flagged `<ul role="list">` / `<ol role="list">` as redundant.
+  But that is a well-known LEGITIMATE fix: when `list-style: none` is applied, Safari + VoiceOver
+  stop announcing the element as a list, and re-adding role="list" restores it. Flagging it would
+  tell the dev to remove a role that is actually needed — actively harmful advice. Removed ul/ol
+  (and li) from the IMPLICIT_ROLE map; unambiguous mappings (button/a/nav/main/table/textarea/
+  h1-6) still flag redundant roles.
+
+Gate: server tsc 0, frontend tsc 0, **2302 vitest** PASS (AccessibilityAnalysis 32 tests, +1 assertion).
+
+---
+
+### 2026-06-25 — Section I march (batch 39, POLISH): cookie-deletion not flagged for missing SameSite/Secure
+
+Batch 38 polish merged to main c2f1f98 (PR #390). FP fix in ComplianceAnalysis:
+
+- The cookie-no-samesite / cookie-no-httponly / cookie-no-secure rules flagged a cookie being
+  DELETED (logout/clear flows: `document.cookie = 'sid=; Max-Age=0'`, `res.cookie('n','',{maxAge:0})`,
+  a 1970 expiry) for missing those flags. But a cookie being removed does not need them — the
+  browser is deleting it, not storing it. Added an isCookieDeletion guard (Max-Age 0/-1 or a
+  1970/past expiry) that skips all three cookie checks. Normal cookie SETS are still flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2303 vitest** PASS (ComplianceAnalysis 19 tests, +1 new).
+
+---
+
+### 2026-06-25 — BYOK (user's own Anthropic key) REMOVED per admin
+
+Admin (aashishcpmt09) confirmed BYOK was deliberately removed earlier and must NOT be
+re-introduced or re-proposed. There was never any Anthropic-BYOK code (ClaudeClient always
+uses the platform's own ANTHROPIC_API_KEY); BYOK existed only as forward-looking doc
+references. Removed those references so no future session rebuilds it:
+- CLAUDE.md §"NavBharatAI Pro v3.0" — replaced the "future BYOK option stays open" line with an
+  explicit "BYOK is NOT a feature, do not build/re-propose" rule.
+- NAVBHARATAI_PRO_V3_DESIGN.md — D2, D7, §5.1 persistence, §"requirements" updated: v3.0 always
+  runs on NavBharatAI's own account; transcript persistence is NavBharatAI-hosted
+  (`ConversationStore`); no "transcript on the user's Claude" option.
+- This file's "Remaining/next" line — dropped "BYOK option".
+
+IMPORTANT — this is ONLY about Bring-Your-Own-*Key* (Anthropic). Bring-Your-Own-*Database*
+(Engineer AI Phase 14, BackendScaffolder) and the BYO E2B sandbox key are SEPARATE, KEPT
+features and were not touched. Historical PROGRESS entries (D7 decision, BYOK quota tier) are
+left intact per the append-only rule; this note supersedes them.
+
+NEXT: build conversation persistence (ConversationStore, D7) — the admin's chosen target.
+
+---
+
+### 2026-06-25 — v3.0 conversation persistence P-A: ConversationStore foundation (D7)
+
+Admin chose "conversation persistence" as the next v3.0 target (and BYOK removed, prior note).
+First increment — the storage CONTRACT + reference implementation (not yet wired into AgentRunner;
+no behaviour change to the flag-gated v3.0 path):
+
+- NEW `src/server/AgentV3/ConversationStore.ts`:
+  - `ConversationRecord` (id, userId, workspaceId, title, status, VERBATIM messages transcript,
+    usage, billedUsd, timestamps) — the durable form of an AgentRunner build so it survives a
+    reconnect/refresh.
+  - `ConversationStore` interface (create/get/appendMessages/update/listByUser/remove), all async
+    so a Firestore backend drops in with no signature change.
+  - `InMemoryConversationStore` — dev/CI impl + reference semantics; stores CLONES so callers
+    cannot mutate persisted state through a returned reference. `deriveTitle()` helper.
+- Persistence is NavBharatAI-hosted only (D7, post-BYOK-removal). NEXT (P-B): wire into
+  AgentRunner (create on start, append each turn, finalize on end) + route load/list; then
+  (P-C) a Firestore-backed ConversationStore for real durability.
+
+Gate: server tsc 0, frontend tsc 0, **2314 vitest** PASS (11 new ConversationStore tests).
+
+---
+
+### 2026-06-25 — v3.0 conversation persistence P-B: wire ConversationStore into AgentRunner (D7)
+
+P-A merged (PR #393, f896199). P-B wires the store into the build loop:
+
+- `AgentRunnerOptions.persistence` (optional): `{ store, conversationId, userId, workspaceId, title, now? }`.
+  When present, AgentRunner: creates the record at start (seed transcript); appends each turn
+  (assistant + tool_results) with a `running` checkpoint so a reconnect resumes mid-build, not
+  from scratch; and finalizes with the terminal status — `complete` (model ended), `stopped`
+  (user abort / budget cap / step cap), or `error` (exception) — plus the latest usage + billedUsd.
+- ALL persistence calls are best-effort (wrapped in try/catch): a store failure is swallowed and
+  NEVER breaks the build. When `persistence` is absent, behaviour is byte-for-byte unchanged
+  (back-compat verified by test).
+
+Gate: server tsc 0, frontend tsc 0, **2318 vitest** PASS (4 new AgentRunner persistence tests).
+NEXT (P-C): a Firestore-backed ConversationStore + route load/list/resume endpoints.
+
+---
+
+### 2026-06-25 — v3.0 conversation persistence P-C: Firestore-backed ConversationStore (D7)
+
+P-B merged (PR #394, 53863f6). P-C adds the durable backend:
+
+- NEW `src/server/AgentV3/FirestoreConversationStore.ts` — mirrors the proven FirestoreJobStore
+  pattern (firebase-admin init + databaseId from firebase-applet-config.json). Avoids Firestore's
+  1 MB/doc limit: metadata in `agentv3_conversations/{id}`, transcript in an append-only `turns`
+  subcollection (one doc per appendMessages, monotonic `seq`); get() reassembles the transcript
+  in order. listByUser returns metadata only (empty messages) — cheap listing; get(id) for the
+  full build. The Firestore handle is INJECTABLE.
+- Because the handle is injectable, this is UNIT-TESTED via a compact faithful in-memory fake of
+  the narrow Firestore surface (nested docs/subcollections, get/set-merge/update, where+orderBy+
+  limit, runTransaction, batched delete) — 7 tests proving create/get-reassembly/append-ordering/
+  unknown-id throws/finalize/list-scope-order-cap/remove. (More rigorous than the existing
+  FirestoreJobStore, which is integration-only.) ConversationStore.listByUser contract doc
+  updated to allow an empty transcript in list results.
+
+Gate: server tsc 0, frontend tsc 0, **2325 vitest** PASS (7 new FirestoreConversationStore tests).
+NEXT (P-D): wire store selection (Firestore when available, else in-memory) into the agentv3
+route + load/list/resume endpoints — completing the end-to-end "build survives refresh" feature.
+
+---
+
+### 2026-06-25 — v3.0 conversation persistence P-D: route wiring + load/list endpoints (D7)
+
+P-C merged (PR #395, 8c6b909). P-D wires persistence into the live build route (additive, flag-gated):
+
+- `getConversationStore()` singleton — Firestore when `AGENTV3_PERSIST_FIRESTORE=true` (real
+  cross-instance durability in Cloud Run), else InMemory (dev/CI safe default; missing creds never
+  error). Matches the cautious v3.0 flag-gating.
+- The main build runner in `POST /api/agentv3/chat` now passes `persistence` (store +
+  fresh conversationId + userId + workspaceId + deriveTitle(prompt)) → each build is saved as it
+  runs (best-effort; a store failure never breaks the build).
+- NEW `GET /api/agentv3/conversations?userId=` (list a user's builds, metadata only) and
+  `GET /api/agentv3/conversations/:id?userId=` (load full transcript for resume) — both
+  flag-gated; the single-fetch is OWNER-ONLY via the exported pure `conversationAccess(rec, userId)`
+  helper (ok / not-found / forbidden), unit-tested.
+
+Backend persistence is now END-TO-END: a build is persisted as it runs and reloadable by API.
+Gate: server tsc 0, frontend tsc 0, **boot:check PASS**, **2326 vitest** PASS (1 new route test).
+NEXT (P-E, frontend): on load/reconnect, useAgentV3Build lists by userId + reloads the most recent
+build's transcript into the panel — the last step to make "build survives refresh" user-visible.
+
+---
+
+### 2026-06-25 — v3.0 conversation persistence P-E: frontend reload of chat history (D7) — FEATURE COMPLETE
+
+P-D merged (PR #396, 4bdaf55). P-E (admin chose option (a): chat + git-restore) makes the
+persistence user-visible:
+
+- NEW `src/components/agentv3/agentV3History.ts` (pure, tested): `messageText()` extracts visible
+  text from a Claude message (string or block array); `conversationToEvents(conv)` turns a
+  persisted build into wire events (workspace + one narration per assistant turn + a `done` for a
+  finished build; a still-running build is left open so it can be Resumed). Replayed through the
+  existing agentV3Reducer → rebuilds the narration feed + workspaceId with no new reducer logic.
+- `useAgentV3Build.loadConversation(opts)` — fetches the user's most recent persisted build
+  (list → by-id) and folds its events into state. Best-effort; no-op while running.
+- `AgentV3Panel` — a one-time mount effect calls loadConversation when signed in, idle, and the
+  panel is empty, so a refresh/reconnect re-displays the last build's chat. Never clobbers a live
+  build or a History-opened thread. Files come back via the existing git/restore path.
+
+Conversation persistence (D7) is now END-TO-END: P-A store contract → P-B AgentRunner wiring →
+P-C Firestore backend → P-D route + endpoints → P-E frontend reload. A v3.0 build survives a
+refresh/reconnect.
+Gate: server tsc 0, frontend tsc 0, **2334 vitest** PASS (8 new agentV3History tests).

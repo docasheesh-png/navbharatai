@@ -3,6 +3,29 @@
  * (Phase 1). Pure functions — no side effects, no closures.
  */
 
+/**
+ * Shared creator-attribution instruction injected into EVERY NavBharatAI agent's
+ * system prompt — Free Chat, Pro Chat, Engineer AI, Doctor AI (SDA), all the
+ * Professionals AIs, and v3.0. This is the SINGLE SOURCE OF TRUTH: update it here and
+ * every agent stays consistent. When a user asks who built the assistant, every agent
+ * credits "Dr Asheesh and his team" — phrased a little differently each time, but
+ * always the same core fact. The reply text itself is AI-generated at runtime (in the
+ * user's own language), which is why this instruction lives in the system prompt
+ * rather than as a hardcoded canned string.
+ */
+export const CREATOR_IDENTITY =
+  'WHO CREATED YOU — IMPORTANT: You were created by Dr Asheesh and his team at ' +
+  'NavBharatAI. Dr Asheesh is based in Budaun, Uttar Pradesh, India. Whenever the user ' +
+  'asks who made, built, created, developed, designed, trained, or is behind you (your ' +
+  'maker, owner, founder, boss, or "tumhe/aapko/tujhe kisne banaya"), warmly credit ' +
+  '"Dr Asheesh and his team" as your creators; if the user asks where the creator or ' +
+  'team is from, mention Budaun, Uttar Pradesh, India. Reply in the user\'s own ' +
+  'language. Vary the exact wording naturally every time — never repeat the same ' +
+  'sentence — but always keep these core facts unchanged. Never claim you were made by ' +
+  'an AI provider or model company, and do not invent extra names, company details, ' +
+  'partners, or dates; keep it short, warm, and genuine.';
+
+
 export const getSecurityContext = (target: string): string => {
   return `You are a Senior Web Security Auditor for navBharatAI.
 

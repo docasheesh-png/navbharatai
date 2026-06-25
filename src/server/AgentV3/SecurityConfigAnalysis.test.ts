@@ -1,17 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { scanSecurityConfig, securityConfigSummary } from './SecurityConfigAnalysis';
 
+// Note: TLS-verification-disabled and insecure Math.random() randomness are intentionally NOT
+// tested here — those rules live in SecurityAnalysis (disable-tls-verification /
+// insecure-random-token) and were removed from this module to avoid double-reporting the same
+// line in `evaluate`. This module now owns CORS misconfiguration + secret-logging.
+
 describe('scanSecurityConfig', () => {
-  it('flags disabled TLS verification (high)', () => {
-    const issues = scanSecurityConfig('src/api.ts', 'const agent = new https.Agent({ rejectUnauthorized: false });');
-    expect(issues.some((i) => i.rule === 'tls-verification-disabled' && i.severity === 'high')).toBe(true);
-  });
-
-  it('flags NODE_TLS_REJECT_UNAUTHORIZED=0', () => {
-    const issues = scanSecurityConfig('src/setup.js', "process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';");
-    expect(issues.some((i) => i.rule === 'tls-verification-disabled')).toBe(true);
-  });
-
   it('flags wildcard CORS origin (medium)', () => {
     const issues = scanSecurityConfig('src/server.ts', "app.use(cors({ origin: '*' }));");
     expect(issues.some((i) => i.rule === 'wildcard-cors' && i.severity === 'medium')).toBe(true);
@@ -22,19 +17,11 @@ describe('scanSecurityConfig', () => {
     expect(issues.some((i) => i.rule === 'wildcard-cors')).toBe(true);
   });
 
-  it('flags Math.random() used for a token (insecure randomness, high)', () => {
-    const issues = scanSecurityConfig('src/auth.ts', "const token = Math.random().toString(36).slice(2);");
-    expect(issues.some((i) => i.rule === 'insecure-randomness' && i.severity === 'high')).toBe(true);
-  });
-
-  it('flags Math.random() referenced before a security keyword too', () => {
-    const issues = scanSecurityConfig('src/a.ts', "const sessionId = `${Math.random()}` // session");
-    expect(issues.some((i) => i.rule === 'insecure-randomness')).toBe(true);
-  });
-
-  it('does not flag ordinary Math.random() use (e.g. a shuffle)', () => {
-    const issues = scanSecurityConfig('src/util.ts', "const r = Math.random() * items.length;");
-    expect(issues.some((i) => i.rule === 'insecure-randomness')).toBe(false);
+  it('flags CORS reflecting any origin with credentials (high) but not a pinned origin with credentials', () => {
+    expect(scanSecurityConfig('src/server.ts', 'app.use(cors({ origin: true, credentials: true }));').some((i) => i.rule === 'cors-credentials-reflect-origin' && i.severity === 'high')).toBe(true);
+    expect(scanSecurityConfig('src/server.ts', 'app.use(cors({ credentials: true, origin: true }));').some((i) => i.rule === 'cors-credentials-reflect-origin')).toBe(true);
+    // a pinned origin with credentials is the correct, safe pattern.
+    expect(scanSecurityConfig('src/server.ts', "app.use(cors({ origin: 'https://app.example.com', credentials: true }));").some((i) => i.rule === 'cors-credentials-reflect-origin')).toBe(false);
   });
 
   it('flags a secret env var logged to the console (medium)', () => {
@@ -53,7 +40,7 @@ describe('scanSecurityConfig', () => {
   });
 
   it('ignores commented-out lines', () => {
-    const issues = scanSecurityConfig('src/a.ts', "// rejectUnauthorized: false");
+    const issues = scanSecurityConfig('src/a.ts', "// origin: '*' allow everything");
     expect(issues).toHaveLength(0);
   });
 
@@ -62,7 +49,7 @@ describe('scanSecurityConfig', () => {
   });
 
   it('records the line number', () => {
-    const issues = scanSecurityConfig('src/a.ts', "const x = 1;\nconst opts = { rejectUnauthorized: false };");
+    const issues = scanSecurityConfig('src/a.ts', "const x = 1;\napp.use(cors({ origin: '*' }));");
     expect(issues[0].line).toBe(2);
   });
 });
@@ -72,7 +59,10 @@ describe('securityConfigSummary', () => {
     expect(securityConfigSummary([])).toContain('✓');
   });
   it('lists issues high-severity first', () => {
-    const out = securityConfigSummary(scanSecurityConfig('a.ts', "origin: '*'\nrejectUnauthorized: false"));
+    // cors-credentials-reflect-origin is high, wildcard-cors is medium.
+    const out = securityConfigSummary(
+      scanSecurityConfig('a.ts', "app.use(cors({ origin: true, credentials: true }));\norigin: '*'"),
+    );
     expect(out).toContain('Security config');
     expect(out.indexOf('[high]')).toBeLessThan(out.indexOf('[medium]'));
   });

@@ -1,8 +1,21 @@
 import { callGemini, callClaude, callGroq } from '../lib/aiCalls';
 import { retrieveKnowledge, formatKnowledge } from './knowledge';
+import { CREATOR_IDENTITY } from '../lib/prompts';
 import type { ProfessionalConfig } from './types';
 
 export interface ProfessionalTurn { role: 'user' | 'assistant'; content: string; }
+
+/**
+ * Assemble a professional's full system prompt: persona, disclaimer, the knowledge
+ * retrieved for this message, and the shared creator-attribution instruction (so every
+ * professional credits Dr Asheesh and team consistently). Pure — exported so the
+ * assembly (and the attribution injection) is unit-testable.
+ */
+export function buildProfessionalSystemPrompt(config: ProfessionalConfig, kbBlock = ''): string {
+  return [config.systemPrompt, config.disclaimer, kbBlock, CREATOR_IDENTITY]
+    .filter(Boolean)
+    .join('\n\n');
+}
 
 /** Resilient model call: Gemini → Claude → Grok. System prompt is honoured by
  * Gemini/Claude; for the Grok fallback it is prepended to the message. */
@@ -25,7 +38,7 @@ export async function runProfessionalChat(
   history: ProfessionalTurn[] = [],
 ): Promise<string> {
   const kbBlock = formatKnowledge(retrieveKnowledge(config.knowledge, message));
-  const systemPrompt = [config.systemPrompt, config.disclaimer, kbBlock].filter(Boolean).join('\n\n');
+  const systemPrompt = buildProfessionalSystemPrompt(config, kbBlock);
 
   const transcript = (history || [])
     .slice(-8)

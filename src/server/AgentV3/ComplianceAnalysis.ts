@@ -40,6 +40,9 @@ const SENSITIVE = /\b(password|passwd|aadhaar|aadhar|\bpan\b|cvv|\bssn\b|credit[
 // (and therefore needs a privacy policy). Names/types a real form would use.
 const PII_FIELD = /\b(name\s*=\s*['"`{]?\s*)?(email|e-mail|phone|mobile|aadhaar|aadhar|\bpan\b|passport|address|dob|date[_-]?of[_-]?birth|credit[_-]?card|card[_-]?number|ssn)\b/i;
 const PII_INPUT_TYPE = /type\s*=\s*['"{]?\s*(email|tel|password)\b/i;
+// Geolocation access — precise location is sensitive personal data (DPDP/GDPR), so an
+// app reading it is collecting PII and needs consent + a privacy policy.
+const GEOLOCATION = /navigator\.geolocation|\b(?:getCurrentPosition|watchPosition)\s*\(/;
 
 // Known third-party analytics / trackers that set cookies or fingerprint users.
 const TRACKER = /(google-analytics\.com|googletagmanager\.com|\bgtag\s*\(|\bga\s*\(\s*['"](send|create)|analytics\.track\s*\(|mixpanel|hotjar|\bfbq\s*\(|facebook[^\n]*pixel|cdn\.segment\.com|amplitude\.com|clarity\.ms|matomo|plausible\.io)/i;
@@ -47,9 +50,9 @@ const TRACKER = /(google-analytics\.com|googletagmanager\.com|\bgtag\s*\(|\bga\s
 // A cookie-consent / CMP surface that legitimises trackers.
 const CONSENT_UI = /(cookie[\s-]?consent|cookie[\s-]?banner|consent[_-]?manager|gdpr[_-]?consent|CookieConsent|onetrust|cookiebot|tarteaucitron|usercentrics|\bconsent(Given|State|Mode)\b)/i;
 
-/** Does a file's content collect personal data (PII form fields / inputs)? */
+/** Does a file's content collect personal data (PII form fields / inputs / geolocation)? */
 export function detectsPiiCollection(content: string): boolean {
-  return PII_INPUT_TYPE.test(content) || PII_FIELD.test(content);
+  return PII_INPUT_TYPE.test(content) || PII_FIELD.test(content) || GEOLOCATION.test(content);
 }
 
 /** Does a file load a known third-party tracker? */
@@ -100,9 +103,34 @@ export function scanCompliance(file: string, content: string): ComplianceIssue[]
       push('sensitive-in-browser-storage', 'medium');
     }
 
+    // A cookie being DELETED (logout / clear) does not need SameSite/Secure/httpOnly — the
+    // browser is removing it, not storing it. Detect the clear-cookie signals (Max-Age 0/-1,
+    // a 1970/past expiry) so logout code is not falsely flagged.
+    const isCookieDeletion = /\bmax-?age\s*[:=]\s*-?0\b|expires\s*[:=][^;,)]*(?:1970|Thu,\s*0?1\s*Jan)/i.test(line);
+
     // ── medium: cookie set without SameSite (cross-site leakage / CSRF surface) ──
-    if (/document\.cookie\s*=/.test(line) && !/samesite/i.test(line)) {
+    if (/document\.cookie\s*=/.test(line) && !/samesite/i.test(line) && !isCookieDeletion) {
       push('cookie-no-samesite', 'medium');
+    }
+
+    // ── medium: server cookie set without httpOnly — readable by any script, so an
+    // XSS can steal the session/auth token (DPDP/GDPR security-of-processing) ───────
+    if (/\bres(?:ponse)?\.cookie\s*\(/.test(line) && !/httponly/i.test(line) && !isCookieDeletion) {
+      push('cookie-no-httponly', 'medium');
+    }
+
+    // ── medium: server cookie set without the Secure flag — the browser will send it
+    // over plain http where it can be intercepted on the wire (DPDP/GDPR security-of-
+    // processing). The `secure:` option (or a "Secure" attribute) resolves it. ───────
+    if (/\bres(?:ponse)?\.cookie\s*\(/.test(line) && !/\bsecure\b/i.test(line) && !isCookieDeletion) {
+      push('cookie-no-secure', 'medium');
+    }
+
+    // ── medium: a secret/credential carried in a URL query string — it leaks into
+    // server access logs, browser history and the Referer header. Use the
+    // Authorization header or a POST body instead. ─────────────────────────────────
+    if (/[?&](?:password|passwd|token|secret|api[_-]?key|apikey|access[_-]?token|auth[_-]?token|otp|cvv)\s*=/i.test(line)) {
+      push('secret-in-url', 'medium');
     }
 
     // ── high: personal data over plain http:// (in the clear on the network) ─────

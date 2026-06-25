@@ -1,5 +1,35 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess } from './agentv3';
+
+describe('conversationAccess (D7 ownership gate)', () => {
+  it('allows the owner, forbids others, and reports not-found', () => {
+    expect(conversationAccess({ userId: 'u1' }, 'u1')).toBe('ok');
+    expect(conversationAccess({ userId: 'u1' }, 'u2')).toBe('forbidden');
+    expect(conversationAccess({ userId: 'u1' }, null)).toBe('forbidden'); // anonymous can't read an owned build
+    expect(conversationAccess(null, 'u1')).toBe('not-found');
+  });
+});
+
+describe('providerDebugTag (temporary admin provider-debug, env-gated)', () => {
+  const prev = process.env.AGENTV3_DEBUG_PROVIDER;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTV3_DEBUG_PROVIDER;
+    else process.env.AGENTV3_DEBUG_PROVIDER = prev;
+  });
+
+  it('is OFF by default — no tag, so users never see the provider', () => {
+    delete process.env.AGENTV3_DEBUG_PROVIDER;
+    expect(providerDebugTag('VERTEX')).toBe('');
+  });
+
+  it('tags the reply with the provider when AGENTV3_DEBUG_PROVIDER is enabled', () => {
+    process.env.AGENTV3_DEBUG_PROVIDER = '1';
+    expect(providerDebugTag('VERTEX')).toContain('VERTEX');
+    expect(providerDebugTag('GEMINI')).toContain('replied via GEMINI');
+    // An empty label still produces no tag.
+    expect(providerDebugTag('')).toBe('');
+  });
+});
 
 describe('deriveWorkspaceId (session continuity)', () => {
   it('uses a stable session id so the same session reuses one workspace', () => {
@@ -66,5 +96,29 @@ describe('agentV3KeyDiag (provider diagnosis)', () => {
     expect(d.anthropicKeySet).toBe(false);
     expect(d.anthropicKeyPrefix).toBeNull();
     expect(d.looksLikeAnthropicKey).toBe(false);
+  });
+
+  it('reports FREE-router (Vertex/Gemini/Grok) provider configuration presence', () => {
+    const keys = ['GOOGLE_CLOUD_PROJECT', 'GOOGLE_CLOUD_PROJECT_ID', 'GEMINI_API_KEY', 'GROK_API_KEY', 'XAI_API_KEY'] as const;
+    const saved: Record<string, string | undefined> = {};
+    for (const k of keys) { saved[k] = process.env[k]; delete process.env[k]; }
+    try {
+      expect(agentV3KeyDiag().vertexConfigured).toBe(false);
+      expect(agentV3KeyDiag().geminiKeySet).toBe(false);
+      expect(agentV3KeyDiag().grokKeySet).toBe(false);
+
+      process.env.GOOGLE_CLOUD_PROJECT = 'my-proj';
+      process.env.GEMINI_API_KEY = 'gm-key';
+      process.env.XAI_API_KEY = 'xai-key';
+      const d = agentV3KeyDiag();
+      expect(d.vertexConfigured).toBe(true);
+      expect(d.geminiKeySet).toBe(true);
+      expect(d.grokKeySet).toBe(true); // XAI_API_KEY counts for Grok
+    } finally {
+      for (const k of keys) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    }
   });
 });

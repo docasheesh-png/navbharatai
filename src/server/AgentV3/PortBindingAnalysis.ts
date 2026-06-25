@@ -10,10 +10,13 @@
 // configuration (process.env.PORT / import.meta.env), so good code is never nagged.
 
 export interface PortBindingIssue {
-  severity: 'medium';
+  severity: 'medium' | 'high';
+  /** 'hardcoded-port' = a literal listen port; 'loopback-host' = bound to localhost only. */
+  kind: 'hardcoded-port' | 'loopback-host';
   file: string;
   line: number;
-  port: string;
+  /** The literal port, for a hardcoded-port issue. */
+  port?: string;
 }
 
 const CODE_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
@@ -21,10 +24,15 @@ const CODE_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
 // numeric literal port (2–5 digits). Excludes `.listen(port)`, `.listen()` and
 // single-digit backlog-only calls.
 const LISTEN_LITERAL_RE = /\.listen\s*\(\s*(\d{2,5})\b/;
+// A server bound to the loopback host (localhost / 127.0.0.1) — either as the
+// positional second argument (`.listen(3000, 'localhost')`) or an object option
+// (`.listen({ port, host: '127.0.0.1' })`). A loopback bind is only reachable from
+// inside the container, so a cloud host / sandbox preview gets "connection refused".
+const LISTEN_LOOPBACK_RE = /\.listen\s*\(\s*[^,)]+,\s*['"`](?:localhost|127\.0\.0\.1)['"`]|\.listen\s*\([^)]*\bhost\s*:\s*['"`](?:localhost|127\.0\.0\.1)['"`]/;
 // If the line reads the port from configuration, the literal is a safe fallback.
 const ENV_RE = /process\.env\.|import\.meta\.env\.|getenv|process\.env\[/i;
 
-/** Scan one file for a server bound to a hardcoded (non-env) port. PURE. */
+/** Scan one file for a server bound to a hardcoded (non-env) port or to loopback. PURE. */
 export function scanPortBinding(file: string, content: string): PortBindingIssue[] {
   if (!CODE_RE.test(file) || !content) return [];
   const issues: PortBindingIssue[] = [];
@@ -32,9 +40,14 @@ export function scanPortBinding(file: string, content: string): PortBindingIssue
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (/^\s*(\/\/|\*)/.test(line)) continue; // skip comments
+    // Loopback host is a bug regardless of where the port comes from, so this check
+    // runs even when the port is read from env (no ENV_RE skip).
+    if (LISTEN_LOOPBACK_RE.test(line)) {
+      issues.push({ severity: 'high', kind: 'loopback-host', file, line: i + 1 });
+    }
     if (ENV_RE.test(line)) continue; // port read from env on this line — fine
     const m = line.match(LISTEN_LITERAL_RE);
-    if (m) issues.push({ severity: 'medium', file, line: i + 1, port: m[1] });
+    if (m) issues.push({ severity: 'medium', kind: 'hardcoded-port', file, line: i + 1, port: m[1] });
   }
   return issues;
 }
@@ -42,9 +55,16 @@ export function scanPortBinding(file: string, content: string): PortBindingIssue
 /** A short, honest port-binding block for the `evaluate` output. */
 export function portBindingSummary(issues: PortBindingIssue[]): string {
   if (issues.length === 0) return 'Server port: ✓ no hardcoded listen port.';
-  const head = `Server port — ${issues.length} hardcoded listen port(s) (cloud hosts inject PORT; traffic will not reach the app):`;
+  const counts = issues.filter((x) => x.kind === 'loopback-host').length;
+  const head = counts
+    ? `Server binding — ${issues.length} issue(s) (cloud hosts inject PORT and route only to a 0.0.0.0 bind; traffic will not reach the app):`
+    : `Server port — ${issues.length} hardcoded listen port(s) (cloud hosts inject PORT; traffic will not reach the app):`;
   const body = issues
     .slice(0, 10)
-    .map((x) => `  ⚠ ${x.file}:${x.line} — listen(${x.port}) — use process.env.PORT (e.g. process.env.PORT || ${x.port}).`);
+    .map((x) =>
+      x.kind === 'loopback-host'
+        ? `  ⚠ ${x.file}:${x.line} — server bound to localhost/127.0.0.1 — bind to 0.0.0.0 so the host/preview can reach it.`
+        : `  ⚠ ${x.file}:${x.line} — listen(${x.port}) — use process.env.PORT (e.g. process.env.PORT || ${x.port}).`,
+    );
   return [head, ...body].join('\n');
 }

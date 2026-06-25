@@ -25,9 +25,55 @@ describe('scanAsyncPatterns', () => {
     expect(scanAsyncPatterns('a.ts', 'await Promise.all(items.map(async (x) => save(x)));')).toEqual([]);
   });
 
+  it('flags a new Promise(async …) executor (errors are swallowed) but not the sync form', () => {
+    expect(scanAsyncPatterns('a.ts', 'return new Promise(async (resolve) => { resolve(await f()); });')[0])
+      .toMatchObject({ kind: 'new-promise-async', line: 1 });
+    expect(scanAsyncPatterns('a.ts', 'const p = new Promise<string>(async (resolve, reject) => {});')[0]?.kind)
+      .toBe('new-promise-async');
+    // Safe: a normal (synchronous) executor is not flagged.
+    expect(scanAsyncPatterns('a.ts', 'const p = new Promise((resolve) => setTimeout(resolve, 10));')).toEqual([]);
+  });
+
+  it('flags useEffect(async …) (the effect returns a Promise; cleanup never runs)', () => {
+    expect(scanAsyncPatterns('App.tsx', 'useEffect(async () => { await load(); }, []);')[0])
+      .toMatchObject({ kind: 'async-useeffect', line: 1 });
+    // Safe: the correct pattern — a sync effect that calls an inner async function.
+    expect(scanAsyncPatterns('App.tsx', 'useEffect(() => { void load(); }, []);')).toEqual([]);
+  });
+
+  it('flags filter/find/some/every/sort with an async callback (always-wrong predicate) but not .map', () => {
+    expect(scanAsyncPatterns('a.ts', 'const open = items.filter(async (x) => await isOpen(x));')[0])
+      .toMatchObject({ kind: 'async-array-predicate', line: 1 });
+    expect(scanAsyncPatterns('a.ts', 'const hit = list.find(async (x) => await match(x));')[0]?.kind)
+      .toBe('async-array-predicate');
+    expect(scanAsyncPatterns('a.ts', 'arr.sort(async (a, b) => await cmp(a, b));')[0]?.kind)
+      .toBe('async-array-predicate');
+    // .map(async …) is correct when awaited via Promise.all — not flagged here.
+    expect(scanAsyncPatterns('a.ts', 'await Promise.all(items.map(async (x) => save(x)));').some((i) => i.kind === 'async-array-predicate')).toBe(false);
+    // a synchronous predicate is fine.
+    expect(scanAsyncPatterns('a.ts', 'items.filter((x) => x.open);')).toEqual([]);
+  });
+
+  it('flags useMemo(async …) (memoizes a Promise, not the value) but not useCallback(async …)', () => {
+    expect(scanAsyncPatterns('a.tsx', 'const v = useMemo(async () => await load(id), [id]);')[0])
+      .toMatchObject({ kind: 'async-usememo', line: 1 });
+    // useCallback(async …) is correct — memoizing an async function is fine.
+    expect(scanAsyncPatterns('a.tsx', 'const fn = useCallback(async () => await save(), []);').some((i) => i.kind === 'async-usememo')).toBe(false);
+  });
+
+  it('flags reduce(async …) (the accumulator becomes a Promise) but not a sync reduce', () => {
+    expect(scanAsyncPatterns('a.ts', 'const total = items.reduce(async (acc, x) => (await acc) + x, 0);')[0]?.kind)
+      .toBe('async-reduce');
+    expect(scanAsyncPatterns('a.ts', 'const total = items.reduceRight(async (acc, x) => acc, init);')[0]?.kind)
+      .toBe('async-reduce');
+    // a synchronous reduce is fine.
+    expect(scanAsyncPatterns('a.ts', 'const total = items.reduce((acc, x) => acc + x, 0);')).toEqual([]);
+  });
+
   it('ignores comments and non-code files', () => {
     expect(scanAsyncPatterns('a.ts', '// items.forEach(async (x) => await f(x))')).toEqual([]);
     expect(scanAsyncPatterns('README.md', 'items.forEach(async (x) => await f(x))')).toEqual([]);
+    expect(scanAsyncPatterns('a.ts', '// new Promise(async (r) => r())')).toEqual([]);
   });
 });
 

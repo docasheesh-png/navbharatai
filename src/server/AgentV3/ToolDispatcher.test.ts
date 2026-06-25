@@ -156,6 +156,27 @@ describe('ToolDispatcher', () => {
     expect(ev && ev.type === 'preview' && ev.url).toBe('https://sandbox-5173.example.dev');
   });
 
+  it('update_preview maps an *.e2b.app sandbox host to a configured custom preview domain (§12)', async () => {
+    const prev = process.env.E2B_PREVIEW_DOMAIN;
+    process.env.E2B_PREVIEW_DOMAIN = 'mitrify.xyz'; // custom domain configured → swap applies
+    try {
+      const e2bAct = {
+        readFile: act.readFile.bind(act), writeFile: act.writeFile.bind(act),
+        listFiles: act.listFiles.bind(act), runCommand: act.runCommand.bind(act),
+        getPortUrl: async (_ws: string, port: number) => `https://${port}-sbx9.e2b.app`,
+      };
+      const dd = new ToolDispatcher(e2bAct, 'ws-1', state, stream);
+      const res = await dd.dispatch(call('update_preview', { port: 5173 }));
+      expect(res.is_error).toBe(false);
+      expect(res.content).toContain('https://5173-sbx9.mitrify.xyz');
+      const ev = events.find((e) => e.type === 'preview');
+      expect(ev && ev.type === 'preview' && ev.url).toBe('https://5173-sbx9.mitrify.xyz');
+    } finally {
+      if (prev === undefined) delete process.env.E2B_PREVIEW_DOMAIN;
+      else process.env.E2B_PREVIEW_DOMAIN = prev;
+    }
+  });
+
   it('update_preview errors honestly when the sandbox has no port mapping', async () => {
     const noPort = new ToolDispatcher(
       { readFile: act.readFile.bind(act), writeFile: act.writeFile.bind(act), listFiles: act.listFiles.bind(act), runCommand: act.runCommand.bind(act) },
@@ -332,6 +353,29 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('unsafe-html-sink');
   });
 
+  it('flags a SQL query built from interpolated input', async () => {
+    const dd = makeDispatcher('ws-eval-sqli');
+    await write(dd, 'src/db.ts', 'export const find = (id) => db.query(`SELECT * FROM users WHERE id = ${id}`);');
+    const out = await evalText(dd);
+    expect(out).toContain('sql-injection');
+  });
+
+  it('flags a hardcoded Authorization Bearer header', async () => {
+    const dd = makeDispatcher('ws-eval-authhdr');
+    await write(dd, 'src/api.ts', "export const call = () => fetch('/x', { headers: { Authorization: 'Bearer sk_live_abc123def456' } });");
+    const out = await evalText(dd);
+    expect(out).toContain('hardcoded-auth-header');
+  });
+
+  it('flags a hardcoded provider token (e.g. a GitHub token) in source', async () => {
+    const dd = makeDispatcher('ws-eval-token');
+    // Assembled at runtime so no contiguous token literal lives in this test file.
+    const token = 'gh' + 'p_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8';
+    await write(dd, 'src/gh.ts', `export const tok = "${token}";`);
+    const out = await evalText(dd);
+    expect(out).toContain('hardcoded-provider-token');
+  });
+
   it('flags a forEach(async …) loop that does not await', async () => {
     const dd = makeDispatcher('ws-eval-async');
     await write(dd, 'src/sync.ts', 'export const run = (items) => items.forEach(async (it) => { await save(it); });');
@@ -340,11 +384,32 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
     expect(out).toContain('Promise.all');
   });
 
+  it('flags useEffect(async …) where React cleanup never runs', async () => {
+    const dd = makeDispatcher('ws-eval-useeffect');
+    await write(dd, 'src/C.tsx', 'export const C = () => { useEffect(async () => { await load(); }, []); return null; };');
+    const out = await evalText(dd);
+    expect(out).toContain('useEffect(async');
+  });
+
+  it('flags a new Promise(async …) executor that swallows errors', async () => {
+    const dd = makeDispatcher('ws-eval-promexec');
+    await write(dd, 'src/p.ts', 'export const go = () => new Promise(async (resolve) => { resolve(await fetchData()); });');
+    const out = await evalText(dd);
+    expect(out).toContain('async executor');
+  });
+
   it('flags command injection from a dynamically-built shell command', async () => {
     const dd = makeDispatcher('ws-eval-cmdinj');
     await write(dd, 'src/run.ts', 'import { execSync } from "child_process";\nexport const go = (dir) => execSync(`rm -rf ${dir}`);');
     const out = await evalText(dd);
     expect(out).toContain('command-injection');
+  });
+
+  it('flags target="_blank" without rel="noopener" (reverse tabnabbing)', async () => {
+    const dd = makeDispatcher('ws-eval-blank');
+    await write(dd, 'src/Link.tsx', 'export const L = () => <a href="https://x.com" target="_blank">x</a>;');
+    const out = await evalText(dd);
+    expect(out).toContain('unsafe-target-blank');
   });
 
   it('flags a non-VITE_ import.meta.env reference (undefined in the browser)', async () => {
@@ -427,6 +492,41 @@ describe('ToolDispatcher — evaluate integration (more dimensions + generators)
     await write(dd, 'src/Logo.tsx', 'export const Logo = () => <img src="/logo.png" />;');
     const out = await evalText(dd);
     expect(out.toLowerCase()).toContain('accessib');
+  });
+
+  it('flags a javascript: URL in an href (XSS sink)', async () => {
+    const dd = makeDispatcher('ws-eval-jsuri');
+    await write(dd, 'src/Nav.tsx', 'export const Nav = () => <a href="javascript:doEvil()">click</a>;');
+    const out = await evalText(dd);
+    expect(out).toContain('javascript-uri');
+  });
+
+  it('flags a placeholder-image service left in the markup', async () => {
+    const dd = makeDispatcher('ws-eval-phimg');
+    await write(dd, 'src/Hero.tsx', 'export const Hero = () => <img src="https://via.placeholder.com/640" alt="h" />;');
+    const out = await evalText(dd);
+    expect(out).toContain('placeholder-image');
+  });
+
+  it('flags a server-only Node builtin (fs) imported by front-end code', async () => {
+    const dd = makeDispatcher('ws-eval-nodebuiltin');
+    await write(dd, 'src/components/Saver.tsx', "import fs from 'fs';\nexport const Saver = () => null;");
+    const out = await evalText(dd);
+    expect(out).toContain('break the browser build');
+  });
+
+  it('flags an icon-only <a href> link with no accessible name', async () => {
+    const dd = makeDispatcher('ws-eval-linkname');
+    await write(dd, 'src/Nav.tsx', 'export const N = () => <a href="/home"><svg /></a>;');
+    const out = await evalText(dd);
+    expect(out).toContain('link-no-accessible-name');
+  });
+
+  it('flags an <iframe> with no accessible title', async () => {
+    const dd = makeDispatcher('ws-eval-iframe');
+    await write(dd, 'src/Embed.tsx', 'export const E = () => <iframe src="https://x.com/v" />;');
+    const out = await evalText(dd);
+    expect(out).toContain('iframe-missing-title');
   });
 
   it('flags a requested feature that was not built (requirement coverage)', async () => {

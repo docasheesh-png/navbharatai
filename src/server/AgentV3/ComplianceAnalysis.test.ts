@@ -23,9 +23,39 @@ describe('scanCompliance — file-local rules', () => {
     expect(scanCompliance('a.ts', `document.cookie = 'sid=' + id + '; SameSite=Strict';`).some((i) => i.kind === 'cookie-no-samesite')).toBe(false);
   });
 
+  it('flags a server cookie set without httpOnly, but not when httpOnly is present', () => {
+    expect(scanCompliance('src/auth.ts', `res.cookie('session', token, { secure: true });`).some((i) => i.kind === 'cookie-no-httponly')).toBe(true);
+    expect(scanCompliance('src/auth.ts', `res.cookie('session', token, { httpOnly: true, secure: true });`).some((i) => i.kind === 'cookie-no-httponly')).toBe(false);
+    // Not a cookie set — must not false-positive on similarly-named calls.
+    expect(scanCompliance('src/auth.ts', `app.use(res.cookieParser());`).some((i) => i.kind === 'cookie-no-httponly')).toBe(false);
+  });
+
+  it('flags a server cookie set without the Secure flag, but not when secure is present', () => {
+    expect(scanCompliance('src/auth.ts', `res.cookie('session', token, { httpOnly: true });`).some((i) => i.kind === 'cookie-no-secure')).toBe(true);
+    expect(scanCompliance('src/auth.ts', `res.cookie('session', token, { httpOnly: true, secure: true });`).some((i) => i.kind === 'cookie-no-secure')).toBe(false);
+    // Not a cookie set — must not false-positive.
+    expect(scanCompliance('src/auth.ts', `app.use(res.cookieParser());`).some((i) => i.kind === 'cookie-no-secure')).toBe(false);
+  });
+
+  it('does not flag a cookie being DELETED (logout) for missing SameSite/Secure/httpOnly', () => {
+    // document.cookie clear via Max-Age=0 / 1970 expiry.
+    expect(scanCompliance('a.ts', `document.cookie = 'sid=; Max-Age=0; path=/';`).some((i) => i.kind === 'cookie-no-samesite')).toBe(false);
+    expect(scanCompliance('a.ts', `document.cookie = 'sid=; expires=Thu, 01 Jan 1970 00:00:00 UTC';`).some((i) => i.kind === 'cookie-no-samesite')).toBe(false);
+    // server-side clear via res.cookie('name', '', { maxAge: 0 }).
+    expect(scanCompliance('src/auth.ts', `res.cookie('session', '', { maxAge: 0 });`).some((i) => i.kind === 'cookie-no-httponly' || i.kind === 'cookie-no-secure')).toBe(false);
+  });
+
   it('flags personal data over plain http but ignores localhost', () => {
     expect(scanCompliance('a.ts', `fetch('http://api.example.com/u')`).some((i) => i.kind === 'insecure-http-endpoint')).toBe(true);
     expect(scanCompliance('a.ts', `fetch('http://localhost:3000/u')`).some((i) => i.kind === 'insecure-http-endpoint')).toBe(false);
+  });
+
+  it('flags a secret/token carried in a URL query string but not a benign param', () => {
+    expect(scanCompliance('a.ts', 'fetch(`/api/login?password=${pw}`);').some((i) => i.kind === 'secret-in-url')).toBe(true);
+    expect(scanCompliance('a.ts', `const u = '/reset?token=' + t;`).some((i) => i.kind === 'secret-in-url')).toBe(true);
+    expect(scanCompliance('a.ts', `fetch('https://api.x.com/d?api_key=' + k);`).some((i) => i.kind === 'secret-in-url')).toBe(true);
+    // a benign, non-sensitive query param is fine.
+    expect(scanCompliance('a.ts', `fetch('/api/items?page=2&sort=name');`).some((i) => i.kind === 'secret-in-url')).toBe(false);
   });
 
   it('does not flag a benign log line', () => {
@@ -44,6 +74,12 @@ describe('project-level detectors', () => {
     expect(detectsPiiCollection(`<input type="email" name="email" />`)).toBe(true);
     expect(detectsPiiCollection(`<input type="password" />`)).toBe(true);
     expect(detectsPiiCollection(`<input type="text" name="nickname" />`)).toBe(false);
+  });
+
+  it('detects geolocation access as personal-data collection (sensitive location)', () => {
+    expect(detectsPiiCollection(`navigator.geolocation.getCurrentPosition(onPos);`)).toBe(true);
+    expect(detectsPiiCollection(`const id = navigator.geolocation.watchPosition(cb);`)).toBe(true);
+    expect(detectsPiiCollection(`const pos = computePosition(el);`)).toBe(false);
   });
 
   it('detects trackers and consent surfaces', () => {

@@ -20,6 +20,15 @@ describe('scanAuthenticity', () => {
     expect(fixme.some((x) => x.kind === 'todo-marker')).toBe(true);
   });
 
+  it('flags a placeholder-image service in an <img src> (medium) but not a real photo service', () => {
+    const bad = scanAuthenticity('src/Hero.tsx', '<img src="https://via.placeholder.com/640x480" alt="hero" />');
+    expect(bad.some((x) => x.kind === 'placeholder-image' && x.severity === 'medium')).toBe(true);
+    expect(scanAuthenticity('src/Hero.tsx', '<img src="https://placehold.co/600x400" alt="x" />').some((x) => x.kind === 'placeholder-image')).toBe(true);
+    // Real photo services are not flagged (used in shipping apps).
+    expect(scanAuthenticity('src/Hero.tsx', '<img src="https://picsum.photos/600/400" alt="x" />').some((x) => x.kind === 'placeholder-image')).toBe(false);
+    expect(scanAuthenticity('src/Hero.tsx', '<img src="/assets/hero.png" alt="x" />').some((x) => x.kind === 'placeholder-image')).toBe(false);
+  });
+
   it('flags a console.log-only handler as an empty handler (medium)', () => {
     const issues = scanAuthenticity(
       'src/handler.ts',
@@ -67,6 +76,45 @@ describe('scanAuthenticity', () => {
     expect(scanAuthenticity('src/a.ts', '// debugger; left a note')).toEqual([]);
     expect(scanAuthenticity('src/a.ts', 'const debuggerMode = true;')).toEqual([]);
     expect(scanAuthenticity('src/a.ts', 'logger.debugger;')).toEqual([]);
+  });
+
+  it('flags a bare eslint-disable (all rules off) but not one that names specific rules', () => {
+    expect(scanAuthenticity('src/a.ts', '/* eslint-disable */\nconst x = 1;').some((i) => i.kind === 'eslint-disable-all')).toBe(true);
+    expect(scanAuthenticity('src/b.ts', '// eslint-disable-next-line\nfoo();').some((i) => i.kind === 'eslint-disable-all')).toBe(true);
+    // Naming the rule(s) is intentional and is not flagged.
+    expect(scanAuthenticity('src/c.ts', '// eslint-disable-next-line react-hooks/exhaustive-deps\nfoo();').some((i) => i.kind === 'eslint-disable-all')).toBe(false);
+    expect(scanAuthenticity('src/d.ts', '/* eslint-disable no-console */\nfoo();').some((i) => i.kind === 'eslint-disable-all')).toBe(false);
+  });
+
+  it('flags @ts-nocheck (medium) and a blind @ts-ignore (low), but not @ts-expect-error', () => {
+    const noCheck = scanAuthenticity('src/a.ts', '// @ts-nocheck\nconst x: number = "bad";');
+    expect(noCheck.some((i) => i.kind === 'ts-nocheck' && i.severity === 'medium')).toBe(true);
+    const ignore = scanAuthenticity('src/b.ts', '// @ts-ignore\nfoo.bar();');
+    expect(ignore.some((i) => i.kind === 'ts-ignore' && i.severity === 'low')).toBe(true);
+    // @ts-expect-error is intentional and self-verifying — not flagged.
+    expect(scanAuthenticity('src/c.ts', '// @ts-expect-error known gap\nfoo.bar();').some((i) => i.kind === 'ts-ignore' || i.kind === 'ts-nocheck')).toBe(false);
+  });
+
+  it('flags a leftover debug console.log (bare number / sentinel string) but not a real log', () => {
+    expect(scanAuthenticity('src/a.ts', 'console.log(123);').some((i) => i.kind === 'debug-console-log')).toBe(true);
+    expect(scanAuthenticity('src/a.ts', "console.log('here');").some((i) => i.kind === 'debug-console-log')).toBe(true);
+    expect(scanAuthenticity('src/a.ts', "console.log('test1');").some((i) => i.kind === 'debug-console-log')).toBe(true);
+    // a real, meaningful log message is not flagged.
+    expect(scanAuthenticity('src/a.ts', "console.log('User saved successfully');").some((i) => i.kind === 'debug-console-log')).toBe(false);
+    expect(scanAuthenticity('src/a.ts', 'console.log(user.id);').some((i) => i.kind === 'debug-console-log')).toBe(false);
+  });
+
+  it('flags a placeholder @example.com email but not a real one', () => {
+    expect(scanAuthenticity('src/Contact.tsx', 'const support = "support@example.com";').some((i) => i.kind === 'placeholder-email')).toBe(true);
+    expect(scanAuthenticity('src/Contact.tsx', '<a href="mailto:hello@example.org">Email</a>').some((i) => i.kind === 'placeholder-email')).toBe(true);
+    expect(scanAuthenticity('src/Contact.tsx', 'const support = "help@navbharat.ai";').some((i) => i.kind === 'placeholder-email')).toBe(false);
+  });
+
+  it('flags an empty promise .catch(() => {}) but not one with a real body', () => {
+    expect(scanAuthenticity('src/a.ts', 'fetch(u).then(r => r.json()).catch(() => {});').some((i) => i.kind === 'empty-promise-catch')).toBe(true);
+    expect(scanAuthenticity('src/a.ts', 'load().catch(e => {});').some((i) => i.kind === 'empty-promise-catch')).toBe(true);
+    // a catch that handles the error is not flagged.
+    expect(scanAuthenticity('src/a.ts', 'load().catch((e) => { console.error(e); });').some((i) => i.kind === 'empty-promise-catch')).toBe(false);
   });
 
   it('flags an empty catch block (low) that silently swallows the error', () => {

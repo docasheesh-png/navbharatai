@@ -14,6 +14,19 @@ describe('scanPortBinding', () => {
     expect(scanPortBinding('a.js', 'app.listen(5173)')[0].port).toBe('5173');
   });
 
+  it('flags a server bound to a loopback host as high (preview unreachable)', () => {
+    expect(scanPortBinding('server.ts', "app.listen(3000, 'localhost');").some((x) => x.kind === 'loopback-host' && x.severity === 'high')).toBe(true);
+    expect(scanPortBinding('server.ts', "app.listen(port, '127.0.0.1', () => {});").some((x) => x.kind === 'loopback-host')).toBe(true);
+    expect(scanPortBinding('server.ts', "server.listen({ port: 8080, host: 'localhost' });").some((x) => x.kind === 'loopback-host')).toBe(true);
+    // a loopback bind is flagged even when the PORT itself comes from env.
+    expect(scanPortBinding('server.ts', "app.listen(process.env.PORT, '127.0.0.1');").some((x) => x.kind === 'loopback-host')).toBe(true);
+  });
+
+  it('does NOT flag a 0.0.0.0 bind or a callback second argument', () => {
+    expect(scanPortBinding('server.ts', "app.listen(3000, '0.0.0.0');").some((x) => x.kind === 'loopback-host')).toBe(false);
+    expect(scanPortBinding('server.ts', 'app.listen(3000, () => console.log("up"));').some((x) => x.kind === 'loopback-host')).toBe(false);
+  });
+
   it('does NOT flag a port read from process.env.PORT (the correct pattern)', () => {
     expect(scanPortBinding('server.ts', 'app.listen(process.env.PORT || 3000)')).toEqual([]);
     expect(scanPortBinding('server.ts', 'const port = Number(process.env.PORT) || 8080; app.listen(port)')).toEqual([]);

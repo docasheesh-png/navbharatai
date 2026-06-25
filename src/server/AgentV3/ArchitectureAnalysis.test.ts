@@ -48,6 +48,33 @@ describe('analyzeArchitecture', () => {
     expect(r.layeringViolations.length).toBeGreaterThan(0);
   });
 
+  it('flags a server-only Node builtin imported by front-end code, but not a polyfilled one', () => {
+    const g = graphOf({
+      'src/components/Saver.tsx': "import fs from 'fs';\nexport function Saver(){return null;}",
+      'src/components/Hasher.tsx': "import path from 'path';\nimport crypto from 'crypto';\nexport function Hasher(){return null;}",
+    });
+    const r = analyzeArchitecture(g);
+    expect(r.nodeBuiltinsInFrontend.some((v) => v.includes('Saver.tsx') && v.includes('fs'))).toBe(true);
+    // path/crypto are commonly polyfilled by bundlers — intentionally not flagged.
+    expect(r.nodeBuiltinsInFrontend.some((v) => v.includes('Hasher.tsx'))).toBe(false);
+    expect(architectureSummary(r)).toContain('break the browser build');
+  });
+
+  it('flags other unpolyfilled server-only builtins (async_hooks, perf_hooks) in front-end code', () => {
+    const g = graphOf({
+      'src/components/Trace.tsx': "import { AsyncLocalStorage } from 'node:async_hooks';\nexport function Trace(){return null;}",
+      'src/components/Perf.tsx': "import { performance } from 'perf_hooks';\nexport function Perf(){return null;}",
+    });
+    const r = analyzeArchitecture(g);
+    expect(r.nodeBuiltinsInFrontend.some((v) => v.includes('Trace.tsx') && v.includes('async_hooks'))).toBe(true);
+    expect(r.nodeBuiltinsInFrontend.some((v) => v.includes('Perf.tsx') && v.includes('perf_hooks'))).toBe(true);
+  });
+
+  it('does NOT flag a server-only builtin imported by back-end code', () => {
+    const g = graphOf({ 'src/server/store.ts': "import fs from 'fs';\nexport const store = {};" });
+    expect(analyzeArchitecture(g).nodeBuiltinsInFrontend).toEqual([]);
+  });
+
   it('reports clean for a well-structured project', () => {
     const g = graphOf({
       'src/App.tsx': "import { Button } from './Button';\nexport function App(){return null;}",

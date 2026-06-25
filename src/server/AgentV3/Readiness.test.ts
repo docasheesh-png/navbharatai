@@ -4,7 +4,7 @@ import type { ArchitectureReport } from './ArchitectureAnalysis';
 import type { SecurityFinding } from './SecurityAnalysis';
 
 const cleanArch: ArchitectureReport = {
-  fileCount: 5, edgeCount: 6, cycles: [], unresolvedImports: [], layeringViolations: [],
+  fileCount: 5, edgeCount: 6, cycles: [], unresolvedImports: [], layeringViolations: [], nodeBuiltinsInFrontend: [],
 };
 
 describe('assessReadiness', () => {

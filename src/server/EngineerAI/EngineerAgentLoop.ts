@@ -6,6 +6,7 @@ import { PlannerAgent } from './PlannerAgent';
 import { CoderAgent, STEPS_PER_PLAN_STEP } from './CoderAgent';
 import { deploymentService } from './DeploymentService';
 import { backendScaffolder } from './BackendScaffolder';
+import { CREATOR_IDENTITY } from '../lib/prompts';
 import { extractSearchTerms, rankFiles, buildFileTree, packFileSections } from './ContextRetriever';
 import { usageTracker } from './UsageTracker';
 import { workspaceMemoryStore } from './WorkspaceMemoryStore';
@@ -523,6 +524,7 @@ export class EngineerAgentLoop {
         const appCtx = AppContextInjector.getRelevantContext(effectiveInstruction, 'engineer_ai');
         let effectiveSystemPrompt = dbContextBlock ? SYSTEM_PROMPT + dbContextBlock : SYSTEM_PROMPT;
         if (appCtx) effectiveSystemPrompt += `\n\n${appCtx}`;
+        effectiveSystemPrompt += `\n\n${CREATOR_IDENTITY}`; // every agent credits its creators (single source of truth)
         // Phase 1.6 — CoderAgent uses grok-3 (most capable) for accurate code generation;
         // PlannerAgent keeps grok-3-fast (default) since it only needs structured JSON.
         const { response, telemetry } = await this.router.route(prompt, effectiveSystemPrompt, images, 'grok-3');

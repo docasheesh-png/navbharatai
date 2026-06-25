@@ -7,6 +7,7 @@ import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { analyzeArchitecture, architectureSummary } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
+import { applyPreviewDomain } from './PreviewDomain';
 import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
@@ -20,6 +21,8 @@ import type { DependencyIssue } from './DependencyAnalysis';
 import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
 import { classifyCommandRisk, governanceNote } from './CommandGovernance';
+import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
+import { ViteReactProvider } from '../AppMakerLab/generator/templates/ViteReactProvider';
 import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
@@ -101,6 +104,30 @@ export class ToolDispatcher {
     private readonly secondOpinion?: SecondOpinion,
     private readonly consensus?: Consensus,
   ) {}
+
+  /**
+   * Self-heal the workspace scaffold. The actuator normally seeds a Vite+React+TS
+   * starter at the root when the workspace is created; this is the safety net for
+   * the case where the root has no package.json (unknown project type, or a seed
+   * that silently failed). Called when the scaffold guard blocks a create-* command
+   * so the redirect it returns is always actionable. Best-effort — never throws.
+   */
+  private async ensureViteScaffold(): Promise<void> {
+    try {
+      await this.actuator.readFile(this.workspaceId, 'package.json');
+      return; // root already scaffolded — nothing to do
+    } catch {
+      /* missing — write the starter below */
+    }
+    try {
+      const files = new ViteReactProvider().getFiles([]);
+      for (const [path, content] of Object.entries(files)) {
+        await this.actuator.writeFile(this.workspaceId, path, content).catch(() => {});
+      }
+    } catch {
+      /* self-heal is best-effort; the redirect message still guides the agent */
+    }
+  }
 
   /** Create a real git checkpoint after a change (best-effort; emits on success). */
   private async maybeCheckpoint(message: string): Promise<void> {
@@ -484,6 +511,23 @@ export class ToolDispatcher {
 
       case 'bash': {
         const command = reqStr(input, 'command');
+        // Scaffold guard: create-* generators (`npm create vite`, `npx create-*`,
+        // `npm init <gen>`) require a newer Node than the fixed-version sandbox and
+        // FAIL — after which the agent tends to improvise a nested project subdir.
+        // A Vite+React+TS scaffold already lives at the workspace root, so short-
+        // circuit the doomed command and redirect the agent there instead of
+        // running something we KNOW fails and burning build turns.
+        const guard = scaffoldGuard(command);
+        if (guard.blocked) {
+          await this.ensureViteScaffold();
+          const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+          const msg = scaffoldGuardMessage(guard.reason ?? '', files);
+          getWorkspaceMemory(this.workspaceId).recordAudit(
+            `scaffold-guard blocked create-* generator: ${command.slice(0, 160)}`,
+          );
+          this.state?.appendTerminal(msg);
+          return msg;
+        }
         // Governance (Layer 58): classify the command's risk before it runs so the
         // result carries an honest warning and a decision-audit episode is recorded.
         const risk = classifyCommandRisk(command);
@@ -778,7 +822,10 @@ export class ToolDispatcher {
         if (!this.actuator.getPortUrl) {
           throw new Error('Live preview is not available in this sandbox.');
         }
-        const url = await this.actuator.getPortUrl(this.workspaceId, port);
+        const rawUrl = await this.actuator.getPortUrl(this.workspaceId, port);
+        // §12: v3.0-built apps are previewed under the platform's E2B custom domain
+        // (mitrify.xyz) instead of the raw *.e2b.app host. Idempotent + scoped to v3.0.
+        const url = applyPreviewDomain(rawUrl);
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
         return `Live preview published at ${url}`;
       }

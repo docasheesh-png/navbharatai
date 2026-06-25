@@ -11,12 +11,12 @@
 | # | Decision | Choice | Notes |
 |---|---|---|---|
 | D1 | **Build approach** | **Strangler-fig** — build v3.0 alongside the live app, behind a feature flag, prove, then cut over. | The live app + payments must NEVER break (CLAUDE.md absolute rule #1). No "delete & rewrite". |
-| D2 | **Who pays for Claude** | **NavBharatAI pays** (admin override). | This **overrides** the CLAUDE.md constraint *"AiCreditsProvider is NEVER registered / user apps run on the user's own accounts"* — authorized by admin (aashishcpmt09) on 2026-06-22. **Mandatory cost-control guardrails** apply (§7). A future BYOK option stays open. |
+| D2 | **Who pays for Claude** | **NavBharatAI pays** (admin override). | This **overrides** the CLAUDE.md constraint *"AiCreditsProvider is NEVER registered / user apps run on the user's own accounts"* — authorized by admin (aashishcpmt09) on 2026-06-22. **Mandatory cost-control guardrails** apply (§7). **BYOK (user's own Anthropic key) was removed by admin 2026-06-25 and is not a feature — v3.0 always runs on NavBharatAI's own account.** |
 | D3 | **Sequencing** | **Design-doc first** (this doc) → admin review → then code, phase by phase. | |
 | D4 | **Sandbox** | **Hybrid: E2B sandbox (engine execution) + real Git repo (user ownership).** | Both E2B keys and real-repo are available. "Give the engine what the engine needs (a fast cloud sandbox), give the user what the user needs (a real, ownable git repo)." World's-best app maker (§7.1). |
 | D5 | **Pricing / CostGuard** | **User is billed `user_tokens × Opus_price × 2.5`** — regardless of which model actually runs (Sonnet, Opus, or Vertex under the hood). | NavBharatAI pays the real provider cost (D2) and bills the user a **2.5× markup over the Opus-equivalent rate** → revenue-positive; D2 exposure is covered. The user always pays the Opus-equivalent ×2.5; the engine is free to route to a cheaper model and keep the margin (§7.2). |
 | D6 | **Super (only-Opus) toggle** | A premium **"Only Opus" super toggle** bills at **×5** (Opus-equivalent ×5). | Forces every step onto Opus; charged at 5× (§7.2). |
-| D7 | **Transcript / DB persistence** | **User's choice** — the user is asked where their data/DB lives. With BYOK, the transcript + app DB live on the **user's own account** (their Claude/their DB). | Honors CLAUDE.md "users' own accounts" for user *data* even though compute billing is D2/D5 (§5.1). |
+| D7 | **Transcript / DB persistence** | **Transcript/build state is NavBharatAI-hosted** (platform `ConversationStore`, durable across reconnect). The generated app's **own** database still uses Bring-Your-Own-Database (a separate, kept feature — user's Supabase/Firebase). | BYOK was removed (D2); there is no "transcript on the user's Claude account" option. The app's data still lives on the user's own DB via BYO-Database (§5.1). |
 | D8 | **Beta allowlist** | **Admin-only now**; once v3.0 is complete → **all logged-in users**. | Matches the strangler-fig rollout (§6). P0 default is admin-only via `AGENTV3_ALLOWLIST`. |
 | D9 | **Engagement is REAL** | The "AI Team" live tracker + live preview must reflect **real running state** — never a fake/scripted animation. | Each agent card = a real running sub-agent + real tool calls; preview updates from real sandbox files as they're written (§3.4, §7.1). CLAUDE.md real-features rule. |
 
@@ -223,14 +223,14 @@ engagement goal.
 - Compaction only when nearing the context window: summarize oldest turns, keep recent verbatim (Claude-Code-style), never silently drop tool_results mid-task.
 
 ### 5.1 Persistence is the user's choice (D7)
-- The user is **asked where their data lives**. Default: NavBharatAI-managed
-  storage (existing DB/Firestore) for the transcript so a build survives a
-  reconnect.
-- With **BYOK** (user brings their own Claude key / their own DB), the transcript
-  + the app's data live on the **user's own account** — honoring the CLAUDE.md
-  "users' own accounts" principle for user *data*, even though build *compute* is
-  billed via D5. `ConversationStore` is an interface with pluggable backends
-  (managed vs user-owned) selected per the user's setting.
+- The transcript / build state is stored in **NavBharatAI-managed storage**
+  (existing DB/Firestore) via `ConversationStore`, so a build survives a reconnect
+  or refresh.
+- BYOK (user's own Claude key) was removed by admin (2026-06-25), so there is no
+  "transcript on the user's own Claude account" option. The generated app's **own**
+  data still lives on the user's own database via **Bring-Your-Own-Database** (a
+  separate, kept feature) — honoring the CLAUDE.md "users' own accounts" principle
+  for the app's *data*, even though build *compute* is billed via D5.
 
 ---
 
@@ -344,7 +344,7 @@ New/updated entries required (added in the PR that ships each surface):
 1. **Sandbox** → ✅ **Hybrid E2B + real Git repo** (D4, §7.1). Both available; engine gets the sandbox, user gets an ownable repo.
 2. **Budget / pricing** → ✅ **`user_tokens × Opus_rate × 2.5`** standard (D5, §7.2). NavBharatAI pays real cost, bills the markup.
 3. **Opus access** → ✅ **"Only Opus" super toggle billed ×5** (D6). Standard mode routes to Sonnet under the hood, still billed at Opus-equivalent ×2.5.
-4. **Persistence** → ✅ **User's choice** (D7, §5.1). User is asked where their data/DB lives; with BYOK it lives on the user's own account.
+4. **Persistence** → ✅ **NavBharatAI-hosted transcript/build state** via `ConversationStore` (D7, §5.1), durable across reconnect. The app's own data uses Bring-Your-Own-Database (separate feature). BYOK was removed by admin (2026-06-25).
 5. **Beta allowlist** → ✅ **Admin-only now → all logged-in users at GA** (D8). Enforced via `AGENTV3_ALLOWLIST`.
 
 All five are now locked as decisions D4–D9 in §0. P1 is unblocked.
@@ -454,3 +454,76 @@ skipped under tests. The route computes `billedInr = round(billedUsd × usdInrRa
 adds it to the `result` message (customer-facing ₹). Internal accounting stays in USD
 (currency-stable, no migration); INR is the display. Frontend ₹ display + the Power effort UI
 (P4) are next.
+
+## §12 — App hosting on mitrify.xyz (admin-directed, 2026-06-24) — DESIGN LOCKED, BUILD GATED ON VERIFY
+
+Admin (aashishcpmt09) owns a web-hosting domain **mitrify.xyz** which is "linked to E2B".
+Separate from NavBharatAI's OWN platform site (navbharatai.com / the Cloud Run service
+`navbharat-ai-prod`) — mitrify.xyz is purely for the **end-user apps that v3.0 builds**.
+
+### Decision (admin, 2026-06-24)
+- **Default — user has NOT connected their own domain:** mitrify.xyz serves BOTH roles for the
+  built app: (a) **live preview** while building, and (b) **durable deploy/hosting** that stays
+  live after the build sandbox closes.
+- **After the user connects their own website** (via GitHub or DNS, the existing "Connect my
+  website" flow → `/api/domains/connect`, Cloudflare-for-SaaS): the user's own domain becomes the
+  production/deploy home, and mitrify.xyz is demoted to **preview only**.
+- So the publish-target resolver is: `userOwnDomainConnected ? deployTo(userDomain), previewOn(mitrify)
+  : deployTo(mitrify), previewOn(mitrify)`.
+
+### Ground-truth state of the code (audited 2026-06-24, NOT assumed)
+- `src/server/lib/cloudflare.ts` ALREADY uses mitrify.xyz as the Cloudflare-for-SaaS zone name
+  (`CLOUDFLARE_SAAS_ZONE_NAME` default `mitrify.xyz`; fallback origin `connect.mitrify.xyz`).
+- `/api/domains/connect` (`src/server/routes/domains.ts`) creates the Cloudflare custom hostname
+  and returns DNS records, and persists a `custom_domains` mapping — BUT there is **no serving
+  layer yet** that routes an incoming hostname (`connect.mitrify.xyz` / a user domain) → the
+  running user app. AppKnowledgeBase honestly states the connect backend "is being finalized".
+- v3.0 live preview currently returns the RAW E2B host: `E2BActuator.getPortUrl` →
+  `https://${sandbox.getHost(port)}` (i.e. `{port}-{sandboxId}.e2b.app`), NOT a mitrify URL.
+
+### The gap (what must be built — but only after the link is verified)
+1. **Preview on mitrify**: swap/override the preview URL from `*.e2b.app` to a `*.mitrify.xyz`
+   form. The EXACT URL format depends on HOW mitrify is linked to E2B (E2B-native custom domain =
+   host-suffix swap; a reverse proxy = proxy URL scheme; Cloudflare-SaaS = a serving layer). This
+   is unconfirmed, so it is NOT yet implemented — guessing the format would ship a broken/fake URL,
+   which violates the "real features only" rule.
+2. **Durable deploy**: a publish step at build completion that puts the built artifact on a
+   permanent home (E2B sandboxes are ephemeral and pause/expire, so they cannot be the durable
+   host) + a hostname→app serving/routing layer behind mitrify.xyz.
+3. **Publish-target resolver**: pick mitrify vs the user's connected domain per the decision above.
+
+### BUILD GATE (why nothing is shipped yet)
+The admin chose "not sure / I'll check" for the E2B↔mitrify link mechanism. Per safeguard #3
+(0.01% doubt → stop) and the "real features only" rule, NO preview/deploy URL change ships until
+the admin confirms the real mechanism (E2B dashboard custom-domain setting + mitrify DNS records +
+which Cloud env vars are set). Verification steps were given to the admin. Once confirmed, wire the
+real format — never a guessed one.
+
+### §12.1 — Preview-on-mitrify IMPLEMENTED (2026-06-24); durable deploy still pending
+
+Admin confirmed (2026-06-24) the E2B link mechanism: **mitrify.xyz is an E2B-native custom domain**
+(it shows in the E2B dashboard "Domains/Custom domain" setting) and said "preview/deploy me mitrify
+show hone do, chalega". E2B custom domains are an ADDITIVE alias — the sandbox keeps running on the
+same infra and the SDK API endpoint (`api.e2b.app`) is unchanged; only the user-facing host suffix
+differs (`{port}-{id}.e2b.app` ↔ `{port}-{id}.mitrify.xyz`).
+
+Verified the E2B SDK (v2.30.0): `sandbox.getHost(port)` →
+`connectionConfig.getHost(id, port, sandboxDomain)` → `${port}-${id}.${domain}`, where `domain`
+defaults to `E2B_DOMAIN || 'e2b.app'`. Reconfiguring the SDK `domain` is the WRONG lever — it also
+rewrites `apiUrl = https://api.${domain}` and would break sandbox creation. So the correct, surgical
+fix is a host-suffix swap on the user-facing preview URL only.
+
+Shipped:
+- `src/server/AgentV3/PreviewDomain.ts` — PURE `applyPreviewDomain(url, domain?)`: swaps a `*.e2b.app`
+  host suffix → `*.<previewDomain>` (default `mitrify.xyz`, override `E2B_PREVIEW_DOMAIN`, set it to
+  `e2b.app` to disable). Idempotent; leaves localhost / already-custom / non-e2b hosts untouched.
+- Wired ONLY in `ToolDispatcher.update_preview` (v3.0 path) — the live Engineer AI builder's
+  `E2BActuator.getPortUrl` is untouched, so zero blast radius on the existing production builder.
+- Tests: PreviewDomain.test.ts (6) + a dispatcher integration test (e2b host → mitrify.xyz).
+
+STILL PENDING (the "deploy" half of §12): a DURABLE host + hostname→app serving layer so a finished
+app stays live after the ephemeral E2B sandbox closes, plus the publish-target resolver
+(mitrify vs the user's own connected domain). E2B sandboxes pause/expire, so they cannot BE the
+durable host — this needs real infra (a persistent runtime or a static/SSR deploy target) and is the
+next build step once the durable-host target is chosen. Preview is real now; durable deploy is not
+yet built (honest state — not faked).

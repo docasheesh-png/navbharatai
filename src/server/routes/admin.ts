@@ -59,8 +59,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     console.log('[ADMIN_LOGIN] login attempt received');
 
     if (username === validUser && safeStrEqual(passHash, expectedHash)) {
+      // Static token — no daily rotation so sessions don't break at midnight UTC.
       const token = crypto.createHmac('sha256', validPass)
-        .update(`admin:${Math.floor(Date.now() / 86400000)}:${username}`)
+        .update(`admin:static:${username}`)
         .digest('hex');
       audit('ADMIN_LOGIN_SUCCESS', { username, ip: req.ip });
       return res.json({ ok: true, token });
@@ -79,7 +80,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const validPass = adminPassword();
     if (!validPass || !token) return res.status(401).json({ error: 'Admin token required.' });
     const expected = crypto.createHmac('sha256', validPass)
-      .update(`admin:${Math.floor(Date.now() / 86400000)}:${adminUsername()}`)
+      .update(`admin:static:${adminUsername()}`)
       .digest('hex');
     if (!safeStrEqual(token, expected)) {
       audit('ADMIN_ACCESS_DENIED', { ip: req.ip, path: req.path });

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
-  History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw,
+  History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
   SlidersHorizontal, Check, X, Paperclip, FileText,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
@@ -27,7 +27,7 @@ interface ChatMsg {
 }
 
 export function AgentV3Panel({ userId, email, resume }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null }) {
-  const { state, running, error, start, respond, restore, stop, reset } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   const [onlyOpus, setOnlyOpus] = useState(false);
   const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default
@@ -97,6 +97,24 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [convo.length, state.narration, running]);
+
+  // Detect a build that is running server-side but is NOT attached here (its original
+  // connection was lost) — so the header can offer "Resume". Re-checks when the account
+  // loads and whenever this UI goes idle.
+  useEffect(() => {
+    if (!running) checkRunning({ userId, email });
+  }, [userId, email, running, checkRunning]);
+
+  // D7 — on first open with a signed-in account, re-display the most recent persisted build's
+  // chat history so a refresh/reconnect doesn't lose it (option (a): chat + git-restore). Runs
+  // ONCE, and only when nothing is running and the panel is still empty, so it never clobbers a
+  // live build or a thread already opened from History. Best-effort.
+  const loadedConvoRef = useRef(false);
+  useEffect(() => {
+    if (loadedConvoRef.current || running || !userId || state.narration.length > 0) return;
+    loadedConvoRef.current = true;
+    void loadConversation({ userId, email });
+  }, [userId, email, running, state.narration.length, loadConversation]);
 
   // Resume a saved v3.0 conversation opened from History ("open chat"). Adopt its
   // sessionId so the backend continues with the SAME workspace/memory (best-effort,
@@ -261,14 +279,43 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
           <span className="font-semibold">NavBharatAI Pro v3.0</span>
           <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
           <span className="text-[9px] text-zinc-600 font-mono" title="Deployed build time — if this doesn't change after a deploy, your browser is serving cached code.">{(() => { try { return 'b:' + (typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '').slice(5, 16).replace('T', ' '); } catch { return ''; } })()}</span>
-          <button
-            onClick={startNewSession}
-            disabled={running}
-            title="Start a new project (fresh sandbox + memory)"
-            className="ml-auto flex items-center gap-1 text-xs text-zinc-400 hover:text-white disabled:opacity-40 border border-zinc-700 rounded px-2 py-1"
-          >
-            <RotateCcw className="w-3.5 h-3.5" /> New
-          </button>
+          {running ? (
+            // Attached + streaming here → Stop.
+            <button
+              onClick={stop}
+              title="Stop the running build"
+              className="ml-auto flex items-center gap-1 text-xs text-white bg-red-600 hover:bg-red-500 rounded px-2 py-1"
+            >
+              <Square className="w-3.5 h-3.5" /> Stop
+            </button>
+          ) : serverBuildRunning ? (
+            // A build is running server-side but this UI isn't attached → Resume + Stop.
+            <div className="ml-auto flex items-center gap-1.5">
+              <button
+                onClick={() => resumeBuild({ userId, email })}
+                title="Open the running build — resume where it left off"
+                className="flex items-center gap-1 text-xs text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2 py-1"
+              >
+                <Play className="w-3.5 h-3.5" /> Resume
+              </button>
+              <button
+                onClick={stop}
+                title="Stop the running build"
+                className="flex items-center gap-1 text-xs text-red-200 border border-red-700 hover:bg-red-950 rounded px-2 py-1"
+              >
+                <Square className="w-3.5 h-3.5" /> Stop
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={startNewSession}
+              disabled={running}
+              title="Start a new project (fresh sandbox + memory)"
+              className="ml-auto flex items-center gap-1 text-xs text-zinc-400 hover:text-white disabled:opacity-40 border border-zinc-700 rounded px-2 py-1"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> New
+            </button>
+          )}
         </div>
         <div className="flex gap-1 px-3 pb-2 overflow-x-auto whitespace-nowrap" style={{ WebkitOverflowScrolling: 'touch' }}>
           <TabPill active={showWorkspace && tab === 'preview'} onClick={() => openTab('preview')} icon={<Globe className="w-3.5 h-3.5" />}>Preview</TabPill>
@@ -334,7 +381,7 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
           <div className="shrink-0 sticky bottom-0 bg-zinc-950 border-t border-zinc-800 pb-[env(safe-area-inset-bottom)]">
             {agents.length > 0 && (
               <div className="px-3 pt-2 flex gap-1.5 overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
-                {agents.map((a) => <AgentChip key={a.agent} card={a} />)}
+                {agents.map((a) => <AgentChip key={a.agent} card={a} running={running} />)}
               </div>
             )}
             {files.length > 0 && (
@@ -358,7 +405,7 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
               className="hidden"
               onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
             />
-            <div className="flex items-end gap-2 p-3">
+            <div className="flex items-end gap-2 px-2 py-1.5">
               {/* Build-options popover (Planning / Thinking / Power) — anchored above the input */}
               <div className="relative shrink-0">
                 {settingsOpen && (
@@ -566,10 +613,15 @@ function PreviewSurface({ url }: { url?: string }) {
   );
 }
 
-function AgentChip({ card }: { card: AgentCard }) {
+function AgentChip({ card, running }: { card: AgentCard; running: boolean }) {
+  // While the build is running, every team member shows a spinning ring (work in
+  // progress). Once the build finishes, it turns into a green check. (Per-tool-call
+  // active flags flicker between tools, so the chip tracks the whole-build state.)
   return (
     <div className="flex items-center gap-1 text-[11px] bg-zinc-900 rounded-full px-2 py-1" title={card.lastAction}>
-      {card.active ? <Loader2 className="w-3 h-3 text-indigo-400 animate-spin" /> : <CheckCircle2 className="w-3 h-3 text-zinc-600" />}
+      {running
+        ? <Loader2 className="w-3 h-3 text-indigo-400 animate-spin" />
+        : <CheckCircle2 className="w-3 h-3 text-emerald-500" />}
       <span className="font-medium capitalize text-zinc-200">{card.agent}</span>
     </div>
   );

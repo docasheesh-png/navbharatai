@@ -64,6 +64,15 @@ const RULES: Rule[] = [
     re: /(?:\/\/|\/\*|#|["'`])\s*(this is a )?(placeholder|stub)\b/i,
   },
   {
+    kind: 'placeholder-image',
+    severity: 'medium',
+    // Unambiguous placeholder-image generators left in an <img src>/url — fake
+    // content shipped as real, against the "real features only" rule. Conservative:
+    // only services whose name IS "placeholder/dummy" (picsum/unsplash are excluded —
+    // they serve real photos and are used in shipping apps).
+    re: /\b(via\.placeholder\.com|placehold\.(co|it)|placekitten\.com|placeimg\.com|dummyimage\.com|lorempixel\.com)\b/i,
+  },
+  {
     kind: 'coming-soon',
     severity: 'high',
     re: /\b(coming\s+soon|not\s+available\s+yet)\b/i,
@@ -81,6 +90,37 @@ const RULES: Rule[] = [
     re: /(?:^|[^.\w])debugger\s*;/,
     ignore: (_m, line) => /^\s*(\/\/|\*|\/\*)/.test(line),
   },
+  // ── medium: `@ts-nocheck` disables type-checking for the WHOLE file, hiding
+  // every real type error in it — fake "it compiles" against "real features only".
+  {
+    kind: 'ts-nocheck',
+    severity: 'medium',
+    re: /@ts-nocheck\b/,
+  },
+  // ── low: a blind `@ts-ignore` silences the next line's type error without
+  // proving one exists (unlike `@ts-expect-error`, which is intentional and is
+  // NOT flagged). Often hides a real bug behind a green build. ─────────────────
+  {
+    kind: 'ts-ignore',
+    severity: 'low',
+    re: /@ts-ignore\b/,
+  },
+  // ── low: a BARE eslint-disable (no rule named) turns OFF every lint rule for the
+  // file or line, hiding real problems. A disable that names specific rules
+  // (`eslint-disable no-console`) is intentional and is NOT flagged. ───────────────
+  {
+    kind: 'eslint-disable-all',
+    severity: 'low',
+    re: /eslint-disable(?:-(?:next-)?line)?\b\s*(?:\*\/\s*)?$/,
+  },
+  {
+    // A classic leftover debug print — console.log with a bare number or a throwaway
+    // sentinel string ("here"/"test"/"asdf"…). High-precision: only these unambiguous
+    // debug arguments, never a real log message.
+    kind: 'debug-console-log',
+    severity: 'low',
+    re: /console\.log\s*\(\s*(?:\d+|['"`](?:here|test(?:ing)?|hello|hi|debug|x+|a{3,}|asdf|todo|wip|foo|bar|baz)\d*['"`])\s*\)/i,
+  },
   // ── low: hardcoded obviously-fake return values left in code ──────────────
   {
     kind: 'fake-return',
@@ -91,6 +131,21 @@ const RULES: Rule[] = [
     kind: 'weak-default-password',
     severity: 'low',
     re: /\bpassword\b\s*[:=]\s*['"`](changeme|test123|123456|password)['"`]/i,
+  },
+  {
+    // A left-in placeholder contact email on the RFC-reserved example.* domains —
+    // shipped as if real (support@example.com etc.), against "real features only".
+    kind: 'placeholder-email',
+    severity: 'low',
+    re: /@example\.(?:com|org|net)\b/i,
+  },
+  {
+    // A promise `.catch(() => {})` with an EMPTY body silently swallows the rejection —
+    // the async failure is hidden and the app looks like it worked (the promise-chain
+    // twin of an empty try/catch). A catch with a real body or a comment is not matched.
+    kind: 'empty-promise-catch',
+    severity: 'low',
+    re: /\.catch\s*\(\s*(?:\(\s*[a-zA-Z_$][\w$]*\s*\)|\(\s*\)|[a-zA-Z_$][\w$]*)\s*=>\s*\{\s*\}\s*\)/,
   },
 ];
 

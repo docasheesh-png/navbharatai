@@ -7,6 +7,7 @@
 // AgentRegistry so the Architect always delegates by real, current capability.
 
 import { rosterBriefing } from './AgentRegistry';
+import { CREATOR_IDENTITY } from '../lib/prompts';
 
 /**
  * Plan-mode system prompt (P4): the agent produces a concise step-by-step plan
@@ -19,7 +20,7 @@ export function planSystemPrompt(): string {
     'todo per major step, status "pending"). Briefly explain the approach in your',
     'message. Do NOT write any files or run any commands yet — only plan. End your',
     'turn after calling update_todo.',
-  ].join('\n');
+  ].join('\n') + '\n\n' + CREATOR_IDENTITY;
 }
 
 export function architectSystemPrompt(): string {
@@ -43,7 +44,29 @@ export function architectSystemPrompt(): string {
     '  updated as you progress (mark items in_progress / done).',
     '- Use write_file and edit_file to create real, complete source files — never',
     '  placeholders, stubs, or TODO comments left unfinished.',
+    '- SCAFFOLDING — a Vite + React + TypeScript project is ALREADY scaffolded in the',
+    '  workspace (package.json, vite.config, index.html, src/main.tsx, src/App.tsx). Just',
+    '  EDIT/ADD files at the ROOT (never a nested project subdirectory). Do NOT run',
+    '  `npm create vite` / `create-vite` / `npx create-*` / `npm init <generator>`: those',
+    '  scaffolders need a newer Node than the sandbox and will FAIL — the sandbox now',
+    '  auto-BLOCKS them and redirects you to the existing root scaffold, so running one',
+    '  just wastes a turn. If you need a different stack, write its config files directly',
+    '  with write_file (never a create-* generator).',
+    '- The sandbox NODE VERSION IS FIXED — you cannot change it. If a dev tool errors with a',
+    '  Node-version mismatch (e.g. "node:util does not provide an export named styleText", an',
+    '  ESM/engine error, or a create-* failure), do NOT loop trying to upgrade Node or the',
+    '  tool repeatedly: pin that tool to an OLDER version compatible with the sandbox, or just',
+    '  SKIP that step. Never burn many turns fighting an unfixable environment version.',
+    '- A WORKING PREVIEW is the goal, not a green test suite. Do NOT block on running tests:',
+    '  if vitest/the test runner fails on the sandbox Node, SKIP running tests and move on —',
+    '  build the app, start the dev server, and call update_preview. Ship the live preview first.',
     '- Use bash to install dependencies, run the build, and run the dev server.',
+    '- CRITICAL — the preview runs in a cloud sandbox reached over the network, so the',
+    '  dev server MUST listen on 0.0.0.0, NOT just localhost/127.0.0.1, or the preview',
+    '  shows "connection refused" even though the server is running. For Vite set',
+    "  server.host = true (and a fixed server.port, e.g. 5173) in vite.config, or run",
+    '  `npm run dev -- --host 0.0.0.0 --port 5173`. For Next use `next dev -H 0.0.0.0`,',
+    '  for CRA `HOST=0.0.0.0 npm start`. Use that SAME port in update_preview.',
     '- After you start a dev server, call update_preview with its port so the user',
     '  sees the app live in the preview while it is still being built.',
     '- Use read_file, grep and glob to inspect the workspace before changing it.',
@@ -118,5 +141,5 @@ export function architectSystemPrompt(): string {
     '- When the app is genuinely complete and working, end your turn with a short',
     '  summary of what you built and how to run it. Do not call any tool in that',
     '  final turn.',
-  ].join('\n');
+  ].join('\n') + '\n\n' + CREATOR_IDENTITY;
 }

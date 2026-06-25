@@ -127,6 +127,38 @@ The trigger handles the deploy. No `gcloud` access from the Claude session.
 - A backup `.github/workflows/deploy.yml` exists; it only deploys if repo secrets
   `GCP_PROJECT_ID` + `GCP_SA_KEY` are set (currently NOT set → it skips cleanly).
 
+## The autonomous phase cycle (mandatory — how every roadmap phase ships)
+
+**Claude owns the ENTIRE ship cycle for each phase/batch, end to end — including the
+merge.** Do NOT stop after opening a PR and hand it to the admin to merge. Drive the
+whole loop yourself, autonomously, and immediately start the next phase. This is the
+default working mode for all roadmap/march work and it repeats forever until the admin
+says stop (or a phase is genuinely blocked — see safeguard #3).
+
+**The cycle (repeat for every phase):**
+
+1. **Complete the next phase** — real, fully-wired work (the two absolute rules apply:
+   never break the app; real features only). No half-done work.
+2. **Run the full verification gate** (safeguard #5, non-negotiable):
+   `npx tsc --noEmit` (frontend) + `npx tsc -p tsconfig.server.json` (if server touched)
+   + `npx vitest run` (read the real pass/fail line) + a boot/smoke check for server
+   changes. Green or it does not leave your machine.
+3. **Branch → commit → push** the work to the feature branch.
+4. **Open a PR** to `main`.
+5. **Wait for CI to go green** on that PR — actually wait, poll the checks; never merge
+   while CI is pending or red.
+6. **On green, MERGE it yourself** (CI green BEFORE merge is the hard gate — merging red
+   breaks the live app for every user; merge = auto production deploy via Cloud Run).
+7. **Immediately start the next phase** → go back to step 1. Same cycle, next phase.
+
+**You do steps 4, 5, AND 6 yourself.** "Open a PR" is not the finish line — a green merge
+is. The admin should not have to merge anything for the cycle to keep moving; you complete
+each phase, you make the PR, you wait for green, you merge, you move on — over and over.
+
+**Only stop the cycle when:** the admin explicitly says stop/pause, there is no next phase
+left, or you hit real doubt/ambiguity/breakage risk (safeguard #3 — then ask the admin).
+A transient CI failure is NOT a stop: diagnose, fix, re-push, wait for green, merge, continue.
+
 ## Language standard (mandatory for all sessions)
 
 All NavBharatAI source code, UI text, code comments, variable names, function
@@ -177,8 +209,11 @@ explicitly authorized a different model on 2026-06-22 (see
   "Only Opus" super toggle — regardless of which model actually runs. Billed via
   the platform's usage cost record (`UserCostStore`), the same place every other
   build records cost. Margin is structurally positive (billed ≥ real cost).
-- A future BYOK option (user's own Anthropic key) stays open and is preferred
-  where available; it would restore the original "users' own accounts" model.
+- **BYOK (user's own Anthropic key) is NOT a NavBharatAI feature and must not be
+  built or re-proposed.** The admin (aashishcpmt09) removed it deliberately
+  (2026-06-25); v3.0 always runs on NavBharatAI's own Anthropic account billed via
+  the markup above. Do not re-introduce a "bring your own Claude key" option in any
+  form. (This does NOT affect Bring-Your-Own-*Database* — a separate, kept feature.)
 
 This override is **scoped to AgentV3** and was added in the same change that
 wired v3.0 billing. Do not extend it to Engineer AI or remove the constraints

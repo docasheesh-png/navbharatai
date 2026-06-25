@@ -1,0 +1,167 @@
+import { describe, it, expect } from 'vitest';
+import * as admin from 'firebase-admin';
+import { FirestoreConversationStore } from './FirestoreConversationStore';
+
+// ── A compact but faithful in-memory fake of the narrow Firestore surface the store uses:
+// nested documents/subcollections, get/set(merge)/update, where+orderBy+limit queries,
+// runTransaction (single-threaded, no isolation needed) and batched deletes. It lets us unit-
+// test the store's real logic (seq increment, transcript reassembly, metadata merge, listing)
+// without a live Firestore. ─────────────────────────────────────────────────────────────────
+class FakeDoc {
+  data: Record<string, unknown> | undefined;
+  readonly subcols = new Map<string, FakeCollection>();
+  constructor(readonly id: string) {}
+  collection(name: string): FakeCollection {
+    let c = this.subcols.get(name);
+    if (!c) { c = new FakeCollection(); this.subcols.set(name, c); }
+    return c;
+  }
+}
+class DocRef {
+  constructor(readonly col: FakeCollection, readonly id: string) {}
+  private node(): FakeDoc {
+    let d = this.col.docs.get(this.id);
+    if (!d) { d = new FakeDoc(this.id); this.col.docs.set(this.id, d); }
+    return d;
+  }
+  async get() {
+    const d = this.col.docs.get(this.id);
+    return { exists: !!d?.data, id: this.id, ref: this, data: () => d?.data };
+  }
+  async set(data: Record<string, unknown>, opts?: { merge?: boolean }) {
+    const d = this.node();
+    d.data = opts?.merge ? { ...(d.data ?? {}), ...data } : { ...data };
+  }
+  async update(data: Record<string, unknown>) {
+    const d = this.node();
+    d.data = { ...(d.data ?? {}), ...data };
+  }
+  collection(name: string) { return this.node().collection(name); }
+}
+class Query {
+  constructor(
+    readonly col: FakeCollection,
+    readonly filters: Array<[string, string, unknown]> = [],
+    readonly order?: [string, 'asc' | 'desc'],
+    readonly lim?: number,
+  ) {}
+  where(f: string, _op: string, v: unknown) { return new Query(this.col, [...this.filters, [f, '==', v]], this.order, this.lim); }
+  orderBy(f: string, dir: 'asc' | 'desc' = 'asc') { return new Query(this.col, this.filters, [f, dir], this.lim); }
+  limit(n: number) { return new Query(this.col, this.filters, this.order, n); }
+  async get() {
+    let rows = [...this.col.docs.values()].filter((d) => d.data);
+    for (const [f, , v] of this.filters) rows = rows.filter((d) => d.data?.[f] === v);
+    if (this.order) {
+      const [f, dir] = this.order;
+      rows.sort((a, b) => (((a.data?.[f] as number) ?? 0) - ((b.data?.[f] as number) ?? 0)) * (dir === 'desc' ? -1 : 1));
+    }
+    if (this.lim !== undefined) rows = rows.slice(0, this.lim);
+    return { docs: rows.map((d) => ({ id: d.id, data: () => d.data, ref: new DocRef(this.col, d.id) })) };
+  }
+}
+class FakeCollection {
+  readonly docs = new Map<string, FakeDoc>();
+  doc(id: string) { return new DocRef(this, id); }
+  where(f: string, op: string, v: unknown) { return new Query(this).where(f, op, v); }
+  orderBy(f: string, dir: 'asc' | 'desc' = 'asc') { return new Query(this).orderBy(f, dir); }
+  // A CollectionReference IS a Query in Firestore — `.get()` returns every doc.
+  get() { return new Query(this).get(); }
+}
+class FakeFirestore {
+  readonly cols = new Map<string, FakeCollection>();
+  collection(name: string): FakeCollection {
+    let c = this.cols.get(name);
+    if (!c) { c = new FakeCollection(); this.cols.set(name, c); }
+    return c;
+  }
+  async runTransaction<T>(fn: (tx: { get: (r: DocRef) => Promise<unknown>; set: (r: DocRef, d: Record<string, unknown>, o?: { merge?: boolean }) => void }) => Promise<T>): Promise<T> {
+    return fn({ get: (r) => r.get(), set: (r, d, o) => { void r.set(d, o); } });
+  }
+  batch() {
+    const ops: Array<() => void> = [];
+    return {
+      delete: (r: DocRef) => ops.push(() => { r.col.docs.delete(r.id); }),
+      commit: async () => { ops.forEach((op) => op()); },
+    };
+  }
+}
+
+function newStore() {
+  const fake = new FakeFirestore();
+  const store = new FirestoreConversationStore(fake as unknown as admin.firestore.Firestore);
+  return { store, fake };
+}
+
+const base = { id: 'b1', userId: 'u1', workspaceId: 'ws-1', title: 'todo app', createdAt: 1000 };
+
+describe('FirestoreConversationStore (faithful fake)', () => {
+  it('creates, then get() reassembles metadata + seed transcript', async () => {
+    const { store } = newStore();
+    await store.create({ ...base, messages: [{ role: 'user', content: 'hi' }] });
+    const rec = await store.get('b1');
+    expect(rec?.status).toBe('running');
+    expect(rec?.userId).toBe('u1');
+    expect(rec?.messages).toEqual([{ role: 'user', content: 'hi' }]);
+    expect(rec?.billedUsd).toBe(0);
+    expect(rec?.createdAt).toBe(1000);
+  });
+
+  it('rejects a duplicate id and returns null for unknown', async () => {
+    const { store } = newStore();
+    expect(await store.get('nope')).toBeNull();
+    await store.create({ ...base });
+    await expect(store.create({ ...base })).rejects.toThrow(/already exists/);
+  });
+
+  it('appends turns into the subcollection and get() concatenates them in order', async () => {
+    const { store } = newStore();
+    await store.create({ ...base, messages: [{ role: 'user', content: 'hi' }] });
+    await store.appendMessages('b1', [{ role: 'assistant', content: 'a' }], { usage: { inputTokens: 5, outputTokens: 2, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }, billedUsd: 0.1, updatedAt: 2000 });
+    await store.appendMessages('b1', [{ role: 'user', content: 'r' }], { status: 'complete', billedUsd: 0.2, updatedAt: 3000 });
+    const rec = await store.get('b1');
+    expect(rec?.messages).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: 'a' },
+      { role: 'user', content: 'r' },
+    ]);
+    expect(rec?.status).toBe('complete');
+    expect(rec?.billedUsd).toBe(0.2);
+    expect(rec?.usage.inputTokens).toBe(5);
+    expect(rec?.updatedAt).toBe(3000);
+  });
+
+  it('throws when appending/updating an unknown id', async () => {
+    const { store } = newStore();
+    await expect(store.appendMessages('ghost', [], { updatedAt: 1 })).rejects.toThrow(/unknown conversation id/);
+    await expect(store.update('ghost', { updatedAt: 1 })).rejects.toThrow(/unknown conversation id/);
+  });
+
+  it('update() finalizes status without adding turns', async () => {
+    const { store } = newStore();
+    await store.create({ ...base, messages: [{ role: 'user', content: 'hi' }] });
+    await store.update('b1', { status: 'stopped', updatedAt: 9 });
+    const rec = await store.get('b1');
+    expect(rec?.status).toBe('stopped');
+    expect(rec?.messages).toHaveLength(1);
+  });
+
+  it('listByUser returns metadata (no transcript) scoped + ordered by updatedAt desc + capped', async () => {
+    const { store } = newStore();
+    await store.create({ ...base, id: 'a', userId: 'u1', messages: [{ role: 'user', content: 'x' }] });
+    await store.create({ ...base, id: 'b', userId: 'u1' });
+    await store.create({ ...base, id: 'c', userId: 'u2' });
+    await store.update('a', { updatedAt: 5000 }); // make 'a' most recent for u1
+    const u1 = await store.listByUser('u1');
+    expect(u1.map((r) => r.id)).toEqual(['a', 'b']);
+    expect(u1[0].messages).toEqual([]); // list view omits the transcript
+    expect((await store.listByUser('u1', 1)).map((r) => r.id)).toEqual(['a']);
+    expect(await store.listByUser('nobody')).toEqual([]);
+  });
+
+  it('removes the main doc and its turns', async () => {
+    const { store } = newStore();
+    await store.create({ ...base, messages: [{ role: 'user', content: 'hi' }] });
+    await store.remove('b1');
+    expect(await store.get('b1')).toBeNull();
+  });
+});

@@ -32,26 +32,71 @@ export function analyzeSeo(indexHtml: string | null | undefined): SeoReport {
   const findings: SeoFinding[] = [];
 
   // A non-empty <title>.
+  const titleMatch = /<title>\s*([^<]*?)\s*<\/title>/i.exec(html);
   if (!/<title>\s*\S[^<]*<\/title>/i.test(html)) {
     findings.push({
       level: 'high',
       message: 'No non-empty <title> in the HTML entry — set a descriptive page title (browser tab, search results and link previews all use it).',
     });
+  } else if (titleMatch && /^(?:vite(?:\s*\+\s*react(?:\s*\+\s*ts)?)?(?:\s+app)?|react\s+app|create\s+react\s+app|document|untitled|home)$/i.test(titleMatch[1].trim())) {
+    // A leftover scaffold/template default title — the page shipped with a placeholder.
+    findings.push({
+      level: 'medium',
+      message: `The <title> is a leftover template default ("${titleMatch[1].trim()}") — replace it with your app's real, descriptive title.`,
+    });
+  } else if (titleMatch && titleMatch[1].trim().length > 60) {
+    // Google truncates titles past ~60 characters in search results, so the tail is
+    // lost. Only flagged when a real (non-default) title is present and over the limit.
+    findings.push({
+      level: 'low',
+      message: `The <title> is ${titleMatch[1].trim().length} characters — search results truncate it past ~60, so the end is cut off. Tighten it to the key words first.`,
+    });
   }
 
   // Viewport meta — without it the app is not mobile-responsive.
+  const viewportMatch = /<meta[^>]+name=["']viewport["'][^>]*content=["']([^"']*)["']/i.exec(html);
   if (!/<meta[^>]+name=["']viewport["']/i.test(html)) {
     findings.push({
       level: 'medium',
       message: 'No viewport meta tag — add <meta name="viewport" content="width=device-width, initial-scale=1"> so the app is mobile-responsive.',
     });
+  } else if (viewportMatch && /\bwidth\s*=\s*\d+/i.test(viewportMatch[1])) {
+    // A fixed pixel width (width=1024) instead of device-width breaks mobile layout.
+    findings.push({
+      level: 'medium',
+      message: 'The viewport is pinned to a fixed pixel width instead of width=device-width — the app will not be responsive on mobile. Use content="width=device-width, initial-scale=1".',
+    });
   }
 
-  // Meta description with real content.
+  // <meta charset> — without a declared charset, non-ASCII text (e.g. Hindi) can
+  // render as mojibake in some browsers/encodings.
+  const charsetMatch = /<meta[^>]+charset=["']?\s*([\w-]+)/i.exec(html);
+  if (!/<meta[^>]+charset=/i.test(html)) {
+    findings.push({
+      level: 'low',
+      message: 'No <meta charset> in the HTML entry — add <meta charset="utf-8"> as the first <head> tag so non-ASCII (e.g. Hindi) text renders correctly.',
+    });
+  } else if (charsetMatch && !/^utf-?8$/i.test(charsetMatch[1].trim())) {
+    // A non-UTF-8 charset (e.g. ISO-8859-1, windows-1252) cannot represent Devanagari, so
+    // Hindi/Hinglish content renders as mojibake. UTF-8 is the only safe choice.
+    findings.push({
+      level: 'low',
+      message: `The declared charset is "${charsetMatch[1].trim()}", not UTF-8 — it cannot represent Hindi/Devanagari (or emoji) and will render as mojibake. Use <meta charset="utf-8">.`,
+    });
+  }
+
+  // Meta description — present with real content, and not so long it gets truncated.
+  const descMatch = /<meta[^>]+name=["']description["'][^>]*content=["']([^"']*)["']/i.exec(html);
   if (!/<meta[^>]+name=["']description["'][^>]*content=["'][^"']+["']/i.test(html)) {
     findings.push({
       level: 'low',
       message: 'No meta description — add one so search results and social shares show a meaningful summary.',
+    });
+  } else if (descMatch && descMatch[1].trim().length > 160) {
+    // Google truncates descriptions past ~160 characters, so the tail is lost in results.
+    findings.push({
+      level: 'low',
+      message: `The meta description is ${descMatch[1].trim().length} characters — search results truncate it past ~160, so the end is cut off. Tighten it to one clear sentence.`,
     });
   }
 
@@ -63,13 +108,54 @@ export function analyzeSeo(indexHtml: string | null | undefined): SeoReport {
     });
   }
 
+  // Open Graph tags — without any, links shared on WhatsApp/social show a bare URL
+  // with no title/image. Flag only when there are NONE (high-signal, not nagging).
+  if (!/<meta[^>]+(?:property|name)=["']og:[^"']+["']/i.test(html)) {
+    findings.push({
+      level: 'low',
+      message: 'No Open Graph tags — add og:title, og:description and og:image so links shared on WhatsApp/social show a rich preview instead of a bare URL.',
+    });
+  }
+
+  // Partial Open Graph: og tags exist but og:image is missing — a shared link then
+  // renders a card with a title/description but no image (much lower engagement). Only
+  // flagged when OG is otherwise present (the "no OG at all" case is handled above).
+  if (
+    /<meta[^>]+(?:property|name)=["']og:[^"']+["']/i.test(html) &&
+    !/<meta[^>]+(?:property|name)=["']og:image["']/i.test(html)
+  ) {
+    findings.push({
+      level: 'low',
+      message: 'Open Graph tags are present but og:image is missing — add <meta property="og:image" content="..."> so shared links show a preview image, not just text.',
+    });
+  }
+
+  // A leftover robots "noindex" actively keeps the live site OUT of search results —
+  // a common dev-template footgun. Flag it (medium) so it is removed before launch.
+  if (/<meta[^>]+name=["']robots["'][^>]*content=["'][^"']*\bnoindex\b/i.test(html)) {
+    findings.push({
+      level: 'medium',
+      message: 'The page has <meta name="robots" content="noindex"> — search engines will NOT index it. Remove the noindex before launch (unless you intentionally want this page hidden from search).',
+    });
+  }
+
+  // Favicon — without a <link rel="icon">, the browser shows a generic icon and
+  // requests /favicon.ico (a 404 in the network log). The Vite scaffold ships one,
+  // so a missing favicon means it was removed.
+  if (!/<link[^>]+rel=["'](?:shortcut\s+)?(?:icon|apple-touch-icon|mask-icon)["']/i.test(html)) {
+    findings.push({
+      level: 'low',
+      message: 'No favicon link — add <link rel="icon" href="..."> so the browser tab and bookmarks show your icon instead of a generic one (and to avoid a 404 on /favicon.ico).',
+    });
+  }
+
   return { assessed: true, findings };
 }
 
 /** A short, honest SEO/metadata block for the `evaluate` output. */
 export function seoSummary(report: SeoReport): string {
   if (!report.assessed) return 'SEO/metadata: — (no HTML entry to assess).';
-  if (report.findings.length === 0) return 'SEO/metadata: ✓ title, viewport, description and lang are present.';
+  if (report.findings.length === 0) return 'SEO/metadata: ✓ title, viewport, charset, description, lang, Open Graph tags and favicon are present.';
   const order: Record<SeoLevel, number> = { high: 0, medium: 1, low: 2 };
   const sorted = [...report.findings].sort((a, b) => order[a.level] - order[b.level]);
   const head = `SEO/metadata — ${report.findings.length} item(s) missing:`;

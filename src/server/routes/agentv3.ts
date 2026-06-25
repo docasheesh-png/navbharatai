@@ -33,6 +33,12 @@ import {
   classifyIntent,
 } from '../AgentV3';
 import { randomUUID } from 'crypto';
+import {
+  InMemoryConversationStore,
+  deriveTitle,
+  type ConversationStore,
+} from '../AgentV3/ConversationStore';
+import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
@@ -83,6 +89,41 @@ function buildActuator(): IEngineerActuator {
   else if (process.env.DOCKER_ENABLED === 'true') sharedActuator = new DockerActuator();
   else sharedActuator = new LocalActuator();
   return sharedActuator;
+}
+
+// ── Conversation persistence (D7) ──────────────────────────────────────────────
+let sharedConversationStore: ConversationStore | null = null;
+/**
+ * The durable transcript store: Firestore when explicitly enabled (real cross-instance
+ * durability in Cloud Run), otherwise the in-memory store (dev/CI, and a safe default so a
+ * missing-credentials environment never errors). Singleton. Gated on AGENTV3_PERSIST_FIRESTORE
+ * so CI/local stay on the in-memory store, matching the cautious v3.0 flag-gating.
+ */
+function getConversationStore(): ConversationStore {
+  if (sharedConversationStore) return sharedConversationStore;
+  if (process.env.AGENTV3_PERSIST_FIRESTORE === 'true') {
+    try {
+      sharedConversationStore = new FirestoreConversationStore();
+    } catch {
+      sharedConversationStore = new InMemoryConversationStore();
+    }
+  } else {
+    sharedConversationStore = new InMemoryConversationStore();
+  }
+  return sharedConversationStore;
+}
+
+/**
+ * Access decision for fetching a single conversation. PURE & testable: a build is only
+ * readable by the user who owns it (no userId, or a mismatch, is forbidden).
+ */
+export function conversationAccess(
+  rec: { userId: string } | null,
+  userId: string | null,
+): 'ok' | 'not-found' | 'forbidden' {
+  if (!rec) return 'not-found';
+  if (!userId || rec.userId !== userId) return 'forbidden';
+  return 'ok';
 }
 
 /** A client-supplied session id must be a safe, bounded token (it becomes part of
@@ -282,6 +323,57 @@ export function registerAgentV3Routes(app: Express): void {
     // buildRunning lets the UI detect an orphaned build (started elsewhere / lost its
     // connection) and offer "Resume" + "Stop".
     res.json({ enabled: isAgentV3Enabled(userId, email), buildRunning: isBuildRunning(userId ?? 'anon'), ...agentV3Status(), team: agentLifecycle.snapshot() });
+  });
+
+  // D7 — list a user's persisted builds (most-recently-updated first) so the client can
+  // reload one after a refresh/reconnect. Metadata only (no transcript) for a cheap list.
+  app.get('/api/agentv3/conversations', async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      return;
+    }
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required.' });
+      return;
+    }
+    try {
+      const list = await getConversationStore().listByUser(userId, 50);
+      res.json({
+        conversations: list.map((c) => ({
+          id: c.id, title: c.title, status: c.status, workspaceId: c.workspaceId,
+          billedUsd: c.billedUsd, createdAt: c.createdAt, updatedAt: c.updatedAt,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // D7 — load one persisted build (full transcript) for resume. Owner-only.
+  app.get('/api/agentv3/conversations/:id', async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      return;
+    }
+    try {
+      const rec = await getConversationStore().get(req.params.id);
+      const access = conversationAccess(rec, userId);
+      if (access === 'not-found') {
+        res.status(404).json({ error: 'Conversation not found.' });
+        return;
+      }
+      if (access === 'forbidden') {
+        res.status(403).json({ error: 'This build belongs to another account.' });
+        return;
+      }
+      res.json({ conversation: rec });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   // Provider diagnosis — confirms whether a real Anthropic key is configured.
@@ -680,6 +772,16 @@ export function registerAgentV3Routes(app: Express): void {
         maxSteps,
         agentRole: 'architect',
         signal: abort.signal,
+        // D7: persist the build transcript so it survives a reconnect/refresh. Best-effort —
+        // a store failure never breaks the build (see AgentRunner). Reloadable via the
+        // GET /api/agentv3/conversations endpoints below.
+        persistence: {
+          store: getConversationStore(),
+          conversationId: randomUUID(),
+          userId: userId ?? 'anon',
+          workspaceId,
+          title: deriveTitle(prompt),
+        },
       });
 
       let buildPrompt = prompt;

@@ -3350,3 +3350,25 @@ P-B merged (PR #394, 53863f6). P-C adds the durable backend:
 Gate: server tsc 0, frontend tsc 0, **2325 vitest** PASS (7 new FirestoreConversationStore tests).
 NEXT (P-D): wire store selection (Firestore when available, else in-memory) into the agentv3
 route + load/list/resume endpoints — completing the end-to-end "build survives refresh" feature.
+
+---
+
+### 2026-06-25 — v3.0 conversation persistence P-D: route wiring + load/list endpoints (D7)
+
+P-C merged (PR #395, 8c6b909). P-D wires persistence into the live build route (additive, flag-gated):
+
+- `getConversationStore()` singleton — Firestore when `AGENTV3_PERSIST_FIRESTORE=true` (real
+  cross-instance durability in Cloud Run), else InMemory (dev/CI safe default; missing creds never
+  error). Matches the cautious v3.0 flag-gating.
+- The main build runner in `POST /api/agentv3/chat` now passes `persistence` (store +
+  fresh conversationId + userId + workspaceId + deriveTitle(prompt)) → each build is saved as it
+  runs (best-effort; a store failure never breaks the build).
+- NEW `GET /api/agentv3/conversations?userId=` (list a user's builds, metadata only) and
+  `GET /api/agentv3/conversations/:id?userId=` (load full transcript for resume) — both
+  flag-gated; the single-fetch is OWNER-ONLY via the exported pure `conversationAccess(rec, userId)`
+  helper (ok / not-found / forbidden), unit-tested.
+
+Backend persistence is now END-TO-END: a build is persisted as it runs and reloadable by API.
+Gate: server tsc 0, frontend tsc 0, **boot:check PASS**, **2326 vitest** PASS (1 new route test).
+NEXT (P-E, frontend): on load/reconnect, useAgentV3Build lists by userId + reloads the most recent
+build's transcript into the panel — the last step to make "build survives refresh" user-visible.

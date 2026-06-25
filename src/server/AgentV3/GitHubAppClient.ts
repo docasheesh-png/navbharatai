@@ -47,9 +47,19 @@ export function githubConfigFromEnv(): GitHubConfig | null {
   return { appId, privateKey: privateKey.replace(/\\n/g, '\n'), org };
 }
 
-/** Whether git-native storage is configured (the admin completed Phase 0). */
+/** Whether git-native storage is CONFIGURED (the admin completed Phase 0 — secrets present). */
 export function githubStorageEnabled(): boolean {
   return githubConfigFromEnv() !== null;
+}
+
+/**
+ * Whether git-native storage is ACTIVE in the build loop. Requires the secrets AND an explicit
+ * GITHUB_STORAGE_ENABLED=true opt-in — so the feature ships DORMANT even after Phase 0, and the
+ * admin turns it on only when ready to test (strangler-fig; the live build path is never changed
+ * by merely having the secrets set).
+ */
+export function githubStorageActive(): boolean {
+  return process.env.GITHUB_STORAGE_ENABLED === 'true' && githubStorageEnabled();
 }
 
 /** A deterministic, GitHub-safe repo name for a user's project (alnum, -, _ only; bounded). */

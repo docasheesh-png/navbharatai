@@ -204,7 +204,10 @@ setInterval(() => {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        // Firebase Auth (Google popup/redirect) loads gapi from apis.google.com, and phone-OTP
+        // reCAPTCHA loads from www.google.com / www.gstatic.com. Without these in script-src the
+        // browser blocks the gapi script and Google sign-in fails with a bare auth/internal-error.
+        scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://apis.google.com", "https://www.gstatic.com", "https://www.google.com"],
         styleSrc:   ["'self'", "'unsafe-inline'"],
         imgSrc:     ["'self'", "data:", "blob:", "https:"],
         connectSrc: ["'self'", "https:", "wss:"],

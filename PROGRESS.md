@@ -3461,3 +3461,23 @@ NOTE (admin action, NOT code — I can't access Firebase Console): the actual lo
 (Google provider enabled + support email + OAuth Web client + Identity Toolkit API + authorized
 domains + API-key referrers).
 Gate: frontend tsc 0, server tsc 0, **2361 vitest** PASS (6 new authDiagnostics tests).
+
+---
+
+### 2026-06-25 — Auth: CSP was blocking Google sign-in (the REAL root cause)
+
+Admin's Google login failed with `auth/internal-error`. Browser console revealed the true cause:
+`Loading the script 'https://apis.google.com/js/api.js' violates the Content Security Policy
+directive: "script-src 'self' 'unsafe-inline' 'unsafe-eval'". The action has been blocked.`
+
+So it was NEVER a Firebase-provider/OAuth problem (provider enabled, web client + secret + redirect
+URIs all correct, verified by admin screenshots). Our own helmet CSP in server.ts omitted Google's
+auth script origins from `script-src`, so the browser blocked gapi (`apis.google.com/js/api.js`) and
+Firebase Auth surfaced a bare `auth/internal-error`. (The CSP comment already accounted for the auth
+IFRAME via frameSrc but missed the auth SCRIPT.)
+
+Fix: added `https://apis.google.com` (gapi, Google popup/redirect) + `https://www.gstatic.com` +
+`https://www.google.com` (phone-OTP reCAPTCHA) to `scriptSrc`. Verified by booting the server and
+curling the live `Content-Security-Policy` header — it now includes all three. connectSrc (`https:`)
+and frameSrc (`https:`) already covered identitytoolkit + the auth handler iframe.
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2361 vitest** PASS. Ships on merge → deploy.

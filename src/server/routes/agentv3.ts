@@ -18,6 +18,7 @@ import {
   resolveModel,
   architectSystemPrompt,
   planSystemPrompt,
+  editModePrefix,
   awaitApproval,
   resolveApproval,
   GitManager,
@@ -25,6 +26,7 @@ import {
   restoreSession,
   agentLifecycle,
   getWorkspaceMemory,
+  warmIndexFiles,
   reflectOnBuild,
   reflectionNote,
   summarizeProject,
@@ -607,7 +609,7 @@ export function registerAgentV3Routes(app: Express): void {
     // so the user can't tell which model answered — it reads as a normal reply.
     //
     // Conservative gate (any doubt → fall through to the real build path):
-    //  • classifyIntent must say 'chat' (defaults to 'build' on any ambiguity), and
+    //  • classifyIntent must say 'chat' (defaults to a build intent on any ambiguity), and
     //  • plan-mode must not be forcing a plan (a plain conversational turn).
     // A file attachment no longer forces the build path — it is pre-read into text
     // (below) so "read this file" can be answered cheaply via the chat path too.
@@ -636,12 +638,17 @@ export function registerAgentV3Routes(app: Express): void {
 
     // A clearly-conversational turn (greeting, thanks, small-talk) has NOTHING to
     // plan, so it takes the cheap chat path EVEN when plan-mode is on. classifyIntent
-    // is conservative (defaults to 'build' on any doubt), so a real build request is
+    // is conservative (defaults to a build intent on any doubt), so a real build request is
     // unaffected. This keeps a "hi" cheap AND avoids running the heavy build loop
     // (E2B sandbox + Claude) for small-talk — that heavy path sat silent during
     // sandbox setup and could reset the stream on Cloud Run / mobile Safari ("Load
     // failed") instead of just replying.
-    const isPlainChatTurn = classifyIntent(prompt) === 'chat';
+    const intent = classifyIntent(prompt);
+    const isPlainChatTurn = intent === 'chat';
+    // Surgical edit mode: the user is modifying an existing app (fix/change/update/
+    // refactor/…), not building from scratch. When true, the build loop reads the
+    // current files and makes minimum targeted edits instead of rebuilding everything.
+    const isEditMode = intent === 'edit_existing';
     if (isPlainChatTurn) {
       try {
         const chatRouter = AIRouterManager.getRouter('free');
@@ -761,13 +768,52 @@ export function registerAgentV3Routes(app: Express): void {
       // decision, using the SAME non-Claude free router. Never throws.
       const consensus = makeConsensus(opinionRouter);
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus);
+
+      // Surgical edit mode (gold standard): when the user is editing an existing
+      // app rather than building fresh, inject the CURRENT file tree and the
+      // edit-mode prefix so the agent reads existing files and makes minimum,
+      // targeted edit_file patches — never rebuilding everything from scratch.
+      // Best-effort: a listFiles failure falls back to the edit prefix without a
+      // tree, and a non-edit turn uses the normal architect prompt unchanged.
+      let architectSystem = architectSystemPrompt();
+      if (isEditMode) {
+        let fileTree: string[] = [];
+        try {
+          fileTree = await actuator.listFiles(workspaceId);
+        } catch { /* listing is best-effort — fall through to the normal build prompt */ }
+        // Engage surgical-edit mode ONLY when there are real files to patch. On an
+        // empty or failed workspace there is nothing to edit, so the normal build
+        // prompt (which freely creates files) is the correct, non-misleading default.
+        if (fileTree.length > 0) {
+          events.emit({
+            type: 'narration',
+            agent: 'architect',
+            text: `✏️ Editing your existing app (${fileTree.length} file${fileTree.length === 1 ? '' : 's'}) — I'll make targeted changes, not rebuild it.`,
+            ts: Date.now(),
+          });
+          architectSystem = editModePrefix(fileTree) + '\n\n---\n\n' + architectSystem;
+          // Warm the project graph from the PERSISTED sandbox files when memory is
+          // cold (process restarted but the sandbox survived). This makes the agent's
+          // recall / evaluate tools see the existing codebase immediately on a resumed
+          // edit session, instead of only after it manually re-reads files. Best-effort,
+          // capped, and a no-op when memory is already warm — never blocks the build.
+          try {
+            await warmIndexFiles(
+              getWorkspaceMemory(workspaceId),
+              fileTree,
+              (p) => actuator.readFile(workspaceId, p),
+            );
+          } catch { /* warming is best-effort — never blocks a build */ }
+        }
+      }
+
       const runner = new AgentRunner({
         client,
         dispatcher,
         state,
         events,
         model,
-        system: architectSystemPrompt(),
+        system: architectSystem,
         tools: catalogForTools(roleConfig('architect').tools),
         onlyOpus,
         thinking,

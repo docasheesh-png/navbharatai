@@ -28,52 +28,127 @@ describe('classifyIntent', () => {
     });
   });
 
-  describe('build / engineering → build', () => {
-    it('classifies "build me a todo app" as build', () => {
-      expect(classifyIntent('build me a todo app')).toBe('build');
+  describe('new build → new_build', () => {
+    it('classifies "build me a todo app" as new_build', () => {
+      expect(classifyIntent('build me a todo app')).toBe('new_build');
     });
 
-    it('classifies "ek login page banao" as build', () => {
-      expect(classifyIntent('ek login page banao')).toBe('build');
+    it('classifies "ek login page banao" as new_build', () => {
+      expect(classifyIntent('ek login page banao')).toBe('new_build');
     });
 
-    it('classifies "fix the navbar bug" as build', () => {
-      expect(classifyIntent('fix the navbar bug')).toBe('build');
-    });
-
-    it('classifies a long detailed request as build', () => {
+    it('classifies a long detailed request as new_build', () => {
       const long =
         'I would like a complete e-commerce experience with a product listing, ' +
         'a shopping cart, a checkout flow and order history persisted somewhere reliable.';
       expect(long.length).toBeGreaterThan(120);
-      expect(classifyIntent(long)).toBe('build');
+      expect(classifyIntent(long)).toBe('new_build');
+    });
+
+    it('classifies "create a React dashboard" as new_build', () => {
+      expect(classifyIntent('create a React dashboard')).toBe('new_build');
+    });
+
+    it('classifies "make a calculator app" as new_build', () => {
+      expect(classifyIntent('make a calculator app')).toBe('new_build');
+    });
+
+    it('classifies "generate an e-commerce site" as new_build', () => {
+      expect(classifyIntent('generate an e-commerce site')).toBe('new_build');
+    });
+
+    it('classifies "design a landing page" as new_build', () => {
+      expect(classifyIntent('design a landing page')).toBe('new_build');
+    });
+
+    it('classifies "deploy the app to production" as new_build', () => {
+      expect(classifyIntent('deploy the app to production')).toBe('new_build');
+    });
+
+    it('new_build signal wins even when edit signal is also present', () => {
+      expect(classifyIntent('build a new page and fix the footer')).toBe('new_build');
+      expect(classifyIntent('create the app and debug the login')).toBe('new_build');
     });
   });
 
-  describe('conservative defaults → build', () => {
-    it('classifies an ambiguous short noun "react" as build', () => {
-      expect(classifyIntent('react')).toBe('build');
+  describe('edit existing → edit_existing', () => {
+    it('classifies "fix the navbar bug" as edit_existing', () => {
+      expect(classifyIntent('fix the navbar bug')).toBe('edit_existing');
     });
 
-    it('classifies an empty string as build (safe default)', () => {
-      expect(classifyIntent('')).toBe('build');
+    it('classifies "update the button color" as edit_existing', () => {
+      expect(classifyIntent('update the button color')).toBe('edit_existing');
     });
 
-    it('classifies whitespace-only input as build (safe default)', () => {
-      expect(classifyIntent('   ')).toBe('build');
+    it('classifies "change the header text" as edit_existing', () => {
+      expect(classifyIntent('change the header text')).toBe('edit_existing');
     });
 
-    it('treats a build signal mixed with social text as build', () => {
-      expect(classifyIntent('thanks, now build me a login page')).toBe('build');
+    it('classifies "refactor the auth module" as edit_existing', () => {
+      expect(classifyIntent('refactor the auth module')).toBe('edit_existing');
     });
 
-    it('treats a message with a URL to work on as build', () => {
-      expect(classifyIntent('look at https://example.com')).toBe('build');
+    it('classifies "remove the sidebar" as edit_existing', () => {
+      expect(classifyIntent('remove the sidebar')).toBe('edit_existing');
+    });
+
+    it('classifies "rename the function" as edit_existing', () => {
+      expect(classifyIntent('rename the function')).toBe('edit_existing');
+    });
+
+    it('classifies "debug the payment flow" as edit_existing', () => {
+      expect(classifyIntent('debug the payment flow')).toBe('edit_existing');
+    });
+
+    it('classifies "improve the loading animation" as edit_existing', () => {
+      expect(classifyIntent('improve the loading animation')).toBe('edit_existing');
+    });
+
+    it('classifies Hindi edit requests as edit_existing', () => {
+      expect(classifyIntent('theek karo yeh button')).toBe('edit_existing');
+      expect(classifyIntent('badlo yeh color')).toBe('edit_existing');
+      expect(classifyIntent('sudharo login page')).toBe('edit_existing');
+      expect(classifyIntent('hatao yeh footer')).toBe('edit_existing');
+    });
+
+    it('classifies "fix karo yeh bug" as edit_existing', () => {
+      expect(classifyIntent('fix karo yeh bug')).toBe('edit_existing');
+    });
+
+    it('classifies "update karo navbar ki color" as edit_existing', () => {
+      expect(classifyIntent('update karo navbar ki color')).toBe('edit_existing');
+    });
+  });
+
+  describe('conservative defaults → new_build', () => {
+    it('classifies an ambiguous short noun "react" as new_build', () => {
+      expect(classifyIntent('react')).toBe('new_build');
+    });
+
+    it('classifies an empty string as new_build (safe default)', () => {
+      expect(classifyIntent('')).toBe('new_build');
+    });
+
+    it('classifies whitespace-only input as new_build (safe default)', () => {
+      expect(classifyIntent('   ')).toBe('new_build');
+    });
+
+    it('treats a build signal mixed with social text as new_build', () => {
+      expect(classifyIntent('thanks, now build me a login page')).toBe('new_build');
+    });
+
+    it('treats a message with a URL to work on as new_build', () => {
+      expect(classifyIntent('look at https://example.com')).toBe('new_build');
+    });
+
+    it('classifies "add a payment button" as new_build (ambiguous verb)', () => {
+      expect(classifyIntent('add a payment button')).toBe('new_build');
     });
   });
 
   it('is case-insensitive', () => {
     expect(classifyIntent('HELLO')).toBe('chat');
-    expect(classifyIntent('BUILD A PAGE')).toBe('build');
+    expect(classifyIntent('BUILD A PAGE')).toBe('new_build');
+    expect(classifyIntent('FIX THE BUG')).toBe('edit_existing');
   });
 });

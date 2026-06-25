@@ -478,7 +478,18 @@ export class ToolDispatcher {
         this.state?.recordFileChange({ path, kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         await this.maybeCheckpoint(`${kind} ${path}`);
-        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} (${content.length} bytes).`;
+        if (kind === 'modify') {
+          // write_file replaced an EXISTING file wholesale. For a small change this
+          // is wasteful and risks dropping unrelated code — nudge the agent toward
+          // edit_file (surgical patch) so it makes minimum, targeted changes.
+          return (
+            `Updated ${path} (${content.length} bytes).\n` +
+            `NOTE: ${path} already existed and write_file replaced the ENTIRE file. ` +
+            `For a small, targeted change, prefer edit_file (old_string → new_string) ` +
+            `so you don't risk dropping unrelated code.`
+          );
+        }
+        return `Created ${path} (${content.length} bytes).`;
       }
 
       case 'edit_file': {
@@ -486,27 +497,23 @@ export class ToolDispatcher {
         const oldStr = reqStr(input, 'old_string');
         const newStr = reqStr(input, 'new_string');
         const existing = await this.actuator.readFile(this.workspaceId, path);
-        const occurrences = existing.split(oldStr).length - 1;
-        if (occurrences === 0) {
-          throw new Error(`edit_file: old_string not found in ${path}.`);
-        }
-        if (occurrences > 1) {
-          throw new Error(
-            `edit_file: old_string is not unique in ${path} (${occurrences} matches) — include more surrounding context.`,
-          );
-        }
-        const updated = existing.replace(oldStr, newStr);
+        // Exact match first, with a whitespace-tolerant fallback so a patch whose
+        // indentation/spacing is slightly off still applies (still required to be
+        // unique). applyEdit throws the same honest "not found" / "not unique" errors.
+        const { updated, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
         await this.actuator.writeFile(this.workspaceId, path, updated);
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, updated);
         this.events?.emit({
           type: 'diff',
           agent,
-          diff: { path, patch: miniDiff(oldStr, newStr) },
+          // Show the text that was ACTUALLY replaced (verbatim from the file) so the
+          // diff is honest even when a whitespace-flexible match was used.
+          diff: { path, patch: miniDiff(matchedOld, newStr) },
           ts: Date.now(),
         });
         await this.maybeCheckpoint(`edit ${path}`);
-        return `Edited ${path}.`;
+        return `Edited ${path}.${note}`;
       }
 
       case 'bash': {
@@ -909,6 +916,76 @@ function miniDiff(oldStr: string, newStr: string): string {
   const minus = oldStr.split('\n').map((l) => `- ${l}`).join('\n');
   const plus = newStr.split('\n').map((l) => `+ ${l}`).join('\n');
   return `${minus}\n${plus}`;
+}
+
+/**
+ * Build a regex that matches `literal` but treats every run of whitespace as
+ * flexible (\s+), so an edit whose indentation/spacing is slightly off still
+ * matches. Regex metacharacters are escaped first, so the ONLY special behavior
+ * is the whitespace flexibility — there are no nested quantifiers, so it cannot
+ * backtrack catastrophically. Returns null for whitespace-only input (a
+ * meaningless flexible match).
+ */
+function flexibleWhitespaceRegex(literal: string): RegExp | null {
+  if (!literal.trim()) return null;
+  const escaped = literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = escaped.replace(/\s+/g, '\\s+');
+  try {
+    return new RegExp(pattern, 'g');
+  } catch {
+    return null;
+  }
+}
+
+/** Result of applying a single edit_file replacement. */
+export interface EditResult {
+  /** The full file content after the replacement. */
+  updated: string;
+  /** The exact text that was replaced (verbatim from the file) — used for the diff. */
+  matchedOld: string;
+  /** Human-readable note ('' on an exact hit; explains a whitespace-flexible match). */
+  note: string;
+}
+
+/**
+ * Apply one edit_file replacement with a whitespace-tolerant fallback.
+ *
+ *  1. EXACT: if `oldStr` occurs exactly once, replace it. More than once →
+ *     ambiguous, throw (the model must add surrounding context).
+ *  2. FLEXIBLE: if `oldStr` is not found exactly (0 matches), retry treating any
+ *     run of whitespace as flexible. This rescues edits where the model's
+ *     indentation or spacing is slightly off. The flexible match must STILL be
+ *     unique — 0 or >1 flexible matches throw the same honest errors.
+ *
+ * Pure and deterministic — unit-testable without a sandbox. The `path` is only
+ * used to make error messages specific.
+ */
+export function applyEdit(existing: string, oldStr: string, newStr: string, path = 'file'): EditResult {
+  const exact = existing.split(oldStr).length - 1;
+  if (exact === 1) {
+    return { updated: existing.replace(oldStr, newStr), matchedOld: oldStr, note: '' };
+  }
+  if (exact > 1) {
+    throw new Error(
+      `edit_file: old_string is not unique in ${path} (${exact} matches) — include more surrounding context.`,
+    );
+  }
+  // exact === 0 → whitespace-flexible fallback.
+  const flexible = flexibleWhitespaceRegex(oldStr);
+  const matches = flexible ? [...existing.matchAll(flexible)] : [];
+  if (matches.length === 0) {
+    throw new Error(`edit_file: old_string not found in ${path}.`);
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `edit_file: old_string is not unique in ${path} (${matches.length} whitespace-flexible matches) — include more surrounding context.`,
+    );
+  }
+  const m = matches[0];
+  const start = m.index ?? 0;
+  const matchedOld = m[0];
+  const updated = existing.slice(0, start) + newStr + existing.slice(start + matchedOld.length);
+  return { updated, matchedOld, note: ' (matched ignoring whitespace differences)' };
 }
 
 function shellQuote(s: string): string {

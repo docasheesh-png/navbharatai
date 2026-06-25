@@ -3724,3 +3724,30 @@ PHASE 1 (this PR) — `GitHubAppClient.ts` (standalone, flag-gated OFF, NOT wire
 Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2503 vitest** PASS (7 new).
 NEXT (Phase 2): wire into the build loop — clone the repo into the sandbox at start, commit+push at
 build end → git becomes the source of truth (replaces the ephemeral-sandbox file loss).
+
+---
+
+## 2026-06-25 — Git-native storage PHASE 2 (DONE, merged PR #420, deploys via Cloud Run)
+
+PHASE 2 — wired git-native storage into the v3.0 build loop, behind an explicit
+`GITHUB_STORAGE_ENABLED=true` opt-in (ships DORMANT; the three App secrets alone do NOT activate it,
+so the live build path is unchanged until the admin flips the flag — strangler-fig).
+
+- `GitRepoSync.ts` (over the same `CommandRunner` port as GitManager → unit-testable, no-op without a
+  shell): `hydrateIfEmpty(authedUrl)` clones the project repo into the sandbox ONLY when it came up
+  empty (never clobbers a live sandbox or a Firestore restore); `pushAll(authedUrl, branch, message)`
+  commits + force-pushes the sandbox back (private single-writer mirror → force safe). Best-effort
+  everywhere; the authed token is handed straight to git and NEVER emitted to the event stream;
+  branch + commit message sanitized against shell injection.
+- `githubStorageActive()` gate added to GitHubAppClient (secrets present AND the flag = true).
+- Route wiring (agentv3.ts): ensureRepo + hydrate BEFORE the Firestore fallback at build start;
+  commit + push AFTER the durable file save at build end. Both no-op when dormant. The Firestore file
+  capture stays as the backstop.
+- 9 new unit tests (fake CommandRunner): hydrate skip/clone/fail, push commit/no-change/fail, branch +
+  message sanitization, never-throws.
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2512 vitest** PASS (9 new).
+NEXT (Phase 3): CI + merge of the user's repo, Claude-Code-style (PR → check status → merge).
+Phase 4: auth simplify (Email/Phone primary, remove the failing Google button, optional "Connect
+GitHub" + Export/Transfer for portability). Phase 5: dual preview (in-browser iframe + E2B).
+NOTE: Phases 3–5 touch user-facing auth/preview flows → confirm with admin before each (safeguard #3).

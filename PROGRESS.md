@@ -3630,3 +3630,26 @@ ProComplexity, WorkspaceMutationEngine/VFS, Engineer AI's ReAct loop, tar.gz che
 
 NEXT (admin-triggered, NOT today): independence move (extract actuators + helpers + scaffold to
 src/server/sandbox/, see the 2026-06-25 hard-audit) → then delete EngineerAI/AppMakerLab/pro.
+
+---
+
+### 2026-06-25 — v3.0 BUGFIX: preview "Blocked request … is not allowed" (Vite allowedHosts)
+
+Admin hit a live v3.0 preview showing: `Blocked request. This host ("5174-…e2b.app") is not
+allowed. Add it to server.allowedHosts in vite.config.` Root cause: newer Vite enforces a host
+allow-list; the sandbox proxy host (<port>-<id>.e2b.app) isn't in it, so Vite blocks the request and
+the preview shows the error instead of the app. `allowedHosts` was set NOWHERE in the codebase.
+
+Fix (two places, since the agent sometimes writes its own vite.config):
+- Default scaffold `ViteReactProviderContents.viteConfig`: added `allowedHosts: true` to BOTH
+  `server` and `preview`.
+- Architect system prompt: added a CRITICAL instruction to always set server/preview allowedHosts:true
+  for Vite, and that a "Blocked request … is not allowed" preview is ALWAYS fixed by allowedHosts:true.
+- Regression test (ScaffoldPreview.test.ts) asserts both the scaffold config and the prompt carry it.
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2466 vitest** PASS (2 new).
+
+NOTE: the same session also showed a reviewer "0/100 — missing all source code" right after the agent
+claimed it wrote 7 files; that looks like a separate workspace-state hiccup (the build started on an
+"empty directory" and recreated the scaffold mid-run). Not reproduced/fixed here — flagged for
+follow-up if it recurs; the concrete, reproducible preview-block bug is fixed above.

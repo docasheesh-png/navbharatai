@@ -19,6 +19,10 @@ export interface HardcodedUrlIssue {
 }
 
 const CODE_RE = /\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte)$/i;
+// Files where a localhost / private address is legitimate and never ships to production:
+// test files (hit a local test server) and build/tooling config (e.g. a Vite dev-server
+// proxy → http://localhost:3000). Scanning them just produces false positives.
+const SKIP_PATH = /(?:\.test\.|\.spec\.|(?:^|[\\/])(?:__tests__|tests?|e2e)[\\/]|\.config\.[cm]?[jt]s$|(?:^|[\\/])(?:setupTests|vite\.config|vitest\.config|playwright\.config|webpack\.config|next\.config))/i;
 const LOCALHOST_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?/i;
 // RFC 1918 private-network ranges as a URL host: 10/8, 172.16–31/12, 192.168/16.
 const PRIVATE_IP_RE = /https?:\/\/(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(?::\d+)?/i;
@@ -27,7 +31,7 @@ const ENV_RE = /process\.env\.|import\.meta\.env\.|getenv|process\.env\[/i;
 
 /** Scan one file for hardcoded local/private URLs that are not env-var fallbacks. PURE. */
 export function scanHardcodedUrls(file: string, content: string): HardcodedUrlIssue[] {
-  if (!CODE_RE.test(file) || !content) return [];
+  if (!CODE_RE.test(file) || SKIP_PATH.test(file) || !content) return [];
   const issues: HardcodedUrlIssue[] = [];
   const lines = content.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {

@@ -46,6 +46,18 @@ describe('scanHardcodedUrls', () => {
   it('does not flag a real production URL', () => {
     expect(scanHardcodedUrls('src/a.ts', "const API = 'https://api.example.com';")).toHaveLength(0);
   });
+
+  it('does NOT scan test or build-config files (localhost is legitimate there)', () => {
+    const url = "const API = 'http://localhost:3000/api';";
+    // test files hit a local test server; config files set a dev proxy → these never ship.
+    expect(scanHardcodedUrls('src/api.test.ts', url)).toHaveLength(0);
+    expect(scanHardcodedUrls('src/api.spec.ts', url)).toHaveLength(0);
+    expect(scanHardcodedUrls('__tests__/api.ts', url)).toHaveLength(0);
+    expect(scanHardcodedUrls('vite.config.ts', "server: { proxy: { '/api': 'http://localhost:3000' } }")).toHaveLength(0);
+    expect(scanHardcodedUrls('vitest.config.ts', url)).toHaveLength(0);
+    // a normal source file is still scanned.
+    expect(scanHardcodedUrls('src/api.ts', url)).toHaveLength(1);
+  });
 });
 
 describe('hardcodedUrlSummary', () => {

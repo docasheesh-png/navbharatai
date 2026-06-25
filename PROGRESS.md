@@ -3106,3 +3106,19 @@ after the batch-27 overlap):
    tokens in the same sandbox value (order-independent); allow-scripts alone is not flagged.
 
 Gate: server tsc 0, frontend tsc 0, **2296 vitest** PASS (53 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 30): weak bcrypt rounds + trust-proxy:true (security)
+
+Batch 29 merged to main 844c1d5 (PR #380). New `SecurityAnalysis` rules (verified uncovered
+across the whole AgentV3 dir):
+
+1. **weak-bcrypt-rounds** (medium) — a bcrypt cost factor below 10 (single-digit rounds in
+   `bcrypt.hash(data, N)` or `genSalt(N)`) hashes too fast → cheap brute-force of stolen
+   hashes. 10+ (two digits) or a variable is not flagged.
+2. **express-trust-proxy-true** (medium) — `app.set('trust proxy', true)` trusts X-Forwarded-For
+   from any client (IP spoofing → defeats rate limiting / audit logs). A specific hop count or
+   proxy IP is not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2298 vitest** PASS (55 SecurityAnalysis tests, +2 new).

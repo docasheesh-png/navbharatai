@@ -230,6 +230,20 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', "res.cookie('sid', id, { sameSite: 'lax' });").some((f) => f.rule === 'samesite-none-insecure')).toBe(false);
   });
 
+  it('flags a weak bcrypt cost factor (<10) but not a strong one', () => {
+    expect(scanSecurity('a.ts', 'const h = await bcrypt.hash(password, 8);').some((f) => f.rule === 'weak-bcrypt-rounds' && f.severity === 'medium')).toBe(true);
+    expect(scanSecurity('a.ts', 'const salt = bcrypt.genSaltSync(5);').some((f) => f.rule === 'weak-bcrypt-rounds')).toBe(true);
+    // 10+ rounds (two digits) is fine.
+    expect(scanSecurity('a.ts', 'const h = await bcrypt.hash(password, 12);').some((f) => f.rule === 'weak-bcrypt-rounds')).toBe(false);
+    expect(scanSecurity('a.ts', 'const salt = bcrypt.genSaltSync(10);').some((f) => f.rule === 'weak-bcrypt-rounds')).toBe(false);
+  });
+
+  it("flags app.set('trust proxy', true) but not a specific hop count", () => {
+    expect(scanSecurity('a.ts', "app.set('trust proxy', true);").some((f) => f.rule === 'express-trust-proxy-true' && f.severity === 'medium')).toBe(true);
+    // a specific hop count / IP is the correct, non-blanket form.
+    expect(scanSecurity('a.ts', "app.set('trust proxy', 1);").some((f) => f.rule === 'express-trust-proxy-true')).toBe(false);
+  });
+
   it('flags ECB cipher mode but not an authenticated mode', () => {
     expect(scanSecurity('a.ts', "const c = crypto.createCipheriv('aes-256-ecb', key, null);").some((f) => f.rule === 'insecure-cipher-ecb' && f.severity === 'high')).toBe(true);
     expect(scanSecurity('a.ts', "const c = crypto.createCipheriv('des-ecb', key, null);").some((f) => f.rule === 'insecure-cipher-ecb')).toBe(true);

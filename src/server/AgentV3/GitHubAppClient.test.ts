@@ -88,6 +88,74 @@ describe('ensureRepo', () => {
   });
 });
 
+describe('openPullRequest', () => {
+  it('opens a PR and returns its number + head sha', async () => {
+    const client = new GitHubAppClient(cfg, {
+      fetchImpl: fakeFetch({
+        ...installRoutes,
+        'POST /repos/navbharatai-apps/app-x/pulls': { status: 201, body: { number: 7, html_url: 'https://github.com/navbharatai-apps/app-x/pull/7', head: { sha: 'abc123' } } },
+      }),
+    });
+    const pr = await client.openPullRequest('app-x', 'nbi/build-1', 'main', 'Build', 'body');
+    expect(pr.number).toBe(7);
+    expect(pr.headSha).toBe('abc123');
+  });
+
+  it('reuses an existing open PR when GitHub returns 422', async () => {
+    const client = new GitHubAppClient(cfg, {
+      fetchImpl: fakeFetch({
+        ...installRoutes,
+        'POST /repos/navbharatai-apps/app-x/pulls': { status: 422, body: { message: 'A pull request already exists' } },
+        'GET /repos/navbharatai-apps/app-x/pulls?head=navbharatai-apps%3Anbi%2Fbuild-1&base=main&state=open': { status: 200, body: [{ number: 9, html_url: 'https://github.com/navbharatai-apps/app-x/pull/9', head: { sha: 'def456' } }] },
+      }),
+    });
+    const pr = await client.openPullRequest('app-x', 'nbi/build-1', 'main', 'Build', 'body');
+    expect(pr.number).toBe(9);
+  });
+});
+
+describe('combinedStatus', () => {
+  const base = (statusBody: unknown, checksBody: unknown) => new GitHubAppClient(cfg, {
+    fetchImpl: fakeFetch({
+      ...installRoutes,
+      'GET /repos/navbharatai-apps/app-x/commits/sha1/status': { status: 200, body: statusBody },
+      'GET /repos/navbharatai-apps/app-x/commits/sha1/check-runs': { status: 200, body: checksBody },
+    }),
+  });
+
+  it('returns "none" when the repo has no checks at all', async () => {
+    expect(await base({ state: 'pending', total_count: 0 }, { check_runs: [] }).combinedStatus('app-x', 'sha1')).toBe('none');
+  });
+
+  it('returns "success" when status is success and all check-runs passed', async () => {
+    expect(await base({ state: 'success', total_count: 1 }, { check_runs: [{ status: 'completed', conclusion: 'success' }] }).combinedStatus('app-x', 'sha1')).toBe('success');
+  });
+
+  it('returns "failure" when a check-run failed', async () => {
+    expect(await base({ state: 'success', total_count: 0 }, { check_runs: [{ status: 'completed', conclusion: 'failure' }] }).combinedStatus('app-x', 'sha1')).toBe('failure');
+  });
+
+  it('returns "pending" when a check-run is still running', async () => {
+    expect(await base({ state: 'success', total_count: 0 }, { check_runs: [{ status: 'in_progress' }] }).combinedStatus('app-x', 'sha1')).toBe('pending');
+  });
+});
+
+describe('mergePullRequest', () => {
+  it('returns true when GitHub reports merged', async () => {
+    const client = new GitHubAppClient(cfg, {
+      fetchImpl: fakeFetch({ ...installRoutes, 'PUT /repos/navbharatai-apps/app-x/pulls/7/merge': { status: 200, body: { merged: true } } }),
+    });
+    expect(await client.mergePullRequest('app-x', 7)).toBe(true);
+  });
+
+  it('returns false when the merge is blocked', async () => {
+    const client = new GitHubAppClient(cfg, {
+      fetchImpl: fakeFetch({ ...installRoutes, 'PUT /repos/navbharatai-apps/app-x/pulls/7/merge': { status: 405, body: { merged: false, message: 'not mergeable' } } }),
+    });
+    expect(await client.mergePullRequest('app-x', 7)).toBe(false);
+  });
+});
+
 describe('repoNameForProject + config', () => {
   it('makes a deterministic, GitHub-safe repo name', () => {
     const a = repoNameForProject('User_1', 'My Todo App!');

@@ -213,6 +213,28 @@ const RULES: Rule[] = [
     message: 'Raw request object used as a database query — a user can inject query operators ($gt/$ne) to bypass it (NoSQL injection). Extract and validate the specific fields instead of passing req.body/req.query directly.',
   },
   {
+    rule: 'ssrf',
+    severity: 'high',
+    // A server-side HTTP request whose URL is taken DIRECTLY from request input
+    // (req.query/params/body/headers) is a Server-Side Request Forgery vector — an
+    // attacker points it at internal services (e.g. http://169.254.169.254 cloud
+    // metadata) or the private network. High-precision: the request fn's first arg
+    // IS req.* (a fixed base with `${req...}` appended does not start with req., so
+    // `fetch(`/api/${req.query.id}`)` is not flagged).
+    re: /\b(?:fetch|axios(?:\.(?:get|post|put|patch|delete|head|request))?|got|https?\.(?:get|request))\s*\(\s*req\.(?:query|params|body|headers)\b/,
+    message: 'Server-side request to a URL from request input — this enables SSRF (an attacker can reach internal services / cloud metadata). Validate the URL against an allow-list of hosts before fetching.',
+  },
+  {
+    rule: 'disable-tls-verification',
+    severity: 'high',
+    // Turning off TLS certificate validation (rejectUnauthorized:false, or the
+    // process-wide NODE_TLS_REJECT_UNAUTHORIZED=0) makes every HTTPS connection
+    // accept ANY certificate — a trivial man-in-the-middle. Both forms are
+    // unambiguous, so matching them is high-precision.
+    re: /\brejectUnauthorized\s*:\s*false\b|\bNODE_TLS_REJECT_UNAUTHORIZED\b\s*[:=]\s*['"`]?0\b/,
+    message: 'TLS certificate verification disabled (rejectUnauthorized:false / NODE_TLS_REJECT_UNAUTHORIZED=0) — every HTTPS connection now accepts any certificate (man-in-the-middle). Never disable it; trust the proper CA certificate instead.',
+  },
+  {
     rule: 'hardcoded-auth-header',
     severity: 'high',
     // An Authorization header set to a literal `Bearer <token>` / `Basic <creds>` — a

@@ -48,6 +48,7 @@ import { SDAChat } from './components/sda/SDAChat';
 import { ProfessionalsView } from './components/professionals/ProfessionalsView';
 import { ProfessionalChat } from './components/professionals/ProfessionalChat';
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
+import { RepoAnalystTool } from './components/repoAnalyst/RepoAnalystTool';
 import { EngineerAIChat } from './components/engineer/EngineerAIChat';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { triggerCashfreeCheckout } from './services/paymentService';
@@ -5872,7 +5873,7 @@ ${buildLanguageRule(preferredLanguage)}`;
           )}
           {activeView === 'repo_analyst' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.repo_analyst} userId={user?.uid} />
+              <RepoAnalystTool userId={user?.uid} />
             </div>
           )}
 

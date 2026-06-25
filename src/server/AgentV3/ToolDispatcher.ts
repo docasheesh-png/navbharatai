@@ -45,6 +45,10 @@ import { scanEnvTemplateSecrets, envTemplateSecretSummary, type EnvTemplateSecre
 import { scanAsyncPatterns, asyncPatternSummary, type AsyncPatternIssue } from './AsyncPatternAnalysis';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
+import { reviewEdit, formatReviewResult } from './PostEditReviewer';
+import { renameSymbol, addComponentProp } from './CodemodeExecutor';
+import type { CodemodeFile } from './CodemodeExecutor';
+import { getEmbeddingStore } from './EmbeddingSearch';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -476,8 +480,22 @@ export class ToolDispatcher {
         }
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.state?.recordFileChange({ path, kind }, agent);
-        getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+        const mem = getWorkspaceMemory(this.workspaceId);
+        mem.indexFile(path, content);
+        // Level 3: update embedding index for semantic search (best-effort, async, non-blocking).
+        getEmbeddingStore(this.workspaceId).addFile(path, content).catch(() => {});
         await this.maybeCheckpoint(`${kind} ${path}`);
+        // Level 4: post-write static review — flag missing imports, typos, stub files.
+        const review = reviewEdit(path, content);
+        const reviewNote = formatReviewResult(review, path);
+        // Level 5: impact cascade — warn the agent which files import the edited file.
+        const { direct: impactFiles } = mem.impactRadius(path);
+        const cascadeNote =
+          impactFiles.length > 0
+            ? `\nIMPACT: ${impactFiles.length} file(s) import ${path}: ${impactFiles.slice(0, 5).join(', ')}${impactFiles.length > 5 ? '…' : ''}. Verify they still compile.`
+            : '';
+        // Level 6: test file hint — if a test file exists, suggest running it.
+        const testHint = testFileHint(path);
         if (kind === 'modify') {
           // write_file replaced an EXISTING file wholesale. For a small change this
           // is wasteful and risks dropping unrelated code — nudge the agent toward
@@ -486,10 +504,11 @@ export class ToolDispatcher {
             `Updated ${path} (${content.length} bytes).\n` +
             `NOTE: ${path} already existed and write_file replaced the ENTIRE file. ` +
             `For a small, targeted change, prefer edit_file (old_string → new_string) ` +
-            `so you don't risk dropping unrelated code.`
+            `so you don't risk dropping unrelated code.` +
+            reviewNote + cascadeNote + testHint
           );
         }
-        return `Created ${path} (${content.length} bytes).`;
+        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint;
       }
 
       case 'edit_file': {
@@ -503,7 +522,10 @@ export class ToolDispatcher {
         const { updated, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
         await this.actuator.writeFile(this.workspaceId, path, updated);
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);
-        getWorkspaceMemory(this.workspaceId).indexFile(path, updated);
+        const editMem = getWorkspaceMemory(this.workspaceId);
+        editMem.indexFile(path, updated);
+        // Level 3: update embedding index (best-effort, non-blocking).
+        getEmbeddingStore(this.workspaceId).addFile(path, updated).catch(() => {});
         this.events?.emit({
           type: 'diff',
           agent,
@@ -513,7 +535,18 @@ export class ToolDispatcher {
           ts: Date.now(),
         });
         await this.maybeCheckpoint(`edit ${path}`);
-        return `Edited ${path}.${note}`;
+        // Level 4: post-edit static review — catch missing imports, typos, stub content.
+        const editReview = reviewEdit(path, updated);
+        const editReviewNote = formatReviewResult(editReview, path);
+        // Level 5: impact cascade — warn about files that import the changed file.
+        const { direct: editImpact } = editMem.impactRadius(path);
+        const editCascadeNote =
+          editImpact.length > 0
+            ? `\nIMPACT: ${editImpact.length} file(s) import ${path}: ${editImpact.slice(0, 5).join(', ')}${editImpact.length > 5 ? '…' : ''}. Check they still compile.`
+            : '';
+        // Level 6: test file hint.
+        const editTestHint = testFileHint(path);
+        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint;
       }
 
       case 'bash': {
@@ -868,10 +901,91 @@ export class ToolDispatcher {
         return await this.consensus(question);
       }
 
+      // Level 7: structural codemods (AST-safe cross-file refactoring via ts-morph).
+      case 'codemod_rename': {
+        const oldName = reqStr(input, 'old_name');
+        const newName = reqStr(input, 'new_name');
+        let files: string[];
+        try {
+          files = await this.actuator.listFiles(this.workspaceId);
+        } catch {
+          return 'codemod_rename: failed to list workspace files.';
+        }
+        // Read all TS/TSX source files (capped at 50 for performance).
+        const CODE = /\.(t|j)sx?$/;
+        const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
+        const codeFiles = files.filter((f) => CODE.test(f) && !SKIP.test(f)).slice(0, 50);
+        const fileContents: CodemodeFile[] = [];
+        for (const f of codeFiles) {
+          try {
+            fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) });
+          } catch { /* skip unreadable file */ }
+        }
+        const result = await renameSymbol(fileContents, oldName, newName);
+        if (!result.ok) return `codemod_rename failed: ${result.error}`;
+        // Write back changed files.
+        for (const { path, after } of result.changes) {
+          try {
+            await this.actuator.writeFile(this.workspaceId, path, after);
+            getWorkspaceMemory(this.workspaceId).indexFile(path, after);
+          } catch { /* best-effort */ }
+        }
+        await this.maybeCheckpoint(`codemod rename ${oldName} → ${newName}`);
+        return result.summary || `Renamed "${oldName}" → "${newName}" in ${result.changes.length} file(s).`;
+      }
+
+      case 'codemod_add_prop': {
+        const componentName = reqStr(input, 'component_name');
+        const propName = reqStr(input, 'prop_name');
+        const propType = reqStr(input, 'prop_type');
+        const defaultValue = optStr(input, 'default_value');
+        let files: string[];
+        try {
+          files = await this.actuator.listFiles(this.workspaceId);
+        } catch {
+          return 'codemod_add_prop: failed to list workspace files.';
+        }
+        const CODE = /\.(t|j)sx?$/;
+        const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
+        const tsxFiles = files.filter((f) => CODE.test(f) && !SKIP.test(f)).slice(0, 50);
+        const fileContents: CodemodeFile[] = [];
+        for (const f of tsxFiles) {
+          try {
+            fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) });
+          } catch { /* skip */ }
+        }
+        const result = await addComponentProp(fileContents, componentName, propName, propType, defaultValue);
+        if (!result.ok) return `codemod_add_prop failed: ${result.error}`;
+        for (const { path, after } of result.changes) {
+          try {
+            await this.actuator.writeFile(this.workspaceId, path, after);
+            getWorkspaceMemory(this.workspaceId).indexFile(path, after);
+          } catch { /* best-effort */ }
+        }
+        await this.maybeCheckpoint(`codemod add prop ${propName} to ${componentName}`);
+        return result.summary || `Added prop "${propName}" to ${componentName} in ${result.changes.length} file(s).`;
+      }
+
       default:
         throw new Error(`Unknown tool: ${call.name}`);
     }
   }
+}
+
+/**
+ * Level 6 — Test file hint: if a matching test file name can be inferred from
+ * the given path, return a short note suggesting the test command. Pure, no I/O.
+ */
+function testFileHint(filePath: string): string {
+  const CODE = /\.(t|j)sx?$/;
+  if (!CODE.test(filePath)) return '';
+  const base = filePath.replace(/\.(t|j)sx?$/, '');
+  const basename = base.split('/').pop() ?? '';
+  // Emit a hint so the agent knows to look for a test file and run it.
+  return (
+    `\nTEST HINT: if a test file exists (e.g. ${basename}.test.tsx), run it to verify: ` +
+    `npm test -- --run ${basename}`
+  );
 }
 
 function reqStr(input: Record<string, unknown>, key: string): string {

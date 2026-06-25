@@ -58,6 +58,12 @@ import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { CREATOR_IDENTITY } from '../lib/prompts';
+import { classifyIntentSmart } from '../AgentV3/IntentClassifier';
+import { reviewBuild, formatReview } from '../AgentV3/ReviewerAgent';
+import {
+  saveWorkspaceMemory,
+  restoreWorkspaceMemory,
+} from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
 import { GrokProvider } from '../AI/Router/providers/GrokProvider';
@@ -643,7 +649,18 @@ export function registerAgentV3Routes(app: Express): void {
     // (E2B sandbox + Claude) for small-talk — that heavy path sat silent during
     // sandbox setup and could reset the stream on Cloud Run / mobile Safari ("Load
     // failed") instead of just replying.
-    const intent = classifyIntent(prompt);
+    // Level 1 (LLM intent): fast keyword classification first; if confidence is
+    // low, upgrade with a cheap LLM call via the free router (never blocks — any
+    // LLM failure falls back to the keyword result). Best-effort, no await on the
+    // hot path: we fire the upgrade async and fall through immediately.
+    let intent = classifyIntent(prompt);
+    try {
+      const freeRouter = AIRouterManager.getRouter('free');
+      intent = await classifyIntentSmart(
+        prompt,
+        (p) => freeRouter.route(p, 'You are a classifier. Reply with one word only.').then((r) => r.response.content),
+      );
+    } catch { /* LLM upgrade is best-effort — keyword result stands */ }
     const isPlainChatTurn = intent === 'chat';
     // Surgical edit mode: the user is modifying an existing app (fix/change/update/
     // refactor/…), not building from scratch. When true, the build loop reads the
@@ -798,11 +815,11 @@ export function registerAgentV3Routes(app: Express): void {
           // edit session, instead of only after it manually re-reads files. Best-effort,
           // capped, and a no-op when memory is already warm — never blocks the build.
           try {
-            await warmIndexFiles(
-              getWorkspaceMemory(workspaceId),
-              fileTree,
-              (p) => actuator.readFile(workspaceId, p),
-            );
+            // Level 9: restore persisted memory snapshot before warming from files —
+            // episodes and file-list hints survive server restarts this way.
+            const wsMem = getWorkspaceMemory(workspaceId);
+            await restoreWorkspaceMemory(workspaceId, wsMem).catch(() => {});
+            await warmIndexFiles(wsMem, fileTree, (p) => actuator.readFile(workspaceId, p));
           } catch { /* warming is best-effort — never blocks a build */ }
         }
       }
@@ -952,6 +969,38 @@ export function registerAgentV3Routes(app: Express): void {
           if (summaryText) events.emit({ type: 'narration', agent: 'architect', text: summaryText, ts: Date.now() });
         } catch { /* summary is best-effort — never affects the build */ }
       }
+
+      // Level 8: Post-build multi-agent quality review — independent agent checks the
+      // produced code for real defects, anti-patterns and missed requirements.
+      // Only fires on successful builds; result is advisory narration, never blocks.
+      if (result.ok) {
+        try {
+          const rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
+          const rSample = await Promise.all(
+            rFiles.slice(0, 5).map(async (p) => ({
+              path: p,
+              content: await actuator.readFile(workspaceId, p).catch(() => ''),
+            })),
+          );
+          const review = await reviewBuild({
+            userRequest: prompt,
+            fileTree: rFiles,
+            fileSample: rSample,
+            spawn: spawnSubAgent,
+          });
+          const reviewText = formatReview(review);
+          if (reviewText) {
+            events.emit({ type: 'narration', agent: 'architect', text: reviewText, ts: Date.now() });
+          }
+        } catch { /* reviewer is best-effort — never affects the build result */ }
+      }
+
+      // Level 9: Persist workspace memory to Firestore so the NEXT session (or build)
+      // can restore file-list hints and episode history without re-reading all files.
+      // Best-effort: Firestore unavailability must never affect the build outcome.
+      try {
+        saveWorkspaceMemory(workspaceId, getWorkspaceMemory(workspaceId).snapshot()).catch(() => {});
+      } catch { /* memory persist is best-effort */ }
 
       // Bill the user the marked-up cost (D5/D6), recorded in the same place the
       // platform records every build's cost. Best-effort — never blocks the run.

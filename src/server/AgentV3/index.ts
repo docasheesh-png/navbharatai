@@ -80,8 +80,19 @@ export { GitManager } from './GitManager';
 export type { Checkpointer, CommandRunner } from './GitManager';
 export { registerSession, getSession, restoreSession, sessionCount } from './WorkspaceRegistry';
 export type { WorkspaceSession } from './WorkspaceRegistry';
-export { classifyIntent } from './IntentClassifier';
-export type { BuildIntent } from './IntentClassifier';
+export { classifyIntent, classifyIntentWithConfidence, classifyIntentSmart } from './IntentClassifier';
+export type { BuildIntent, IntentWithConfidence } from './IntentClassifier';
+export { reviewEdit, formatReviewResult } from './PostEditReviewer';
+export type { PostEditReview } from './PostEditReviewer';
+export { reviewBuild, formatReview } from './ReviewerAgent';
+export type { ReviewResult, ReviewIssue } from './ReviewerAgent';
+export { saveWorkspaceMemory, loadWorkspaceMemory, restoreWorkspaceMemory } from './FirestoreWorkspaceMemoryStore';
+export { getEmbeddingStore, _clearEmbeddingStores } from './EmbeddingSearch';
+export type { EmbeddingEntry } from './EmbeddingSearch';
+export { analyzeWithAST } from './ASTAnalyzer';
+export type { ASTFacts, ASTSymbolInfo, ASTImport } from './ASTAnalyzer';
+export { renameSymbol, addComponentProp } from './CodemodeExecutor';
+export type { CodemodeResult, CodemodeChange, CodemodeFile } from './CodemodeExecutor';
 
 import { AGENTV3_PHASE } from './types';
 

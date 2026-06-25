@@ -232,6 +232,73 @@ export class WorkspaceMemory {
     return hits.sort((a, b) => b.score - a.score).slice(0, limit);
   }
 
+  // ── Level 5: reverse import graph ───────────────────────────────────────────
+
+  /**
+   * Resolve a relative import specifier against an importer's directory to a
+   * normalised path without extension (best-effort — collapses ./ and ../).
+   */
+  private static resolveSpecifier(importerDir: string, spec: string): string {
+    if (!spec.startsWith('.')) return spec;
+    const parts = importerDir ? importerDir.split('/') : [];
+    for (const seg of spec.replace(/\.[^./]+$/, '').split('/')) {
+      if (seg === '..') parts.pop();
+      else if (seg !== '.') parts.push(seg);
+    }
+    return parts.join('/');
+  }
+
+  /**
+   * Files that directly import the given file (reverse dependency lookup).
+   * Matching is performed by normalising relative specifiers against each
+   * importer's directory and falling back to basename comparison for robustness.
+   */
+  reverseDeps(file: string): string[] {
+    const fileNoExt = file.replace(/\.[^.]+$/, '');
+    const basename = fileNoExt.split('/').pop() ?? '';
+    const result: string[] = [];
+    for (const [f, facts] of this.fileFacts) {
+      if (f === file) continue;
+      const fDir = f.split('/').slice(0, -1).join('/');
+      for (const imp of facts.imports) {
+        if (!imp.startsWith('.')) continue;
+        const resolved = WorkspaceMemory.resolveSpecifier(fDir, imp);
+        const impBasename = imp.split('/').pop()?.replace(/\.[^.]+$/, '') ?? '';
+        if (resolved === fileNoExt || impBasename === basename) {
+          result.push(f);
+          break;
+        }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Full impact radius of changing a file: direct importers and their transitive
+   * importers (BFS, depth-limited to 5 to avoid huge traversals). Useful for
+   * showing the agent which files may be affected by an API change.
+   */
+  impactRadius(file: string): { direct: string[]; transitive: string[] } {
+    const direct = this.reverseDeps(file);
+    const visited = new Set<string>([file, ...direct]);
+    const queue = [...direct];
+    const transitive: string[] = [];
+    let depth = 0;
+    while (queue.length > 0 && depth < 5) {
+      const next = queue.shift()!;
+      const nextDeps = this.reverseDeps(next);
+      for (const dep of nextDeps) {
+        if (!visited.has(dep)) {
+          visited.add(dep);
+          transitive.push(dep);
+          queue.push(dep);
+        }
+      }
+      depth++;
+    }
+    return { direct, transitive };
+  }
+
   /** A compact, human-readable map of the project for injecting into agent context. */
   projectMap(): string {
     const g = this.graph();

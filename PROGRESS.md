@@ -71,6 +71,19 @@
 - Issue #5 — ZIP upload preview: Honest classification for framework apps (no fake preview), shows clear message instead ✅
 - Cloud Build for commit 4dbbc14 failed transiently; this commit re-triggers deploy of correct code ✅
 
+**Session 2026-06-25 — AgentV3 Intelligence Levels 1–9 (branch `claude/test-coverage-analysis-bq0yev`):**
+- **Level 1 — LLM-upgraded intent classification:** `classifyIntentWithConfidence` (4-tier keyword confidence scoring) + `classifyIntentSmart` (LLM fallback for low-confidence inputs). Wired in agentv3.ts with best-effort try/catch. ✅
+- **Level 2 — AST-level code understanding:** `ASTAnalyzer.ts` — ts-morph dynamic import (graceful fallback), extracts symbols/imports/components/routes with exact line numbers. ✅
+- **Level 3 — Semantic file search:** `EmbeddingSearch.ts` — OpenAI ada-002 vector store; in-memory cosine similarity; graceful no-op when OPENAI_API_KEY absent; wired into write_file/edit_file in ToolDispatcher. ✅
+- **Level 4 — Post-edit self-review:** `PostEditReviewer.ts` — pure static analysis (stub detection, typo check, missing import hints, JSX/React check, TODO count); appended to tool_result in ToolDispatcher; never blocks. ✅
+- **Level 5 — Dependency-aware cascading edits:** `WorkspaceMemory.reverseDeps()` + `impactRadius()` — reverse import graph BFS (depth 5); impact radius reported in write_file/edit_file tool_result. ✅
+- **Level 6 — Test-driven edit verification:** `testFileHint()` in ToolDispatcher — suggests the matching test file after every write/edit so agent can verify immediately. ✅
+- **Level 7 — Structural codemods:** `CodemodeExecutor.ts` — AST-safe cross-file `renameSymbol` and `addComponentProp` via ts-morph; `codemod_rename` and `codemod_add_prop` tools in ToolCatalog. ✅
+- **Level 8 — Multi-agent post-build reviewer:** `ReviewerAgent.ts` — sub-agent spawn on successful builds; parses CRITICAL/WARNING/SUGGESTION; wired in agentv3.ts after reflection. ✅
+- **Level 9 — Persistent WorkspaceMemory:** `FirestoreWorkspaceMemoryStore.ts` — 30-day TTL, max 100 episodes; `restoreWorkspaceMemory` wired before warmIndexFiles in edit mode; `saveWorkspaceMemory` wired after every build. ✅
+- **New ts-morph dep:** `npm install ts-morph --save` — AST parsing for Levels 2 and 7.
+- **All gates green:** `tsc --noEmit` 0 errors + `tsc -p tsconfig.server.json` 0 errors + vitest **2446/2446** passed (incl. 6 new test files: PostEditReviewer, ReviewerAgent, EmbeddingSearch, ASTAnalyzer, CodemodeExecutor, CodemodeExecutor.test.ts).
+
 **Branch:** `claude/test-coverage-analysis-bq0yev`
 **Session 2026-06-21 (b) — shipped this branch, all tsc x2 + vitest 1049/1049 green:**
 - Phase 17 — Auto Test Generation (multi-file Vitest for generated apps) ✅

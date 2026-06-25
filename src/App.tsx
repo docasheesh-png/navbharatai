@@ -1268,6 +1268,7 @@ export default function App() {
       if (res.ok && data.ok) {
         sessionStorage.setItem('admin_token', data.token);
         setIsAdmin(true);
+        toggleTab('home');
         addLog('Admin: Access Granted.', 'success');
       } else {
         // Surface the REAL reason: server JSON error, or the raw status + body.
@@ -1301,22 +1302,8 @@ export default function App() {
     // is no longer mounted on return — getRedirectResult MUST be called here, at the
     // app root, or the sign-in is never finalized and the user stays logged out.
     getRedirectResult(auth)
-      .then((result) => {
-        if (result?.user) {
-          setUser(result.user);
-          setLoadingUser(false);
-          setShowAuth(false); // close auth modal if it opened during the brief logged-out window
-        }
-      })
-      .catch((e) => {
-        const code = e?.code || '';
-        console.error('[auth] redirect sign-in failed:', code || e?.message || e);
-        // Notify the user — "no-auth-event" just means no pending redirect (normal), skip it.
-        if (code && code !== 'auth/no-auth-event') {
-          addToast('Google sign-in could not be completed. Please try again.', 'error');
-          setShowAuth(true);
-        }
-      });
+      .then((result) => { if (result?.user) { setUser(result.user); setLoadingUser(false); } })
+      .catch((e) => { console.error('[auth] redirect sign-in failed:', e?.code || e?.message || e); });
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoadingUser(false);
@@ -5259,7 +5246,7 @@ ${buildLanguageRule(preferredLanguage)}`;
           </div>
         }>
         <div className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
-          ['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell', 'engine_builder'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem)] supports-[height:100dvh]:h-[calc(100dvh-3.5rem)] max-h-[calc(100vh-3.5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem)]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
+          ['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem)] supports-[height:100dvh]:h-[calc(100dvh-3.5rem)] max-h-[calc(100vh-3.5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem)]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
           // 8.1 — space for bottom nav on mobile (all views including chat)
           effectiveDeviceMode !== 'desktop' ? "pb-14" : ""
         )}>
@@ -5513,6 +5500,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'techbuy_ai') toggleTab('techbuy_ai');
               else if (id === 'adventure_ai') toggleTab('adventure_ai');
               else if (id === 'budget_ai') toggleTab('budget_ai');
+              else if (id === 'repo_analyst') toggleTab('repo_analyst');
             }} />
           )}
 
@@ -5882,6 +5870,11 @@ ${buildLanguageRule(preferredLanguage)}`;
               <ProfessionalChat config={PROFESSIONAL_CHATS.budget_ai} userId={user?.uid} />
             </div>
           )}
+          {activeView === 'repo_analyst' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.repo_analyst} userId={user?.uid} />
+            </div>
+          )}
 
           {/* ── Engineer AI ── */}
           {activeView === 'engineer_ai' && (
@@ -6013,7 +6006,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               chat/history are preserved. It is unmounted (and fully reset) ONLY when
               its tab is closed via the ✕. */}
           {openTabs.includes('engine_builder') && (
-            <div className="flex-1 min-h-0" style={{ display: activeView === 'engine_builder' ? undefined : 'none' }}>
+            <div className="flex-1" style={{ height: '100vh', display: activeView === 'engine_builder' ? undefined : 'none' }}>
               <AgentV3Panel userId={user?.uid} email={user?.email} resume={v3Resume} />
             </div>
           )}

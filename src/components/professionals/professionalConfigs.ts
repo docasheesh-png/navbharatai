@@ -882,4 +882,17 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Budgeting tips for an irregular income',
     ],
   },
+  repo_analyst: {
+    id: 'repo_analyst',
+    name: 'GitHub Repo Analyst & Improver',
+    endpoint: '/api/repo-analyst/chat',
+    welcome:
+      "Namaste! 🔍 I'm GitHub Repo Analyst & Improver — paste a PUBLIC GitHub repo URL (or owner/repo) and I'll fetch it for real and analyse it: what it is, tech stack, strengths, gaps, security/quality flags, its license, and a prioritised improvement plan with code snippets you can adopt. 📌 I analyse public repos read-only — I can't push changes to repos you don't own, and I help you LEARN good patterns license-respecting (no code-laundering). Which repo shall we look at?",
+    quickPrompts: [
+      'Analyse https://github.com/owner/repo',
+      'What are this repo’s strengths & gaps?',
+      'Security & quality issues you can see?',
+      'Give me a prioritised improvement plan',
+    ],
+  },
 };

@@ -31,6 +31,7 @@ import { registerChatRoutes } from './src/server/routes/chat';
 import { registerProRoutes } from './src/server/routes/pro';
 import { registerSdaRoutes } from './src/server/routes/sda';
 import { registerProfessionalsRoutes } from './src/server/routes/professionals';
+import { registerRepoAnalystRoutes } from './src/server/routes/repoAnalyst';
 import { registerEngineerRoutes } from './src/server/routes/engineer';
 import { registerAgentV3Routes } from './src/server/routes/agentv3';
 import { registerDomainsRoutes } from './src/server/routes/domains';
@@ -424,6 +425,7 @@ setInterval(() => {
   // Senior Doctor Assistant (SDA) chat route — extracted to src/server/routes/sda.ts (Phase 1, AI-core step e).
   registerSdaRoutes(app);
   registerProfessionalsRoutes(app);
+  registerRepoAnalystRoutes(app);
   // Engineer AI — autonomous coding agent (Phase 1: process-level sandbox, Claude + Grok).
   registerEngineerRoutes(app);
 

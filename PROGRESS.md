@@ -3168,3 +3168,20 @@ Batch 32 merged to main 84dab44 (PR #383). New `SecurityAnalysis` rules (verifie
    not flagged.
 
 Gate: server tsc 0, frontend tsc 0, **2304 vitest** PASS (57 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 34, POLISH): insecure-http false-positive fix (namespace URIs)
+
+Admin redirected the march from "add new detection rules" (engine is now comprehensive — 44
+checks; candidates coming up already-covered) to "polish existing checks (fewer FPs, audit
+overlaps)". First polish:
+
+- **insecure-http FP fix** — the rule flagged ANY `http://` string, including XML/SVG namespace
+  & schema URIs (`xmlns="http://www.w3.org/2000/svg"`, `http://www.w3.org/1999/xhtml`,
+  `xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"`). These are IDENTIFIERS, never network
+  endpoints — so every inline SVG was a noisy false positive. Added a NAMESPACE_HTTP ignore
+  (xmlns attributes + known namespace authorities: w3.org, xmlns.com, purl.org, schemas.*,
+  ns.adobe.com, inkscape.org, sodipodi). A real http endpoint on a similar line is still flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2305 vitest** PASS (58 SecurityAnalysis tests, +1 new).

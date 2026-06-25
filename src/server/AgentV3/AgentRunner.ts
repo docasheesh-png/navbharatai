@@ -1,6 +1,6 @@
 import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
-import type { ClaudeToolDef, TurnRunner, TurnUsage } from './ClaudeClient';
+import type { ClaudeToolDef, TurnRunner, TurnUsage, ToolUse } from './ClaudeClient';
 import type { ToolDispatcher } from './ToolDispatcher';
 import type { AgentRole } from './types';
 import type { ConversationStore, ConversationStatus } from './ConversationStore';
@@ -56,6 +56,53 @@ export interface AgentRunnerOptions {
     /** Injected clock (defaults to Date.now) — lets tests assert timestamps deterministically. */
     now?: () => number;
   };
+  /**
+   * Max tool calls to run CONCURRENTLY within a single turn's parallel-safe group (read-only
+   * tools + review-only sub-agents). Default 4 — keeps concurrent Claude calls within rate
+   * limits while still parallelising the review/test phase. Mutating tools always run serially.
+   */
+  toolConcurrency?: number;
+}
+
+// ── Parallel tool execution (capped) ───────────────────────────────────────────
+// Read-only / side-effect-free tools — safe to run concurrently with each other.
+const PARALLEL_SAFE_TOOLS = new Set<string>([
+  'read_file', 'grep', 'glob', 'recall', 'evaluate', 'second_opinion', 'consensus',
+]);
+// Sub-agent (task) roles that only READ and REPORT (no write_file/edit) — safe to run in
+// parallel. Builder/fixer roles (frontend, debugger, tester, …) WRITE, so they stay serial to
+// avoid two agents editing the same file at once ("find in parallel, fix serially").
+const PARALLEL_SAFE_TASK_ROLES = new Set<string>([
+  'qa', 'security', 'performance', 'accessibility', 'reviewer', 'researcher', 'monitor',
+]);
+
+/**
+ * A tool call is parallel-safe when it cannot mutate shared sandbox state: a read-only tool, or
+ * a `task` spawn of a review-only specialist. Everything else (write/edit/bash, todo/preview
+ * updates, generators, and builder sub-agents) runs serially.
+ */
+export function isParallelSafeToolUse(toolUse: ToolUse): boolean {
+  if (toolUse.name === 'task') {
+    const role = typeof toolUse.input?.role === 'string' ? toolUse.input.role : '';
+    return PARALLEL_SAFE_TASK_ROLES.has(role);
+  }
+  return PARALLEL_SAFE_TOOLS.has(toolUse.name);
+}
+
+/** Run `fn` over `items` with at most `limit` in flight; results keep input order. */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  const lanes = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, () => worker());
+  await Promise.all(lanes);
+  return results;
 }
 
 export interface AgentRunResult {
@@ -92,6 +139,7 @@ export class AgentRunner {
     } = this.opts;
     const maxSteps = this.opts.maxSteps ?? 50;
     const agentRole: AgentRole = this.opts.agentRole ?? 'architect';
+    const toolConcurrency = Math.max(1, this.opts.toolConcurrency ?? 4);
 
     const messages: unknown[] = [{ role: 'user', content: userPrompt }];
     const usage: TurnUsage = {
@@ -190,15 +238,27 @@ export class AgentRunner {
           return { ok: true, summary, steps, usage, billedUsd: billed() };
         }
 
-        // Execute each requested tool and gather results for the next turn.
-        const resultBlocks: ToolResultBlock[] = [];
-        for (const toolUse of turn.toolUses) {
-          const result = await dispatcher.dispatch(toolUse, agentRole);
-          resultBlocks.push({
-            type: 'tool_result',
-            tool_use_id: result.tool_use_id,
-            content: result.content,
-            is_error: result.is_error,
+        // Execute the requested tools and gather results (in the original order, so tool_use
+        // ids resolve). Mutating tools (write/edit/bash, builder sub-agents) run SERIALLY and
+        // first; independent read-only work and review-only sub-agents then run in a
+        // concurrency-capped PARALLEL group — so the review/test phase finishes far faster
+        // ("find in parallel, fix serially"). Each is dispatched once; order is preserved.
+        const resultBlocks: ToolResultBlock[] = new Array(turn.toolUses.length);
+        const toBlock = (r: { tool_use_id: string; content: string; is_error: boolean }): ToolResultBlock => ({
+          type: 'tool_result',
+          tool_use_id: r.tool_use_id,
+          content: r.content,
+          is_error: r.is_error,
+        });
+        const serialIdx: number[] = [];
+        const parallelIdx: number[] = [];
+        turn.toolUses.forEach((tu, i) => (isParallelSafeToolUse(tu) ? parallelIdx : serialIdx).push(i));
+        for (const i of serialIdx) {
+          resultBlocks[i] = toBlock(await dispatcher.dispatch(turn.toolUses[i], agentRole));
+        }
+        if (parallelIdx.length > 0) {
+          await mapWithConcurrency(parallelIdx, toolConcurrency, async (i) => {
+            resultBlocks[i] = toBlock(await dispatcher.dispatch(turn.toolUses[i], agentRole));
           });
         }
         messages.push({ role: 'user', content: resultBlocks });

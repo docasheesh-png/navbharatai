@@ -3395,3 +3395,26 @@ Conversation persistence (D7) is now END-TO-END: P-A store contract → P-B Agen
 P-C Firestore backend → P-D route + endpoints → P-E frontend reload. A v3.0 build survives a
 refresh/reconnect.
 Gate: server tsc 0, frontend tsc 0, **2334 vitest** PASS (8 new agentV3History tests).
+
+---
+
+### 2026-06-25 — v3.0 build speed: capped-parallel review/test sub-agents (admin-requested)
+
+Admin asked: testing/review agents run one-by-one after a build — run them in parallel (with the
+three caveats: rate-limit cap, find-parallel/fix-serial, model must batch). Implemented:
+
+- `AgentRunner` tool execution is now TWO-PHASE per turn: mutating tools (write/edit/bash, todo/
+  preview, generators, builder sub-agents) run SERIALLY and first; read-only tools + REVIEW-only
+  sub-agents (qa, security, performance, accessibility, reviewer, researcher, monitor) then run in
+  a concurrency-CAPPED parallel group. Results keep original order (tool_use ids resolve).
+  - `isParallelSafeToolUse()` (exported, tested) classifies: read-only tool names + review roles =
+    parallel; everything that can mutate = serial ("find in parallel, fix serially").
+  - `mapWithConcurrency()` caps in-flight; `AgentRunnerOptions.toolConcurrency` (default 4),
+    route-wired from `AGENTV3_TOOL_CONCURRENCY` env → keeps concurrent Claude calls rate-safe.
+- Architect system prompt: added "VERIFY IN PARALLEL" guidance — spawn independent review agents
+  in ONE turn (multiple task calls) so they actually parallelize, then assign fixes one file at a
+  time so fixes never collide.
+
+Effect: the review/verify phase (qa+security+performance+a11y+reviewer) now runs ~concurrently
+instead of serially → roughly halves that phase, while builds/fixes stay safe (serial).
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2337 vitest** PASS (3 new parallel-exec tests).

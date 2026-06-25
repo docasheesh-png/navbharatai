@@ -184,6 +184,26 @@ const RULES: Rule[] = [
     message: 'Vue v-html renders raw HTML (XSS sink) — sanitise the HTML or render text with {{ }} / v-text instead.',
   },
   {
+    rule: 'handlebars-triple-stache',
+    severity: 'medium',
+    // Handlebars/Mustache `{{{ value }}}` (triple stache) renders the value as RAW,
+    // UNESCAPED HTML — the template-engine equivalent of innerHTML and an XSS sink
+    // when the value is user-controlled. The normal `{{ value }}` (double) is escaped
+    // and safe; the triple-brace form is distinctive, so matching it is high-precision.
+    re: /\{\{\{[^}]+\}\}\}/,
+    message: 'Handlebars {{{triple-stache}}} renders raw unescaped HTML (XSS sink) — use the escaped {{double}} form, or sanitise the value before trusting it as HTML.',
+  },
+  {
+    rule: 'ejs-unescaped-output',
+    severity: 'medium',
+    // EJS `<%- value %>` outputs the value as RAW, UNESCAPED HTML (vs the escaped
+    // `<%= value %>`) — an XSS sink for user-controlled data. The `include()` partial
+    // helper is the standard, safe use of `<%-`, so it is excluded to keep precision.
+    re: /<%-\s*\S/,
+    message: 'EJS <%- %> outputs raw unescaped HTML (XSS sink) — use the escaped <%= %> for user data, or sanitise before output.',
+    ignore: (_m, line) => /<%-\s*include\b/.test(line),
+  },
+  {
     rule: 'unsafe-html-sink',
     severity: 'medium',
     // Vanilla-DOM XSS sinks the React rule misses: assigning OR appending to

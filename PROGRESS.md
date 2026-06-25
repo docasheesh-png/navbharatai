@@ -2825,3 +2825,18 @@ Batch 10 merged to main c11bd89 (PR #361). New `SecurityAnalysis` rules:
    machine. Both forms explicit; the hardened defaults are not flagged.
 
 Gate: server tsc 0, frontend tsc 0, **2262 vitest** PASS (35 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 12): Handlebars triple-stache + EJS unescaped output (template XSS)
+
+Batch 11 merged to main 6924b6a (PR #362). New `SecurityAnalysis` rules — template-engine XSS
+sinks parallel to the existing v-html / dangerouslySetInnerHTML / document-write family:
+
+1. **handlebars-triple-stache** (medium) — `{{{ value }}}` renders RAW unescaped HTML (vs the
+   safe escaped `{{ value }}`); XSS sink for user data. The triple-brace form is distinctive →
+   high precision.
+2. **ejs-unescaped-output** (medium) — `<%- value %>` outputs raw unescaped HTML (vs escaped
+   `<%= %>`). The standard `<%- include(...) %>` partial idiom is excluded for precision.
+
+Gate: server tsc 0, frontend tsc 0, **2264 vitest** PASS (37 SecurityAnalysis tests, +2 new).

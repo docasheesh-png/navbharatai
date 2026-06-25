@@ -194,6 +194,10 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('src/A.tsx', '<div role="button" tabIndex={0}>x</div>').some((x) => x.kind === 'redundant-role')).toBe(false);
     // an anchor WITHOUT href has no implicit link role, so role="link" is not redundant.
     expect(scanAccessibility('src/A.tsx', '<a role="link" onClick={go}>x</a>').some((x) => x.kind === 'redundant-role')).toBe(false);
+    // FP fix: <ul role="list"> / <ol role="list"> is the legitimate Safari/VoiceOver fix for
+    // list-style:none, NOT redundant — flagging it would give harmful advice.
+    expect(scanAccessibility('src/A.tsx', '<ul role="list" className="reset">…</ul>').some((x) => x.kind === 'redundant-role')).toBe(false);
+    expect(scanAccessibility('src/A.tsx', '<ol role="list">…</ol>').some((x) => x.kind === 'redundant-role')).toBe(false);
   });
 
   it('flags an empty heading as medium but not a heading with text or an aria-label', () => {

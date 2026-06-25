@@ -55,9 +55,13 @@ const ABSTRACT_ROLES = new Set([
 ]);
 // The implicit ARIA role of a native element. Setting role= to this same value is
 // redundant noise (axe "no-redundant-roles"). Only unambiguous mappings are listed.
+// NOTE: ul/ol → list and li → listitem are intentionally EXCLUDED. `<ul role="list">` is a
+// well-known, legitimate fix: when `list-style: none` is applied, Safari + VoiceOver stop
+// announcing the element as a list, and re-adding role="list" restores it. Flagging that as
+// "redundant" would give actively harmful advice, so only unambiguous mappings are listed.
 const IMPLICIT_ROLE: Record<string, string> = {
-  button: 'button', a: 'link', nav: 'navigation', ul: 'list', ol: 'list',
-  li: 'listitem', main: 'main', table: 'table', textarea: 'textbox',
+  button: 'button', a: 'link', nav: 'navigation',
+  main: 'main', table: 'table', textarea: 'textbox',
   h1: 'heading', h2: 'heading', h3: 'heading', h4: 'heading', h5: 'heading', h6: 'heading',
 };
 

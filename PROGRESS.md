@@ -3372,3 +3372,26 @@ Backend persistence is now END-TO-END: a build is persisted as it runs and reloa
 Gate: server tsc 0, frontend tsc 0, **boot:check PASS**, **2326 vitest** PASS (1 new route test).
 NEXT (P-E, frontend): on load/reconnect, useAgentV3Build lists by userId + reloads the most recent
 build's transcript into the panel — the last step to make "build survives refresh" user-visible.
+
+---
+
+### 2026-06-25 — v3.0 conversation persistence P-E: frontend reload of chat history (D7) — FEATURE COMPLETE
+
+P-D merged (PR #396, 4bdaf55). P-E (admin chose option (a): chat + git-restore) makes the
+persistence user-visible:
+
+- NEW `src/components/agentv3/agentV3History.ts` (pure, tested): `messageText()` extracts visible
+  text from a Claude message (string or block array); `conversationToEvents(conv)` turns a
+  persisted build into wire events (workspace + one narration per assistant turn + a `done` for a
+  finished build; a still-running build is left open so it can be Resumed). Replayed through the
+  existing agentV3Reducer → rebuilds the narration feed + workspaceId with no new reducer logic.
+- `useAgentV3Build.loadConversation(opts)` — fetches the user's most recent persisted build
+  (list → by-id) and folds its events into state. Best-effort; no-op while running.
+- `AgentV3Panel` — a one-time mount effect calls loadConversation when signed in, idle, and the
+  panel is empty, so a refresh/reconnect re-displays the last build's chat. Never clobbers a live
+  build or a History-opened thread. Files come back via the existing git/restore path.
+
+Conversation persistence (D7) is now END-TO-END: P-A store contract → P-B AgentRunner wiring →
+P-C Firestore backend → P-D route + endpoints → P-E frontend reload. A v3.0 build survives a
+refresh/reconnect.
+Gate: server tsc 0, frontend tsc 0, **2334 vitest** PASS (8 new agentV3History tests).

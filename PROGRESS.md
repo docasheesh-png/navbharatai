@@ -3822,3 +3822,32 @@ Gate (every phase): frontend tsc 0, server tsc 0, boot:check PASS, vitest PASS
 (2503 → 2512 → 2527 across the phases; Phase 4/5 add UI + a route, covered by existing runtime tests).
 All five git-native/preview/auth phases complete. Git-native storage + PR mode remain DORMANT behind
 their flags; auth simplify + export + dual preview are LIVE.
+
+---
+
+### 2026-06-25 — v3.0 cost-ladder measurement: per-tier cost & quality telemetry
+
+The cost-ladder (P2, prior milestone) now routes simple apps to cheaper models —
+but there was NO way to prove it saves money or that quality holds per tier. The
+design doc's P8 cutover gate explicitly requires that measurement ("measure
+cheap-tier quality + fallback rate per task-type before flipping the default"),
+and a cost dashboard would have no real data without it (faking it would break the
+real-features rule). Built the honest foundation:
+
+- NEW `src/server/AgentV3/AgentV3CostTelemetry.ts` — per-day aggregate
+  (`agentv3_cost_telemetry/{YYYY-MM-DD}`) of every v3.0 build, broken down BOTH by
+  task type and by start tier: builds, okBuilds (per-tier success rate), billedUsd,
+  input/output tokens, durationMs, plus powerBuilds. The aggregation is a PURE,
+  unit-tested `foldCostTelemetry()` fold; the store wraps it in a Firestore
+  transaction. Mirrors UserCostStore exactly (VITEST-skip, best-effort, never throws).
+- `routes/agentv3.ts` — records one telemetry row per build right beside the existing
+  `userCostStore.record`, pulling taskType/startTier from the analyser and
+  ok/billed/tokens/duration from the build result. Best-effort; never blocks.
+- `routes/admin.ts` — NEW `GET /api/admin/agentv3/cost-telemetry?days=N` (admin-auth,
+  read-only) returns the last N days of aggregates for an eventual dashboard.
+
+No billing change, no pricing.ts touch, no user-facing surface yet (admin endpoint
+only → no AppKnowledgeBase entry until the dashboard UI ships). Active within the
+already-flag-gated v3.0 path.
+Gate: frontend tsc 0, server tsc 0, **2524 vitest** PASS (+8 new foldCostTelemetry
+tests), boot:check PASS. Ships on merge → deploy.

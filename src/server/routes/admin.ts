@@ -8,6 +8,7 @@ import { serverStats } from '../lib/serverStats';
 import { getProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
+import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { logStore } from '../lib/logStore';
 import { eventStore } from '../lib/eventStore';
@@ -105,6 +106,19 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json({ history });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to read metrics history.' });
+    }
+  });
+
+  // AgentV3 cost-ladder telemetry (P2 measurement): per-day cost & quality broken
+  // down by task type and start tier, so cheap-tier savings + success rate are
+  // visible (the P8 cutover gate needs this). Read-only aggregates; admin-only.
+  app.get('/api/admin/agentv3/cost-telemetry', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const days = Math.min(Math.max(parseInt(String(req.query.days ?? '30'), 10) || 30, 1), 365);
+      const history = await agentV3CostTelemetry.list(days);
+      res.json({ history });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to read AgentV3 cost telemetry.' });
     }
   });
 

@@ -14,6 +14,7 @@ import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
+import { explainAuthReason } from '../lib/authDiagnostics';
 
 /**
  * Temporary diagnostic: hit the Identity Toolkit sign-up endpoint directly from
@@ -23,31 +24,6 @@ import { firebaseConfig } from '../config/firebase';
  * "PROJECT_DISABLED", "API key not valid", or "ADMIN_ONLY_OPERATION" (which
  * would actually mean the auth backend is fine).
  */
-/**
- * Translate a raw Identity Toolkit error message into a plain, ACTIONABLE reason.
- * These are the causes behind a bare auth/internal-error in production — almost all
- * are Firebase Console config, so name the exact fix and project.
- */
-function explainAuthReason(message: string): string {
-  const m = (message || '').toUpperCase();
-  if (!m) return '';
-  if (m.includes('CONFIGURATION_NOT_FOUND')) {
-    return `Firebase Authentication is not set up for this project. An admin must open Firebase Console → Authentication → "Get started" and enable the sign-in providers (project ${firebaseConfig.projectId}).`;
-  }
-  if (m.includes('PASSWORD_LOGIN_DISABLED') || m.includes('OPERATION_NOT_ALLOWED') || m.includes('ADMIN_ONLY_OPERATION')) {
-    return `Sign-in is disabled for this project — the required provider (Email/Password or Google) is turned off. An admin must enable it in Firebase Console → Authentication → Sign-in method (project ${firebaseConfig.projectId}).`;
-  }
-  if (m.includes('INVALID_LOGIN_CREDENTIALS') || m.includes('EMAIL_NOT_FOUND') || m.includes('INVALID_PASSWORD')) {
-    return 'Wrong email or password — or no account exists for this email yet. Switch to Sign up to create one.';
-  }
-  if (m.includes('USER_DISABLED')) return 'This account has been disabled.';
-  if (m.includes('TOO_MANY_ATTEMPTS')) return 'Too many attempts — wait a bit and try again.';
-  if (m.includes('API KEY') || m.includes('API_KEY') || m.includes('REFERER')) {
-    return `The Firebase API key is invalid or restricted for this site. An admin must check the key and its allowed referrers (project ${firebaseConfig.projectId}).`;
-  }
-  return `Server said: ${message}`;
-}
-
 /**
  * Probe the REAL Identity Toolkit endpoint to surface the actual reason behind a
  * bare auth/internal-error. When email+password are supplied we hit

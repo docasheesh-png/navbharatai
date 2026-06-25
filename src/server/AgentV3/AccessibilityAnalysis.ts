@@ -115,6 +115,19 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
         push('input-button-no-name', 'medium');
       }
 
+      // ── medium: a `scope` attribute on a <td> — scope is only valid on a <th> (it tells
+      // a screen reader whether a header labels its row or column). On a <td> it is ignored,
+      // so the data cell was meant to be a header (axe "scope-attr-valid"). ──────────────
+      if (name === 'td' && hasAttr(tag, 'scope')) {
+        push('scope-on-td', 'medium');
+      }
+
+      // ── medium: <marquee>/<blink> auto-move or flash content with no way to pause it
+      // (WCAG 2.2.2 Pause/Stop/Hide); both are deprecated and dropped by modern browsers. ─
+      if (name === 'marquee' || name === 'blink') {
+        push('deprecated-marquee-blink', 'medium');
+      }
+
       // ── medium: <html> with no lang (assistive tech can't pick a voice) ──────
       if (name === 'html' && !hasAttr(tag, 'lang')) {
         push('html-missing-lang', 'medium');

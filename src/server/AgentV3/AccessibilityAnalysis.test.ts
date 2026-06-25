@@ -136,6 +136,21 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('src/F.tsx', '<input type="text" id="name" />').some((x) => x.kind === 'autofocus')).toBe(false);
   });
 
+  it('flags a scope attribute on a <td> but not on a <th>', () => {
+    expect(scanAccessibility('src/T.tsx', '<td scope="col">Name</td>').some((x) => x.kind === 'scope-on-td' && x.severity === 'medium')).toBe(true);
+    // scope IS valid on a th.
+    expect(scanAccessibility('src/T.tsx', '<th scope="col">Name</th>').some((x) => x.kind === 'scope-on-td')).toBe(false);
+    // a plain td is fine.
+    expect(scanAccessibility('src/T.tsx', '<td>Alice</td>').some((x) => x.kind === 'scope-on-td')).toBe(false);
+  });
+
+  it('flags deprecated <marquee>/<blink> elements', () => {
+    expect(scanAccessibility('src/M.tsx', '<marquee>Sale!</marquee>').some((x) => x.kind === 'deprecated-marquee-blink' && x.severity === 'medium')).toBe(true);
+    expect(scanAccessibility('src/M.tsx', '<blink>New</blink>').some((x) => x.kind === 'deprecated-marquee-blink')).toBe(true);
+    // a normal element is fine.
+    expect(scanAccessibility('src/M.tsx', '<div>Sale!</div>').some((x) => x.kind === 'deprecated-marquee-blink')).toBe(false);
+  });
+
   it('flags an <area href> with no alt as high but not one with alt', () => {
     expect(scanAccessibility('src/Map.tsx', '<area href="/x" coords="0,0,10,10" shape="rect" />').some((x) => x.kind === 'area-missing-alt' && x.severity === 'high')).toBe(true);
     expect(scanAccessibility('src/Map.tsx', '<area href="/x" alt="Region X" coords="0,0,10,10" />').some((x) => x.kind === 'area-missing-alt')).toBe(false);

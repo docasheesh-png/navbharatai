@@ -37,6 +37,14 @@ describe('scanCompliance — file-local rules', () => {
     expect(scanCompliance('src/auth.ts', `app.use(res.cookieParser());`).some((i) => i.kind === 'cookie-no-secure')).toBe(false);
   });
 
+  it('does not flag a cookie being DELETED (logout) for missing SameSite/Secure/httpOnly', () => {
+    // document.cookie clear via Max-Age=0 / 1970 expiry.
+    expect(scanCompliance('a.ts', `document.cookie = 'sid=; Max-Age=0; path=/';`).some((i) => i.kind === 'cookie-no-samesite')).toBe(false);
+    expect(scanCompliance('a.ts', `document.cookie = 'sid=; expires=Thu, 01 Jan 1970 00:00:00 UTC';`).some((i) => i.kind === 'cookie-no-samesite')).toBe(false);
+    // server-side clear via res.cookie('name', '', { maxAge: 0 }).
+    expect(scanCompliance('src/auth.ts', `res.cookie('session', '', { maxAge: 0 });`).some((i) => i.kind === 'cookie-no-httponly' || i.kind === 'cookie-no-secure')).toBe(false);
+  });
+
   it('flags personal data over plain http but ignores localhost', () => {
     expect(scanCompliance('a.ts', `fetch('http://api.example.com/u')`).some((i) => i.kind === 'insecure-http-endpoint')).toBe(true);
     expect(scanCompliance('a.ts', `fetch('http://localhost:3000/u')`).some((i) => i.kind === 'insecure-http-endpoint')).toBe(false);

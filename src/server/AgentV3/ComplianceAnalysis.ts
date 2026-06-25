@@ -103,21 +103,26 @@ export function scanCompliance(file: string, content: string): ComplianceIssue[]
       push('sensitive-in-browser-storage', 'medium');
     }
 
+    // A cookie being DELETED (logout / clear) does not need SameSite/Secure/httpOnly — the
+    // browser is removing it, not storing it. Detect the clear-cookie signals (Max-Age 0/-1,
+    // a 1970/past expiry) so logout code is not falsely flagged.
+    const isCookieDeletion = /\bmax-?age\s*[:=]\s*-?0\b|expires\s*[:=][^;,)]*(?:1970|Thu,\s*0?1\s*Jan)/i.test(line);
+
     // ── medium: cookie set without SameSite (cross-site leakage / CSRF surface) ──
-    if (/document\.cookie\s*=/.test(line) && !/samesite/i.test(line)) {
+    if (/document\.cookie\s*=/.test(line) && !/samesite/i.test(line) && !isCookieDeletion) {
       push('cookie-no-samesite', 'medium');
     }
 
     // ── medium: server cookie set without httpOnly — readable by any script, so an
     // XSS can steal the session/auth token (DPDP/GDPR security-of-processing) ───────
-    if (/\bres(?:ponse)?\.cookie\s*\(/.test(line) && !/httponly/i.test(line)) {
+    if (/\bres(?:ponse)?\.cookie\s*\(/.test(line) && !/httponly/i.test(line) && !isCookieDeletion) {
       push('cookie-no-httponly', 'medium');
     }
 
     // ── medium: server cookie set without the Secure flag — the browser will send it
     // over plain http where it can be intercepted on the wire (DPDP/GDPR security-of-
     // processing). The `secure:` option (or a "Secure" attribute) resolves it. ───────
-    if (/\bres(?:ponse)?\.cookie\s*\(/.test(line) && !/\bsecure\b/i.test(line)) {
+    if (/\bres(?:ponse)?\.cookie\s*\(/.test(line) && !/\bsecure\b/i.test(line) && !isCookieDeletion) {
       push('cookie-no-secure', 'medium');
     }
 

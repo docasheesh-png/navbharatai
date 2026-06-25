@@ -3653,3 +3653,26 @@ NOTE: the same session also showed a reviewer "0/100 — missing all source code
 claimed it wrote 7 files; that looks like a separate workspace-state hiccup (the build started on an
 "empty directory" and recreated the scaffold mid-run). Not reproduced/fixed here — flagged for
 follow-up if it recurs; the concrete, reproducible preview-block bug is fixed above.
+
+---
+
+### 2026-06-25 — v3.0 BUGFIX: reviewer's false "0/100 — missing all source code"
+
+Same live session as the allowedHosts bug: after the agent built a working app (7 files; dev server
+was running on :5174), the post-build ReviewerAgent reported "[CRITICAL] missing all the necessary
+source code. Score: 0/100". Root cause (route ~L986): the reviewer reads the workspace via
+`actuator.listFiles(workspaceId)`; that came back EMPTY (a sandbox read hiccup — the files genuinely
+exist, the dev server proves it), so reviewBuild got `fileTree:[]` and the reviewer model declared the
+app had no code. A false negative that contradicts the build the user just watched succeed.
+
+Fix (ReviewerAgent.ts): added `hasReviewableSource(fileTree)` (exported, pure) and a defensive
+early-return in `reviewBuild` — when the listing has no real source files, it returns a neutral
+skipped result (score 0, passed:true, no issues) WITHOUT spawning the reviewer. `formatReview`
+already emits '' for score 0, so the user sees nothing instead of a scary, wrong "0/100". The build
+result is never affected (review is advisory). Updated one existing parse-test to pass a source file
+(it tests parsing, not the empty case).
+
+Gate: server tsc 0, frontend tsc 0, **2468 vitest** PASS (3 new reviewer-guard tests).
+NOTE: the underlying "listFiles returned empty when files exist" is an E2B read-reliability issue
+(can't reproduce without E2B here) — this fix removes the user-visible false verdict; flagged for
+follow-up if the empty-listing recurs.

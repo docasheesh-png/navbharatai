@@ -28,6 +28,8 @@ import {
   GitHubAppClient,
   githubConfigFromEnv,
   githubStorageActive,
+  githubPrMode,
+  mergeViaPullRequest,
   repoNameForProject,
   type RepoInfo,
   registerSession,
@@ -65,6 +67,10 @@ import { buildDocumentContext } from '../lib/attachmentText';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
+import { VirtualFileSystem } from '../project/ProjectModel';
+import { renderPreview } from '../runtime/renderPreview';
+import { isReactProject } from '../runtime/ReactPreview';
+import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY } from '../lib/prompts';
 import { classifyIntentSmart } from '../AgentV3/IntentClassifier';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
@@ -559,6 +565,40 @@ export function registerAgentV3Routes(app: Express): void {
     }
   });
 
+  // DUAL PREVIEW (Phase 5) — in-browser preview. Builds ONE self-contained HTML document from the
+  // workspace files (static HTML/CSS/JS inlined, or React/Vue bundled in-browser via the existing
+  // runtime renderers) and returns it for the client to render in an <iframe srcdoc>. This needs NO
+  // running dev server, so it works even when the E2B sandbox preview is unavailable (the "Blocked
+  // request" / sandbox-down case) — the second of the two preview paths the builder offers.
+  app.post('/api/agentv3/inbrowser-preview', async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    try {
+      const actuator = buildActuator();
+      const { files } = await collectWorkspaceFiles(actuator, workspaceId);
+      if (Object.keys(files).length === 0) {
+        res.status(404).json({ error: 'No files to preview yet — build something first.' });
+        return;
+      }
+      const vfs = VirtualFileSystem.fromRecord(files);
+      const html = renderPreview(vfs);
+      // Detect the renderer used so the client can label the mode honestly.
+      const kind = isReactProject(vfs) ? 'react' : isVueProject(vfs) ? 'vue' : 'static';
+      res.json({ html, kind, count: Object.keys(files).length });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
+    }
+  });
+
   // §12.2 — import an existing project (e.g. fetched from GitHub via the existing
   // `/api/github/fetch` route, or any source) into the v3.0 sandbox so the agent can
   // edit/update and then deploy/push it back. Path-safe (no traversal/absolute), and
@@ -797,6 +837,8 @@ export function registerAgentV3Routes(app: Express): void {
       let repoSync: GitRepoSync | undefined;
       let repoAuthedUrl = '';
       let repoBranch = 'main';
+      let ghClientRef: GitHubAppClient | undefined;
+      let repoNameRef = '';
       try {
         // Emit an immediate status so the NDJSON stream is never silent while the
         // sandbox is being created (E2B VM setup can take several seconds). A long
@@ -818,6 +860,8 @@ export function registerAgentV3Routes(app: Express): void {
               const token = await ghClient.getInstallationToken();
               repoAuthedUrl = ghClient.authedCloneUrl(repoName, token);
               repoBranch = repo.defaultBranch || 'main';
+              ghClientRef = ghClient;
+              repoNameRef = repoName;
               repoSync = new GitRepoSync(actuator, workspaceId);
               const h = await repoSync.hydrateIfEmpty(repoAuthedUrl);
               if (h.hydrated) {
@@ -1129,9 +1173,26 @@ export function registerAgentV3Routes(app: Express): void {
       if (repoSync && repoAuthedUrl && writtenFiles.size > 0) {
         try {
           const msg = `NavBharatAI build: ${deriveTitle(prompt)}`;
-          const pushed = await repoSync.pushAll(repoAuthedUrl, repoBranch, msg);
-          if (pushed.pushed) {
-            events.emit({ type: 'narration', agent: 'architect', text: 'Saved your project to its GitHub repo.', ts: Date.now() });
+          // PR MODE (Phase 3, opt-in GITHUB_PR_MODE): push to a build branch, open a PR, and merge
+          // it ONLY when CI is green (Claude-Code-style). Default mode force-pushes straight to the
+          // project's default branch. Both best-effort — never block or fail the build.
+          if (githubPrMode() && ghClientRef && repoNameRef) {
+            const buildBranch = `nbi/build-${Date.now()}`;
+            const pushed = await repoSync.pushAll(repoAuthedUrl, buildBranch, msg);
+            if (pushed.pushed) {
+              const flow = await mergeViaPullRequest(ghClientRef, repoNameRef, {
+                head: buildBranch, base: repoBranch, title: msg,
+                body: 'Automated build by NavBharatAI Pro v3.0.',
+              });
+              if (flow.note) {
+                events.emit({ type: 'narration', agent: 'architect', text: flow.note, ts: Date.now() });
+              }
+            }
+          } else {
+            const pushed = await repoSync.pushAll(repoAuthedUrl, repoBranch, msg);
+            if (pushed.pushed) {
+              events.emit({ type: 'narration', agent: 'architect', text: 'Saved your project to its GitHub repo.', ts: Date.now() });
+            }
           }
         } catch { /* git-native push is best-effort */ }
       }

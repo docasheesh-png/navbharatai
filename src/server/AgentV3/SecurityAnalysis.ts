@@ -27,6 +27,12 @@ interface Rule {
 
 const PLACEHOLDER = /(your[_-]?|example|placeholder|xxx+|<|\$\{|process\.env|import\.meta\.env|changeme|dummy|test)/i;
 
+// A security-sensitive context: the value being built is a secret/identity token, not a
+// throwaway. Used to keep the "weak randomness / weak hash" rules high-precision — they
+// fire ONLY when one of these words is on the same line, so an ordinary Math.random()
+// (jitter, a sample, an animation) or an md5 cache-key/ETag is never flagged.
+const SECURITY_CONTEXT = /\b(secret|token|password|passwd|otp|nonce|session|salt|api[_-]?key|apikey|credential|csrf|signature|hmac|private[_-]?key|access[_-]?token|reset[_-]?code|verification|auth)\b/i;
+
 const RULES: Rule[] = [
   {
     rule: 'hardcoded-secret',
@@ -140,6 +146,28 @@ const RULES: Rule[] = [
     // using it for tokens/keys/IVs is predictable. Use crypto.randomBytes() instead.
     re: /\.pseudoRandomBytes\s*\(/,
     message: 'crypto.pseudoRandomBytes() is not cryptographically secure (deprecated) — use crypto.randomBytes() for tokens, keys and IVs.',
+  },
+  {
+    rule: 'insecure-random-token',
+    severity: 'high',
+    // Math.random() is NOT cryptographically secure — its output is predictable, so using
+    // it to build a token/secret/OTP/session id lets an attacker guess the value. The
+    // SECURITY_CONTEXT guard (same-line keyword) keeps this precise: ordinary Math.random()
+    // for jitter/sampling/animation is not flagged. Use crypto.randomBytes/randomUUID.
+    re: /\bMath\.random\s*\(\s*\)/,
+    message: 'Math.random() is not cryptographically secure (predictable) — do not build a token/OTP/secret/session id with it; use crypto.randomUUID() or crypto.randomBytes().',
+    ignore: (_m, line) => !SECURITY_CONTEXT.test(line),
+  },
+  {
+    rule: 'weak-hash-security',
+    severity: 'medium',
+    // MD5 and SHA-1 are cryptographically broken (collisions, fast to brute-force). Used
+    // for a password/token/signature they are insecure; the SECURITY_CONTEXT guard keeps
+    // this precise so an md5 ETag/cache-key/checksum (a legitimate non-security use) is not
+    // flagged. Use SHA-256+ for integrity, and bcrypt/scrypt/argon2 for passwords.
+    re: /\bcreateHash\s*\(\s*['"`](?:md5|sha1)['"`]\s*\)/i,
+    message: 'MD5/SHA-1 is cryptographically broken — do not use it for a password/token/signature; use SHA-256+ for integrity and bcrypt/scrypt/argon2 for passwords.',
+    ignore: (_m, line) => !SECURITY_CONTEXT.test(line),
   },
   {
     rule: 'weak-crypto-cipher',

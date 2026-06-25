@@ -2902,3 +2902,19 @@ predicate rules):
    each step's `acc` is a Promise unless awaited every time, and the result is a Promise.
 
 Gate: server tsc 0, frontend tsc 0, **2272 vitest** PASS (11 AsyncPatternAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 17): insecure randomness + weak hash for security values
+
+Batch 16 merged to main 749a618 (PR #367). New `SecurityAnalysis` rules, both kept precise by a
+shared SECURITY_CONTEXT same-line keyword guard (secret/token/password/otp/session/…):
+
+1. **insecure-random-token** (high) — `Math.random()` on a security-context line builds a
+   predictable token/OTP/session id; ordinary Math.random() (jitter, sampling, animation) is
+   NOT flagged. Use crypto.randomUUID()/randomBytes().
+2. **weak-hash-security** (medium) — `createHash('md5'|'sha1')` on a security-context line
+   (password/token/signature). An md5 ETag/cache-key/checksum (no security keyword) is NOT
+   flagged. Use SHA-256+ for integrity, bcrypt/scrypt/argon2 for passwords.
+
+Gate: server tsc 0, frontend tsc 0, **2274 vitest** PASS (41 SecurityAnalysis tests, +2 new).

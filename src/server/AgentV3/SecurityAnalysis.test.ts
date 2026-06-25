@@ -223,6 +223,23 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'svm.runModel(data);').some((f) => f.rule === 'vm-code-execution')).toBe(false);
   });
 
+  it('flags Math.random() for a token/secret but not ordinary non-security use', () => {
+    expect(scanSecurity('a.ts', 'const token = Math.random().toString(36).slice(2);').some((f) => f.rule === 'insecure-random-token' && f.severity === 'high')).toBe(true);
+    expect(scanSecurity('a.ts', 'const otp = Math.floor(Math.random() * 1000000);').some((f) => f.rule === 'insecure-random-token')).toBe(true);
+    // ordinary non-security randomness is not flagged.
+    expect(scanSecurity('a.ts', 'const jitter = Math.random() * 100;').some((f) => f.rule === 'insecure-random-token')).toBe(false);
+    expect(scanSecurity('a.ts', 'const i = Math.floor(Math.random() * items.length);').some((f) => f.rule === 'insecure-random-token')).toBe(false);
+  });
+
+  it('flags MD5/SHA-1 used for a security value but not a non-security checksum', () => {
+    expect(scanSecurity('a.ts', "const h = crypto.createHash('md5').update(password).digest('hex');").some((f) => f.rule === 'weak-hash-security' && f.severity === 'medium')).toBe(true);
+    expect(scanSecurity('a.ts', "const sig = createHash('sha1').update(token).digest('hex');").some((f) => f.rule === 'weak-hash-security')).toBe(true);
+    // an md5 ETag / cache key (no security keyword) is a legitimate non-security use.
+    expect(scanSecurity('a.ts', "const etag = createHash('md5').update(fileBuffer).digest('hex');").some((f) => f.rule === 'weak-hash-security')).toBe(false);
+    // SHA-256 is fine.
+    expect(scanSecurity('a.ts', "const h = createHash('sha256').update(password).digest('hex');").some((f) => f.rule === 'weak-hash-security')).toBe(false);
+  });
+
   it('flags insecure Electron webPreferences but not the secure defaults', () => {
     expect(scanSecurity('main.ts', 'webPreferences: { nodeIntegration: true }').some((f) => f.rule === 'electron-insecure-webprefs' && f.severity === 'high')).toBe(true);
     expect(scanSecurity('main.ts', 'webPreferences: { contextIsolation: false }').some((f) => f.rule === 'electron-insecure-webprefs')).toBe(true);

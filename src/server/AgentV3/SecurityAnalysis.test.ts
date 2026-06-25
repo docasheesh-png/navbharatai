@@ -155,6 +155,20 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.tsx', '<a href="https://x.com">x</a>').some((f) => f.rule === 'javascript-uri')).toBe(false);
   });
 
+  it('flags document.domain assignment but not a comparison', () => {
+    expect(scanSecurity('a.ts', "document.domain = 'example.com';").some((f) => f.rule === 'document-domain-write' && f.severity === 'medium')).toBe(true);
+    // reading/comparing document.domain is fine.
+    expect(scanSecurity('a.ts', "if (document.domain === 'app.acme.com') {}").some((f) => f.rule === 'document-domain-write')).toBe(false);
+  });
+
+  it('flags an iframe sandbox that allows both scripts and same-origin (escape) but not a safe one', () => {
+    expect(scanSecurity('a.tsx', '<iframe src="/x" sandbox="allow-scripts allow-same-origin" />').some((f) => f.rule === 'iframe-sandbox-escape' && f.severity === 'medium')).toBe(true);
+    // order-independent.
+    expect(scanSecurity('a.tsx', '<iframe sandbox="allow-same-origin allow-forms allow-scripts" />').some((f) => f.rule === 'iframe-sandbox-escape')).toBe(true);
+    // allow-scripts WITHOUT allow-same-origin is the safe form.
+    expect(scanSecurity('a.tsx', '<iframe sandbox="allow-scripts allow-forms" />').some((f) => f.rule === 'iframe-sandbox-escape')).toBe(false);
+  });
+
   it('flags postMessage with a wildcard target origin but not a specific one', () => {
     expect(scanSecurity('a.ts', "iframe.contentWindow.postMessage(data, '*');").some((f) => f.rule === 'postmessage-wildcard-origin')).toBe(true);
     expect(scanSecurity('a.ts', "win.postMessage(payload, 'https://app.example.com');").some((f) => f.rule === 'postmessage-wildcard-origin')).toBe(false);

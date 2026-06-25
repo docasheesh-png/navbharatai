@@ -3089,3 +3089,20 @@ Batch 27 merged to main c4b72ef (PR #378). HONEST CORRECTION + new check:
   Verified absent from both SecurityAnalysis and ComplianceAnalysis before adding.
 
 Gate: server tsc 0, frontend tsc 0, **2294 vitest** PASS (51 SecurityAnalysis tests).
+
+---
+
+### 2026-06-25 — Section I march (batch 29): document.domain write + iframe sandbox escape (DOM security)
+
+Batch 28 merged to main 4ecdf6f (PR #379). New `SecurityAnalysis` DOM-security rules (both
+verified absent across the whole AgentV3 dir before adding — tightened redundant-work check
+after the batch-27 overlap):
+
+1. **document-domain-write** (medium) — assigning `document.domain` relaxes the same-origin
+   policy (any sibling subdomain can script into the page) and is deprecated. `=(?!=)` matches
+   assignment, not a comparison.
+2. **iframe-sandbox-escape** (medium) — an `<iframe sandbox>` allowing BOTH `allow-scripts` and
+   `allow-same-origin` can remove its own sandbox and escape it. Two lookaheads require both
+   tokens in the same sandbox value (order-independent); allow-scripts alone is not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2296 vitest** PASS (53 SecurityAnalysis tests, +2 new).

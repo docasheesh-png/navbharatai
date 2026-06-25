@@ -456,6 +456,24 @@ const RULES: Rule[] = [
     ignore: (_m, line) => /noopener/i.test(line) || /\.opener\s*=\s*null/.test(line),
   },
   {
+    rule: 'document-domain-write',
+    severity: 'medium',
+    // Assigning document.domain relaxes the same-origin policy so ANY page on a sibling
+    // subdomain can script into this one — a cross-site attack pivot. It is deprecated and
+    // being removed from browsers. The `=(?!=)` matches assignment, not a comparison.
+    re: /\bdocument\.domain\s*=(?!=)/,
+    message: 'Assigning document.domain relaxes the same-origin policy (any sibling subdomain can script into this page) and is deprecated — remove it and use postMessage or CORS for cross-origin communication.',
+  },
+  {
+    rule: 'iframe-sandbox-escape',
+    severity: 'medium',
+    // An <iframe sandbox> that allows BOTH allow-scripts AND allow-same-origin can reach
+    // into its parent and remove its own sandbox attribute — defeating the sandbox entirely.
+    // The two lookaheads require both tokens inside the same sandbox attribute value.
+    re: /sandbox\s*=\s*['"](?=[^'"]*\ballow-scripts\b)(?=[^'"]*\ballow-same-origin\b)[^'"]*['"]/i,
+    message: 'iframe sandbox allows both allow-scripts and allow-same-origin — the framed page can remove its own sandbox and escape it. Drop allow-same-origin (or serve the frame from a distinct origin).',
+  },
+  {
     rule: 'postmessage-wildcard-origin',
     severity: 'medium',
     // window.postMessage(data, '*') broadcasts the message to a frame at ANY origin —

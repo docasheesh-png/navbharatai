@@ -511,6 +511,31 @@ export class ToolDispatcher {
         return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint;
       }
 
+      case 'write_files_batch': {
+        const rawFiles = (input as Record<string, unknown>)?.files;
+        if (!Array.isArray(rawFiles) || rawFiles.length === 0) {
+          return 'write_files_batch: files array is empty or missing.';
+        }
+        const batchFiles: { path: string; content: string }[] = rawFiles.map((f: unknown) => {
+          if (typeof f !== 'object' || f === null) throw new Error('Each file entry must be an object.');
+          const obj = f as Record<string, unknown>;
+          return { path: reqStr(obj, 'path'), content: reqStr(obj, 'content') };
+        });
+        // Sort by import dependencies: files that import others go after their deps.
+        const sorted = topoSortBatch(batchFiles);
+        const written: string[] = [];
+        for (const file of sorted) {
+          await this.actuator.writeFile(this.workspaceId, file.path, file.content);
+          this.state?.recordFileChange({ path: file.path, kind: 'create' }, agent);
+          const batchMem = getWorkspaceMemory(this.workspaceId);
+          batchMem.indexFile(file.path, file.content);
+          getEmbeddingStore(this.workspaceId).addFile(file.path, file.content).catch(() => {});
+          await this.maybeCheckpoint(`create ${file.path}`);
+          written.push(file.path);
+        }
+        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.`;
+      }
+
       case 'edit_file': {
         const path = reqStr(input, 'path');
         const oldStr = reqStr(input, 'old_string');
@@ -970,6 +995,57 @@ export class ToolDispatcher {
         throw new Error(`Unknown tool: ${call.name}`);
     }
   }
+}
+
+/**
+ * Topological sort for write_files_batch: ensures dependency files are written
+ * before files that import them. Handles cycles safely (cycle → original order for
+ * affected nodes). Pure, no I/O.
+ */
+function topoSortBatch(
+  files: { path: string; content: string }[],
+): { path: string; content: string }[] {
+  if (files.length <= 1) return files;
+  const pathSet = new Set(files.map(f => f.path));
+  const fileMap = new Map(files.map(f => [f.path, f]));
+
+  // For each file, find which other batch files it imports (relative imports only).
+  const getDeps = (file: { path: string; content: string }): string[] => {
+    const deps: string[] = [];
+    const importRe = /from\s+['"](\.[^'"]+)['"]/g;
+    let m: RegExpExecArray | null;
+    while ((m = importRe.exec(file.content)) !== null) {
+      const spec = m[1].replace(/^\.\.?\//, ''); // strip leading ./ or ../
+      for (const p of pathSet) {
+        if (p === file.path) continue;
+        const base = p.replace(/\.(ts|tsx|js|jsx)$/, '');
+        const tail = base.split('/').slice(-1)[0] ?? '';
+        if (tail === spec || base.endsWith('/' + spec) || base === spec) {
+          deps.push(p);
+        }
+      }
+    }
+    return deps;
+  };
+
+  const sorted: { path: string; content: string }[] = [];
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+
+  const visit = (path: string): void => {
+    if (visited.has(path)) return;
+    if (visiting.has(path)) return; // cycle — skip to avoid infinite loop
+    visiting.add(path);
+    for (const dep of getDeps(fileMap.get(path)!)) {
+      if (pathSet.has(dep)) visit(dep);
+    }
+    visiting.delete(path);
+    visited.add(path);
+    sorted.push(fileMap.get(path)!);
+  };
+
+  for (const file of files) visit(file.path);
+  return sorted;
 }
 
 /**

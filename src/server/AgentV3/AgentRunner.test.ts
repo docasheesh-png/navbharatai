@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { AgentRunner, type AgentRunnerOptions } from './AgentRunner';
+import { AgentRunner, isParallelSafeToolUse, type AgentRunnerOptions } from './AgentRunner';
 import { ClaudeClient, type MessagesCreateClient } from './ClaudeClient';
 import { ToolDispatcher, type ActuatorPort } from './ToolDispatcher';
 import { WorkspaceState } from './WorkspaceState';
@@ -232,5 +232,90 @@ describe('AgentRunner persistence (D7)', () => {
     const { runner } = buildRunner(twoTurn);
     const result = await runner.run('plain build');
     expect(result.ok).toBe(true);
+  });
+});
+
+describe('AgentRunner parallel tool execution (capped)', () => {
+  function trackingDispatcher() {
+    let inFlight = 0;
+    let serialInFlight = 0;
+    const max = { all: 0, serial: 0 };
+    const order: string[] = [];
+    const dispatcher = {
+      dispatch: async (tu: { id: string; name: string; input: Record<string, unknown> }) => {
+        const parallel = isParallelSafeToolUse(tu);
+        inFlight++; if (inFlight > max.all) max.all = inFlight;
+        if (!parallel) { serialInFlight++; if (serialInFlight > max.serial) max.serial = serialInFlight; }
+        await new Promise((r) => setTimeout(r, 15));
+        order.push(tu.id);
+        if (!parallel) serialInFlight--;
+        inFlight--;
+        return { tool_use_id: tu.id, content: 'ok', is_error: false };
+      },
+    };
+    return { dispatcher, max, order };
+  }
+
+  function runnerWith(dispatcher: unknown, script: unknown[], toolConcurrency = 3) {
+    const stream = new AgentEventStream();
+    const state = new WorkspaceState(stream);
+    const client = new ClaudeClient(scriptedClient(script));
+    return new AgentRunner({
+      client,
+      dispatcher: dispatcher as never,
+      state,
+      events: stream,
+      model: 'm',
+      system: 's',
+      tools: defaultToolCatalog(),
+      toolConcurrency,
+    });
+  }
+
+  const task = (id: string, role: string) => ({ type: 'tool_use', id, name: 'task', input: { role, instruction: 'check' } });
+  const end = { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } };
+
+  it('runs review sub-agents concurrently (capped) while the write stays serial', async () => {
+    const { dispatcher, max, order } = trackingDispatcher();
+    const turn1 = {
+      content: [
+        { type: 'tool_use', id: 'w', name: 'write_file', input: { path: 'a.ts', content: 'x' } },
+        task('qa', 'qa'), task('sec', 'security'), task('perf', 'performance'),
+        task('a11y', 'accessibility'), task('rev', 'reviewer'),
+      ],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 10, output_tokens: 5 },
+    };
+    const result = await runnerWith(dispatcher, [turn1, end], 3).run('build then review');
+    expect(result.ok).toBe(true);
+    expect(max.all).toBeGreaterThan(1);     // review agents really ran in parallel
+    expect(max.all).toBeLessThanOrEqual(3); // …but never above the cap
+    expect(max.serial).toBe(1);             // the write never overlapped anything
+    expect(order).toHaveLength(6);          // every tool was dispatched exactly once
+  });
+
+  it('keeps a pure-write turn fully serial regardless of the cap', async () => {
+    const { dispatcher, max } = trackingDispatcher();
+    const writes = {
+      content: [
+        { type: 'tool_use', id: 'w1', name: 'write_file', input: { path: 'a', content: '1' } },
+        { type: 'tool_use', id: 'w2', name: 'write_file', input: { path: 'b', content: '2' } },
+        { type: 'tool_use', id: 'w3', name: 'write_file', input: { path: 'c', content: '3' } },
+      ],
+      stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 },
+    };
+    await runnerWith(dispatcher, [writes, end], 4).run('write three');
+    expect(max.all).toBe(1); // never more than one mutating tool at a time
+  });
+
+  it('classifies builder sub-agents + writes as serial, read-only ones as parallel', () => {
+    expect(isParallelSafeToolUse({ id: '1', name: 'task', input: { role: 'qa' } })).toBe(true);
+    expect(isParallelSafeToolUse({ id: '2', name: 'task', input: { role: 'reviewer' } })).toBe(true);
+    expect(isParallelSafeToolUse({ id: '3', name: 'task', input: { role: 'frontend' } })).toBe(false);
+    expect(isParallelSafeToolUse({ id: '4', name: 'task', input: { role: 'tester' } })).toBe(false);
+    expect(isParallelSafeToolUse({ id: '5', name: 'read_file', input: {} })).toBe(true);
+    expect(isParallelSafeToolUse({ id: '6', name: 'grep', input: {} })).toBe(true);
+    expect(isParallelSafeToolUse({ id: '7', name: 'write_file', input: {} })).toBe(false);
+    expect(isParallelSafeToolUse({ id: '8', name: 'bash', input: {} })).toBe(false);
   });
 });

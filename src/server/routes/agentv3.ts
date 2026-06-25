@@ -706,6 +706,9 @@ export function registerAgentV3Routes(app: Express): void {
       const budget = maxBuildBudgetUsd();
       const maxSteps = envInt('AGENTV3_MAX_STEPS', 80);
       const subAgentMaxSteps = envInt('AGENTV3_SUBAGENT_MAX_STEPS', 40);
+      // How many parallel-safe tools / review sub-agents may run at once in a turn (rate-limit
+      // safe default; lower it if Anthropic concurrency limits are hit).
+      const toolConcurrency = envInt('AGENTV3_TOOL_CONCURRENCY', 4);
 
       // Sandbox + git setup is best-effort: a plain chat (e.g. "hello") must still
       // get a reply even when no sandbox is available (no E2B key, or a read-only
@@ -770,6 +773,7 @@ export function registerAgentV3Routes(app: Express): void {
         thinking,
         maxBudgetUsd: budget,
         maxSteps,
+        toolConcurrency,
         agentRole: 'architect',
         signal: abort.signal,
         // D7: persist the build transcript so it survives a reconnect/refresh. Best-effort —

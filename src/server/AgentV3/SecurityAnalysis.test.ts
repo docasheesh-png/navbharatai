@@ -196,6 +196,21 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'const agent = new https.Agent({ rejectUnauthorized: true });').some((f) => f.rule === 'disable-tls-verification')).toBe(false);
   });
 
+  it('flags Node vm.runIn*/compileFunction code execution but not unrelated calls', () => {
+    expect(scanSecurity('a.ts', 'const r = vm.runInNewContext(userCode, ctx);').some((f) => f.rule === 'vm-code-execution' && f.severity === 'high')).toBe(true);
+    expect(scanSecurity('a.ts', 'vm.runInThisContext(src);').some((f) => f.rule === 'vm-code-execution')).toBe(true);
+    expect(scanSecurity('a.ts', 'const fn = vm.compileFunction(body, args);').some((f) => f.rule === 'vm-code-execution')).toBe(true);
+    // a method named similarly on another object is not flagged.
+    expect(scanSecurity('a.ts', 'svm.runModel(data);').some((f) => f.rule === 'vm-code-execution')).toBe(false);
+  });
+
+  it('flags insecure Electron webPreferences but not the secure defaults', () => {
+    expect(scanSecurity('main.ts', 'webPreferences: { nodeIntegration: true }').some((f) => f.rule === 'electron-insecure-webprefs' && f.severity === 'high')).toBe(true);
+    expect(scanSecurity('main.ts', 'webPreferences: { contextIsolation: false }').some((f) => f.rule === 'electron-insecure-webprefs')).toBe(true);
+    // the hardened defaults are not flagged.
+    expect(scanSecurity('main.ts', 'webPreferences: { nodeIntegration: false, contextIsolation: true }').some((f) => f.rule === 'electron-insecure-webprefs')).toBe(false);
+  });
+
   it('flags Angular bypassSecurityTrust* (sanitisation disabled) but not normal sanitizer use', () => {
     expect(scanSecurity('app.ts', 'this.html = this.sanitizer.bypassSecurityTrustHtml(raw);').some((f) => f.rule === 'angular-bypass-security')).toBe(true);
     expect(scanSecurity('app.ts', 'const u = ds.bypassSecurityTrustResourceUrl(src);').some((f) => f.rule === 'angular-bypass-security')).toBe(true);

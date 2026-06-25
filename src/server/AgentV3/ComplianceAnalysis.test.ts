@@ -42,6 +42,14 @@ describe('scanCompliance — file-local rules', () => {
     expect(scanCompliance('a.ts', `fetch('http://localhost:3000/u')`).some((i) => i.kind === 'insecure-http-endpoint')).toBe(false);
   });
 
+  it('flags a secret/token carried in a URL query string but not a benign param', () => {
+    expect(scanCompliance('a.ts', 'fetch(`/api/login?password=${pw}`);').some((i) => i.kind === 'secret-in-url')).toBe(true);
+    expect(scanCompliance('a.ts', `const u = '/reset?token=' + t;`).some((i) => i.kind === 'secret-in-url')).toBe(true);
+    expect(scanCompliance('a.ts', `fetch('https://api.x.com/d?api_key=' + k);`).some((i) => i.kind === 'secret-in-url')).toBe(true);
+    // a benign, non-sensitive query param is fine.
+    expect(scanCompliance('a.ts', `fetch('/api/items?page=2&sort=name');`).some((i) => i.kind === 'secret-in-url')).toBe(false);
+  });
+
   it('does not flag a benign log line', () => {
     expect(scanCompliance('a.ts', `console.log('server started on port', port);`)).toHaveLength(0);
   });

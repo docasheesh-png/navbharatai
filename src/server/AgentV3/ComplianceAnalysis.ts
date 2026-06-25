@@ -121,6 +121,13 @@ export function scanCompliance(file: string, content: string): ComplianceIssue[]
       push('cookie-no-secure', 'medium');
     }
 
+    // ── medium: a secret/credential carried in a URL query string — it leaks into
+    // server access logs, browser history and the Referer header. Use the
+    // Authorization header or a POST body instead. ─────────────────────────────────
+    if (/[?&](?:password|passwd|token|secret|api[_-]?key|apikey|access[_-]?token|auth[_-]?token|otp|cvv)\s*=/i.test(line)) {
+      push('secret-in-url', 'medium');
+    }
+
     // ── high: personal data over plain http:// (in the clear on the network) ─────
     // Only flag a real network call to a non-local host.
     if (/(fetch|axios|\.(get|post|put|patch)|url\s*:)\s*\(?\s*['"`]http:\/\//i.test(line) &&

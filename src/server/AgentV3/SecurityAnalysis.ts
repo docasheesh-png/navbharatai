@@ -52,6 +52,27 @@ const RULES: Rule[] = [
     ignore: (_m, line) => PLACEHOLDER.test(line),
   },
   {
+    rule: 'client-exposed-secret',
+    severity: 'high',
+    // Env vars with a CLIENT build prefix (VITE_ / NEXT_PUBLIC_ / REACT_APP_) are inlined
+    // into the public browser bundle — visible to every visitor. A name that says SECRET/
+    // PASSWORD/PRIVATE under such a prefix means a real secret is shipped to the client.
+    // High-precision: the prefix guarantees exposure and the word indicates a true secret
+    // (bare *_KEY/_TOKEN is intentionally NOT matched — publishable keys are meant to be public).
+    re: /\b(?:VITE_|NEXT_PUBLIC_|REACT_APP_)[A-Z0-9_]*(?:SECRET|PASSWORD|PASSWD|PRIVATE)(?:_|\b)/,
+    message: 'A client-exposed env var (VITE_/NEXT_PUBLIC_/REACT_APP_) named like a secret is bundled into the public browser JS — visible to everyone. Keep secrets server-side (no client prefix); only publishable values belong under these prefixes.',
+  },
+  {
+    rule: 'url-embedded-credentials',
+    severity: 'high',
+    // user:password@ embedded in an http(s) URL leaks the credential and is deprecated in
+    // browsers. The connection-string-credentials rule only covers DB/queue schemes
+    // (mongodb/postgres/…); this covers plain http(s) API URLs it misses.
+    re: /\bhttps?:\/\/[^\s:'"`@/]+:([^\s:'"`@/]{3,})@/i,
+    message: 'Credentials embedded in an http(s) URL (https://user:pass@host) — this leaks the credential and is deprecated in browsers; send them in an Authorization header from an environment variable instead.',
+    ignore: (_m, line) => PLACEHOLDER.test(line),
+  },
+  {
     rule: 'hardcoded-jwt-secret',
     severity: 'high',
     // jwt.sign(payload, '<literal>'[, opts]) — a hardcoded signing secret lets anyone

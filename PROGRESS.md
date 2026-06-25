@@ -2979,3 +2979,19 @@ precedent — "aria-roles" / "no-redundant-roles"):
    implicit link role so role="link" there is not redundant.
 
 Gate: server tsc 0, frontend tsc 0, **2282 vitest** PASS (26 AccessibilityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 22): client-exposed secret + URL-embedded credentials
+
+Batch 21 merged to main 3d7a99f (PR #372). New `SecurityAnalysis` rules:
+
+1. **client-exposed-secret** (high) — an env var with a CLIENT build prefix (VITE_/
+   NEXT_PUBLIC_/REACT_APP_) named like a secret (…SECRET/PASSWORD/PRIVATE) is inlined into
+   the public browser bundle — visible to everyone. Bare *_KEY/_TOKEN (publishable values)
+   are intentionally NOT flagged.
+2. **url-embedded-credentials** (high) — `https://user:pass@host` leaks the credential and is
+   deprecated in browsers. Complements connection-string-credentials (which only covers DB/
+   queue schemes). Placeholder/env (${...}, example) forms ignored.
+
+Gate: server tsc 0, frontend tsc 0, **2284 vitest** PASS (47 SecurityAnalysis tests, +2 new).

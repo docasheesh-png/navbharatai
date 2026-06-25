@@ -136,6 +136,21 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('src/F.tsx', '<input type="text" id="name" />').some((x) => x.kind === 'autofocus')).toBe(false);
   });
 
+  it('flags an empty <th> header but not one with text or an aria-label', () => {
+    expect(scanAccessibility('src/T.tsx', '<th></th>').some((x) => x.kind === 'empty-table-header' && x.severity === 'medium')).toBe(true);
+    expect(scanAccessibility('src/T.tsx', '<th><svg /></th>').some((x) => x.kind === 'empty-table-header')).toBe(true);
+    expect(scanAccessibility('src/T.tsx', '<th>Name</th>').some((x) => x.kind === 'empty-table-header')).toBe(false);
+    expect(scanAccessibility('src/T.tsx', '<th aria-label="Name"><svg /></th>').some((x) => x.kind === 'empty-table-header')).toBe(false);
+  });
+
+  it('flags a truly-empty <label for> but not a wrapping or text label', () => {
+    expect(scanAccessibility('src/F.tsx', '<label for="email"></label>').some((x) => x.kind === 'empty-label' && x.severity === 'medium')).toBe(true);
+    // a label with text is fine.
+    expect(scanAccessibility('src/F.tsx', '<label for="email">Email</label>').some((x) => x.kind === 'empty-label')).toBe(false);
+    // a wrapping label (has child content) is not flagged.
+    expect(scanAccessibility('src/F.tsx', '<label for="email"><input id="email" /></label>').some((x) => x.kind === 'empty-label')).toBe(false);
+  });
+
   it('flags a scope attribute on a <td> but not on a <th>', () => {
     expect(scanAccessibility('src/T.tsx', '<td scope="col">Name</td>').some((x) => x.kind === 'scope-on-td' && x.severity === 'medium')).toBe(true);
     // scope IS valid on a th.

@@ -284,6 +284,33 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
     ) {
       issues.push({ file, line: i + 1, kind: 'empty-heading', severity: 'medium', snippet: trimSnippet(line) });
     }
+
+    // ── medium: an empty table header (<th> with no text) ──────────────────────
+    // A <th> names its row/column for screen-reader table navigation; an empty one
+    // leaves that row/column unlabeled (WCAG 1.3.1). Same-line; child tags stripped, so
+    // `<th><Icon/></th>` is flagged but `<th>Name</th>` is not. aria-label is accepted.
+    const th = /<\s*th\b([^>]*)>(.*?)<\/\s*th\s*>/i.exec(line);
+    if (
+      th &&
+      !/\b(aria-label|aria-labelledby|title)\s*=/i.test(th[1]) &&
+      th[2].replace(/<[^>]*>/g, '').trim() === ''
+    ) {
+      issues.push({ file, line: i + 1, kind: 'empty-table-header', severity: 'medium', snippet: trimSnippet(line) });
+    }
+
+    // ── medium: an explicit <label for="…"> with no content ────────────────────
+    // A for-label MUST carry the control's visible name; when truly empty it gives the
+    // associated control no accessible name. Only the truly-empty form is flagged (no
+    // children at all), so a wrapping `<label><input/>…</label>` is never a false positive.
+    const lbl = /<\s*label\b([^>]*)>(.*?)<\/\s*label\s*>/i.exec(line);
+    if (
+      lbl &&
+      /\bfor\s*=/i.test(lbl[1]) &&
+      !/\b(aria-label|aria-labelledby|title)\s*=/i.test(lbl[1]) &&
+      lbl[2].trim() === ''
+    ) {
+      issues.push({ file, line: i + 1, kind: 'empty-label', severity: 'medium', snippet: trimSnippet(line) });
+    }
   }
 
   // ── medium: duplicate static id within the same file ─────────────────────────

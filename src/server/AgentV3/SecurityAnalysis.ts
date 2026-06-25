@@ -161,6 +161,25 @@ const RULES: Rule[] = [
     message: 'Shell command built from dynamic input — this enables command injection; validate/escape the input or use execFile with an args array (no shell).',
   },
   {
+    rule: 'weak-bcrypt-rounds',
+    severity: 'medium',
+    // A bcrypt cost factor below 10 (a single-digit rounds value) hashes too fast, so an
+    // attacker can brute-force stolen password hashes cheaply. Modern guidance is ≥10–12.
+    // Matches a literal single-digit rounds in bcrypt.hash(data, N) or genSalt(N); a
+    // two-digit value (10+) or a variable is not flagged.
+    re: /\bbcrypt(?:js)?\.(?:hash|hashSync)\s*\([^,)]+,\s*([0-9])\s*[,)]|\b(?:bcrypt(?:js)?\.)?genSalt(?:Sync)?\s*\(\s*([0-9])\s*[,)]/,
+    message: 'bcrypt cost factor below 10 — the hash is too fast and cheap to brute-force; use at least 10 (12+ is common for new apps).',
+  },
+  {
+    rule: 'express-trust-proxy-true',
+    severity: 'medium',
+    // `app.set('trust proxy', true)` trusts the X-Forwarded-For header from ANY client, so a
+    // user can spoof their IP — defeating IP-based rate limiting, geo rules and audit logs.
+    // Trust a specific hop count or the known proxy IPs instead of a blanket `true`.
+    re: /\.set\s*\(\s*['"`]trust proxy['"`]\s*,\s*true\b/i,
+    message: "trust proxy: true trusts X-Forwarded-For from any client (IP spoofing — defeats rate limiting and audit logs). Set it to the number of proxy hops or the specific proxy IP(s), not a blanket true.",
+  },
+  {
     rule: 'pseudo-random-bytes',
     severity: 'high',
     // crypto.pseudoRandomBytes() is explicitly NOT cryptographically secure (deprecated) —

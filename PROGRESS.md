@@ -2793,3 +2793,20 @@ Real, deterministic backstop (not just a prompt tweak):
 
 Gate: server tsc 0, frontend tsc 0, **2258 vitest** PASS (5 new ScaffoldGuard tests; 63
 existing ToolDispatcher tests still green — no regression).
+
+---
+
+### 2026-06-25 — Section I march (batch 10): SSRF + disabled-TLS-verification (server security)
+
+Resumed the autonomous Section I march after the scaffold-guard fix (PR #360) merged to main
+df50067. New `SecurityAnalysis` rules:
+
+1. **ssrf** (high) — a server-side HTTP request (`fetch`/`axios`/`axios.get|post|…`/`got`/
+   `http(s).get|request`) whose first arg IS request input (`req.query|params|body|headers`)
+   lets an attacker reach internal services / cloud metadata (169.254.169.254). High-precision:
+   a fixed base with `${req...}` appended doesn't start with `req.`, so it is not flagged.
+2. **disable-tls-verification** (high) — `rejectUnauthorized: false` or
+   `NODE_TLS_REJECT_UNAUTHORIZED=0` turns off TLS cert validation (trivial MITM). Both forms
+   unambiguous → high precision; the secure `rejectUnauthorized: true` is not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2260 vitest** PASS (33 SecurityAnalysis tests, +2 new).

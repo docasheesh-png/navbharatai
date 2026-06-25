@@ -178,6 +178,24 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', "res.sendFile(path.join(__dirname, 'index.html'));").some((f) => f.rule === 'path-traversal')).toBe(false);
   });
 
+  it('flags a server-side request to a request-controlled URL (SSRF) but not a fixed base', () => {
+    expect(scanSecurity('a.ts', 'const r = await fetch(req.query.url);').some((f) => f.rule === 'ssrf' && f.severity === 'high')).toBe(true);
+    expect(scanSecurity('a.ts', 'const r = await axios.get(req.body.target);').some((f) => f.rule === 'ssrf')).toBe(true);
+    expect(scanSecurity('a.ts', 'const r = await axios(req.body);').some((f) => f.rule === 'ssrf')).toBe(true);
+    expect(scanSecurity('a.ts', 'http.get(req.params.host, cb);').some((f) => f.rule === 'ssrf')).toBe(true);
+    expect(scanSecurity('a.ts', 'const r = await got(req.query.u);').some((f) => f.rule === 'ssrf')).toBe(true);
+    // a fixed base with the input appended (not the whole URL) is not flagged here.
+    expect(scanSecurity('a.ts', 'const r = await fetch(`/api/items/${req.query.id}`);').some((f) => f.rule === 'ssrf')).toBe(false);
+    expect(scanSecurity('a.ts', 'const r = await fetch("https://api.example.com/v1");').some((f) => f.rule === 'ssrf')).toBe(false);
+  });
+
+  it('flags disabled TLS certificate verification (MITM) in both forms', () => {
+    expect(scanSecurity('a.ts', 'const agent = new https.Agent({ rejectUnauthorized: false });').some((f) => f.rule === 'disable-tls-verification' && f.severity === 'high')).toBe(true);
+    expect(scanSecurity('a.ts', "process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';").some((f) => f.rule === 'disable-tls-verification')).toBe(true);
+    // the secure default (verification ON) is not flagged.
+    expect(scanSecurity('a.ts', 'const agent = new https.Agent({ rejectUnauthorized: true });').some((f) => f.rule === 'disable-tls-verification')).toBe(false);
+  });
+
   it('flags Angular bypassSecurityTrust* (sanitisation disabled) but not normal sanitizer use', () => {
     expect(scanSecurity('app.ts', 'this.html = this.sanitizer.bypassSecurityTrustHtml(raw);').some((f) => f.rule === 'angular-bypass-security')).toBe(true);
     expect(scanSecurity('app.ts', 'const u = ds.bypassSecurityTrustResourceUrl(src);').some((f) => f.rule === 'angular-bypass-security')).toBe(true);

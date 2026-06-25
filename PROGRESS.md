@@ -3153,3 +3153,18 @@ empty-heading pattern; verified uncovered):
    wrapping `<label><input/>…</label>` is never a false positive.
 
 Gate: server tsc 0, frontend tsc 0, **2302 vitest** PASS (32 AccessibilityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 33): dynamic iframe srcdoc + data:text/html URI (XSS sinks)
+
+Batch 32 merged to main 84dab44 (PR #383). New `SecurityAnalysis` rules (verified uncovered):
+
+1. **iframe-srcdoc-dynamic** (medium) — `<iframe srcdoc={…}>` (JSX expression or template-literal
+   interpolation) renders the value as a full HTML document in the frame — an XSS sink like
+   innerHTML. A static quoted srcdoc is not flagged.
+2. **data-html-uri** (medium) — a `data:text/html` URI in href/src is parsed as an HTML document
+   and runs inline script when opened (XSS/phishing, CSP bypass). A normal URL or data:image is
+   not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2304 vitest** PASS (57 SecurityAnalysis tests, +2 new).

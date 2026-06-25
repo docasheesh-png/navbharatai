@@ -512,6 +512,23 @@ const RULES: Rule[] = [
     ignore: (_m, line) => /javascript:\s*(?:void\s*\(\s*0\s*\)|;)/i.test(line),
   },
   {
+    rule: 'iframe-srcdoc-dynamic',
+    severity: 'medium',
+    // <iframe srcdoc={…}> renders the string as a FULL HTML document inside the frame — a
+    // dynamic value is an XSS sink exactly like innerHTML. Matches a JSX expression or a
+    // template literal with interpolation; a static double/single-quoted srcdoc is not flagged.
+    re: /\bsrcdoc\s*=\s*(?:\{|`[^`]*\$\{)/,
+    message: 'iframe srcdoc set from a dynamic value renders it as raw HTML in the frame (XSS sink) — sanitise the HTML, or build the frame content from trusted data only.',
+  },
+  {
+    rule: 'data-html-uri',
+    severity: 'medium',
+    // A data:text/html URI in href/src is parsed as a full HTML document — following it runs
+    // any inline script it contains (XSS / phishing) and bypasses many CSP setups.
+    re: /(?:href|src|action|formaction|xlink:href)\s*=\s*['"{`]?\s*data:text\/html/i,
+    message: 'data:text/html URI in href/src — it is parsed as an HTML document and runs inline script when opened (XSS/phishing); use a real URL or a sandboxed renderer.',
+  },
+  {
     rule: 'insecure-http',
     severity: 'low',
     re: /['"`]http:\/\/(?!localhost|127\.0\.0\.1)[^'"`]+['"`]/,

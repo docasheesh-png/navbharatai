@@ -102,6 +102,26 @@ const RULES: Rule[] = [
     message: 'setTimeout/setInterval with a string argument runs it as code (an eval — code injection, breaks CSP); pass a function instead.',
   },
   {
+    rule: 'vm-code-execution',
+    severity: 'high',
+    // Node's vm module runs a STRING as code (runInNewContext/runInThisContext/
+    // runInContext/compileFunction) — like eval(), it executes whatever it is given,
+    // and it is NOT a security sandbox (the docs say so). Feeding it dynamic input is
+    // remote code execution. The `vm.` prefix keeps this high-precision.
+    re: /\bvm\.(?:runInNewContext|runInThisContext|runInContext|compileFunction)\s*\(/,
+    message: "Node vm.runIn*/compileFunction runs a string as code (like eval) and is NOT a security sandbox — this enables code execution; never pass user input to it.",
+  },
+  {
+    rule: 'electron-insecure-webprefs',
+    severity: 'high',
+    // Electron renderers are hardened by default. `nodeIntegration: true` gives the
+    // page full Node.js access and `contextIsolation: false` removes the bridge
+    // boundary — either one turns a single XSS in the renderer into full remote code
+    // execution on the user's machine. Both forms are explicit and unambiguous.
+    re: /\bnodeIntegration\s*:\s*true\b|\bcontextIsolation\s*:\s*false\b/,
+    message: 'Insecure Electron webPreferences (nodeIntegration:true / contextIsolation:false) — this turns any renderer XSS into full code execution on the user machine; keep nodeIntegration off and contextIsolation on, and use a preload bridge.',
+  },
+  {
     rule: 'command-injection',
     severity: 'high',
     // A child_process shell sink (exec/execFile/spawn, sync or async) whose command is

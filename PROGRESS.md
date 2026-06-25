@@ -2810,3 +2810,18 @@ df50067. New `SecurityAnalysis` rules:
    unambiguous → high precision; the secure `rejectUnauthorized: true` is not flagged.
 
 Gate: server tsc 0, frontend tsc 0, **2260 vitest** PASS (33 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 11): vm code-execution + insecure Electron webPreferences
+
+Batch 10 merged to main c11bd89 (PR #361). New `SecurityAnalysis` rules:
+
+1. **vm-code-execution** (high) — Node `vm.runInNewContext/runInThisContext/runInContext/
+   compileFunction` runs a STRING as code (like eval) and is explicitly NOT a security
+   sandbox; user input → RCE. The `vm.` prefix keeps it high-precision.
+2. **electron-insecure-webprefs** (high) — `nodeIntegration: true` or `contextIsolation: false`
+   in Electron webPreferences turns any renderer XSS into full code execution on the user's
+   machine. Both forms explicit; the hardened defaults are not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2262 vitest** PASS (35 SecurityAnalysis tests, +2 new).

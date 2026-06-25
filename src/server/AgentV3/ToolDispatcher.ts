@@ -58,6 +58,10 @@ import { getEmbeddingStore } from './EmbeddingSearch';
  */
 export type SubAgentSpawn = (role: AgentRole, instruction: string) => Promise<{ ok: boolean; summary: string }>;
 
+/** The browser interactions browser_action supports (mirrors the actuator's union). */
+export const BROWSER_ACTIONS = ['click', 'type', 'navigate', 'scroll', 'press', 'wait', 'hover', 'double_click', 'select_option'] as const;
+export type BrowserActionName = (typeof BROWSER_ACTIONS)[number];
+
 /**
  * ActuatorPort — the narrow slice of the sandbox actuator the dispatcher needs.
  * The real `IEngineerActuator` (E2B/Docker/Local) structurally satisfies this,
@@ -74,6 +78,23 @@ export interface ActuatorPort {
   ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** Public HTTPS URL for a port in the sandbox (real sandboxes only). Optional. */
   getPortUrl?(workspaceId: string, port: number): Promise<string>;
+  /** Capture a PNG screenshot of a URL from inside the sandbox (real sandboxes only). */
+  screenshot?(
+    workspaceId: string,
+    url: string,
+    viewport?: { width: number; height: number },
+  ): Promise<{ base64: string; mimeType: 'image/png' }>;
+  /** Drive a real headless browser (click/type/navigate/…) and return a screenshot + result. */
+  browserAction?(
+    workspaceId: string,
+    action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option',
+    args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
+  ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }>;
+  /** Runtime browser errors (console.error / uncaught / failed requests) since `sinceMs`. */
+  getConsoleErrors?(
+    workspaceId: string,
+    sinceMs: number,
+  ): Promise<{ errors: { t: number; kind: string; text: string }[] }>;
 }
 
 /** One source file read into the shared evaluate snapshot (path + content). */
@@ -87,6 +108,8 @@ export interface ToolResult {
   tool_use_id: string;
   content: string;
   is_error: boolean;
+  /** Optional screenshot to feed back to the model as a vision block (browser tools). */
+  image?: { base64: string; mimeType: string };
 }
 
 const MAX_SUMMARY = 200;
@@ -440,7 +463,11 @@ export class ToolDispatcher {
       ts: Date.now(),
     });
     try {
-      const content = await this.run(call, agent);
+      // Browser tools return a screenshot image alongside their text; everything else is text.
+      const visual = call.name === 'screenshot' || call.name === 'browser_action'
+        ? await this.runVisual(call)
+        : null;
+      const content = visual ? visual.content : await this.run(call, agent);
       this.events?.emit({
         type: 'tool_result',
         agent,
@@ -449,7 +476,7 @@ export class ToolDispatcher {
         summary: summarize(content),
         ts: Date.now(),
       });
-      return { tool_use_id: call.id, content, is_error: false };
+      return { tool_use_id: call.id, content, is_error: false, image: visual?.image };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.events?.emit({
@@ -462,6 +489,50 @@ export class ToolDispatcher {
       });
       return { tool_use_id: call.id, content: `Error: ${message}`, is_error: true };
     }
+  }
+
+  /**
+   * Browser tools (screenshot / browser_action) — return a text summary PLUS the screenshot so
+   * the model can SEE the page. Requires a real sandbox with a browser; degrades to an honest
+   * "not available" message on Local/Docker actuators (or any actuator that lacks the method).
+   */
+  private async runVisual(call: ToolUse): Promise<{ content: string; image?: { base64: string; mimeType: string } }> {
+    const input = call.input;
+    if (call.name === 'screenshot') {
+      if (!this.actuator.screenshot) {
+        return { content: 'Screenshots require a real cloud sandbox (set E2B_API_KEY) — not available here.' };
+      }
+      const url = reqStr(input, 'url');
+      const width = typeof input.width === 'number' ? input.width : undefined;
+      const height = typeof input.height === 'number' ? input.height : undefined;
+      const viewport = width && height ? { width, height } : undefined;
+      const shot = await this.actuator.screenshot(this.workspaceId, url, viewport);
+      return {
+        content: `Screenshot of ${url} captured (${viewport ? `${viewport.width}×${viewport.height}` : '1280×720'}). The image is attached — inspect it for layout/visual issues.`,
+        image: { base64: shot.base64, mimeType: shot.mimeType },
+      };
+    }
+    // browser_action
+    if (!this.actuator.browserAction) {
+      return { content: 'Browser interaction requires a real cloud sandbox (set E2B_API_KEY) — not available here.' };
+    }
+    const action = reqStr(input, 'action');
+    if (!BROWSER_ACTIONS.includes(action as BrowserActionName)) {
+      return { content: `browser_action: unknown action "${action}". Valid: ${BROWSER_ACTIONS.join(', ')}.` };
+    }
+    const dir = input.direction;
+    const direction: 'up' | 'down' | undefined = dir === 'up' ? 'up' : dir === 'down' ? 'down' : undefined;
+    const args = {
+      selector: optStr(input, 'selector'),
+      text: optStr(input, 'text'),
+      url: optStr(input, 'url'),
+      direction,
+    };
+    const res = await this.actuator.browserAction(this.workspaceId, action as BrowserActionName, args);
+    return {
+      content: `Browser ${action}${args.selector ? ` on "${args.selector}"` : ''}${args.url ? ` → ${args.url}` : ''}: ${res.result}. Screenshot attached.`,
+      image: res.screenshot ? { base64: res.screenshot, mimeType: 'image/png' } : undefined,
+    };
   }
 
   private async run(call: ToolUse, agent: AgentRole): Promise<string> {
@@ -910,6 +981,17 @@ export class ToolDispatcher {
         }
         const limit = typeof input.limit === 'number' ? input.limit : 5;
         return await this.webSearch(query, limit);
+      }
+
+      case 'console_errors': {
+        if (!this.actuator.getConsoleErrors) {
+          return 'Runtime console errors require a real cloud sandbox — not available here.';
+        }
+        const sinceSec = typeof input.since_seconds === 'number' ? input.since_seconds : 120;
+        const since = Date.now() - Math.max(1, sinceSec) * 1000;
+        const { errors } = await this.actuator.getConsoleErrors(this.workspaceId, since);
+        if (errors.length === 0) return 'No runtime browser errors captured in the window — the page ran clean.';
+        return `Runtime browser errors (${errors.length}):\n` + errors.slice(0, 30).map((e) => `- [${e.kind}] ${e.text}`).join('\n');
       }
 
       // Level 7: structural codemods (AST-safe cross-file refactoring via ts-morph).

@@ -117,7 +117,9 @@ export interface AgentRunResult {
 interface ToolResultBlock {
   type: 'tool_result';
   tool_use_id: string;
-  content: string;
+  // A string, OR an Anthropic content-block array (used to attach a screenshot image so the
+  // model can actually SEE the page it captured/drove — vision feedback for browser tools).
+  content: string | Array<Record<string, unknown>>;
   is_error: boolean;
 }
 
@@ -244,10 +246,17 @@ export class AgentRunner {
         // concurrency-capped PARALLEL group — so the review/test phase finishes far faster
         // ("find in parallel, fix serially"). Each is dispatched once; order is preserved.
         const resultBlocks: ToolResultBlock[] = new Array(turn.toolUses.length);
-        const toBlock = (r: { tool_use_id: string; content: string; is_error: boolean }): ToolResultBlock => ({
+        const toBlock = (r: { tool_use_id: string; content: string; is_error: boolean; image?: { base64: string; mimeType: string } }): ToolResultBlock => ({
           type: 'tool_result',
           tool_use_id: r.tool_use_id,
-          content: r.content,
+          // When a browser tool returns a screenshot, feed it back as an image block so the
+          // model can SEE the result (vision), alongside the text summary.
+          content: r.image
+            ? [
+                { type: 'text', text: r.content },
+                { type: 'image', source: { type: 'base64', media_type: r.image.mimeType, data: r.image.base64 } },
+              ]
+            : r.content,
           is_error: r.is_error,
         });
         const serialIdx: number[] = [];

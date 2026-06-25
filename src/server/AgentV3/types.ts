@@ -26,7 +26,10 @@ export type ToolName =
   | 'task'
   | 'second_opinion'
   | 'consensus'
-  | 'web_search';
+  | 'web_search'
+  | 'screenshot'
+  | 'browser_action'
+  | 'console_errors';
 
 /**
  * The multi-agent team roles (§3.3). 'architect' is the lead/orchestrator; every

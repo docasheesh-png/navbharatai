@@ -188,6 +188,33 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'write_files_batch',
+      description:
+        'Write multiple NEW files to the workspace in one operation — faster than ' +
+        'calling write_file one-by-one when creating several independent files. ' +
+        'Files are automatically ordered by import dependencies (dependencies written ' +
+        'first), so this is safe when files import each other in one direction. ' +
+        'Use this ONLY for creating new files. For editing existing files use edit_file.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          files: {
+            type: 'array',
+            description: 'List of files to create.',
+            items: {
+              type: 'object',
+              properties: {
+                path: { type: 'string', description: 'Workspace-relative file path.' },
+                content: { type: 'string', description: 'The complete file contents.' },
+              },
+              required: ['path', 'content'],
+            },
+          },
+        },
+        required: ['files'],
+      },
+    },
+    {
       name: 'codemod_rename',
       description:
         'AST-safe cross-file symbol rename. Renames every usage of an exported ' +
@@ -316,6 +343,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
 export const CATALOG_TOOL_NAMES = [
   'read_file',
   'write_file',
+  'write_files_batch',
   'edit_file',
   'bash',
   'grep',

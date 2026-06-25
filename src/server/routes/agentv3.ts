@@ -61,6 +61,7 @@ import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { CREATOR_IDENTITY } from '../lib/prompts';
 import { classifyIntentSmart } from '../AgentV3/IntentClassifier';
+import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { reviewBuild, formatReview } from '../AgentV3/ReviewerAgent';
 import {
   saveWorkspaceMemory,
@@ -596,7 +597,12 @@ export function registerAgentV3Routes(app: Express): void {
     }
     activeBuilds.add(buildKey);
     const onlyOpus = req.body?.onlyOpus === true;
-    const planFirst = req.body?.planFirst !== false; // plan-mode ON by default (P4)
+    // Smart planning gate: skip for simple apps (todo, calculator, etc.) to save
+    // 2-3 min. planFirst=false from the client always wins (explicit user skip).
+    // planFirst=true (or absent) defers to the complexity classifier — a simple
+    // prompt skips planning even when the client hasn't explicitly disabled it.
+    const planFirstRequested = req.body?.planFirst !== false;
+    const planFirst = planFirstRequested && decidePlanning(prompt) !== 'skip';
     const thinking = req.body?.thinking === true; // adaptive thinking, off by default
 
     // NDJSON stream (mirrors the Engineer route's streaming contract).

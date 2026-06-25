@@ -86,6 +86,8 @@ export { registerSession, getSession, restoreSession, sessionCount } from './Wor
 export type { WorkspaceSession } from './WorkspaceRegistry';
 export { classifyIntent, classifyIntentWithConfidence, classifyIntentSmart } from './IntentClassifier';
 export type { BuildIntent, IntentWithConfidence } from './IntentClassifier';
+export { decidePlanning } from './ComplexityClassifier';
+export type { PlanningDecision } from './ComplexityClassifier';
 export { reviewEdit, formatReviewResult } from './PostEditReviewer';
 export type { PostEditReview } from './PostEditReviewer';
 export { reviewBuild, formatReview } from './ReviewerAgent';

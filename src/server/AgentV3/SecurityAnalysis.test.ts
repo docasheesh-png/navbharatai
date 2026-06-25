@@ -8,6 +8,18 @@ describe('scanSecurity', () => {
 
     expect(scanSecurity('a.ts', 'const apiKey = process.env.API_KEY;')).toEqual([]);
     expect(scanSecurity('b.ts', 'const password = "your-password-here";')).toEqual([]);
+    // FP fix: a validation/UI message (has spaces) is not a hardcoded credential.
+    expect(scanSecurity('v.ts', 'const password = "Password must be 8 characters";').some((f) => f.rule === 'hardcoded-secret')).toBe(false);
+    expect(scanSecurity('v.ts', 'const secret = "the secret to success";').some((f) => f.rule === 'hardcoded-secret')).toBe(false);
+    // a real space-free credential is still flagged.
+    expect(scanSecurity('c.ts', 'const password = "Hunter2Pass99";').some((f) => f.rule === 'hardcoded-secret')).toBe(true);
+  });
+
+  it('flags the global eval() but not member methods named eval (FP fix)', () => {
+    expect(scanSecurity('a.ts', 'const r = eval(userCode);').some((f) => f.rule === 'eval-usage')).toBe(true);
+    // mathjs / mongo / other library .eval() methods are not the dangerous global eval.
+    expect(scanSecurity('a.ts', "const r = math.eval('2 + 2');").some((f) => f.rule === 'eval-usage')).toBe(false);
+    expect(scanSecurity('a.ts', 'db.eval(jsFn);').some((f) => f.rule === 'eval-usage')).toBe(false);
   });
 
   it('flags credentials embedded in a DB/queue connection string', () => {

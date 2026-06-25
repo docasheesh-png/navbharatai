@@ -3185,3 +3185,18 @@ overlaps)". First polish:
   ns.adobe.com, inkscape.org, sodipodi). A real http endpoint on a similar line is still flagged.
 
 Gate: server tsc 0, frontend tsc 0, **2305 vitest** PASS (58 SecurityAnalysis tests, +1 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 35, POLISH): hardcoded-secret + eval-usage false-positive fixes
+
+Batch 34 polish merged to main 588133b (PR #385). Two more FP reductions in SecurityAnalysis:
+
+1. **hardcoded-secret** — the value is now 8+ NON-whitespace chars (`[^'"`\s]{8,}`). A real
+   credential has no spaces, so this drops the common FP of a validation/UI message
+   (`password = "Password must be 8 characters"`). A space-free credential is still flagged.
+2. **eval-usage** — added the `(?<![.\w])` lookbehind so member methods named eval
+   (mathjs `math.eval(...)`, MongoDB `db.eval(...)`) are NOT flagged; only the dangerous global
+   `eval(...)` is.
+
+Gate: server tsc 0, frontend tsc 0, **2306 vitest** PASS (59 SecurityAnalysis tests, +2 new).

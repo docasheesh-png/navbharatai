@@ -143,6 +143,17 @@ html, body {
   50% { opacity: 0; }
 }
 
+/* Dedicated, unbreakable status spinner. A live "working…" ring conveys that the build is
+   alive; if it freezes it reads as a hung app. `!important` + class specificity make it win
+   over the global reduced-motion reset below (which !important-zeroes every animation), and it
+   restates the FULL shorthand (name + duration + timing + iteration) so nothing is left for an
+   earlier rule to drop. Use this for functional loading spinners instead of relying on the
+   utility class alone. */
+.nb-spin {
+  animation: spin 1s linear infinite !important;
+  transform-origin: center !important;
+}
+
 /* L9: Respect user prefers-reduced-motion preference */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

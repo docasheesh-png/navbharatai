@@ -209,8 +209,11 @@ explicitly authorized a different model on 2026-06-22 (see
   "Only Opus" super toggle — regardless of which model actually runs. Billed via
   the platform's usage cost record (`UserCostStore`), the same place every other
   build records cost. Margin is structurally positive (billed ≥ real cost).
-- A future BYOK option (user's own Anthropic key) stays open and is preferred
-  where available; it would restore the original "users' own accounts" model.
+- **BYOK (user's own Anthropic key) is NOT a NavBharatAI feature and must not be
+  built or re-proposed.** The admin (aashishcpmt09) removed it deliberately
+  (2026-06-25); v3.0 always runs on NavBharatAI's own Anthropic account billed via
+  the markup above. Do not re-introduce a "bring your own Claude key" option in any
+  form. (This does NOT affect Bring-Your-Own-*Database* — a separate, kept feature.)
 
 This override is **scoped to AgentV3** and was added in the same change that
 wired v3.0 billing. Do not extend it to Engineer AI or remove the constraints

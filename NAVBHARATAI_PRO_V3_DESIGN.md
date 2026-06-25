@@ -11,12 +11,12 @@
 | # | Decision | Choice | Notes |
 |---|---|---|---|
 | D1 | **Build approach** | **Strangler-fig** — build v3.0 alongside the live app, behind a feature flag, prove, then cut over. | The live app + payments must NEVER break (CLAUDE.md absolute rule #1). No "delete & rewrite". |
-| D2 | **Who pays for Claude** | **NavBharatAI pays** (admin override). | This **overrides** the CLAUDE.md constraint *"AiCreditsProvider is NEVER registered / user apps run on the user's own accounts"* — authorized by admin (aashishcpmt09) on 2026-06-22. **Mandatory cost-control guardrails** apply (§7). A future BYOK option stays open. |
+| D2 | **Who pays for Claude** | **NavBharatAI pays** (admin override). | This **overrides** the CLAUDE.md constraint *"AiCreditsProvider is NEVER registered / user apps run on the user's own accounts"* — authorized by admin (aashishcpmt09) on 2026-06-22. **Mandatory cost-control guardrails** apply (§7). **BYOK (user's own Anthropic key) was removed by admin 2026-06-25 and is not a feature — v3.0 always runs on NavBharatAI's own account.** |
 | D3 | **Sequencing** | **Design-doc first** (this doc) → admin review → then code, phase by phase. | |
 | D4 | **Sandbox** | **Hybrid: E2B sandbox (engine execution) + real Git repo (user ownership).** | Both E2B keys and real-repo are available. "Give the engine what the engine needs (a fast cloud sandbox), give the user what the user needs (a real, ownable git repo)." World's-best app maker (§7.1). |
 | D5 | **Pricing / CostGuard** | **User is billed `user_tokens × Opus_price × 2.5`** — regardless of which model actually runs (Sonnet, Opus, or Vertex under the hood). | NavBharatAI pays the real provider cost (D2) and bills the user a **2.5× markup over the Opus-equivalent rate** → revenue-positive; D2 exposure is covered. The user always pays the Opus-equivalent ×2.5; the engine is free to route to a cheaper model and keep the margin (§7.2). |
 | D6 | **Super (only-Opus) toggle** | A premium **"Only Opus" super toggle** bills at **×5** (Opus-equivalent ×5). | Forces every step onto Opus; charged at 5× (§7.2). |
-| D7 | **Transcript / DB persistence** | **User's choice** — the user is asked where their data/DB lives. With BYOK, the transcript + app DB live on the **user's own account** (their Claude/their DB). | Honors CLAUDE.md "users' own accounts" for user *data* even though compute billing is D2/D5 (§5.1). |
+| D7 | **Transcript / DB persistence** | **Transcript/build state is NavBharatAI-hosted** (platform `ConversationStore`, durable across reconnect). The generated app's **own** database still uses Bring-Your-Own-Database (a separate, kept feature — user's Supabase/Firebase). | BYOK was removed (D2); there is no "transcript on the user's Claude account" option. The app's data still lives on the user's own DB via BYO-Database (§5.1). |
 | D8 | **Beta allowlist** | **Admin-only now**; once v3.0 is complete → **all logged-in users**. | Matches the strangler-fig rollout (§6). P0 default is admin-only via `AGENTV3_ALLOWLIST`. |
 | D9 | **Engagement is REAL** | The "AI Team" live tracker + live preview must reflect **real running state** — never a fake/scripted animation. | Each agent card = a real running sub-agent + real tool calls; preview updates from real sandbox files as they're written (§3.4, §7.1). CLAUDE.md real-features rule. |
 
@@ -223,14 +223,14 @@ engagement goal.
 - Compaction only when nearing the context window: summarize oldest turns, keep recent verbatim (Claude-Code-style), never silently drop tool_results mid-task.
 
 ### 5.1 Persistence is the user's choice (D7)
-- The user is **asked where their data lives**. Default: NavBharatAI-managed
-  storage (existing DB/Firestore) for the transcript so a build survives a
-  reconnect.
-- With **BYOK** (user brings their own Claude key / their own DB), the transcript
-  + the app's data live on the **user's own account** — honoring the CLAUDE.md
-  "users' own accounts" principle for user *data*, even though build *compute* is
-  billed via D5. `ConversationStore` is an interface with pluggable backends
-  (managed vs user-owned) selected per the user's setting.
+- The transcript / build state is stored in **NavBharatAI-managed storage**
+  (existing DB/Firestore) via `ConversationStore`, so a build survives a reconnect
+  or refresh.
+- BYOK (user's own Claude key) was removed by admin (2026-06-25), so there is no
+  "transcript on the user's own Claude account" option. The generated app's **own**
+  data still lives on the user's own database via **Bring-Your-Own-Database** (a
+  separate, kept feature) — honoring the CLAUDE.md "users' own accounts" principle
+  for the app's *data*, even though build *compute* is billed via D5.
 
 ---
 
@@ -344,7 +344,7 @@ New/updated entries required (added in the PR that ships each surface):
 1. **Sandbox** → ✅ **Hybrid E2B + real Git repo** (D4, §7.1). Both available; engine gets the sandbox, user gets an ownable repo.
 2. **Budget / pricing** → ✅ **`user_tokens × Opus_rate × 2.5`** standard (D5, §7.2). NavBharatAI pays real cost, bills the markup.
 3. **Opus access** → ✅ **"Only Opus" super toggle billed ×5** (D6). Standard mode routes to Sonnet under the hood, still billed at Opus-equivalent ×2.5.
-4. **Persistence** → ✅ **User's choice** (D7, §5.1). User is asked where their data/DB lives; with BYOK it lives on the user's own account.
+4. **Persistence** → ✅ **NavBharatAI-hosted transcript/build state** via `ConversationStore` (D7, §5.1), durable across reconnect. The app's own data uses Bring-Your-Own-Database (separate feature). BYOK was removed by admin (2026-06-25).
 5. **Beta allowlist** → ✅ **Admin-only now → all logged-in users at GA** (D8). Enforced via `AGENTV3_ALLOWLIST`.
 
 All five are now locked as decisions D4–D9 in §0. P1 is unblocked.

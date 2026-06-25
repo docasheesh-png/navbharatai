@@ -3287,3 +3287,25 @@ features and were not touched. Historical PROGRESS entries (D7 decision, BYOK qu
 left intact per the append-only rule; this note supersedes them.
 
 NEXT: build conversation persistence (ConversationStore, D7) — the admin's chosen target.
+
+---
+
+### 2026-06-25 — v3.0 conversation persistence P-A: ConversationStore foundation (D7)
+
+Admin chose "conversation persistence" as the next v3.0 target (and BYOK removed, prior note).
+First increment — the storage CONTRACT + reference implementation (not yet wired into AgentRunner;
+no behaviour change to the flag-gated v3.0 path):
+
+- NEW `src/server/AgentV3/ConversationStore.ts`:
+  - `ConversationRecord` (id, userId, workspaceId, title, status, VERBATIM messages transcript,
+    usage, billedUsd, timestamps) — the durable form of an AgentRunner build so it survives a
+    reconnect/refresh.
+  - `ConversationStore` interface (create/get/appendMessages/update/listByUser/remove), all async
+    so a Firestore backend drops in with no signature change.
+  - `InMemoryConversationStore` — dev/CI impl + reference semantics; stores CLONES so callers
+    cannot mutate persisted state through a returned reference. `deriveTitle()` helper.
+- Persistence is NavBharatAI-hosted only (D7, post-BYOK-removal). NEXT (P-B): wire into
+  AgentRunner (create on start, append each turn, finalize on end) + route load/list; then
+  (P-C) a Firestore-backed ConversationStore for real durability.
+
+Gate: server tsc 0, frontend tsc 0, **2314 vitest** PASS (11 new ConversationStore tests).

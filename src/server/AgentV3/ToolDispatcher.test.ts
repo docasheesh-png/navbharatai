@@ -72,12 +72,19 @@ describe('ToolDispatcher', () => {
     expect(events.find((e) => e.type === 'tool_call')).toBeTruthy();
     expect(events.find((e) => e.type === 'tool_result' && e.ok)).toBeTruthy();
     expect(events.find((e) => e.type === 'file_changed')).toBeTruthy();
+    // Creating a NEW file gives a plain confirmation — no edit_file nudge.
+    expect(res.content).toContain('Created src/App.tsx');
+    expect(res.content).not.toContain('edit_file');
   });
 
-  it('write_file on an existing path records a modify', async () => {
+  it('write_file on an existing path records a modify and nudges toward edit_file', async () => {
     act.files.set('a.ts', 'old');
-    await d.dispatch(call('write_file', { path: 'a.ts', content: 'new' }));
+    const res = await d.dispatch(call('write_file', { path: 'a.ts', content: 'new' }));
     expect(state.snapshot().files[0].kind).toBe('modify');
+    // Overwriting an EXISTING file warns the agent to prefer a surgical edit_file patch.
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('already existed');
+    expect(res.content).toContain('edit_file');
   });
 
   it('read_file returns contents', async () => {

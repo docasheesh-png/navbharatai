@@ -62,6 +62,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • MERGED SURFACES from one live stream: file explorer, Code Studio diffs (red/green), terminal, git/history checkpoints, todos and plan — all in sync, zero drift.
 • HYBRID sandbox: a fast E2B cloud sandbox initialised as a real Git repo you own.
 • ITERATIVE sessions: each message continues the SAME project (same sandbox, files and memory), so you can refine step by step ("add a login page" after "build a todo app"). Use the "New" button to start a fresh project.
+• SURGICAL EDITING: when you ask v3.0 to CHANGE an existing app — "fix the navbar", "update the button colour", "refactor the auth", "remove the sidebar" — it detects this is an EDIT (not a new build), loads the current file tree, reads the affected files first, and makes MINIMUM targeted patches (edit_file old→new) instead of rebuilding everything from scratch. Your existing files and working code are never wiped to start over; a one-line fix touches one place. New files are still created when a change genuinely needs them.
 • BUILDS IN YOUR LANGUAGE (Layer 73 — Universal Language): write your request in any language — all 22 Indian languages (Hindi, Tamil, Bengali, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Odia, Urdu and more) or major world languages — and the app's user-facing text (labels, buttons, headings, placeholders, messages) is generated in THAT language, while the code stays in English. Apni bhasha mein likho, app usi bhasha mein banega.
 • SMART COST ROUTING: plain conversation (a greeting, thanks, "who are you", small-talk) is answered by a fast, economical model and only REAL build/engineering requests use the premium engine — the experience is unchanged, you just don't pay build-grade cost for a "hello".
 • WHAT I BUILT summary (Layer 27 — Product Understanding): after each successful build it shows a short, friendly recap in the chat — the detected stack/framework, how many files/components/routes were created, a few key components/routes, and how to run it (plus the Preview tab) — so you understand what was created at a glance.
@@ -94,6 +95,10 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'hindi', 'tamil', 'bengali', 'apni bhasha', 'language', 'multilingual',
       'regional language', 'bhasha', 'build in my language', 'app in hindi',
       'chat', 'cost', 'economical', 'cheap chat', 'cost routing', 'smart routing',
+      'edit', 'edit existing', 'surgical edit', 'targeted change', 'modify app', 'modify existing app',
+      'change app', 'fix existing', 'update existing', 'dont rebuild', "don't rebuild", 'not rebuild',
+      'rebuilds everything', 'wipes my app', 'deleted my files', 'edit_file', 'minimum changes',
+      'edit karo', 'badlo', 'change karo', 'thik karo', 'wapas se bana diya', 'pura dobara bana diya',
     ],
   },
   // ─── ENGINEER AI ─────────────────────────────────────────────────────────

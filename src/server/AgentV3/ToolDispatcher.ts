@@ -478,7 +478,18 @@ export class ToolDispatcher {
         this.state?.recordFileChange({ path, kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         await this.maybeCheckpoint(`${kind} ${path}`);
-        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} (${content.length} bytes).`;
+        if (kind === 'modify') {
+          // write_file replaced an EXISTING file wholesale. For a small change this
+          // is wasteful and risks dropping unrelated code — nudge the agent toward
+          // edit_file (surgical patch) so it makes minimum, targeted changes.
+          return (
+            `Updated ${path} (${content.length} bytes).\n` +
+            `NOTE: ${path} already existed and write_file replaced the ENTIRE file. ` +
+            `For a small, targeted change, prefer edit_file (old_string → new_string) ` +
+            `so you don't risk dropping unrelated code.`
+          );
+        }
+        return `Created ${path} (${content.length} bytes).`;
       }
 
       case 'edit_file': {

@@ -23,6 +23,55 @@ export function planSystemPrompt(): string {
   ].join('\n') + '\n\n' + CREATOR_IDENTITY;
 }
 
+/**
+ * Edit-mode prefix — prepended to architectSystemPrompt() when the current turn
+ * is classified as editing an existing app rather than building from scratch.
+ *
+ * Instructs the architect to read existing files first, use edit_file (surgical
+ * patch) instead of write_file (full overwrite) wherever possible, and make
+ * minimum targeted changes — the gold-standard surgical edit engine.
+ *
+ * @param fileTree - list of paths currently in the workspace (injected for context)
+ */
+export function editModePrefix(fileTree: string[] = []): string {
+  const treeSection =
+    fileTree.length > 0
+      ? `\n\n<<<EXISTING_FILES>>>\n${fileTree.join('\n')}\n<<<END_FILES>>>`
+      : '';
+  return [
+    `**EDIT MODE — you are modifying an existing app, not building from scratch.**${treeSection}`,
+    '',
+    'Follow these rules precisely:',
+    '',
+    '1. READ BEFORE WRITING: use read_file on every file you intend to change before',
+    '   touching it. Never assume you know a file\'s current content from memory.',
+    '',
+    '2. PREFER edit_file OVER write_file: for any file that already exists, use',
+    '   edit_file (old_string → new_string) to make a surgical patch. Only use',
+    '   write_file when creating a brand-new file that does not exist yet.',
+    '',
+    '3. MINIMUM CHANGES: alter only what the user asked for. Do not restructure',
+    '   unrelated code, rename variables, or add/remove imports the user did not',
+    '   request. A one-line fix should touch one place.',
+    '',
+    '4. PRESERVE EXISTING LOGIC: do not rewrite working functions, remove existing',
+    '   features, or blank out sections the user did not mention. If it works, leave',
+    '   it alone.',
+    '',
+    '5. NEVER REBUILD FROM SCRATCH: a "fix the button" request must NOT result in all',
+    '   source files being overwritten or deleted. The file tree above is the authoritative',
+    '   list of what already exists — treat every listed file as built and working.',
+    '',
+    '6. CONFIRM SCOPE: if the user\'s request is ambiguous (which file? which function?)',
+    '   make a conservative targeted change to the most likely location and explain',
+    '   exactly what you changed and why.',
+    '',
+    '7. NEW FILES ARE FINE: if the requested change genuinely requires a new file that',
+    '   does not yet exist, create it with write_file — but still leave all existing',
+    '   files intact unless they need updating.',
+  ].join('\n');
+}
+
 export function architectSystemPrompt(): string {
   return [
     'You are NavBharatAI Pro v3.0 — a friendly, capable AI app builder, like Claude',

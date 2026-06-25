@@ -14,6 +14,8 @@ import {
   makeSubAgentSpawn,
   makeSecondOpinion,
   makeConsensus,
+  makeWebSearch,
+  makeDeploy,
   type OpinionRouter,
   resolveModel,
   architectSystemPrompt,
@@ -22,6 +24,12 @@ import {
   awaitApproval,
   resolveApproval,
   GitManager,
+  GitRepoSync,
+  GitHubAppClient,
+  githubConfigFromEnv,
+  githubStorageActive,
+  repoNameForProject,
+  type RepoInfo,
   registerSession,
   restoreSession,
   agentLifecycle,
@@ -65,6 +73,7 @@ import {
   saveWorkspaceMemory,
   restoreWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
+import { saveWorkspaceFiles, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
 import { GrokProvider } from '../AI/Router/providers/GrokProvider';
@@ -746,6 +755,13 @@ export function registerAgentV3Routes(app: Express): void {
       // the build tools will report the real sandbox error only if the user asks
       // to build. This is what makes v3.0 conversational like Claude Code.
       let git: GitManager | undefined;
+      // Git-native storage (Phase 2, flag-gated OFF by default): when active, the user's project
+      // lives in a real private repo in the platform GitHub org — the durable, ~free source of
+      // truth. We clone it into the (empty) sandbox at start and push it back at end. These stay
+      // unset when storage is dormant, so every line below is a no-op on the live build path.
+      let repoSync: GitRepoSync | undefined;
+      let repoAuthedUrl = '';
+      let repoBranch = 'main';
       try {
         // Emit an immediate status so the NDJSON stream is never silent while the
         // sandbox is being created (E2B VM setup can take several seconds). A long
@@ -753,6 +769,43 @@ export function registerAgentV3Routes(app: Express): void {
         // request timeouts and surfaces as a bare "Load failed" on the client.
         events.emit({ type: 'narration', agent: 'architect', text: 'Setting up your workspace…', ts: Date.now() });
         await actuator.ensureWorkspace(workspaceId, 'react');
+        // GIT-NATIVE HYDRATE: when storage is active, ensure the project repo exists and seed the
+        // sandbox from it BEFORE the Firestore fallback. Best-effort — any failure here leaves the
+        // build on the existing (Firestore) durability path, never blocking it.
+        if (githubStorageActive()) {
+          try {
+            const cfg = githubConfigFromEnv();
+            if (cfg) {
+              const projectId = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : workspaceId;
+              const repoName = repoNameForProject(userId, projectId);
+              const ghClient = new GitHubAppClient(cfg);
+              const repo: RepoInfo = await ghClient.ensureRepo(repoName);
+              const token = await ghClient.getInstallationToken();
+              repoAuthedUrl = ghClient.authedCloneUrl(repoName, token);
+              repoBranch = repo.defaultBranch || 'main';
+              repoSync = new GitRepoSync(actuator, workspaceId);
+              const h = await repoSync.hydrateIfEmpty(repoAuthedUrl);
+              if (h.hydrated) {
+                events.emit({ type: 'narration', agent: 'architect', text: 'Loaded your project from its GitHub repo.', ts: Date.now() });
+              }
+            }
+          } catch { /* git-native is best-effort — fall back to Firestore durability below */ }
+        }
+        // DURABLE FILE RESTORE: the sandbox is ephemeral — if it was lost/recycled (or this is a
+        // later message that got a fresh sandbox), re-seed it with the files we persisted last
+        // time so the build continues from where it left off instead of an "empty directory".
+        // Only when the sandbox actually came up empty, so we never clobber a live sandbox.
+        try {
+          const saved = await loadWorkspaceFiles(workspaceId);
+          const savedPaths = Object.keys(saved);
+          if (savedPaths.length > 0) {
+            const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+            if (Object.keys(existing.files).length === 0) {
+              await writeWorkspaceFiles(actuator, workspaceId, saved);
+              events.emit({ type: 'narration', agent: 'architect', text: `Restored ${savedPaths.length} file(s) from your previous session.`, ts: Date.now() });
+            }
+          }
+        } catch { /* best-effort — restore never blocks a build */ }
         // Real git repo → real checkpoints/History/restore (best-effort on
         // sandboxes without a shell).
         git = new GitManager(actuator, workspaceId);
@@ -790,7 +843,18 @@ export function registerAgentV3Routes(app: Express): void {
       // convene a multi-perspective panel (correctness, security, UX) on a hard
       // decision, using the SAME non-Claude free router. Never throws.
       const consensus = makeConsensus(opinionRouter);
-      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus);
+      // Web search (ported from Engineer AI): the Architect can look up package versions,
+      // framework docs, and error meanings (Brave if BRAVE_API_KEY set, else DuckDuckGo).
+      const webSearch = makeWebSearch();
+      // Real persistent deploy (Firebase Hosting, ported from Engineer AI): publish the built app
+      // to a permanent public URL. Uses ADC (Cloud Run service account); honest error if missing.
+      const deploy = makeDeploy();
+      // DURABLE FILE CAPTURE: record the exact content of every file the agent writes (reliable —
+      // straight from the write op, not a later listFiles that can come back empty). Persisted to
+      // Firestore at build end so the source survives a sandbox loss and restores next session.
+      const writtenFiles = new Map<string, string>();
+      const onFileWrite = (path: string, content: string) => { writtenFiles.set(path, content); };
+      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite);
 
       // Surgical edit mode (gold standard): when the user is editing an existing
       // app rather than building fresh, inject the CURRENT file tree and the
@@ -1007,6 +1071,35 @@ export function registerAgentV3Routes(app: Express): void {
       try {
         saveWorkspaceMemory(workspaceId, getWorkspaceMemory(workspaceId).snapshot()).catch(() => {});
       } catch { /* memory persist is best-effort */ }
+
+      // DURABLE FILE SAVE: persist the build's source so it never vanishes. Start from the files
+      // we captured at write-time (reliable), then supplement with a sandbox scan (catches sub-
+      // agent writes when listFiles works). Skip if BOTH are empty so a read hiccup never
+      // overwrites a previously-good saved set with nothing. Best-effort — never blocks the build.
+      try {
+        const toSave: Record<string, string> = {};
+        try {
+          const scanned = await collectWorkspaceFiles(actuator, workspaceId);
+          Object.assign(toSave, scanned.files);
+        } catch { /* listFiles can be flaky — the captured writes below are the reliable source */ }
+        for (const [p, c] of writtenFiles) toSave[p] = c; // captured writes win (freshest, reliable)
+        if (Object.keys(toSave).length > 0) {
+          saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
+        }
+      } catch { /* file persist is best-effort */ }
+
+      // GIT-NATIVE PUSH: when storage is active, commit + push the sandbox back to the project's
+      // GitHub repo so it is the durable source of truth for next session. Best-effort and only
+      // when files were actually produced — never blocks or fails the build.
+      if (repoSync && repoAuthedUrl && writtenFiles.size > 0) {
+        try {
+          const msg = `NavBharatAI build: ${deriveTitle(prompt)}`;
+          const pushed = await repoSync.pushAll(repoAuthedUrl, repoBranch, msg);
+          if (pushed.pushed) {
+            events.emit({ type: 'narration', agent: 'architect', text: 'Saved your project to its GitHub repo.', ts: Date.now() });
+          }
+        } catch { /* git-native push is best-effort */ }
+      }
 
       // Bill the user the marked-up cost (D5/D6), recorded in the same place the
       // platform records every build's cost. Best-effort — never blocks the run.

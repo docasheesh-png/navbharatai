@@ -45,6 +45,8 @@ import { scanEnvTemplateSecrets, envTemplateSecretSummary, type EnvTemplateSecre
 import { scanAsyncPatterns, asyncPatternSummary, type AsyncPatternIssue } from './AsyncPatternAnalysis';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
+import type { WebSearchFn } from './WebSearch';
+import type { DeployFn } from './Deployment';
 import { reviewEdit, formatReviewResult } from './PostEditReviewer';
 import { renameSymbol, addComponentProp } from './CodemodeExecutor';
 import type { CodemodeFile } from './CodemodeExecutor';
@@ -56,6 +58,10 @@ import { getEmbeddingStore } from './EmbeddingSearch';
  * the composition root wires the real implementation (see SubAgent.ts).
  */
 export type SubAgentSpawn = (role: AgentRole, instruction: string) => Promise<{ ok: boolean; summary: string }>;
+
+/** The browser interactions browser_action supports (mirrors the actuator's union). */
+export const BROWSER_ACTIONS = ['click', 'type', 'navigate', 'scroll', 'press', 'wait', 'hover', 'double_click', 'select_option'] as const;
+export type BrowserActionName = (typeof BROWSER_ACTIONS)[number];
 
 /**
  * ActuatorPort — the narrow slice of the sandbox actuator the dispatcher needs.
@@ -73,6 +79,25 @@ export interface ActuatorPort {
   ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** Public HTTPS URL for a port in the sandbox (real sandboxes only). Optional. */
   getPortUrl?(workspaceId: string, port: number): Promise<string>;
+  /** Capture a PNG screenshot of a URL from inside the sandbox (real sandboxes only). */
+  screenshot?(
+    workspaceId: string,
+    url: string,
+    viewport?: { width: number; height: number },
+  ): Promise<{ base64: string; mimeType: 'image/png' }>;
+  /** Drive a real headless browser (click/type/navigate/…) and return a screenshot + result. */
+  browserAction?(
+    workspaceId: string,
+    action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option',
+    args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
+  ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }>;
+  /** Runtime browser errors (console.error / uncaught / failed requests) since `sinceMs`. */
+  getConsoleErrors?(
+    workspaceId: string,
+    sinceMs: number,
+  ): Promise<{ errors: { t: number; kind: string; text: string }[] }>;
+  /** The built static site (dist/) as path→bytes, for a real persistent deploy. */
+  downloadDistFiles?(workspaceId: string): Promise<Map<string, Buffer>>;
 }
 
 /** One source file read into the shared evaluate snapshot (path + content). */
@@ -86,6 +111,8 @@ export interface ToolResult {
   tool_use_id: string;
   content: string;
   is_error: boolean;
+  /** Optional screenshot to feed back to the model as a vision block (browser tools). */
+  image?: { base64: string; mimeType: string };
 }
 
 const MAX_SUMMARY = 200;
@@ -107,6 +134,15 @@ export class ToolDispatcher {
     private readonly checkpointer?: Checkpointer,
     private readonly secondOpinion?: SecondOpinion,
     private readonly consensus?: Consensus,
+    private readonly webSearch?: WebSearchFn,
+    private readonly deploy?: DeployFn,
+    /**
+     * Called with the path + FINAL content on every successful write_file/edit_file, so the
+     * composition root can durably persist exactly what the agent wrote (not relying on a later,
+     * sometimes-empty, sandbox listFiles). This is what makes a build's files survive a sandbox
+     * loss / the next message getting a fresh sandbox.
+     */
+    private readonly onFileWrite?: (path: string, content: string) => void,
   ) {}
 
   /**
@@ -438,7 +474,11 @@ export class ToolDispatcher {
       ts: Date.now(),
     });
     try {
-      const content = await this.run(call, agent);
+      // Browser tools return a screenshot image alongside their text; everything else is text.
+      const visual = call.name === 'screenshot' || call.name === 'browser_action'
+        ? await this.runVisual(call)
+        : null;
+      const content = visual ? visual.content : await this.run(call, agent);
       this.events?.emit({
         type: 'tool_result',
         agent,
@@ -447,7 +487,7 @@ export class ToolDispatcher {
         summary: summarize(content),
         ts: Date.now(),
       });
-      return { tool_use_id: call.id, content, is_error: false };
+      return { tool_use_id: call.id, content, is_error: false, image: visual?.image };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.events?.emit({
@@ -460,6 +500,50 @@ export class ToolDispatcher {
       });
       return { tool_use_id: call.id, content: `Error: ${message}`, is_error: true };
     }
+  }
+
+  /**
+   * Browser tools (screenshot / browser_action) — return a text summary PLUS the screenshot so
+   * the model can SEE the page. Requires a real sandbox with a browser; degrades to an honest
+   * "not available" message on Local/Docker actuators (or any actuator that lacks the method).
+   */
+  private async runVisual(call: ToolUse): Promise<{ content: string; image?: { base64: string; mimeType: string } }> {
+    const input = call.input;
+    if (call.name === 'screenshot') {
+      if (!this.actuator.screenshot) {
+        return { content: 'Screenshots require a real cloud sandbox (set E2B_API_KEY) — not available here.' };
+      }
+      const url = reqStr(input, 'url');
+      const width = typeof input.width === 'number' ? input.width : undefined;
+      const height = typeof input.height === 'number' ? input.height : undefined;
+      const viewport = width && height ? { width, height } : undefined;
+      const shot = await this.actuator.screenshot(this.workspaceId, url, viewport);
+      return {
+        content: `Screenshot of ${url} captured (${viewport ? `${viewport.width}×${viewport.height}` : '1280×720'}). The image is attached — inspect it for layout/visual issues.`,
+        image: { base64: shot.base64, mimeType: shot.mimeType },
+      };
+    }
+    // browser_action
+    if (!this.actuator.browserAction) {
+      return { content: 'Browser interaction requires a real cloud sandbox (set E2B_API_KEY) — not available here.' };
+    }
+    const action = reqStr(input, 'action');
+    if (!BROWSER_ACTIONS.includes(action as BrowserActionName)) {
+      return { content: `browser_action: unknown action "${action}". Valid: ${BROWSER_ACTIONS.join(', ')}.` };
+    }
+    const dir = input.direction;
+    const direction: 'up' | 'down' | undefined = dir === 'up' ? 'up' : dir === 'down' ? 'down' : undefined;
+    const args = {
+      selector: optStr(input, 'selector'),
+      text: optStr(input, 'text'),
+      url: optStr(input, 'url'),
+      direction,
+    };
+    const res = await this.actuator.browserAction(this.workspaceId, action as BrowserActionName, args);
+    return {
+      content: `Browser ${action}${args.selector ? ` on "${args.selector}"` : ''}${args.url ? ` → ${args.url}` : ''}: ${res.result}. Screenshot attached.`,
+      image: res.screenshot ? { base64: res.screenshot, mimeType: 'image/png' } : undefined,
+    };
   }
 
   private async run(call: ToolUse, agent: AgentRole): Promise<string> {
@@ -479,6 +563,7 @@ export class ToolDispatcher {
           kind = 'create';
         }
         await this.actuator.writeFile(this.workspaceId, path, content);
+        this.onFileWrite?.(path, content);
         this.state?.recordFileChange({ path, kind }, agent);
         const mem = getWorkspaceMemory(this.workspaceId);
         mem.indexFile(path, content);
@@ -546,6 +631,7 @@ export class ToolDispatcher {
         // unique). applyEdit throws the same honest "not found" / "not unique" errors.
         const { updated, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
         await this.actuator.writeFile(this.workspaceId, path, updated);
+        this.onFileWrite?.(path, updated);
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);
         const editMem = getWorkspaceMemory(this.workspaceId);
         editMem.indexFile(path, updated);
@@ -924,6 +1010,48 @@ export class ToolDispatcher {
           return 'Consensus is not available in this context.';
         }
         return await this.consensus(question);
+      }
+
+      case 'web_search': {
+        const query = reqStr(input, 'query');
+        if (!this.webSearch) {
+          return 'Web search is not available in this context.';
+        }
+        const limit = typeof input.limit === 'number' ? input.limit : 5;
+        return await this.webSearch(query, limit);
+      }
+
+      case 'deploy': {
+        if (!this.deploy) {
+          return 'Deployment is not configured in this context.';
+        }
+        if (!this.actuator.downloadDistFiles) {
+          return 'Deployment requires a real cloud sandbox (set E2B_API_KEY) — not available here.';
+        }
+        let files: Map<string, Buffer>;
+        try {
+          files = await this.actuator.downloadDistFiles(this.workspaceId);
+        } catch (err) {
+          const m = err instanceof Error ? err.message : String(err);
+          return `Could not read the built site: ${m}. Run "npm run build" first so a dist/ directory exists.`;
+        }
+        if (files.size === 0) {
+          return 'No built files found. Run "npm run build" to produce dist/ before deploying.';
+        }
+        const url = await this.deploy(this.workspaceId, files);
+        this.events?.emit({ type: 'preview', url, ts: Date.now() });
+        return `Deployed to a permanent public URL: ${url} (${files.size} files). This stays live after the sandbox stops.`;
+      }
+
+      case 'console_errors': {
+        if (!this.actuator.getConsoleErrors) {
+          return 'Runtime console errors require a real cloud sandbox — not available here.';
+        }
+        const sinceSec = typeof input.since_seconds === 'number' ? input.since_seconds : 120;
+        const since = Date.now() - Math.max(1, sinceSec) * 1000;
+        const { errors } = await this.actuator.getConsoleErrors(this.workspaceId, since);
+        if (errors.length === 0) return 'No runtime browser errors captured in the window — the page ran clean.';
+        return `Runtime browser errors (${errors.length}):\n` + errors.slice(0, 30).map((e) => `- [${e.kind}] ${e.text}`).join('\n');
       }
 
       // Level 7: structural codemods (AST-safe cross-file refactoring via ts-morph).

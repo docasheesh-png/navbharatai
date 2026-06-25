@@ -3527,3 +3527,227 @@ Gold-standard polish (same PR):
 AppKnowledgeBase: documented the surgical-edit capability + keywords (mandatory sync rule).
 Gate: frontend tsc 0, server tsc 0, **2400 vitest** PASS (32 new tests across IntentClassifier,
 systemPrompt, ToolDispatcher/applyEdit, WorkspaceMemory/warmIndexFiles). Ships on merge → deploy.
+
+---
+
+### 2026-06-25 — v3.0 feature port #1: web_search tool (admin: bring old-engine features into v3.0)
+
+Admin wants the best old-engine features COPIED into v3.0 (self-contained, so v3.0 owns them and
+they survive the planned deletion of the old engines). Old engines NOT deleted yet (admin will
+trigger that tomorrow). Each feature = its own additive PR; nothing live touched.
+
+PR #1 — `web_search` tool:
+- NEW `src/server/AgentV3/WebSearch.ts` — self-contained copy of Engineer AI's WebSearchClient,
+  strict-typed (the source lives outside the strict tsconfig; cleaned the `any`s). Brave (if
+  BRAVE_API_KEY) → DuckDuckGo fallback → npm registry for package queries. Degrades to "no results",
+  never throws. `makeWebSearch()` factory + `formatSearchResults`/`parseDuckDuckGo` (tested).
+- Wired like second_opinion/consensus: ToolName + ToolCatalog def + CATALOG_TOOL_NAMES +
+  ToolDispatcher `web_search` case (injected fn) + architect tool-set + index export + route
+  injects makeWebSearch() into the dispatcher + architect prompt guidance.
+- NO old-engine coupling added (WebSearch.ts is a v3.0-owned copy; the original is untouched and
+  still deletable later).
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2452 vitest** PASS (6 new WebSearch tests).
+NEXT: screenshot/browser_action, deploy, generate_tests (each its own PR).
+
+---
+
+### 2026-06-25 — v3.0 feature port #2: screenshot + browser_action + console_errors (agent gets eyes)
+
+PR #2 of the old-engine feature ports. Gives v3.0 the ability to SEE and TEST the app it builds —
+the single biggest capability gap vs Engineer AI.
+
+- ActuatorPort extended with OPTIONAL `screenshot`, `browserAction`, `getConsoleErrors` (the real
+  IEngineerActuator/E2BActuator already implement them; Local/Docker degrade honestly).
+- VISION PASSTHROUGH (real "agent sees"): ToolResult gained an optional `image`; ToolDispatcher
+  routes screenshot/browser_action through `runVisual()` which returns {content, image}; AgentRunner
+  feeds the screenshot back to the model as an Anthropic image content-block in the tool_result, so
+  the model actually inspects the rendered page (not just text). Parallel-safe (image flows through
+  the return value, no shared state).
+- 3 new tools: `screenshot` (capture+see a URL, optional viewport for responsive), `browser_action`
+  (click/type/navigate/scroll/hover/etc. — persistent session for multi-step flows, returns result+
+  screenshot), `console_errors` (runtime browser errors a build never reveals). Wired: types +
+  catalog defs + CATALOG_TOOL_NAMES + dispatcher + architect tool-set + architect prompt ("verify
+  visually; fix what you see; never fake the verification").
+- Honest fallback: on Local/Docker (no E2B) the tools return "requires a real sandbox", never a fake
+  success. No old-engine import added (uses the actuator v3.0 already holds via the ActuatorPort).
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2458 vitest** PASS (6 new browser-tool tests).
+NEXT: deploy tool, generate_tests tool.
+
+---
+
+### 2026-06-25 — v3.0 feature port #3: deploy tool (real persistent Firebase Hosting)
+
+PR #3 of the old-engine feature ports. v3.0 can now SHIP — publish a built app to a permanent
+public URL (not just the ephemeral dev-server preview).
+
+- NEW `src/server/AgentV3/Deployment.ts` — v3.0-owned copy of Engineer AI's DeploymentService
+  (Firebase Hosting REST + ADC auth, SHA-dedup upload, SPA rewrite + immutable asset caching).
+  Channel id prefixed `v3-`. `makeDeploy()` factory + `DeployFn` type + `makeChannelId` (tested).
+- ActuatorPort extended with optional `downloadDistFiles`; `deploy` tool case: pulls dist/ from the
+  sandbox → deploys → emits a preview event → returns the permanent URL. Honest refusals: no dist
+  ("run npm run build first"), no sandbox ("requires E2B"), deploy unconfigured.
+- Wired: ToolName + catalog def + CATALOG_TOOL_NAMES + dispatcher (injected DeployFn) + architect
+  tool-set + index export + route injects makeDeploy() + architect prompt ("deploy when asked;
+  never claim deployed unless deploy returned a URL"). Uses ADC (Cloud Run service account); a 403
+  means the SA needs the Firebase Hosting Admin role. No old-engine import added.
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2464 vitest** PASS (6 new deploy tests).
+NEXT: generate_tests tool (last of today's ports).
+
+---
+
+### 2026-06-25 — v3.0 feature ports COMPLETE (3 of 5) + generate_tests intentionally SKIPPED
+
+Admin asked to copy the best old-engine features INTO v3.0 (self-contained, so v3.0 owns them and
+they survive the planned deletion of the old engines). DELETION NOT done yet — admin triggers that
+separately (next day). Shipped today, each its own additive PR (no live path touched, old engines
+untouched):
+
+- #411 `web_search` — Brave→DuckDuckGo→npm (WebSearch.ts, v3.0-owned).
+- #412 `screenshot` + `browser_action` + `console_errors` — agent VISION + interactive testing
+  (ActuatorPort optional methods + image-passthrough so the model truly SEES the page).
+- #413 `deploy` — real persistent Firebase Hosting (Deployment.ts, v3.0-owned).
+
+These three were the genuine capability gaps (see/search/ship). All wired through types + catalog +
+dispatcher + architect tool-set + index + route + prompt, with honest "requires a real sandbox"
+fallbacks. None adds an import from EngineerAI/AppMakerLab/pro → v3.0 stays deletion-ready.
+
+INTENTIONALLY SKIPPED (the "ulta bekar"/duplication cases, per admin's own guidance + the speed goal):
+- `generate_tests` (ProTestGen) — REDUNDANT: the v3.0 agent already writes tests with write_file
+  (under its control + normal billing) and `evaluate`/TestCoverageAnalysis already flags untested
+  files. A separate test-gen pipeline fires extra AI calls OUTSIDE the agent loop → SLOWER builds,
+  which directly contradicts the admin's "fast" goal AND the architect prompt's existing
+  "a working preview is the goal, not a green test suite; don't block on tests" philosophy. Do NOT
+  re-port it unless admin explicitly asks.
+- `context file-ranking` (ContextRetriever) — mostly OVERLAPS v3.0's existing grep/glob/recall.
+  Low marginal value; skipped to avoid bloat.
+
+Also SKIPPED earlier (architecture conflicts, do not port): ProCodeReview (evaluate is superior),
+ErrorPatternMatcher (RecalledLessons better), BackendProvisioner/TemplateRegistry as features,
+ProComplexity, WorkspaceMutationEngine/VFS, Engineer AI's ReAct loop, tar.gz checkpoint tool.
+
+NEXT (admin-triggered, NOT today): independence move (extract actuators + helpers + scaffold to
+src/server/sandbox/, see the 2026-06-25 hard-audit) → then delete EngineerAI/AppMakerLab/pro.
+
+---
+
+### 2026-06-25 — v3.0 BUGFIX: preview "Blocked request … is not allowed" (Vite allowedHosts)
+
+Admin hit a live v3.0 preview showing: `Blocked request. This host ("5174-…e2b.app") is not
+allowed. Add it to server.allowedHosts in vite.config.` Root cause: newer Vite enforces a host
+allow-list; the sandbox proxy host (<port>-<id>.e2b.app) isn't in it, so Vite blocks the request and
+the preview shows the error instead of the app. `allowedHosts` was set NOWHERE in the codebase.
+
+Fix (two places, since the agent sometimes writes its own vite.config):
+- Default scaffold `ViteReactProviderContents.viteConfig`: added `allowedHosts: true` to BOTH
+  `server` and `preview`.
+- Architect system prompt: added a CRITICAL instruction to always set server/preview allowedHosts:true
+  for Vite, and that a "Blocked request … is not allowed" preview is ALWAYS fixed by allowedHosts:true.
+- Regression test (ScaffoldPreview.test.ts) asserts both the scaffold config and the prompt carry it.
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2466 vitest** PASS (2 new).
+
+NOTE: the same session also showed a reviewer "0/100 — missing all source code" right after the agent
+claimed it wrote 7 files; that looks like a separate workspace-state hiccup (the build started on an
+"empty directory" and recreated the scaffold mid-run). Not reproduced/fixed here — flagged for
+follow-up if it recurs; the concrete, reproducible preview-block bug is fixed above.
+
+---
+
+### 2026-06-25 — v3.0 BUGFIX: reviewer's false "0/100 — missing all source code"
+
+Same live session as the allowedHosts bug: after the agent built a working app (7 files; dev server
+was running on :5174), the post-build ReviewerAgent reported "[CRITICAL] missing all the necessary
+source code. Score: 0/100". Root cause (route ~L986): the reviewer reads the workspace via
+`actuator.listFiles(workspaceId)`; that came back EMPTY (a sandbox read hiccup — the files genuinely
+exist, the dev server proves it), so reviewBuild got `fileTree:[]` and the reviewer model declared the
+app had no code. A false negative that contradicts the build the user just watched succeed.
+
+Fix (ReviewerAgent.ts): added `hasReviewableSource(fileTree)` (exported, pure) and a defensive
+early-return in `reviewBuild` — when the listing has no real source files, it returns a neutral
+skipped result (score 0, passed:true, no issues) WITHOUT spawning the reviewer. `formatReview`
+already emits '' for score 0, so the user sees nothing instead of a scary, wrong "0/100". The build
+result is never affected (review is advisory). Updated one existing parse-test to pass a source file
+(it tests parsing, not the empty case).
+
+Gate: server tsc 0, frontend tsc 0, **2468 vitest** PASS (3 new reviewer-guard tests).
+NOTE: the underlying "listFiles returned empty when files exist" is an E2B read-reliability issue
+(can't reproduce without E2B here) — this fix removes the user-visible false verdict; flagged for
+follow-up if the empty-listing recurs.
+
+---
+
+### 2026-06-25 — v3.0 BUGFIX: durable file persistence (files no longer vanish)
+
+Admin: v3.0 built 7 files, then on the next (edit) message they all vanished; Files(0)/Diff(0) in the
+UI; reviewer said "missing all source code". Root cause: the sandbox is EPHEMERAL and v3.0 persisted
+only the MEMORY snapshot (file-list hints + episodes), NOT the file CONTENT — so a lost/recycled or
+fresh-next-message sandbox had nothing to restore from. (History(7) showed git commits, proving the
+files WERE written; a flaky listFiles + no content-restore = "gayab".)
+
+Fix — capture-at-write + Firestore + restore (admin OK'd "hamare firebase ke db me"):
+- NEW `WorkspaceFileStore.ts` — Firestore-backed durable file store (collection `workspace_files_v3`,
+  one doc per file in a `files` subcollection to dodge the 1MB limit; a metadata `paths` list is
+  authoritative so deleted files don't resurrect). Mirrors FirestoreWorkspaceMemoryStore (VITEST-skip,
+  best-effort, never throws). `fileDocId` (base64url, slash-free).
+- `ToolDispatcher` — new optional `onFileWrite(path, content)` fired on every successful write_file/
+  edit_file with the FINAL content. Reliable capture straight from the write op — does NOT depend on
+  the sometimes-empty listFiles.
+- Route: a per-build `writtenFiles` accumulator feeds onFileWrite; at build END it saves the union of
+  captured writes (reliable) + a sandbox scan (supplement) to Firestore, skipping if BOTH are empty
+  (so a read hiccup never overwrites a good saved set). At build START, if the sandbox came up empty,
+  it restores the persisted files into it and narrates "Restored N file(s) from your previous session."
+
+Effect: a build's source survives sandbox loss + carries across messages → no more "files gayab".
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2473 vitest** PASS (5 new tests).
+NOTE: requires Firestore (Cloud Run ADC) — works automatically in prod; VITEST/local = best-effort no-op.
+
+---
+
+### 2026-06-25 — v3.0 git-native storage PHASE 1: GitHubAppClient (admin-approved roadmap)
+
+Admin approved the plan to make v3.0 git-native (files live in a real GitHub repo = durable, ~free,
+no Firestore bill, enables CI/merge). Admin completed PHASE 0: created org `navbharatai-apps`,
+registered the "NavBharatAI Builder" GitHub App (App ID 4146547; perms Contents/PRs RW, Checks/Admin),
+installed it on the org, and set Cloud Run secrets GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY / GITHUB_ORG.
+
+PHASE 1 (this PR) — `GitHubAppClient.ts` (standalone, flag-gated OFF, NOT wired to the build path yet):
+- App auth with zero new deps (Node crypto RS256 JWT + fetch): sign App JWT → org installation id →
+  installation access token (cached). `ensureRepo(name)` (GET-or-create, idempotent, private+auto_init),
+  `authedCloneUrl` (token-embedded git URL). `githubConfigFromEnv()`/`githubStorageEnabled()` (null/false
+  until all 3 secrets present → storage stays off), `repoNameForProject()` (deterministic, GitHub-safe).
+- Fully unit-tested (7 tests) incl. a REAL RSA keypair verifying the JWT signature + fake-fetch for the
+  installation/token/repo endpoints (reuse vs create). No live-path coupling → current v3.0 unaffected.
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2503 vitest** PASS (7 new).
+NEXT (Phase 2): wire into the build loop — clone the repo into the sandbox at start, commit+push at
+build end → git becomes the source of truth (replaces the ephemeral-sandbox file loss).
+
+---
+
+## 2026-06-25 — Git-native storage PHASE 2 (DONE, merged PR #420, deploys via Cloud Run)
+
+PHASE 2 — wired git-native storage into the v3.0 build loop, behind an explicit
+`GITHUB_STORAGE_ENABLED=true` opt-in (ships DORMANT; the three App secrets alone do NOT activate it,
+so the live build path is unchanged until the admin flips the flag — strangler-fig).
+
+- `GitRepoSync.ts` (over the same `CommandRunner` port as GitManager → unit-testable, no-op without a
+  shell): `hydrateIfEmpty(authedUrl)` clones the project repo into the sandbox ONLY when it came up
+  empty (never clobbers a live sandbox or a Firestore restore); `pushAll(authedUrl, branch, message)`
+  commits + force-pushes the sandbox back (private single-writer mirror → force safe). Best-effort
+  everywhere; the authed token is handed straight to git and NEVER emitted to the event stream;
+  branch + commit message sanitized against shell injection.
+- `githubStorageActive()` gate added to GitHubAppClient (secrets present AND the flag = true).
+- Route wiring (agentv3.ts): ensureRepo + hydrate BEFORE the Firestore fallback at build start;
+  commit + push AFTER the durable file save at build end. Both no-op when dormant. The Firestore file
+  capture stays as the backstop.
+- 9 new unit tests (fake CommandRunner): hydrate skip/clone/fail, push commit/no-change/fail, branch +
+  message sanitization, never-throws.
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2512 vitest** PASS (9 new).
+NEXT (Phase 3): CI + merge of the user's repo, Claude-Code-style (PR → check status → merge).
+Phase 4: auth simplify (Email/Phone primary, remove the failing Google button, optional "Connect
+GitHub" + Export/Transfer for portability). Phase 5: dual preview (in-browser iframe + E2B).
+NOTE: Phases 3–5 touch user-facing auth/preview flows → confirm with admin before each (safeguard #3).

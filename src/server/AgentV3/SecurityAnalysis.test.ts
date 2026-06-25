@@ -32,6 +32,23 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'const u = "https://api.example.com/v1";')).toEqual([]);
   });
 
+  it('flags a client-exposed secret env var but not a publishable key', () => {
+    expect(scanSecurity('a.ts', 'const k = import.meta.env.VITE_STRIPE_SECRET_KEY;').some((f) => f.rule === 'client-exposed-secret' && f.severity === 'high')).toBe(true);
+    expect(scanSecurity('.env', 'NEXT_PUBLIC_DB_PASSWORD=hunter2').some((f) => f.rule === 'client-exposed-secret')).toBe(true);
+    expect(scanSecurity('a.ts', 'process.env.REACT_APP_PRIVATE_KEY').some((f) => f.rule === 'client-exposed-secret')).toBe(true);
+    // a publishable key (no SECRET/PASSWORD/PRIVATE word) is meant to be public — not flagged.
+    expect(scanSecurity('a.ts', 'const k = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;').some((f) => f.rule === 'client-exposed-secret')).toBe(false);
+    expect(scanSecurity('a.ts', 'const k = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;').some((f) => f.rule === 'client-exposed-secret')).toBe(false);
+  });
+
+  it('flags credentials embedded in an http(s) URL but not a clean URL', () => {
+    expect(scanSecurity('a.ts', "const u = 'https://admin:s3cretpw@api.acme.com/v1';").some((f) => f.rule === 'url-embedded-credentials' && f.severity === 'high')).toBe(true);
+    // a clean URL or host:port (no user:pass@) is fine.
+    expect(scanSecurity('a.ts', "const u = 'https://api.acme.com:8080/v1';").some((f) => f.rule === 'url-embedded-credentials')).toBe(false);
+    // env/placeholder forms are ignored.
+    expect(scanSecurity('a.ts', "const u = `https://${user}:${pass}@api.example.com`;").some((f) => f.rule === 'url-embedded-credentials')).toBe(false);
+  });
+
   it('flags a hardcoded JWT signing secret (with or without options)', () => {
     for (const code of [
       "const t = jwt.sign(payload, 'my-super-secret');",

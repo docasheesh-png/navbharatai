@@ -105,6 +105,14 @@ const RULES: Rule[] = [
     severity: 'low',
     re: /@ts-ignore\b/,
   },
+  // ── low: a BARE eslint-disable (no rule named) turns OFF every lint rule for the
+  // file or line, hiding real problems. A disable that names specific rules
+  // (`eslint-disable no-console`) is intentional and is NOT flagged. ───────────────
+  {
+    kind: 'eslint-disable-all',
+    severity: 'low',
+    re: /eslint-disable(?:-(?:next-)?line)?\b\s*(?:\*\/\s*)?$/,
+  },
   // ── low: hardcoded obviously-fake return values left in code ──────────────
   {
     kind: 'fake-return',

@@ -78,6 +78,14 @@ describe('scanAuthenticity', () => {
     expect(scanAuthenticity('src/a.ts', 'logger.debugger;')).toEqual([]);
   });
 
+  it('flags a bare eslint-disable (all rules off) but not one that names specific rules', () => {
+    expect(scanAuthenticity('src/a.ts', '/* eslint-disable */\nconst x = 1;').some((i) => i.kind === 'eslint-disable-all')).toBe(true);
+    expect(scanAuthenticity('src/b.ts', '// eslint-disable-next-line\nfoo();').some((i) => i.kind === 'eslint-disable-all')).toBe(true);
+    // Naming the rule(s) is intentional and is not flagged.
+    expect(scanAuthenticity('src/c.ts', '// eslint-disable-next-line react-hooks/exhaustive-deps\nfoo();').some((i) => i.kind === 'eslint-disable-all')).toBe(false);
+    expect(scanAuthenticity('src/d.ts', '/* eslint-disable no-console */\nfoo();').some((i) => i.kind === 'eslint-disable-all')).toBe(false);
+  });
+
   it('flags @ts-nocheck (medium) and a blind @ts-ignore (low), but not @ts-expect-error', () => {
     const noCheck = scanAuthenticity('src/a.ts', '// @ts-nocheck\nconst x: number = "bad";');
     expect(noCheck.some((i) => i.kind === 'ts-nocheck' && i.severity === 'medium')).toBe(true);

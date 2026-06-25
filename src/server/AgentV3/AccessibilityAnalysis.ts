@@ -90,6 +90,13 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
         push('html-missing-lang', 'medium');
       }
 
+      // ── medium: <meta http-equiv="refresh"> auto-refreshes/redirects the page on a
+      // timer — it disorients users, can trap screen-reader users, and moves focus
+      // without consent (WCAG 2.2.1 Timing Adjustable / 3.2.5 Change on Request). ─────
+      if (name === 'meta' && /http-equiv\s*=\s*['"{]?\s*refresh\b/i.test(tag)) {
+        push('meta-refresh', 'medium');
+      }
+
       // ── medium: a viewport meta that DISABLES pinch-zoom (user-scalable=no or
       // maximum-scale=1) locks out low-vision users who need to zoom (WCAG 1.4.4). ──
       if (

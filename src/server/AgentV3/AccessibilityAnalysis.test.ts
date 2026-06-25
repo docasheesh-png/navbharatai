@@ -25,6 +25,11 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('index.html', '<html lang="en">')).toEqual([]);
   });
 
+  it('flags a <meta http-equiv="refresh"> auto-refresh but not a normal meta', () => {
+    expect(scanAccessibility('index.html', '<meta http-equiv="refresh" content="5; url=/next" />').some((x) => x.kind === 'meta-refresh')).toBe(true);
+    expect(scanAccessibility('index.html', '<meta name="description" content="x" />').some((x) => x.kind === 'meta-refresh')).toBe(false);
+  });
+
   it('flags a viewport meta that disables zoom (WCAG 1.4.4) but not a normal viewport', () => {
     expect(scanAccessibility('index.html', '<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />').some((x) => x.kind === 'zoom-disabled')).toBe(true);
     expect(scanAccessibility('index.html', '<meta name="viewport" content="width=device-width, maximum-scale=1.0" />').some((x) => x.kind === 'zoom-disabled')).toBe(true);

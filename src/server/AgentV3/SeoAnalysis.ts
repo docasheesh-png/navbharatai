@@ -47,10 +47,17 @@ export function analyzeSeo(indexHtml: string | null | undefined): SeoReport {
   }
 
   // Viewport meta — without it the app is not mobile-responsive.
+  const viewportMatch = /<meta[^>]+name=["']viewport["'][^>]*content=["']([^"']*)["']/i.exec(html);
   if (!/<meta[^>]+name=["']viewport["']/i.test(html)) {
     findings.push({
       level: 'medium',
       message: 'No viewport meta tag — add <meta name="viewport" content="width=device-width, initial-scale=1"> so the app is mobile-responsive.',
+    });
+  } else if (viewportMatch && /\bwidth\s*=\s*\d+/i.test(viewportMatch[1])) {
+    // A fixed pixel width (width=1024) instead of device-width breaks mobile layout.
+    findings.push({
+      level: 'medium',
+      message: 'The viewport is pinned to a fixed pixel width instead of width=device-width — the app will not be responsive on mobile. Use content="width=device-width, initial-scale=1".',
     });
   }
 

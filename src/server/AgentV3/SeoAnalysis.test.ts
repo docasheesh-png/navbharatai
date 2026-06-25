@@ -50,6 +50,13 @@ describe('analyzeSeo', () => {
     expect(r.findings.some((f) => f.level === 'medium' && /viewport/.test(f.message))).toBe(true);
   });
 
+  it('flags a fixed-pixel-width viewport (non-responsive) but not width=device-width', () => {
+    const fixed = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>App</title><meta name="viewport" content="width=1024"><meta name="description" content="y"><meta property="og:title" content="X"><link rel="icon" href="/f.ico"></head></html>');
+    expect(fixed.findings.some((f) => /fixed pixel width/.test(f.message))).toBe(true);
+    const ok = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>App</title><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="y"><meta property="og:title" content="X"><link rel="icon" href="/f.ico"></head></html>');
+    expect(ok.findings.some((f) => /fixed pixel width/.test(f.message))).toBe(false);
+  });
+
   it('flags a missing description and lang as low', () => {
     const r = analyzeSeo('<html><head><title>X</title><meta name="viewport" content="x"></head></html>');
     expect(r.findings.some((f) => /description/.test(f.message))).toBe(true);

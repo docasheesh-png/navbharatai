@@ -2713,3 +2713,16 @@ Batch 4 merged to main b03dfe3. New:
    cryptographically secure (deprecated); flagged so tokens/keys/IVs use crypto.randomBytes().
 
 Gate: server tsc 0, frontend tsc 0, **2246 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 6): viewport-fixed-width (SEO) + meta-refresh (a11y)
+
+Batch 5 merged to main 82329a4. New:
+
+1. `SeoAnalysis` **viewport-fixed-width** (medium) — a viewport pinned to a fixed pixel width
+   (width=1024) instead of width=device-width makes the app non-responsive on mobile.
+2. `AccessibilityAnalysis` **meta-refresh** (medium) — a <meta http-equiv="refresh"> timed
+   auto-refresh/redirect disorients users and moves focus without consent (WCAG 2.2.1 / 3.2.5).
+
+Gate: server tsc 0, frontend tsc 0, **2248 vitest** PASS, build PASS.

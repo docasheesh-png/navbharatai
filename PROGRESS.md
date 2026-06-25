@@ -2645,3 +2645,26 @@ v3.0-only static scanners (pure, line/tag-local) so precision stays high. Branch
     turns off every lint rule; a disable that names specific rules NOT flagged.
 
 Gate at end of batch: server tsc 0, frontend tsc 0, **2234 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 2, post-deploy): 6 more high-precision checks
+
+Batch 1 (11 checks) merged to `main` 8d08761 (admin: "deploy karo") — clean FF, CI green pre-merge,
+Cloud Run auto-deploy triggered. Continuing the march on `claude/navbharatai-pro-testing-p2mgr5`
+(now ahead of main again). Six more, each unit-tested + KB-synced + full gate green:
+
+1. `AccessibilityAnalysis` **input-image-missing-alt** (high) — `<input type="image">` graphical
+   submit button with no alt (WCAG 1.1.1); plain img-missing-alt only covered `<img>`.
+2. `SeoAnalysis` **robots-noindex** (medium) — a leftover `<meta name=robots content=noindex>`
+   that silently keeps the live site OUT of search results.
+3. `AccessibilityAnalysis` **zoom-disabled** (medium) — viewport `user-scalable=no` / `maximum-scale=1`
+   blocks pinch-zoom, locking out low-vision users (WCAG 1.4.4).
+4. `AuthenticityAnalysis` **empty-promise-catch** (low) — `.catch(() => {})` empty body silently
+   swallows a rejection (promise-chain twin of an empty try/catch).
+5. `AccessibilityAnalysis` **role-presentation-interactive** (medium) — `role=none`/`presentation`
+   on a button/link/control strips its semantics from assistive tech.
+6. `SeoAnalysis` **placeholder-title** (medium) — a leftover template-default `<title>` ("Vite + React"
+   / "React App" / "Document" / "Untitled") — the classic "looks unfinished" tell.
+
+Gate at end of batch 2: server tsc 0, frontend tsc 0, **2240 vitest** PASS, build PASS.

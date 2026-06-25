@@ -67,6 +67,10 @@ import { buildDocumentContext } from '../lib/attachmentText';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
+import { VirtualFileSystem } from '../project/ProjectModel';
+import { renderPreview } from '../runtime/renderPreview';
+import { isReactProject } from '../runtime/ReactPreview';
+import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY } from '../lib/prompts';
 import { classifyIntentSmart } from '../AgentV3/IntentClassifier';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
@@ -557,6 +561,40 @@ export function registerAgentV3Routes(app: Express): void {
       res.json({ files, count: Object.keys(files).length, skipped: skipped.length });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to read the workspace files.' });
+    }
+  });
+
+  // DUAL PREVIEW (Phase 5) — in-browser preview. Builds ONE self-contained HTML document from the
+  // workspace files (static HTML/CSS/JS inlined, or React/Vue bundled in-browser via the existing
+  // runtime renderers) and returns it for the client to render in an <iframe srcdoc>. This needs NO
+  // running dev server, so it works even when the E2B sandbox preview is unavailable (the "Blocked
+  // request" / sandbox-down case) — the second of the two preview paths the builder offers.
+  app.post('/api/agentv3/inbrowser-preview', async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    try {
+      const actuator = buildActuator();
+      const { files } = await collectWorkspaceFiles(actuator, workspaceId);
+      if (Object.keys(files).length === 0) {
+        res.status(404).json({ error: 'No files to preview yet — build something first.' });
+        return;
+      }
+      const vfs = VirtualFileSystem.fromRecord(files);
+      const html = renderPreview(vfs);
+      // Detect the renderer used so the client can label the mode honestly.
+      const kind = isReactProject(vfs) ? 'react' : isVueProject(vfs) ? 'vue' : 'static';
+      res.json({ html, kind, count: Object.keys(files).length });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
     }
   });
 

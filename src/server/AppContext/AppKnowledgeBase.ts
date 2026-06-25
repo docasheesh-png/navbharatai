@@ -111,6 +111,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['export', 'download', 'zip', 'download project', 'export code', 'download code', 'my code', 'source code', 'no lock-in', 'portability', 'take my code', 'code nikalo', 'project download', 'download karo', 'zip nikalo', 'apna code'],
     aiSurface: 'nbi_chat',
   },
+  {
+    id: 'agentv3_preview',
+    name: 'Preview (dual: Live server + In-browser)',
+    path: 'NavBharatAI Pro v3.0 → header → Preview tab → "Live server" / "In-browser" switch',
+    description: 'Two ways to preview your app inside the v3.0 builder. "Live server" shows the real running app from the cloud (E2B) sandbox — full fidelity, supports any framework and a backend. "In-browser" renders a self-contained build of your files right inside the browser with no server, so it still works when the sandbox preview is unavailable (e.g. a "Blocked request" error) and is instant for static HTML/CSS/JS and simple React/Vue apps. Switch between them with the toggle at the top of the Preview tab; use the refresh icon to rebuild the in-browser preview from the latest files.',
+    howToUse: 'Open the Preview tab in NavBharatAI Pro v3.0. If the app is running you will see the Live server preview. Click "In-browser" to render the files locally without a server (useful if the live preview is blocked or not started). Click the refresh icon to rebuild it after changes.',
+    relatedFeatures: ['agentv3_builder', 'agentv3_export'],
+    keywords: ['preview', 'live preview', 'in-browser preview', 'browser preview', 'blocked request', 'preview not working', 'preview nahi chal raha', 'app dekho', 'see app', 'run app', 'sandbox preview', 'static preview', 'dual preview', 'preview kaise'],
+    aiSurface: 'nbi_chat',
+  },
   // ─── ENGINEER AI ─────────────────────────────────────────────────────────
   {
     id: 'connect_domain',

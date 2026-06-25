@@ -536,7 +536,7 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
           </div>
 
           {tab === 'preview' ? (
-            <PreviewSurface url={state.previewUrl} />
+            <PreviewSurface url={state.previewUrl} workspaceId={state.workspaceId} />
           ) : (
             <div className="flex-1 overflow-auto p-3 font-mono text-xs">
               {tab === 'files' && (state.files.length === 0 ? <Empty>No files yet.</Empty> : (
@@ -652,17 +652,96 @@ function Bubble({ msg }: { msg: ChatMsg }) {
   );
 }
 
-function PreviewSurface({ url }: { url?: string }) {
-  if (!url) {
-    return <div className="h-full flex items-center justify-center p-6"><Empty>No live preview yet — it appears the moment the agent starts the app.</Empty></div>;
+/**
+ * Dual preview (Phase 5). Two real preview paths:
+ *  • "Live server" — the running app in the E2B sandbox (state.previewUrl), full-fidelity (a real
+ *    dev server, supports any framework/backend). Shown whenever a preview URL exists.
+ *  • "In-browser" — a self-contained HTML build of the workspace files rendered in an <iframe
+ *    srcdoc>, with NO running server. Works even when the sandbox preview is unavailable (the
+ *    "Blocked request" / sandbox-down case) and for plain static or simple React/Vue apps.
+ * The user can switch between them; in-browser defaults on when there is no live URL yet.
+ */
+function PreviewSurface({ url, workspaceId }: { url?: string; workspaceId?: string }) {
+  const [mode, setMode] = useState<'live' | 'inbrowser'>(url ? 'live' : 'inbrowser');
+  const [html, setHtml] = useState<string>('');
+  const [kind, setKind] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string>('');
+
+  // Follow the live URL: when one arrives and the user hasn't deliberately chosen in-browser,
+  // prefer the higher-fidelity live server.
+  useEffect(() => { if (url) setMode('live'); }, [url]);
+
+  const loadInBrowser = async () => {
+    if (!workspaceId) { setErr('Build something first — there are no files to preview yet.'); return; }
+    setLoading(true);
+    setErr('');
+    try {
+      const res = await fetch('/api/agentv3/inbrowser-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);
+      setHtml(typeof data.html === 'string' ? data.html : '');
+      setKind(typeof data.kind === 'string' ? data.kind : '');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setHtml('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Auto-build the in-browser preview the first time that mode is shown.
+  useEffect(() => {
+    if (mode === 'inbrowser' && !html && !loading && !err && workspaceId) { void loadInBrowser(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, workspaceId]);
+
+  const canLive = !!url;
+  const switcher = (
+    <div className="flex items-center gap-1">
+      {canLive && (
+        <button onClick={() => setMode('live')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app in the cloud sandbox (full fidelity)">Live server</button>
+      )}
+      <button onClick={() => setMode('inbrowser')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'inbrowser' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="A self-contained preview rendered in your browser — no server needed">In-browser</button>
+    </div>
+  );
+
+  if (mode === 'live' && url) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
+          {switcher}
+          <span className="truncate flex-1">{url}</span>
+          <a href={url} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
+        </div>
+        <iframe title="Live preview" src={url} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+      </div>
+    );
   }
+
+  // In-browser mode.
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
-        <span className="truncate flex-1">{url}</span>
-        <a href={url} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
+        {switcher}
+        <span className="flex-1 truncate">{kind ? `In-browser preview (${kind})` : 'In-browser preview'}</span>
+        <button onClick={loadInBrowser} disabled={loading || !workspaceId} className="flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Rebuild the in-browser preview from the current files">
+          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+        </button>
       </div>
-      <iframe title="Live preview" src={url} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm"><Loader2 className="w-4 h-4 animate-spin mr-2" /> Building preview…</div>
+      ) : err ? (
+        <div className="flex-1 flex items-center justify-center p-6"><Empty>Couldn't build the in-browser preview: {err}</Empty></div>
+      ) : html ? (
+        <iframe title="In-browser preview" srcDoc={html} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-forms allow-popups" />
+      ) : (
+        <div className="flex-1 flex items-center justify-center p-6"><Empty>{workspaceId ? 'No preview yet — build something first.' : 'No live preview yet — it appears the moment the agent starts the app.'}</Empty></div>
+      )}
     </div>
   );
 }

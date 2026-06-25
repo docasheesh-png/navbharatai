@@ -3481,3 +3481,36 @@ Fix: added `https://apis.google.com` (gapi, Google popup/redirect) + `https://ww
 curling the live `Content-Security-Policy` header — it now includes all three. connectSrc (`https:`)
 and frameSrc (`https:`) already covered identitytoolkit + the auth handler iframe.
 Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2361 vitest** PASS. Ships on merge → deploy.
+
+---
+
+### 2026-06-25 — AgentV3 v3.0: surgical edit engine (PR #409)
+
+Problem: when a v3.0 user asked to CHANGE an existing app ("fix the navbar", "update the button
+colour", "refactor auth"), the engine treated it identically to "build me a new app" — it defaulted
+to `write_file` (full overwrite) and rebuilt everything from scratch, wiping the user's existing files.
+
+Root cause: `classifyIntent` returned the same `'build'` for both new builds and edits; both got the
+identical `architectSystemPrompt()` ("create real, complete source files"); no file-tree context and
+no instruction to read-first / patch surgically.
+
+Fix (real, end-to-end), built on already-existing infra (stable sessionId→workspaceId, sandbox VFS,
+read_file/edit_file/grep/glob, WorkspaceMemory project graph):
+- `IntentClassifier`: `'chat' | 'build'` → `'chat' | 'new_build' | 'edit_existing'`. New-build signals
+  win over edit signals; conservative default stays a build intent.
+- `systemPrompt.editModePrefix(fileTree)`: locate-first (grep/glob), read-before-write, prefer
+  edit_file over write_file, minimum changes, preserve existing logic, never rebuild from scratch.
+- `routes/agentv3.ts`: on an edit turn WITH real files, inject the live file tree + edit prefix and
+  narrate the edit; empty/failed workspace falls back to the normal build prompt.
+- `ToolDispatcher`: write_file nudges toward edit_file when it overwrites an existing file.
+
+Gold-standard polish (same PR):
+- (A) `warmIndexFiles` — pre-index persisted sandbox files into project memory when memory is cold
+  (process restarted), so recall/evaluate see the existing codebase immediately on a resumed edit.
+- (B) grep/glob "LOCATE FIRST" guidance in the edit prompt.
+- (C) `applyEdit` — edit_file now has a whitespace-tolerant fallback (still unique-or-error), so a
+  patch whose indentation is slightly off still applies; the diff shows the verbatim replaced text.
+
+AppKnowledgeBase: documented the surgical-edit capability + keywords (mandatory sync rule).
+Gate: frontend tsc 0, server tsc 0, **2400 vitest** PASS (32 new tests across IntentClassifier,
+systemPrompt, ToolDispatcher/applyEdit, WorkspaceMemory/warmIndexFiles). Ships on merge → deploy.

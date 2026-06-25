@@ -52,7 +52,7 @@ export { roleConfig, isWorkerRole, WORKER_ROLES, allRoles, findRolesByCapability
 export type { RoleConfig } from './AgentRegistry';
 export { agentLifecycle } from './AgentLifecycle';
 export type { AgentHealth, AgentPhase, RunToken } from './AgentLifecycle';
-export { WorkspaceMemory, getWorkspaceMemory, extractFacts } from './WorkspaceMemory';
+export { WorkspaceMemory, getWorkspaceMemory, extractFacts, warmIndexFiles } from './WorkspaceMemory';
 export type { ProjectGraph, SymbolInfo, Episode, MemorySnapshot, RecallHit } from './WorkspaceMemory';
 export { analyzeArchitecture, architectureSummary, resolveLocalImport } from './ArchitectureAnalysis';
 export type { ArchitectureReport } from './ArchitectureAnalysis';

@@ -26,6 +26,7 @@ import {
   restoreSession,
   agentLifecycle,
   getWorkspaceMemory,
+  warmIndexFiles,
   reflectOnBuild,
   reflectionNote,
   summarizeProject,
@@ -791,6 +792,18 @@ export function registerAgentV3Routes(app: Express): void {
             ts: Date.now(),
           });
           architectSystem = editModePrefix(fileTree) + '\n\n---\n\n' + architectSystem;
+          // Warm the project graph from the PERSISTED sandbox files when memory is
+          // cold (process restarted but the sandbox survived). This makes the agent's
+          // recall / evaluate tools see the existing codebase immediately on a resumed
+          // edit session, instead of only after it manually re-reads files. Best-effort,
+          // capped, and a no-op when memory is already warm — never blocks the build.
+          try {
+            await warmIndexFiles(
+              getWorkspaceMemory(workspaceId),
+              fileTree,
+              (p) => actuator.readFile(workspaceId, p),
+            );
+          } catch { /* warming is best-effort — never blocks a build */ }
         }
       }
 

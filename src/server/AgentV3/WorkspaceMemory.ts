@@ -272,3 +272,41 @@ export function getWorkspaceMemory(workspaceId: string): WorkspaceMemory {
 export function _clearWorkspaceMemory(): void {
   memories.clear();
 }
+
+/**
+ * Pre-index existing sandbox files into a workspace's project memory when the
+ * in-memory graph is COLD — e.g. the server process restarted but the sandbox
+ * files persisted, or an edit session resumes work that was built in another
+ * process. This makes `recall` ("where is the login component?") and `evaluate`
+ * (architecture / dependency analysis) work IMMEDIATELY on a resumed edit
+ * session, instead of only after the agent has manually re-read files this turn.
+ *
+ * Cheap and best-effort by design:
+ *  - only files NOT already in the graph are read (warm memory ⇒ zero reads),
+ *  - only code files are indexed (that is what produces symbols/components/routes),
+ *  - the file count and per-file size are capped,
+ *  - any read error skips that file and never blocks the build.
+ *
+ * Returns the paths actually indexed (for logging/tests). Never throws.
+ */
+export async function warmIndexFiles(
+  mem: WorkspaceMemory,
+  fileTree: readonly string[],
+  read: (path: string) => Promise<string>,
+  opts: { maxFiles?: number; maxBytes?: number } = {},
+): Promise<string[]> {
+  const maxFiles = opts.maxFiles ?? 80;
+  const maxBytes = opts.maxBytes ?? 200_000;
+  const known = new Set(mem.graph().files);
+  const targets = fileTree.filter((f) => isCode(f) && !known.has(f)).slice(0, maxFiles);
+  const indexed: string[] = [];
+  for (const file of targets) {
+    try {
+      const content = await read(file);
+      if (typeof content !== 'string' || content.length > maxBytes) continue;
+      mem.indexFile(file, content);
+      indexed.push(file);
+    } catch { /* unreadable file — skip, never block the build */ }
+  }
+  return indexed;
+}

@@ -14,6 +14,13 @@ describe('editModePrefix', () => {
     expect(p).toContain('write_file');
   });
 
+  it('instructs locating code with grep/glob before editing', () => {
+    const p = editModePrefix(['src/App.tsx']);
+    expect(p).toContain('LOCATE FIRST');
+    expect(p).toContain('grep');
+    expect(p).toContain('glob');
+  });
+
   it('forbids rebuilding from scratch and demands minimum changes', () => {
     const p = editModePrefix(['src/App.tsx']);
     expect(p).toContain('NEVER REBUILD FROM SCRATCH');

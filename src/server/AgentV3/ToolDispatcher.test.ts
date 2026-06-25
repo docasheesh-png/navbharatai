@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ToolDispatcher, type ActuatorPort } from './ToolDispatcher';
+import { ToolDispatcher, applyEdit, type ActuatorPort } from './ToolDispatcher';
 import { defaultToolCatalog, CATALOG_TOOL_NAMES } from './ToolCatalog';
 import { WorkspaceState } from './WorkspaceState';
 import { AgentEventStream } from './AgentEventStream';
@@ -120,6 +120,20 @@ describe('ToolDispatcher', () => {
     const res = await d.dispatch(call('edit_file', { path: 'a.ts', old_string: 'zzz', new_string: 'x' }));
     expect(res.is_error).toBe(true);
     expect(res.content).toContain('not found');
+  });
+
+  it('edit_file applies a patch whose whitespace is slightly off (flexible fallback)', async () => {
+    // File uses two-space indent; the model supplies four-space indent + extra blank.
+    act.files.set('a.ts', 'function f() {\n  return 1;\n}');
+    const res = await d.dispatch(call('edit_file', {
+      path: 'a.ts',
+      old_string: 'function f() {\n    return 1;\n}',  // wrong indentation
+      new_string: 'function f() {\n  return 2;\n}',
+    }));
+    expect(res.is_error).toBe(false);
+    expect(act.files.get('a.ts')).toBe('function f() {\n  return 2;\n}');
+    expect(res.content).toContain('ignoring whitespace');
+    expect(events.find((e) => e.type === 'diff')).toBeTruthy();
   });
 
   it('bash runs the command and records terminal output', async () => {
@@ -618,5 +632,46 @@ describe('ToolDispatcher — evaluate integration (compliance + env vars)', () =
     const out = await evalText(dd);
     expect(out).toContain('Env var check');
     expect(out).toContain('MISSING_SECRET_TOKEN');
+  });
+});
+
+describe('applyEdit (edit_file matching with whitespace-tolerant fallback)', () => {
+  it('replaces an exact unique match with no note', () => {
+    const r = applyEdit('const x = 1;\nconst y = 2;', 'const x = 1;', 'const x = 42;');
+    expect(r.updated).toBe('const x = 42;\nconst y = 2;');
+    expect(r.matchedOld).toBe('const x = 1;');
+    expect(r.note).toBe('');
+  });
+
+  it('throws when an exact match is not unique', () => {
+    expect(() => applyEdit('dup\ndup', 'dup', 'x')).toThrow(/not unique/);
+  });
+
+  it('falls back to a whitespace-flexible match when exact fails', () => {
+    // File has single-space indent; supplied old_string has different spacing.
+    const file = 'if (a) {\n  doThing();\n}';
+    const r = applyEdit(file, 'if (a) {\n      doThing();\n}', 'if (a) {\n  doOther();\n}');
+    expect(r.updated).toBe('if (a) {\n  doOther();\n}');
+    expect(r.note).toContain('whitespace');
+    // matchedOld is the VERBATIM text from the file (real indentation), not the input.
+    expect(r.matchedOld).toBe('if (a) {\n  doThing();\n}');
+  });
+
+  it('throws "not found" when neither exact nor flexible matches', () => {
+    expect(() => applyEdit('abc', 'xyz', 'q')).toThrow(/not found/);
+  });
+
+  it('throws "not unique" when the flexible match is ambiguous', () => {
+    // 'a + b' (single spaces) does not appear exactly, but matches BOTH
+    // double-spaced occurrences under whitespace-flexible matching → ambiguous.
+    const file = 'x = a  +  b\ny = a  +  b';
+    expect(() => applyEdit(file, 'a + b', 'a - b')).toThrow(/not unique/);
+  });
+
+  it('does not treat regex metacharacters in old_string as patterns', () => {
+    const file = 'const re = /a.+b/;\nconst ok = 1;';
+    const r = applyEdit(file, 'const re = /a.+b/;', 'const re = /done/;');
+    expect(r.updated).toBe('const re = /done/;\nconst ok = 1;');
+    expect(r.note).toBe('');
   });
 });

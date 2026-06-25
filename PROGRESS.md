@@ -2855,3 +2855,19 @@ Batch 12 merged to main b7c69d9 (PR #363). Diversified from security to a11y. Ne
    disorienting screen-reader users and skipping content (axe "no-autofocus").
 
 Gate: server tsc 0, frontend tsc 0, **2266 vitest** PASS (24 AccessibilityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 14): partial-OG og:image + over-long title (SEO)
+
+Batch 13 merged to main 40dde8b (PR #364). New `SeoAnalysis` checks (both fire only on real,
+present-but-flawed metadata — never nagging a clean page):
+
+1. **og:image missing (partial OG)** (low) — Open Graph tags exist but `og:image` is absent, so
+   a shared link renders a card with text and no image. Distinct from the existing "no OG at
+   all" finding (which only fires when there are zero og tags).
+2. **over-long `<title>`** (low) — a real (non-default) title over 60 characters is truncated in
+   search results; flagged with its actual length so the agent tightens it.
+
+Existing "no OG" test made specific (`/No Open Graph tags/`) since a partial OG is now flagged
+by its own rule. Gate: server tsc 0, frontend tsc 0, **2268 vitest** PASS (17 SeoAnalysis tests).

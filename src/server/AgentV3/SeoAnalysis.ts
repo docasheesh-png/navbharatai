@@ -44,6 +44,13 @@ export function analyzeSeo(indexHtml: string | null | undefined): SeoReport {
       level: 'medium',
       message: `The <title> is a leftover template default ("${titleMatch[1].trim()}") — replace it with your app's real, descriptive title.`,
     });
+  } else if (titleMatch && titleMatch[1].trim().length > 60) {
+    // Google truncates titles past ~60 characters in search results, so the tail is
+    // lost. Only flagged when a real (non-default) title is present and over the limit.
+    findings.push({
+      level: 'low',
+      message: `The <title> is ${titleMatch[1].trim().length} characters — search results truncate it past ~60, so the end is cut off. Tighten it to the key words first.`,
+    });
   }
 
   // Viewport meta — without it the app is not mobile-responsive.
@@ -92,6 +99,19 @@ export function analyzeSeo(indexHtml: string | null | undefined): SeoReport {
     findings.push({
       level: 'low',
       message: 'No Open Graph tags — add og:title, og:description and og:image so links shared on WhatsApp/social show a rich preview instead of a bare URL.',
+    });
+  }
+
+  // Partial Open Graph: og tags exist but og:image is missing — a shared link then
+  // renders a card with a title/description but no image (much lower engagement). Only
+  // flagged when OG is otherwise present (the "no OG at all" case is handled above).
+  if (
+    /<meta[^>]+(?:property|name)=["']og:[^"']+["']/i.test(html) &&
+    !/<meta[^>]+(?:property|name)=["']og:image["']/i.test(html)
+  ) {
+    findings.push({
+      level: 'low',
+      message: 'Open Graph tags are present but og:image is missing — add <meta property="og:image" content="..."> so shared links show a preview image, not just text.',
     });
   }
 

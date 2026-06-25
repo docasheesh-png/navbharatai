@@ -43,8 +43,10 @@ const RULES: Rule[] = [
   {
     rule: 'hardcoded-secret',
     severity: 'high',
-    // key/secret/password/token assigned a non-trivial string literal.
-    re: /\b(api[_-]?key|secret|password|passwd|access[_-]?token|auth[_-]?token|client[_-]?secret)\b\s*[:=]\s*['"`]([^'"`]{8,})['"`]/i,
+    // key/secret/password/token assigned a non-trivial string literal. The value is 8+
+    // NON-whitespace chars: a real credential has no spaces, so this excludes the common
+    // false positive of a validation/UI message (password = "Password must be 8 characters").
+    re: /\b(api[_-]?key|secret|password|passwd|access[_-]?token|auth[_-]?token|client[_-]?secret)\b\s*[:=]\s*['"`]([^'"`\s]{8,})['"`]/i,
     message: 'Hardcoded credential — load it from an environment variable instead.',
     ignore: (_m, line) => PLACEHOLDER.test(line),
   },
@@ -113,7 +115,10 @@ const RULES: Rule[] = [
   {
     rule: 'eval-usage',
     severity: 'medium',
-    re: /\beval\s*\(/,
+    // The global eval() runs a string as code (injection). The negative lookbehind excludes
+    // member methods named eval (mathjs `math.eval(...)`, MongoDB `db.eval(...)`, etc.) which
+    // are unrelated library calls — only the dangerous global eval is flagged.
+    re: /(?<![.\w])eval\s*\(/,
     message: 'Use of eval() — avoid it; it enables code injection.',
     ignore: (_m, line) => /\/\/|\*/.test(line.slice(0, line.indexOf('eval'))),
   },

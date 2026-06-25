@@ -228,19 +228,6 @@ const RULES: Rule[] = [
     message: 'File path built from request input — this enables path traversal (e.g. ../../etc/passwd). Validate against an allow-list and resolve+confine the path under a fixed base directory.',
   },
   {
-    rule: 'secret-in-web-storage',
-    severity: 'medium',
-    // localStorage/sessionStorage are readable by ANY JavaScript on the page, so a single
-    // XSS exfiltrates anything kept there. Storing a token/secret/password in them is a
-    // common mistake. The SECURITY_CONTEXT guard keeps it precise (a theme/locale value is
-    // not flagged). Prefer an httpOnly, Secure cookie for auth tokens.
-    re: /\b(?:localStorage|sessionStorage)\.setItem\s*\(/,
-    message: 'Storing a token/secret in localStorage/sessionStorage — any XSS on the page can read it (web storage is JS-accessible). Keep auth tokens in an httpOnly, Secure cookie instead.',
-    // Substring match (not \b) so camelCase keys like authToken/accessToken are caught; the
-    // word "session" is intentionally excluded since it appears inside "sessionStorage".
-    ignore: (_m, line) => !/(?:secret|token|passwd|password|jwt|credential|api[_-]?key|apikey|private[_-]?key)/i.test(line),
-  },
-  {
     rule: 'cookie-httponly-false',
     severity: 'medium',
     // httpOnly:false makes a cookie readable by client JavaScript — an XSS can then steal a
@@ -248,6 +235,17 @@ const RULES: Rule[] = [
     // deliberate (and usually wrong) opt-out for a sensitive cookie.
     re: /\bhttpOnly\s*:\s*false\b/i,
     message: 'httpOnly:false makes the cookie readable by client JavaScript — an XSS can steal a session/auth cookie. Set httpOnly:true (and Secure + SameSite) for auth cookies.',
+  },
+  {
+    rule: 'samesite-none-insecure',
+    severity: 'medium',
+    // A cookie with SameSite=None MUST also be Secure — modern browsers silently REJECT a
+    // SameSite=None cookie that is not Secure (so the cookie is never set and auth breaks),
+    // and None alone removes CSRF protection. Flag SameSite:'none' unless secure:true is on
+    // the same line.
+    re: /\bsameSite\s*:\s*['"`]none['"`]/i,
+    message: "SameSite=None without Secure — browsers silently reject the cookie (it is never set, breaking auth) and it removes CSRF protection; set secure:true alongside sameSite:'none'.",
+    ignore: (_m, line) => /\bsecure\s*:\s*true\b/i.test(line),
   },
   {
     rule: 'dangerous-html',

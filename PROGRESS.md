@@ -3070,3 +3070,22 @@ Batch 26 merged to main e4d4a7b (PR #377). New `SecurityAnalysis` rules:
    can steal a session/auth cookie. The flag defaults off, so an explicit false is a risky opt-out.
 
 Gate: server tsc 0, frontend tsc 0, **2294 vitest** PASS (51 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 28): correction (remove duplicate) + SameSite=None insecure
+
+Batch 27 merged to main c4b72ef (PR #378). HONEST CORRECTION + new check:
+
+- **Removed** `secret-in-web-storage` (added in batch 27) — it DUPLICATED ComplianceAnalysis's
+  existing `sensitive-in-browser-storage` (both fire on localStorage/sessionStorage.setItem +
+  a sensitive keyword), so the same line was reported twice in `evaluate`. Root cause: before
+  batch 27 I grepped only SecurityAnalysis.ts, not the whole AgentV3 dir (safeguard #6 lapse).
+  `cookie-httponly-false` (also batch 27) is KEPT — it is complementary: Compliance's
+  `cookie-no-httponly` checks for ABSENCE of httponly and so misses an explicit `httpOnly:false`.
+- **Added** `samesite-none-insecure` (medium) — a cookie with `sameSite:'none'` and no
+  `secure:true` on the line: modern browsers silently REJECT it (cookie never set → auth
+  breaks) and None alone drops CSRF protection. SameSite=None+Secure and Lax/Strict not flagged.
+  Verified absent from both SecurityAnalysis and ComplianceAnalysis before adding.
+
+Gate: server tsc 0, frontend tsc 0, **2294 vitest** PASS (51 SecurityAnalysis tests).

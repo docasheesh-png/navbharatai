@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseRepoRef } from '../src/server/repoAnalyst/githubFetch';
 import { buildRepoContext, findRepoRef } from '../src/server/repoAnalyst/analyst';
+import { parseGeneratedFiles } from '../src/server/repoAnalyst/generate';
 import type { RepoSnapshot } from '../src/server/repoAnalyst/githubFetch';
 
 describe('parseRepoRef', () => {
@@ -88,5 +89,47 @@ describe('buildRepoContext', () => {
   it('flags missing license honestly when none detected', () => {
     const ctx = buildRepoContext({ ...snap, license: null });
     expect(ctx.toLowerCase()).toContain('none detected');
+  });
+});
+
+describe('parseGeneratedFiles', () => {
+  it('parses a summary and multiple files', () => {
+    const out = parseGeneratedFiles([
+      "Here are improvements for your fork.",
+      "Two files added.",
+      "=== FILE: README.md ===",
+      "# Project",
+      "Docs here.",
+      "=== END FILE ===",
+      "=== FILE: .github/workflows/ci.yml ===",
+      "name: CI",
+      "on: [push]",
+      "=== END FILE ===",
+    ].join('\n'));
+    expect(out.summary).toContain('improvements');
+    expect(out.files).toHaveLength(2);
+    expect(out.files[0].path).toBe('README.md');
+    expect(out.files[0].content).toContain('# Project');
+    expect(out.files[1].path).toBe('.github/workflows/ci.yml');
+    expect(out.files[1].content).toContain('name: CI');
+  });
+
+  it('sanitizes unsafe/absolute/traversal paths to safe relative ones', () => {
+    const out = parseGeneratedFiles('=== FILE: /etc/../../secret.txt ===\nhello\n=== END FILE ===');
+    expect(out.files).toHaveLength(1);
+    expect(out.files[0].path).not.toContain('..');
+    expect(out.files[0].path.startsWith('/')).toBe(false);
+    expect(out.files[0].path).toBe('etc/secret.txt');
+  });
+
+  it('unwraps a single surrounding code fence', () => {
+    const out = parseGeneratedFiles('=== FILE: a.js ===\n```js\nconst a = 1;\n```\n=== END FILE ===');
+    expect(out.files[0].content.trim()).toBe('const a = 1;');
+  });
+
+  it('returns no files when there are no file blocks', () => {
+    const out = parseGeneratedFiles('Just some prose with no file blocks.');
+    expect(out.files).toHaveLength(0);
+    expect(out.summary).toContain('prose');
   });
 });

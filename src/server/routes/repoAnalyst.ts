@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { buildRateLimiter } from '../lib/authMiddleware';
 import { runRepoAnalystChat, type AnalystTurn } from '../repoAnalyst/analyst';
+import { runRepoImprovementGen } from '../repoAnalyst/generate';
 
 /**
  * GitHub Repo Analyst & Improver route.
@@ -26,6 +27,23 @@ export function registerRepoAnalystRoutes(app: Express): void {
     try {
       const reply = await runRepoAnalystChat(message.trim(), turns, token);
       res.json({ reply, professionalId: 'repo_analyst' });
+    } catch (err: any) {
+      res.status(503).json({ error: err?.message || 'The analyst is busy. Please try again.' });
+    }
+  });
+
+  // "Improver" — generate concrete improvement files for the referenced repo.
+  app.post('/api/repo-analyst/generate', buildRateLimiter(), async (req: Request, res: Response) => {
+    const { message, history } = req.body || {};
+    const token = req.headers.authorization?.split(' ')[1];
+    const turns: AnalystTurn[] = Array.isArray(history)
+      ? history
+          .filter((m: any) => m && typeof m.content === 'string')
+          .map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content) }))
+      : [];
+    try {
+      const result = await runRepoImprovementGen(typeof message === 'string' ? message.trim() : '', turns, token);
+      res.json({ ...result, professionalId: 'repo_analyst' });
     } catch (err: any) {
       res.status(503).json({ error: err?.message || 'The analyst is busy. Please try again.' });
     }

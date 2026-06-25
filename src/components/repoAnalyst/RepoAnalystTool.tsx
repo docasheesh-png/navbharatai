@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { GitBranch, Loader2, Search, Send } from 'lucide-react';
+import { GitBranch, Loader2, Search, Send, Sparkles, Copy, Download } from 'lucide-react';
 
 /**
  * Dedicated "GitHub Repo Analyst & Improver" tool UI.
@@ -11,8 +11,10 @@ import { GitBranch, Loader2, Search, Send } from 'lucide-react';
  */
 
 interface Turn { role: 'user' | 'assistant'; content: string; }
+interface GenFile { path: string; content: string; }
 
 const ENDPOINT = '/api/repo-analyst/chat';
+const GEN_ENDPOINT = '/api/repo-analyst/generate';
 
 /** Light, safe renderer: **bold**, `code`, and heading-ish lines — no HTML injection. */
 function renderReport(text: string): React.ReactNode {
@@ -44,6 +46,9 @@ export function RepoAnalystTool({ userId }: { userId?: string }) {
   const [turns, setTurns] = useState<Turn[]>([]); // report + follow-ups (assistant/user)
   const [loading, setLoading] = useState(false);
   const [followUp, setFollowUp] = useState('');
+  const [genFiles, setGenFiles] = useState<GenFile[]>([]);
+  const [genSummary, setGenSummary] = useState('');
+  const [genLoading, setGenLoading] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [turns, loading]);
@@ -91,6 +96,41 @@ export function RepoAnalystTool({ userId }: { userId?: string }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const generateFiles = async () => {
+    if (genLoading || loading) return;
+    setGenLoading(true);
+    setGenFiles([]);
+    setGenSummary('');
+    try {
+      const res = await fetch(GEN_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: followUp.trim(), history: turns.slice(-10), userId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Request failed.');
+      setGenSummary(data.summary || '');
+      setGenFiles(Array.isArray(data.files) ? data.files : []);
+      if (followUp.trim()) setFollowUp('');
+    } catch (e: any) {
+      setGenSummary(`⚠️ ${e?.message || 'Could not generate files — please try again.'}`);
+    } finally {
+      setGenLoading(false);
+    }
+  };
+
+  const copyFile = (f: GenFile) => { try { navigator.clipboard?.writeText(f.content); } catch { /* ignore */ } };
+  const downloadFile = (f: GenFile) => {
+    try {
+      const blob = new Blob([f.content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = f.path.split('/').pop() || 'file.txt';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch { /* ignore */ }
   };
 
   const hasReport = turns.some((t) => t.role === 'assistant');
@@ -152,6 +192,38 @@ export function RepoAnalystTool({ userId }: { userId?: string }) {
               <Loader2 className="w-4 h-4 animate-spin text-indigo-400" /> Fetching &amp; analysing the repository…
             </div>
           )}
+
+          {hasReport && (
+            <div className="pt-1">
+              <button
+                onClick={generateFiles}
+                disabled={genLoading || loading}
+                className="text-[13px] px-3 py-2 rounded-xl bg-emerald-600/90 hover:bg-emerald-600 disabled:opacity-40 text-white font-semibold flex items-center gap-2"
+              >
+                {genLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                Generate improvement files
+              </button>
+              <p className="text-[11px] text-[#586069] mt-1">Original, ready-to-use files for YOUR fork (tests, README, CI, fixes…). Type a specific ask in the box below first if you want (e.g. “a CI workflow + a test”). License-respecting — apply them in your own copy.</p>
+            </div>
+          )}
+
+          {genSummary && (
+            <div className="bg-[#161b22] border border-emerald-500/20 rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap text-[#c9d1d9]">{genSummary}</div>
+          )}
+
+          {genFiles.map((f, i) => (
+            <div key={i} className="border border-white/10 rounded-2xl overflow-hidden">
+              <div className="flex items-center justify-between gap-2 px-3 py-2 bg-[#161b22] border-b border-white/10">
+                <span className="font-mono text-[12px] text-emerald-300 truncate">{f.path}</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => copyFile(f)} title="Copy" className="p-1.5 rounded-lg hover:bg-white/10 text-[#8b949e]"><Copy className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => downloadFile(f)} title="Download" className="p-1.5 rounded-lg hover:bg-white/10 text-[#8b949e]"><Download className="w-3.5 h-3.5" /></button>
+                </div>
+              </div>
+              <pre className="px-3 py-2 text-[12px] text-[#c9d1d9] overflow-x-auto custom-scrollbar max-h-80 whitespace-pre"><code>{f.content}</code></pre>
+            </div>
+          ))}
+
           <div ref={endRef} />
         </div>
       </div>

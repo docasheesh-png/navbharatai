@@ -188,8 +188,8 @@ const RULES: Rule[] = [
     // missed; these formats are unmistakable, so matching one is almost certainly a
     // real leaked credential. (EnvSecretValueAnalysis covers the same formats, but only
     // inside .env templates — this covers code.)
-    re: /\bgh[posru]_[A-Za-z0-9]{30,}|\bAIza[0-9A-Za-z_-]{30,}|\bxox[baprs]-[A-Za-z0-9-]{10,}|\b[rs]k_live_[A-Za-z0-9]{16,}/,
-    message: 'Hardcoded API credential (GitHub/Google/Slack/Stripe token) in source — remove it, load it from an environment variable, and rotate the key since it was committed.',
+    re: /\bgh[posru]_[A-Za-z0-9]{30,}|\bgithub_pat_[A-Za-z0-9_]{30,}|\bAIza[0-9A-Za-z_-]{30,}|\bxox[baprs]-[A-Za-z0-9-]{10,}|\b[rs]k_live_[A-Za-z0-9]{16,}|\bsk-ant-[A-Za-z0-9_-]{20,}/,
+    message: 'Hardcoded API credential (GitHub/Google/Slack/Stripe/Anthropic token) in source — remove it, load it from an environment variable, and rotate the key since it was committed.',
     ignore: (_m, line) => PLACEHOLDER.test(line),
   },
   {

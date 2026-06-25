@@ -114,6 +114,8 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', `const g = "${'AI' + 'za' + body}";`).some((f) => f.rule === 'hardcoded-provider-token')).toBe(true);
     expect(scanSecurity('a.ts', `const s = "${'xo' + 'xb-' + body}";`).some((f) => f.rule === 'hardcoded-provider-token')).toBe(true);
     expect(scanSecurity('a.ts', `const k = "${'sk' + '_live_' + body}";`).some((f) => f.rule === 'hardcoded-provider-token')).toBe(true);
+    expect(scanSecurity('a.ts', `const p = "${'github' + '_pat_' + body}";`).some((f) => f.rule === 'hardcoded-provider-token')).toBe(true);
+    expect(scanSecurity('a.ts', `const a = "${'sk-' + 'ant-' + body}";`).some((f) => f.rule === 'hardcoded-provider-token')).toBe(true);
     // Safe: env-injected, a placeholder/example, and an ordinary URL are not flagged.
     expect(scanSecurity('a.ts', 'const t = process.env.GITHUB_TOKEN;').some((f) => f.rule === 'hardcoded-provider-token')).toBe(false);
     expect(scanSecurity('a.ts', `const ex = "${'gh' + 'p_' + 'EXAMPLE' + body}";`).some((f) => f.rule === 'hardcoded-provider-token')).toBe(false);

@@ -870,4 +870,16 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Altitude sickness & outdoor safety tips',
     ],
   },
+  budget_ai: {
+    id: 'budget_ai',
+    name: 'Home-Budget & Frugal-Living AI',
+    welcome:
+      "Namaste! 🐷 I'm Home-Budget & Frugal-Living AI — practical, judgement-free help to manage everyday money: make a simple monthly budget, track spends, cut bills & grocery costs, build a saving habit & emergency fund, and live well on a budget. Tell me your rough income & main expenses. ⚠️ This is everyday money-management, not investment/tax advice (Finance AI for investing, CA AI for tax) — and beware 'save/earn fast' schemes. Frugality should reduce stress, not cause misery!",
+    quickPrompts: [
+      'Help me make a monthly budget',
+      'Practical ways to cut my expenses',
+      'How do I build a saving habit & emergency fund?',
+      'Budgeting tips for an irregular income',
+    ],
+  },
 };

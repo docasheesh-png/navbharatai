@@ -146,6 +146,104 @@ function hasCodeOrPathOrUrl(message: string): boolean {
 const LONG_MESSAGE_THRESHOLD = 120;
 const SHORT_WORD_COUNT = 3;
 
+// ── Level 1: confidence-annotated classification ─────────────────────────────
+
+/**
+ * Classification result including a confidence level.
+ *  'high' — a clear signal drove the decision (strong keyword match).
+ *  'low'  — the classifier defaulted (short message, no signals, or social pattern
+ *            only) and an LLM call could produce a better result.
+ */
+export interface IntentWithConfidence {
+  intent: BuildIntent;
+  confidence: 'high' | 'low';
+  /** The first signal that triggered the decision, if any. */
+  signal?: string;
+}
+
+/**
+ * Same as classifyIntent but also returns a confidence level so callers can
+ * optionally upgrade borderline results with an LLM call.
+ */
+export function classifyIntentWithConfidence(message: string): IntentWithConfidence {
+  const text = typeof message === 'string' ? message.trim() : '';
+  if (!text) return { intent: 'new_build', confidence: 'low' };
+
+  const lower = text.toLowerCase();
+
+  // Steps 1–4 → high confidence (strong, explicit signals)
+  for (const signal of NEW_BUILD_SIGNALS) {
+    const idx = lower.indexOf(signal);
+    if (idx === -1) continue;
+    const before = idx === 0 ? '' : lower[idx - 1];
+    const after = idx + signal.length >= lower.length ? '' : lower[idx + signal.length];
+    if ((before === '' || !/[a-z0-9]/.test(before)) && (after === '' || !/[a-z0-9]/.test(after))) {
+      return { intent: 'new_build', confidence: 'high', signal };
+    }
+  }
+  for (const signal of EDIT_SIGNALS) {
+    const idx = lower.indexOf(signal);
+    if (idx === -1) continue;
+    const before = idx === 0 ? '' : lower[idx - 1];
+    const after = idx + signal.length >= lower.length ? '' : lower[idx + signal.length];
+    if ((before === '' || !/[a-z0-9]/.test(before)) && (after === '' || !/[a-z0-9]/.test(after))) {
+      return { intent: 'edit_existing', confidence: 'high', signal };
+    }
+  }
+  if (text.length > LONG_MESSAGE_THRESHOLD) {
+    return { intent: 'new_build', confidence: 'high', signal: 'long-message' };
+  }
+  if (hasCodeOrPathOrUrl(text)) {
+    return { intent: 'new_build', confidence: 'high', signal: 'code-or-url' };
+  }
+  if (matchesSignal(lower, BUILD_SIGNALS)) {
+    return { intent: 'new_build', confidence: 'high', signal: 'build-signal' };
+  }
+
+  // Steps 5–7 → low confidence (social pattern, short message, or default)
+  for (const pattern of SOCIAL_PATTERNS) {
+    if (pattern.test(lower)) return { intent: 'chat', confidence: 'low', signal: 'social' };
+  }
+  const wordCount = lower.split(/\s+/).filter(Boolean).length;
+  if (wordCount <= SHORT_WORD_COUNT) return { intent: 'chat', confidence: 'low', signal: 'short' };
+  return { intent: 'new_build', confidence: 'low', signal: 'default' };
+}
+
+/**
+ * Upgrade a low-confidence classification by calling a lightweight LLM.
+ * `llmCall` receives a short prompt and must return one of: 'chat', 'build', 'edit'.
+ * If the LLM returns an unrecognised value or throws, the original intent is kept.
+ * Best-effort — never throws to the caller.
+ */
+export async function classifyIntentSmart(
+  message: string,
+  llmCall: (prompt: string) => Promise<string>,
+): Promise<BuildIntent> {
+  const { intent, confidence } = classifyIntentWithConfidence(message);
+  if (confidence === 'high') return intent;
+
+  const prompt = [
+    'Classify this user message into exactly one of three categories:',
+    '  chat    — plain conversation, greeting, question, thanks',
+    '  build   — create a new app / feature / component from scratch',
+    '  edit    — fix, modify, or update something that already exists',
+    '',
+    `Message: "${message.slice(0, 300)}"`,
+    '',
+    'Reply with ONLY one word: chat, build, or edit.',
+  ].join('\n');
+
+  try {
+    const raw = (await llmCall(prompt)).trim().toLowerCase().split(/\s/)[0] ?? '';
+    if (raw === 'chat') return 'chat';
+    if (raw === 'build') return 'new_build';
+    if (raw === 'edit') return 'edit_existing';
+  } catch {
+    /* LLM call failed — fall back to keyword result */
+  }
+  return intent;
+}
+
 /**
  * Classify a message as plain conversation ('chat'), a fresh build ('new_build'),
  * or a modification of an existing app ('edit_existing').

@@ -188,6 +188,39 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'codemod_rename',
+      description:
+        'AST-safe cross-file symbol rename. Renames every usage of an exported ' +
+        'identifier (function, variable, type, class, interface) across the whole ' +
+        'workspace — import sites, call sites, and JSX tags — without touching ' +
+        'string literals. Far safer than a global find-and-replace.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          old_name: { type: 'string', description: 'The current symbol name to rename.' },
+          new_name: { type: 'string', description: 'The new name to replace it with.' },
+        },
+        required: ['old_name', 'new_name'],
+      },
+    },
+    {
+      name: 'codemod_add_prop',
+      description:
+        'Add a new prop (with its type and optional default) to a React component: ' +
+        'updates the Props interface/type and every JSX usage site in one atomic ' +
+        'operation. Use instead of manually hunting every call site.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          component_name: { type: 'string', description: 'The component to add the prop to (e.g. "Button").' },
+          prop_name: { type: 'string', description: 'The new prop name (e.g. "disabled").' },
+          prop_type: { type: 'string', description: 'The TypeScript type (e.g. "boolean", "string").' },
+          default_value: { type: 'string', description: 'Optional default value for JSX usage sites (e.g. "false").' },
+        },
+        required: ['component_name', 'prop_name', 'prop_type'],
+      },
+    },
+    {
       name: 'generate_gitignore',
       description:
         'Generate a correct, stack-aware .gitignore so node_modules, build output and ' +
@@ -215,6 +248,8 @@ export const CATALOG_TOOL_NAMES = [
   'update_preview',
   'recall',
   'evaluate',
+  'codemod_rename',
+  'codemod_add_prop',
   'generate_readme',
   'generate_env_example',
   'generate_gitignore',

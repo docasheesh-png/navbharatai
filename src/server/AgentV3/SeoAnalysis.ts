@@ -32,10 +32,17 @@ export function analyzeSeo(indexHtml: string | null | undefined): SeoReport {
   const findings: SeoFinding[] = [];
 
   // A non-empty <title>.
+  const titleMatch = /<title>\s*([^<]*?)\s*<\/title>/i.exec(html);
   if (!/<title>\s*\S[^<]*<\/title>/i.test(html)) {
     findings.push({
       level: 'high',
       message: 'No non-empty <title> in the HTML entry — set a descriptive page title (browser tab, search results and link previews all use it).',
+    });
+  } else if (titleMatch && /^(?:vite(?:\s*\+\s*react(?:\s*\+\s*ts)?)?(?:\s+app)?|react\s+app|create\s+react\s+app|document|untitled|home)$/i.test(titleMatch[1].trim())) {
+    // A leftover scaffold/template default title — the page shipped with a placeholder.
+    findings.push({
+      level: 'medium',
+      message: `The <title> is a leftover template default ("${titleMatch[1].trim()}") — replace it with your app's real, descriptive title.`,
     });
   }
 

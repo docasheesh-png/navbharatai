@@ -23,6 +23,16 @@ describe('analyzeSeo', () => {
     expect(r.findings).toHaveLength(0);
   });
 
+  it('flags a leftover template-default title as medium, but not a real title', () => {
+    const vite = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>Vite + React</title><meta name="viewport" content="x"><meta name="description" content="y"><meta property="og:title" content="X"><link rel="icon" href="/f.ico"></head></html>');
+    expect(vite.findings.some((f) => f.level === 'medium' && /template default/.test(f.message))).toBe(true);
+    const doc = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>Document</title><meta name="viewport" content="x"><meta name="description" content="y"><meta property="og:title" content="X"><link rel="icon" href="/f.ico"></head></html>');
+    expect(doc.findings.some((f) => /template default/.test(f.message))).toBe(true);
+    // a real, descriptive title is fine.
+    const real = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>Budaun Grocery Store</title><meta name="viewport" content="x"><meta name="description" content="y"><meta property="og:title" content="X"><link rel="icon" href="/f.ico"></head></html>');
+    expect(real.findings.some((f) => /template default/.test(f.message))).toBe(false);
+  });
+
   it('flags a missing/empty title as high', () => {
     const r = analyzeSeo('<html lang="en"><head><title></title><meta name="viewport" content="x"><meta name="description" content="y"></head></html>');
     expect(r.findings.some((f) => f.level === 'high' && /title/.test(f.message))).toBe(true);

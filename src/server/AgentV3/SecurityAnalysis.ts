@@ -201,6 +201,24 @@ const RULES: Rule[] = [
     message: 'crypto.createCipher()/createDecipher() are insecure (no IV, MD5 key derivation) — use createCipheriv()/createDecipheriv() with a random IV instead.',
   },
   {
+    rule: 'insecure-cipher-ecb',
+    severity: 'high',
+    // ECB block-cipher mode encrypts identical plaintext blocks to identical ciphertext, so
+    // it leaks data patterns (the classic "ECB penguin") and provides no semantic security.
+    // High-precision: a cipher algorithm string whose mode is -ecb. Use GCM (or CBC + a
+    // random IV) instead.
+    re: /['"`][a-z0-9]+(?:-[a-z0-9]+)*-ecb['"`]/i,
+    message: 'ECB cipher mode leaks plaintext patterns (identical blocks → identical ciphertext) and is not semantically secure — use an authenticated mode like AES-GCM (or CBC with a random IV).',
+  },
+  {
+    rule: 'weak-rsa-key-size',
+    severity: 'medium',
+    // An RSA/DSA key of 1024 bits (or less) is brute-forceable and deprecated — modern
+    // guidance requires ≥2048. High-precision: modulusLength is the RSA/DSA key-size option.
+    re: /\bmodulusLength\s*:\s*(?:512|768|1024)\b/,
+    message: 'RSA/DSA key size ≤1024 bits is too weak (brute-forceable, deprecated) — use modulusLength: 2048 or higher (3072/4096 for long-term keys).',
+  },
+  {
     rule: 'path-traversal',
     severity: 'high',
     // A filesystem read / file response built from request input (req.query/params/body/

@@ -3041,3 +3041,17 @@ no child-content false positives; axe "area-alt"):
    so it is announced as just "button".
 
 Gate: server tsc 0, frontend tsc 0, **2290 vitest** PASS (28 AccessibilityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 26): ECB cipher mode + weak RSA key size (crypto)
+
+Batch 25 merged to main 24c9f32 (PR #376). New `SecurityAnalysis` crypto rules:
+
+1. **insecure-cipher-ecb** (high) — a cipher algorithm in ECB mode (`aes-256-ecb`, `des-ecb`)
+   encrypts identical plaintext blocks to identical ciphertext (the "ECB penguin"), leaking
+   patterns. Use AES-GCM (or CBC + random IV). GCM/CBC not flagged.
+2. **weak-rsa-key-size** (medium) — `modulusLength: 512/768/1024` for RSA/DSA key generation is
+   brute-forceable/deprecated; require ≥2048. 2048/4096 not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2292 vitest** PASS (49 SecurityAnalysis tests, +2 new).

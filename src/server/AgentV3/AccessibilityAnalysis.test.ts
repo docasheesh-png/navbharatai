@@ -136,6 +136,23 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('src/F.tsx', '<input type="text" id="name" />').some((x) => x.kind === 'autofocus')).toBe(false);
   });
 
+  it('flags an abstract ARIA role as medium but not a concrete role', () => {
+    expect(scanAccessibility('src/A.tsx', '<div role="widget">x</div>').some((x) => x.kind === 'abstract-aria-role' && x.severity === 'medium')).toBe(true);
+    expect(scanAccessibility('src/A.tsx', '<div role="input">x</div>').some((x) => x.kind === 'abstract-aria-role')).toBe(true);
+    // a concrete, usable role is fine.
+    expect(scanAccessibility('src/A.tsx', '<div role="button" tabIndex={0}>x</div>').some((x) => x.kind === 'abstract-aria-role')).toBe(false);
+  });
+
+  it('flags a redundant role that duplicates the native role but not a non-redundant one', () => {
+    expect(scanAccessibility('src/A.tsx', '<button role="button">Go</button>').some((x) => x.kind === 'redundant-role' && x.severity === 'low')).toBe(true);
+    expect(scanAccessibility('src/A.tsx', '<nav role="navigation">…</nav>').some((x) => x.kind === 'redundant-role')).toBe(true);
+    expect(scanAccessibility('src/A.tsx', '<a href="/x" role="link">Home</a>').some((x) => x.kind === 'redundant-role')).toBe(true);
+    // a role that changes/adds semantics is not redundant.
+    expect(scanAccessibility('src/A.tsx', '<div role="button" tabIndex={0}>x</div>').some((x) => x.kind === 'redundant-role')).toBe(false);
+    // an anchor WITHOUT href has no implicit link role, so role="link" is not redundant.
+    expect(scanAccessibility('src/A.tsx', '<a role="link" onClick={go}>x</a>').some((x) => x.kind === 'redundant-role')).toBe(false);
+  });
+
   it('flags an empty heading as medium but not a heading with text or an aria-label', () => {
     expect(scanAccessibility('src/P.tsx', '<h1></h1>').some((x) => x.kind === 'empty-heading' && x.severity === 'medium')).toBe(true);
     expect(scanAccessibility('src/P.tsx', '<h2><svg /></h2>').some((x) => x.kind === 'empty-heading')).toBe(true);

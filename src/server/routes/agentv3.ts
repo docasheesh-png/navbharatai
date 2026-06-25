@@ -70,6 +70,7 @@ import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/Workspace
 import { CREATOR_IDENTITY } from '../lib/prompts';
 import { classifyIntentSmart } from '../AgentV3/IntentClassifier';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
+import { analyzeRequest, type StartTier } from '../AgentV3/RequestAnalyser';
 import { reviewBuild, formatReview } from '../AgentV3/ReviewerAgent';
 import {
   saveWorkspaceMemory,
@@ -232,9 +233,23 @@ function isBuildRunning(buildKey: string): boolean {
  * if no Gemini/Vertex provider is configured, falls back to the Claude-only resilient
  * runner. Build models are env-overridable (AGENTV3_{VERTEX,GEMINI}_BUILD_MODEL).
  */
-function buildTurnRunner(): TurnRunner {
+/**
+ * Cost-ladder (P2): map the analyser's start tier to the cheapest CAPABLE Gemini
+ * build model. Trivial/simple work (greeting, calculator, todo) starts on Gemini
+ * Flash — a fraction of Pro's cost; anything the analyser scored as real coding or
+ * a complex/architecture app keeps gemini-2.5-pro, with the Claude backstop intact.
+ * Billing is UNCHANGED (Opus-equivalent × 2.5 / × 5) — this lowers ONLY NavBharatAI's
+ * own provider cost, so the margin is strictly wider. Exported for unit testing.
+ */
+export function tierToGeminiBuildModel(tier: StartTier): string {
+  return tier === 'gemini' ? 'gemini-2.5-flash' : 'gemini-2.5-pro';
+}
+
+function buildTurnRunner(opts?: { geminiModel?: string }): TurnRunner {
+  // Explicit env overrides always win; absent them the cost-ladder tier model
+  // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
-    process.env[envName] || process.env.AGENTV3_BUILD_MODEL || 'gemini-2.5-pro';
+    process.env[envName] || process.env.AGENTV3_BUILD_MODEL || opts?.geminiModel || 'gemini-2.5-pro';
   const cheap: NamedRunner[] = [];
   // Vertex (function-calling, via the Cloud Run service account / ADC).
   const project = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID;
@@ -742,7 +757,24 @@ export function registerAgentV3Routes(app: Express): void {
       // (Vertex → Gemini → Grok) so chat never dies if Claude is down/misconfigured.
       // Multi-provider build engine: Vertex/Gemini do the REAL build (function-calling),
       // Claude is the backstop — so builds work even when Claude is out of credits.
-      const client = buildTurnRunner();
+      // Cost-ladder routing (P2): the deterministic request analyser picks the
+      // cheapest capable START model so a simple app (calculator/todo) builds on
+      // Gemini Flash instead of Pro. Active within v3.0 (itself flag-gated); set
+      // AGENTV3_COST_LADDER=off to fall back to the fixed model. Billing is
+      // unchanged (Opus-equivalent markup) — this only trims real provider cost.
+      // No provider name is surfaced to the user (kept to server telemetry only).
+      const costLadderOn = process.env.AGENTV3_COST_LADDER !== 'off';
+      const analysis = costLadderOn
+        ? analyzeRequest({ prompt, powerMode: onlyOpus })
+        : undefined;
+      if (analysis) {
+        console.log(
+          `[AGENTV3] cost-ladder: ${analysis.reasoning} → build model ${tierToGeminiBuildModel(analysis.startTier)}`,
+        );
+      }
+      const client = buildTurnRunner(
+        analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : undefined,
+      );
       const model = resolveModel(onlyOpus);
       const budget = maxBuildBudgetUsd();
       const maxSteps = envInt('AGENTV3_MAX_STEPS', 80);

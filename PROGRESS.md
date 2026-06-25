@@ -3751,3 +3751,39 @@ NEXT (Phase 3): CI + merge of the user's repo, Claude-Code-style (PR → check s
 Phase 4: auth simplify (Email/Phone primary, remove the failing Google button, optional "Connect
 GitHub" + Export/Transfer for portability). Phase 5: dual preview (in-browser iframe + E2B).
 NOTE: Phases 3–5 touch user-facing auth/preview flows → confirm with admin before each (safeguard #3).
+
+---
+
+### 2026-06-25 — v3.0 cost-ladder P2: analyser → start-tier build-model wiring
+
+The deterministic request analyser (`RequestAnalyser.analyzeRequest`, already
+built + unit-tested) existed but was **never wired into the build route** — every
+v3.0 build ran on a fixed `gemini-2.5-pro` chain regardless of how trivial the
+request was. This is the "make a Gemini calculator cost ₹20 not ₹1600" lever the
+design doc (§8.5 P2) calls for, and it was dead.
+
+Wired it (real, end-to-end, margin-safe):
+- `routes/agentv3.ts`: before building the turn runner, call `analyzeRequest({ prompt,
+  powerMode: onlyOpus })` and map the resulting `startTier` to the cheapest CAPABLE
+  Gemini build model via new exported `tierToGeminiBuildModel()`:
+  `gemini` (greeting / calculator / todo / simple_app) → **gemini-2.5-flash**;
+  every other tier (haiku/sonnet/opus) → **gemini-2.5-pro** (proven model kept for
+  real coding / complex / architecture work). The Claude backstop in the provider
+  chain is untouched.
+- `buildTurnRunner(opts?)` now takes an optional `geminiModel`; explicit env overrides
+  (`AGENTV3_{VERTEX,GEMINI}_BUILD_MODEL`, `AGENTV3_BUILD_MODEL`) still win, then the
+  tier model, then the `gemini-2.5-pro` default.
+- Escape hatch: `AGENTV3_COST_LADDER=off` restores the fixed-model behavior.
+- The chosen model is logged to server telemetry only (`[AGENTV3] cost-ladder: …`) —
+  **no provider/model name is surfaced to the user**, consistent with the existing
+  hidden-provider design.
+
+**Billing is UNCHANGED** — every v3.0 build is still billed at the Opus-equivalent
+markup (× 2.5 / × 5) per the constitution. This change lowers ONLY NavBharatAI's own
+real provider cost, so the margin is strictly wider. `pricing.ts` is NOT touched
+(the constitution-locked lever stays locked). Active within v3.0, which is itself
+flag-gated (`AGENTV3_ENABLED`) — zero impact on the live app.
+
+Exported `analyzeRequest` + types from `AgentV3/index.ts` (clean public surface).
+Gate: frontend tsc 0, server tsc 0, **2516 vitest** PASS (+4 new cost-ladder tests),
+boot:check PASS. Ships on merge → deploy.

@@ -31,6 +31,16 @@ const USEEFFECT_ASYNC_RE = /\buseEffect\s*\(\s*async\b/;
 // always true, sort does nothing — an always-wrong, silent bug. (`.map(async …)` is NOT
 // included: it is correct when wrapped in `await Promise.all(arr.map(async …))`.)
 const ASYNC_PREDICATE_RE = /\.(filter|find|findIndex|findLast|findLastIndex|some|every|sort)\s*\(\s*async\b/;
+// `useMemo(async () => …)` — useMemo returns whatever the factory returns, so an async
+// factory makes the memoized value a Promise (always truthy, never the resolved data).
+// The component reads a Promise where it expects the value — an always-wrong, silent bug.
+// (`useCallback(async …)` is NOT included: memoizing an async function is correct.)
+const USEMEMO_ASYNC_RE = /\buseMemo\s*\(\s*async\b/;
+// `array.reduce(async (acc, x) => …)` — the accumulator becomes a Promise, so each step's
+// `acc` is a Promise (not the value) unless every iteration awaits it, and the final result
+// is a Promise. It is easy to get subtly wrong and usually a bug; a for...of loop with await
+// is clearer and correct.
+const ASYNC_REDUCE_RE = /\.reduce(?:Right)?\s*\(\s*async\b/;
 
 /** Human-readable fix guidance per footgun kind. */
 const FIX: Record<string, string> = {
@@ -38,6 +48,8 @@ const FIX: Record<string, string> = {
   'new-promise-async': 'new Promise(async …) → the async executor\'s errors are swallowed (the promise never rejects); do the async work before the Promise, or call resolve/reject from .then/.catch.',
   'async-useeffect': 'useEffect(async …) → the effect returns a Promise, so React never runs cleanup; define an async function inside and call it (and return a real cleanup if needed).',
   'async-array-predicate': 'filter/find/some/every/sort(async …) → the method uses the return synchronously but an async callback returns a Promise (always truthy), so the predicate is always-wrong; resolve the async values first (await Promise.all(arr.map(...))) then filter/find synchronously.',
+  'async-usememo': 'useMemo(async …) → the factory returns a Promise, so the memoized value is a Promise (always truthy), never the resolved data; load the data in a useEffect into state, or memoize the resolved value, not the promise.',
+  'async-reduce': 'reduce(async …) → the accumulator becomes a Promise, so each step\'s acc is a Promise unless you await it every time, and the result is a Promise; use a for...of loop with await instead.',
 };
 
 /** Scan one file for async-pattern footguns. PURE. */
@@ -59,6 +71,12 @@ export function scanAsyncPatterns(file: string, content: string): AsyncPatternIs
     }
     if (ASYNC_PREDICATE_RE.test(line)) {
       issues.push({ file, line: i + 1, kind: 'async-array-predicate' });
+    }
+    if (USEMEMO_ASYNC_RE.test(line)) {
+      issues.push({ file, line: i + 1, kind: 'async-usememo' });
+    }
+    if (ASYNC_REDUCE_RE.test(line)) {
+      issues.push({ file, line: i + 1, kind: 'async-reduce' });
     }
   }
   return issues;

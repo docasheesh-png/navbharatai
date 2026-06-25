@@ -2886,3 +2886,19 @@ Batch 14 merged to main 727a5ac (PR #365). New `SecurityAnalysis` rules:
    or `secureProtocol: 'TLSv1_method'/'SSLv3_method'`) exposes BEAST/POODLE; TLS 1.2+ not flagged.
 
 Gate: server tsc 0, frontend tsc 0, **2270 vitest** PASS (39 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 16): async useMemo + async reduce (correctness footguns)
+
+Batch 15 merged to main 293496f (PR #366). Shifted to runtime-correctness. New
+`AsyncPatternAnalysis` footguns (parallel to the existing forEach/Promise-executor/useEffect/
+predicate rules):
+
+1. **async-usememo** — `useMemo(async () => …)` memoizes the returned Promise, so the value is
+   a Promise (always truthy, never the resolved data) — an always-wrong silent bug.
+   `useCallback(async …)` is NOT flagged (memoizing an async function is correct).
+2. **async-reduce** — `reduce(async …)`/`reduceRight(async …)` makes the accumulator a Promise;
+   each step's `acc` is a Promise unless awaited every time, and the result is a Promise.
+
+Gate: server tsc 0, frontend tsc 0, **2272 vitest** PASS (11 AsyncPatternAnalysis tests, +2 new).

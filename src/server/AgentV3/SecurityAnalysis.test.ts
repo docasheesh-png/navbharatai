@@ -211,6 +211,18 @@ describe('scanSecurity', () => {
     expect(scanSecurity('main.ts', 'webPreferences: { nodeIntegration: false, contextIsolation: true }').some((f) => f.rule === 'electron-insecure-webprefs')).toBe(false);
   });
 
+  it('flags Handlebars triple-stache raw HTML but not the escaped double form', () => {
+    expect(scanSecurity('t.hbs', '<div>{{{ userBio }}}</div>').some((f) => f.rule === 'handlebars-triple-stache' && f.severity === 'medium')).toBe(true);
+    expect(scanSecurity('t.hbs', '<div>{{ userName }}</div>').some((f) => f.rule === 'handlebars-triple-stache')).toBe(false);
+  });
+
+  it('flags EJS unescaped output but not the escaped form or include() partials', () => {
+    expect(scanSecurity('t.ejs', '<p><%- comment.body %></p>').some((f) => f.rule === 'ejs-unescaped-output' && f.severity === 'medium')).toBe(true);
+    expect(scanSecurity('t.ejs', '<p><%= comment.body %></p>').some((f) => f.rule === 'ejs-unescaped-output')).toBe(false);
+    // the standard, safe partial-include idiom is not flagged.
+    expect(scanSecurity('t.ejs', "<%- include('partials/header') %>").some((f) => f.rule === 'ejs-unescaped-output')).toBe(false);
+  });
+
   it('flags Angular bypassSecurityTrust* (sanitisation disabled) but not normal sanitizer use', () => {
     expect(scanSecurity('app.ts', 'this.html = this.sanitizer.bypassSecurityTrustHtml(raw);').some((f) => f.rule === 'angular-bypass-security')).toBe(true);
     expect(scanSecurity('app.ts', 'const u = ds.bypassSecurityTrustResourceUrl(src);').some((f) => f.rule === 'angular-bypass-security')).toBe(true);

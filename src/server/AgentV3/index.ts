@@ -94,6 +94,8 @@ export { classifyIntent, classifyIntentWithConfidence, classifyIntentSmart } fro
 export type { BuildIntent, IntentWithConfidence } from './IntentClassifier';
 export { decidePlanning } from './ComplexityClassifier';
 export type { PlanningDecision } from './ComplexityClassifier';
+export { analyzeRequest } from './RequestAnalyser';
+export type { AnalyserInput, AnalysisResult, StartTier, TaskType } from './RequestAnalyser';
 export { reviewEdit, formatReviewResult } from './PostEditReviewer';
 export type { PostEditReview } from './PostEditReviewer';
 export { reviewBuild, formatReview } from './ReviewerAgent';

@@ -2918,3 +2918,16 @@ shared SECURITY_CONTEXT same-line keyword guard (secret/token/password/otp/sessi
    flagged. Use SHA-256+ for integrity, bcrypt/scrypt/argon2 for passwords.
 
 Gate: server tsc 0, frontend tsc 0, **2274 vitest** PASS (41 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 18): hardcoded private-network IP URLs (deploy readiness)
+
+Batch 17 merged to main 08e5482 (PR #368). Extended `HardcodedUrlAnalysis` beyond localhost:
+
+- **private-ip** (medium) — a hardcoded RFC-1918 private-network URL (`192.168.x.x`,
+  `10.x.x.x`, `172.16–31.x.x`) is the same "works on my machine, breaks in production" bug as
+  localhost — it won't resolve once deployed. Public IPs/domains and env-var fallbacks are NOT
+  flagged. Added a `kind: 'localhost' | 'private-ip'` field to the issue and kind-aware summary.
+
+Gate: server tsc 0, frontend tsc 0, **2276 vitest** PASS (10 HardcodedUrlAnalysis tests, +3 new).

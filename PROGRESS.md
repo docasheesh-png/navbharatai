@@ -3251,3 +3251,17 @@ Batch 37 polish merged to main 7628437 (PR #389). FP/harmful-advice fix in Acces
   h1-6) still flag redundant roles.
 
 Gate: server tsc 0, frontend tsc 0, **2302 vitest** PASS (AccessibilityAnalysis 32 tests, +1 assertion).
+
+---
+
+### 2026-06-25 — Section I march (batch 39, POLISH): cookie-deletion not flagged for missing SameSite/Secure
+
+Batch 38 polish merged to main c2f1f98 (PR #390). FP fix in ComplianceAnalysis:
+
+- The cookie-no-samesite / cookie-no-httponly / cookie-no-secure rules flagged a cookie being
+  DELETED (logout/clear flows: `document.cookie = 'sid=; Max-Age=0'`, `res.cookie('n','',{maxAge:0})`,
+  a 1970 expiry) for missing those flags. But a cookie being removed does not need them — the
+  browser is deleting it, not storing it. Added an isCookieDeletion guard (Max-Age 0/-1 or a
+  1970/past expiry) that skips all three cookie checks. Normal cookie SETS are still flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2303 vitest** PASS (ComplianceAnalysis 19 tests, +1 new).

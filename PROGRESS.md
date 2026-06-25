@@ -2685,3 +2685,17 @@ Batch 2 (6 checks) merged to main f68f1f4. New since:
    contact email shipped as if real.
 
 Gate: server tsc 0, frontend tsc 0, **2243 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 4): 2 security checks (auth/secret hardening)
+
+Batch 3 merged to main 6985077. New on `claude/navbharatai-pro-testing-p2mgr5`:
+
+1. `SecurityAnalysis` **hardcoded-provider-token** extended — now also matches GitHub fine-grained
+   PATs (github_pat_) and Anthropic keys (sk-ant-), both unmistakable formats.
+2. `SecurityAnalysis` **jwt-none-algorithm** (high) — a JWT configured with the "none" algorithm
+   (sign) or allowing "none" in the verify list accepts UNSIGNED tokens → anyone can forge any
+   token (auth bypass). A real algorithm allow-list (HS256/RS256) is not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2244 vitest** PASS, build PASS.

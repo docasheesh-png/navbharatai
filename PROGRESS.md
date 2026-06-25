@@ -3222,3 +3222,17 @@ audit (subagent mapped all rule kinds/regexes across 12 analyzers). Findings:
   (source code vs .env templates).
 
 Gate: server tsc 0, frontend tsc 0, **2301 vitest** PASS (SecurityConfigAnalysis 11 tests).
+
+---
+
+### 2026-06-25 — Section I march (batch 37, POLISH): HardcodedUrl skip test/config files (FP fix)
+
+Batch 36 polish merged to main f726674 (PR #388). FP fix in HardcodedUrlAnalysis:
+
+- The localhost/private-IP scanner had no path filter, so it false-flagged `http://localhost`
+  in TEST files (hitting a local test server) and BUILD-CONFIG files (e.g. a Vite dev-server
+  `proxy: { '/api': 'http://localhost:3000' }`) — neither of which ship to production. Added a
+  SKIP_PATH (`.test.`/`.spec.`/`__tests__`/`tests`/`e2e` dirs, `*.config.[cm]?[jt]s`, and
+  vite/vitest/playwright/webpack/next config + setupTests). A normal source file is still scanned.
+
+Gate: server tsc 0, frontend tsc 0, **2302 vitest** PASS (HardcodedUrlAnalysis 11 tests, +1 new).

@@ -298,11 +298,18 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       return;
     } catch (err: any) {
       const code = err?.code || '';
-      // Popup blocked → fall through to redirect (no error shown, redirect starts silently).
-      if (code === 'auth/popup-blocked' || code === 'auth/popup-cancelled-by-user') {
-        // fall through to redirect below
+      if (code === 'auth/popup-blocked') {
+        // Browser blocked the popup — fall through to redirect below.
+      } else if (
+        code === 'auth/popup-closed-by-user' ||
+        code === 'auth/popup-cancelled-by-user' ||
+        code === 'auth/cancelled-popup-request'
+      ) {
+        // User dismissed the popup intentionally — stop silently, let them retry.
+        setLoading(false);
+        return;
       } else {
-        // Real error (disabled provider, bad API key, etc.) — show it and stop.
+        // Real error (disabled provider, bad API key, unauthorized domain, etc.) — show it.
         if (code === 'auth/internal-error') {
           setError(`${describeGoogleError(err)}\n${await diagnoseAuth()}`);
         } else {

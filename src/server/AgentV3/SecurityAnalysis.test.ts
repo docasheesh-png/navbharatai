@@ -189,6 +189,20 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'const r = await fetch("https://api.example.com/v1");').some((f) => f.rule === 'ssrf')).toBe(false);
   });
 
+  it('flags a RegExp built from request input (ReDoS) but not a fixed pattern', () => {
+    expect(scanSecurity('a.ts', 'const re = new RegExp(req.query.search);').some((f) => f.rule === 'regexp-from-request' && f.severity === 'medium')).toBe(true);
+    expect(scanSecurity('a.ts', 'const re = new RegExp(`^${req.body.prefix}`);').some((f) => f.rule === 'regexp-from-request')).toBe(true);
+    // a fixed/literal pattern is fine.
+    expect(scanSecurity('a.ts', 'const re = new RegExp("^[a-z]+$");').some((f) => f.rule === 'regexp-from-request')).toBe(false);
+  });
+
+  it('flags XML entity expansion (XXE) but not a parser with it disabled', () => {
+    expect(scanSecurity('a.ts', 'const doc = libxml.parseXml(xml, { noent: true });').some((f) => f.rule === 'xxe-entity-expansion' && f.severity === 'high')).toBe(true);
+    expect(scanSecurity('a.ts', 'parser.parse(xml, { resolveEntities: true });').some((f) => f.rule === 'xxe-entity-expansion')).toBe(true);
+    // entity expansion off (the safe default) is not flagged.
+    expect(scanSecurity('a.ts', 'const doc = libxml.parseXml(xml, { noent: false });').some((f) => f.rule === 'xxe-entity-expansion')).toBe(false);
+  });
+
   it('flags disabled TLS certificate verification (MITM) in both forms', () => {
     expect(scanSecurity('a.ts', 'const agent = new https.Agent({ rejectUnauthorized: false });').some((f) => f.rule === 'disable-tls-verification' && f.severity === 'high')).toBe(true);
     expect(scanSecurity('a.ts', "process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';").some((f) => f.rule === 'disable-tls-verification')).toBe(true);

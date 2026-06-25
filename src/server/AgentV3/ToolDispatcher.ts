@@ -45,6 +45,7 @@ import { scanEnvTemplateSecrets, envTemplateSecretSummary, type EnvTemplateSecre
 import { scanAsyncPatterns, asyncPatternSummary, type AsyncPatternIssue } from './AsyncPatternAnalysis';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
+import type { WebSearchFn } from './WebSearch';
 import { reviewEdit, formatReviewResult } from './PostEditReviewer';
 import { renameSymbol, addComponentProp } from './CodemodeExecutor';
 import type { CodemodeFile } from './CodemodeExecutor';
@@ -107,6 +108,7 @@ export class ToolDispatcher {
     private readonly checkpointer?: Checkpointer,
     private readonly secondOpinion?: SecondOpinion,
     private readonly consensus?: Consensus,
+    private readonly webSearch?: WebSearchFn,
   ) {}
 
   /**
@@ -899,6 +901,15 @@ export class ToolDispatcher {
           return 'Consensus is not available in this context.';
         }
         return await this.consensus(question);
+      }
+
+      case 'web_search': {
+        const query = reqStr(input, 'query');
+        if (!this.webSearch) {
+          return 'Web search is not available in this context.';
+        }
+        const limit = typeof input.limit === 'number' ? input.limit : 5;
+        return await this.webSearch(query, limit);
       }
 
       // Level 7: structural codemods (AST-safe cross-file refactoring via ts-morph).

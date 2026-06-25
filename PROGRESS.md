@@ -3527,3 +3527,25 @@ Gold-standard polish (same PR):
 AppKnowledgeBase: documented the surgical-edit capability + keywords (mandatory sync rule).
 Gate: frontend tsc 0, server tsc 0, **2400 vitest** PASS (32 new tests across IntentClassifier,
 systemPrompt, ToolDispatcher/applyEdit, WorkspaceMemory/warmIndexFiles). Ships on merge → deploy.
+
+---
+
+### 2026-06-25 — v3.0 feature port #1: web_search tool (admin: bring old-engine features into v3.0)
+
+Admin wants the best old-engine features COPIED into v3.0 (self-contained, so v3.0 owns them and
+they survive the planned deletion of the old engines). Old engines NOT deleted yet (admin will
+trigger that tomorrow). Each feature = its own additive PR; nothing live touched.
+
+PR #1 — `web_search` tool:
+- NEW `src/server/AgentV3/WebSearch.ts` — self-contained copy of Engineer AI's WebSearchClient,
+  strict-typed (the source lives outside the strict tsconfig; cleaned the `any`s). Brave (if
+  BRAVE_API_KEY) → DuckDuckGo fallback → npm registry for package queries. Degrades to "no results",
+  never throws. `makeWebSearch()` factory + `formatSearchResults`/`parseDuckDuckGo` (tested).
+- Wired like second_opinion/consensus: ToolName + ToolCatalog def + CATALOG_TOOL_NAMES +
+  ToolDispatcher `web_search` case (injected fn) + architect tool-set + index export + route
+  injects makeWebSearch() into the dispatcher + architect prompt guidance.
+- NO old-engine coupling added (WebSearch.ts is a v3.0-owned copy; the original is untouched and
+  still deletable later).
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2452 vitest** PASS (6 new WebSearch tests).
+NEXT: screenshot/browser_action, deploy, generate_tests (each its own PR).

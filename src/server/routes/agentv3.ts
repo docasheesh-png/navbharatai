@@ -14,6 +14,7 @@ import {
   makeSubAgentSpawn,
   makeSecondOpinion,
   makeConsensus,
+  makeWebSearch,
   type OpinionRouter,
   resolveModel,
   architectSystemPrompt,
@@ -784,7 +785,10 @@ export function registerAgentV3Routes(app: Express): void {
       // convene a multi-perspective panel (correctness, security, UX) on a hard
       // decision, using the SAME non-Claude free router. Never throws.
       const consensus = makeConsensus(opinionRouter);
-      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus);
+      // Web search (ported from Engineer AI): the Architect can look up package versions,
+      // framework docs, and error meanings (Brave if BRAVE_API_KEY set, else DuckDuckGo).
+      const webSearch = makeWebSearch();
+      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch);
 
       // Surgical edit mode (gold standard): when the user is editing an existing
       // app rather than building fresh, inject the CURRENT file tree and the

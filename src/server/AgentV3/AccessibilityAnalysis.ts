@@ -90,6 +90,15 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
         push('html-missing-lang', 'medium');
       }
 
+      // ── medium: a viewport meta that DISABLES pinch-zoom (user-scalable=no or
+      // maximum-scale=1) locks out low-vision users who need to zoom (WCAG 1.4.4). ──
+      if (
+        name === 'meta' && /name\s*=\s*['"{]?\s*viewport\b/i.test(tag) &&
+        /user-scalable\s*=\s*(?:no|0)|maximum-scale\s*=\s*1(?:\.0)?\b/i.test(tag)
+      ) {
+        push('zoom-disabled', 'medium');
+      }
+
       // ── medium: <iframe> with no accessible name (screen readers announce only
       // "iframe" with no context — WCAG 4.1.2). title is the standard fix; an
       // aria-label is accepted as an equivalent name. ────────────────────────────

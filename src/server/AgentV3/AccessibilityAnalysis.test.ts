@@ -25,6 +25,13 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('index.html', '<html lang="en">')).toEqual([]);
   });
 
+  it('flags a viewport meta that disables zoom (WCAG 1.4.4) but not a normal viewport', () => {
+    expect(scanAccessibility('index.html', '<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />').some((x) => x.kind === 'zoom-disabled')).toBe(true);
+    expect(scanAccessibility('index.html', '<meta name="viewport" content="width=device-width, maximum-scale=1.0" />').some((x) => x.kind === 'zoom-disabled')).toBe(true);
+    // a normal, zoomable viewport is fine.
+    expect(scanAccessibility('index.html', '<meta name="viewport" content="width=device-width, initial-scale=1" />').some((x) => x.kind === 'zoom-disabled')).toBe(false);
+  });
+
   it('flags autoplaying audio / unmuted autoplay video (WCAG 1.4.2), but not muted video autoplay', () => {
     expect(scanAccessibility('src/P.tsx', '<audio src="/s.mp3" autoplay />').some((x) => x.kind === 'media-autoplay')).toBe(true);
     expect(scanAccessibility('src/P.tsx', '<video src="/v.mp4" autoplay />').some((x) => x.kind === 'media-autoplay')).toBe(true);

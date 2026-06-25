@@ -1322,9 +1322,20 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoadingUser(false);
+      // Close auth modal whenever Firebase confirms a signed-in user — covers
+      // the redirect return path where getRedirectResult may not fire first.
+      if (currentUser) setShowAuth(false);
     });
     return unsubscribe;
   }, []);
+
+  // Close auth modal the moment any login method completes (defensive belt-and-
+  // suspenders — onAuthStateChanged above handles it, but the extra effect
+  // catches any edge case where user becomes non-null without the listener firing
+  // before the modal is shown again).
+  useEffect(() => {
+    if (user) setShowAuth(false);
+  }, [user]);
 
   // Admin login = full app access. When the admin is signed in (separate server
   // password auth), treat them as a logged-in user so the app never forces the

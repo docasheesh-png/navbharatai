@@ -3418,3 +3418,22 @@ three caveats: rate-limit cap, find-parallel/fix-serial, model must batch). Impl
 Effect: the review/verify phase (qa+security+performance+a11y+reviewer) now runs ~concurrently
 instead of serially → roughly halves that phase, while builds/fixes stay safe (serial).
 Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2337 vitest** PASS (3 new parallel-exec tests).
+
+---
+
+### 2026-06-25 — v3.0 UI: harden the "working…" status spinner (admin-reported freeze)
+
+Admin reported the v3.0 "working…" pre-output spinner not rotating. Verified the `animate-spin`
+utility itself compiles correctly (`.animate-spin{animation:var(--animate-spin)}` + `--animate-spin:
+spin 1s linear infinite` + `@keyframes spin` all present), so the class isn't globally broken — the
+realistic culprits for that one element are the global `prefers-reduced-motion` reset
+(`*{animation-duration:.01ms!important}`) interacting with the cascade, or stale cached code.
+
+Fix: added a dedicated `.nb-spin` class — `animation: spin 1s linear infinite !important` +
+`transform-origin:center` — that wins over the reduced-motion reset (class specificity + !important)
+and restates the FULL shorthand so no property is dropped. Applied to the "working…" indicator and
+the AI-team chip rings. Compiled CSS confirms `.nb-spin{transform-origin:50%!important;animation:1s
+linear infinite spin!important}`.
+Gate: frontend tsc 0, **2355 vitest** PASS (frontend-only; no server change). NOTE: if it still
+looks frozen after deploy, it's the browser serving cached JS/CSS — hard-refresh (the header 'b:'
+build stamp confirms which build is live).

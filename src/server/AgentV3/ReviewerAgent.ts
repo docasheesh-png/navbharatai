@@ -50,6 +50,20 @@ function parseReviewOutput(text: string): ReviewIssue[] {
   return issues;
 }
 
+/** Source-file extensions that mean "there is real reviewable code in the workspace". */
+const SOURCE_RE = /\.(tsx?|jsx?|html?|css|scss|vue|svelte|astro|mjs|cjs)$/i;
+
+/**
+ * Whether the file listing contains real source the reviewer can judge. Used to GUARD the
+ * post-build review: if the workspace read came back empty (a sandbox read hiccup after a
+ * successful build, where files genuinely exist), the reviewer has nothing to look at — and must
+ * NOT be allowed to declare "missing all source code, 0/100", which is a false negative that
+ * contradicts the build the user just watched succeed.
+ */
+export function hasReviewableSource(fileTree: string[]): boolean {
+  return Array.isArray(fileTree) && fileTree.some((p) => SOURCE_RE.test(p));
+}
+
 /**
  * Spawn a focused post-build review sub-agent that checks the built app against
  * the user's original request. Returns a structured ReviewResult.
@@ -62,6 +76,18 @@ export async function reviewBuild(opts: {
   spawn: SubAgentSpawn;
 }): Promise<ReviewResult> {
   const { userRequest, fileTree, fileSample } = opts;
+
+  // Defensive: never review an unreadable/empty workspace — an empty listing means we could not
+  // read the files, NOT that the app has no code. Return a neutral, honest skipped result so the
+  // user never sees a false "missing all source code, 0/100" after a successful build.
+  if (!hasReviewableSource(fileTree)) {
+    return {
+      passed: true,
+      score: 0,
+      issues: [],
+      summary: 'Review skipped — the workspace file listing could not be read (the build still completed).',
+    };
+  }
 
   const fileContext = fileSample
     .slice(0, 5)

@@ -58,7 +58,7 @@ describe('reviewBuild', () => {
   it('parses emoji-style issue markers', async () => {
     const result = await reviewBuild({
       userRequest: 'make a chat app',
-      fileTree: [],
+      fileTree: ['src/App.tsx'],
       fileSample: [],
       spawn: makeSpawn('🚨 Messages are not persisted anywhere.\n⚠️ No input validation.\nScore: 55'),
     });

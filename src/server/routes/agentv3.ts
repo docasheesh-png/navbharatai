@@ -67,6 +67,7 @@ import {
   saveWorkspaceMemory,
   restoreWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
+import { saveWorkspaceFiles, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
 import { GrokProvider } from '../AI/Router/providers/GrokProvider';
@@ -755,6 +756,21 @@ export function registerAgentV3Routes(app: Express): void {
         // request timeouts and surfaces as a bare "Load failed" on the client.
         events.emit({ type: 'narration', agent: 'architect', text: 'Setting up your workspace…', ts: Date.now() });
         await actuator.ensureWorkspace(workspaceId, 'react');
+        // DURABLE FILE RESTORE: the sandbox is ephemeral — if it was lost/recycled (or this is a
+        // later message that got a fresh sandbox), re-seed it with the files we persisted last
+        // time so the build continues from where it left off instead of an "empty directory".
+        // Only when the sandbox actually came up empty, so we never clobber a live sandbox.
+        try {
+          const saved = await loadWorkspaceFiles(workspaceId);
+          const savedPaths = Object.keys(saved);
+          if (savedPaths.length > 0) {
+            const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+            if (Object.keys(existing.files).length === 0) {
+              await writeWorkspaceFiles(actuator, workspaceId, saved);
+              events.emit({ type: 'narration', agent: 'architect', text: `Restored ${savedPaths.length} file(s) from your previous session.`, ts: Date.now() });
+            }
+          }
+        } catch { /* best-effort — restore never blocks a build */ }
         // Real git repo → real checkpoints/History/restore (best-effort on
         // sandboxes without a shell).
         git = new GitManager(actuator, workspaceId);
@@ -798,7 +814,12 @@ export function registerAgentV3Routes(app: Express): void {
       // Real persistent deploy (Firebase Hosting, ported from Engineer AI): publish the built app
       // to a permanent public URL. Uses ADC (Cloud Run service account); honest error if missing.
       const deploy = makeDeploy();
-      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy);
+      // DURABLE FILE CAPTURE: record the exact content of every file the agent writes (reliable —
+      // straight from the write op, not a later listFiles that can come back empty). Persisted to
+      // Firestore at build end so the source survives a sandbox loss and restores next session.
+      const writtenFiles = new Map<string, string>();
+      const onFileWrite = (path: string, content: string) => { writtenFiles.set(path, content); };
+      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite);
 
       // Surgical edit mode (gold standard): when the user is editing an existing
       // app rather than building fresh, inject the CURRENT file tree and the
@@ -1015,6 +1036,22 @@ export function registerAgentV3Routes(app: Express): void {
       try {
         saveWorkspaceMemory(workspaceId, getWorkspaceMemory(workspaceId).snapshot()).catch(() => {});
       } catch { /* memory persist is best-effort */ }
+
+      // DURABLE FILE SAVE: persist the build's source so it never vanishes. Start from the files
+      // we captured at write-time (reliable), then supplement with a sandbox scan (catches sub-
+      // agent writes when listFiles works). Skip if BOTH are empty so a read hiccup never
+      // overwrites a previously-good saved set with nothing. Best-effort — never blocks the build.
+      try {
+        const toSave: Record<string, string> = {};
+        try {
+          const scanned = await collectWorkspaceFiles(actuator, workspaceId);
+          Object.assign(toSave, scanned.files);
+        } catch { /* listFiles can be flaky — the captured writes below are the reliable source */ }
+        for (const [p, c] of writtenFiles) toSave[p] = c; // captured writes win (freshest, reliable)
+        if (Object.keys(toSave).length > 0) {
+          saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
+        }
+      } catch { /* file persist is best-effort */ }
 
       // Bill the user the marked-up cost (D5/D6), recorded in the same place the
       // platform records every build's cost. Best-effort — never blocks the run.

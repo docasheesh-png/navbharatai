@@ -2768,3 +2768,28 @@ Batch 8 merged to main 19c3029. New:
    bypass it (classic login auth bypass). Validated explicit fields are not flagged.
 
 Gate: server tsc 0, frontend tsc 0, **2253 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Fix: AgentV3 sandbox create-* scaffolder Node-version failure (live-test bug)
+
+Reported during live v3.0 test ("node.js wali problem abhi bhi h"): the build agent ran
+`npm create vite`, it FAILED on the sandbox's fixed (older) Node, and the agent then
+improvised a nested `todo-app/` subdir and hand-wrote package.json — slow + fragile. The
+system prompt already discouraged create-* generators, but a prompt is advisory and the
+model ignored it.
+
+Real, deterministic backstop (not just a prompt tweak):
+1. NEW `src/server/AgentV3/ScaffoldGuard.ts` — PURE matcher that detects create-* project
+   generators (`npm/yarn/pnpm/bun create`, `npx create-*`, `npm init <generator>`) without
+   matching ordinary `npm install` / `npm run` / `npm init -y` / git commits. + redirect
+   message that steers the agent to the existing ROOT scaffold (never a nested subdir).
+2. `ToolDispatcher` bash handler now intercepts a blocked command BEFORE running it,
+   self-heals the root scaffold (writes the Vite+React+TS starter via ViteReactProvider if
+   package.json is missing), records a governance audit, and returns the redirect — so the
+   doomed command never runs and no build turns are wasted.
+3. `systemPrompt` SCAFFOLDING bullet updated: these commands are now auto-BLOCKED, edit at
+   the ROOT only.
+
+Gate: server tsc 0, frontend tsc 0, **2258 vitest** PASS (5 new ScaffoldGuard tests; 63
+existing ToolDispatcher tests still green — no regression).

@@ -136,6 +136,19 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('src/F.tsx', '<input type="text" id="name" />').some((x) => x.kind === 'autofocus')).toBe(false);
   });
 
+  it('flags an <area href> with no alt as high but not one with alt', () => {
+    expect(scanAccessibility('src/Map.tsx', '<area href="/x" coords="0,0,10,10" shape="rect" />').some((x) => x.kind === 'area-missing-alt' && x.severity === 'high')).toBe(true);
+    expect(scanAccessibility('src/Map.tsx', '<area href="/x" alt="Region X" coords="0,0,10,10" />').some((x) => x.kind === 'area-missing-alt')).toBe(false);
+  });
+
+  it('flags an <input type="button"> with no accessible name but not one with a value', () => {
+    expect(scanAccessibility('src/F.tsx', '<input type="button" />').some((x) => x.kind === 'input-button-no-name' && x.severity === 'medium')).toBe(true);
+    // a value provides the name; submit/reset have a default label.
+    expect(scanAccessibility('src/F.tsx', '<input type="button" value="Go" />').some((x) => x.kind === 'input-button-no-name')).toBe(false);
+    expect(scanAccessibility('src/F.tsx', '<input type="submit" />').some((x) => x.kind === 'input-button-no-name')).toBe(false);
+    expect(scanAccessibility('src/F.tsx', '<input type="button" aria-label="Go" />').some((x) => x.kind === 'input-button-no-name')).toBe(false);
+  });
+
   it('flags an abstract ARIA role as medium but not a concrete role', () => {
     expect(scanAccessibility('src/A.tsx', '<div role="widget">x</div>').some((x) => x.kind === 'abstract-aria-role' && x.severity === 'medium')).toBe(true);
     expect(scanAccessibility('src/A.tsx', '<div role="input">x</div>').some((x) => x.kind === 'abstract-aria-role')).toBe(true);

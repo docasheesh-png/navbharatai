@@ -15,6 +15,7 @@ import {
   makeSecondOpinion,
   makeConsensus,
   makeWebSearch,
+  makeDeploy,
   type OpinionRouter,
   resolveModel,
   architectSystemPrompt,
@@ -788,7 +789,10 @@ export function registerAgentV3Routes(app: Express): void {
       // Web search (ported from Engineer AI): the Architect can look up package versions,
       // framework docs, and error meanings (Brave if BRAVE_API_KEY set, else DuckDuckGo).
       const webSearch = makeWebSearch();
-      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch);
+      // Real persistent deploy (Firebase Hosting, ported from Engineer AI): publish the built app
+      // to a permanent public URL. Uses ADC (Cloud Run service account); honest error if missing.
+      const deploy = makeDeploy();
+      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy);
 
       // Surgical edit mode (gold standard): when the user is editing an existing
       // app rather than building fresh, inject the CURRENT file tree and the

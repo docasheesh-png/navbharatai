@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel } from './agentv3';
+import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 
 describe('conversationAccess (D7 ownership gate)', () => {
   it('allows the owner, forbids others, and reports not-found', () => {
@@ -120,5 +121,37 @@ describe('agentV3KeyDiag (provider diagnosis)', () => {
         else process.env[k] = saved[k];
       }
     }
+  });
+});
+
+describe('cost-ladder (P2) — tierToGeminiBuildModel + analyser integration', () => {
+  it('routes the cheapest tier to Gemini Flash and every other tier to Pro', () => {
+    expect(tierToGeminiBuildModel('gemini')).toBe('gemini-2.5-flash');
+    expect(tierToGeminiBuildModel('haiku')).toBe('gemini-2.5-pro');
+    expect(tierToGeminiBuildModel('sonnet')).toBe('gemini-2.5-pro');
+    expect(tierToGeminiBuildModel('opus')).toBe('gemini-2.5-pro');
+  });
+
+  it('a simple app (calculator/todo) resolves to the cheap Flash build model', () => {
+    const calc = analyzeRequest({ prompt: 'build me a calculator' });
+    expect(calc.startTier).toBe('gemini');
+    expect(tierToGeminiBuildModel(calc.startTier)).toBe('gemini-2.5-flash');
+
+    const todo = analyzeRequest({ prompt: 'make a simple todo list app' });
+    expect(tierToGeminiBuildModel(todo.startTier)).toBe('gemini-2.5-flash');
+  });
+
+  it('a complex app keeps the proven Pro build model', () => {
+    const complex = analyzeRequest({
+      prompt: 'build a full-stack e-commerce dashboard with authentication and payments',
+    });
+    expect(complex.startTier === 'sonnet' || complex.startTier === 'haiku').toBe(true);
+    expect(tierToGeminiBuildModel(complex.startTier)).toBe('gemini-2.5-pro');
+  });
+
+  it('power mode forces Opus tier — still maps to Pro on the Gemini fallback (Claude is the real Opus path)', () => {
+    const power = analyzeRequest({ prompt: 'build a calculator', powerMode: true });
+    expect(power.startTier).toBe('opus');
+    expect(tierToGeminiBuildModel(power.startTier)).toBe('gemini-2.5-pro');
   });
 });

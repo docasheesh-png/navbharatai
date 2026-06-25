@@ -12,6 +12,13 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('src/Page.tsx', '<img src="/d.png" alt="" />')).toEqual([]);
   });
 
+  it('flags <input type="image"> with no alt as high, but not one with alt', () => {
+    expect(scanAccessibility('src/Form.tsx', '<input type="image" src="/go.png" />').some((x) => x.kind === 'input-image-missing-alt' && x.severity === 'high')).toBe(true);
+    expect(scanAccessibility('src/Form.tsx', '<input type="image" src="/go.png" alt="Submit" />').some((x) => x.kind === 'input-image-missing-alt')).toBe(false);
+    // a normal text input is not an image control.
+    expect(scanAccessibility('src/Form.tsx', '<input type="text" aria-label="Name" />').some((x) => x.kind === 'input-image-missing-alt')).toBe(false);
+  });
+
   it('flags <html> without lang as medium', () => {
     const issues = scanAccessibility('index.html', '<html>');
     expect(issues.some((x) => x.kind === 'html-missing-lang' && x.severity === 'medium')).toBe(true);

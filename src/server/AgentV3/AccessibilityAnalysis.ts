@@ -78,6 +78,13 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
         push('img-missing-alt', 'high');
       }
 
+      // ── high: <input type="image"> (a graphical submit button) with no alt —
+      // it is an image control, so a screen reader announces nothing without alt
+      // (WCAG 1.1.1). The plain img-missing-alt rule only covers the <img> tag. ──────
+      if (name === 'input' && /\btype\s*=\s*['"{]?\s*image\b/i.test(tag) && !hasAttr(tag, 'alt')) {
+        push('input-image-missing-alt', 'high');
+      }
+
       // ── medium: <html> with no lang (assistive tech can't pick a voice) ──────
       if (name === 'html' && !hasAttr(tag, 'lang')) {
         push('html-missing-lang', 'medium');

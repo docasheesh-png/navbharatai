@@ -233,6 +233,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         },
       },
     },
+    {
+      name: 'web_search',
+      description:
+        'Search the web for up-to-date information — package versions, framework/API docs, ' +
+        'or the meaning of an unfamiliar error. Returns a short ranked list of titles, URLs ' +
+        'and snippets. Use it when the answer is not in the workspace and you would otherwise guess.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'What to look up (e.g. "vite 5 config server.host" or "npm zod").' },
+          limit: { type: 'number', description: 'Max results (1–10, default 5).' },
+        },
+        required: ['query'],
+      },
+    },
   ];
 }
 
@@ -253,6 +268,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_readme',
   'generate_env_example',
   'generate_gitignore',
+  'web_search',
 ] as const;
 
 /**

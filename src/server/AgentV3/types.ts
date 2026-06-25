@@ -25,7 +25,8 @@ export type ToolName =
   | 'generate_gitignore'
   | 'task'
   | 'second_opinion'
-  | 'consensus';
+  | 'consensus'
+  | 'web_search';
 
 /**
  * The multi-agent team roles (§3.3). 'architect' is the lead/orchestrator; every

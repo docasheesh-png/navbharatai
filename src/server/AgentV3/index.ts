@@ -48,6 +48,8 @@ export { makeSecondOpinion } from './SecondOpinion';
 export type { SecondOpinion, OpinionRouter } from './SecondOpinion';
 export { makeConsensus, synthesizeConsensus } from './Consensus';
 export type { Consensus, Perspective } from './Consensus';
+export { makeWebSearch, WebSearch, formatSearchResults, parseDuckDuckGo } from './WebSearch';
+export type { WebSearchFn, SearchResult } from './WebSearch';
 export { roleConfig, isWorkerRole, WORKER_ROLES, allRoles, findRolesByCapability, rolesByLayer, rosterBriefing } from './AgentRegistry';
 export type { RoleConfig } from './AgentRegistry';
 export { agentLifecycle } from './AgentLifecycle';

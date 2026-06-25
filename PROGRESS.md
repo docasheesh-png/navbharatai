@@ -3026,3 +3026,18 @@ preview-"connection refused" bug class:
   ('hardcoded-port' | 'loopback-host'); `port` is now optional; severity union medium|high.
 
 Gate: server tsc 0, frontend tsc 0, **2288 vitest** PASS (13 PortBindingAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 25): <area> missing alt + <input type=button> no name (a11y)
+
+Batch 24 merged to main 17f2bf0 (PR #375). New `AccessibilityAnalysis` rules (void elements,
+no child-content false positives; axe "area-alt"):
+
+1. **area-missing-alt** (high) — an `<area href>` (an image-map region = a link) with no alt;
+   a screen reader announces nothing for it (WCAG 1.1.1).
+2. **input-button-no-name** (medium) — `<input type="button">` with no value/aria-label/title.
+   Unlike submit/reset (default "Submit"/"Reset"), a plain button input has no default label,
+   so it is announced as just "button".
+
+Gate: server tsc 0, frontend tsc 0, **2290 vitest** PASS (28 AccessibilityAnalysis tests, +2 new).

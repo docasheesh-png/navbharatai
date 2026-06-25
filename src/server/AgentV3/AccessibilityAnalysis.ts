@@ -98,6 +98,23 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
         push('input-image-missing-alt', 'high');
       }
 
+      // ── high: <area href> (an image-map region, i.e. a link) with no alt — a screen
+      // reader announces nothing for it (WCAG 1.1.1 / axe "area-alt"). ──────────────
+      if (name === 'area' && hasAttr(tag, 'href') && !hasAttr(tag, 'alt')) {
+        push('area-missing-alt', 'high');
+      }
+
+      // ── medium: <input type="button"> with no accessible name — unlike submit/reset
+      // (which default to "Submit"/"Reset"), a plain button input has no default label, so
+      // with no value / aria-label it is announced as just "button". ──────────────────
+      if (
+        name === 'input' && /\btype\s*=\s*['"{]?\s*button\b/i.test(tag) &&
+        !hasAttr(tag, 'value') && !hasAttr(tag, 'aria-label') &&
+        !hasAttr(tag, 'aria-labelledby') && !hasAttr(tag, 'title')
+      ) {
+        push('input-button-no-name', 'medium');
+      }
+
       // ── medium: <html> with no lang (assistive tech can't pick a voice) ──────
       if (name === 'html' && !hasAttr(tag, 'lang')) {
         push('html-missing-lang', 'medium');

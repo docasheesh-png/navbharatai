@@ -3437,3 +3437,27 @@ linear infinite spin!important}`.
 Gate: frontend tsc 0, **2355 vitest** PASS (frontend-only; no server change). NOTE: if it still
 looks frozen after deploy, it's the browser serving cached JS/CSS — hard-refresh (the header 'b:'
 build stamp confirms which build is live).
+
+---
+
+### 2026-06-25 — Auth: fix misleading Google sign-in diagnosis (admin-reported login failure)
+
+Admin reported Google login failing with `[auth/internal-error]` and the app showing "Sign-in is
+disabled — provider turned off". Root cause of the MESSAGE (not the login itself): the app's
+diagnostic probe (`diagnoseAuth` → anonymous `signUp`) returns `ADMIN_ONLY_OPERATION` on a healthy
+project where anonymous auth is off (the normal default), and `explainAuthReason` wrongly lumped
+`ADMIN_ONLY_OPERATION` together with `OPERATION_NOT_ALLOWED` → "provider turned off". The author's
+own comment noted ADMIN_ONLY_OPERATION "would actually mean the auth backend is fine" — the mapping
+contradicted it. (Tell: a cleanly-disabled provider throws `auth/operation-not-allowed`, handled
+separately; `auth/internal-error` points to the Google provider's OWN config.)
+
+Fix (code): extracted `explainAuthReason` into `src/lib/authDiagnostics.ts` (pure, unit-tested) and
+split `ADMIN_ONLY_OPERATION` into its own branch with an HONEST, actionable message — "backend+key
+work; check the Google provider's OAuth client + support email + Identity Toolkit API + authorized
+domains". AuthComponent now imports it. 6 new tests.
+
+NOTE (admin action, NOT code — I can't access Firebase Console): the actual login fix for
+`auth/internal-error` on project gen-lang-client-0866594388 is in Console — see the chat checklist
+(Google provider enabled + support email + OAuth Web client + Identity Toolkit API + authorized
+domains + API-key referrers).
+Gate: frontend tsc 0, server tsc 0, **2361 vitest** PASS (6 new authDiagnostics tests).

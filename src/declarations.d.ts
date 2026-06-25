@@ -476,6 +476,7 @@ declare module 'lucide-react' {
   export const Telescope: Icon;
   export const PersonStanding: Icon;
   export const Mountain: Icon;
+  export const PiggyBank: Icon;
   export const PlayCircle: Icon;
   export const Hash: Icon;
   export const AtSign: Icon;

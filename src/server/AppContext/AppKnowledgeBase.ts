@@ -1041,6 +1041,18 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     keywords: ['trekking', 'trek', 'hiking', 'adventure', 'camping', 'road trip', 'mountains', 'himalaya', 'outdoor', 'altitude', 'rafting', 'paragliding', 'safari', 'backpacking', 'yatra'],
   },
 
+  // ─── HOME-BUDGET & FRUGAL-LIVING AI ──────────────────────────────────────
+  {
+    id: 'budget_ai',
+    name: 'Home-Budget & Frugal-Living AI',
+    path: 'Sidebar → Professionals → Home-Budget & Frugal-Living',
+    description: 'Practical, judgement-free helper for everyday household money management: budgeting (simple monthly budget, 50/30/20 & envelope methods, tracking spends), cutting everyday expenses (groceries, bills, subscriptions, eating out, impulse buys), saving habits (pay-yourself-first, emergency fund, goal-based saving), managing bills & debt generally (due dates, clearing high-interest debt, not overspending on EMIs/credit), frugal living (smart shopping, reuse/repair, energy/water saving), and family money (budgeting together, teaching kids, irregular income). Honesty/approach: practical & non-judgemental (small doable steps, no shaming — frugality should reduce stress not cause misery); everyday money-management NOT investment/tax/personalised advice (investing → Finance AI, tax → CA AI, stocks → Stock-Market AI, serious distress → a professional); anti-scam (save/earn-fast & high-return schemes → Cyber Safety AI); no product recommendations/guarantees; never fabricates prices/numbers.',
+    howToUse: 'Open Sidebar → Professionals → Home-Budget & Frugal-Living and ask: "make a monthly budget", "cut my expenses", "build a saving habit & emergency fund", "budgeting for irregular income". For investing use the Finance AI, tax the CA AI.',
+    relatedFeatures: ['professionals', 'finance_ai', 'accountant_ai', 'environment_ai'],
+    aiSurface: 'budget_ai',
+    keywords: ['budget', 'budgeting', 'save money', 'expenses', 'frugal', 'household', 'monthly budget', 'emergency fund', 'cut costs', 'bachat', 'kharcha', 'saving', 'money management', 'cheap living'],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

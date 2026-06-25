@@ -5499,6 +5499,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               else if (id === 'games_ai') toggleTab('games_ai');
               else if (id === 'techbuy_ai') toggleTab('techbuy_ai');
               else if (id === 'adventure_ai') toggleTab('adventure_ai');
+              else if (id === 'budget_ai') toggleTab('budget_ai');
             }} />
           )}
 
@@ -5861,6 +5862,11 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'adventure_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <ProfessionalChat config={PROFESSIONAL_CHATS.adventure_ai} userId={user?.uid} />
+            </div>
+          )}
+          {activeView === 'budget_ai' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <ProfessionalChat config={PROFESSIONAL_CHATS.budget_ai} userId={user?.uid} />
             </div>
           )}
 

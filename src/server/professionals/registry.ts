@@ -71,6 +71,7 @@ import { DANCE_AI } from './configs/dance';
 import { GAMES_AI } from './configs/games';
 import { TECHBUY_AI } from './configs/techbuy';
 import { ADVENTURE_AI } from './configs/adventure';
+import { BUDGET_AI } from './configs/budget';
 
 /**
  * Registry of all config-driven professionals. Add a new professional by adding
@@ -153,6 +154,7 @@ const PROFESSIONALS: Record<string, ProfessionalConfig> = {
   [GAMES_AI.id]: GAMES_AI,
   [TECHBUY_AI.id]: TECHBUY_AI,
   [ADVENTURE_AI.id]: ADVENTURE_AI,
+  [BUDGET_AI.id]: BUDGET_AI,
 };
 
 export function getProfessional(id: string): ProfessionalConfig | undefined {

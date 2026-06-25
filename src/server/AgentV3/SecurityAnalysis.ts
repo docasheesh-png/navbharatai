@@ -293,6 +293,24 @@ const RULES: Rule[] = [
     message: 'Server-side request to a URL from request input — this enables SSRF (an attacker can reach internal services / cloud metadata). Validate the URL against an allow-list of hosts before fetching.',
   },
   {
+    rule: 'regexp-from-request',
+    severity: 'medium',
+    // Building a RegExp from request input lets an attacker inject a catastrophically
+    // backtracking pattern (ReDoS) that pins the CPU and hangs the server, or break the
+    // intended match. High-precision: req.* appears inside the RegExp constructor's args.
+    re: /\bnew\s+RegExp\s*\(\s*[^)]*\breq\.(?:query|params|body|headers)\b/,
+    message: 'RegExp built from request input — a crafted pattern can cause catastrophic backtracking (ReDoS) that hangs the server. Validate/escape the input, or match with a fixed pattern instead of compiling user input.',
+  },
+  {
+    rule: 'xxe-entity-expansion',
+    severity: 'high',
+    // An XML parser told to resolve/expand entities (noent/resolveEntities/expandEntities:
+    // true) processes external entities — the classic XXE vector: read local files
+    // (file:///etc/passwd), SSRF, or a billion-laughs DoS. Keep entity expansion OFF.
+    re: /\b(?:noent|resolveEntities|expandEntities|externalEntities)\s*:\s*true\b/,
+    message: 'XML entity expansion enabled (noent/resolveEntities/expandEntities: true) — this opens XXE (local file disclosure, SSRF, billion-laughs DoS). Disable entity/DTD processing for untrusted XML.',
+  },
+  {
     rule: 'disable-tls-verification',
     severity: 'high',
     // Turning off TLS certificate validation (rejectUnauthorized:false, or the

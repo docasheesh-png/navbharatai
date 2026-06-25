@@ -2931,3 +2931,18 @@ Batch 17 merged to main 08e5482 (PR #368). Extended `HardcodedUrlAnalysis` beyon
   flagged. Added a `kind: 'localhost' | 'private-ip'` field to the issue and kind-aware summary.
 
 Gate: server tsc 0, frontend tsc 0, **2276 vitest** PASS (10 HardcodedUrlAnalysis tests, +3 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 19): RegExp-from-request (ReDoS) + XXE entity expansion
+
+Batch 18 merged to main cfbda93 (PR #369). New `SecurityAnalysis` rules:
+
+1. **regexp-from-request** (medium) — `new RegExp(...)` built from request input (req.query/
+   params/body/headers) lets an attacker inject a catastrophically backtracking pattern (ReDoS)
+   that hangs the server. A fixed/literal pattern is not flagged.
+2. **xxe-entity-expansion** (high) — an XML parser told to resolve entities
+   (`noent`/`resolveEntities`/`expandEntities`/`externalEntities: true`) opens XXE: local file
+   disclosure, SSRF, billion-laughs DoS. The safe `false` form is not flagged.
+
+Gate: server tsc 0, frontend tsc 0, **2278 vitest** PASS (43 SecurityAnalysis tests, +2 new).

@@ -2668,3 +2668,20 @@ Cloud Run auto-deploy triggered. Continuing the march on `claude/navbharatai-pro
    / "React App" / "Document" / "Untitled") — the classic "looks unfinished" tell.
 
 Gate at end of batch 2: server tsc 0, frontend tsc 0, **2240 vitest** PASS, build PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch 3): 3 checks + standing autonomous-deploy
+
+Admin: "khud ba khud deploy kar diya karo, ruk kyu jate ho" → standing authorization to
+auto-deploy each green batch to `main` (CI-green-before-merge gate still enforced; no asking).
+Batch 2 (6 checks) merged to main f68f1f4. New since:
+
+1. `ComplianceAnalysis` **secret-in-url** (medium) — a password/token/api_key/otp/cvv in a URL query
+   string leaks into server logs, browser history and the Referer header.
+2. `SecurityAnalysis` **insecure-websocket** (low) — a ws:// socket to a remote host (in the clear;
+   an https page can't open it — mixed content); wss:// and localhost not flagged.
+3. `AuthenticityAnalysis` **placeholder-email** (low) — a left-in support@example.com / .org / .net
+   contact email shipped as if real.
+
+Gate: server tsc 0, frontend tsc 0, **2243 vitest** PASS, build PASS.

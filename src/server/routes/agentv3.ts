@@ -69,6 +69,7 @@ import { CREATOR_IDENTITY } from '../lib/prompts';
 import { classifyIntentSmart } from '../AgentV3/IntentClassifier';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier } from '../AgentV3/RequestAnalyser';
+import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { reviewBuild, formatReview } from '../AgentV3/ReviewerAgent';
 import {
   saveWorkspaceMemory,
@@ -774,6 +775,8 @@ export function registerAgentV3Routes(app: Express): void {
         analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : undefined,
       );
       const model = resolveModel(onlyOpus);
+      // Build start time — used for cost-ladder telemetry duration (P2 measurement).
+      const buildStartedAt = Date.now();
       const budget = maxBuildBudgetUsd();
       const maxSteps = envInt('AGENTV3_MAX_STEPS', 80);
       const subAgentMaxSteps = envInt('AGENTV3_SUBAGENT_MAX_STEPS', 40);
@@ -1140,6 +1143,23 @@ export function registerAgentV3Routes(app: Express): void {
       if (userId && result.billedUsd > 0) {
         userCostStore.record(userId, result.billedUsd).catch(() => {});
       }
+
+      // Cost-ladder telemetry (P2 measurement): record this build's task type, start
+      // tier, billed amount, tokens, success, and duration so the savings AND the
+      // per-tier quality are MEASURABLE (the P8 cutover gate needs this data). Best-
+      // effort — never blocks the run. Recorded for every build, signed-in or not.
+      agentV3CostTelemetry
+        .record({
+          taskType: analysis?.taskType ?? 'unknown',
+          startTier: analysis?.startTier ?? (onlyOpus ? 'opus' : 'unknown'),
+          billedUsd: result.billedUsd,
+          inputTokens: result.usage?.inputTokens ?? 0,
+          outputTokens: result.usage?.outputTokens ?? 0,
+          ok: result.ok,
+          powerMode: onlyOpus,
+          durationMs: Math.max(0, Date.now() - buildStartedAt),
+        })
+        .catch(() => {});
 
       // TEMP DEBUG: tag the build reply with the provider/model (Claude primary; the
       // resilient runner already self-labels in the text if it fell back to a free provider).

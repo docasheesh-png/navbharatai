@@ -330,6 +330,27 @@ const RULES: Rule[] = [
     message: 'Deprecated TLS/SSL version pinned (TLS 1.0/1.1 or SSLv3) — these are vulnerable (BEAST/POODLE) and rejected by modern servers; require TLS 1.2+ (minVersion: "TLSv1.2").',
   },
   {
+    rule: 'prototype-pollution',
+    severity: 'high',
+    // A deep-merge / deep-set of untrusted request input (lodash merge/mergeWith/
+    // defaultsDeep/set, or jQuery.extend(true, …)) lets a `{ "__proto__": {…} }` payload
+    // pollute Object.prototype — affecting every object in the app (auth bypass, RCE in
+    // some sinks). High-precision: req.* is merged as a WHOLE object — the `(?!\.\w)`
+    // excludes a specific validated leaf (req.body.name), a documented precision trade-off
+    // (a nested object like req.body.settings is not matched).
+    re: /\b(?:_|lodash)\.(?:merge|mergeWith|defaultsDeep|setWith|set)\s*\([^)]*\breq\.(?:body|query|params)\b(?!\s*\.\w)|\.extend\s*\(\s*true\s*,[^)]*\breq\.(?:body|query|params)\b(?!\s*\.\w)/,
+    message: 'Deep-merging untrusted request input can pollute Object.prototype (a "__proto__" payload poisons every object) — validate/whitelist the fields first, or use a null-prototype target and a pollution-safe merge.',
+  },
+  {
+    rule: 'open-redirect-header',
+    severity: 'medium',
+    // Setting the Location header directly from request input is an open redirect (the
+    // header-based twin of res.redirect(req...)). High-precision: a setHeader/header/set
+    // call whose header name is "location" and whose value comes from req.*.
+    re: /\b(?:setHeader|header|set)\s*\(\s*['"`]location['"`]\s*,\s*[^)]*\breq\.(?:query|params|body|headers)\b/i,
+    message: 'Location header set from request input — an open redirect that sends users to an attacker URL; validate the target against an allow-list of paths/hosts.',
+  },
+  {
     rule: 'hardcoded-auth-header',
     severity: 'high',
     // An Authorization header set to a literal `Bearer <token>` / `Basic <creds>` — a

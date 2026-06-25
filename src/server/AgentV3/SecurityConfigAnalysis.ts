@@ -1,10 +1,12 @@
 // AgentV3 — Security configuration scan (Section I #4 v1).
 //
-// Beyond the secret/eval/XSS scan in SecurityAnalysis, two configuration mistakes
-// are common, high-impact and high-precision to detect: disabling TLS certificate
-// verification (opens the app to man-in-the-middle attacks) and a wildcard CORS
-// policy (any origin can call the API). This PURE, deterministic scanner flags those
-// exact code patterns so the agent fixes them before shipping.
+// Focuses on CORS misconfiguration and secret-logging — config mistakes that are common,
+// high-impact and high-precision to detect. TLS-verification-disabled and insecure
+// Math.random() randomness are deliberately NOT duplicated here: SecurityAnalysis already
+// covers both (`disable-tls-verification` and `insecure-random-token`, the latter with a
+// broader security-keyword guard), and running both analyzers would double-report the same
+// line in the `evaluate` output. This PURE, deterministic scanner flags its exact patterns so
+// the agent fixes them before shipping.
 //
 // High-precision by design: each rule matches a specific, unambiguous code pattern,
 // so well-configured code is not nagged.
@@ -28,12 +30,6 @@ interface Rule {
 
 const RULES: Rule[] = [
   {
-    rule: 'tls-verification-disabled',
-    severity: 'high',
-    re: /rejectUnauthorized\s*:\s*false|NODE_TLS_REJECT_UNAUTHORIZED\s*[=:]\s*['"]?0\b/,
-    message: 'TLS certificate verification is disabled (rejectUnauthorized:false / NODE_TLS_REJECT_UNAUTHORIZED=0) — this allows man-in-the-middle attacks. Remove it and trust real certificates.',
-  },
-  {
     rule: 'wildcard-cors',
     severity: 'medium',
     re: /origin\s*:\s*['"]\*['"]|['"]Access-Control-Allow-Origin['"]\s*[,:]\s*['"]\*['"]/,
@@ -47,13 +43,6 @@ const RULES: Rule[] = [
     // API with the user's cookies. Both flags on the same line (either order).
     re: /origin\s*:\s*true[^}\n]*credentials\s*:\s*true|credentials\s*:\s*true[^}\n]*origin\s*:\s*true/,
     message: 'CORS reflects any origin (origin:true) while allowing credentials — any site can make authenticated requests with the user\'s cookies. Pin origin to an explicit allow-list of trusted origins.',
-  },
-  {
-    rule: 'insecure-randomness',
-    severity: 'high',
-    // Math.random() used near a security-sensitive value (either order, same line).
-    re: /\b(token|secret|password|passwd|otp|nonce|session|apikey|api_key|private_?key)\b[^\n]{0,40}Math\.random\s*\(|Math\.random\s*\([^\n]{0,40}\b(token|secret|password|passwd|otp|nonce|session|apikey|api_key|private_?key)\b/i,
-    message: 'Math.random() is used to generate a security value (token/secret/password/etc.) — it is predictable, not cryptographically secure. Use crypto.randomUUID() or crypto.randomBytes() instead.',
   },
   {
     rule: 'logged-secret',

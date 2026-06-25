@@ -2614,3 +2614,34 @@ v3.0-only, flag-OFF.
 
 Tests: +1 unit (req-input + status-code forms flagged; static + fixed-path safe). Gate green:
 server tsc 0, **2223 vitest** (+1), build PASS, boot:check PASS.
+
+---
+
+### 2026-06-25 — Section I march (batch): 11 high-precision quality checks
+
+Continuing the autonomous Section I march (complete→push→next). Eleven new high-precision
+checks added across the existing `evaluate` dimensions — each with a unit test, `AppKnowledgeBase`
+synced where user-facing, and the full gate green (server+frontend tsc, vitest, build). All are
+v3.0-only static scanners (pure, line/tag-local) so precision stays high. Branch
+`claude/navbharatai-pro-testing-p2mgr5`, not merged to main (admin's call):
+
+1. `AuthenticityAnalysis` **ts-nocheck** (medium) + **ts-ignore** (low) — suppressing type errors
+   hides real bugs behind a green build; `@ts-expect-error` (intentional, self-verifying) NOT flagged.
+2. `SecurityAnalysis` **weak-crypto-cipher** (high) — legacy `crypto.createCipher`/`createDecipher`
+   (no IV, MD5 key derivation); the correct `createCipheriv`/`createDecipheriv` NOT flagged.
+3. `AccessibilityAnalysis` **aria-hidden-interactive** (medium) — `aria-hidden="true"` on an
+   interactive element (button / a[href] / input / select / textarea): focusable but unannounced.
+4. `ComplianceAnalysis` **cookie-no-secure** (medium) — server cookie set without the Secure flag.
+5. `SeoAnalysis` **Open Graph** (low) — no `og:` tags → bare link previews on WhatsApp/social.
+6. `AsyncPatternAnalysis` **async-array-predicate** — `filter/find/findIndex/some/every/sort(async …)`
+   are always-wrong (the method uses the return synchronously); `.map(async …)` excluded.
+7. `SecurityAnalysis` **vue-v-html** (medium) — Vue `v-html` raw-HTML XSS sink (closes the Vue gap).
+8. `ArchitectureAnalysis` **nodeBuiltinsInFrontend** expanded — +async_hooks, diagnostics_channel,
+   perf_hooks, trace_events (no browser equivalent, not bundler-polyfilled).
+9. `SeoAnalysis` **favicon** (low) — no `<link rel=icon>` → generic tab icon + /favicon.ico 404.
+10. `ComplianceAnalysis` **geolocation as PII** — `navigator.geolocation`/getCurrentPosition/
+    watchPosition now triggers the "collects personal data → needs privacy policy" launch-safe logic.
+11. `AuthenticityAnalysis` **eslint-disable-all** (low) — a bare `eslint-disable` (no rule named)
+    turns off every lint rule; a disable that names specific rules NOT flagged.
+
+Gate at end of batch: server tsc 0, frontend tsc 0, **2234 vitest** PASS, build PASS.

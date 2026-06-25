@@ -43,7 +43,7 @@
 - Test count grew ~1049 → **1602 passing** (~50 new AgentV3 tests). 
 - **To run live (admin):** set `AGENTV3_ENABLED=true` + `AGENTV3_ALLOWLIST=<admin uid>` + `ANTHROPIC_API_KEY` + `E2B_API_KEY` in Cloud Run; a floating "v3.0" button appears for the admin → full multi-agent builder.
 - **GitManager (real git commits) DONE** (pushed to #191): sandbox is a real git repo; every write/edit creates a real commit (sandbox-only; best-effort), History shows real SHAs; step caps now env-configurable (AGENTV3_MAX_STEPS=80, AGENTV3_SUBAGENT_MAX_STEPS=40). 1607 tests.
-- **Remaining/next:** P6 cutover (make v3.0 default, retire old builders) — only after live dogfood; conversation persistence (D7) reconnect-durable backend; wire GitManager.restore to a History→restore endpoint (needs persistent sandbox mapping); editable-todo UI (bidirectional); BYOK option. Live run still requires admin to set keys + flag (real Claude+E2B spend) — not exercised in-session (no keys).
+- **Remaining/next:** P6 cutover (make v3.0 default, retire old builders) — only after live dogfood; conversation persistence (D7) reconnect-durable backend; wire GitManager.restore to a History→restore endpoint (needs persistent sandbox mapping); editable-todo UI (bidirectional). **(BYOK REMOVED — see 2026-06-25 note; not a feature.)** Live run still requires admin to set keys + flag (real Claude+E2B spend) — not exercised in-session (no keys).
 
 **Session 2026-06-22 (c) — Pro v3.0 ("Vargen 3.0") kickoff: parity audit + design doc (DESIGN ONLY, no runtime change):**
 - Earlier this session: 35-bug brutal audit → 28 fixes shipped live (PRs #173–#178, all CI-green) + Cashfree payment-leak fixes.
@@ -3265,3 +3265,25 @@ Batch 38 polish merged to main c2f1f98 (PR #390). FP fix in ComplianceAnalysis:
   1970/past expiry) that skips all three cookie checks. Normal cookie SETS are still flagged.
 
 Gate: server tsc 0, frontend tsc 0, **2303 vitest** PASS (ComplianceAnalysis 19 tests, +1 new).
+
+---
+
+### 2026-06-25 — BYOK (user's own Anthropic key) REMOVED per admin
+
+Admin (aashishcpmt09) confirmed BYOK was deliberately removed earlier and must NOT be
+re-introduced or re-proposed. There was never any Anthropic-BYOK code (ClaudeClient always
+uses the platform's own ANTHROPIC_API_KEY); BYOK existed only as forward-looking doc
+references. Removed those references so no future session rebuilds it:
+- CLAUDE.md §"NavBharatAI Pro v3.0" — replaced the "future BYOK option stays open" line with an
+  explicit "BYOK is NOT a feature, do not build/re-propose" rule.
+- NAVBHARATAI_PRO_V3_DESIGN.md — D2, D7, §5.1 persistence, §"requirements" updated: v3.0 always
+  runs on NavBharatAI's own account; transcript persistence is NavBharatAI-hosted
+  (`ConversationStore`); no "transcript on the user's Claude" option.
+- This file's "Remaining/next" line — dropped "BYOK option".
+
+IMPORTANT — this is ONLY about Bring-Your-Own-*Key* (Anthropic). Bring-Your-Own-*Database*
+(Engineer AI Phase 14, BackendScaffolder) and the BYO E2B sandbox key are SEPARATE, KEPT
+features and were not touched. Historical PROGRESS entries (D7 decision, BYOK quota tier) are
+left intact per the append-only rule; this note supersedes them.
+
+NEXT: build conversation persistence (ConversationStore, D7) — the admin's chosen target.

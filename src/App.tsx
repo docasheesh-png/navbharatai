@@ -1268,7 +1268,6 @@ export default function App() {
       if (res.ok && data.ok) {
         sessionStorage.setItem('admin_token', data.token);
         setIsAdmin(true);
-        toggleTab('home');
         addLog('Admin: Access Granted.', 'success');
       } else {
         // Surface the REAL reason: server JSON error, or the raw status + body.

@@ -13,6 +13,21 @@ describe('scanHardcodedUrls', () => {
     expect(scanHardcodedUrls('src/a.ts', "fetch('http://127.0.0.1:8080/x')")).toHaveLength(1);
   });
 
+  it('flags hardcoded private-network IP URLs (192.168 / 10 / 172.16-31)', () => {
+    const a = scanHardcodedUrls('src/a.ts', "const API = 'http://192.168.1.50:3000/api';");
+    expect(a).toHaveLength(1);
+    expect(a[0]).toMatchObject({ kind: 'private-ip', url: 'http://192.168.1.50:3000' });
+    expect(scanHardcodedUrls('src/a.ts', "fetch('http://10.0.0.5/x')")[0]?.kind).toBe('private-ip');
+    expect(scanHardcodedUrls('src/a.ts', "fetch('https://172.16.3.4:8443/x')")[0]?.kind).toBe('private-ip');
+    // a public IP / domain is not a private address.
+    expect(scanHardcodedUrls('src/a.ts', "fetch('http://172.15.0.1/x')")).toHaveLength(0);
+    expect(scanHardcodedUrls('src/a.ts', "fetch('https://8.8.8.8/x')")).toHaveLength(0);
+  });
+
+  it('does NOT flag a private IP that is an env-var fallback', () => {
+    expect(scanHardcodedUrls('src/a.ts', "const u = process.env.API || 'http://192.168.1.10:3000';")).toHaveLength(0);
+  });
+
   it('does NOT flag an env-var fallback default', () => {
     const issues = scanHardcodedUrls('src/api.ts', "const API = process.env.API_URL || 'http://localhost:3000';");
     expect(issues).toHaveLength(0);

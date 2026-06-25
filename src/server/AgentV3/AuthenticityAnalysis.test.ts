@@ -95,6 +95,13 @@ describe('scanAuthenticity', () => {
     expect(scanAuthenticity('src/c.ts', '// @ts-expect-error known gap\nfoo.bar();').some((i) => i.kind === 'ts-ignore' || i.kind === 'ts-nocheck')).toBe(false);
   });
 
+  it('flags an empty promise .catch(() => {}) but not one with a real body', () => {
+    expect(scanAuthenticity('src/a.ts', 'fetch(u).then(r => r.json()).catch(() => {});').some((i) => i.kind === 'empty-promise-catch')).toBe(true);
+    expect(scanAuthenticity('src/a.ts', 'load().catch(e => {});').some((i) => i.kind === 'empty-promise-catch')).toBe(true);
+    // a catch that handles the error is not flagged.
+    expect(scanAuthenticity('src/a.ts', 'load().catch((e) => { console.error(e); });').some((i) => i.kind === 'empty-promise-catch')).toBe(false);
+  });
+
   it('flags an empty catch block (low) that silently swallows the error', () => {
     const issues = scanAuthenticity('src/a.ts', 'try {\n  risky();\n} catch (e) {}');
     const hit = issues.find((i) => i.kind === 'empty-catch');

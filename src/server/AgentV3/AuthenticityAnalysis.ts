@@ -124,6 +124,14 @@ const RULES: Rule[] = [
     severity: 'low',
     re: /\bpassword\b\s*[:=]\s*['"`](changeme|test123|123456|password)['"`]/i,
   },
+  {
+    // A promise `.catch(() => {})` with an EMPTY body silently swallows the rejection —
+    // the async failure is hidden and the app looks like it worked (the promise-chain
+    // twin of an empty try/catch). A catch with a real body or a comment is not matched.
+    kind: 'empty-promise-catch',
+    severity: 'low',
+    re: /\.catch\s*\(\s*(?:\(\s*[a-zA-Z_$][\w$]*\s*\)|\(\s*\)|[a-zA-Z_$][\w$]*)\s*=>\s*\{\s*\}\s*\)/,
+  },
 ];
 
 /**

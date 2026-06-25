@@ -248,6 +248,59 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         required: ['query'],
       },
     },
+    {
+      name: 'screenshot',
+      description:
+        'Capture a screenshot of a running URL inside the sandbox and SEE the result image, so ' +
+        'you can verify the app actually renders correctly (layout, broken UI, missing elements). ' +
+        'Use the preview URL (or http://localhost:<devPort>) after the dev server is up. Optional ' +
+        'width/height check responsive layouts. Requires a real sandbox.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'The URL to capture (e.g. http://localhost:5173).' },
+          width: { type: 'number', description: 'Optional viewport width (e.g. 390 for mobile).' },
+          height: { type: 'number', description: 'Optional viewport height.' },
+        },
+        required: ['url'],
+      },
+    },
+    {
+      name: 'browser_action',
+      description:
+        'Drive a real headless browser to TEST interactive flows: click, type, navigate, scroll, ' +
+        'press, hover, double_click, select_option, or wait. State (cookies/DOM/URL) persists across ' +
+        'calls so you can complete a multi-step flow (fill a form → submit → verify). Returns the ' +
+        'action result and a screenshot you can SEE. Requires a real sandbox.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            description: 'The interaction to perform.',
+            enum: ['click', 'type', 'navigate', 'scroll', 'press', 'wait', 'hover', 'double_click', 'select_option'],
+          },
+          selector: { type: 'string', description: 'CSS selector for click/type/hover/select (when applicable).' },
+          text: { type: 'string', description: 'Text to type, key to press, or option to select.' },
+          url: { type: 'string', description: 'URL for the navigate action.' },
+          direction: { type: 'string', description: 'Scroll direction.', enum: ['up', 'down'] },
+        },
+        required: ['action'],
+      },
+    },
+    {
+      name: 'console_errors',
+      description:
+        'Read runtime browser errors (console.error, uncaught exceptions, failed requests) captured ' +
+        'while the app ran — failures a successful BUILD never reveals. Use after loading/driving the ' +
+        'app to catch runtime breakage. Requires a real sandbox.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          since_seconds: { type: 'number', description: 'Look back this many seconds (default 120).' },
+        },
+      },
+    },
   ];
 }
 
@@ -269,6 +322,9 @@ export const CATALOG_TOOL_NAMES = [
   'generate_env_example',
   'generate_gitignore',
   'web_search',
+  'screenshot',
+  'browser_action',
+  'console_errors',
 ] as const;
 
 /**

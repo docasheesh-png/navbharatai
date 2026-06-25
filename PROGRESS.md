@@ -3549,3 +3549,28 @@ PR #1 — `web_search` tool:
 
 Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2452 vitest** PASS (6 new WebSearch tests).
 NEXT: screenshot/browser_action, deploy, generate_tests (each its own PR).
+
+---
+
+### 2026-06-25 — v3.0 feature port #2: screenshot + browser_action + console_errors (agent gets eyes)
+
+PR #2 of the old-engine feature ports. Gives v3.0 the ability to SEE and TEST the app it builds —
+the single biggest capability gap vs Engineer AI.
+
+- ActuatorPort extended with OPTIONAL `screenshot`, `browserAction`, `getConsoleErrors` (the real
+  IEngineerActuator/E2BActuator already implement them; Local/Docker degrade honestly).
+- VISION PASSTHROUGH (real "agent sees"): ToolResult gained an optional `image`; ToolDispatcher
+  routes screenshot/browser_action through `runVisual()` which returns {content, image}; AgentRunner
+  feeds the screenshot back to the model as an Anthropic image content-block in the tool_result, so
+  the model actually inspects the rendered page (not just text). Parallel-safe (image flows through
+  the return value, no shared state).
+- 3 new tools: `screenshot` (capture+see a URL, optional viewport for responsive), `browser_action`
+  (click/type/navigate/scroll/hover/etc. — persistent session for multi-step flows, returns result+
+  screenshot), `console_errors` (runtime browser errors a build never reveals). Wired: types +
+  catalog defs + CATALOG_TOOL_NAMES + dispatcher + architect tool-set + architect prompt ("verify
+  visually; fix what you see; never fake the verification").
+- Honest fallback: on Local/Docker (no E2B) the tools return "requires a real sandbox", never a fake
+  success. No old-engine import added (uses the actuator v3.0 already holds via the ActuatorPort).
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2458 vitest** PASS (6 new browser-tool tests).
+NEXT: deploy tool, generate_tests tool.

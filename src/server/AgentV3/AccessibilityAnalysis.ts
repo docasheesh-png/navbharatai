@@ -156,6 +156,17 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
         push('anchor-missing-href', 'low');
       }
 
+      // ── low: autofocus on a form control yanks focus to it on page load —
+      // it disorients screen-reader users (they are dropped mid-page with no
+      // context) and can skip past important content (axe "no-autofocus"). The
+      // hasAttr check matches both HTML `autofocus` and JSX `autoFocus`. ──────────
+      if (
+        (name === 'input' || name === 'select' || name === 'textarea' || name === 'button') &&
+        hasAttr(tag, 'autofocus')
+      ) {
+        push('autofocus', 'low');
+      }
+
       // ── medium: aria-hidden="true" on an interactive element (WCAG 4.1.2) ─────
       // The element stays focusable but is hidden from assistive tech — a keyboard
       // user tabs to a control a screen reader never announces (a "ghost" focus
@@ -201,6 +212,21 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
       lnk[2].replace(/<[^>]*>/g, '').trim() === ''
     ) {
       issues.push({ file, line: i + 1, kind: 'link-no-accessible-name', severity: 'low', snippet: trimSnippet(line) });
+    }
+
+    // ── medium: an empty heading (<h1>…<h6> with no text) ──────────────────────
+    // Screen-reader users navigate by headings; an empty one is announced as a
+    // heading with no content, breaking the page outline (axe "empty-heading",
+    // WCAG 1.3.1 / 2.4.6). Same-line open/close; child tags are stripped, so
+    // `<h2><Icon/></h2>` with no text is flagged but `<h2>About</h2>` is not. An
+    // aria-label on the heading provides the name and is accepted.
+    const hdg = /<\s*h([1-6])\b([^>]*)>(.*?)<\/\s*h\1\s*>/i.exec(line);
+    if (
+      hdg &&
+      !/\b(aria-label|aria-labelledby|title)\s*=/i.test(hdg[2]) &&
+      hdg[3].replace(/<[^>]*>/g, '').trim() === ''
+    ) {
+      issues.push({ file, line: i + 1, kind: 'empty-heading', severity: 'medium', snippet: trimSnippet(line) });
     }
   }
 

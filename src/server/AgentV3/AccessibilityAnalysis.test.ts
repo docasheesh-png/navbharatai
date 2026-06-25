@@ -129,6 +129,22 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('src/Nav.tsx', '<a href="/home">Home</a>')).toEqual([]);
   });
 
+  it('flags autofocus on a form control as low (HTML and JSX casing)', () => {
+    expect(scanAccessibility('src/F.tsx', '<input autoFocus />').some((x) => x.kind === 'autofocus' && x.severity === 'low')).toBe(true);
+    expect(scanAccessibility('src/F.html', '<input type="text" autofocus>').some((x) => x.kind === 'autofocus')).toBe(true);
+    // no autofocus → not flagged.
+    expect(scanAccessibility('src/F.tsx', '<input type="text" id="name" />').some((x) => x.kind === 'autofocus')).toBe(false);
+  });
+
+  it('flags an empty heading as medium but not a heading with text or an aria-label', () => {
+    expect(scanAccessibility('src/P.tsx', '<h1></h1>').some((x) => x.kind === 'empty-heading' && x.severity === 'medium')).toBe(true);
+    expect(scanAccessibility('src/P.tsx', '<h2><svg /></h2>').some((x) => x.kind === 'empty-heading')).toBe(true);
+    // real text content → not flagged.
+    expect(scanAccessibility('src/P.tsx', '<h1>Welcome</h1>').some((x) => x.kind === 'empty-heading')).toBe(false);
+    // an aria-label provides the accessible name.
+    expect(scanAccessibility('src/P.tsx', '<h2 aria-label="Section"><svg /></h2>').some((x) => x.kind === 'empty-heading')).toBe(false);
+  });
+
   it('returns [] for non-frontend files and test/vendored paths', () => {
     expect(scanAccessibility('src/util.ts', '<img src="x" />')).toEqual([]);
     expect(scanAccessibility('src/Page.test.tsx', '<img src="x" />')).toEqual([]);

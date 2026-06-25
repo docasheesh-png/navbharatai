@@ -46,6 +46,7 @@ import { scanAsyncPatterns, asyncPatternSummary, type AsyncPatternIssue } from '
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
 import type { WebSearchFn } from './WebSearch';
+import type { DeployFn } from './Deployment';
 import { reviewEdit, formatReviewResult } from './PostEditReviewer';
 import { renameSymbol, addComponentProp } from './CodemodeExecutor';
 import type { CodemodeFile } from './CodemodeExecutor';
@@ -95,6 +96,8 @@ export interface ActuatorPort {
     workspaceId: string,
     sinceMs: number,
   ): Promise<{ errors: { t: number; kind: string; text: string }[] }>;
+  /** The built static site (dist/) as path→bytes, for a real persistent deploy. */
+  downloadDistFiles?(workspaceId: string): Promise<Map<string, Buffer>>;
 }
 
 /** One source file read into the shared evaluate snapshot (path + content). */
@@ -132,6 +135,7 @@ export class ToolDispatcher {
     private readonly secondOpinion?: SecondOpinion,
     private readonly consensus?: Consensus,
     private readonly webSearch?: WebSearchFn,
+    private readonly deploy?: DeployFn,
   ) {}
 
   /**
@@ -981,6 +985,28 @@ export class ToolDispatcher {
         }
         const limit = typeof input.limit === 'number' ? input.limit : 5;
         return await this.webSearch(query, limit);
+      }
+
+      case 'deploy': {
+        if (!this.deploy) {
+          return 'Deployment is not configured in this context.';
+        }
+        if (!this.actuator.downloadDistFiles) {
+          return 'Deployment requires a real cloud sandbox (set E2B_API_KEY) — not available here.';
+        }
+        let files: Map<string, Buffer>;
+        try {
+          files = await this.actuator.downloadDistFiles(this.workspaceId);
+        } catch (err) {
+          const m = err instanceof Error ? err.message : String(err);
+          return `Could not read the built site: ${m}. Run "npm run build" first so a dist/ directory exists.`;
+        }
+        if (files.size === 0) {
+          return 'No built files found. Run "npm run build" to produce dist/ before deploying.';
+        }
+        const url = await this.deploy(this.workspaceId, files);
+        this.events?.emit({ type: 'preview', url, ts: Date.now() });
+        return `Deployed to a permanent public URL: ${url} (${files.size} files). This stays live after the sandbox stops.`;
       }
 
       case 'console_errors': {

@@ -29,7 +29,8 @@ export type ToolName =
   | 'web_search'
   | 'screenshot'
   | 'browser_action'
-  | 'console_errors';
+  | 'console_errors'
+  | 'deploy';
 
 /**
  * The multi-agent team roles (§3.3). 'architect' is the lead/orchestrator; every

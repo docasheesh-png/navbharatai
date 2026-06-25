@@ -48,7 +48,7 @@ const REGISTRY: Record<AgentRole, RoleConfig> = {
       'Prefer delegating independent pieces in parallel; integrate their results, ' +
       'verify the app genuinely works, and only finish when it does. Never fake ' +
       'completion.',
-    tools: [...BUILD_TOOLS, 'task', 'second_opinion', 'consensus', 'web_search', 'screenshot', 'browser_action', 'console_errors'],
+    tools: [...BUILD_TOOLS, 'task', 'second_opinion', 'consensus', 'web_search', 'screenshot', 'browser_action', 'console_errors', 'deploy'],
     capabilities: ['orchestrate', 'plan', 'delegate', 'integrate', 'architecture', 'coordinate'],
   },
 

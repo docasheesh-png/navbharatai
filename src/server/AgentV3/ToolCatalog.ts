@@ -301,6 +301,14 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         },
       },
     },
+    {
+      name: 'deploy',
+      description:
+        'Publish the built app to a PERMANENT public URL (Firebase Hosting) that stays live after the ' +
+        'sandbox stops — use when the user asks to deploy/publish/go live. Run "npm run build" first so ' +
+        'a dist/ directory exists, then call deploy. Returns the public https URL. Requires a real sandbox.',
+      input_schema: { type: 'object', properties: {} },
+    },
   ];
 }
 
@@ -325,6 +333,7 @@ export const CATALOG_TOOL_NAMES = [
   'screenshot',
   'browser_action',
   'console_errors',
+  'deploy',
 ] as const;
 
 /**

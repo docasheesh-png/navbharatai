@@ -3574,3 +3574,24 @@ the single biggest capability gap vs Engineer AI.
 
 Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2458 vitest** PASS (6 new browser-tool tests).
 NEXT: deploy tool, generate_tests tool.
+
+---
+
+### 2026-06-25 — v3.0 feature port #3: deploy tool (real persistent Firebase Hosting)
+
+PR #3 of the old-engine feature ports. v3.0 can now SHIP — publish a built app to a permanent
+public URL (not just the ephemeral dev-server preview).
+
+- NEW `src/server/AgentV3/Deployment.ts` — v3.0-owned copy of Engineer AI's DeploymentService
+  (Firebase Hosting REST + ADC auth, SHA-dedup upload, SPA rewrite + immutable asset caching).
+  Channel id prefixed `v3-`. `makeDeploy()` factory + `DeployFn` type + `makeChannelId` (tested).
+- ActuatorPort extended with optional `downloadDistFiles`; `deploy` tool case: pulls dist/ from the
+  sandbox → deploys → emits a preview event → returns the permanent URL. Honest refusals: no dist
+  ("run npm run build first"), no sandbox ("requires E2B"), deploy unconfigured.
+- Wired: ToolName + catalog def + CATALOG_TOOL_NAMES + dispatcher (injected DeployFn) + architect
+  tool-set + index export + route injects makeDeploy() + architect prompt ("deploy when asked;
+  never claim deployed unless deploy returned a URL"). Uses ADC (Cloud Run service account); a 403
+  means the SA needs the Firebase Hosting Admin role. No old-engine import added.
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2464 vitest** PASS (6 new deploy tests).
+NEXT: generate_tests tool (last of today's ports).

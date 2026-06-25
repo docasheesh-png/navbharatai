@@ -3122,3 +3122,18 @@ across the whole AgentV3 dir):
    proxy IP is not flagged.
 
 Gate: server tsc 0, frontend tsc 0, **2298 vitest** PASS (55 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 31): scope-on-td + deprecated marquee/blink (a11y)
+
+Batch 30 merged to main 453c1dc (PR #381). New `AccessibilityAnalysis` rules (verified
+uncovered; scoped to avoid custom-component false positives):
+
+1. **scope-on-td** (medium) — a `scope` attribute on a `<td>` is ignored (scope is only valid
+   on a `<th>`); the cell was meant to be a header (axe "scope-attr-valid"). Scoped to td to
+   avoid flagging custom JSX components that happen to take a `scope` prop.
+2. **deprecated-marquee-blink** (medium) — `<marquee>`/`<blink>` auto-move/flash content with no
+   pause (WCAG 2.2.2) and are dropped by modern browsers.
+
+Gate: server tsc 0, frontend tsc 0, **2300 vitest** PASS (30 AccessibilityAnalysis tests, +2 new).

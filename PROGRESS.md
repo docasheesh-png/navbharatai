@@ -3309,3 +3309,21 @@ no behaviour change to the flag-gated v3.0 path):
   (P-C) a Firestore-backed ConversationStore for real durability.
 
 Gate: server tsc 0, frontend tsc 0, **2314 vitest** PASS (11 new ConversationStore tests).
+
+---
+
+### 2026-06-25 — v3.0 conversation persistence P-B: wire ConversationStore into AgentRunner (D7)
+
+P-A merged (PR #393, f896199). P-B wires the store into the build loop:
+
+- `AgentRunnerOptions.persistence` (optional): `{ store, conversationId, userId, workspaceId, title, now? }`.
+  When present, AgentRunner: creates the record at start (seed transcript); appends each turn
+  (assistant + tool_results) with a `running` checkpoint so a reconnect resumes mid-build, not
+  from scratch; and finalizes with the terminal status — `complete` (model ended), `stopped`
+  (user abort / budget cap / step cap), or `error` (exception) — plus the latest usage + billedUsd.
+- ALL persistence calls are best-effort (wrapped in try/catch): a store failure is swallowed and
+  NEVER breaks the build. When `persistence` is absent, behaviour is byte-for-byte unchanged
+  (back-compat verified by test).
+
+Gate: server tsc 0, frontend tsc 0, **2318 vitest** PASS (4 new AgentRunner persistence tests).
+NEXT (P-C): a Firestore-backed ConversationStore + route load/list/resume endpoints.

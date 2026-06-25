@@ -3,6 +3,7 @@ import type { WorkspaceState } from './WorkspaceState';
 import type { ClaudeToolDef, TurnRunner, TurnUsage } from './ClaudeClient';
 import type { ToolDispatcher } from './ToolDispatcher';
 import type { AgentRole } from './types';
+import type { ConversationStore, ConversationStatus } from './ConversationStore';
 import { billedAmountUsd } from './pricing';
 
 /**
@@ -40,6 +41,21 @@ export interface AgentRunnerOptions {
   agentRole?: AgentRole;
   /** When aborted (e.g. the user pressed Stop), the loop stops between turns. */
   signal?: AbortSignal;
+  /**
+   * Optional durable persistence of the transcript (D7). When provided, the build is created
+   * in the store at the start, the new transcript turns are appended as the loop runs, and the
+   * final status/usage/billing is written when it ends — so the build survives a reconnect.
+   * Persistence is ALWAYS best-effort: a store error is swallowed and never breaks the build.
+   */
+  persistence?: {
+    store: ConversationStore;
+    conversationId: string;
+    userId: string;
+    workspaceId: string;
+    title: string;
+    /** Injected clock (defaults to Date.now) — lets tests assert timestamps deterministically. */
+    now?: () => number;
+  };
 }
 
 export interface AgentRunResult {
@@ -88,6 +104,42 @@ export class AgentRunner {
     const billed = (): number =>
       billedAmountUsd({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }, onlyOpus);
 
+    // ── Durable persistence (D7), all best-effort — a store error never breaks the build. ──
+    const persistence = this.opts.persistence;
+    const now = persistence?.now ?? (() => Date.now());
+    let persistedCount = 0;
+    const persistCreate = async (): Promise<void> => {
+      if (!persistence) return;
+      try {
+        await persistence.store.create({
+          id: persistence.conversationId,
+          userId: persistence.userId,
+          workspaceId: persistence.workspaceId,
+          title: persistence.title,
+          messages: messages.slice(),
+          createdAt: now(),
+        });
+        persistedCount = messages.length;
+      } catch {
+        /* persistence is best-effort */
+      }
+    };
+    // Persist any transcript turns added since the last call, plus the latest usage/billing and
+    // (optionally) a terminal status. Uses appendMessages when there are new turns, else update.
+    const persist = async (status?: ConversationStatus): Promise<void> => {
+      if (!persistence) return;
+      try {
+        const fresh = messages.slice(persistedCount);
+        const patch = { usage: { ...usage }, billedUsd: billed(), updatedAt: now(), ...(status ? { status } : {}) };
+        if (fresh.length) await persistence.store.appendMessages(persistence.conversationId, fresh, patch);
+        else await persistence.store.update(persistence.conversationId, patch);
+        persistedCount = messages.length;
+      } catch {
+        /* persistence is best-effort */
+      }
+    };
+    await persistCreate();
+
     let steps = 0;
     try {
       while (steps < maxSteps) {
@@ -96,6 +148,7 @@ export class AgentRunner {
         // User pressed Stop (or the build was cancelled) — end honestly between turns.
         if (this.opts.signal?.aborted) {
           const summary = 'Build stopped by the user.';
+          await persist('stopped');
           events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
           return { ok: false, summary, steps, usage, billedUsd: billed() };
         }
@@ -132,6 +185,7 @@ export class AgentRunner {
         // No tools requested → the model has finished.
         if (turn.toolUses.length === 0) {
           const summary = turn.text.trim() || 'Build complete.';
+          await persist('complete');
           events.emit({ type: 'done', ok: true, summary, ts: Date.now() });
           return { ok: true, summary, steps, usage, billedUsd: billed() };
         }
@@ -152,16 +206,23 @@ export class AgentRunner {
         // Budget guardrail (CostGuard / D5) — stop honestly, never silently.
         if (maxBudgetUsd !== undefined && billed() >= maxBudgetUsd) {
           const summary = `Budget reached ($${billed().toFixed(4)} of $${maxBudgetUsd.toFixed(2)}). Stopped.`;
+          await persist('stopped');
           events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
           return { ok: false, summary, steps, usage, billedUsd: billed() };
         }
+
+        // Mid-build checkpoint: the turn (assistant + tool results) is persisted so a reconnect
+        // resumes from here, not from the start.
+        await persist('running');
       }
 
       const summary = `Step limit reached (${maxSteps}). Stopped without completing.`;
+      await persist('stopped');
       events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
       return { ok: false, summary, steps, usage, billedUsd: billed() };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      await persist('error');
       events.emit({ type: 'error', message, ts: Date.now() });
       return { ok: false, summary: `Error: ${message}`, steps, usage, billedUsd: billed() };
     }

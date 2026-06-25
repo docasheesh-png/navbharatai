@@ -3236,3 +3236,18 @@ Batch 36 polish merged to main f726674 (PR #388). FP fix in HardcodedUrlAnalysis
   vite/vitest/playwright/webpack/next config + setupTests). A normal source file is still scanned.
 
 Gate: server tsc 0, frontend tsc 0, **2302 vitest** PASS (HardcodedUrlAnalysis 11 tests, +1 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 38, POLISH): redundant-role no longer flags <ul role=list>
+
+Batch 37 polish merged to main 7628437 (PR #389). FP/harmful-advice fix in AccessibilityAnalysis:
+
+- The batch-21 `redundant-role` rule flagged `<ul role="list">` / `<ol role="list">` as redundant.
+  But that is a well-known LEGITIMATE fix: when `list-style: none` is applied, Safari + VoiceOver
+  stop announcing the element as a list, and re-adding role="list" restores it. Flagging it would
+  tell the dev to remove a role that is actually needed — actively harmful advice. Removed ul/ol
+  (and li) from the IMPLICIT_ROLE map; unambiguous mappings (button/a/nav/main/table/textarea/
+  h1-6) still flag redundant roles.
+
+Gate: server tsc 0, frontend tsc 0, **2302 vitest** PASS (AccessibilityAnalysis 32 tests, +1 assertion).

@@ -2840,3 +2840,18 @@ sinks parallel to the existing v-html / dangerouslySetInnerHTML / document-write
    `<%= %>`). The standard `<%- include(...) %>` partial idiom is excluded for precision.
 
 Gate: server tsc 0, frontend tsc 0, **2264 vitest** PASS (37 SecurityAnalysis tests, +2 new).
+
+---
+
+### 2026-06-25 — Section I march (batch 13): empty-heading + autofocus (accessibility)
+
+Batch 12 merged to main b7c69d9 (PR #363). Diversified from security to a11y. New
+`AccessibilityAnalysis` rules (both with axe-core precedent):
+
+1. **empty-heading** (medium) — an `<h1>`–`<h6>` whose stripped inner text is empty breaks the
+   heading-navigation outline screen-reader users rely on (axe "empty-heading", WCAG 1.3.1 /
+   2.4.6). Same-line; `<h2><Icon/></h2>` flagged, `<h2>About</h2>` and an aria-label'd heading not.
+2. **autofocus** (low) — `autofocus`/`autoFocus` on a form control yanks focus on load,
+   disorienting screen-reader users and skipping content (axe "no-autofocus").
+
+Gate: server tsc 0, frontend tsc 0, **2266 vitest** PASS (24 AccessibilityAnalysis tests, +2 new).

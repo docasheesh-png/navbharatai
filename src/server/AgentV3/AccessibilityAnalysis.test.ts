@@ -59,6 +59,15 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('src/B.tsx', '<button onClick={go}>Save</button>').some((x) => x.kind === 'aria-hidden-interactive')).toBe(false);
   });
 
+  it('flags role="none"/"presentation" on an interactive element (semantics stripped)', () => {
+    expect(scanAccessibility('src/B.tsx', '<button role="presentation" onClick={go}>X</button>').some((x) => x.kind === 'role-presentation-interactive')).toBe(true);
+    expect(scanAccessibility('src/B.tsx', '<a href="/x" role="none">link</a>').some((x) => x.kind === 'role-presentation-interactive')).toBe(true);
+    // role="presentation" on a decorative img/table is a legitimate use — not interactive.
+    expect(scanAccessibility('src/B.tsx', '<img src="/d.png" alt="" role="presentation" />').some((x) => x.kind === 'role-presentation-interactive')).toBe(false);
+    // a button with a real role is fine.
+    expect(scanAccessibility('src/B.tsx', '<button onClick={go}>Save</button>').some((x) => x.kind === 'role-presentation-interactive')).toBe(false);
+  });
+
   it('flags <iframe> without a title (medium) but not one with title or aria-label', () => {
     const issues = scanAccessibility('src/Embed.tsx', '<iframe src="https://x.com/v" />');
     expect(issues.some((x) => x.kind === 'iframe-missing-title' && x.severity === 'medium')).toBe(true);

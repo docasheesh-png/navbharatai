@@ -153,12 +153,17 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
       // The element stays focusable but is hidden from assistive tech — a keyboard
       // user tabs to a control a screen reader never announces (a "ghost" focus
       // trap). Buttons, links with href, and form controls are interactive.
-      if (
-        (name === 'button' || name === 'select' || name === 'textarea' ||
-          (name === 'a' && hasAttr(tag, 'href')) || name === 'input') &&
-        /\baria-hidden\s*=\s*['"{]?\s*true\b/i.test(tag)
-      ) {
+      const interactive =
+        name === 'button' || name === 'select' || name === 'textarea' ||
+        (name === 'a' && hasAttr(tag, 'href')) || name === 'input';
+      if (interactive && /\baria-hidden\s*=\s*['"{]?\s*true\b/i.test(tag)) {
         push('aria-hidden-interactive', 'medium');
+      }
+
+      // ── medium: role="none"/"presentation" on an interactive element strips its
+      // semantics — a screen reader no longer announces it as a button/link/control. ──
+      if (interactive && /\brole\s*=\s*['"{]?\s*(?:none|presentation)\b/i.test(tag)) {
+        push('role-presentation-interactive', 'medium');
       }
     }
 

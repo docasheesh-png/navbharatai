@@ -195,6 +195,12 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'fetch("https://api.example.com/x")')).toEqual([]);
   });
 
+  it('flags an insecure ws:// websocket to a remote host but allows wss and localhost', () => {
+    expect(scanSecurity('a.ts', 'const s = new WebSocket("ws://api.example.com/live");').some((f) => f.rule === 'insecure-websocket')).toBe(true);
+    expect(scanSecurity('a.ts', 'const s = new WebSocket("ws://localhost:3000/live");').some((f) => f.rule === 'insecure-websocket')).toBe(false);
+    expect(scanSecurity('a.ts', 'const s = new WebSocket("wss://api.example.com/live");').some((f) => f.rule === 'insecure-websocket')).toBe(false);
+  });
+
   it('returns clean for safe code', () => {
     expect(scanSecurity('a.ts', 'export const add = (a, b) => a + b;')).toEqual([]);
   });

@@ -228,6 +228,14 @@ const RULES: Rule[] = [
     re: /['"`]http:\/\/(?!localhost|127\.0\.0\.1)[^'"`]+['"`]/,
     message: 'Insecure http:// URL — use https:// for remote endpoints.',
   },
+  {
+    rule: 'insecure-websocket',
+    severity: 'low',
+    // A non-encrypted ws:// socket to a remote host travels in the clear, and an https
+    // page cannot open it at all (mixed content). Local dev sockets are not flagged.
+    re: /['"`]ws:\/\/(?!localhost|127\.0\.0\.1)[^'"`]+['"`]/,
+    message: 'Insecure ws:// WebSocket to a remote host — use wss:// (an https page is blocked from opening a ws:// socket as mixed content).',
+  },
 ];
 
 /** Scan one file's content for security findings. Returns [] for non-issues. */

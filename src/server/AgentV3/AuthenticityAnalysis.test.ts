@@ -95,6 +95,12 @@ describe('scanAuthenticity', () => {
     expect(scanAuthenticity('src/c.ts', '// @ts-expect-error known gap\nfoo.bar();').some((i) => i.kind === 'ts-ignore' || i.kind === 'ts-nocheck')).toBe(false);
   });
 
+  it('flags a placeholder @example.com email but not a real one', () => {
+    expect(scanAuthenticity('src/Contact.tsx', 'const support = "support@example.com";').some((i) => i.kind === 'placeholder-email')).toBe(true);
+    expect(scanAuthenticity('src/Contact.tsx', '<a href="mailto:hello@example.org">Email</a>').some((i) => i.kind === 'placeholder-email')).toBe(true);
+    expect(scanAuthenticity('src/Contact.tsx', 'const support = "help@navbharat.ai";').some((i) => i.kind === 'placeholder-email')).toBe(false);
+  });
+
   it('flags an empty promise .catch(() => {}) but not one with a real body', () => {
     expect(scanAuthenticity('src/a.ts', 'fetch(u).then(r => r.json()).catch(() => {});').some((i) => i.kind === 'empty-promise-catch')).toBe(true);
     expect(scanAuthenticity('src/a.ts', 'load().catch(e => {});').some((i) => i.kind === 'empty-promise-catch')).toBe(true);

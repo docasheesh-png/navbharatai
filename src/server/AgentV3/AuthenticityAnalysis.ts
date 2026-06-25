@@ -125,6 +125,13 @@ const RULES: Rule[] = [
     re: /\bpassword\b\s*[:=]\s*['"`](changeme|test123|123456|password)['"`]/i,
   },
   {
+    // A left-in placeholder contact email on the RFC-reserved example.* domains —
+    // shipped as if real (support@example.com etc.), against "real features only".
+    kind: 'placeholder-email',
+    severity: 'low',
+    re: /@example\.(?:com|org|net)\b/i,
+  },
+  {
     // A promise `.catch(() => {})` with an EMPTY body silently swallows the rejection —
     // the async failure is hidden and the app looks like it worked (the promise-chain
     // twin of an empty try/catch). A catch with a real body or a comment is not matched.

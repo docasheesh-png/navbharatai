@@ -28,6 +28,8 @@ import {
   GitHubAppClient,
   githubConfigFromEnv,
   githubStorageActive,
+  githubPrMode,
+  mergeViaPullRequest,
   repoNameForProject,
   type RepoInfo,
   registerSession,
@@ -762,6 +764,8 @@ export function registerAgentV3Routes(app: Express): void {
       let repoSync: GitRepoSync | undefined;
       let repoAuthedUrl = '';
       let repoBranch = 'main';
+      let ghClientRef: GitHubAppClient | undefined;
+      let repoNameRef = '';
       try {
         // Emit an immediate status so the NDJSON stream is never silent while the
         // sandbox is being created (E2B VM setup can take several seconds). A long
@@ -783,6 +787,8 @@ export function registerAgentV3Routes(app: Express): void {
               const token = await ghClient.getInstallationToken();
               repoAuthedUrl = ghClient.authedCloneUrl(repoName, token);
               repoBranch = repo.defaultBranch || 'main';
+              ghClientRef = ghClient;
+              repoNameRef = repoName;
               repoSync = new GitRepoSync(actuator, workspaceId);
               const h = await repoSync.hydrateIfEmpty(repoAuthedUrl);
               if (h.hydrated) {
@@ -1094,9 +1100,26 @@ export function registerAgentV3Routes(app: Express): void {
       if (repoSync && repoAuthedUrl && writtenFiles.size > 0) {
         try {
           const msg = `NavBharatAI build: ${deriveTitle(prompt)}`;
-          const pushed = await repoSync.pushAll(repoAuthedUrl, repoBranch, msg);
-          if (pushed.pushed) {
-            events.emit({ type: 'narration', agent: 'architect', text: 'Saved your project to its GitHub repo.', ts: Date.now() });
+          // PR MODE (Phase 3, opt-in GITHUB_PR_MODE): push to a build branch, open a PR, and merge
+          // it ONLY when CI is green (Claude-Code-style). Default mode force-pushes straight to the
+          // project's default branch. Both best-effort — never block or fail the build.
+          if (githubPrMode() && ghClientRef && repoNameRef) {
+            const buildBranch = `nbi/build-${Date.now()}`;
+            const pushed = await repoSync.pushAll(repoAuthedUrl, buildBranch, msg);
+            if (pushed.pushed) {
+              const flow = await mergeViaPullRequest(ghClientRef, repoNameRef, {
+                head: buildBranch, base: repoBranch, title: msg,
+                body: 'Automated build by NavBharatAI Pro v3.0.',
+              });
+              if (flow.note) {
+                events.emit({ type: 'narration', agent: 'architect', text: flow.note, ts: Date.now() });
+              }
+            }
+          } else {
+            const pushed = await repoSync.pushAll(repoAuthedUrl, repoBranch, msg);
+            if (pushed.pushed) {
+              events.emit({ type: 'narration', agent: 'architect', text: 'Saved your project to its GitHub repo.', ts: Date.now() });
+            }
           }
         } catch { /* git-native push is best-effort */ }
       }

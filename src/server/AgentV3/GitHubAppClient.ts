@@ -136,6 +136,51 @@ export class GitHubAppClient {
     return `https://x-access-token:${token}@github.com/${this.cfg.org}/${name}.git`;
   }
 
+  /**
+   * Open a PR (head → base). Idempotent: if an open PR already exists for that head/base GitHub
+   * returns 422, and we look it up and return the existing one instead of failing.
+   */
+  async openPullRequest(repo: string, head: string, base: string, title: string, body: string): Promise<PullRequestInfo> {
+    const token = await this.getInstallationToken();
+    const created = await this.request<PullApi>('POST', `/repos/${this.cfg.org}/${repo}/pulls`, `token ${token}`, { title, head, base, body });
+    if (created.ok && created.body?.number) return toPullInfo(created.body);
+    // 422 = a PR for this head/base already exists (or no diff). Reuse the open one if present.
+    if (created.status === 422) {
+      const existing = await this.request<PullApi[]>('GET', `/repos/${this.cfg.org}/${repo}/pulls?head=${encodeURIComponent(`${this.cfg.org}:${head}`)}&base=${encodeURIComponent(base)}&state=open`, `token ${token}`);
+      const first = Array.isArray(existing.body) ? existing.body[0] : undefined;
+      if (existing.ok && first?.number) return toPullInfo(first);
+    }
+    throw new Error(`openPullRequest: could not open PR ${head}→${base} on "${repo}" (HTTP ${created.status}).`);
+  }
+
+  /**
+   * The combined CI verdict for a ref: 'success' | 'pending' | 'failure', or 'none' when the repo
+   * has NO checks configured at all (the common case for a freshly-created project repo — then it
+   * is safe to merge immediately). Considers BOTH the legacy commit-status API and GitHub Actions
+   * check-runs, so either CI style is honoured.
+   */
+  async combinedStatus(repo: string, ref: string): Promise<CiVerdict> {
+    const token = await this.getInstallationToken();
+    const status = await this.request<{ state?: string; total_count?: number }>('GET', `/repos/${this.cfg.org}/${repo}/commits/${ref}/status`, `token ${token}`);
+    const checks = await this.request<{ check_runs?: Array<{ status?: string; conclusion?: string }> }>('GET', `/repos/${this.cfg.org}/${repo}/commits/${ref}/check-runs`, `token ${token}`);
+    const statusCount = status.body?.total_count ?? 0;
+    const runs = checks.body?.check_runs ?? [];
+    if (statusCount === 0 && runs.length === 0) return 'none';
+    // Any failure anywhere → failure. Any not-yet-complete → pending. Else success.
+    const runFailed = runs.some((r) => r.status === 'completed' && r.conclusion != null && !['success', 'neutral', 'skipped'].includes(r.conclusion));
+    const runPending = runs.some((r) => r.status !== 'completed');
+    if (status.body?.state === 'failure' || status.body?.state === 'error' || runFailed) return 'failure';
+    if (status.body?.state === 'pending' || runPending) return 'pending';
+    return 'success';
+  }
+
+  /** Merge a PR. Returns true when GitHub reports it merged. */
+  async mergePullRequest(repo: string, number: number, method: 'merge' | 'squash' | 'rebase' = 'squash'): Promise<boolean> {
+    const token = await this.getInstallationToken();
+    const merged = await this.request<{ merged?: boolean }>('PUT', `/repos/${this.cfg.org}/${repo}/pulls/${number}/merge`, `token ${token}`, { merge_method: method });
+    return merged.ok && merged.body?.merged === true;
+  }
+
   private async request<T>(method: string, path: string, auth: string, body?: unknown): Promise<{ ok: boolean; status: number; body: T | null }> {
     const res = await this.fetchImpl(`${GITHUB_API}${path}`, {
       method,
@@ -163,4 +208,23 @@ function toRepoInfo(r: RepoApi, created: boolean): RepoInfo {
     defaultBranch: r.default_branch ?? 'main',
     created,
   };
+}
+
+/** A combined CI verdict for a commit/PR head. 'none' = the repo has no checks configured. */
+export type CiVerdict = 'success' | 'pending' | 'failure' | 'none';
+
+export interface PullRequestInfo {
+  number: number;
+  htmlUrl: string;
+  headSha: string;
+}
+
+interface PullApi {
+  number?: number;
+  html_url?: string;
+  head?: { sha?: string };
+}
+
+function toPullInfo(p: PullApi): PullRequestInfo {
+  return { number: p.number ?? 0, htmlUrl: p.html_url ?? '', headSha: p.head?.sha ?? '' };
 }

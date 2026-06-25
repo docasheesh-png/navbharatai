@@ -7,8 +7,8 @@ import {
   signInWithPhoneNumber,
   ConfirmationResult,
   GoogleAuthProvider,
+  signInWithPopup,
   signInWithRedirect,
-  getRedirectResult
 } from 'firebase/auth';
 import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2 } from 'lucide-react';
@@ -278,23 +278,8 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     }
   };
 
-  // Complete a redirect-based Google sign-in when the user returns to the app
-  // (the fallback path used when the popup is blocked, e.g. on mobile browsers).
-  useEffect(() => {
-    let cancelled = false;
-    getRedirectResult(auth)
-      .then((result) => {
-        if (!cancelled && result?.user) {
-          setUser(result.user);
-          onClose();
-        }
-      })
-      .catch((err) => {
-        if (!cancelled && err?.code) setError(describeGoogleError(err));
-      });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // getRedirectResult is handled once at the App root (App.tsx) so it's not
+  // duplicated here — calling it twice causes a race where one gets null.
 
   const handleGoogleSignIn = async () => {
     setError('');
@@ -302,18 +287,37 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
 
-    // Redirect-FIRST. In many real environments the browser silently blocks the
-    // OAuth popup (nothing opens, no error to catch), so a popup-based flow just
-    // dies quietly. A full-page redirect needs no popup and cannot be blocked —
-    // the page navigates to Google, and getRedirectResult() (effect above) finishes
-    // the sign-in when the user returns. Popup is only tried as a nicer-UX upgrade
-    // on desktop, and any popup problem immediately falls through to the redirect.
+    // Try popup first — instant result, no page reload, works on desktop + modern mobile.
+    // Fall back to redirect only if the popup is explicitly blocked by the browser.
+    try {
+      const result = await signInWithPopup(auth, provider);
+      if (result?.user) {
+        setUser(result.user);
+        onClose();
+      }
+      return;
+    } catch (err: any) {
+      const code = err?.code || '';
+      // Popup blocked → fall through to redirect (no error shown, redirect starts silently).
+      if (code === 'auth/popup-blocked' || code === 'auth/popup-cancelled-by-user') {
+        // fall through to redirect below
+      } else {
+        // Real error (disabled provider, bad API key, etc.) — show it and stop.
+        if (code === 'auth/internal-error') {
+          setError(`${describeGoogleError(err)}\n${await diagnoseAuth()}`);
+        } else {
+          setError(describeGoogleError(err));
+        }
+        setLoading(false);
+        return;
+      }
+    }
+
+    // Redirect fallback — navigates the whole page to Google.
+    // getRedirectResult() in App.tsx root picks up the result on return.
     try {
       await signInWithRedirect(auth, provider);
-      return; // page navigates away to Google; loading stays until it returns
     } catch (err: any) {
-      // Redirect itself failed (rare — real config/credential issue). Show the
-      // actionable reason; for an opaque internal-error add the live diagnosis.
       const code = err?.code || '';
       if (code === 'auth/internal-error') {
         setError(`${describeGoogleError(err)}\n${await diagnoseAuth()}`);

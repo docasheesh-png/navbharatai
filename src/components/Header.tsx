@@ -137,6 +137,19 @@ export const Header = ({
                     if (/^firebase:authUser/i.test(k) || /firebaseLocalStorage/i.test(k)) localStorage.removeItem(k);
                   }
                 } catch { /* storage may be unavailable — reload still signs out */ }
+                // Admin uses a SEPARATE server-password session (not Firebase): the
+                // `isAdmin` flag lives in localStorage and the token in sessionStorage,
+                // and a synthetic admin identity is rebuilt from them on reload. Without
+                // clearing these the admin can never sign out — the reload just restores
+                // them. Clear both so logout actually logs the admin out too.
+                try {
+                  localStorage.removeItem('navbharat_admin_v1');
+                  sessionStorage.removeItem('admin_token');
+                } catch { /* storage may be unavailable — reload still signs out */ }
+                // Firebase persists the signed-in user in IndexedDB (not localStorage),
+                // so a hung signOut() would otherwise be restored on reload. Best-effort
+                // delete the DB so the sign-out is guaranteed.
+                try { indexedDB.deleteDatabase('firebaseLocalStorageDb'); } catch { /* ignore — reload still signs out */ }
                 window.location.reload();
               }}
               className="w-10 h-10 bg-white/5 hover:bg-red-500/10 rounded-xl flex items-center justify-center text-[#484f58] hover:text-red-500 transition-all border border-white/5 active:scale-90"

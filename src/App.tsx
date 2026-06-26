@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
-import { AgentV3Panel } from './components/agentv3/AgentV3Panel';
+// AgentV3Panel is rendered via ProV3Surface (the gated v3.0 surface), not directly here.
 import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
 import { GitViewPanel } from './components/panels/GitViewPanel';
 import { DeploySuccessPanel } from './components/panels/DeploySuccessPanel';
@@ -20,7 +20,7 @@ import { ViewPanels } from './components/panels/ViewPanels';
 import { SidebarNav } from './components/panels/SidebarNav';
 import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
-import { AgentV3Launcher } from './components/agentv3/AgentV3Launcher';
+// AgentV3Launcher removed — v3.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
 import { ConnectDomainPanel } from './components/panels/ConnectDomainPanel';
 import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
@@ -4397,7 +4397,7 @@ ${buildLanguageRule(preferredLanguage)}`;
         ts: mm.timestamp ? (Date.parse(mm.timestamp) || Date.now()) : (mm.ts ?? Date.now()),
       }));
       setV3Resume({ sessionId: sid, messages: msgs, nonce: Date.now() });
-      toggleTab('engine_builder');
+      toggleTab('nbi_pro_chat'); // v3.0 now lives in nbi_pro_chat
       addLog(`Resumed v3.0 session: ${session.title}`, 'info');
       return;
     }
@@ -4491,7 +4491,7 @@ ${buildLanguageRule(preferredLanguage)}`;
       }));
       setV3Resume({ sessionId: sid, messages: msgs, nonce: Date.now() });
       setCurrentSessionId(targetSession.id);
-      toggleTab('engine_builder');
+      toggleTab('nbi_pro_chat'); // v3.0 now lives in nbi_pro_chat
       addToast('Resumed v3.0 session.', 'success');
       return true;
     }
@@ -5390,7 +5390,7 @@ ${buildLanguageRule(preferredLanguage)}`;
             /* NavBharatAI Pro v3.0 — replaces the retired Pro v2.0 builder. ProV3Surface shows the
                real v3.0 builder when it's enabled for this account, else an honest "rolling out"
                message (never a broken builder). The old ProChatPanel (v2.0) is retired. */
-            <ProV3Surface userId={user?.uid} email={user?.email} />
+            <ProV3Surface userId={user?.uid} email={user?.email} resume={v3Resume} />
           )}
 
           {/* ── Senior Doctor Assistant ── */}
@@ -5404,7 +5404,8 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'professionals' && (
             <ProfessionalsView onSelect={(id) => {
               if (id === 'sda_chat') toggleTab('sda_chat');
-              else if (id === 'engineer_ai') toggleTab('nbi_pro_chat'); // Engineer AI retired → Pro v3.0
+              else if (id === 'nbi_pro_chat') toggleTab('nbi_pro_chat'); // NavBharatAI Pro v3.0 gate
+              else if (id === 'engineer_ai') toggleTab('nbi_pro_chat'); // legacy id → Pro v3.0
               else if (id === 'teacher_ai') toggleTab('teacher_ai');
               else if (id === 'mentor_ai') toggleTab('mentor_ai');
               else if (id === 'thesis_ai') toggleTab('thesis_ai');
@@ -6002,15 +6003,9 @@ ${buildLanguageRule(preferredLanguage)}`;
             />
           )}
 
-          {/* v3.0 stays MOUNTED while its header tab is open — switching to another
-              tab (or mobile back) only hides it, so the build keeps running and the
-              chat/history are preserved. It is unmounted (and fully reset) ONLY when
-              its tab is closed via the ✕. */}
-          {openTabs.includes('engine_builder') && (
-            <div className="flex-1" style={{ height: '100vh', display: activeView === 'engine_builder' ? undefined : 'none' }}>
-              <AgentV3Panel userId={user?.uid} email={user?.email} resume={v3Resume} />
-            </div>
-          )}
+          {/* Separate 'engine_builder' v3.0 view REMOVED — v3.0 is now reached only via the two
+              gates (sidebar "NavBharatAI Pro v3.0" = nbi_pro_chat, and Professionals → Pro v3.0),
+              both rendering ProV3Surface above. The floating launcher is removed too. */}
 
           {activeView === 'entertainment' && (
             <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0d1117] min-h-screen">
@@ -6118,7 +6113,7 @@ ${buildLanguageRule(preferredLanguage)}`;
  
               
       {/* AgentV3 (Vargen 3.0) launcher — admin-only, flag-gated; renders nothing when disabled. */}
-      <AgentV3Launcher userId={user?.uid} email={user?.email} onOpen={() => toggleTab('engine_builder')} />
+      {/* Floating v3.0 launcher REMOVED — v3.0 is reached via the two gates only (see ProV3Surface). */}
 
       {/* Auth Modal + all overlay modals → AppModals */}
       <AppModals

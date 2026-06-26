@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Loader2, Sparkles } from 'lucide-react';
 import { AgentV3Panel } from './AgentV3Panel';
 
+type V3Resume = { sessionId: string; messages: Array<{ role: 'user' | 'agent'; text: string; ts: number }>; nonce: number } | null;
+
 /**
  * NavBharatAI Pro v3.0 surface — the single Pro builder, replacing the retired Pro v2.0.
  *
@@ -11,7 +13,7 @@ import { AgentV3Panel } from './AgentV3Panel';
  *  • not yet  → an honest "rolling out" message (NEVER a broken/empty builder, so the app never
  *    looks broken for a user who isn't on the v3.0 batch yet).
  */
-export function ProV3Surface({ userId, email }: { userId?: string; email?: string }) {
+export function ProV3Surface({ userId, email, resume }: { userId?: string; email?: string; resume?: V3Resume }) {
   const [state, setState] = useState<'loading' | 'enabled' | 'disabled'>('loading');
 
   useEffect(() => {
@@ -36,7 +38,7 @@ export function ProV3Surface({ userId, email }: { userId?: string; email?: strin
   }
 
   if (state === 'enabled') {
-    return <AgentV3Panel userId={userId} email={email} />;
+    return <AgentV3Panel userId={userId} email={email} resume={resume} />;
   }
 
   return (

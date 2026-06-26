@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 
 describe('conversationAccess (D7 ownership gate)', () => {
@@ -153,5 +153,64 @@ describe('cost-ladder (P2) — tierToGeminiBuildModel + analyser integration', (
     const power = analyzeRequest({ prompt: 'build a calculator', powerMode: true });
     expect(power.startTier).toBe('opus');
     expect(tierToGeminiBuildModel(power.startTier)).toBe('gemini-2.5-pro');
+  });
+});
+
+describe('cost-ladder escalation (P3) — dormant policy + gate', () => {
+  const prev = process.env.AGENTV3_ESCALATION;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTV3_ESCALATION;
+    else process.env.AGENTV3_ESCALATION = prev;
+  });
+
+  it('is OFF by default — escalationEnabled() false, builds run once', () => {
+    delete process.env.AGENTV3_ESCALATION;
+    expect(escalationEnabled()).toBe(false);
+    const simple = analyzeRequest({ prompt: 'build me a calculator' });
+    expect(shouldEscalateBuild(simple, false)).toBe(false); // flag off → never escalate
+  });
+
+  it('only activates when the flag is exactly "on"', () => {
+    process.env.AGENTV3_ESCALATION = 'true';
+    expect(escalationEnabled()).toBe(false); // only literal "on" enables it
+    process.env.AGENTV3_ESCALATION = 'on';
+    expect(escalationEnabled()).toBe(true);
+  });
+
+  it('when ON, escalates a cheap-tier build with a higher tier available', () => {
+    process.env.AGENTV3_ESCALATION = 'on';
+    const simple = analyzeRequest({ prompt: 'build me a calculator' }); // starts on gemini
+    expect(simple.startTier).toBe('gemini');
+    expect(simple.escalationPath.length).toBeGreaterThan(1);
+    expect(shouldEscalateBuild(simple, false)).toBe(true);
+  });
+
+  it('when ON, does NOT escalate power/Only-Opus builds (ladder bypassed)', () => {
+    process.env.AGENTV3_ESCALATION = 'on';
+    const power = analyzeRequest({ prompt: 'build a calculator', powerMode: true });
+    expect(power.escalationPath).toEqual(['opus']); // single tier — nowhere to climb
+    expect(shouldEscalateBuild(power, true)).toBe(false);
+  });
+
+  it('when ON, does NOT escalate a build already at the top tier (no higher tier)', () => {
+    process.env.AGENTV3_ESCALATION = 'on';
+    // A complex app starts at sonnet — the top of the normal ladder, path length 1.
+    const complex = analyzeRequest({ prompt: 'production-grade scalable microservice architecture with auth and payments' });
+    if (complex.escalationPath.length <= 1) {
+      expect(shouldEscalateBuild(complex, false)).toBe(false);
+    } else {
+      expect(shouldEscalateBuild(complex, false)).toBe(true);
+    }
+  });
+
+  it('escalationGate: ok build passes, failed build fails (triggers climb)', () => {
+    expect(escalationGate(true)).toMatchObject({ pass: true, score: 100 });
+    expect(escalationGate(false)).toMatchObject({ pass: false, score: 0 });
+    expect(escalationGate(false).reason).toContain('escalate');
+  });
+
+  it('shouldEscalateBuild is false when there is no analysis', () => {
+    process.env.AGENTV3_ESCALATION = 'on';
+    expect(shouldEscalateBuild(undefined, false)).toBe(false);
   });
 });

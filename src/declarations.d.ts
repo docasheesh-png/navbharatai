@@ -550,6 +550,7 @@ declare module 'firebase/auth' {
   export function sendPasswordResetEmail(auth: any, email: string): Promise<void>;
   export function updateProfile(user: any, profile: any): Promise<void>;
   export const GoogleAuthProvider: any;
+  export const GithubAuthProvider: any;
   export function signInWithPopup(auth: any, provider: any): Promise<any>;
   export function signInWithRedirect(auth: any, provider: any): Promise<any>;
   export function getRedirectResult(auth: any): Promise<any>;

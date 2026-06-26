@@ -1315,7 +1315,7 @@ export default function App() {
         console.error('[auth] redirect sign-in failed:', code || e?.message || e);
         // auth/no-auth-event = no pending redirect (normal on most page loads — ignore).
         if (code && code !== 'auth/no-auth-event') {
-          addToast('Google sign-in failed. Please try again.', 'error');
+          addToast('Sign-in failed. Please try again.', 'error');
           setShowAuth(true);
         }
       });

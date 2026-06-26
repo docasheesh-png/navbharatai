@@ -4161,3 +4161,27 @@ New v3.0 env var: `AGENTV3_USER_MONTHLY_CAP_USD` (USD, default 0 = off).
 
 Gate at each merge: frontend tsc 0, server tsc 0, vitest PASS (2598→2606), boot:check PASS.
 Next in R1: §1.2 rate-limit all mutating endpoints, §3.3 prompt-injection defense (imports).
+
+---
+
+## 2026-06-26 (cont.) — R2 §1.1 mandatory gate + escalation ground-truth correction
+
+- **R2 §1.1 — mandatory quality gate (PR #459):** the objective 22-dimension `evaluate`
+  scan now runs automatically before a top-level build is reported done; a NOT-READY
+  verdict (unresolved import / secret leak / fake code / can't-run) downgrades ok:true →
+  ok:false with an honest summary. `ToolDispatcher.assessBuildReadiness()` reuses the exact
+  same scan (no divergence). Wired via `readinessGate` (top-level runners only, never
+  sub-agents) + `readinessGateEnabled()` (ON by default; `AGENTV3_READINESS_GATE=off` escape
+  hatch). New env var: `AGENTV3_READINESS_GATE`.
+
+- **Ground-truth correction (escalation):** the audit/roadmap listed the Escalation
+  Orchestrator as "built+tested but NOT wired to AgentRunner / dormant." Reading the live
+  route shows it IS wired — `routes/agentv3.ts` runs `runWithEscalation(analysis.escalationPath,
+  { buildOnTier, gate: escalationGate(build.ok) })` (cheap→strong, Opus backstop), gated only
+  by `AGENTV3_ESCALATION` (default off) + `shouldEscalateBuild()`. So R3 §2.1 ("wire
+  escalation") is largely DONE in code — what remains is an ops decision to enable the flag
+  (with telemetry) rather than new wiring. BONUS: because §1.1 makes a not-ready build ok:false,
+  the existing `escalationGate(build.ok)` now escalates on a failed READINESS check too — the two
+  features composed for free.
+
+Gate at merge: frontend tsc 0, server tsc 0, vitest 2621 PASS, boot:check PASS.

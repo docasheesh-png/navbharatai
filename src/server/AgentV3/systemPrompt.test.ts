@@ -41,6 +41,14 @@ describe('editModePrefix', () => {
     expect(p).toContain('NEW FILES ARE FINE');
   });
 
+  it('makes "never break the app" the #1 absolute edit rule and demands post-edit verification', () => {
+    const p = editModePrefix(['src/App.tsx']);
+    expect(p).toContain('YOUR EDIT MUST NEVER BREAK THE APP');
+    // It must demand actually proving the app still builds/runs after editing.
+    expect(p).toContain('npx tsc --noEmit');
+    expect(p).toContain('prove it still works');
+  });
+
   it('omits the file-tree block when no files are supplied (defensive default)', () => {
     const p = editModePrefix();
     expect(p).toContain('EDIT MODE');
@@ -66,5 +74,14 @@ describe('architectSystemPrompt / planSystemPrompt sanity', () => {
     const p = planSystemPrompt();
     expect(p.toLowerCase()).toContain('plan');
     expect(p).toContain('update_todo');
+  });
+
+  it('instructs building every app to be edit-resilient so later edits never break it', () => {
+    const p = architectSystemPrompt();
+    expect(p).toContain('EDIT-RESILIENT');
+    expect(p).toContain('NEVER BREAK FROM LATER EDITS');
+    // The concrete robustness levers must be spelled out, not just asserted.
+    expect(p).toContain('ERROR BOUNDARY');
+    expect(p).toContain('DECOUPLED');
   });
 });

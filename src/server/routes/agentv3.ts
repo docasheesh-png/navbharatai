@@ -68,6 +68,7 @@ import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from 
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
+import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
@@ -834,7 +835,11 @@ export function registerAgentV3Routes(app: Express): void {
       try {
         const docs = await buildDocumentContext(rawAttachments);
         const vis = await describeVisionAttachments(rawAttachments, { useClaude: onlyOpus });
-        attachmentContext = [docs, vis].filter(Boolean).join('\n\n');
+        const extracted = [docs, vis].filter(Boolean).join('\n\n');
+        // Prompt-injection defense (R1 §3.3): the user may have innocently uploaded a document
+        // or repo that carries an injection payload. Fence the extracted content as untrusted
+        // DATA so the agent reads it but never executes instructions hidden inside it.
+        attachmentContext = fenceUntrusted('attached files', extracted);
       } catch { /* best-effort — a bad file never blocks the turn */ }
     }
 

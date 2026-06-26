@@ -102,6 +102,43 @@ export interface SettingsPanelProps {
   addLog: (msg: string, type: 'info' | 'error' | 'success' | 'warn') => void;
 }
 
+/**
+ * "Reduce Animations" toggle (Settings → General). Animations are ON by default; turning this ON
+ * sets the `nb-reduce-motion` class on <html> (CSS minimises every animation/transition, and the
+ * JS-driven waving tiranga goes static). The choice is persisted in localStorage and re-applied on
+ * load (see main.tsx). Self-contained so it needs no prop wiring.
+ */
+function ReduceMotionToggle() {
+  const [reduced, setReduced] = React.useState<boolean>(() => {
+    try { return localStorage.getItem('navbharat_reduce_motion') === 'true'; } catch { return false; }
+  });
+  const apply = (next: boolean) => {
+    setReduced(next);
+    try { localStorage.setItem('navbharat_reduce_motion', next ? 'true' : 'false'); } catch { /* ignore */ }
+    try { document.documentElement.classList.toggle('nb-reduce-motion', next); } catch { /* ignore */ }
+  };
+  return (
+    <div className="flex items-center justify-between p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
+      <div className="flex items-center gap-4">
+        <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center text-lg">🇮🇳</div>
+        <div>
+          <div className="text-sm font-bold text-white">Reduce Animations</div>
+          <div className="text-[11px] text-[#8b949e] mt-0.5 max-w-xs">Animations (like the waving flag) are on by default. Turn this on to minimise motion for comfort.</div>
+        </div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={reduced}
+        onClick={() => apply(!reduced)}
+        className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ${reduced ? 'bg-indigo-600' : 'bg-white/15'}`}
+      >
+        <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${reduced ? 'translate-x-5' : ''}`} />
+      </button>
+    </div>
+  );
+}
+
 export function SettingsPanel({
   themeClasses,
   settingsScreen,
@@ -412,6 +449,11 @@ export function SettingsPanel({
                            </button>
                           ))}
                         </div>
+                     </div>
+
+                     <div className="space-y-3 pt-6 border-t border-white/10">
+                        <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block pl-1">Motion</label>
+                        <ReduceMotionToggle />
                      </div>
 
                      <div className="space-y-3 pt-6 border-t border-white/10">

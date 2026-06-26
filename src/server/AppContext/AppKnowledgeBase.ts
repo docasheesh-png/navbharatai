@@ -1464,6 +1464,21 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['metrics', 'stats', 'cost', 'admin', 'dashboard', 'builds', 'usage', 'ai cost', 'success rate', 'observability', 'logs', 'monitoring'],
   },
   {
+    id: 'admin-cost-ladder',
+    name: 'v3.0 Cost-Ladder Dashboard',
+    path: 'Admin Dashboard → Revenue tab → "v3.0 Cost-Ladder (last 30 days)" (admin only)',
+    description: `Admin-only panel showing how NavBharatAI Pro v3.0 routes builds across model tiers to control cost, with REAL telemetry (never faked):
+• Total v3.0 builds and overall success rate over the last 30 days
+• CHEAP-TIER SHARE — what % of builds ran on the cheapest 'gemini' start tier (the cost-ladder's whole point: simple apps build on Gemini Flash, not Pro)
+• Per-start-tier breakdown table (gemini → haiku → sonnet → opus): builds, share %, success rate %, average tokens, average build time, billed amount
+• Power-mode (Only-Opus) build count
+• The cheap-tier success rate is the P8 cutover signal — high share + high success means the ladder is safe to enable by default
+• Backend: GET /api/admin/agentv3/cost-telemetry, aggregated daily in Firestore (agentv3_cost_telemetry). Billing is unchanged (Opus-equivalent markup) — the ladder only lowers NavBharatAI's own provider cost.`,
+    howToUse: 'Admin login required. Open the Admin Dashboard → Revenue tab → scroll to "v3.0 Cost-Ladder". Click Refresh to pull the latest 30-day telemetry. Data appears once Pro v3.0 builds have run.',
+    relatedFeatures: ['admin', 'admin-metrics', 'pro_chat'],
+    keywords: ['cost ladder', 'cost', 'tier', 'gemini', 'cheap tier', 'savings', 'model routing', 'v3.0 cost', 'build cost', 'admin', 'success rate', 'telemetry', 'opus', 'sonnet', 'haiku'],
+  },
+  {
     id: 'auto-dependency-sync',
     name: 'Auto Dependency Sync',
     path: 'Pro Chat → Build any app → automatic (no user action needed)',

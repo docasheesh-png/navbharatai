@@ -52,6 +52,7 @@ import { reviewEdit, formatReviewResult } from './PostEditReviewer';
 import { renameSymbol, addComponentProp } from './CodemodeExecutor';
 import type { CodemodeFile } from './CodemodeExecutor';
 import { getEmbeddingStore } from './EmbeddingSearch';
+import { redactSecrets, redactDeep } from './SecretRedactor';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -484,11 +485,16 @@ export class ToolDispatcher {
   }
 
   async dispatch(call: ToolUse, agent: AgentRole = 'architect'): Promise<ToolResult> {
+    // Secret redaction (R1.1, roadmap §3.2): tool_call input and tool_result summaries are
+    // streamed to the user's screen, so a command/output that inlines an API key, a .env value
+    // or a connection-string password must be masked BEFORE it is shown. We redact ONLY the
+    // user-visible event surface (input + summary + error message) — the model-facing `content`
+    // is left intact so edit_file's exact-string matching never breaks on a redacted value.
     this.events?.emit({
       type: 'tool_call',
       agent,
       tool: call.name as ToolName,
-      input: call.input,
+      input: redactDeep(call.input),
       callId: call.id,
       ts: Date.now(),
     });
@@ -503,7 +509,7 @@ export class ToolDispatcher {
         agent,
         callId: call.id,
         ok: true,
-        summary: summarize(content),
+        summary: redactSecrets(summarize(content)),
         ts: Date.now(),
       });
       return { tool_use_id: call.id, content, is_error: false, image: visual?.image };
@@ -514,7 +520,7 @@ export class ToolDispatcher {
         agent,
         callId: call.id,
         ok: false,
-        summary: message,
+        summary: redactSecrets(message),
         ts: Date.now(),
       });
       return { tool_use_id: call.id, content: `Error: ${message}`, is_error: true };

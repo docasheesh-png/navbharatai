@@ -42,6 +42,7 @@ import { getPreviewService } from './src/server/runtime/PreviewService';
 import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
 import { registerSyncRoutes } from './src/server/routes/sync';
+import { registerProfileRoutes } from './src/server/routes/profile';
 
 
 // Traceability Infrastructure
@@ -458,6 +459,9 @@ setInterval(() => {
   registerPreviewRoutes(app, chatLimiter);
   // Engine-backed build route (Phase 4 — VFS + EditEngine + Verifier + RepairLoop + preview).
   registerBuildRoutes(app);
+
+  // User profile (My Profile page: display name, photo, build history, budget).
+  registerProfileRoutes(app);
 
   // PWA "App Store" routes — extracted to src/server/routes/pwa.ts (Phase 1).
   registerPwaRoutes(app, pwaStore);

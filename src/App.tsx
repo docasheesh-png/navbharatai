@@ -10,6 +10,7 @@ import { AdminLoginPanel } from './components/panels/AdminLoginPanel';
 // FilesPanel → moved to ViewPanels.tsx
 import { DonationPanel } from './components/panels/DonationPanel';
 import { BillingPanel } from './components/panels/BillingPanel';
+import { ProfilePage } from './components/profile/ProfilePage';
 import { DeployModal } from './components/panels/DeployModal';
 import { WorkspacePane } from './components/panels/WorkspacePane';
 import { SettingsPanel } from './components/panels/SettingsPanel';
@@ -5240,6 +5241,8 @@ ${buildLanguageRule(preferredLanguage)}`;
         auth={auth}
         theme={theme}
         setTheme={setTheme}
+        onOpenProfile={() => setActiveView('my_profile')}
+        onOpenSettings={() => setActiveView('settings')}
       />
 
       {/* Main Content Area */}
@@ -5981,6 +5984,32 @@ ${buildLanguageRule(preferredLanguage)}`;
               onSetLimitSuccess={setLimitSuccess}
               onToast={addToast}
               monthlyAiCost={monthlyAiCost}
+            />
+          )}
+
+          {activeView === 'my_profile' && (
+            <ProfilePage
+              user={user}
+              onNavigateToBilling={() => { setActiveView('billing'); }}
+              onNavigateToSettings={() => { setActiveView('settings'); }}
+              onLogout={async () => {
+                if (!confirm('Sign out from NavBharatAI?')) return;
+                try {
+                  await Promise.race([
+                    signOut(auth).catch(() => {}),
+                    new Promise(r => setTimeout(r, 2500)),
+                  ]);
+                } catch { /* ignore */ }
+                try {
+                  for (const k of Object.keys(localStorage)) {
+                    if (/^firebase:authUser/i.test(k) || /firebaseLocalStorage/i.test(k)) localStorage.removeItem(k);
+                  }
+                  localStorage.removeItem('navbharat_admin_v1');
+                  sessionStorage.removeItem('admin_token');
+                } catch { /* ignore */ }
+                try { indexedDB.deleteDatabase('firebaseLocalStorageDb'); } catch { /* ignore */ }
+                window.location.reload();
+              }}
             />
           )}
 

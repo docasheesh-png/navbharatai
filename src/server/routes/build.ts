@@ -41,6 +41,8 @@ import { metricsStore } from '../lib/metricsStore';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
 import { workspaceLock } from '../project/WorkspaceLock';
 import { userCostStore } from '../lib/UserCostStore';
+import { userBuildHistoryStore, type BuildStatus } from '../lib/UserBuildHistoryStore';
+import { usdToInr } from '../lib/UsdInrRate';
 
 /**
  * Phase 4 integration — the real, engine-backed build endpoint.
@@ -541,6 +543,37 @@ export function registerBuildRoutes(app: Express): void {
             // Phase 4.2 — accumulate per-user monthly AI cost (display-only, never blocks).
             if (reqUserId && typeof eng.estimatedCostUsd === 'number' && eng.estimatedCostUsd > 0) {
               userCostStore.record(reqUserId, eng.estimatedCostUsd).catch(() => {});
+            }
+            // My Profile — per-build history record.
+            if (reqUserId) {
+              try {
+                const isPartial = eng.partial || deadline.signal.aborted;
+                const isCompleted = eng.ok && !isPartial;
+                const isFailed = !eng.ok && !isPartial && (eng.fileCount ?? 0) === 0;
+                const buildStatus: BuildStatus = isCompleted ? 'completed' : isFailed ? 'failed' : 'cancelled';
+                const fullCostInr = usdToInr(eng.estimatedCostUsd ?? 0);
+                // Partial charge for cancelled builds: 50% if files were written, else 0.
+                const costInr = buildStatus === 'completed'
+                  ? fullCostInr
+                  : buildStatus === 'cancelled' && (eng.fileCount ?? 0) > 0
+                  ? Math.round(fullCostInr * 0.5 * 100) / 100
+                  : 0;
+                const durationMs = Date.now() - startedAt;
+                userBuildHistoryStore.record({
+                  id: `${reqUserId}_${startedAt}`,
+                  userId: reqUserId,
+                  sessionId: sessionId || '',
+                  title: (prompt || '').trim().slice(0, 80),
+                  createdAt: startedAt,
+                  durationMs,
+                  costInr,
+                  fullCostInr,
+                  status: buildStatus,
+                  progressPercent: buildStatus === 'cancelled' ? Math.min(90, Math.round(((eng.fileCount ?? 0) / 10) * 100)) : 0,
+                  tier: eng.tier || 'vfs',
+                  fileCount: eng.fileCount ?? 0,
+                }).catch(() => {});
+              } catch { /* history never blocks the build */ }
             }
             // Phase 2.1 — save version checkpoint for every successful build.
             if (sessionId && eng.ok && !eng.partial) {

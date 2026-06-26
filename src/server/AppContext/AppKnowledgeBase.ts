@@ -1677,6 +1677,30 @@ Hints are cleared after a successful build so they don't carry over to unrelated
     aiSurface: 'pro_chat',
     keywords: ['error', 'build fail', 'fix', 'retry', 'learn', 'pattern', 'cannot find module', 'eresolve', 'peer dep', 'jsx error', 'tailwind', 'supabase', 'smart build', 'auto fix', 'error detection', 'build smarter', 'galti', 'error fix', 'dobara banao'],
   },
+  {
+    id: 'v3-framework-selector',
+    name: 'Multi-Framework Builder (v3.0)',
+    path: 'NavBharatAI Pro v3.0 → header → framework badge (or ⚙ → Framework)',
+    description: `NavBharatAI Pro v3.0 can build apps in 17 different frameworks and tech stacks:
+Frontend: React + Vite, Next.js, Remix, Vue 3, Nuxt 3, Svelte, SvelteKit, Angular, Astro, Vanilla TypeScript.
+Backend / API: Express.js, NestJS, Fastify, FastAPI (Python), Django (Python), Flask (Python).
+Static: plain HTML/CSS/JS.
+Each framework gets a full starter scaffold (package.json, config, entry files) pre-seeded in the workspace so the agent can start building immediately. The agent's instructions are also tailored per framework — it knows the routing conventions, dev server port, and common pitfalls for each.`,
+    howToUse: 'In Pro v3.0 chat: click the framework badge in the header (shows e.g. "⚛ React + Vite") or open ⚙ → Framework. A picker appears with All / Frontend / Full-Stack / Backend / Static filters. Select your framework and click Confirm. Then describe your app — the agent will build using that framework.',
+    relatedFeatures: ['pro_chat', 'v3-github-import', 'iterative-agent-build'],
+    aiSurface: 'pro_chat',
+    keywords: ['framework', 'nextjs', 'vue', 'svelte', 'angular', 'astro', 'django', 'flask', 'fastapi', 'nestjs', 'express', 'fastify', 'nuxt', 'remix', 'vanilla', 'python', 'stack', 'technology', 'kaunsa framework', 'react', 'typescript', 'javascript', 'tech stack', 'choose framework', 'framework select'],
+  },
+  {
+    id: 'v3-github-import',
+    name: 'GitHub / URL Import (v3.0)',
+    path: 'NavBharatAI Pro v3.0 → ⚙ → Import Repo',
+    description: `Import an existing project from any public GitHub repository (or any git URL) directly into the v3.0 workspace. Once imported, you can ask the agent to understand the code, fix bugs, add features, or continue building on top of it. The import clones the repo into the live sandbox — the agent then works on the real files just as if it had created them. Private repos work if you have connected your GitHub account in Settings → Connections (your OAuth token is automatically forwarded).`,
+    howToUse: '1. In Pro v3.0, open ⚙ (build options) → Import Repo. 2. Paste the GitHub URL (e.g. https://github.com/username/my-app). 3. Click "Set Import". 4. Then send your first message (e.g. "Analyze this project" or "Add dark mode"). The repo will be cloned into the workspace before the agent starts.',
+    relatedFeatures: ['pro_chat', 'v3-framework-selector', 'iterative-agent-build'],
+    aiSurface: 'pro_chat',
+    keywords: ['import', 'github', 'clone', 'existing app', 'existing project', 'repo', 'repository', 'my app', 'upload', 'firebase import', 'github se import', 'apni app', 'existing code', 'already made', 'meri app', 'koi bhi app'],
+  },
 ];
 
 /** Quick lookup by id. */

@@ -23,6 +23,7 @@ import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } fr
 import { classifyCommandRisk, governanceNote } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { ViteReactProvider } from './sandbox/AppMakerLab/generator/templates/ViteReactProvider';
+import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
@@ -143,29 +144,47 @@ export class ToolDispatcher {
      * loss / the next message getting a fresh sandbox.
      */
     private readonly onFileWrite?: (path: string, content: string) => void,
+    /** Framework id from FrameworkRegistry (e.g. 'nextjs', 'vue'). Defaults to 'vite-react'. */
+    private readonly framework?: string,
   ) {}
 
   /**
-   * Self-heal the workspace scaffold. The actuator normally seeds a Vite+React+TS
-   * starter at the root when the workspace is created; this is the safety net for
-   * the case where the root has no package.json (unknown project type, or a seed
-   * that silently failed). Called when the scaffold guard blocks a create-* command
-   * so the redirect it returns is always actionable. Best-effort — never throws.
+   * Self-heal the workspace scaffold using the configured framework template.
+   * The actuator normally seeds a starter at workspace creation; this is the
+   * safety net for when no package.json (or equivalent entry file) is present.
+   * Called when the scaffold guard blocks a create-* command — best-effort, never throws.
    */
   private async ensureViteScaffold(): Promise<void> {
+    const entryFile = this.frameworkEntryFile();
     try {
-      await this.actuator.readFile(this.workspaceId, 'package.json');
+      await this.actuator.readFile(this.workspaceId, entryFile);
       return; // root already scaffolded — nothing to do
     } catch {
       /* missing — write the starter below */
     }
     try {
-      const files = new ViteReactProvider().getFiles([]);
+      const registry = new TemplateRegistry();
+      const frameworkId = this.framework ?? 'vite-react';
+      const provider = (() => {
+        try { return registry.getProvider(frameworkId); } catch { return new ViteReactProvider(); }
+      })();
+      const files = provider.getFiles([]);
       for (const [path, content] of Object.entries(files)) {
         await this.actuator.writeFile(this.workspaceId, path, content).catch(() => {});
       }
     } catch {
       /* self-heal is best-effort; the redirect message still guides the agent */
+    }
+  }
+
+  /** Returns the canonical entry file to probe for an existing scaffold (framework-aware). */
+  private frameworkEntryFile(): string {
+    switch (this.framework) {
+      case 'python-fastapi':
+      case 'flask': return 'requirements.txt';
+      case 'django': return 'manage.py';
+      case 'static': return 'index.html';
+      default: return 'package.json';
     }
   }
 

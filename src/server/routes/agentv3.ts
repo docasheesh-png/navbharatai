@@ -873,6 +873,8 @@ export function registerAgentV3Routes(app: Express): void {
 
     const actuator = buildActuator();
     const workspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
+    const framework = typeof req.body?.framework === 'string' && req.body.framework ? req.body.framework : 'vite-react';
+    const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
     try {
       // Native Claude for real tool-use, with a multi-provider text fallback
       // (Vertex → Gemini → Grok) so chat never dies if Claude is down/misconfigured.
@@ -985,6 +987,27 @@ export function registerAgentV3Routes(app: Express): void {
             } catch { /* git-native is best-effort — fall back to Firestore durability below */ }
           }
         }
+        // GITHUB IMPORT: if the user specified an existing repo URL, clone it now (before
+        // durable-restore and git-native hydrate, so the import takes priority). Best-effort —
+        // any failure emits a friendly narration and falls through to the normal empty workspace.
+        if (importUrl) {
+          try {
+            events.emit({ type: 'narration', agent: 'architect', text: `Importing your project from ${importUrl}…`, ts: Date.now() });
+            const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+            if (Object.keys(existing.files).length === 0) {
+              const importSync = new GitRepoSync(actuator, workspaceId);
+              const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
+              const cloneUrl = githubToken ? importUrl.replace('https://', `https://${githubToken}@`) : importUrl;
+              const h = await importSync.hydrateFromRepo(cloneUrl);
+              if (h.hydrated) {
+                events.emit({ type: 'narration', agent: 'architect', text: `Imported your project files from the repository. I'll analyze and improve this project.`, ts: Date.now() });
+              }
+            }
+          } catch (importErr) {
+            const m = importErr instanceof Error ? importErr.message : String(importErr);
+            events.emit({ type: 'narration', agent: 'architect', text: `Could not import the repository (${m}). Starting with an empty workspace instead.`, ts: Date.now() });
+          }
+        }
         // DURABLE FILE RESTORE: the sandbox is ephemeral — if it was lost/recycled (or this is a
         // later message that got a fresh sandbox), re-seed it with the files we persisted last
         // time so the build continues from where it left off instead of an "empty directory".
@@ -1048,7 +1071,7 @@ export function registerAgentV3Routes(app: Express): void {
       // Firestore at build end so the source survives a sandbox loss and restores next session.
       const writtenFiles = new Map<string, string>();
       const onFileWrite = (path: string, content: string) => { writtenFiles.set(path, content); };
-      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite);
+      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework);
 
       // Surgical edit mode (gold standard): when the user is editing an existing
       // app rather than building fresh, inject the CURRENT file tree and the
@@ -1056,7 +1079,7 @@ export function registerAgentV3Routes(app: Express): void {
       // targeted edit_file patches — never rebuilding everything from scratch.
       // Best-effort: a listFiles failure falls back to the edit prefix without a
       // tree, and a non-edit turn uses the normal architect prompt unchanged.
-      let architectSystem = architectSystemPrompt();
+      let architectSystem = architectSystemPrompt(framework);
       if (isEditMode) {
         let fileTree: string[] = [];
         try {

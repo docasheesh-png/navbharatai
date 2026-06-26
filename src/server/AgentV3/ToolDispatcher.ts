@@ -556,8 +556,9 @@ export class ToolDispatcher {
         const path = reqStr(input, 'path');
         const content = reqStr(input, 'content');
         let kind: 'create' | 'modify' = 'create';
+        let existingContent = '';
         try {
-          await this.actuator.readFile(this.workspaceId, path);
+          existingContent = await this.actuator.readFile(this.workspaceId, path);
           kind = 'modify';
         } catch {
           kind = 'create';
@@ -582,14 +583,21 @@ export class ToolDispatcher {
         // Level 6: test file hint — if a test file exists, suggest running it.
         const testHint = testFileHint(path);
         if (kind === 'modify') {
-          // write_file replaced an EXISTING file wholesale. For a small change this
-          // is wasteful and risks dropping unrelated code — nudge the agent toward
-          // edit_file (surgical patch) so it makes minimum, targeted changes.
+          // write_file replaced an EXISTING file wholesale. For anything except a
+          // deliberate full-rewrite, this risks silently dropping unrelated code.
+          // Return the CURRENT (pre-overwrite) content so the agent can immediately
+          // issue a precise edit_file call instead — no extra read_file round-trip.
+          // The write already happened above; we can't undo it, but we make the next
+          // step as cheap as possible and strongly discourage this pattern.
+          const preview =
+            existingContent.length <= 2000
+              ? existingContent
+              : existingContent.slice(0, 2000) + '\n…(truncated — use read_file for full content)';
           return (
             `Updated ${path} (${content.length} bytes).\n` +
-            `NOTE: ${path} already existed and write_file replaced the ENTIRE file. ` +
-            `For a small, targeted change, prefer edit_file (old_string → new_string) ` +
-            `so you don't risk dropping unrelated code.` +
+            `⚠️  FULL-REWRITE WARNING: ${path} already existed and write_file replaced the ENTIRE file. ` +
+            `Unless you intentionally wanted a full rewrite, use edit_file (old_string → new_string) next time — ` +
+            `it is surgical and safe. The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
             reviewNote + cascadeNote + testHint
           );
         }
@@ -1292,7 +1300,18 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
   const flexible = flexibleWhitespaceRegex(oldStr);
   const matches = flexible ? [...existing.matchAll(flexible)] : [];
   if (matches.length === 0) {
-    throw new Error(`edit_file: old_string not found in ${path}.`);
+    // Give the model the current file so it can craft the correct old_string without
+    // an extra read_file round-trip, which wastes a step.
+    const contentPreview =
+      existing.length <= 1500
+        ? existing
+        : existing.slice(0, 1500) + '\n…(truncated — call read_file for full content)';
+    throw new Error(
+      `edit_file: old_string not found in ${path}. ` +
+        `The string you supplied does not appear verbatim (or close enough) in the current file. ` +
+        `Current file content:\n\`\`\`\n${contentPreview}\n\`\`\`\n` +
+        `Copy the exact lines you want to change from the content above and retry.`,
+    );
   }
   if (matches.length > 1) {
     throw new Error(

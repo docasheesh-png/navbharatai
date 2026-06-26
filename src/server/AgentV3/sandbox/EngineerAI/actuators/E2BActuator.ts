@@ -157,12 +157,26 @@ function shellQuote(s: string): string {
 
 /** Guess the dev-server port from the launch command for health-check polling. */
 function extractDevPort(command: string): number {
+  // Explicit --port / PORT= always wins
   const flag = command.match(/--port[=\s]+(\d+)/i);
   if (flag) return parseInt(flag[1], 10);
   const env = command.match(/\bPORT=(\d+)/);
   if (env) return parseInt(env[1], 10);
-  if (/next|react-scripts/.test(command)) return 3000;
-  return 5173; // Vite default (most AI-generated React apps)
+  // Python-style port argument (uvicorn main:app --port 8000 / runserver 0.0.0.0:8000)
+  const pyPort = command.match(/\bport\s+(\d+)|\d+\.?\d*\.\d+\.?\d*:(\d+)/i);
+  if (pyPort) return parseInt(pyPort[1] ?? pyPort[2], 10);
+  // Framework-specific defaults
+  if (/\bng\s+serve\b/.test(command)) return 4200;           // Angular
+  if (/\bastro\b/.test(command)) return 4321;               // Astro
+  if (/\bnext\b/.test(command) || /react-scripts/.test(command)) return 3000; // Next.js / CRA
+  if (/\bnuxt\b/.test(command)) return 3000;               // Nuxt
+  if (/\buvicorn\b|\bgunicorn\b|\bflask\b|\bdjango\b|\bmanage\.py\b/.test(command)) return 8000; // Python
+  if (/\bflask\s+run\b/.test(command)) return 5000;         // Flask default
+  if (/\bnestjs\b|\bnest\b/.test(command)) return 3000;     // NestJS
+  if (/\bexpress\b/.test(command)) return 3000;             // Express
+  if (/\bfastify\b/.test(command)) return 3000;             // Fastify
+  if (/\bserve\b/.test(command) && !/npm/.test(command)) return 3000; // http-server/serve
+  return 5173; // Vite default
 }
 
 /**
@@ -444,7 +458,14 @@ export class E2BActuator implements IEngineerActuator {
       /\b(?:dev|serve|watch|livereload)\b/i.test(command) ||
       /npm\s+run\s+(?:dev|start|serve)\b/i.test(command) ||
       /python.*http\.server|http-server|live-server/i.test(command) ||
-      /\buvicorn\b|\bgunicorn\b|\bflask\s+run\b/i.test(command)
+      /\buvicorn\b|\bgunicorn\b|\bflask\s+run\b/i.test(command) ||
+      // Shell scripts that wrap dev servers (Django, Flask, FastAPI dev.sh)
+      /^\s*(?:bash|sh)\s+\S*dev\.sh\b/i.test(command) ||
+      // Framework-specific CLIs
+      /\bng\s+serve\b/i.test(command) ||            // Angular CLI
+      /\bnext\s+dev\b/i.test(command) ||             // Next.js direct
+      /\bnuxt\s+dev\b/i.test(command) ||             // Nuxt direct
+      /\bastro\s+dev\b/i.test(command)               // Astro direct
     );
 
     if (isLongRunning) {

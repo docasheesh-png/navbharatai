@@ -15,7 +15,6 @@ import {
   makeSecondOpinion,
   makeConsensus,
   makeWebSearch,
-  makeDeploy,
   type OpinionRouter,
   resolveModel,
   haikuModel,
@@ -71,6 +70,7 @@ import { buildDocumentContext } from '../lib/attachmentText';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 import { deploymentStore, withDeploymentPersistence } from '../AgentV3/DeploymentStore';
+import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
@@ -681,6 +681,24 @@ export function registerAgentV3Routes(app: Express): void {
     res.json({ url: rec?.url ?? null, fileCount: rec?.fileCount ?? 0, updatedAt: rec?.updatedAt ?? null });
   });
 
+  // R5 §5.1 — list the available deploy providers and which are configured right now (no lock-in).
+  // Honest status: a provider whose API token is missing reports configured:false with what to set,
+  // so the UI can show "available — add token" instead of faking a deploy target.
+  app.get('/api/agentv3/deploy-providers', async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    // hasGithub is a boolean hint only — never accept a token in a GET query string.
+    const hasGithub = req.query.hasGithub === 'true' || req.query.hasGithub === '1';
+    res.json({
+      providers: deployProviderStatus({ userId, githubToken: hasGithub ? 'present' : undefined }),
+      default: DEFAULT_DEPLOY_PROVIDER,
+    });
+  });
+
   // §12.2 — deploy/git support: return the built app's source files as a
   // path→content map. This is exactly the shape the EXISTING deploy + git routes
   // accept (`/api/pro/deploy`, `/api/github/push-enhanced`), so v3.0 reuses that
@@ -1152,9 +1170,15 @@ export function registerAgentV3Routes(app: Express): void {
       const webSearch = makeWebSearch();
       // Real persistent deploy (Firebase Hosting, ported from Engineer AI): publish the built app
       // to a permanent public URL. Uses ADC (Cloud Run service account); honest error if missing.
-      // R5 §5.1 — wrap the deploy so every successful publish is durably recorded (DeploymentStore),
-      // making the live URL recoverable after a reconnect/new session instead of lost with the stream.
-      const deploy = withDeploymentPersistence(makeDeploy(), userId);
+      // R5 §5.1 — deploy through the multi-provider registry (no lock-in). Defaults to Firebase
+      // Hosting today; as Netlify/Vercel/etc. land, the chosen provider routes here. Wrapped so every
+      // successful publish is durably recorded (DeploymentStore) and recoverable after a reconnect.
+      const githubTokenForDeploy = typeof req.body?.githubToken === 'string' ? req.body.githubToken : undefined;
+      const deployProvider = getDeployProvider(DEFAULT_DEPLOY_PROVIDER) ?? getDeployProvider('firebase')!;
+      const deploy = withDeploymentPersistence(
+        (ws, files) => deployProvider.deploy(ws, files, { userId, githubToken: githubTokenForDeploy }),
+        userId,
+      );
       // DURABLE FILE CAPTURE: record the exact content of every file the agent writes (reliable —
       // straight from the write op, not a later listFiles that can come back empty). Persisted to
       // Firestore at build end so the source survives a sandbox loss and restores next session.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ViteReactProvider } from '../AppMakerLab/generator/templates/ViteReactProvider';
+import { ViteReactProvider } from './sandbox/AppMakerLab/generator/templates/ViteReactProvider';
 import { architectSystemPrompt } from './systemPrompt';
 
 // Regression guard for the "Blocked request … is not allowed" preview failure: newer Vite blocks

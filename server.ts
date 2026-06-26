@@ -222,6 +222,13 @@ setInterval(() => {
       },
     },
     crossOriginEmbedderPolicy: false,
+    // CRITICAL for social sign-in: helmet's default COOP is 'same-origin', which severs
+    // window.opener for the OAuth popup — the Google/GitHub popup completes but its
+    // postMessage result can't reach the app ("message channel closed"), so the user
+    // returns logged-out with no error. 'same-origin-allow-popups' keeps the opener link
+    // so signInWithPopup actually delivers the credential. This is the fix that was
+    // missing across every prior Google-login attempt.
+    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
   }));
   app.use(traceMiddleware);
 

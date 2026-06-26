@@ -3965,3 +3965,47 @@ Dormant by default → no AppKnowledgeBase entry yet (adding one while OFF would
 AIs falsely promise free builds). Documented when the admin enables it.
 Gate: frontend tsc 0, server tsc 0, **2562 vitest** PASS (+6 new onboarding-policy
 tests), boot:check PASS. Ships on merge → deploy (dormant until the limit is set).
+
+---
+
+### 2026-06-26 — Auth: Google + GitHub social login rebuilt from scratch (with the real root-cause fix)
+
+Google login had failed across ~12 prior attempts and was deleted entirely (PR #424).
+A multi-agent diagnosis found the real, never-addressed blocker and the full rebuild
+ships here.
+
+ROOT CAUSE (RC5, never fixed before): helmet set NO `crossOriginOpenerPolicy`, so its
+default `same-origin` COOP severed `window.opener` for the OAuth popup — the popup
+completed but its postMessage result could never reach the app ("message channel closed
+before a response"), so the user returned logged-out with no error. Every prior attempt
+flip-flopped between popup (broken by COOP) and redirect (broken by cross-origin storage
+partitioning, RC2) without ever fixing COOP.
+
+THE FIX:
+- `server.ts`: add `crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' }` to
+  helmet — keeps the opener link so signInWithPopup actually delivers its credential.
+  This is the missing piece behind every past failure.
+- `components/AuthComponent.tsx`: fresh social sign-in — "Sign in with Google" and
+  "Continue with GitHub" buttons. Popup-first (sidesteps the redirect storage problem),
+  with an automatic full-page **redirect fallback** if the browser blocks the popup.
+  Errors are always surfaced via describeSocialError (unauthorized-domain /
+  operation-not-allowed name the exact Firebase Console fix) — never silent.
+- **GitHub = maximum repo permission**: requests `repo` + `workflow` + `read:user` +
+  `user:email` scopes and captures the OAuth access token into `localStorage.gh_token`,
+  so NavBharatAI can 100% connect to the user's repos (git-native storage, deploy, PR→CI
+  →merge flow).
+- `App.tsx`: getRedirectResult finalizes the redirect-fallback path AND captures the
+  GitHub token; onAuthStateChanged syncs `githubToken` state on any social login. Removed
+  the old confusing "force-reopen modal on error" behaviour.
+- `declarations.d.ts`: ambient firebase/auth stubs for GithubAuthProvider / AuthProvider.
+- AppKnowledgeBase `login_auth`: lists all four methods again (+ GitHub repo-connect),
+  Google/GitHub keywords restored (mandatory sync rule).
+
+HONEST CAVEAT (CLAUDE.md "no fake success"): the code fix is correct and ships the
+genuinely-missing COOP fix, but a successful Google/GitHub round-trip ALSO depends on
+admin-only Firebase Console config that CANNOT be verified from the sandbox: (1) Google
+AND GitHub providers ENABLED in Authentication → Sign-in method; (2) the live serving
+domain in Authentication → Settings → Authorized domains; (3) for GitHub, an OAuth app
+configured with the Firebase callback URL. This feature must be verified on the LIVE site
+in a real browser before being called "working".
+Gate: frontend tsc 0, server tsc 0, **2562 vitest** PASS, boot:check PASS.

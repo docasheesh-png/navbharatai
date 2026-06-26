@@ -3937,3 +3937,31 @@ Matches the design doc's failover chain (…→ Haiku → Gemini → Vertex). Ba
 only — no user-facing surface, so no AppKnowledgeBase entry.
 Gate: frontend tsc 0, server tsc 0, **2556 vitest** PASS (+2 new forceModelRunner tests),
 boot:check PASS. Ships on merge → deploy.
+
+---
+
+### 2026-06-26 — v3.0 cost-ladder P9: new-user free onboarding builds (dormant behind flag)
+
+Retention feature: give each NEW user their first N v3.0 builds free. With the
+cost-ladder, a new user's first app (usually simple) builds on Gemini for ~₹0 real
+cost — near-free for NavBharatAI but a strong first impression. DORMANT by default
+(AGENTV3_FREE_ONBOARDING_BUILDS=0), so live billing is exactly as before until the
+admin sets a limit. This is a promo waiver, NOT the P5 pricing-model change (which
+the admin kept as Opus-equivalent ×2.5).
+
+- NEW `src/server/lib/OnboardingCreditStore.ts` — lifetime per-user free-build counter
+  (`agentv3_onboarding_credits/{userId}`), atomic `consumeFreeBuild(userId, limit)`.
+  Pure `onboardingEligible(used, limit)` policy + `freeOnboardingLimit()` env parse.
+  Fail-safe: any Firestore error → false (user billed normally; an outage can NEVER
+  make every build free). Mirrors UserCostStore (VITEST-skip, best-effort).
+- `routes/agentv3.ts`: on a SUCCESSFUL build (result.ok) for an eligible user, the free
+  credit is consumed → `effectiveBilledUsd = 0`, a "🎁 This build is on us" narration is
+  shown, and both the cost record AND the result event use the waived amount so the
+  customer-facing ₹ matches. A FAILED build never burns a free credit.
+- Cost-ladder telemetry keeps recording the REAL billed amount (build economics),
+  separate from the user-facing waiver.
+
+Dormant by default → no AppKnowledgeBase entry yet (adding one while OFF would have the
+AIs falsely promise free builds). Documented when the admin enables it.
+Gate: frontend tsc 0, server tsc 0, **2562 vitest** PASS (+6 new onboarding-policy
+tests), boot:check PASS. Ships on merge → deploy (dormant until the limit is set).

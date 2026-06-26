@@ -1,6 +1,7 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate } from './agentv3';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
+import { userCostStore } from '../lib/UserCostStore';
 
 describe('conversationAccess (D7 ownership gate)', () => {
   it('allows the owner, forbids others, and reports not-found', () => {
@@ -212,5 +213,74 @@ describe('cost-ladder escalation (P3) — dormant policy + gate', () => {
   it('shouldEscalateBuild is false when there is no analysis', () => {
     process.env.AGENTV3_ESCALATION = 'on';
     expect(shouldEscalateBuild(undefined, false)).toBe(false);
+  });
+});
+
+describe('userMonthlyCapUsd (R1 §3.1 per-user monthly ceiling — env parsing)', () => {
+  const prev = process.env.AGENTV3_USER_MONTHLY_CAP_USD;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTV3_USER_MONTHLY_CAP_USD;
+    else process.env.AGENTV3_USER_MONTHLY_CAP_USD = prev;
+  });
+
+  it('is disabled (0) by default so existing behaviour is unchanged', () => {
+    delete process.env.AGENTV3_USER_MONTHLY_CAP_USD;
+    expect(userMonthlyCapUsd()).toBe(0);
+  });
+
+  it('reads a positive cap from the env var', () => {
+    process.env.AGENTV3_USER_MONTHLY_CAP_USD = '50';
+    expect(userMonthlyCapUsd()).toBe(50);
+  });
+
+  it('treats a non-positive / invalid value as disabled', () => {
+    process.env.AGENTV3_USER_MONTHLY_CAP_USD = '-5';
+    expect(userMonthlyCapUsd()).toBe(0);
+    process.env.AGENTV3_USER_MONTHLY_CAP_USD = 'abc';
+    expect(userMonthlyCapUsd()).toBe(0);
+  });
+});
+
+describe('checkMonthlyCap (R1 §3.1 — gate behaviour)', () => {
+  const prev = process.env.AGENTV3_USER_MONTHLY_CAP_USD;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTV3_USER_MONTHLY_CAP_USD;
+    else process.env.AGENTV3_USER_MONTHLY_CAP_USD = prev;
+    vi.restoreAllMocks();
+  });
+
+  it('allows everyone when the cap is disabled', async () => {
+    delete process.env.AGENTV3_USER_MONTHLY_CAP_USD;
+    const r = await checkMonthlyCap('u1');
+    expect(r.allowed).toBe(true);
+  });
+
+  it('never caps anonymous (no userId) builds', async () => {
+    process.env.AGENTV3_USER_MONTHLY_CAP_USD = '10';
+    const r = await checkMonthlyCap(null);
+    expect(r.allowed).toBe(true);
+  });
+
+  it('denies a user who has reached the cap this month', async () => {
+    process.env.AGENTV3_USER_MONTHLY_CAP_USD = '10';
+    vi.spyOn(userCostStore, 'get').mockResolvedValue({ userId: 'u1', month: '2026-06', totalBuilds: 9, totalCostUsd: 12.5, updatedAt: 0 });
+    const r = await checkMonthlyCap('u1');
+    expect(r.allowed).toBe(false);
+    expect(r.cap).toBe(10);
+    expect(r.spent).toBe(12.5);
+  });
+
+  it('allows a user still under the cap', async () => {
+    process.env.AGENTV3_USER_MONTHLY_CAP_USD = '10';
+    vi.spyOn(userCostStore, 'get').mockResolvedValue({ userId: 'u1', month: '2026-06', totalBuilds: 2, totalCostUsd: 3.0, updatedAt: 0 });
+    const r = await checkMonthlyCap('u1');
+    expect(r.allowed).toBe(true);
+  });
+
+  it('fails OPEN on a store error so a Firestore outage never locks users out', async () => {
+    process.env.AGENTV3_USER_MONTHLY_CAP_USD = '10';
+    vi.spyOn(userCostStore, 'get').mockRejectedValue(new Error('firestore down'));
+    const r = await checkMonthlyCap('u1');
+    expect(r.allowed).toBe(true);
   });
 });

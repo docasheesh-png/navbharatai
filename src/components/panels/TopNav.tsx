@@ -183,14 +183,33 @@ export function TopNav({
             <button
               onClick={async (e) => {
                 e.stopPropagation();
-                if (confirm('Logout from NavBharat?')) {
-                  try {
-                    await signOut(auth);
-                    window.location.reload();
-                  } catch (error) {
-                    console.error('Logout failed:', error);
+                if (!confirm('Logout from NavBharat?')) return;
+                // Logout must ALWAYS work. signOut() can hang when the Firebase auth
+                // helper iframe is unavailable, so cap it with a timeout, then forcibly
+                // clear every persisted session and reload.
+                try {
+                  await Promise.race([
+                    signOut(auth).catch(() => {}),
+                    new Promise((resolve) => setTimeout(resolve, 2500)),
+                  ]);
+                } catch { /* ignore — fall through to the hard clear below */ }
+                try {
+                  for (const k of Object.keys(localStorage)) {
+                    if (/^firebase:authUser/i.test(k) || /firebaseLocalStorage/i.test(k)) localStorage.removeItem(k);
                   }
-                }
+                } catch { /* storage may be unavailable — reload still signs out */ }
+                // Admin uses a SEPARATE server-password session (not Firebase): the
+                // `isAdmin` flag in localStorage + the token in sessionStorage rebuild a
+                // synthetic admin identity on reload. Clear them or the admin can never
+                // sign out.
+                try {
+                  localStorage.removeItem('navbharat_admin_v1');
+                  sessionStorage.removeItem('admin_token');
+                } catch { /* storage may be unavailable — reload still signs out */ }
+                // Firebase persists the signed-in user in IndexedDB (not localStorage);
+                // best-effort delete so a hung signOut() isn't restored on reload.
+                try { indexedDB.deleteDatabase('firebaseLocalStorageDb'); } catch { /* ignore — reload still signs out */ }
+                window.location.reload();
               }}
               className="w-10 h-10 bg-white/5 hover:bg-red-500/10 rounded-xl flex items-center justify-center text-[#484f58] hover:text-red-500 transition-all border border-white/5 active:scale-90"
               title="Logout"

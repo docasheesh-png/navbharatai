@@ -4,7 +4,7 @@ const PKG = JSON.stringify({
   name: 'my-vue-app',
   version: '1.0.0',
   scripts: {
-    dev: 'vite --host 0.0.0.0 --port 3000',
+    dev: 'vite',
     build: 'vite build',
     preview: 'vite preview',
   },
@@ -20,7 +20,11 @@ const PKG = JSON.stringify({
 const VITE_CONFIG = `import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 
-export default defineConfig({ plugins: [vue()] });
+export default defineConfig({
+  plugins: [vue()],
+  server: { host: true, port: 5173, allowedHosts: true },
+  preview: { host: true, port: 5173, allowedHosts: true },
+});
 `;
 
 const TSCONFIG = JSON.stringify({

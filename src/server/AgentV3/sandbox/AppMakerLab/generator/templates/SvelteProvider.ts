@@ -4,7 +4,7 @@ const PKG = JSON.stringify({
   name: 'my-svelte-app',
   version: '1.0.0',
   scripts: {
-    dev: 'vite --host 0.0.0.0 --port 3000',
+    dev: 'vite',
     build: 'vite build',
     preview: 'vite preview',
   },
@@ -18,7 +18,11 @@ const PKG = JSON.stringify({
 const VITE_CONFIG = `import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 
-export default defineConfig({ plugins: [svelte()] });
+export default defineConfig({
+  plugins: [svelte()],
+  server: { host: true, port: 5173, allowedHosts: true },
+  preview: { host: true, port: 5173, allowedHosts: true },
+});
 `;
 
 const INDEX_HTML = `<!doctype html>

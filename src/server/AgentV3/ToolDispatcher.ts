@@ -27,7 +27,7 @@ import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/Temp
 import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
-import { assessReadiness, readinessVerdict, type ExtraFinding } from './Readiness';
+import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
 import { analyzeRequirementCoverage, requirementCoverageSummary } from './RequirementCoverage';
 import { generateReadme } from './ReadmeGenerator';
@@ -148,6 +148,29 @@ export class ToolDispatcher {
     /** Framework id from FrameworkRegistry (e.g. 'nextjs', 'vue'). Defaults to 'vite-react'. */
     private readonly framework?: string,
   ) {}
+
+  /**
+   * The structured readiness verdict from the most recent `evaluate` run. Captured as a
+   * side-effect so the mandatory end-of-build gate (assessBuildReadiness) can reuse the exact
+   * same objective scan the agent uses — never a second, divergent implementation.
+   */
+  private lastReadiness: ReadinessReport | null = null;
+
+  /**
+   * Run the real `evaluate` scan and return its structured readiness verdict (R2 §1.1).
+   * Used by AgentRunner to make the quality gate MANDATORY: a build cannot be reported as a
+   * clean success while `ready` is false (a build-breaker, secret leak, fake code, or an app
+   * that cannot run). Best-effort: if the scan throws, returns a permissive READY so the gate
+   * never wrongly fails a real build on an internal error.
+   */
+  async assessBuildReadiness(): Promise<ReadinessReport> {
+    try {
+      await this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect');
+      return this.lastReadiness ?? { score: 100, ready: true, blockers: [], warnings: [] };
+    } catch {
+      return { score: 100, ready: true, blockers: [], warnings: [] };
+    }
+  }
 
   /**
    * Self-heal the workspace scaffold using the configured framework template.
@@ -907,6 +930,8 @@ export class ToolDispatcher {
         if (errorBoundary.findings.length) extra.push({ severity: 'medium', label: 'React app has no error boundary' });
         if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
         const readiness = assessReadiness(archReport, findings, extra);
+        // Stash for the mandatory end-of-build gate (R2 §1.1) — same scan, no divergence.
+        this.lastReadiness = readiness;
         const verdict = readinessVerdict(readiness);
         const confidence = computeBuildConfidence({
           readinessScore: readiness.score,

@@ -211,6 +211,16 @@ export function userMonthlyCapUsd(): number {
 }
 
 /**
+ * R2 §1.1 — the mandatory end-of-build readiness gate is ON by default; the admin can disable
+ * it with AGENTV3_READINESS_GATE=off (a safe escape hatch should it ever over-block). When on,
+ * a top-level build that finished with unresolved-import / secret-leak / fake-code / can't-run
+ * blockers is reported as NOT a clean success (ok:false) instead of a fake "done".
+ */
+export function readinessGateEnabled(): boolean {
+  return process.env.AGENTV3_READINESS_GATE !== 'off';
+}
+
+/**
  * Check whether a user is at or over their monthly spend ceiling. Returns the cap and
  * the current monthly total so the caller can return an honest, specific message.
  * Best-effort: a Firestore read failure (or no userId) NEVER blocks a build — we fail
@@ -1179,6 +1189,9 @@ export function registerAgentV3Routes(app: Express): void {
         agentRole: 'architect' as const,
         signal: abort.signal,
         expectsArtifacts,
+        // R2 §1.1 — top-level build runners (which spread baseRunnerOpts) get the mandatory
+        // readiness gate; sub-agents (SubAgent.ts, separate opts) never do.
+        readinessGate: readinessGateEnabled(),
       };
       const runner = new AgentRunner({
         ...baseRunnerOpts,

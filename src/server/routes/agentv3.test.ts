@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { userCostStore } from '../lib/UserCostStore';
 
@@ -282,5 +282,28 @@ describe('checkMonthlyCap (R1 §3.1 — gate behaviour)', () => {
     vi.spyOn(userCostStore, 'get').mockRejectedValue(new Error('firestore down'));
     const r = await checkMonthlyCap('u1');
     expect(r.allowed).toBe(true);
+  });
+});
+
+describe('readinessGateEnabled (R2 §1.1 — mandatory gate flag)', () => {
+  const prev = process.env.AGENTV3_READINESS_GATE;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTV3_READINESS_GATE;
+    else process.env.AGENTV3_READINESS_GATE = prev;
+  });
+
+  it('is ON by default so "done" means verified', () => {
+    delete process.env.AGENTV3_READINESS_GATE;
+    expect(readinessGateEnabled()).toBe(true);
+  });
+
+  it('can be disabled with AGENTV3_READINESS_GATE=off (admin escape hatch)', () => {
+    process.env.AGENTV3_READINESS_GATE = 'off';
+    expect(readinessGateEnabled()).toBe(false);
+  });
+
+  it('any other value keeps it on', () => {
+    process.env.AGENTV3_READINESS_GATE = 'on';
+    expect(readinessGateEnabled()).toBe(true);
   });
 });

@@ -357,3 +357,49 @@ describe('AgentRunner — empty-build detection (fake-success fix)', () => {
     expect(actuator.files.get('index.html')).toBe('<h1>Clock</h1>');
   });
 });
+
+describe('AgentRunner — mandatory readiness gate (R2 §1.1)', () => {
+  // A stub dispatcher with a controllable readiness verdict, isolating the gate's
+  // ok-downgrade logic from the full evaluate scan.
+  function gateDispatcher(ready: boolean) {
+    return {
+      dispatch: async (tu: { id: string; name: string; input: Record<string, unknown> }) =>
+        ({ tool_use_id: tu.id, content: 'ok', is_error: false }),
+      assessBuildReadiness: async () =>
+        ready
+          ? { score: 100, ready: true, blockers: [] as string[], warnings: [] as string[] }
+          : { score: 40, ready: false, blockers: ['1 unresolved import(s) — the build will fail'], warnings: [] as string[] },
+    };
+  }
+
+  function gateRunner(dispatcher: unknown, opts: Partial<AgentRunnerOptions>) {
+    const stream = new AgentEventStream();
+    const state = new WorkspaceState(stream);
+    const client = new ClaudeClient(scriptedClient([
+      { content: [{ type: 'tool_use', id: 'w', name: 'write_file', input: { path: 'src/App.tsx', content: 'x' } }], stop_reason: 'tool_use', usage: { input_tokens: 10, output_tokens: 5 } },
+      { content: [{ type: 'text', text: 'Build complete.' }], stop_reason: 'end_turn', usage: { input_tokens: 5, output_tokens: 5 } },
+    ]));
+    return new AgentRunner({
+      client, dispatcher: dispatcher as never, state, events: stream,
+      model: 'm', system: 's', tools: defaultToolCatalog(),
+      expectsArtifacts: true, ...opts,
+    });
+  }
+
+  it('downgrades a NOT-READY build to ok:false instead of a fake success', async () => {
+    const result = await gateRunner(gateDispatcher(false), { readinessGate: true }).run('build an app');
+    expect(result.ok).toBe(false);
+    expect(result.summary).toContain('NOT READY');
+    expect(result.summary).toContain('unresolved import');
+  });
+
+  it('keeps a READY build as a genuine success', async () => {
+    const result = await gateRunner(gateDispatcher(true), { readinessGate: true }).run('build an app');
+    expect(result.ok).toBe(true);
+  });
+
+  it('does NOT gate when readinessGate is off (default) — a not-ready scan cannot fail the build', async () => {
+    const result = await gateRunner(gateDispatcher(false), { readinessGate: false }).run('build an app');
+    expect(result.ok).toBe(true);
+  });
+});

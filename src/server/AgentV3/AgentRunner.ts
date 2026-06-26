@@ -46,6 +46,14 @@ export interface AgentRunnerOptions {
    * stops the "model replied instead of building, but it was billed as done" fake-success bug.
    */
   expectsArtifacts?: boolean;
+  /**
+   * R2 §1.1 — when true (top-level build only, never sub-agents), the loop runs the objective
+   * `evaluate` readiness scan before reporting a successful build, and DOWNGRADES ok:true →
+   * ok:false if the verdict is not ready (a build-breaker, secret leak, fake code, or an app
+   * that cannot run). Makes the quality gate MANDATORY instead of "only if the agent calls it",
+   * so "done" means verified. Off by default; never applied to sub-agents.
+   */
+  readinessGate?: boolean;
   /** When aborted (e.g. the user pressed Stop), the loop stops between turns. */
   signal?: AbortSignal;
   /**
@@ -150,6 +158,7 @@ export class AgentRunner {
     const agentRole: AgentRole = this.opts.agentRole ?? 'architect';
     const toolConcurrency = Math.max(1, this.opts.toolConcurrency ?? 4);
     const expectsArtifacts = this.opts.expectsArtifacts === true;
+    const readinessGate = this.opts.readinessGate === true;
     // Total tool calls across the whole run — a build that never called a tool built nothing.
     let totalToolUses = 0;
 
@@ -249,12 +258,32 @@ export class AgentRunner {
           // replies "I'm preparing a plan…" instead of building, and gets billed as done).
           // Only treat a no-tool turn as success for chat, or when real work already happened.
           const builtNothing = expectsArtifacts && totalToolUses === 0;
-          const ok = !builtNothing;
-          const summary = builtNothing
+          let ok = !builtNothing;
+          let summary = builtNothing
             ? (turn.text.trim()
                 ? `${turn.text.trim()}\n\n(No files were created — the build did not run. Retrying with a stronger model…)`
                 : 'The build did not produce any files — the model replied without building.')
             : (turn.text.trim() || 'Build complete.');
+
+          // R2 §1.1 — MANDATORY readiness gate (top-level build only). Before reporting a
+          // successful build, run the objective evaluate scan; if it is NOT ready (a build-
+          // breaker, secret leak, fake code, or an app that cannot run), DOWNGRADE to ok:false
+          // with an honest summary of the blockers. The work is preserved (files/preview still
+          // exist) — we simply refuse to claim success that wasn't earned ("Preview is EARNED").
+          // When escalation is active, this ok:false is exactly what triggers a stronger retry.
+          if (ok && readinessGate && expectsArtifacts && totalToolUses > 0) {
+            try {
+              const readiness = await dispatcher.assessBuildReadiness();
+              if (!readiness.ready) {
+                ok = false;
+                const blockers = readiness.blockers.length
+                  ? ` Must fix before it's production-ready: ${readiness.blockers.join('; ')}.`
+                  : '';
+                summary = `${turn.text.trim() || 'Build finished.'}\n\n⚠️ Readiness gate: NOT READY (score ${readiness.score}/100).${blockers}`;
+              }
+            } catch { /* gate is best-effort — a scan error never fails a real build */ }
+          }
+
           await persist(ok ? 'complete' : 'error');
           events.emit({ type: 'done', ok, summary, ts: Date.now() });
           return { ok, summary, steps, usage, billedUsd: billed() };

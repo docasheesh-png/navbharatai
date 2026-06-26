@@ -53,7 +53,7 @@ import { EngineerAIChat } from './components/engineer/EngineerAIChat';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, getRedirectResult, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, getRedirectResult, GithubAuthProvider, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { firebaseConfig } from './config/firebase';
 
@@ -1298,13 +1298,21 @@ export default function App() {
 
 
   useEffect(() => {
-    // Complete a pending Google redirect sign-in on app load. signInWithRedirect
-    // navigates the whole page to Google and back, so the auth modal that started it
-    // is no longer mounted on return — getRedirectResult MUST be called here, at the
-    // app root, or the sign-in is never finalized and the user stays logged out.
+    // Finalize a social sign-in that used the REDIRECT fallback (popup is primary).
+    // signInWithRedirect navigates the whole page away and back, so the auth modal
+    // that started it is gone on return — getRedirectResult MUST run here at the app
+    // root to complete it. For a GitHub redirect we also capture the OAuth token so
+    // NavBharatAI can connect to the user's repos.
     getRedirectResult(auth)
       .then((result) => {
         if (result?.user) {
+          try {
+            const ghCred = GithubAuthProvider.credentialFromResult(result);
+            if (ghCred?.accessToken) {
+              localStorage.setItem('gh_token', ghCred.accessToken);
+              setGithubToken(ghCred.accessToken);
+            }
+          } catch { /* not a GitHub sign-in — ignore */ }
           setUser(result.user);
           setLoadingUser(false);
           setShowAuth(false);
@@ -1312,19 +1320,21 @@ export default function App() {
       })
       .catch((e) => {
         const code = e?.code || '';
-        console.error('[auth] redirect sign-in failed:', code || e?.message || e);
-        // auth/no-auth-event = no pending redirect (normal on most page loads — ignore).
+        console.error('[auth] social redirect failed:', code || e?.message || e);
+        // auth/no-auth-event = no pending redirect (normal on most loads — ignore).
         if (code && code !== 'auth/no-auth-event') {
-          addToast('Google sign-in failed. Please try again.', 'error');
-          setShowAuth(true);
+          addToast('Sign-in failed. Please try again.', 'error');
         }
       });
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoadingUser(false);
-      // Close auth modal whenever Firebase confirms a signed-in user — covers
-      // the redirect return path where getRedirectResult may not fire first.
-      if (currentUser) setShowAuth(false);
+      if (currentUser) {
+        setShowAuth(false);
+        // Pick up a GitHub OAuth token captured during social sign-in (popup or
+        // redirect) so the rest of the app sees the connection without a reload.
+        try { const t = localStorage.getItem('gh_token'); if (t) setGithubToken(t); } catch { /* ignore */ }
+      }
     });
     return unsubscribe;
   }, []);

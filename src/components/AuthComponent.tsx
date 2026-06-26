@@ -6,9 +6,15 @@ import {
   RecaptchaVerifier,
   signInWithPhoneNumber,
   ConfirmationResult,
+  GoogleAuthProvider,
+  GithubAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  AuthProvider,
+  UserCredential,
 } from 'firebase/auth';
 import { motion } from 'motion/react';
-import { X, AlertCircle, Loader2 } from 'lucide-react';
+import { X, AlertCircle, Loader2, Github } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
 import { explainAuthReason } from '../lib/authDiagnostics';
@@ -68,6 +74,42 @@ function describeAuthError(err: any): string {
   } catch {
     return err?.message || 'Sign-in failed. Try again.';
   }
+}
+
+/**
+ * Honest, actionable messages for social (Google/GitHub) sign-in failures. The two
+ * failures that are config — not code — name the exact Firebase Console fix so the
+ * admin can resolve them without a developer console.
+ */
+function describeSocialError(err: any): string {
+  const code = err?.code || '';
+  switch (code) {
+    case 'auth/unauthorized-domain':
+      return `This site's domain isn't authorized for sign-in. Admin: add it under Firebase Console → Authentication → Settings → Authorized domains (project ${firebaseConfig.projectId}).`;
+    case 'auth/operation-not-allowed':
+      return `This sign-in provider isn't enabled. Admin: enable it under Firebase Console → Authentication → Sign-in method (project ${firebaseConfig.projectId}).`;
+    case 'auth/account-exists-with-different-credential':
+      return 'An account already exists with this email using a different sign-in method. Sign in with that method first.';
+    case 'auth/network-request-failed':
+      return 'Network error reaching the sign-in provider. Check your connection and try again.';
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return 'Sign-in was cancelled. Please try again.';
+    default:
+      return describeAuthError(err);
+  }
+}
+
+/**
+ * Capture the GitHub OAuth access token from a successful sign-in and store it so
+ * NavBharatAI can connect to the user's repos (git-native storage, deploy, PR flow).
+ * The token carries the scopes we requested (repo, workflow, …) — 100% app connection.
+ */
+function captureGithubToken(result: UserCredential): void {
+  try {
+    const cred = GithubAuthProvider.credentialFromResult(result);
+    if (cred?.accessToken) localStorage.setItem('gh_token', cred.accessToken);
+  } catch { /* best-effort — never block sign-in */ }
 }
 
 export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser: any, onClose: () => void }) => {
@@ -260,6 +302,63 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   // Helper for IDE logs integration if needed
   const addTerminalLine = (text: string, type: 'info' | 'error' | 'success' | 'warn' = 'info') => {
       console.log(`[IDE LOG] ${type}: ${text}`);
+  };
+
+  // ── Social sign-in (Google + GitHub) — popup-first, redirect fallback ─────────
+  // Popup is the primary path: it sidesteps the cross-origin storage partitioning
+  // that makes signInWithRedirect return logged-out on a different serving domain,
+  // and the COOP header (server.ts) now lets the popup deliver its result. If the
+  // browser blocks the popup, we fall back to a full-page redirect (finalized at the
+  // app root via getRedirectResult). Errors are always surfaced — never silent.
+  const socialSignIn = async (provider: AuthProvider, onCredential?: (r: UserCredential) => void) => {
+    try {
+      const result = await signInWithPopup(auth, provider);
+      onCredential?.(result);
+      onClose(); // success — App.tsx onAuthStateChanged also closes/syncs state
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/popup-blocked' || code === 'auth/cancelled-popup-request' || code === 'auth/popup-closed-by-user') {
+        // Popup unavailable — fall back to full-page redirect (navigates away).
+        await signInWithRedirect(auth, provider);
+        return;
+      }
+      throw err;
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setLoading(true);
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    try {
+      await socialSignIn(provider);
+    } catch (err: any) {
+      console.error('[GOOGLE SIGN-IN]', err);
+      setError(describeSocialError(err));
+      setLoading(false);
+    }
+  };
+
+  const handleGithubSignIn = async () => {
+    setError('');
+    setLoading(true);
+    const provider = new GithubAuthProvider();
+    // Maximum repo permission so NavBharatAI can fully connect to the user's apps:
+    // repo (full read/write to code + statuses + deployments), workflow (manage CI/
+    // Actions for the git-native PR→CI→merge flow), and identity scopes.
+    provider.addScope('repo');
+    provider.addScope('workflow');
+    provider.addScope('read:user');
+    provider.addScope('user:email');
+    provider.setCustomParameters({ allow_signup: 'true' });
+    try {
+      await socialSignIn(provider, captureGithubToken);
+    } catch (err: any) {
+      console.error('[GITHUB SIGN-IN]', err);
+      setError(describeSocialError(err));
+      setLoading(false);
+    }
   };
 
   return (
@@ -529,6 +628,36 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
               <span>{successMessage}</span>
             </div>
           )}
+
+          {/* ── Social sign-in: Google + GitHub ─────────────────────────────── */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-white/10" />
+              <span className="text-[9px] font-black uppercase tracking-widest text-[#484f58]">or continue with</span>
+              <div className="flex-1 h-px bg-white/10" />
+            </div>
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={loading}
+              className="w-full py-4 bg-white hover:bg-gray-100 disabled:opacity-50 text-gray-900 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"/></svg>
+              Sign in with Google
+            </button>
+            <button
+              type="button"
+              onClick={handleGithubSignIn}
+              disabled={loading}
+              className="w-full py-4 bg-[#24292e] hover:bg-[#2f363d] disabled:opacity-50 text-white border border-white/10 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"
+            >
+              <Github className="w-4 h-4" />
+              Continue with GitHub
+            </button>
+            <p className="text-[9px] text-[#484f58] text-center leading-relaxed">
+              GitHub connects your repos so NavBharatAI can build, commit &amp; deploy your apps.
+            </p>
+          </div>
 
           {/* Hidden Recaptcha */}
           <div ref={recaptchaRef} id="recaptcha-container"></div>

@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
-  SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github,
+  SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github, Circle,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
-import type { AgentCard, GitCheckpoint } from './agentV3Types';
+import type { AgentCard, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
 import { db, sanitizeFirestoreData } from '../../App';
 import { doc, setDoc } from 'firebase/firestore';
 
@@ -424,9 +424,7 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
                   <AlertCircle className="w-4 h-4" /> {state.pendingPermission.action}
                 </div>
                 {state.todos.length > 0 && (
-                  <ul className="mb-2 space-y-0.5">
-                    {state.todos.map((t) => <li key={t.id} className="text-xs text-amber-100/90">• {t.title}</li>)}
-                  </ul>
+                  <div className="mb-2"><TodoList todos={state.todos} /></div>
                 )}
                 <div className="flex gap-2">
                   <button onClick={() => respond(state.pendingPermission!.callId, true)} className="px-3 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white">Approve &amp; build</button>
@@ -446,6 +444,13 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
 
           {/* Bottom: live AI-team chips + input (Claude-Code style — at the bottom) */}
           <div className="shrink-0 sticky bottom-0 bg-zinc-950 border-t border-zinc-800 pb-[env(safe-area-inset-bottom)]">
+            {/* Live plan progress (only when there's no pending plan-approval gate, which shows its
+                own copy) — lets the user watch the AI work through its real todo list as it builds. */}
+            {state.todos.length > 0 && !state.pendingPermission && (
+              <div className="px-3 pt-2 max-h-28 overflow-auto">
+                <TodoList todos={state.todos} />
+              </div>
+            )}
             {agents.length > 0 && (
               <div className="px-3 pt-2 flex gap-1.5 overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
                 {agents.map((a) => <AgentChip key={a.agent} card={a} running={running} />)}
@@ -661,6 +666,42 @@ function Bubble({ msg }: { msg: ChatMsg }) {
           <TypewriterText text={msg.text} streaming={msg.streaming} />{cursor}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Status icon for a single todo — lets the user watch the agent work through its plan live. */
+function todoStatusIcon(status: TodoStatus) {
+  switch (status) {
+    case 'done': return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />;
+    case 'in_progress': return <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin shrink-0" />;
+    case 'blocked': return <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />;
+    default: return <Circle className="w-3.5 h-3.5 text-zinc-600 shrink-0" />; // pending
+  }
+}
+
+/**
+ * The agent's live plan/todo list with real status (done ✓ / in-progress ⏳ / pending ○ / blocked ⚠)
+ * and a progress count — so the build is engaging and honest: the user sees exactly what the AI is
+ * doing and how far along it is, driven by real `todo_updated` events (never a fake animation).
+ */
+function TodoList({ todos }: { todos: TodoItem[] }) {
+  if (!todos.length) return null;
+  const done = todos.filter((t) => t.status === 'done').length;
+  return (
+    <div className="text-left">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 mb-1">
+        <span>Plan</span>
+        <span className="text-zinc-500">{done}/{todos.length}</span>
+      </div>
+      <ul className="space-y-1">
+        {todos.map((t) => (
+          <li key={t.id} className="flex items-center gap-1.5 text-xs">
+            {todoStatusIcon(t.status)}
+            <span className={t.status === 'done' ? 'line-through text-zinc-500' : 'text-zinc-200'}>{t.title}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

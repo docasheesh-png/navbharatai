@@ -54,10 +54,10 @@ import {
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
-import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
-import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
-import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
-import { DockerActuator } from '../EngineerAI/actuators/DockerActuator';
+import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
+import { LocalActuator } from '../AgentV3/sandbox/EngineerAI/actuators/LocalActuator';
+import { E2BActuator } from '../AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
+import { DockerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';

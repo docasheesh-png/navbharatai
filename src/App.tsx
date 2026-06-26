@@ -14,7 +14,7 @@ import { ProfilePage } from './components/profile/ProfilePage';
 import { DeployModal } from './components/panels/DeployModal';
 import { WorkspacePane } from './components/panels/WorkspacePane';
 import { SettingsPanel } from './components/panels/SettingsPanel';
-import { ProChatPanel } from './components/panels/ProChatPanel';
+import { ProV3Surface } from './components/agentv3/ProV3Surface';
 import { NBIChatPanel } from './components/panels/NBIChatPanel';
 import { ViewPanels } from './components/panels/ViewPanels';
 import { SidebarNav } from './components/panels/SidebarNav';
@@ -50,7 +50,7 @@ import { ProfessionalsView } from './components/professionals/ProfessionalsView'
 import { ProfessionalChat } from './components/professionals/ProfessionalChat';
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { RepoAnalystTool } from './components/repoAnalyst/RepoAnalystTool';
-import { EngineerAIChat } from './components/engineer/EngineerAIChat';
+// EngineerAIChat retired — replaced by NavBharatAI Pro v3.0 (ProV3Surface).
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
@@ -1405,7 +1405,7 @@ export default function App() {
 
     if ((view === 'nbi_pro_chat' || view === 'sda_chat' || view === 'engineer_ai') && !user) {
       setShowAuth(true);
-      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI v2.0' : view === 'sda_chat' ? 'Doctor AI' : 'Engineer AI'} is available for logged-in users only. Please sign in.`, 'warn');
+      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI Pro v3.0' : view === 'sda_chat' ? 'Doctor AI' : 'NavBharatAI Pro v3.0'} is available for logged-in users only. Please sign in.`, 'warn');
       return;
     }
 
@@ -4356,7 +4356,7 @@ ${buildLanguageRule(preferredLanguage)}`;
   const menuItems = useMemo(() => [
     { id: 'home',         label: 'Home',              icon: Bot },
     { id: 'nbi_chat',     label: 'NavBharatAI FREE',  icon: MessageSquare },
-    { id: 'nbi_pro_chat', label: 'NavBharatAI v2.0',   icon: Bot },
+    { id: 'nbi_pro_chat', label: 'NavBharatAI Pro v3.0', icon: Bot },
     { id: 'preview',      label: 'Preview',           icon: Monitor },
     { id: 'files',        label: 'Files',             icon: FolderOpen },
     { id: 'history',      label: 'History',           icon: History },
@@ -5387,71 +5387,10 @@ ${buildLanguageRule(preferredLanguage)}`;
           )}
 
           {activeView === 'nbi_pro_chat' && (
-            <ProChatPanel
-              theme={theme}
-              themeClasses={themeClasses}
-              mode={mode}
-              setMode={setMode}
-              buildVersionStack={buildVersionStack}
-              handleUndoBuild={handleUndoBuild}
-              proMessages={proMessages}
-              proInput={proInput}
-              setProInput={setProInput}
-              isProLoading={isProLoading}
-              handleStopPro={handleStopPro}
-              showDeployPanel={showDeployPanel}
-              setShowDeployPanel={setShowDeployPanel}
-              deployPlatform={deployPlatform}
-              setDeployPlatform={setDeployPlatform}
-              deployToken={deployToken}
-              setDeployToken={setDeployToken}
-              deployProjectName={deployProjectName}
-              setDeployProjectName={setDeployProjectName}
-              deployOwner={deployOwner}
-              setDeployOwner={setDeployOwner}
-              deployRepo={deployRepo}
-              setDeployRepo={setDeployRepo}
-              deployPanelError={deployPanelError}
-              setDeployPanelError={setDeployPanelError}
-              isDeploying={isDeploying}
-              handleDeployApp={handleDeployApp}
-              showWorkspace={showWorkspace}
-              setShowWorkspace={setShowWorkspace}
-              files={files}
-              isAppBuilt={isAppBuilt}
-              generatedCode={generatedCode}
-              setFiles={(f) => setFiles(f as any)}
-              updatePreview={updatePreview}
-              toggleTab={toggleTab}
-              setIsMenuOpen={setIsMenuOpen}
-              previewHistory={previewHistory}
-              setGeneratedCode={setGeneratedCode}
-              proBuildProgress={proBuildProgress}
-              setProBuildProgress={setProBuildProgress}
-              proGuiderPlan={proGuiderPlan}
-              setProGuiderPlan={setProGuiderPlan}
-              proGuiderReplanning={proGuiderReplanning}
-              setProGuiderReplanning={setProGuiderReplanning}
-              proGuiderSpecRef={proGuiderSpecRef}
-              proGuiderRefineRef={proGuiderRefineRef}
-              providerRetryCountdown={providerRetryCountdown}
-              setProviderRetryCountdown={setProviderRetryCountdown}
-              providerRetryTimerRef={providerRetryTimerRef}
-              providerRetryPromptRef={providerRetryPromptRef}
-              handleSendForPro={handleSendForPro}
-              sessions={sessions}
-              currentProSessionId={currentProSessionId}
-              togglePin={togglePin}
-              user={user}
-              setShowAuth={setShowAuth}
-              handleRestoreUci={handleRestoreUci}
-              pendingGHEdit={pendingGHEdit}
-              handleGHConfirmPush={handleGHConfirmPush}
-              isPushing={isPushing}
-              wallet={wallet}
-              downloadAppZip={downloadAppZip}
-              activeIntent={activeIntent}
-            />
+            /* NavBharatAI Pro v3.0 — replaces the retired Pro v2.0 builder. ProV3Surface shows the
+               real v3.0 builder when it's enabled for this account, else an honest "rolling out"
+               message (never a broken builder). The old ProChatPanel (v2.0) is retired. */
+            <ProV3Surface userId={user?.uid} email={user?.email} />
           )}
 
           {/* ── Senior Doctor Assistant ── */}
@@ -5465,7 +5404,7 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'professionals' && (
             <ProfessionalsView onSelect={(id) => {
               if (id === 'sda_chat') toggleTab('sda_chat');
-              else if (id === 'engineer_ai') toggleTab('engineer_ai');
+              else if (id === 'engineer_ai') toggleTab('nbi_pro_chat'); // Engineer AI retired → Pro v3.0
               else if (id === 'teacher_ai') toggleTab('teacher_ai');
               else if (id === 'mentor_ai') toggleTab('mentor_ai');
               else if (id === 'thesis_ai') toggleTab('thesis_ai');
@@ -5915,10 +5854,7 @@ ${buildLanguageRule(preferredLanguage)}`;
             </div>
           )}
 
-          {/* ── Engineer AI ── */}
-          {activeView === 'engineer_ai' && (
-            <EngineerAIChat userId={user?.uid} />
-          )}
+          {/* ── Engineer AI — RETIRED (replaced by NavBharatAI Pro v3.0). UI entry removed. ── */}
 
                     {activeView === 'about' && (
             <AboutPanel

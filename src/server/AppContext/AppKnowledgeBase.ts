@@ -152,9 +152,9 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
   },
   {
     id: 'engineer_ai',
-    name: 'Engineer AI',
-    path: 'Header → Engineer AI tab  OR  Sidebar → Professionals → Engineer AI',
-    description: `Autonomous full-stack AI coding agent. Complete capabilities:
+    name: 'Engineer AI (retired → use NavBharatAI Pro v3.0)',
+    path: 'RETIRED. App building is now NavBharatAI Pro v3.0 — Sidebar → "NavBharatAI Pro v3.0".',
+    description: `RETIRED — replaced by NavBharatAI Pro v3.0, the new agentic app builder (everything Engineer AI did, now in v3.0: builds full-stack apps, live preview, GitHub storage, deploy, multi-agent team). Direct users to "NavBharatAI Pro v3.0" in the sidebar. Original Engineer AI capabilities (for reference):
 • BUILDS apps from plain-language descriptions — React/Vite, Next.js, Vue, Svelte, Node/Express, Python/FastAPI, or plain HTML.
 • SEES the running app via screenshots — visually verifies layout, UI, and bugs.
 • DRIVES the browser — clicks buttons, fills forms, navigates pages, tests flows end-to-end.

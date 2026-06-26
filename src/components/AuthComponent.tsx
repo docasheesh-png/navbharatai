@@ -382,13 +382,15 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       const pendingCred = GithubAuthProvider.credentialFromError(err);
       const email: string = err?.customData?.email || err?.email || '';
       if (!pendingCred || !email) { setError(describeSocialError(err)); setLoading(false); return false; }
-      const methods: string[] = await fetchSignInMethodsForEmail(auth, email);
+      // Firebase "Email Enumeration Protection" (ON by default) makes fetchSignInMethodsForEmail
+      // return an EMPTY array — so we can't always learn the existing method. Treat "password-only"
+      // as the only case that needs a typed password; for everything else (google.com, OR unknown
+      // because of enumeration protection) verify via Google — the enabled social provider — then
+      // link GitHub onto that account.
+      const methods: string[] = await fetchSignInMethodsForEmail(auth, email).catch(() => [] as string[]);
+      const passwordOnly = methods.includes('password') && !methods.includes('google.com');
       let signedIn: UserCredential | null = null;
-      if (methods.includes('google.com')) {
-        const g = new GoogleAuthProvider();
-        g.setCustomParameters({ login_hint: email });
-        signedIn = await signInWithPopup(auth, g); // verify ownership via the existing Google method
-      } else if (methods.includes('password')) {
+      if (passwordOnly) {
         if (!password) {
           setError(`This email (${email}) already has a password account. Type your password above, then click "Continue with GitHub" again to connect it.`);
           setLoading(false);
@@ -396,9 +398,9 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         }
         signedIn = await signInWithEmailAndPassword(auth, email, password);
       } else {
-        setError(`This email (${email}) is already registered with a different method. Sign in with that method first, then connect GitHub.`);
-        setLoading(false);
-        return false;
+        const g = new GoogleAuthProvider();
+        g.setCustomParameters({ login_hint: email });
+        signedIn = await signInWithPopup(auth, g); // verify ownership via Google, then link GitHub
       }
       if (signedIn?.user) {
         // Attach GitHub to the now-authenticated account, and keep the GitHub OAuth token (for

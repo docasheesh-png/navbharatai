@@ -33,6 +33,21 @@ export interface MultiProviderOptions {
 }
 
 /**
+ * Wrap a runner so it ALWAYS runs with `model`, ignoring the caller's `params.model`.
+ * Used to add a fixed cheaper-model backstop (e.g. Claude Haiku) at the END of a provider
+ * chain: if the primary model (Sonnet/Opus) is overloaded or rate-limited, the forced-Haiku
+ * runner still completes the turn — so a model-specific outage never breaks the build (P7
+ * failover hardening). Pure; the wrapped runner is injected, so it's fully unit-testable.
+ */
+export function forceModelRunner(runner: TurnRunner, model: string): TurnRunner {
+  return {
+    runTurn(params: RunTurnParams): Promise<TurnResult> {
+      return runner.runTurn({ ...params, model });
+    },
+  };
+}
+
+/**
  * Build a TurnRunner that tries each runner in `chain` order and returns the first that
  * succeeds. The final entry is the guaranteed backstop — keep Claude last. Throws only if
  * EVERY runner (including the backstop) fails.

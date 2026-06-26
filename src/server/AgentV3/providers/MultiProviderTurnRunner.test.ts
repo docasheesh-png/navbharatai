@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { makeMultiProviderTurnRunner, type NamedRunner } from './MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from './MultiProviderTurnRunner';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 
 const PARAMS: RunTurnParams = { model: 'm', messages: [{ role: 'user', content: 'hi' }] };
@@ -65,5 +65,30 @@ describe('makeMultiProviderTurnRunner', () => {
 
   it('throws if constructed with an empty chain', () => {
     expect(() => makeMultiProviderTurnRunner([])).toThrow(/at least one runner/);
+  });
+});
+
+describe('forceModelRunner (P7 — fixed-model Haiku backstop)', () => {
+  it('overrides params.model with the forced model, leaving other params intact', async () => {
+    const captured: RunTurnParams[] = [];
+    const inner: TurnRunner = { runTurn: vi.fn(async (p: RunTurnParams) => { captured.push(p); return ok('haiku reply'); }) };
+    const forced = forceModelRunner(inner, 'claude-haiku-4-5');
+    const res = await forced.runTurn(PARAMS); // PARAMS.model === 'm'
+    expect(res.text).toBe('haiku reply');
+    expect(captured[0].model).toBe('claude-haiku-4-5'); // forced, not 'm'
+    expect(captured[0].messages).toBe(PARAMS.messages); // everything else passed through
+  });
+
+  it('serves as a working final backstop when the primary Claude model fails', async () => {
+    // Vertex + Gemini + primary Claude all throw; the forced-Haiku backstop completes the turn.
+    const haikuInner: TurnRunner = { runTurn: vi.fn(async (p: RunTurnParams) => ok(`done on ${p.model}`)) };
+    const chain: NamedRunner[] = [
+      { name: 'GEMINI', runner: runnerFail('gemini down') },
+      { name: 'CLAUDE', runner: runnerFail('sonnet overloaded') },
+      { name: 'CLAUDE_HAIKU', runner: forceModelRunner(haikuInner, 'claude-haiku-4-5') },
+    ];
+    const runner = makeMultiProviderTurnRunner(chain);
+    const res = await runner.runTurn(PARAMS);
+    expect(res.text).toBe('done on claude-haiku-4-5'); // backstop ran on the forced model
   });
 });

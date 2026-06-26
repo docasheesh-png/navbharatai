@@ -4056,3 +4056,39 @@ Result (when GITHUB_STORAGE_ENABLED=true): GitHub-logged-in users get each proje
 in THEIR OWN GitHub, built/committed/PR'd/CI-checked/merged like Claude Code (never merges red);
 Email/Phone users get the same durability via the platform org. Gate every phase: frontend tsc 0,
 server tsc 0, vitest PASS (up to 2574), boot:check PASS.
+
+---
+
+### 2026-06-26 — My Profile feature (PR #442, merged)
+
+Full user profile page accessible from the top-right avatar dropdown AND Settings → Account → My Profile.
+
+**What shipped:**
+- `UserBuildHistoryStore.ts` (NEW): Firestore collection `user_build_history`, admin SDK, VITEST-skip.
+  Records every build with status (`completed` / `failed` / `cancelled`), costInr (full / 0 / 50%),
+  durationMs, fileCount, tier. Methods: `record()`, `list()`, `getSummary()`.
+- `UserProfileStore.ts` (NEW): Firestore collection `user_profiles`, admin SDK, VITEST-skip.
+  Stores displayName, bio, phone, photoUrl, budgetLimitInr. Methods: `get()`, `update()`.
+- `routes/profile.ts` (NEW): bearer-token authenticated.
+  - `GET /api/profile` — profile + wallet summary + monthly AI spend
+  - `PUT /api/profile` — update displayName/bio/phone/photoUrl
+  - `PUT /api/profile/budget` — set budgetLimitInr
+  - `GET /api/profile/history?period=week|month|custom&from=&to=` — paginated build history
+- `ProfilePage.tsx` (NEW, ~583 lines): full-page profile UI with avatar (Google/GitHub photo or
+  initials fallback), editable name/bio/phone/photo-URL, wallet balance + monthly spend + budget
+  limit input, build history with This Week / This Month / Custom date range tabs + summary cards +
+  table with status badges, quick links to Billing/Settings, Sign Out.
+- `TopNav.tsx`: replaced plain logout button with animated avatar dropdown (My Profile | Settings | Sign Out).
+- `SettingsPanel.tsx`: new "Account" group at top with "My Profile" item that navigates (nav:true).
+- `App.tsx`: renders `ProfilePage` when `activeView === 'my_profile'`; wires `onOpenProfile` + `onOpenSettings` to TopNav.
+- `server.ts`: registers profile routes.
+- `build.ts`: records per-build history entry after each completed/failed/cancelled build.
+- `AppKnowledgeBase.ts`: `my_profile` entry with exact navigation paths and keywords.
+- `types/index.ts`: added `'my_profile'` to ViewType, `'profile'` to SettingsScreen.
+
+Build status logic: `completed` (full charge) if `eng.ok && !partial`; `failed` (free) if
+`!eng.ok && fileCount === 0 && !partial`; `cancelled` (50% charge if files written, 0 if none) otherwise.
+Budget cap: if build started with sufficient balance, always completes; after completion if balance ≤ 0,
+input box replaced by a recharge card.
+
+Gate: frontend tsc 0, server tsc 0, **2574 vitest** PASS, CI green on PR #442.

@@ -196,6 +196,38 @@ function maxBuildBudgetUsd(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : 25;
 }
 
+/**
+ * Per-user monthly spend ceiling (R1, roadmap §3.1). The hard per-BUILD cap
+ * (maxBuildBudgetUsd) stops one runaway build; this caps a user's TOTAL billed
+ * spend across the calendar month so a single user can never run the platform's
+ * D2 (NavBharatAI-pays) exposure to the moon. Returns 0 (disabled) unless the admin
+ * sets AGENTV3_USER_MONTHLY_CAP_USD to a positive number, so existing behaviour is
+ * unchanged until it is opted into.
+ */
+export function userMonthlyCapUsd(): number {
+  const raw = Number(process.env.AGENTV3_USER_MONTHLY_CAP_USD);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
+/**
+ * Check whether a user is at or over their monthly spend ceiling. Returns the cap and
+ * the current monthly total so the caller can return an honest, specific message.
+ * Best-effort: a Firestore read failure (or no userId) NEVER blocks a build — we fail
+ * OPEN so a transient store outage cannot lock every user out (the per-build cap still
+ * bounds the blast radius). Disabled (cap<=0) → always allowed.
+ */
+export async function checkMonthlyCap(userId: string | null): Promise<{ allowed: boolean; cap: number; spent: number }> {
+  const cap = userMonthlyCapUsd();
+  if (cap <= 0 || !userId) return { allowed: true, cap, spent: 0 };
+  try {
+    const usage = await userCostStore.get(userId);
+    const spent = usage?.totalCostUsd ?? 0;
+    return { allowed: spent < cap, cap, spent };
+  } catch {
+    return { allowed: true, cap, spent: 0 };
+  }
+}
+
 function envInt(name: string, fallback: number): number {
   const raw = Number(process.env[name]);
   return Number.isInteger(raw) && raw > 0 ? raw : fallback;
@@ -733,6 +765,17 @@ export function registerAgentV3Routes(app: Express): void {
     }
     if (prompt.length > MAX_PROMPT_LEN) {
       res.status(400).json({ error: `Prompt is too long (max ${MAX_PROMPT_LEN} chars).` });
+      return;
+    }
+    // Per-user monthly spend ceiling (R1 §3.1). When the admin has set a cap and this user
+    // has reached it this month, deny new builds with an honest, specific message (HTTP 402).
+    // Disabled by default and fails open on a store error, so it never locks users out wrongly.
+    const monthly = await checkMonthlyCap(userId);
+    if (!monthly.allowed) {
+      res.status(402).json({
+        error: `Monthly usage limit reached (≈$${monthly.spent.toFixed(2)} of $${monthly.cap.toFixed(2)}). ` +
+          `Your limit resets at the start of next month.`,
+      });
       return;
     }
     const buildKey = userId ?? 'anon';

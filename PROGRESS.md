@@ -4133,3 +4133,31 @@ returned current content to craft a precise retry — NEVER fall back to `write_
 an existing file just because the edit failed.
 
 Gate: frontend tsc 0, server tsc 0, **2574 vitest** PASS, CI green on PR #449.
+
+---
+
+## 2026-06-26 — v3.0 hardening: audit, roadmap & R1 safety floor (autonomous cycle)
+
+Ground-truth audit of v3.0 (3 deep code-reading passes) → `NAVBHARATAI_PRO_V3_ROADMAP.md`
+(6 audit points mapped, prioritized R1→R7 plan). Then shipped, each branch→PR→CI green→merge:
+
+- **IDOR fix (PR #453):** `assertWorkspaceOwner()` on all 4 workspaceId endpoints
+  (`/restore`, `/workspace-files`, `/inbrowser-preview`, `/import-files`) — a user can no
+  longer read/restore/export another user's workspace. Client forwards the Firebase ID token;
+  admin keeps working via the body-userId fallback.
+- **"Apps never break from editing" permanent rule (PR #454):** baked into v3.0's brain
+  (`systemPrompt.ts`) — BUILD side builds every app edit-resilient by design (root error
+  boundary, small decoupled modules, typed contracts, defensive guards, no fragile traps);
+  EDIT side makes "never break the app" the #1 rule and demands proving build/run after edits.
+- **R1.1 — secret redaction (PR #455):** new `SecretRedactor` masks provider keys / PEM /
+  JWT / URL creds / secret-named assignments in the user-visible tool-call input + tool-result
+  summary + error message. Model-facing `content` left intact (edit_file exact-match safe).
+- **R1 §3.1 — per-user monthly spend ceiling:** new `AGENTV3_USER_MONTHLY_CAP_USD` env var
+  (default 0 = disabled). When set, `/api/agentv3/chat` denies a build with an honest HTTP 402
+  once the user's `user_costs` monthly total reaches the cap. Fails OPEN on a store error so a
+  Firestore outage never locks users out. Caps the platform's D2 (NavBharatAI-pays) exposure.
+
+New v3.0 env var: `AGENTV3_USER_MONTHLY_CAP_USD` (USD, default 0 = off).
+
+Gate at each merge: frontend tsc 0, server tsc 0, vitest PASS (2598→2606), boot:check PASS.
+Next in R1: §1.2 rate-limit all mutating endpoints, §3.3 prompt-injection defense (imports).

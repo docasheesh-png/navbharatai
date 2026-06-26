@@ -4092,3 +4092,44 @@ Budget cap: if build started with sufficient balance, always completes; after co
 input box replaced by a recharge card.
 
 Gate: frontend tsc 0, server tsc 0, **2574 vitest** PASS, CI green on PR #442.
+
+---
+
+### 2026-06-26 — v3.0 engine hardening: 6 real gaps from technical audit (PR #449)
+
+Technical audit of actual engine code (not design docs) revealed 6 gaps. All fixed:
+
+**Fix 1+4 — write_file full-rewrite guard + WorkspaceMemory content injection:**
+`ToolDispatcher.ts` write_file handler now captures `existingContent` BEFORE the write.
+When `kind === 'modify'` (file already existed), the WARNING message now embeds the
+pre-overwrite content (up to 2000 chars). Model gets current file state immediately —
+no extra `read_file` round-trip needed to craft the correct `edit_file` call.
+
+**Fix 2 — edit_file "not found" error with current content:**
+When `old_string` is not found (even after whitespace-flexible fallback), the error now
+returns the current file content inline (up to 1500 chars). Model copies exact lines and
+retries without a separate `read_file` call. Saves one full build step per failed edit.
+
+**Fix 3 — PreviewDomain startup warning:**
+`PreviewDomain.ts` now logs `[AgentV3]` warning at startup in production when
+`E2B_PREVIEW_DOMAIN` is not set — tells the operator raw `*.e2b.app` URLs are in use
+and exactly how to configure a stable branded domain.
+
+**Fix 5 — Hard sub-agent delegation rules (system prompt):**
+`architectSystemPrompt()` now has a `MANDATORY DELEGATION` block with explicit
+file→role routing: `src/components/**` → `task(frontend)`, `src/server/**` →
+`task(backend)`, etc. Architect writes ONLY config files. All independent `task()`
+calls in ONE turn = parallel workers. Previously the Architect would write everything
+itself — no parallelism benefit.
+
+**Fix 6 — Mid-build TypeScript gate (system prompt):**
+System prompt now instructs agent to run `npx tsc --noEmit 2>&1 | head -30` after every
+5 file writes. Fix all errors immediately before continuing. Catches type breakage at the
+source instead of discovering it 20 steps later at the final `evaluate` call.
+
+**Fix 3b — Edit mode: no write_file fallback on edit failure:**
+`editModePrefix()` now explicitly tells the model: if `edit_file` fails, use the
+returned current content to craft a precise retry — NEVER fall back to `write_file` on
+an existing file just because the edit failed.
+
+Gate: frontend tsc 0, server tsc 0, **2574 vitest** PASS, CI green on PR #449.

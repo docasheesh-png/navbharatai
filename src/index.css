@@ -154,21 +154,15 @@ html, body {
   transform-origin: center !important;
 }
 
-/* L9: Respect user prefers-reduced-motion preference */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-  /* …but KEEP functional loading spinners turning. A loading spinner conveys live
-     status ("working…"); frozen, it reads as broken. This is an allowed exception to
-     reduced-motion (status indicators), not decorative motion. */
-  .animate-spin {
-    animation-duration: 1s !important;
-    animation-iteration-count: infinite !important;
-  }
+/* Animations are ON by default. The OS prefers-reduced-motion is NOT auto-respected anymore;
+   instead users control motion via Settings → General → "Reduce Animations" (default OFF). When
+   they turn it ON, the `nb-reduce-motion` class is set on <html> and every animation/transition is
+   minimised. (The JS-driven waving tiranga reads the same class and goes static.) */
+.nb-reduce-motion *, .nb-reduce-motion *::before, .nb-reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }
 
 /* L18: Visible focus outline for keyboard navigation */

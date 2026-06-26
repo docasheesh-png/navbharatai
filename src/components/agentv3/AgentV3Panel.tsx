@@ -607,6 +607,12 @@ function WavingTiranga({ size = 16 }: { size?: number }) {
     let raf = 0;
     let start = 0;
     const tick = (t: number) => {
+      // Respect the user's "Reduce Animations" choice (Settings → General): hold the flag static.
+      if (document.documentElement.classList.contains('nb-reduce-motion')) {
+        if (ref.current) ref.current.style.transform = 'none';
+        raf = requestAnimationFrame(tick); // keep checking so it resumes if they toggle back
+        return;
+      }
       if (!start) start = t;
       const e = (t - start) / 1000;
       // Flutter: the trailing (right) edge swings while the pole (left) edge stays — a cloth-in-wind feel.

@@ -4185,3 +4185,24 @@ Next in R1: §1.2 rate-limit all mutating endpoints, §3.3 prompt-injection defe
   features composed for free.
 
 Gate at merge: frontend tsc 0, server tsc 0, vitest 2621 PASS, boot:check PASS.
+
+---
+
+## 2026-06-26 (cont.) — R4 §2.3 auto-fix + R5 §5.1 one-click live deploy
+
+- **R4 §2.3 — runtime-error auto-fix loop (PR #461):** new AutoFix module + route loop. When
+  enabled (AGENTV3_AUTOFIX=on, default off), after a successful build the captured browser runtime
+  errors drive up to N (default 1, max 3) Claude-first repair passes (fix → reload → re-verify),
+  with an advancing time window so a repaired error is never re-detected; honest WARN if any remain.
+  New env: AGENTV3_AUTOFIX, AGENTV3_AUTOFIX_ATTEMPTS.
+
+- **R5 §5.1 — one-click live deploy (PR #462 backend, #463 UI):** the deploy ENGINE was already
+  real (Firebase Hosting → permanent *.web.app URL). Added what was missing:
+  • DeploymentStore + withDeploymentPersistence() — every deploy's URL is now durably saved.
+  • GET /api/agentv3/deployment (ownership-checked) — fetch a workspace's live URL back.
+  • UI "Deploy" button (drives the real build+deploy pipeline) + a "Live site" link restored on
+    load, so the permanent URL survives a refresh/new session (was lost with the stream before).
+  • AppKnowledgeBase `agentv3_deploy` entry. Custom domain (DNS) explicitly NOT built yet — the
+    .web.app URL is permanent + shareable; custom domain is an honest follow-up.
+
+Gate at each merge: frontend tsc 0, server tsc 0, vitest PASS (2630→2634), boot:check PASS.

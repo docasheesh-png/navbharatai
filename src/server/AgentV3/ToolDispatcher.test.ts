@@ -675,3 +675,41 @@ describe('applyEdit (edit_file matching with whitespace-tolerant fallback)', () 
     expect(r.note).toBe('');
   });
 });
+
+describe('ToolDispatcher — secret redaction on the user-visible event surface (R1.1)', () => {
+  let act: FakeActuator;
+  let state: WorkspaceState;
+  let stream: AgentEventStream;
+  let events: AgentEvent[];
+  let d: ToolDispatcher;
+
+  beforeEach(() => {
+    act = new FakeActuator();
+    stream = new AgentEventStream();
+    events = [];
+    stream.subscribe((e) => events.push(e), false);
+    state = new WorkspaceState(stream);
+    d = new ToolDispatcher(act, 'ws-1', state, stream);
+  });
+
+  it('redacts a secret in bash stdout from the tool_result summary, but keeps it in model content', async () => {
+    const secret = 'sk-ant-api03-' + 'A'.repeat(30);
+    act.commandResult = { exitCode: 0, stdout: `ANTHROPIC_API_KEY=${secret}`, stderr: '' };
+    const res = await d.dispatch(call('bash', { command: 'printenv ANTHROPIC_API_KEY' }));
+
+    const result = events.find((e) => e.type === 'tool_result');
+    // User-visible summary must NOT contain the raw secret.
+    expect(result && 'summary' in result ? (result as { summary: string }).summary : '').not.toContain(secret);
+    expect(result && 'summary' in result ? (result as { summary: string }).summary : '').toContain('[REDACTED:');
+    // Model-facing content is intact (so the agent can still reason; exact-match edits never break).
+    expect(res.content).toContain(secret);
+  });
+
+  it('redacts a secret inlined in the tool_call input shown to the user', async () => {
+    const secret = 'ghp_' + 'b'.repeat(36);
+    await d.dispatch(call('bash', { command: `git remote set-url origin https://${secret}@github.com/x/y.git` }));
+    const callEvt = events.find((e) => e.type === 'tool_call') as { input?: { command?: string } } | undefined;
+    expect(callEvt?.input?.command ?? '').not.toContain(secret);
+    expect(callEvt?.input?.command ?? '').toContain('[REDACTED:');
+  });
+});

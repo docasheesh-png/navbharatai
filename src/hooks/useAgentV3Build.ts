@@ -3,6 +3,21 @@ import { agentV3Reducer } from '../components/agentv3/agentV3Reducer';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent } from '../components/agentv3/agentV3Types';
 import { conversationToEvents, type PersistedConversation } from '../components/agentv3/agentV3History';
+import { auth } from '../App';
+
+/**
+ * Build JSON headers carrying the signed-in user's Firebase ID token when available.
+ * The server prefers the verified token over any body-supplied userId for workspace
+ * ownership checks; a missing token soft-falls-back to the body userId (synthetic admin).
+ */
+async function authJsonHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const tok = await auth.currentUser?.getIdToken();
+    if (tok) headers.Authorization = `Bearer ${tok}`;
+  } catch { /* no token — server soft-falls-back to body userId */ }
+  return headers;
+}
 
 /**
  * useAgentV3Build — drives a v3.0 build and keeps the live client state that all
@@ -201,7 +216,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     try {
       const res = await fetch('/api/agentv3/restore', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authJsonHeaders(),
         body: JSON.stringify({ workspaceId, sha, userId: userIdRef.current, email: emailRef.current }),
       });
       const j = await res.json().catch(() => ({}));

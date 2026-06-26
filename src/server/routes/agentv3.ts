@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter } from '../lib/authMiddleware';
+import { buildRateLimiter, verifyFirebaseToken } from '../lib/authMiddleware';
 import {
   isAgentV3Enabled,
   agentV3Status,
@@ -166,6 +166,23 @@ const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
  * (reused across messages = iterative building). No/invalid sessionId → a fresh,
  * timestamped one-shot workspace (the previous behaviour).
  */
+/**
+ * Ownership guard for the workspaceId-bearing endpoints (IDOR fix). A workspaceId is always
+ * `agentv3-{uid}-{sessionId}` (see deriveWorkspaceId), so a workspace belongs to a user iff the id
+ * carries that user's uid. We prefer a SERVER-VERIFIED uid (Firebase ID token) — spoof-proof — and
+ * fall back to the request's claimed userId for callers without a token (the synthetic admin user,
+ * and anonymous sessions, which also rely on the unguessable random sessionId). Returns false for a
+ * malformed id or a uid mismatch, so one user can never read/write another user's workspace.
+ */
+async function assertWorkspaceOwner(req: Request, workspaceId: string): Promise<boolean> {
+  if (!workspaceId || !workspaceId.startsWith('agentv3-')) return false;
+  const verifiedUid = await verifyFirebaseToken(req);
+  const claimedUid = typeof req.body?.userId === 'string' ? req.body.userId : null;
+  const id = verifiedUid ?? claimedUid;
+  const uid = id && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : 'anon';
+  return workspaceId.startsWith(`agentv3-${uid}-`);
+}
+
 export function deriveWorkspaceId(userId: string | null, sessionId: unknown): string {
   const uid = userId && /^[A-Za-z0-9_-]{1,64}$/.test(userId) ? userId : 'anon';
   if (typeof sessionId === 'string' && SESSION_ID_RE.test(sessionId)) {
@@ -584,6 +601,10 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(400).json({ error: 'workspaceId and sha are required.' });
       return;
     }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
     const ok = await restoreSession(workspaceId, sha, userId ?? undefined);
     res.json({ ok });
   });
@@ -603,6 +624,10 @@ export function registerAgentV3Routes(app: Express): void {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!workspaceId) {
       res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
     try {
@@ -629,6 +654,10 @@ export function registerAgentV3Routes(app: Express): void {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!workspaceId) {
       res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
     try {
@@ -667,6 +696,10 @@ export function registerAgentV3Routes(app: Express): void {
     }
     if (!files || typeof files !== 'object' || Array.isArray(files)) {
       res.status(400).json({ error: 'files (a path→content object) is required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
     try {

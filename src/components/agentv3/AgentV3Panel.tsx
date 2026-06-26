@@ -6,7 +6,19 @@ import {
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import type { AgentCard, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
-import { db, sanitizeFirestoreData } from '../../App';
+import { db, sanitizeFirestoreData, auth } from '../../App';
+
+/** Best-effort Firebase ID-token header so the server can verify workspace ownership (IDOR guard).
+ *  Returns {} for the synthetic admin / anonymous users (no Firebase user) — the server falls back
+ *  to its claimed-id + random-sessionId check for those. */
+async function authJsonHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const tok = await auth.currentUser?.getIdToken();
+    if (tok) headers.Authorization = `Bearer ${tok}`;
+  } catch { /* no token — server soft-falls-back */ }
+  return headers;
+}
 import { doc, setDoc } from 'firebase/firestore';
 
 /**
@@ -280,8 +292,8 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
     try {
       const res = await fetch('/api/agentv3/workspace-files', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId: wsId }),
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId: wsId, userId, email }),
       });
       if (!res.ok) throw new Error(`server returned ${res.status}`);
       const data = await res.json() as { files?: Record<string, string> };
@@ -554,7 +566,7 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
           </div>
 
           {tab === 'preview' ? (
-            <PreviewSurface url={state.previewUrl} workspaceId={state.workspaceId} />
+            <PreviewSurface url={state.previewUrl} workspaceId={state.workspaceId} userId={userId} email={email} />
           ) : (
             <div className="flex-1 overflow-auto p-3 font-mono text-xs">
               {tab === 'files' && (state.files.length === 0 ? <Empty>No files yet.</Empty> : (
@@ -764,7 +776,7 @@ function TodoList({ todos }: { todos: TodoItem[] }) {
  *    "Blocked request" / sandbox-down case) and for plain static or simple React/Vue apps.
  * The user can switch between them; in-browser defaults on when there is no live URL yet.
  */
-function PreviewSurface({ url, workspaceId }: { url?: string; workspaceId?: string }) {
+function PreviewSurface({ url, workspaceId, userId, email }: { url?: string; workspaceId?: string; userId?: string; email?: string }) {
   const [mode, setMode] = useState<'live' | 'inbrowser'>(url ? 'live' : 'inbrowser');
   const [html, setHtml] = useState<string>('');
   const [kind, setKind] = useState<string>('');
@@ -782,8 +794,8 @@ function PreviewSurface({ url, workspaceId }: { url?: string; workspaceId?: stri
     try {
       const res = await fetch('/api/agentv3/inbrowser-preview', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId }),
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId, userId, email }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);

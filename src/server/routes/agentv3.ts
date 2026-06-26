@@ -1055,6 +1055,9 @@ export function registerAgentV3Routes(app: Express): void {
       // Base runner options — shared by the default build AND any escalated rebuild (P3).
       // Only client/model/conversationId vary per tier; everything else is identical so the
       // escalated build streams to the same surfaces and writes to the same workspace.
+      // A new build or an edit MUST produce files — tell the runner so it reports a no-tool
+      // "I'm preparing a plan…" reply as a FAILED build (ok:false) instead of a fake success.
+      const expectsArtifacts = intent === 'new_build' || intent === 'edit_existing';
       const baseRunnerOpts = {
         dispatcher,
         state,
@@ -1068,6 +1071,7 @@ export function registerAgentV3Routes(app: Express): void {
         toolConcurrency,
         agentRole: 'architect' as const,
         signal: abort.signal,
+        expectsArtifacts,
       };
       const runner = new AgentRunner({
         ...baseRunnerOpts,
@@ -1216,6 +1220,33 @@ export function registerAgentV3Routes(app: Express): void {
         result = await runner.run(buildPrompt);
       }
 
+      // SAFETY NET (the "fake build" fix): if a build/edit was expected to produce files but
+      // produced ZERO — the cheap model replied ("I'm preparing a plan…") instead of building —
+      // retry ONCE with a Claude-first runner. Claude reliably uses the build tools, so this
+      // turns a fake "done" into a real app. Always on for this hard failure, independent of the
+      // P3 quality-escalation flag. Skipped if the user already stopped the build.
+      if (expectsArtifacts && writtenFiles.size === 0 && !abort.signal.aborted) {
+        events.emit({ type: 'narration', agent: 'architect', text: 'The first attempt produced no files — rebuilding with a stronger model…', ts: Date.now() });
+        const retryRunner = new AgentRunner({
+          ...baseRunnerOpts,
+          client: buildTurnRunner({ claudeFirst: true }),
+          model: resolveModel(onlyOpus),
+          persistence: {
+            store: getConversationStore(),
+            conversationId: randomUUID(),
+            userId: userId ?? 'anon',
+            workspaceId,
+            title: deriveTitle(prompt),
+          },
+        });
+        try {
+          const retry = await retryRunner.run(buildPrompt);
+          if (retry.ok || writtenFiles.size > 0) { result = retry; deliveredTier = 'sonnet'; }
+        } catch (e) {
+          console.log(`[AGENTV3] empty-build Claude retry failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
       // Build Reflection (Layer 57, seed): derive a short reflection from what
       // happened this build (errors hit, fixes applied, outcome) and store it
       // back into project memory so the NEXT build in this session can recall
@@ -1326,7 +1357,13 @@ export function registerAgentV3Routes(app: Express): void {
       // and fail-safe — any error leaves the user billed normally. effectiveBilledUsd flows into
       // both the cost record AND the result event so the customer-facing amount matches.
       let effectiveBilledUsd = result.billedUsd;
-      if (userId && result.ok && result.billedUsd > 0 && freeOnboardingLimit() > 0) {
+      // NEVER charge for a build that produced nothing. If the user asked for an app/edit and
+      // zero files were created (even after the Claude retry), the build failed — bill ₹0.
+      // "Preview is EARNED" cuts both ways: no artifacts, no charge.
+      if (expectsArtifacts && writtenFiles.size === 0) {
+        effectiveBilledUsd = 0;
+      }
+      if (userId && result.ok && effectiveBilledUsd > 0 && freeOnboardingLimit() > 0) {
         const isFree = await onboardingCreditStore
           .consumeFreeBuild(userId, freeOnboardingLimit())
           .catch(() => false);

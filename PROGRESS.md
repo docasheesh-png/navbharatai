@@ -4009,3 +4009,25 @@ domain in Authentication → Settings → Authorized domains; (3) for GitHub, an
 configured with the Firebase callback URL. This feature must be verified on the LIVE site
 in a real browser before being called "working".
 Gate: frontend tsc 0, server tsc 0, **2562 vitest** PASS, boot:check PASS.
+
+---
+
+### 2026-06-26 — v3.0 fix: stop fake-success billing when model replies with no tool calls (PR #433)
+
+**Root cause (production bug):** A user requested "analog clock app", received a chat reply
+("I'm preparing a plan") instead of files, yet was billed ₹10.23. The bug was in
+`AgentRunner.ts` line 236-240: `turn.toolUses.length === 0` branch returned `ok:true` and
+billed regardless — even when no files were ever written.
+
+**Fix:**
+- `AgentRunner.ts`: added `expectsArtifacts?: boolean` option + `totalToolUses` counter.
+  When `expectsArtifacts=true` and zero tool calls were made across the whole build, emits
+  `ok:false` with an honest "no files were created" message instead of `ok:true`.
+- `routes/agentv3.ts`: `expectsArtifacts = true` for `new_build` and `edit_existing`
+  intents. After a zero-file run, auto-retries ONCE with a Claude-first runner (stronger
+  model). If retry also produces 0 files, `effectiveBilledUsd` is forced to 0 — users
+  are NEVER charged for a build that produced nothing.
+- 3 new tests covering: the production bug (`ok:false` on zero-tool build), chat turns
+  (unaffected — still `ok:true`), and a real build that wrote a file (`ok:true`).
+
+Gate: frontend tsc 0, server tsc 0, **2562 vitest** PASS (all 3 new tests green), boot:check PASS.

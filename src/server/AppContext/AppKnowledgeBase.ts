@@ -112,6 +112,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'agentv3_deploy',
+    name: 'Deploy to a live URL (one click)',
+    path: 'NavBharatAI Pro v3.0 → header tab row → "Deploy" button (the live link then shows as "Live site")',
+    description: 'Publish your built app to a PERMANENT public URL with one click. The "Deploy" button runs the production build and publishes the app to Firebase Hosting, returning a real https URL (like https://…--v3-….web.app) that anyone can open and that STAYS LIVE even after the cloud sandbox stops. Once deployed, a "Live site" link appears in the same header row — click it to open your live app, or share the URL with anyone. The live link is saved, so it comes back even after you refresh or return in a new session. (A custom domain like yourname.com is not wired yet — the live .web.app URL is permanent and shareable.)',
+    howToUse: 'Build an app in NavBharatAI Pro v3.0, then click "Deploy" in the tab row at the top. v3.0 builds and publishes it; watch the progress in the chat. When it finishes, click the "Live site" link that appears to open your permanent public URL, and share that URL with anyone.',
+    relatedFeatures: ['agentv3_builder', 'agentv3_preview', 'agentv3_export'],
+    keywords: ['deploy', 'publish', 'go live', 'live url', 'public url', 'host', 'hosting', 'share app', 'live site', 'make it live', 'put online', 'deploy karo', 'live karo', 'publish karo', 'app live', 'website live', 'permanent url', 'share link', 'firebase hosting', 'launch'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'agentv3_preview',
     name: 'Preview (dual: Live server + In-browser)',
     path: 'NavBharatAI Pro v3.0 → header → Preview tab → "Live server" / "In-browser" switch',

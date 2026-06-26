@@ -332,6 +332,44 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
     }
   };
 
+  // R5 §5.1 — the app's permanent LIVE deployment URL (Firebase Hosting). Restored durably from the
+  // server so it survives a reconnect/new session, not just the current build stream.
+  const [liveUrl, setLiveUrl] = useState<string | null>(null);
+
+  // Fetch the persisted live URL whenever the workspace changes or a build/deploy finishes.
+  useEffect(() => {
+    const wsId = state.workspaceId;
+    if (!wsId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const params = new URLSearchParams({ workspaceId: wsId });
+        if (userId) params.set('userId', userId);
+        if (email) params.set('email', email);
+        const res = await fetch(`/api/agentv3/deployment?${params.toString()}`, { headers: await authJsonHeaders() });
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && typeof data?.url === 'string' && data.url) setLiveUrl(data.url);
+      } catch { /* best-effort — no live URL shown */ }
+    })();
+    return () => { cancelled = true; };
+  }, [state.workspaceId, state.done, userId, email]);
+
+  // One-click deploy: drive the REAL build+deploy pipeline (the agent runs `npm run build` then the
+  // deploy tool, publishing to a permanent Firebase Hosting URL). Routed through the normal stream so
+  // the user watches real progress; the live URL is then refreshed from the server (effect above).
+  const deployLive = () => {
+    if (running || !state.workspaceId) return;
+    if (state.narration.length > 0) {
+      setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind }))]);
+    }
+    if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
+    setUserMsgs((c) => [...c, { role: 'user', text: '🚀 Deploy to a live URL', ts: Date.now() }]);
+    start(
+      'Deploy this app to a permanent public live URL. Run "npm run build" first, then call the deploy tool, and finish by giving me the live link.',
+      { userId, email, onlyOpus, planFirst: false, thinking, sessionId: sessionIdRef.current, framework },
+    );
+  };
+
   const agents = Object.values(state.agents).sort((a, b) => b.updatedTs - a.updatedTs);
   const diffPaths = Object.keys(state.diffs);
 
@@ -415,6 +453,29 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
             >
               <Github className="w-3.5 h-3.5" />
               GitHub
+              <ExternalLink className="w-3 h-3 opacity-60" />
+            </a>
+          )}
+          {/* R5 §5.1 — one-click deploy: publish the built app to a PERMANENT public URL. */}
+          <button
+            onClick={deployLive}
+            disabled={running || !state.workspaceId}
+            title="Publish your app to a permanent public live URL (it stays online after the sandbox stops)"
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-emerald-700/60 text-emerald-300 hover:text-white hover:border-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <Rocket className="w-3.5 h-3.5" />
+            Deploy
+          </button>
+          {liveUrl && (
+            <a
+              href={liveUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={`Your live site: ${liveUrl}`}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-emerald-700/60 bg-emerald-950/40 text-emerald-300 hover:text-white hover:border-emerald-500 transition-colors"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              Live site
               <ExternalLink className="w-3 h-3 opacity-60" />
             </a>
           )}

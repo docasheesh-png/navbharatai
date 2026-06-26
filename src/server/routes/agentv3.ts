@@ -74,8 +74,9 @@ import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY } from '../lib/prompts';
 import { classifyIntentSmart } from '../AgentV3/IntentClassifier';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
-import { analyzeRequest, type StartTier } from '../AgentV3/RequestAnalyser';
+import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
+import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
 import { reviewBuild, formatReview } from '../AgentV3/ReviewerAgent';
 import {
   saveWorkspaceMemory,
@@ -250,7 +251,7 @@ export function tierToGeminiBuildModel(tier: StartTier): string {
   return tier === 'gemini' ? 'gemini-2.5-flash' : 'gemini-2.5-pro';
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string }): TurnRunner {
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -273,11 +274,47 @@ function buildTurnRunner(opts?: { geminiModel?: string }): TurnRunner {
   }
   if (cheap.length === 0) return makeResilientTurnRunner(new ClaudeClient()); // Claude-only env
   const claude: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient() };
-  const chain = process.env.AGENTV3_BUILD_CLAUDE_FIRST === '1' ? [claude, ...cheap] : [...cheap, claude];
+  // claudeFirst (escalation): put the stronger Claude model at the head of the chain so an
+  // escalated tier actually leads with Claude, not Gemini. Else cheap-first (env override honoured).
+  const claudeFirst = opts?.claudeFirst || process.env.AGENTV3_BUILD_CLAUDE_FIRST === '1';
+  const chain = claudeFirst ? [claude, ...cheap] : [...cheap, claude];
   return makeMultiProviderTurnRunner(chain, {
     onProviderUsed: (used, from) => { if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`); },
     onProviderError: (name, err) => console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
   });
+}
+
+/**
+ * Cost-ladder escalation (P3) — DORMANT by default. Wiring exists but the rebuild-on-
+ * gate-fail loop only activates when AGENTV3_ESCALATION=on (the design doc's "behind the
+ * rollout flag" instruction). With it OFF, the build runs exactly once on the start tier —
+ * byte-identical to pre-P3 behaviour. Exported pure for unit testing.
+ */
+export function escalationEnabled(): boolean {
+  return process.env.AGENTV3_ESCALATION === 'on';
+}
+
+/**
+ * Whether THIS build should run through the escalation orchestrator. Only when: the flag is
+ * on, we have an analyser verdict, it is NOT power/Only-Opus mode (power bypasses the ladder),
+ * and the escalation path actually has a higher tier to climb to. Otherwise the single-build
+ * fast path is used (and stays identical to today).
+ */
+export function shouldEscalateBuild(analysis: AnalysisResult | undefined, onlyOpus: boolean): boolean {
+  if (!escalationEnabled()) return false;
+  if (!analysis || onlyOpus) return false;
+  return (analysis.escalationPath?.length ?? 0) > 1;
+}
+
+/**
+ * Objective build gate: a build that did not complete (ok=false) fails the gate and triggers
+ * escalation; a completed build passes. Deterministic, free, no LLM call — the honest signal
+ * the AgentRunner already computes. (Richer 22-dimension gating can replace this later.)
+ */
+export function escalationGate(ok: boolean): GateVerdict {
+  return ok
+    ? { pass: true, score: 100, reason: 'build completed' }
+    : { pass: false, score: 0, reason: 'build did not complete — escalate to a stronger tier' };
 }
 
 /**
@@ -973,12 +1010,13 @@ export function registerAgentV3Routes(app: Express): void {
         }
       }
 
-      const runner = new AgentRunner({
-        client,
+      // Base runner options — shared by the default build AND any escalated rebuild (P3).
+      // Only client/model/conversationId vary per tier; everything else is identical so the
+      // escalated build streams to the same surfaces and writes to the same workspace.
+      const baseRunnerOpts = {
         dispatcher,
         state,
         events,
-        model,
         system: architectSystem,
         tools: catalogForTools(roleConfig('architect').tools),
         onlyOpus,
@@ -986,8 +1024,13 @@ export function registerAgentV3Routes(app: Express): void {
         maxBudgetUsd: budget,
         maxSteps,
         toolConcurrency,
-        agentRole: 'architect',
+        agentRole: 'architect' as const,
         signal: abort.signal,
+      };
+      const runner = new AgentRunner({
+        ...baseRunnerOpts,
+        client,
+        model,
         // D7: persist the build transcript so it survives a reconnect/refresh. Best-effort —
         // a store failure never breaks the build (see AgentRunner). Reloadable via the
         // GET /api/agentv3/conversations endpoints below.
@@ -1091,7 +1134,45 @@ export function registerAgentV3Routes(app: Express): void {
         }
       }
 
-      const result = await runner.run(buildPrompt);
+      // Cost-ladder escalation (P3) — DORMANT unless AGENTV3_ESCALATION=on. When off,
+      // this is exactly `await runner.run(buildPrompt)` (the start-tier build, once). When
+      // on, the build runs cheap-first and climbs the analyser's escalation path ONLY when
+      // the objective gate (build completed?) fails — the last tier is always delivered as a
+      // best-effort backstop, so the build never "breaks". `deliveredTier` feeds telemetry.
+      let result: Awaited<ReturnType<typeof runner.run>>;
+      let deliveredTier: StartTier = analysis?.startTier ?? (onlyOpus ? 'opus' : 'gemini');
+      if (analysis && shouldEscalateBuild(analysis, onlyOpus)) {
+        const esc = await runWithEscalation(analysis.escalationPath, {
+          buildOnTier: async (tier, attempt) => {
+            if (attempt === 1) return runner.run(buildPrompt); // reuse the start-tier runner
+            // Escalated attempt: a stronger, Claude-first runner on the same workspace/stream.
+            events.emit({ type: 'narration', agent: 'architect', text: `Escalating to a stronger model to finish the build…`, ts: Date.now() });
+            const escRunner = new AgentRunner({
+              ...baseRunnerOpts,
+              client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true }),
+              model: resolveModel(tier === 'opus'),
+              persistence: {
+                store: getConversationStore(),
+                conversationId: randomUUID(),
+                userId: userId ?? 'anon',
+                workspaceId,
+                title: deriveTitle(prompt),
+              },
+            });
+            return escRunner.run(buildPrompt);
+          },
+          gate: async (build) => escalationGate(build.ok),
+          onAttempt: (tier, attempt) => console.log(`[AGENTV3] escalation attempt ${attempt} on tier ${tier}`),
+          onEscalate: (from, to, reason) => console.log(`[AGENTV3] escalate ${from} → ${to}: ${reason}`),
+        });
+        result = esc.build;
+        deliveredTier = esc.tier;
+        if (esc.escalations > 0) {
+          console.log(`[AGENTV3] delivered tier=${esc.tier} after ${esc.escalations} escalation(s), gatePassed=${esc.gatePassed}`);
+        }
+      } else {
+        result = await runner.run(buildPrompt);
+      }
 
       // Build Reflection (Layer 57, seed): derive a short reflection from what
       // happened this build (errors hit, fixes applied, outcome) and store it
@@ -1212,7 +1293,9 @@ export function registerAgentV3Routes(app: Express): void {
       agentV3CostTelemetry
         .record({
           taskType: analysis?.taskType ?? 'unknown',
-          startTier: analysis?.startTier ?? (onlyOpus ? 'opus' : 'unknown'),
+          // Record the tier the build was actually DELIVERED on (after any P3 escalation),
+          // so per-tier success rates reflect what really ran, not just the start tier.
+          startTier: deliveredTier,
           billedUsd: result.billedUsd,
           inputTokens: result.usage?.inputTokens ?? 0,
           outputTokens: result.usage?.outputTokens ?? 0,

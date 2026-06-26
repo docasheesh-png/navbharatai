@@ -3878,3 +3878,39 @@ The cheap-tier success rate shown here IS the P8 cutover signal: high share + hi
 success = the ladder is safe to default-on. No billing/pricing change.
 Gate: frontend tsc 0, server tsc 0, **2547 vitest** PASS (+8 new summary tests),
 boot:check PASS. Ships on merge → deploy.
+
+---
+
+### 2026-06-26 — v3.0 cost-ladder P3: evaluate-gated escalation (wired, DORMANT behind flag)
+
+Completes the cost-ladder's autonomy. The analyser already picks a cheap start tier
+(P2) and we measure it (telemetry/dashboard) — P3 adds the missing piece: build
+cheap-first, and climb to a stronger tier ONLY when the build objectively fails.
+
+The `runWithEscalation` orchestrator already existed + was unit-tested; the design
+doc explicitly deferred its WIRING to "behind the rollout flag" — so this ships it
+DORMANT:
+
+- Flag `AGENTV3_ESCALATION` (default OFF). When off, the build path is byte-identical
+  to before — a single `runner.run(buildPrompt)` on the start tier. Verified by routing
+  the unchanged path through an explicit else-branch.
+- When `=on`: the build runs through `runWithEscalation(analysis.escalationPath, …)`.
+  Attempt 1 reuses the existing start-tier runner; on gate-fail it builds once more on a
+  stronger, **Claude-first** runner (same workspace + event stream, new transcript id),
+  emitting an honest "Escalating to a stronger model…" narration. The last tier is always
+  delivered as a best-effort backstop, so the build NEVER breaks.
+- Objective gate (`escalationGate`): `build.ok` — a build that didn't complete fails and
+  triggers the climb; deterministic, free, no LLM call. (Richer 22-dim gating can replace
+  it later.)
+- Guards (`shouldEscalateBuild`): never escalates power/Only-Opus builds (ladder bypassed)
+  or a build already at the top tier; no analysis → no escalation.
+- `buildTurnRunner` gained a `claudeFirst` option so an escalated tier actually leads with
+  Claude, not Gemini.
+- Telemetry now records the DELIVERED tier (post-escalation), so per-tier success rates
+  reflect what really ran.
+
+No billing/pricing change; no user-facing surface (dormant build-routing → no
+AppKnowledgeBase entry). Activating it (and proving cheap-tier quality via the P6
+dashboard) is the admin-gated P8 rollout step.
+Gate: frontend tsc 0, server tsc 0, **2554 vitest** PASS (+7 new escalation policy/gate
+tests), boot:check PASS. Ships on merge → deploy (dormant until AGENTV3_ESCALATION=on).

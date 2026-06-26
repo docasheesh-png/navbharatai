@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, verifyFirebaseToken } from '../lib/authMiddleware';
+import { buildRateLimiter, workspaceRateLimiter, verifyFirebaseToken } from '../lib/authMiddleware';
 import {
   isAgentV3Enabled,
   agentV3Status,
@@ -620,7 +620,7 @@ export function registerAgentV3Routes(app: Express): void {
   });
 
   // History → restore: roll the workspace back to a checkpoint commit (P-git).
-  app.post('/api/agentv3/restore', async (req: Request, res: Response) => {
+  app.post('/api/agentv3/restore', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
@@ -646,7 +646,7 @@ export function registerAgentV3Routes(app: Express): void {
   // accept (`/api/pro/deploy`, `/api/github/push-enhanced`), so v3.0 reuses that
   // backend for durable deploy + GitHub push instead of rebuilding any of it.
   // Read-only; never returns node_modules / build output / live .env secrets.
-  app.post('/api/agentv3/workspace-files', async (req: Request, res: Response) => {
+  app.post('/api/agentv3/workspace-files', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
@@ -676,7 +676,7 @@ export function registerAgentV3Routes(app: Express): void {
   // runtime renderers) and returns it for the client to render in an <iframe srcdoc>. This needs NO
   // running dev server, so it works even when the E2B sandbox preview is unavailable (the "Blocked
   // request" / sandbox-down case) — the second of the two preview paths the builder offers.
-  app.post('/api/agentv3/inbrowser-preview', async (req: Request, res: Response) => {
+  app.post('/api/agentv3/inbrowser-preview', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
@@ -713,7 +713,7 @@ export function registerAgentV3Routes(app: Express): void {
   // `/api/github/fetch` route, or any source) into the v3.0 sandbox so the agent can
   // edit/update and then deploy/push it back. Path-safe (no traversal/absolute), and
   // never imports node_modules / .git / live .env secrets.
-  app.post('/api/agentv3/import-files', async (req: Request, res: Response) => {
+  app.post('/api/agentv3/import-files', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {

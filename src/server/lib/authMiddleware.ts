@@ -60,20 +60,36 @@ export function requireUserMatch(paramName = 'userId') {
   };
 }
 
-// In-memory rate-limit buckets — keyed by uid (authenticated) or IP (anonymous).
-// Map is periodically self-pruning to prevent unbounded growth.
+// In-memory rate-limit buckets — keyed by "<bucketName>:<uid|IP>" so DIFFERENT
+// limiters (build vs workspace) never share a counter for the same user. Map is
+// periodically self-pruning to prevent unbounded growth.
 const _rateBuckets = new Map<string, { count: number; windowStart: number }>();
 const RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-const RATE_LIMIT_AUTHED = 10;          // builds per hour, authenticated user
-const RATE_LIMIT_ANON   = 5;           // builds per hour, anonymous (by IP)
 
-export function buildRateLimiter() {
+export interface RateLimitOptions {
+  /** Namespace so each limiter has its own counters (e.g. 'build', 'workspace'). */
+  name: string;
+  /** Max requests per hour for an authenticated user. */
+  authed: number;
+  /** Max requests per hour for an anonymous caller (keyed by IP). */
+  anon: number;
+  /** Noun shown in the 429 message (e.g. 'builds', 'requests'). Default 'requests'. */
+  noun?: string;
+}
+
+/**
+ * Generic per-hour rate limiter. Authenticated callers (valid Bearer token) are keyed
+ * by uid and get the `authed` limit; anonymous callers are keyed by IP and get the
+ * `anon` limit. VITEST-skipped. Returns 429 when over the limit.
+ */
+export function rateLimiter(opts: RateLimitOptions) {
+  const noun = opts.noun ?? 'requests';
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     if (process.env.VITEST) { next(); return; }
 
     const uid = await verifyFirebaseToken(req);
-    const key = uid ?? (req.ip || 'anon');
-    const limit = uid ? RATE_LIMIT_AUTHED : RATE_LIMIT_ANON;
+    const key = `${opts.name}:${uid ?? (req.ip || 'anon')}`;
+    const limit = uid ? opts.authed : opts.anon;
     const now = Date.now();
 
     // Self-prune when the map gets large (evict windows that have expired).
@@ -90,10 +106,24 @@ export function buildRateLimiter() {
       return;
     }
     if (bucket.count >= limit) {
-      res.status(429).json({ error: `Rate limit exceeded: max ${limit} builds per hour. Try again later.` });
+      res.status(429).json({ error: `Rate limit exceeded: max ${limit} ${noun} per hour. Try again later.` });
       return;
     }
     bucket.count++;
     next();
   };
+}
+
+/** Hot build endpoint (`/chat`): 10 builds/hr authed, 5/hr anonymous. */
+export function buildRateLimiter() {
+  return rateLimiter({ name: 'build', authed: 10, anon: 5, noun: 'builds' });
+}
+
+/**
+ * Workspace endpoints (`/restore`, `/import-files`, `/inbrowser-preview`, `/workspace-files`):
+ * cheaper than a full build but still hit the sandbox / Firestore, so they get a more generous
+ * but real ceiling — 60/hr authed, 30/hr anonymous — to stop abuse/hammering.
+ */
+export function workspaceRateLimiter() {
+  return rateLimiter({ name: 'workspace', authed: 60, anon: 30, noun: 'requests' });
 }

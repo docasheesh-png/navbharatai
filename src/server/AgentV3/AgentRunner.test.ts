@@ -372,8 +372,9 @@ describe('AgentRunner — mandatory readiness gate (R2 §1.1)', () => {
     };
   }
 
-  function gateRunner(dispatcher: unknown, opts: Partial<AgentRunnerOptions>) {
+  function gateRunner(dispatcher: unknown, opts: Partial<AgentRunnerOptions>, events?: AgentEvent[]) {
     const stream = new AgentEventStream();
+    if (events) stream.subscribe((e) => events.push(e), false);
     const state = new WorkspaceState(stream);
     const client = new ClaudeClient(scriptedClient([
       { content: [{ type: 'tool_use', id: 'w', name: 'write_file', input: { path: 'src/App.tsx', content: 'x' } }], stop_reason: 'tool_use', usage: { input_tokens: 10, output_tokens: 5 } },
@@ -401,5 +402,15 @@ describe('AgentRunner — mandatory readiness gate (R2 §1.1)', () => {
   it('does NOT gate when readinessGate is off (default) — a not-ready scan cannot fail the build', async () => {
     const result = await gateRunner(gateDispatcher(false), { readinessGate: false }).run('build an app');
     expect(result.ok).toBe(true);
+  });
+
+  it('emits the build-health readiness in the done event (R2 §4.6)', async () => {
+    const events: AgentEvent[] = [];
+    await gateRunner(gateDispatcher(false), { readinessGate: true }, events).run('build an app');
+    const done = events.find((e) => e.type === 'done') as { readiness?: { score: number; ready: boolean; blockers: string[] } } | undefined;
+    expect(done?.readiness).toBeTruthy();
+    expect(done?.readiness?.ready).toBe(false);
+    expect(done?.readiness?.score).toBe(40);
+    expect(done?.readiness?.blockers?.length).toBeGreaterThan(0);
   });
 });

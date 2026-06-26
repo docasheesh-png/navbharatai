@@ -80,6 +80,17 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(s.workspaceId).toBe('ws-42');
   });
 
+  it('captures the build-health readiness from a done event (R2 §4.6)', () => {
+    const health = { score: 70, ready: false, blockers: ['1 unresolved import(s)'], warnings: ['2 medium-severity'] };
+    const s = agentV3Reducer(initialAgentV3State(), { type: 'done', ok: false, summary: 'not ready', ts: 1, readiness: health });
+    expect(s.buildHealth).toEqual(health);
+  });
+
+  it('leaves buildHealth undefined when a done event carries no readiness', () => {
+    const s = agentV3Reducer(initialAgentV3State(), { type: 'done', ok: true, summary: 'built', ts: 1 });
+    expect(s.buildHealth).toBeUndefined();
+  });
+
   it('stores the live preview URL', () => {
     const s = agentV3Reducer(initialAgentV3State(), { type: 'preview', url: 'https://app.sandbox.dev', ts: 1 });
     expect(s.previewUrl).toBe('https://app.sandbox.dev');

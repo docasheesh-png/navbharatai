@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
-import type { AgentCard, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
+import type { AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
 import { db, sanitizeFirestoreData, auth } from '../../App';
 
 /** Best-effort Firebase ID-token header so the server can verify workspace ownership (IDOR guard).
@@ -529,6 +529,7 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
                   : `$${(state.billedUsd as number).toFixed(4)}`}
               </div>
             )}
+            {state.done && state.buildHealth && <BuildHealthCard health={state.buildHealth} />}
           </div>
 
           {/* Bottom: live AI-team chips + input (Claude-Code style — at the bottom) */}
@@ -907,6 +908,40 @@ function todoStatusIcon(status: TodoStatus) {
     case 'blocked': return <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />;
     default: return <Circle className="w-3.5 h-3.5 text-zinc-600 shrink-0" />; // pending
   }
+}
+
+/**
+ * R2 §4.6 — Build-health card. Shows the OBJECTIVE readiness verdict from the mandatory quality
+ * gate (real `evaluate` scan): a 0–100 score, READY / NOT READY, and the exact blockers/warnings.
+ * Honest by construction — the same gate that decides whether a build is reported as a success.
+ */
+function BuildHealthCard({ health }: { health: BuildHealth }) {
+  const ready = health.ready;
+  return (
+    <div className={`mt-1 rounded-lg border px-2.5 py-1.5 text-[11px] ${ready ? 'border-emerald-800/60 bg-emerald-950/30' : 'border-amber-800/60 bg-amber-950/30'}`}>
+      <div className="flex items-center gap-1.5 font-semibold">
+        {ready
+          ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          : <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+        <span className={ready ? 'text-emerald-300' : 'text-amber-300'}>Build health: {ready ? 'READY' : 'NOT READY'}</span>
+        <span className="text-zinc-500">· {health.score}/100</span>
+      </div>
+      {health.blockers.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-amber-200/90">
+          {health.blockers.slice(0, 6).map((b, i) => (
+            <li key={`b${i}`} className="flex gap-1"><span className="text-amber-500">✗</span><span>{b}</span></li>
+          ))}
+        </ul>
+      )}
+      {health.warnings.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-zinc-400">
+          {health.warnings.slice(0, 4).map((w, i) => (
+            <li key={`w${i}`} className="flex gap-1"><span className="text-zinc-500">•</span><span>{w}</span></li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 /**

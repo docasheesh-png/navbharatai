@@ -10,6 +10,8 @@ import {
   GithubAuthProvider,
   signInWithPopup,
   signInWithRedirect,
+  fetchSignInMethodsForEmail,
+  linkWithCredential,
   AuthProvider,
   UserCredential,
 } from 'firebase/auth';
@@ -355,9 +357,65 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     try {
       await socialSignIn(provider, captureGithubToken);
     } catch (err: any) {
+      // The user's GitHub email already belongs to an account created with another method
+      // (Google or Email/Password). Instead of dead-ending, LINK GitHub onto that account so the
+      // user actually signs in and can use their GitHub repos. Real account-linking, not a message.
+      if (err?.code === 'auth/account-exists-with-different-credential') {
+        const linked = await linkGithubToExistingAccount(err);
+        if (linked) return; // signed in + GitHub linked — done
+        return; // linkGithubToExistingAccount already set an actionable error/loading state
+      }
       console.error('[GITHUB SIGN-IN]', err);
       setError(describeSocialError(err));
       setLoading(false);
+    }
+  };
+
+  /**
+   * Resolve `auth/account-exists-with-different-credential`: the GitHub email is already registered
+   * with Google or Email/Password. Sign in with that existing method, then link the pending GitHub
+   * credential onto the SAME account — so the user ends up signed in with GitHub connected (one
+   * account, both methods). Returns true when the user is signed in + linked.
+   */
+  const linkGithubToExistingAccount = async (err: any): Promise<boolean> => {
+    try {
+      const pendingCred = GithubAuthProvider.credentialFromError(err);
+      const email: string = err?.customData?.email || err?.email || '';
+      if (!pendingCred || !email) { setError(describeSocialError(err)); setLoading(false); return false; }
+      const methods: string[] = await fetchSignInMethodsForEmail(auth, email);
+      let signedIn: UserCredential | null = null;
+      if (methods.includes('google.com')) {
+        const g = new GoogleAuthProvider();
+        g.setCustomParameters({ login_hint: email });
+        signedIn = await signInWithPopup(auth, g); // verify ownership via the existing Google method
+      } else if (methods.includes('password')) {
+        if (!password) {
+          setError(`This email (${email}) already has a password account. Type your password above, then click "Continue with GitHub" again to connect it.`);
+          setLoading(false);
+          return false;
+        }
+        signedIn = await signInWithEmailAndPassword(auth, email, password);
+      } else {
+        setError(`This email (${email}) is already registered with a different method. Sign in with that method first, then connect GitHub.`);
+        setLoading(false);
+        return false;
+      }
+      if (signedIn?.user) {
+        // Attach GitHub to the now-authenticated account, and keep the GitHub OAuth token (for
+        // git-native storage) straight from the pending credential.
+        await linkWithCredential(signedIn.user, pendingCred);
+        try { if (pendingCred.accessToken) localStorage.setItem('gh_token', pendingCred.accessToken); } catch { /* best-effort */ }
+        setUser(signedIn.user);
+        onClose();
+        return true;
+      }
+      setLoading(false);
+      return false;
+    } catch (e: any) {
+      console.error('[GITHUB LINK]', e);
+      setError(describeSocialError(e));
+      setLoading(false);
+      return false;
     }
   };
 

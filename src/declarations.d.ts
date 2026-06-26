@@ -554,6 +554,8 @@ declare module 'firebase/auth' {
   export function signInWithPopup(auth: any, provider: any): Promise<any>;
   export function signInWithRedirect(auth: any, provider: any): Promise<any>;
   export function getRedirectResult(auth: any): Promise<any>;
+  export function fetchSignInMethodsForEmail(auth: any, email: string): Promise<string[]>;
+  export function linkWithCredential(user: any, credential: any): Promise<any>;
   export type AuthProvider = any;
   export function signInWithPhoneNumber(auth: any, phone: string, verifier: any): Promise<any>;
   export function setPersistence(auth: any, persistence: any): Promise<void>;

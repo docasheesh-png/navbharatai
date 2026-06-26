@@ -9,6 +9,30 @@
 import { rosterBriefing } from './AgentRegistry';
 import { CREATOR_IDENTITY } from '../lib/prompts';
 
+const FRAMEWORK_HINTS: Record<string, string> = {
+  'vite-react': 'SCAFFOLDING — a Vite + React + TypeScript project is ALREADY scaffolded in the workspace (package.json, vite.config, index.html, src/main.tsx, src/App.tsx). Just EDIT/ADD files at the ROOT. Do NOT run `npm create vite` / `npx create-*` — those will fail. Write config files directly with write_file.',
+  'nextjs': 'SCAFFOLDING — a Next.js 14 App Router project is scaffolded (package.json, tsconfig.json, next.config.js, app/layout.tsx, app/page.tsx). Edit files at the ROOT. Use `app/` dir conventions (Server Components by default). Do NOT run `npx create-next-app`.',
+  'remix': 'SCAFFOLDING — a Remix (Vite) project is scaffolded (package.json, vite.config.ts, app/root.tsx, app/routes/_index.tsx). Edit files at the ROOT. Use file-based routing under `app/routes/`. Do NOT run `npx create-remix`.',
+  'vue': 'SCAFFOLDING — a Vue 3 + Vite + TypeScript project is scaffolded (package.json, vite.config.ts, src/App.vue, src/main.ts). Edit files at the ROOT. Use the Composition API (`<script setup>`). Do NOT run `npm create vue`.',
+  'nuxt': 'SCAFFOLDING — a Nuxt 3 project is scaffolded (package.json, nuxt.config.ts, app.vue, pages/index.vue). Edit files at the ROOT. Use `pages/` for routing, `composables/` for shared logic. Do NOT run `npx nuxi init`.',
+  'svelte': 'SCAFFOLDING — a Svelte 5 + Vite project is scaffolded. Edit files at ROOT. Do NOT run `npm create svelte`.',
+  'sveltekit': 'SCAFFOLDING — a SvelteKit project is scaffolded (svelte.config.js, vite.config.ts, src/app.html, src/routes/+page.svelte). Edit files at the ROOT. Use `src/routes/` for pages. Do NOT run `npm create svelte`.',
+  'angular': 'SCAFFOLDING — an Angular 18 standalone-components project is scaffolded. Use standalone components (no NgModule). Edit files at ROOT. Do NOT run `ng new`.',
+  'astro': 'SCAFFOLDING — an Astro project is scaffolded (astro.config.mjs, src/pages/index.astro). Edit files at ROOT. Use `.astro` files for pages. Do NOT run `npm create astro`.',
+  'vanilla': 'SCAFFOLDING — a Vanilla TypeScript + Vite project is scaffolded (index.html, src/main.ts). Edit files at ROOT. No framework — pure DOM manipulation.',
+  'node-express': 'SCAFFOLDING — a Node.js + Express + TypeScript project is scaffolded (package.json, tsconfig.json, src/index.ts). Run with `npm run dev`. Add routes in src/routes/. Do NOT use create-express generators.',
+  'nestjs': 'SCAFFOLDING — a NestJS project is scaffolded (nest-cli.json, src/main.ts, src/app.module.ts). Use decorators (@Controller, @Injectable). Do NOT run `nest new`.',
+  'fastify': 'SCAFFOLDING — a Fastify + TypeScript project is scaffolded (src/index.ts). Register plugins with `app.register()`. Do NOT run generators.',
+  'python-fastapi': 'SCAFFOLDING — a Python FastAPI project is scaffolded (requirements.txt, main.py, dev.sh). Install deps with `pip install -r requirements.txt`. Run with `bash dev.sh`. Use async def for route handlers.',
+  'django': 'SCAFFOLDING — a Django + DRF project is scaffolded (manage.py, myproject/settings.py, api/). Run with `bash dev.sh`. Add REST views in api/views.py and register in api/urls.py.',
+  'flask': 'SCAFFOLDING — a Flask project is scaffolded (app.py, requirements.txt, dev.sh). Run with `bash dev.sh`. Add routes as `@app.route()` decorators.',
+  'static': 'SCAFFOLDING — a plain HTML/CSS/JS site is scaffolded (index.html). No build step. Serve with `npx serve . -p 3000`. Write plain HTML, CSS, and vanilla JS only.',
+};
+
+function frameworkScaffoldHint(framework?: string): string {
+  return FRAMEWORK_HINTS[framework ?? 'vite-react'] ?? FRAMEWORK_HINTS['vite-react'];
+}
+
 /**
  * Plan-mode system prompt (P4): the agent produces a concise step-by-step plan
  * via update_todo and then stops, so the user can approve before the build runs.
@@ -81,7 +105,8 @@ export function editModePrefix(fileTree: string[] = []): string {
   ].join('\n');
 }
 
-export function architectSystemPrompt(): string {
+export function architectSystemPrompt(framework?: string): string {
+  const scaffoldHint = frameworkScaffoldHint(framework);
   return [
     'You are NavBharatAI Pro v3.0 — a friendly, capable AI app builder, like Claude',
     'Code. You chat naturally AND build complete, working web apps inside a cloud',
@@ -107,14 +132,7 @@ export function architectSystemPrompt(): string {
     '  one call. It auto-orders by import dependencies and is 3× faster than calling',
     '  write_file one-by-one. Only use write_files_batch for NEW files; for existing',
     '  files always use edit_file (surgical patch).',
-    '- SCAFFOLDING — a Vite + React + TypeScript project is ALREADY scaffolded in the',
-    '  workspace (package.json, vite.config, index.html, src/main.tsx, src/App.tsx). Just',
-    '  EDIT/ADD files at the ROOT (never a nested project subdirectory). Do NOT run',
-    '  `npm create vite` / `create-vite` / `npx create-*` / `npm init <generator>`: those',
-    '  scaffolders need a newer Node than the sandbox and will FAIL — the sandbox now',
-    '  auto-BLOCKS them and redirects you to the existing root scaffold, so running one',
-    '  just wastes a turn. If you need a different stack, write its config files directly',
-    '  with write_file (never a create-* generator).',
+    scaffoldHint,
     '- The sandbox NODE VERSION IS FIXED — you cannot change it. If a dev tool errors with a',
     '  Node-version mismatch (e.g. "node:util does not provide an export named styleText", an',
     '  ESM/engine error, or a create-* failure), do NOT loop trying to upgrade Node or the',

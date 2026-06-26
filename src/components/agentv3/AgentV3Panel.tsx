@@ -5,6 +5,7 @@ import {
   SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github, Circle,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
+import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
 import type { AgentCard, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
 import { db, sanitizeFirestoreData } from '../../App';
 import { doc, setDoc } from 'firebase/firestore';
@@ -42,6 +43,11 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
   // ZIP, text/code). Read and analyzed by v3.0 — converted to base64 on send.
   const [files, setFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Framework selector + import
+  const [framework, setFramework] = useState('vite-react');
+  const [importUrl, setImportUrl] = useState('');
+  const [showFrameworkPicker, setShowFrameworkPicker] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [userMsgs, setUserMsgs] = useState<ChatMsg[]>([]);
   // Finalized agent replies from PREVIOUS turns. The live build state
   // (state.narration) is reset by start() on every new message, so without
@@ -241,7 +247,9 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
     setUserMsgs((c) => [...c, { role: 'user', text: displayText, ts: Date.now() }]);
     setPrompt('');
     setFiles([]);
-    start(msgText, { userId, email, onlyOpus, planFirst, thinking, sessionId: sessionIdRef.current, attachments });
+    const pendingImportUrl = importUrl.trim();
+    setImportUrl(''); // consume import URL on first send
+    start(msgText, { userId, email, onlyOpus, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, importUrl: pendingImportUrl || undefined });
   };
 
   // Start a brand-new project: fresh sandbox/memory (new session id) and clear chat.
@@ -323,6 +331,14 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
           <Bot className="w-5 h-5 text-indigo-400" />
           <span className="font-semibold">NavBharatAI Pro v3.0</span>
           <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
+          <button
+            onClick={() => setShowFrameworkPicker(true)}
+            className="flex items-center gap-1 text-[10px] bg-white/5 hover:bg-white/10 border border-white/5 text-zinc-400 hover:text-white px-2 py-0.5 rounded-full transition-all"
+            title="Change framework"
+          >
+            <span>{FRAMEWORKS.find(f => f.id === framework)?.iconChar ?? '⚛'}</span>
+            <span>{FRAMEWORKS.find(f => f.id === framework)?.name ?? 'React + Vite'}</span>
+          </button>
           <span className="text-[9px] text-zinc-600 font-mono" title="Deployed build time — if this doesn't change after a deploy, your browser is serving cached code.">{(() => { try { return 'b:' + (typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '').slice(5, 16).replace('T', ' '); } catch { return ''; } })()}</span>
           {running ? (
             // Attached + streaming here → Stop.
@@ -484,10 +500,25 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
                   <>
                     {/* outside-click catcher */}
                     <div className="fixed inset-0 z-10" onClick={() => setSettingsOpen(false)} />
-                    <div className="absolute bottom-full left-0 mb-2 z-20 w-48 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
+                    <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
                       <ToggleRow label="Planning" checked={planFirst} disabled={running} onClick={() => setPlanFirst((v) => !v)} />
                       <ToggleRow label="Thinking" checked={thinking} disabled={running} onClick={() => setThinking((v) => !v)} />
                       <ToggleRow label="Power" hint="5×" checked={onlyOpus} disabled={running} onClick={() => setOnlyOpus((v) => !v)} />
+                      <div className="border-t border-zinc-800 my-1" />
+                      <button
+                        className="w-full flex items-center justify-between px-3 py-2 rounded hover:bg-zinc-800 text-left"
+                        onClick={() => { setShowFrameworkPicker(true); setSettingsOpen(false); }}
+                      >
+                        <span className="text-xs text-zinc-300">Framework</span>
+                        <span className="text-[11px] text-indigo-400 font-medium">{FRAMEWORKS.find(f => f.id === framework)?.name ?? 'React + Vite'}</span>
+                      </button>
+                      <button
+                        className="w-full flex items-center justify-between px-3 py-2 rounded hover:bg-zinc-800 text-left"
+                        onClick={() => { setShowImportModal(true); setSettingsOpen(false); }}
+                      >
+                        <span className="text-xs text-zinc-300">Import Repo</span>
+                        {importUrl ? <span className="text-[10px] text-green-400 truncate max-w-[100px]">✓ set</span> : <span className="text-[10px] text-zinc-500">GitHub / URL</span>}
+                      </button>
                     </div>
                   </>
                 )}
@@ -591,6 +622,82 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
         </div>
         )}
       </div>
+
+      {/* Framework Picker Modal */}
+      {showFrameworkPicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowFrameworkPicker(false)} />
+          <div className="relative z-10 w-full max-w-sm bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-widest">Choose Framework</h3>
+                <p className="text-[10px] text-[#8b949e] mt-0.5">Pick the technology stack for your new project</p>
+              </div>
+              <button onClick={() => setShowFrameworkPicker(false)} className="text-zinc-500 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <FrameworkPicker value={framework} onChange={setFramework} />
+            <button
+              onClick={() => setShowFrameworkPicker(false)}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-all"
+            >
+              Confirm
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Import Repo Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowImportModal(false)} />
+          <div className="relative z-10 w-full max-w-sm bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-widest">Import Project</h3>
+                <p className="text-[10px] text-[#8b949e] mt-0.5">Clone a GitHub repo into your v3.0 workspace</p>
+              </div>
+              <button onClick={() => setShowImportModal(false)} className="text-zinc-500 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-[#8b949e] uppercase tracking-widest">Repository URL</label>
+              <input
+                type="url"
+                value={importUrl}
+                onChange={e => setImportUrl(e.target.value)}
+                placeholder="https://github.com/username/my-app"
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
+              />
+              <p className="text-[10px] text-[#484f58]">
+                Public repos work without a token. For private repos, make sure you've signed in with GitHub in Settings → Connections.
+              </p>
+            </div>
+            {importUrl.trim() && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg">
+                <Github className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                <span className="text-[11px] text-green-300 truncate">{importUrl.trim()}</span>
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setImportUrl(''); setShowImportModal(false); }}
+                className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 text-zinc-300 text-sm font-medium rounded-xl transition-all"
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => setShowImportModal(false)}
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-all"
+              >
+                {importUrl.trim() ? 'Set Import' : 'Close'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,53 @@
+import { ITemplateProvider } from './ViteReactProvider';
+
+const PKG = JSON.stringify({
+  name: 'my-nuxt-app',
+  version: '1.0.0',
+  private: true,
+  scripts: {
+    dev: 'nuxt dev --host 0.0.0.0 --port 3000',
+    build: 'nuxt build',
+    generate: 'nuxt generate',
+    preview: 'nuxt preview --host 0.0.0.0 --port 3000',
+    start: 'nuxt dev --host 0.0.0.0 --port 3000',
+  },
+  devDependencies: { nuxt: '^3.12.0', vue: '^3.4.0', 'vue-router': '^4.3.0' },
+}, null, 2);
+
+const NUXT_CONFIG = `export default defineNuxtConfig({
+  devtools: { enabled: false },
+  devServer: { host: '0.0.0.0', port: 3000 },
+});
+`;
+
+const APP_VUE = `<template>
+  <div style="padding: 2rem; font-family: sans-serif;">
+    <h1>Hello from Nuxt!</h1>
+    <p>Count: {{ count }}</p>
+    <button @click="count++">Increment</button>
+    <NuxtPage />
+  </div>
+</template>
+
+<script setup lang="ts">
+const count = ref(0);
+</script>
+`;
+
+const INDEX_VUE = `<template>
+  <div>
+    <p>Welcome to Nuxt 3. Edit <code>app/pages/index.vue</code> to get started.</p>
+  </div>
+</template>
+`;
+
+export class NuxtProvider implements ITemplateProvider {
+  getFiles(_features: string[]): Record<string, string> {
+    return {
+      'package.json': PKG,
+      'nuxt.config.ts': NUXT_CONFIG,
+      'app.vue': APP_VUE,
+      'pages/index.vue': INDEX_VUE,
+    };
+  }
+}

@@ -69,6 +69,7 @@ import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
+import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
@@ -1365,6 +1366,46 @@ export function registerAgentV3Routes(app: Express): void {
         } catch (e) {
           console.log(`[AGENTV3] empty-build Claude retry failed: ${e instanceof Error ? e.message : String(e)}`);
         }
+      }
+
+      // R4 §2.3 — RUNTIME-ERROR AUTO-FIX LOOP (opt-in: AGENTV3_AUTOFIX=on). A build can compile
+      // and even render yet still throw runtime errors the browser captured (an undefined call, a
+      // failed fetch, a React render crash). Feed those captured errors back into a bounded,
+      // Claude-first repair pass that fixes → reloads → re-verifies, then WARN honestly if any
+      // remain. Best-effort and budget-capped per attempt — it can never break or hang the build.
+      if (autoFixEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted && actuator.getConsoleErrors) {
+        const maxAttempts = autoFixMaxAttempts();
+        // Advancing window: each capture only considers errors NEWER than the previous fix attempt,
+        // so a repaired error logged before the fix is never re-detected and we cannot loop on it.
+        let sinceMs = Date.now() - 180_000;
+        for (let attempt = 1; attempt <= maxAttempts && !abort.signal.aborted; attempt++) {
+          let captured: RuntimeError[] = [];
+          try {
+            captured = filterActionableErrors((await actuator.getConsoleErrors!(workspaceId, sinceMs)).errors);
+          } catch { break; /* console capture needs a real sandbox — skip silently */ }
+          if (captured.length === 0) break; // ran clean — nothing to fix
+          events.emit({ type: 'narration', agent: 'architect', text: `🔧 Detected ${captured.length} runtime error(s) — auto-fixing (attempt ${attempt}/${maxAttempts})…`, ts: Date.now() });
+          const fixStart = Date.now();
+          const fixRunner = new AgentRunner({
+            ...baseRunnerOpts,
+            client: buildTurnRunner({ claudeFirst: true }),
+            model: resolveModel(onlyOpus),
+            persistence: { store: getConversationStore(), conversationId: randomUUID(), userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+          });
+          try {
+            const fix = await fixRunner.run(buildRepairPrompt(captured));
+            if (fix.ok) result = fix;
+          } catch (e) {
+            console.log(`[AGENTV3] auto-fix attempt ${attempt} failed: ${e instanceof Error ? e.message : String(e)}`);
+            break;
+          }
+          sinceMs = fixStart; // next check only sees errors from the post-fix reload
+        }
+        // Honest final check: if errors remain after the repair budget is spent, WARN — never claim clean.
+        try {
+          const remaining = filterActionableErrors((await actuator.getConsoleErrors!(workspaceId, sinceMs)).errors);
+          if (remaining.length) events.emit({ type: 'narration', agent: 'architect', text: autoFixWarning(remaining), ts: Date.now() });
+        } catch { /* best-effort */ }
       }
 
       // Build Reflection (Layer 57, seed): derive a short reflection from what

@@ -917,7 +917,7 @@ export function registerAgentV3Routes(app: Express): void {
               prClient = userClient;
               repoNameRef = repoName;
               repoSync = new GitRepoSync(actuator, workspaceId);
-              const h = await repoSync.hydrateIfEmpty(repoAuthedUrl);
+              const h = await repoSync.hydrateFromRepo(repoAuthedUrl);
               // Surface the repo so the UI can offer a "View on GitHub" link (full app control).
               if (repo.htmlUrl) events.emit({ type: 'repo', url: repo.htmlUrl, fullName: repo.fullName || `${login}/${repoName}`, ts: Date.now() });
               events.emit({
@@ -943,7 +943,7 @@ export function registerAgentV3Routes(app: Express): void {
                 prClient = ghClient;
                 repoNameRef = repoName;
                 repoSync = new GitRepoSync(actuator, workspaceId);
-                const h = await repoSync.hydrateIfEmpty(repoAuthedUrl);
+                const h = await repoSync.hydrateFromRepo(repoAuthedUrl);
                 if (repo.htmlUrl) events.emit({ type: 'repo', url: repo.htmlUrl, fullName: repo.fullName || repoName, ts: Date.now() });
                 if (h.hydrated) {
                   events.emit({ type: 'narration', agent: 'architect', text: 'Loaded your project from its GitHub repo.', ts: Date.now() });

@@ -19,35 +19,35 @@ function fakeRunner(
 
 const URL = 'https://x-access-token:ghs_tok@github.com/navbharatai-apps/app-u1-todo.git';
 
-describe('GitRepoSync.hydrateIfEmpty', () => {
-  it('skips the clone when the sandbox already has files', async () => {
-    const { runner, commands } = fakeRunner(() => ({ stdout: 'NB_HAVE_FILES' }));
-    const sync = new GitRepoSync(runner, 'ws1');
-    const res = await sync.hydrateIfEmpty(URL);
-    expect(res).toEqual({ hydrated: false, hadFiles: true, skipped: false });
+describe('GitRepoSync.hydrateFromRepo', () => {
+  it('overlays the repo onto the sandbox when the repo has real content (resume restore)', async () => {
+    const { runner, commands } = fakeRunner(() => ({ stdout: 'NB_HYDRATED' }));
+    const res = await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL);
+    expect(res).toEqual({ hydrated: true, hadFiles: false, skipped: false });
     expect(commands[0]).toContain('git clone');
     expect(commands[0]).toContain(URL); // the authed URL is handed to git
+    expect(commands[0]).toContain('package.json'); // only overlays when the REPO has a built project
   });
 
-  it('reports hydrated when the empty sandbox is cloned from the repo', async () => {
-    const { runner } = fakeRunner(() => ({ stdout: 'NB_HYDRATED' }));
-    const res = await new GitRepoSync(runner, 'ws1').hydrateIfEmpty(URL);
-    expect(res).toEqual({ hydrated: true, hadFiles: false, skipped: false });
+  it('keeps the scaffold (no restore) when the repo is new/empty (first build)', async () => {
+    const { runner } = fakeRunner(() => ({ stdout: 'NB_EMPTY_REPO' }));
+    const res = await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL);
+    expect(res).toEqual({ hydrated: false, hadFiles: false, skipped: false });
   });
 
-  it('degrades to skipped on a clone failure (e.g. empty repo / no network)', async () => {
-    const { runner } = fakeRunner(() => ({ stdout: 'NB_HYDRATE_FAIL' }));
-    const res = await new GitRepoSync(runner, 'ws1').hydrateIfEmpty(URL);
+  it('degrades to skipped on a clone failure (no network / no git)', async () => {
+    const { runner } = fakeRunner(() => ({ stdout: 'NB_CLONE_FAIL' }));
+    const res = await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL);
     expect(res.skipped).toBe(true);
     expect(res.hydrated).toBe(false);
   });
 
   it('skips with no url, and never throws when the runner rejects', async () => {
-    const noUrl = await new GitRepoSync(fakeRunner(() => ({})).runner, 'ws1').hydrateIfEmpty('');
+    const noUrl = await new GitRepoSync(fakeRunner(() => ({})).runner, 'ws1').hydrateFromRepo('');
     expect(noUrl).toEqual({ hydrated: false, hadFiles: false, skipped: true });
 
     const throwing: CommandRunner = { async runCommand() { throw new Error('no shell'); } };
-    const res = await new GitRepoSync(throwing, 'ws1').hydrateIfEmpty(URL);
+    const res = await new GitRepoSync(throwing, 'ws1').hydrateFromRepo(URL);
     expect(res.skipped).toBe(true);
   });
 });

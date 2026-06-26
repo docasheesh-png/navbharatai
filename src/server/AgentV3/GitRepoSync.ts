@@ -45,26 +45,32 @@ export class GitRepoSync {
   ) {}
 
   /**
-   * Seed the sandbox from the repo, but ONLY when it came up empty — so a live sandbox (or a
-   * Firestore restore that already ran) is never clobbered. Clones into a temp dir and copies the
-   * content (including its `.git`, so the workspace becomes a real clone with `origin` set).
+   * Restore the project FROM the repo (the repo is the source of truth). The sandbox is always
+   * pre-scaffolded with a starter template by ensureWorkspace, so an "only if the sandbox is empty"
+   * check would never fire — instead we clone the repo and, when it holds REAL project content
+   * (a package.json or src/, i.e. a prior build — not just an auto-init README), overlay it onto
+   * the sandbox so the user's actual code wins over the template. A brand-new/empty repo leaves the
+   * scaffold in place (first build). The repo's `.git` comes with the overlay, so the workspace
+   * becomes a real clone. Best-effort: a clone failure is a no-op, never blocking the build.
    */
-  async hydrateIfEmpty(authedUrl: string): Promise<HydrateResult> {
+  async hydrateFromRepo(authedUrl: string): Promise<HydrateResult> {
     if (!authedUrl) return { hydrated: false, hadFiles: false, skipped: true };
     try {
       const cmd =
-        // If the workspace already has source, leave it alone.
-        '( [ -f package.json ] || [ -d src ] ) && echo NB_HAVE_FILES || ' +
-        // Otherwise clone the repo into a temp dir and copy everything (incl .git) into place.
-        '( rm -rf /tmp/nbhydrate 2>/dev/null; ' +
-        `git clone --depth 1 "${authedUrl}" /tmp/nbhydrate >/dev/null 2>&1 && ` +
-        'cp -a /tmp/nbhydrate/. ./ >/dev/null 2>&1 && rm -rf /tmp/nbhydrate && echo NB_HYDRATED ' +
-        '|| echo NB_HYDRATE_FAIL )';
+        'rm -rf /tmp/nbhydrate 2>/dev/null; ' +
+        `if git clone --depth 1 "${authedUrl}" /tmp/nbhydrate >/dev/null 2>&1; then ` +
+        // Only overlay when the repo actually has a built project (not just an auto-init README).
+        'if [ -f /tmp/nbhydrate/package.json ] || [ -d /tmp/nbhydrate/src ]; then ' +
+        'cp -a /tmp/nbhydrate/. ./ >/dev/null 2>&1 && echo NB_HYDRATED || echo NB_HYDRATE_FAIL; ' +
+        'else echo NB_EMPTY_REPO; fi; ' +
+        'else echo NB_CLONE_FAIL; fi; ' +
+        'rm -rf /tmp/nbhydrate 2>/dev/null';
       const r = await this.run(cmd);
       const out = r.stdout || '';
-      if (out.includes('NB_HAVE_FILES')) return { hydrated: false, hadFiles: true, skipped: false };
       if (out.includes('NB_HYDRATED')) return { hydrated: true, hadFiles: false, skipped: false };
-      // NB_HYDRATE_FAIL (empty repo / network) — not an error, just nothing to seed.
+      // Repo had no real content yet (first build) — kept the scaffold; ran fine, nothing to restore.
+      if (out.includes('NB_EMPTY_REPO')) return { hydrated: false, hadFiles: false, skipped: false };
+      // Clone/copy failed (network, no git) — best-effort no-op.
       return { hydrated: false, hadFiles: false, skipped: true };
     } catch {
       return { hydrated: false, hadFiles: false, skipped: true };

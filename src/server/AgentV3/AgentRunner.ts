@@ -39,6 +39,13 @@ export interface AgentRunnerOptions {
   maxBudgetUsd?: number;
   /** Which agent this loop represents (for event attribution). Default 'architect'. */
   agentRole?: AgentRole;
+  /**
+   * True when this run is expected to PRODUCE artifacts (a build/edit), not just chat. When
+   * set, a turn that ends with NO tool calls and where the run NEVER called a single tool is
+   * reported as ok:false — a build that wrote nothing is a FAILED build, not a success. This
+   * stops the "model replied instead of building, but it was billed as done" fake-success bug.
+   */
+  expectsArtifacts?: boolean;
   /** When aborted (e.g. the user pressed Stop), the loop stops between turns. */
   signal?: AbortSignal;
   /**
@@ -142,6 +149,9 @@ export class AgentRunner {
     const maxSteps = this.opts.maxSteps ?? 50;
     const agentRole: AgentRole = this.opts.agentRole ?? 'architect';
     const toolConcurrency = Math.max(1, this.opts.toolConcurrency ?? 4);
+    const expectsArtifacts = this.opts.expectsArtifacts === true;
+    // Total tool calls across the whole run — a build that never called a tool built nothing.
+    let totalToolUses = 0;
 
     const messages: unknown[] = [{ role: 'user', content: userPrompt }];
     const usage: TurnUsage = {
@@ -232,13 +242,24 @@ export class AgentRunner {
         // Record the assistant turn verbatim so tool_use ids resolve next turn.
         messages.push({ role: 'assistant', content: turn.rawContent });
 
-        // No tools requested → the model has finished.
+        // No tools requested → the model has finished its turn.
         if (turn.toolUses.length === 0) {
-          const summary = turn.text.trim() || 'Build complete.';
-          await persist('complete');
-          events.emit({ type: 'done', ok: true, summary, ts: Date.now() });
-          return { ok: true, summary, steps, usage, billedUsd: billed() };
+          // A build/edit that NEVER called a single tool produced nothing — that is a FAILED
+          // build, not a success. Reporting ok:true here is the fake-success bug (the model
+          // replies "I'm preparing a plan…" instead of building, and gets billed as done).
+          // Only treat a no-tool turn as success for chat, or when real work already happened.
+          const builtNothing = expectsArtifacts && totalToolUses === 0;
+          const ok = !builtNothing;
+          const summary = builtNothing
+            ? (turn.text.trim()
+                ? `${turn.text.trim()}\n\n(No files were created — the build did not run. Retrying with a stronger model…)`
+                : 'The build did not produce any files — the model replied without building.')
+            : (turn.text.trim() || 'Build complete.');
+          await persist(ok ? 'complete' : 'error');
+          events.emit({ type: 'done', ok, summary, ts: Date.now() });
+          return { ok, summary, steps, usage, billedUsd: billed() };
         }
+        totalToolUses += turn.toolUses.length;
 
         // Execute the requested tools and gather results (in the original order, so tool_use
         // ids resolve). Mutating tools (write/edit/bash, builder sub-agents) run SERIALLY and

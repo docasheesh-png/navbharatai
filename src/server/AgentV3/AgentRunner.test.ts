@@ -43,7 +43,7 @@ function scriptedClient(messages: unknown[]): MessagesCreateClient {
 
 function buildRunner(
   script: unknown[],
-  opts: { maxSteps?: number; maxBudgetUsd?: number; signal?: AbortSignal; persistence?: AgentRunnerOptions['persistence'] } = {},
+  opts: { maxSteps?: number; maxBudgetUsd?: number; signal?: AbortSignal; persistence?: AgentRunnerOptions['persistence']; expectsArtifacts?: boolean } = {},
 ) {
   const actuator = new FakeActuator();
   const stream = new AgentEventStream();
@@ -317,5 +317,43 @@ describe('AgentRunner parallel tool execution (capped)', () => {
     expect(isParallelSafeToolUse({ id: '6', name: 'grep', input: {} })).toBe(true);
     expect(isParallelSafeToolUse({ id: '7', name: 'write_file', input: {} })).toBe(false);
     expect(isParallelSafeToolUse({ id: '8', name: 'bash', input: {} })).toBe(false);
+  });
+});
+
+describe('AgentRunner — empty-build detection (fake-success fix)', () => {
+  it('reports ok:false when a BUILD replies with no tool calls and creates nothing', async () => {
+    // The cheap model "replies" instead of building — the exact production bug.
+    const { runner, actuator, events } = buildRunner(
+      [{ content: [{ type: 'text', text: "I'm preparing a plan so we can build this app." }], stop_reason: 'end_turn', usage: { input_tokens: 100, output_tokens: 30 } }],
+      { expectsArtifacts: true },
+    );
+    const result = await runner.run('Build an analog clock');
+    expect(result.ok).toBe(false); // NOT a fake success
+    expect(actuator.files.size).toBe(0); // nothing built
+    expect(result.summary.toLowerCase()).toContain('no files');
+    const done = events.find((e) => e.type === 'done') as { ok?: boolean } | undefined;
+    expect(done?.ok).toBe(false);
+  });
+
+  it('still reports ok:true for a CHAT turn with no tool calls (chat unaffected)', async () => {
+    const { runner } = buildRunner(
+      [{ content: [{ type: 'text', text: 'Hello! How can I help you today?' }], stop_reason: 'end_turn', usage: { input_tokens: 20, output_tokens: 10 } }],
+      { expectsArtifacts: false },
+    );
+    const result = await runner.run('hi');
+    expect(result.ok).toBe(true);
+  });
+
+  it('reports ok:true for a real build that DID write a file then wrapped up', async () => {
+    const { runner, actuator } = buildRunner(
+      [
+        { content: [{ type: 'tool_use', id: 'tu1', name: 'write_file', input: { path: 'index.html', content: '<h1>Clock</h1>' } }], stop_reason: 'tool_use', usage: { input_tokens: 200, output_tokens: 50 } },
+        { content: [{ type: 'text', text: 'Done — your clock is ready.' }], stop_reason: 'end_turn', usage: { input_tokens: 60, output_tokens: 20 } },
+      ],
+      { expectsArtifacts: true },
+    );
+    const result = await runner.run('Build an analog clock');
+    expect(result.ok).toBe(true); // real work happened → genuine success
+    expect(actuator.files.get('index.html')).toBe('<h1>Clock</h1>');
   });
 });

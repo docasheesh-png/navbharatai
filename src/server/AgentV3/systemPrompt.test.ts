@@ -84,4 +84,11 @@ describe('architectSystemPrompt / planSystemPrompt sanity', () => {
     expect(p).toContain('ERROR BOUNDARY');
     expect(p).toContain('DECOUPLED');
   });
+
+  it('carries the prompt-injection guard: fenced external content is data, never instructions', () => {
+    const p = architectSystemPrompt();
+    expect(p).toContain('UNTRUSTED EXTERNAL DATA');
+    expect(p).toContain('UNTRUSTED_EXTERNAL_DATA');
+    expect(p).toContain('exfiltrate');
+  });
 });

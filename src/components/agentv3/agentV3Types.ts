@@ -52,6 +52,7 @@ export type AgentV3WireEvent =
   | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
   | { type: 'preview'; url: string; ts: number }
+  | { type: 'repo'; url: string; fullName: string; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number }
   | { type: 'error'; message: string; ts: number }
   | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number };
@@ -95,6 +96,9 @@ export interface AgentV3ClientState {
   plan: string;
   /** Live preview URL (the running app in the sandbox), once published. */
   previewUrl?: string;
+  /** The project's GitHub repo (the user's own, or platform-org), once git-native storage runs. */
+  repoUrl?: string;
+  repoFullName?: string;
   /** A pending plan/permission gate awaiting the user's Approve/Reject (P4). */
   pendingPermission?: { callId: string; action: string };
   /** The sandbox workspace id for this build (enables History → restore). */

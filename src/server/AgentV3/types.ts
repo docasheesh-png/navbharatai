@@ -125,6 +125,7 @@ export type AgentEvent =
   | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
   | { type: 'preview'; url: string; ts: number }
+  | { type: 'repo'; url: string; fullName: string; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number }
   | { type: 'error'; message: string; ts: number };
 

@@ -70,6 +70,7 @@ import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
+import { deploymentStore, withDeploymentPersistence } from '../AgentV3/DeploymentStore';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
@@ -179,7 +180,11 @@ const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
 async function assertWorkspaceOwner(req: Request, workspaceId: string): Promise<boolean> {
   if (!workspaceId || !workspaceId.startsWith('agentv3-')) return false;
   const verifiedUid = await verifyFirebaseToken(req);
-  const claimedUid = typeof req.body?.userId === 'string' ? req.body.userId : null;
+  // Claimed id may come from the JSON body (POST) or the query string (GET). The verified token
+  // always takes precedence over either, so this only widens the token-less admin/anon fallback.
+  const claimedUid =
+    (typeof req.body?.userId === 'string' ? req.body.userId : null) ??
+    (typeof req.query?.userId === 'string' ? req.query.userId : null);
   const id = verifiedUid ?? claimedUid;
   const uid = id && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : 'anon';
   return workspaceId.startsWith(`agentv3-${uid}-`);
@@ -653,6 +658,29 @@ export function registerAgentV3Routes(app: Express): void {
     res.json({ ok });
   });
 
+  // R5 §5.1 — return a workspace's latest LIVE deployment URL (durable, survives reconnect).
+  // Lets the UI restore the "Live site" link after a refresh/new session instead of losing it
+  // with the build stream. Ownership-checked; null url when the app has never been deployed.
+  app.get('/api/agentv3/deployment', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const rec = await deploymentStore.get(workspaceId);
+    res.json({ url: rec?.url ?? null, fileCount: rec?.fileCount ?? 0, updatedAt: rec?.updatedAt ?? null });
+  });
+
   // §12.2 — deploy/git support: return the built app's source files as a
   // path→content map. This is exactly the shape the EXISTING deploy + git routes
   // accept (`/api/pro/deploy`, `/api/github/push-enhanced`), so v3.0 reuses that
@@ -1124,7 +1152,9 @@ export function registerAgentV3Routes(app: Express): void {
       const webSearch = makeWebSearch();
       // Real persistent deploy (Firebase Hosting, ported from Engineer AI): publish the built app
       // to a permanent public URL. Uses ADC (Cloud Run service account); honest error if missing.
-      const deploy = makeDeploy();
+      // R5 §5.1 — wrap the deploy so every successful publish is durably recorded (DeploymentStore),
+      // making the live URL recoverable after a reconnect/new session instead of lost with the stream.
+      const deploy = withDeploymentPersistence(makeDeploy(), userId);
       // DURABLE FILE CAPTURE: record the exact content of every file the agent writes (reliable —
       // straight from the write op, not a later listFiles that can come back empty). Persisted to
       // Firestore at build end so the source survives a sandbox loss and restores next session.

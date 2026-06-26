@@ -57,6 +57,7 @@ import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
 import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
 import { DockerActuator } from '../EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
+import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { makeResilientTurnRunner } from './agentv3Resilient';
 import { GoogleGenAI } from '@google/genai';
@@ -1287,12 +1288,28 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* git-native push is best-effort */ }
       }
 
+      // P9 — new-user free onboarding builds (DORMANT unless AGENTV3_FREE_ONBOARDING_BUILDS>0).
+      // For an eligible new user, a SUCCESSFUL build is on the house: nothing is recorded and
+      // the user sees ₹0. Only consumed on result.ok (a failed build never burns a free credit),
+      // and fail-safe — any error leaves the user billed normally. effectiveBilledUsd flows into
+      // both the cost record AND the result event so the customer-facing amount matches.
+      let effectiveBilledUsd = result.billedUsd;
+      if (userId && result.ok && result.billedUsd > 0 && freeOnboardingLimit() > 0) {
+        const isFree = await onboardingCreditStore
+          .consumeFreeBuild(userId, freeOnboardingLimit())
+          .catch(() => false);
+        if (isFree) {
+          effectiveBilledUsd = 0;
+          events.emit({ type: 'narration', agent: 'architect', text: '🎁 This build is on us — welcome to NavBharatAI Pro!', ts: Date.now() });
+        }
+      }
+
       // Bill the user the marked-up cost (D5/D6), recorded in the same place the
       // platform records every build's cost. Best-effort — never blocks the run.
       // Internal accounting stays in USD (currency-stable); the customer-facing amount
       // is shown in INR (billedInr = billedUsd × the real-time USD→INR rate).
-      if (userId && result.billedUsd > 0) {
-        userCostStore.record(userId, result.billedUsd).catch(() => {});
+      if (userId && effectiveBilledUsd > 0) {
+        userCostStore.record(userId, effectiveBilledUsd).catch(() => {});
       }
 
       // Cost-ladder telemetry (P2 measurement): record this build's task type, start
@@ -1318,7 +1335,7 @@ export function registerAgentV3Routes(app: Express): void {
       // resilient runner already self-labels in the text if it fell back to a free provider).
       const buildTag = providerDebugTag(`Claude (${model})`);
       if (buildTag) events.emit({ type: 'narration', agent: 'architect', text: buildTag.trim(), ts: Date.now() });
-      emit({ type: 'result', ...result, billedInr: Math.round(result.billedUsd * usdInrRate() * 100) / 100 });
+      emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100 });
     } catch (err) {
       emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {

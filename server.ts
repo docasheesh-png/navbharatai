@@ -17,7 +17,8 @@ import { verifyPaymentInternal } from './src/server/lib/payments';
 import { registerPaymentRoutes } from './src/server/routes/payment';
 import { registerGithubRoutes } from './src/server/routes/github';
 import { registerCloudsyncRoutes } from './src/server/routes/cloudsync';
-import { registerAppmakerRoutes } from './src/server/routes/appmaker';
+// RETIRED — AppMaker telemetry routes (old engine). Unregistered in the v3.0 cutover; no frontend uses them.
+// import { registerAppmakerRoutes } from './src/server/routes/appmaker';
 import { registerAuthRoutes } from './src/server/routes/auth';
 import { registerGithubAuthRoutes } from './src/server/routes/githubAuth';
 import { registerFirebaseAuthRoutes } from './src/server/routes/firebaseAuth';
@@ -32,7 +33,9 @@ import { registerProRoutes } from './src/server/routes/pro';
 import { registerSdaRoutes } from './src/server/routes/sda';
 import { registerProfessionalsRoutes } from './src/server/routes/professionals';
 import { registerRepoAnalystRoutes } from './src/server/routes/repoAnalyst';
-import { registerEngineerRoutes } from './src/server/routes/engineer';
+// RETIRED — Engineer AI routes (/api/engineer-*). Unregistered in the v3.0 cutover so the old
+// Engineer AI engine can NEVER run (no route → no invocation → no file creation). Replaced by Pro v3.0.
+// import { registerEngineerRoutes } from './src/server/routes/engineer';
 import { registerAgentV3Routes } from './src/server/routes/agentv3';
 import { registerDomainsRoutes } from './src/server/routes/domains';
 import { registerZipRoutes } from './src/server/routes/zip';
@@ -390,8 +393,8 @@ setInterval(() => {
     res.json({ status: 'ok', uptime: process.uptime(), port: PORT });
   });
 
-  // AppMaker telemetry/job routes — extracted to src/server/routes/appmaker.ts (Phase 1).
-  registerAppmakerRoutes(app);
+  // RETIRED — AppMaker telemetry/job routes (old engine). Unregistered in the v3.0 cutover.
+  // registerAppmakerRoutes(app);
 
   // Create Order Endpoint
   // Create-order route — extracted to src/server/routes/createOrder.ts (Phase 1).
@@ -437,8 +440,9 @@ setInterval(() => {
   registerSdaRoutes(app);
   registerProfessionalsRoutes(app);
   registerRepoAnalystRoutes(app);
-  // Engineer AI — autonomous coding agent (Phase 1: process-level sandbox, Claude + Grok).
-  registerEngineerRoutes(app);
+  // RETIRED — Engineer AI (/api/engineer-*) is unregistered in the v3.0 cutover. With no route
+  // the old engine can never be invoked → can never run or create files. Replaced by Pro v3.0.
+  // registerEngineerRoutes(app);
 
   // AgentV3 (Vargen 3.0) — v3.0 agent engine, strangler-fig P0 skeleton.
   // Flag-gated (AGENTV3_ENABLED, default OFF); imports nothing from the live

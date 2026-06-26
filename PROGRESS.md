@@ -4031,3 +4031,28 @@ billed regardless — even when no files were ever written.
   (unaffected — still `ok:true`), and a real build that wrote a file (`ok:true`).
 
 Gate: frontend tsc 0, server tsc 0, **2562 vitest** PASS (all 3 new tests green), boot:check PASS.
+
+---
+
+## 2026-06-26 — User-owned git-native: login → user's repo → CI → PR-merge → full control (DONE, merged #435 #436)
+
+The admin configured the GitHub OAuth App + Firebase GitHub provider, so GitHub login now works and
+captures the user's OAuth token (repo + workflow scopes). Wired the full vision on top, all green +
+merged, gated by GITHUB_STORAGE_ENABLED (dormant by default):
+
+- UserGitHubClient (#435): acts AS THE USER (their token), owner = their login. getLogin (cached),
+  ensureRepo (GET-or-create under /user/repos, private+auto_init), authedCloneUrl, and the
+  PrCapableClient methods (openPullRequest idempotent-on-422, combinedStatus over commit-status +
+  check-runs, mergePullRequest) — plugs straight into the existing mergeViaPullRequest. 9 unit tests.
+- Route wiring (#435): the git-native block now PREFERS the user's GitHub when a githubToken is sent
+  (ensureRepo in their account → hydrate at start → push + PR/CI/merge at end via a generalized
+  prClient: PrCapableClient); else the platform-org App store (Email/Phone users). Client forwards
+  the signed-in user's gh_token (read at send time).
+- Full app control UI (#436): new 'repo' event ({url, fullName}) → client reducer stores it →
+  AgentV3Panel shows a "GitHub" link button so the user jumps to their code/branches/PRs/CI/merges.
+- AppKnowledgeBase: new agentv3_github_storage entry.
+
+Result (when GITHUB_STORAGE_ENABLED=true): GitHub-logged-in users get each project as a private repo
+in THEIR OWN GitHub, built/committed/PR'd/CI-checked/merged like Claude Code (never merges red);
+Email/Phone users get the same durability via the platform org. Gate every phase: frontend tsc 0,
+server tsc 0, vitest PASS (up to 2574), boot:check PASS.

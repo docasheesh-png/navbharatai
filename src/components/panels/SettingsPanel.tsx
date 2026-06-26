@@ -7,7 +7,7 @@ import {
   Figma, Rocket, Smartphone, CloudUpload, Package, IndianRupee, Users2, Palette, TrendingUp,
   BarChart2, Cpu, Sparkles, Eye, EyeOff, Github, List, LogOut, GitBranch as GitBranchIcon,
   Folder, Check, Search, RefreshCw, Box, Zap, Globe as GlobeIcon, Search as SearchIcon,
-  Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy,
+  Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { SettingsScreen, ViewType, ApiKeys, PROVIDER_CONFIG } from '../../types';
@@ -219,6 +219,14 @@ export function SettingsPanel({
                 {/* 6 grouped sections */}
                 {[
                   {
+                    title: 'Account',
+                    color: 'text-indigo-400',
+                    icon: User as any,
+                    items: [
+                      { id: 'profile', label: 'My Profile', icon: User as any, nav: true },
+                    ],
+                  },
+                  {
                     title: 'App Settings',
                     color: 'text-blue-400',
                     icon: Settings,
@@ -307,7 +315,11 @@ export function SettingsPanel({
                       {group.items.map(item => (
                         <button
                           key={item.id}
-                          onClick={() => (item as any).tab ? toggleTab(item.id as any) : setSettingsScreen(item.id as any)}
+                          onClick={() => {
+                            if ((item as any).tab) { toggleTab(item.id as any); }
+                            else if ((item as any).nav) { setActiveView(item.id as any); }
+                            else { setSettingsScreen(item.id as any); }
+                          }}
                           className="flex items-center gap-2 p-2.5 bg-[#0d1117] border border-white/5 rounded-xl hover:border-indigo-500/30 hover:bg-indigo-600/10 transition-all group text-left"
                         >
                           <item.icon className="w-3.5 h-3.5 text-[#484f58] group-hover:text-indigo-400 transition-colors flex-shrink-0" />

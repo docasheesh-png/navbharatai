@@ -596,6 +596,49 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
 }
 
 /**
+ * A live, waving Indian flag (tiranga) 🇮🇳 shown while an agent is working — replacing the old
+ * loading spinner. The wave is driven by requestAnimationFrame writing an INLINE transform each
+ * frame (not a CSS animation), so it cannot be killed by the global prefers-reduced-motion reset
+ * that was freezing the spinner. When the work finishes, the caller swaps this for a green check.
+ */
+function WavingTiranga({ size = 16 }: { size?: number }) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    let raf = 0;
+    let start = 0;
+    const tick = (t: number) => {
+      if (!start) start = t;
+      const e = (t - start) / 1000;
+      // Flutter: the trailing (right) edge swings while the pole (left) edge stays — a cloth-in-wind feel.
+      const skew = Math.sin(e * 6) * 9;
+      const rot = Math.sin(e * 6 + 0.9) * 3.2;
+      const sy = 1 + Math.sin(e * 6) * 0.07;
+      if (ref.current) ref.current.style.transform = `skewY(${skew}deg) rotate(${rot}deg) scaleY(${sy})`;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  const h = Math.max(8, Math.round(size * 0.7));
+  const chakra = Math.max(2.5, h / 3.2);
+  return (
+    <span
+      ref={ref}
+      role="img"
+      aria-label="Indian flag waving"
+      className="inline-flex flex-col rounded-[1.5px] overflow-hidden shrink-0 shadow-sm"
+      style={{ width: size, height: h, transformOrigin: 'left center', willChange: 'transform' }}
+    >
+      <span style={{ flex: 1, background: '#FF9933' }} />
+      <span style={{ flex: 1, background: '#ffffff', position: 'relative' }}>
+        <span style={{ position: 'absolute', top: '50%', left: '50%', width: chakra, height: chakra, transform: 'translate(-50%,-50%)', borderRadius: '50%', border: '1px solid #000080' }} />
+      </span>
+      <span style={{ flex: 1, background: '#138808' }} />
+    </span>
+  );
+}
+
+/**
  * Live "working…" indicator with an elapsed-time counter. The ticking seconds prove
  * the build is alive even during a long step that emits no narration, so it never
  * looks frozen. Mounts fresh on each run (rendered only while running).
@@ -609,7 +652,7 @@ function WorkingIndicator() {
   const label = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
   return (
     <div className="flex items-center gap-2 text-xs text-zinc-500">
-      <Loader2 className="w-3.5 h-3.5 animate-spin nb-spin text-indigo-400" />
+      <WavingTiranga size={16} />
       <span>working… {label}</span>
     </div>
   );
@@ -807,7 +850,7 @@ function AgentChip({ card, running }: { card: AgentCard; running: boolean }) {
   return (
     <div className="flex items-center gap-1 text-[11px] bg-zinc-900 rounded-full px-2 py-1" title={card.lastAction}>
       {running
-        ? <Loader2 className="w-3 h-3 text-indigo-400 animate-spin nb-spin" />
+        ? <WavingTiranga size={14} />
         : <CheckCircle2 className="w-3 h-3 text-emerald-500" />}
       <span className="font-medium capitalize text-zinc-200">{card.agent}</span>
     </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database } from 'lucide-react';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
+import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
 
 interface AdminDashboardProps {
   adminToken: string;
@@ -68,6 +69,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [tokenReason, setTokenReason] = useState('');
   const [selectedUserId, setSelectedUserId] = useState('');
 
+  // AgentV3 cost-ladder telemetry (revenue tab) — real per-tier cost & success rate.
+  const [costSummary, setCostSummary] = useState<CostLadderSummary | null>(null);
+  const [costLoading, setCostLoading] = useState(false);
+
   const headers = { 'x-admin-token': adminToken, 'Content-Type': 'application/json' };
 
   const toast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3000); };
@@ -104,9 +109,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch (e) { console.error(e); }
   }, [adminToken]);
 
+  const fetchCostTelemetry = useCallback(async () => {
+    setCostLoading(true);
+    try {
+      const r = await fetch('/api/admin/agentv3/cost-telemetry?days=30', { headers });
+      const d = await r.json();
+      setCostSummary(summarizeCostTelemetry(Array.isArray(d?.history) ? d.history : []));
+    } catch (e) {
+      console.error(e);
+      setCostSummary(summarizeCostTelemetry([]));
+    } finally {
+      setCostLoading(false);
+    }
+  }, [adminToken]);
+
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
   useEffect(() => { if (activeTab === 'users') fetchUsers(); }, [activeTab, fetchUsers]);
   useEffect(() => { if (activeTab === 'settings') fetchPromos(); }, [activeTab, fetchPromos]);
+  useEffect(() => { if (activeTab === 'revenue') fetchCostTelemetry(); }, [activeTab, fetchCostTelemetry]);
 
   const adminPost = async (url: string, body: any) => {
     const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
@@ -529,6 +549,68 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     </tbody>
                   </table>
                 </div>
+              </div>
+
+              {/* ── AgentV3 cost-ladder (v3.0 build cost routing — real telemetry) ── */}
+              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Cpu className="w-4 h-4 text-indigo-400" />
+                    <h3 className="text-sm font-black text-white uppercase tracking-tight">v3.0 Cost-Ladder (last 30 days)</h3>
+                  </div>
+                  <button
+                    onClick={fetchCostTelemetry}
+                    disabled={costLoading}
+                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-40"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${costLoading ? 'animate-spin' : ''}`} /> Refresh
+                  </button>
+                </div>
+
+                {!costSummary || costSummary.totalBuilds === 0 ? (
+                  <p className="text-[10px] text-[#8b949e] uppercase font-bold py-4">
+                    {costLoading ? 'Loading telemetry…' : 'No v3.0 builds recorded yet — data appears once Pro v3.0 builds run.'}
+                  </p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {statCard('v3.0 Builds', costSummary.totalBuilds.toLocaleString(), `${costSummary.days} day(s)`, 'bg-indigo-500', Server)}
+                      {statCard('Success Rate', `${costSummary.overallSuccessPct}%`, `${costSummary.okBuilds} ok`, costSummary.overallSuccessPct >= 80 ? 'bg-emerald-500' : 'bg-amber-500', CheckCircle2)}
+                      {statCard('Cheap-Tier Share', `${costSummary.cheapTierSharePct}%`, 'ran on Gemini (cheapest)', 'bg-sky-500', TrendingUp)}
+                      {statCard('Billed (v3.0)', `$${costSummary.totalBilledUsd.toFixed(4)}`, `${costSummary.powerBuilds} power builds`, 'bg-pink-500', IndianRupee)}
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead><tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
+                          <th className="py-2.5 px-3 text-left">Start Tier</th>
+                          <th className="py-2.5 px-3 text-left">Builds</th>
+                          <th className="py-2.5 px-3 text-left">Share</th>
+                          <th className="py-2.5 px-3 text-left">Success</th>
+                          <th className="py-2.5 px-3 text-left">Avg Tokens</th>
+                          <th className="py-2.5 px-3 text-left">Avg Time</th>
+                          <th className="py-2.5 px-3 text-left">Billed</th>
+                        </tr></thead>
+                        <tbody className="divide-y divide-white/5">
+                          {costSummary.byTier.map((row) => (
+                            <tr key={row.key} className="hover:bg-white/5">
+                              <td className="py-2.5 px-3 text-white font-black uppercase">{row.key}</td>
+                              <td className="py-2.5 px-3 text-amber-400 font-mono font-black">{row.builds}</td>
+                              <td className="py-2.5 px-3 text-sky-400 font-mono">{row.sharePct}%</td>
+                              <td className={`py-2.5 px-3 font-mono font-black ${row.successPct >= 80 ? 'text-emerald-400' : 'text-amber-400'}`}>{row.successPct}%</td>
+                              <td className="py-2.5 px-3 text-[#8b949e] font-mono">{row.avgTokens.toLocaleString()}</td>
+                              <td className="py-2.5 px-3 text-[#8b949e] font-mono">{row.avgDurationSec}s</td>
+                              <td className="py-2.5 px-3 text-emerald-400 font-mono">${row.billedUsd.toFixed(4)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest">
+                      Cheap-tier success rate is the P8 cutover signal — high share + high success means the ladder is safe to default-on.
+                    </p>
+                  </>
+                )}
               </div>
             </div>
           )}

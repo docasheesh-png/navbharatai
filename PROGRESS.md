@@ -3851,3 +3851,30 @@ only → no AppKnowledgeBase entry until the dashboard UI ships). Active within 
 already-flag-gated v3.0 path.
 Gate: frontend tsc 0, server tsc 0, **2524 vitest** PASS (+8 new foldCostTelemetry
 tests), boot:check PASS. Ships on merge → deploy.
+
+---
+
+### 2026-06-26 — v3.0 cost-ladder dashboard: admin Revenue-tab visualization
+
+Completes the cost-ladder trio (wiring → measurement → visualization). The
+telemetry endpoint shipped last; this surfaces it for the admin with REAL numbers
+(no faked "money saved" — that would need per-model provider rates we don't record,
+so it's deliberately omitted per the real-features rule).
+
+- NEW `src/lib/agentV3CostSummary.ts` — PURE, frontend-safe `summarizeCostTelemetry()`
+  that rolls up the per-day telemetry docs into display numbers: total builds,
+  overall + per-tier success rate, billed totals, avg tokens/duration, and the
+  headline CHEAP-TIER SHARE (% of builds on the cheapest 'gemini' tier). Empty/bad
+  input → honest all-zero summary. 8 unit tests.
+- `components/AdminDashboard.tsx` — new "v3.0 Cost-Ladder (last 30 days)" section in
+  the Revenue tab: 4 stat cards (builds, success rate, cheap-tier share, billed) +
+  a per-start-tier table (builds / share / success / avg tokens / avg time / billed),
+  with a Refresh button. Fetches `/api/admin/agentv3/cost-telemetry` only when the
+  Revenue tab is open. Built in AdminDashboard.tsx (NOT App.tsx) → no collision with
+  the concurrent session's App.tsx work.
+- AppKnowledgeBase: NEW `admin-cost-ladder` entry (mandatory sync — new admin surface).
+
+The cheap-tier success rate shown here IS the P8 cutover signal: high share + high
+success = the ladder is safe to default-on. No billing/pricing change.
+Gate: frontend tsc 0, server tsc 0, **2547 vitest** PASS (+8 new summary tests),
+boot:check PASS. Ships on merge → deploy.

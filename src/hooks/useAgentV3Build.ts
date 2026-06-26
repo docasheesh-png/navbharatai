@@ -236,6 +236,11 @@ export function useAgentV3Build(): UseAgentV3Build {
             thinking: opts?.thinking === true,
             sessionId: opts?.sessionId,
             attachments: opts?.attachments && opts.attachments.length > 0 ? opts.attachments : undefined,
+            // When the user signed in with GitHub, forward their OAuth token so the build can store
+            // the project in the USER'S OWN GitHub repo (commit / PR / CI / merge). Best-effort: a
+            // missing token simply falls back to the platform's invisible storage. Read at send time
+            // so a GitHub sign-in mid-session is picked up immediately.
+            githubToken: (() => { try { return localStorage.getItem('gh_token') || undefined; } catch { return undefined; } })(),
           }),
           signal: controller.signal,
         });

@@ -4206,3 +4206,26 @@ Gate at merge: frontend tsc 0, server tsc 0, vitest 2621 PASS, boot:check PASS.
     .web.app URL is permanent + shareable; custom domain is an honest follow-up.
 
 Gate at each merge: frontend tsc 0, server tsc 0, vitest PASS (2630→2634), boot:check PASS.
+
+## 2026-06-26 (cont.) — forensic audit + root-cause fix: v3.0 "Closed Port Error" / empty workspace (PR #469)
+
+**Root cause identified:** `ensureWorkspace(workspaceId, 'react')` (hardcoded) → TemplateRegistry has no
+'react' key (correct key is 'vite-react') → `getProvider('react')` threw → `catch {}` silently swallowed
+→ workspace directory created but COMPLETELY EMPTY. This caused every single Pro v3.0 build to start with
+no scaffold files. The agent then manually scaffolded vite.config.ts from memory without `host: true` →
+Vite bound to 127.0.0.1 only → E2B port proxy blocked → "Closed Port Error" in preview. Users were being
+charged ₹300–400 for broken previews.
+
+**Secondary issues found and fixed:**
+- Reviewer SOURCE_RE missing .py .go .java etc. → Python/Go builds silently skipped by reviewer
+- Reviewer used `listFiles()` only; if sandbox cold-read returned empty, review skipped despite successful build
+- RemixProvider + AstroProvider missing `allowedHosts: true` → sandbox proxy host blocked by newer Vite
+- E2BActuator catch block started with empty workspace instead of vite-react fallback
+
+**All 6 code fixes (PR #469, 2574/2574 tests pass):**
+1. `agentv3.ts` — `ensureWorkspace(workspaceId, framework)` (was `'react'`) — primary fix
+2. `E2BActuator.ts` — `listFrameworks()` guard + vite-react last-resort fallback in catch
+3. `ReviewerAgent.ts` — SOURCE_RE extended with .py .go .java .php .rb .rs .swift .kt
+4. `agentv3.ts` — reviewer uses writtenFiles fallback when listFiles() returns empty
+5. `RemixProvider.ts` — added `allowedHosts: true`
+6. `AstroProvider.ts` — added `allowedHosts: true`

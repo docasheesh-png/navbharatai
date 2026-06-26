@@ -53,7 +53,7 @@ export type AgentV3WireEvent =
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
   | { type: 'preview'; url: string; ts: number }
   | { type: 'repo'; url: string; fullName: string; ts: number }
-  | { type: 'done'; ok: boolean; summary: string; ts: number }
+  | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number }
   | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number };
 
@@ -114,7 +114,17 @@ export interface AgentV3ClientState {
   billedUsd?: number;
   /** Customer-facing bill in INR (billedUsd × the real-time USD→INR rate). */
   billedInr?: number;
+  /** R2 §4.6 — the objective readiness verdict for the finished build (build-health card). */
+  buildHealth?: BuildHealth;
   error?: string;
+}
+
+/** R2 §4.6 — readiness verdict shown as a build-health card after a build. */
+export interface BuildHealth {
+  score: number;
+  ready: boolean;
+  blockers: string[];
+  warnings: string[];
 }
 
 export function initialAgentV3State(): AgentV3ClientState {

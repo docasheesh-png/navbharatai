@@ -271,9 +271,12 @@ export class AgentRunner {
           // with an honest summary of the blockers. The work is preserved (files/preview still
           // exist) — we simply refuse to claim success that wasn't earned ("Preview is EARNED").
           // When escalation is active, this ok:false is exactly what triggers a stronger retry.
+          let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[] } | undefined;
           if (ok && readinessGate && expectsArtifacts && totalToolUses > 0) {
             try {
               const readiness = await dispatcher.assessBuildReadiness();
+              // Surface the verdict to the UI as a build-health card (R2 §4.6) — pass or fail.
+              buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings };
               if (!readiness.ready) {
                 ok = false;
                 const blockers = readiness.blockers.length
@@ -285,7 +288,7 @@ export class AgentRunner {
           }
 
           await persist(ok ? 'complete' : 'error');
-          events.emit({ type: 'done', ok, summary, ts: Date.now() });
+          events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
           return { ok, summary, steps, usage, billedUsd: billed() };
         }
         totalToolUses += turn.toolUses.length;

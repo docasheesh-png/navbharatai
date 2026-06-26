@@ -149,6 +149,9 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'preview':
       return { ...state, previewUrl: event.url };
 
+    case 'repo':
+      return { ...state, repoUrl: event.url, repoFullName: event.fullName };
+
     case 'permission_request':
       return {
         ...state,

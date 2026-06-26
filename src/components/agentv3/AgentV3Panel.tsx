@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
-  SlidersHorizontal, Check, X, Paperclip, FileText, Download,
+  SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import type { AgentCard, GitCheckpoint } from './agentV3Types';
@@ -377,6 +377,19 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
             {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
             {exporting ? 'Exporting…' : 'Export .zip'}
           </button>
+          {state.repoUrl && (
+            <a
+              href={state.repoUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={`Open this project's GitHub repo${state.repoFullName ? ` (${state.repoFullName})` : ''} — your code, branches, pull requests, CI and merges`}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 transition-colors"
+            >
+              <Github className="w-3.5 h-3.5" />
+              GitHub
+              <ExternalLink className="w-3 h-3 opacity-60" />
+            </a>
+          )}
         </div>
       </div>
 

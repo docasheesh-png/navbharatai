@@ -16,6 +16,16 @@
 // a wildcard `*.mitrify.xyz` DNS record — otherwise the preview URL won't resolve.
 const DEFAULT_PREVIEW_DOMAIN = 'e2b.app';
 
+// Warn once at startup so the operator knows preview URLs are raw E2B subdomains and
+// may not be user-friendly or stable across sandbox restarts.
+if (process.env.NODE_ENV === 'production' && !process.env.E2B_PREVIEW_DOMAIN) {
+  console.warn(
+    '[AgentV3] E2B_PREVIEW_DOMAIN is not set — preview URLs will use raw *.e2b.app ' +
+      'subdomains. Set E2B_PREVIEW_DOMAIN=<your-wildcard-domain> (e.g. mitrify.xyz) ' +
+      'and configure E2B custom domain to serve stable, branded preview links.',
+  );
+}
+
 /**
  * The configured preview domain for v3.0 apps. Override with `E2B_PREVIEW_DOMAIN`;
  * set it to `e2b.app` to disable the swap entirely (fall back to the raw host).

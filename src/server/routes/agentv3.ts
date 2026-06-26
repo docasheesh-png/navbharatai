@@ -18,6 +18,7 @@ import {
   makeDeploy,
   type OpinionRouter,
   resolveModel,
+  haikuModel,
   architectSystemPrompt,
   planSystemPrompt,
   editModePrefix,
@@ -60,7 +61,7 @@ import { usdInrRate } from '../lib/UsdInrRate';
 import { makeResilientTurnRunner } from './agentv3Resilient';
 import { GoogleGenAI } from '@google/genai';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
-import { makeMultiProviderTurnRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
@@ -274,10 +275,18 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean })
   }
   if (cheap.length === 0) return makeResilientTurnRunner(new ClaudeClient()); // Claude-only env
   const claude: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient() };
+  // P7 failover hardening: a final Claude-HAIKU backstop that FORCES the Haiku model
+  // regardless of the turn's requested model. It only ever runs after every prior provider
+  // (Vertex → Gemini → primary Claude) has thrown, so normal builds are unaffected — but if
+  // Sonnet/Opus is overloaded or rate-limited, Haiku still completes the turn and the build
+  // never breaks. Billing is unchanged (Opus-equivalent markup, D5/D6) regardless of which
+  // model actually answers. AGENTV3_DISABLE_HAIKU_BACKSTOP=1 removes it if ever needed.
+  const haikuBackstop: NamedRunner = { name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(), haikuModel()) };
+  const withBackstop = process.env.AGENTV3_DISABLE_HAIKU_BACKSTOP === '1' ? [] : [haikuBackstop];
   // claudeFirst (escalation): put the stronger Claude model at the head of the chain so an
   // escalated tier actually leads with Claude, not Gemini. Else cheap-first (env override honoured).
   const claudeFirst = opts?.claudeFirst || process.env.AGENTV3_BUILD_CLAUDE_FIRST === '1';
-  const chain = claudeFirst ? [claude, ...cheap] : [...cheap, claude];
+  const chain = claudeFirst ? [claude, ...cheap, ...withBackstop] : [...cheap, claude, ...withBackstop];
   return makeMultiProviderTurnRunner(chain, {
     onProviderUsed: (used, from) => { if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`); },
     onProviderError: (name, err) => console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`),

@@ -3914,3 +3914,26 @@ AppKnowledgeBase entry). Activating it (and proving cheap-tier quality via the P
 dashboard) is the admin-gated P8 rollout step.
 Gate: frontend tsc 0, server tsc 0, **2554 vitest** PASS (+7 new escalation policy/gate
 tests), boot:check PASS. Ships on merge → deploy (dormant until AGENTV3_ESCALATION=on).
+
+---
+
+### 2026-06-26 — v3.0 cost-ladder P7: failover hardening (Claude-Haiku backstop)
+
+The build provider chain was Vertex → Gemini → (single) Claude. If the primary Claude
+model (Sonnet in normal mode, Opus in power) was overloaded or rate-limited, the build
+could hard-fail even though a cheaper Claude model was available. P7 closes that gap.
+
+- NEW `forceModelRunner(runner, model)` in MultiProviderTurnRunner.ts — wraps a runner so
+  it ALWAYS runs with a fixed model, ignoring the turn's requested model. Pure, unit-tested.
+- `buildTurnRunner` now appends a **Claude-HAIKU backstop** as the final chain entry
+  (forces the Haiku model). It only ever runs AFTER every prior provider has thrown, so
+  normal builds are completely unaffected — but a Sonnet/Opus-specific outage no longer
+  breaks the build; Haiku completes the turn. STRICTLY ADDITIVE resilience (no flag/gate
+  needed); `AGENTV3_DISABLE_HAIKU_BACKSTOP=1` removes it if ever required.
+- Billing is UNCHANGED — Opus-equivalent markup (D5/D6) regardless of which model answers.
+- Exported haikuModel/opusNormalModel/ladderModel + ClaudeLadderTier from AgentV3/index.ts.
+
+Matches the design doc's failover chain (…→ Haiku → Gemini → Vertex). Backend resilience
+only — no user-facing surface, so no AppKnowledgeBase entry.
+Gate: frontend tsc 0, server tsc 0, **2556 vitest** PASS (+2 new forceModelRunner tests),
+boot:check PASS. Ships on merge → deploy.

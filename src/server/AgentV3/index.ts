@@ -27,7 +27,8 @@ export type {
 } from './ClaudeClient';
 export { AgentRunner } from './AgentRunner';
 export type { AgentRunnerOptions, AgentRunResult } from './AgentRunner';
-export { resolveModel, sonnetModel, opusModel } from './models';
+export { resolveModel, sonnetModel, opusModel, haikuModel, opusNormalModel, ladderModel } from './models';
+export type { ClaudeLadderTier } from './models';
 export { architectSystemPrompt, planSystemPrompt, editModePrefix } from './systemPrompt';
 export { awaitApproval, resolveApproval, pendingApprovalCount } from './Approvals';
 export {

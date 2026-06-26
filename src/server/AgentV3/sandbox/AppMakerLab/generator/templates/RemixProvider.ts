@@ -52,7 +52,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [remix({ future: { v3_fetcherPersist: true } })],
-  server: { host: true, port: 5173 },
+  server: { host: true, port: 5173, allowedHosts: true },
 });
 `;
 

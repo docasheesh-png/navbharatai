@@ -121,6 +121,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['preview', 'live preview', 'in-browser preview', 'browser preview', 'blocked request', 'preview not working', 'preview nahi chal raha', 'app dekho', 'see app', 'run app', 'sandbox preview', 'static preview', 'dual preview', 'preview kaise'],
     aiSurface: 'nbi_chat',
   },
+  {
+    id: 'agentv3_github_storage',
+    name: 'Save apps to your own GitHub (git-native)',
+    path: 'Sign in with GitHub → build in NavBharatAI Pro v3.0 → your project is committed to a private repo in YOUR GitHub account',
+    description: 'When you sign in with GitHub, NavBharatAI Pro v3.0 stores each project as a real private repo in YOUR OWN GitHub account (not on our servers). Every build commits there, so your code is durable and 100% owned by you — no lock-in. It works like Claude Code: the build is pushed to a branch, a pull request is opened, CI is checked, and the PR is merged only when checks are green (never merged red). Users who sign in with Email/Phone instead get the same durability via a private repo in the platform GitHub org behind the scenes. Requires GitHub git-native storage to be enabled by the admin.',
+    howToUse: 'Click "Continue with GitHub" on the login screen and approve the repo permissions. Then build normally in NavBharatAI Pro v3.0 — the builder creates/uses a private repo in your GitHub for the project and commits every build to it. Open your GitHub to see the repo, branches, pull requests and merges.',
+    relatedFeatures: ['agentv3_builder', 'agentv3_export', 'login_auth'],
+    keywords: ['github', 'github storage', 'my github', 'save to github', 'git', 'repo', 'repository', 'commit', 'pull request', 'pr', 'ci', 'merge', 'own code', 'no lock-in', 'github me save', 'github par', 'apni github', 'git native', 'version control'],
+    aiSurface: 'nbi_chat',
+  },
   // ─── ENGINEER AI ─────────────────────────────────────────────────────────
   {
     id: 'connect_domain',

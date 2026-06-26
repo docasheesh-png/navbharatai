@@ -27,12 +27,14 @@ import {
   GitManager,
   GitRepoSync,
   GitHubAppClient,
+  UserGitHubClient,
   githubConfigFromEnv,
   githubStorageActive,
   githubPrMode,
   mergeViaPullRequest,
   repoNameForProject,
   type RepoInfo,
+  type PrCapableClient,
   registerSession,
   restoreSession,
   agentLifecycle,
@@ -884,7 +886,9 @@ export function registerAgentV3Routes(app: Express): void {
       let repoSync: GitRepoSync | undefined;
       let repoAuthedUrl = '';
       let repoBranch = 'main';
-      let ghClientRef: GitHubAppClient | undefined;
+      // The PR/CI/merge client for build-end: the USER'S own GitHub (when they signed in with
+      // GitHub) or the platform App (org storage). Either implements PrCapableClient.
+      let prClient: PrCapableClient | undefined;
       let repoNameRef = '';
       try {
         // Emit an immediate status so the NDJSON stream is never silent while the
@@ -897,25 +901,53 @@ export function registerAgentV3Routes(app: Express): void {
         // sandbox from it BEFORE the Firestore fallback. Best-effort — any failure here leaves the
         // build on the existing (Firestore) durability path, never blocking it.
         if (githubStorageActive()) {
-          try {
-            const cfg = githubConfigFromEnv();
-            if (cfg) {
-              const projectId = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : workspaceId;
-              const repoName = repoNameForProject(userId, projectId);
-              const ghClient = new GitHubAppClient(cfg);
-              const repo: RepoInfo = await ghClient.ensureRepo(repoName);
-              const token = await ghClient.getInstallationToken();
-              repoAuthedUrl = ghClient.authedCloneUrl(repoName, token);
+          const projectId = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : workspaceId;
+          const repoName = repoNameForProject(userId, projectId);
+          const userToken = typeof req.body?.githubToken === 'string' && req.body.githubToken ? req.body.githubToken : '';
+          // PREFER THE USER'S OWN GITHUB: when the user signed in with GitHub, store the project in a
+          // repo under THEIR account (their code, no lock-in) and run PR/CI/merge there. Best-effort —
+          // any failure falls through to the platform-org store below.
+          if (userToken) {
+            try {
+              const userClient = new UserGitHubClient(userToken);
+              const login = await userClient.getLogin();
+              const repo = await userClient.ensureRepo(repoName);
+              repoAuthedUrl = userClient.authedCloneUrl(repoName, login);
               repoBranch = repo.defaultBranch || 'main';
-              ghClientRef = ghClient;
+              prClient = userClient;
               repoNameRef = repoName;
               repoSync = new GitRepoSync(actuator, workspaceId);
               const h = await repoSync.hydrateIfEmpty(repoAuthedUrl);
-              if (h.hydrated) {
-                events.emit({ type: 'narration', agent: 'architect', text: 'Loaded your project from its GitHub repo.', ts: Date.now() });
+              events.emit({
+                type: 'narration', agent: 'architect',
+                text: h.hydrated
+                  ? `Loaded your project from your GitHub (${login}/${repoName}).`
+                  : `Connected to your GitHub — this build will be saved to ${login}/${repoName}.`,
+                ts: Date.now(),
+              });
+            } catch { repoSync = undefined; prClient = undefined; /* fall through to the platform store */ }
+          }
+          // PLATFORM-ORG STORE (Email/Phone users, or if the user-token path failed): the invisible
+          // durable repo in the platform GitHub org via the App installation token.
+          if (!repoSync) {
+            try {
+              const cfg = githubConfigFromEnv();
+              if (cfg) {
+                const ghClient = new GitHubAppClient(cfg);
+                const repo: RepoInfo = await ghClient.ensureRepo(repoName);
+                const token = await ghClient.getInstallationToken();
+                repoAuthedUrl = ghClient.authedCloneUrl(repoName, token);
+                repoBranch = repo.defaultBranch || 'main';
+                prClient = ghClient;
+                repoNameRef = repoName;
+                repoSync = new GitRepoSync(actuator, workspaceId);
+                const h = await repoSync.hydrateIfEmpty(repoAuthedUrl);
+                if (h.hydrated) {
+                  events.emit({ type: 'narration', agent: 'architect', text: 'Loaded your project from its GitHub repo.', ts: Date.now() });
+                }
               }
-            }
-          } catch { /* git-native is best-effort — fall back to Firestore durability below */ }
+            } catch { /* git-native is best-effort — fall back to Firestore durability below */ }
+          }
         }
         // DURABLE FILE RESTORE: the sandbox is ephemeral — if it was lost/recycled (or this is a
         // later message that got a fresh sandbox), re-seed it with the files we persisted last
@@ -1298,11 +1330,11 @@ export function registerAgentV3Routes(app: Express): void {
           // PR MODE (Phase 3, opt-in GITHUB_PR_MODE): push to a build branch, open a PR, and merge
           // it ONLY when CI is green (Claude-Code-style). Default mode force-pushes straight to the
           // project's default branch. Both best-effort — never block or fail the build.
-          if (githubPrMode() && ghClientRef && repoNameRef) {
+          if (githubPrMode() && prClient && repoNameRef) {
             const buildBranch = `nbi/build-${Date.now()}`;
             const pushed = await repoSync.pushAll(repoAuthedUrl, buildBranch, msg);
             if (pushed.pushed) {
-              const flow = await mergeViaPullRequest(ghClientRef, repoNameRef, {
+              const flow = await mergeViaPullRequest(prClient, repoNameRef, {
                 head: buildBranch, base: repoBranch, title: msg,
                 body: 'Automated build by NavBharatAI Pro v3.0.',
               });

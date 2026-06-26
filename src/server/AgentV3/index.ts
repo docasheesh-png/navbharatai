@@ -59,6 +59,7 @@ export { GitRepoSync } from './GitRepoSync';
 export type { HydrateResult, PushResult } from './GitRepoSync';
 export { mergeViaPullRequest, githubPrMode } from './GitHubPrFlow';
 export type { PrCapableClient, PrFlowResult, PrFlowOptions } from './GitHubPrFlow';
+export { UserGitHubClient } from './UserGitHubClient';
 export { roleConfig, isWorkerRole, WORKER_ROLES, allRoles, findRolesByCapability, rolesByLayer, rosterBriefing } from './AgentRegistry';
 export type { RoleConfig } from './AgentRegistry';
 export { agentLifecycle } from './AgentLifecycle';

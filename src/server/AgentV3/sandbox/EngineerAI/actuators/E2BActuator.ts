@@ -291,17 +291,26 @@ export class E2BActuator implements IEngineerActuator {
     await sandbox.files.makeDir(WORKSPACE_ROOT);
 
     // Resolve template: fall back to vite-react for unknown/auto types.
+    // Note: this.templateRegistry keys are e.g. 'vite-react', 'nextjs', 'vue' — NOT 'react'.
     const templateKey =
       projectType && projectType !== 'auto' && projectType !== 'node' && projectType !== 'python'
         ? projectType
         : (projectType === 'python' ? 'python-fastapi' : 'vite-react');
+    const resolveKey = (key: string): string =>
+      this.templateRegistry.listFrameworks().includes(key) ? key : 'vite-react';
     try {
-      const files = this.templateRegistry.getProvider(templateKey).getFiles([]);
+      const files = this.templateRegistry.getProvider(resolveKey(templateKey)).getFiles([]);
       await sandbox.files.writeFiles(
         Object.entries(files).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${safeRelPath(p)}`, data: content }))
       );
     } catch {
-      // Unknown template — start with an empty workspace, agent will scaffold it.
+      // Last-resort fallback: seed a minimal vite-react project so the workspace is never empty.
+      try {
+        const fallbackFiles = this.templateRegistry.getProvider('vite-react').getFiles([]);
+        await sandbox.files.writeFiles(
+          Object.entries(fallbackFiles).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${safeRelPath(p)}`, data: content }))
+        );
+      } catch { /* if this also fails, agent will scaffold manually */ }
     }
 
     // Kick off playwright install in background immediately — by the time the agent

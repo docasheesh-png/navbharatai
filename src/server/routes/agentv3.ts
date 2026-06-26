@@ -84,7 +84,7 @@ import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
-import { reviewBuild, formatReview } from '../AgentV3/ReviewerAgent';
+import { reviewBuild, formatReview, hasReviewableSource } from '../AgentV3/ReviewerAgent';
 import {
   saveWorkspaceMemory,
   restoreWorkspaceMemory,
@@ -1036,7 +1036,7 @@ export function registerAgentV3Routes(app: Express): void {
         // silent gap after the headers is what trips Cloud Run / mobile-Safari
         // request timeouts and surfaces as a bare "Load failed" on the client.
         events.emit({ type: 'narration', agent: 'architect', text: 'Setting up your workspace…', ts: Date.now() });
-        await actuator.ensureWorkspace(workspaceId, 'react');
+        await actuator.ensureWorkspace(workspaceId, framework);
         // GIT-NATIVE HYDRATE: when storage is active, ensure the project repo exists and seed the
         // sandbox from it BEFORE the Firestore fallback. Best-effort — any failure here leaves the
         // build on the existing (Firestore) durability path, never blocking it.
@@ -1493,11 +1493,19 @@ export function registerAgentV3Routes(app: Express): void {
       // Only fires on successful builds; result is advisory narration, never blocks.
       if (result.ok) {
         try {
-          const rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
+          let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
+          // If sandbox listFiles came back empty but the build wrote real files, use the
+          // captured write-time paths as a fallback so the reviewer is never skipped after
+          // a successful build due to a transient sandbox read hiccup.
+          if (!hasReviewableSource(rFiles) && writtenFiles.size > 0) {
+            rFiles = [...writtenFiles.keys()];
+          }
           const rSample = await Promise.all(
             rFiles.slice(0, 5).map(async (p) => ({
               path: p,
-              content: await actuator.readFile(workspaceId, p).catch(() => ''),
+              content: writtenFiles.has(p)
+                ? (writtenFiles.get(p) ?? '')
+                : await actuator.readFile(workspaceId, p).catch(() => ''),
             })),
           );
           const review = await reviewBuild({

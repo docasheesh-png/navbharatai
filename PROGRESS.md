@@ -4229,3 +4229,36 @@ charged ₹300–400 for broken previews.
 4. `agentv3.ts` — reviewer uses writtenFiles fallback when listFiles() returns empty
 5. `RemixProvider.ts` — added `allowedHosts: true`
 6. `AstroProvider.ts` — added `allowedHosts: true`
+
+## 2026-06-26 (cont.) — architecture hardening pass 2: port detection + preview health check (PR #471)
+
+Follow-up to PR #469's root-cause fix. Closed the remaining false-success gaps in the v3.0
+build → preview pipeline so the preview is genuinely EARNED, not just published.
+
+**Fixes (PR #471, 2643/2643 tests pass, frontend+server tsc 0):**
+1. `ToolDispatcher.ts` — `update_preview` now polls port readiness (`nc -z localhost <port>`,
+   30 attempts × 500ms = 15s max) BEFORE publishing the preview URL. If the port never comes up
+   it emits an honest WARNING instead of silently publishing a URL that shows "Closed Port Error".
+   This is the direct fix for "system claimed success but preview showed Closed Port Error".
+2. `ToolDispatcher.test.ts` — FakeActuator.runCommand returns PORT_UP for nc -z checks so the
+   update_preview tests resolve instantly (no 15s timeout in CI).
+3. `E2BActuator.ts` — `extractDevPort()` now returns the correct port per framework: Angular 4200,
+   Astro 4321, Python uvicorn/gunicorn/flask 8000/5000, Next.js/Nuxt/NestJS/Express/Fastify 3000
+   (was always defaulting to 5173 → health check polled the wrong port). `isLongRunning` detection
+   extended: `bash dev.sh` (Django/Flask/FastAPI), `ng serve`, `next dev`, `nuxt dev`, `astro dev`.
+   `ensureWorkspace()` adds a `resolveKey()` guard (listFrameworks() membership) + vite-react
+   last-resort fallback so an unknown framework key can never produce an empty workspace.
+4. `NextjsProvider.ts` — dev/start scripts bind `--hostname 0.0.0.0` so the E2B proxy can reach
+   the Next.js dev server (was 127.0.0.1-only → unreachable).
+5. `StaticProvider.ts` — added package.json with an http-server dev script so static-site builds
+   have a runnable `npm run dev` (previously no run command existed for the static template).
+6. `systemPrompt.ts` — FRAMEWORK_HINTS now state explicit port numbers for all 18 frameworks so
+   the agent calls update_preview(<correct port>) instead of guessing.
+
+Gate at merge: frontend tsc 0, server tsc 0, vitest 2643/2643 PASS, CI green before squash-merge.
+
+**Honest limitation (not code-fixable here):** the full regression matrix (10+ app types ×
+5+ frameworks end-to-end through a LIVE E2B sandbox) cannot be executed inside CI — it needs a
+real E2B cloud VM with an API key. The unit/integration suite verifies the per-framework port
+logic, long-running detection, template scaffolding, and the health-check gate deterministically;
+the live multi-framework smoke matrix remains a manual/staging step.

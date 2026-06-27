@@ -26,6 +26,8 @@ class FakeActuator implements ActuatorPort {
   }
   async runCommand(_ws: string, command: string) {
     this.commands.push(command);
+    // Automatically simulate a live port for port-readiness checks so update_preview doesn't time out.
+    if (command.includes('nc -z')) return { exitCode: 0, stdout: 'PORT_UP', stderr: '' };
     return this.commandResult;
   }
   async getPortUrl(_ws: string, port: number): Promise<string> {

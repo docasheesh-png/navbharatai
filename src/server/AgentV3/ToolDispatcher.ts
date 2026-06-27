@@ -1031,12 +1031,28 @@ export class ToolDispatcher {
         if (!this.actuator.getPortUrl) {
           throw new Error('Live preview is not available in this sandbox.');
         }
-        const rawUrl = await this.actuator.getPortUrl(this.workspaceId, port);
+        // Verify the port is actually listening before publishing (30 attempts × 500 ms = 15 s max).
+        // This prevents a false-success preview when the dev server hasn't started yet.
+        let portReady = false;
+        for (let attempt = 0; attempt < 30 && !portReady; attempt++) {
+          try {
+            const chk = await this.actuator.runCommand(
+              this.workspaceId,
+              `nc -z localhost ${port} 2>/dev/null && echo PORT_UP || echo PORT_DOWN`,
+            );
+            if (chk.stdout.includes('PORT_UP')) { portReady = true; break; }
+          } catch { /* keep polling */ }
+          if (!portReady) await new Promise(r => setTimeout(r, 500));
+        }
         // §12: v3.0-built apps are previewed under the platform's E2B custom domain
         // (mitrify.xyz) instead of the raw *.e2b.app host. Idempotent + scoped to v3.0.
+        const rawUrl = await this.actuator.getPortUrl(this.workspaceId, port);
         const url = applyPreviewDomain(rawUrl);
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
-        return `Live preview published at ${url}`;
+        if (!portReady) {
+          return `WARNING: port ${port} did not respond after 15 s. Check that the dev server started correctly — if the preview shows a connection error, run the dev server then call update_preview again.`;
+        }
+        return `Live preview published at ${url} (port ${port} verified UP)`;
       }
 
       case 'task': {

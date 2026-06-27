@@ -4,7 +4,7 @@ const PKG = JSON.stringify({
   name: 'my-next-app',
   version: '1.0.0',
   private: true,
-  scripts: { dev: 'next dev --port 3000', build: 'next build', start: 'next start' },
+  scripts: { dev: 'next dev --hostname 0.0.0.0 --port 3000', build: 'next build', start: 'next start --hostname 0.0.0.0 --port 3000' },
   dependencies: { next: '14', react: '^18', 'react-dom': '^18' },
   devDependencies: {
     typescript: '^5',

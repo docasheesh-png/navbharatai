@@ -112,6 +112,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'agentv3_restore_files',
+    name: 'Restore all files (bring your whole project back)',
+    path: 'NavBharatAI Pro v3.0 → header → History tab (or Files tab when empty) → "Restore all files" button',
+    description: 'Bring your ENTIRE project back into the workspace with one click — a real restore, not a preview. If your files look gone (for example after a page refresh, or a build that did not finish), open the History tab (or the Files tab) and click "Restore all files". NavBharatAI writes your last durably-saved project files back into the workspace so they are genuinely there again — listed in Files, previewable, buildable and deployable. It honestly tells you how many files were restored, or says so if there are no saved files yet. You can also restore to a specific earlier checkpoint from the History list.',
+    howToUse: 'Open NavBharatAI Pro v3.0. Tap the "History" tab at the top (or the "Files" tab if it shows no files). Click "Restore all files" — the workspace is repopulated and the Files tab opens showing your restored files. To go back to an earlier version instead, click "Restore" next to a specific checkpoint in History.',
+    relatedFeatures: ['agentv3_builder', 'agentv3_export', 'agentv3_deploy'],
+    keywords: ['restore', 'restore files', 'restore all', 'files gone', 'files missing', 'files 0', 'lost files', 'get files back', 'recover', 'recover files', 'checkpoint', 'history', 'restore karo', 'files wapas', 'file gayab', 'files nahi dikh rahi', 'project wapas', 'restore project'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'agentv3_deploy',
     name: 'Deploy to a live URL (one click)',
     path: 'NavBharatAI Pro v3.0 → header tab row → "Deploy" button (the live link then shows as "Live site")',

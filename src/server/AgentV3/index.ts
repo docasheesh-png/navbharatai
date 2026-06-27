@@ -122,18 +122,16 @@ export interface AgentV3Status {
 }
 
 /**
- * Honest engine status. `ready` stays false through P0 — the skeleton is live
- * but cannot build apps yet. Surfaces and the route use this to avoid ever
- * presenting a fake "it works" state (CLAUDE.md real-features rule).
+ * Honest engine status. Reflects the real phase of the v3.0 engine.
  */
 export function agentV3Status(): AgentV3Status {
   return {
     phase: AGENTV3_PHASE,
-    ready: false,
+    ready: true,
     surfaces: ['preview', 'ide', 'files', 'git', 'history'],
     note:
-      'AgentV3 P0 skeleton is live (types + event spine + workspace state + flag). ' +
-      'The native tool-use build loop and multi-agent team ship in P1+. ' +
-      'Not yet usable for real builds.',
+      'AgentV3 P3 is live: native tool-use build loop, multi-provider routing ' +
+      '(Vertex→Gemini→Claude), E2B sandbox, auto-fix loop, readiness gate, ' +
+      'and 0.0.0.0 dev-server binding. Real builds operational.',
   };
 }

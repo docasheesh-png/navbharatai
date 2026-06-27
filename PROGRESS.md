@@ -4289,3 +4289,58 @@ Remaining (more complex / infra decisions): GitHub Pages (user token + repo), Ra
 servers, not static), Hostinger (FTP), and per-app custom domain on mitrify.xyz (DNS/infra design).
 
 Gate at each merge: frontend tsc 0, server tsc 0, vitest PASS (2643→2661), boot:check PASS.
+
+---
+
+## 2026-06-27 — MODE A infra: custom E2B builder template (artifacts, build-ready)
+
+Admin asked for BOTH scaffolding modes rock-solid: MODE B (internal templates,
+already working) AND MODE A (`npm create vite` / `create-next-app`). Forensic
+finding: MODE A fails ONLY because `Sandbox.create()` uses E2B's default base
+image (no template id) whose Node is too old for modern generators. ScaffoldGuard
+correctly blocks MODE A today as a result. The fix is infra (a modern pinned-Node
+sandbox image), not code.
+
+**Verified live:** `npm create vite@latest -- --template react-ts` run on Node
+v22.22 in this environment → succeeded (React 19 + Vite 8 scaffold). Confirms the
+ONLY blocker is the sandbox Node version.
+
+**Shipped (this PR) — `infra/e2b/`:**
+- `e2b.Dockerfile` — Node 22 (pinned) + git, netcat-openbsd (`nc` for the
+  update_preview port health-check), python3/venv (FastAPI/Flask/Django),
+  build-essential, pre-warmed create-vite/create-next-app; build-time sanity gate
+  that fails the image build if Node < 20.19.
+- `e2b.toml` — template config (name navbharat-builder, cpu 2 / 2 GB).
+- `README.md` — turnkey build+publish+verify guide AND the deferred code-wiring
+  plan (point Sandbox.create at E2B_TEMPLATE_ID with default-base fallback;
+  template-aware ScaffoldGuard allow; MODE A→MODE B automatic fallback; post-
+  scaffold patch to add `server:{host:true,allowedHosts:true}` to create-vite's
+  vite.config for the E2B proxy; AppKnowledgeBase entry).
+
+**Honest blockers (cannot run from the Claude web sandbox):** Docker Hub image
+blobs are blocked by egress policy (403 from production.cloudfront.docker.com)
+and no E2B_API_KEY is mounted — so the `e2b template build` + publish step must
+run on a machine with Docker + Docker Hub access + the E2B key. Artifacts are
+build-ready; code wiring is intentionally deferred to a follow-up PR until a real
+template id exists (so the old create-vite-fails bug is never re-introduced by
+pointing at a half-built template).
+
+No code/TS touched → tsc clean, existing test suite unaffected.
+
+## 2026-06-27 (cont.) — MODE A infra: one-click GitHub Actions build for the E2B template
+
+The custom E2B template (added previous PR) must be built where Docker + Docker
+Hub egress + E2B_API_KEY are all available — NOT the Claude web sandbox (Docker
+Hub blobs AND api.e2b.dev are both egress-blocked there; key not mounted).
+
+Added `.github/workflows/e2b-template.yml` (workflow_dispatch, manual): builds +
+publishes the template on a GitHub runner using an `E2B_API_KEY` repo secret, and
+prints the resulting Template ID into the job summary (+ uploads the updated
+e2b.toml as an artifact). This is the turnkey "infra build" path — admin adds one
+repo secret and clicks Run; no local terminal/Docker needed. README updated to
+make this the recommended path. Manual-only so it never incurs E2B build cost on
+ordinary pushes.
+
+Next (gated on the printed Template ID): set Cloud Run E2B_TEMPLATE_ID, then the
+code-wiring PR (Sandbox.create template + template-aware ScaffoldGuard + MODE A→B
+fallback + create-vite vite.config host/allowedHosts patch).

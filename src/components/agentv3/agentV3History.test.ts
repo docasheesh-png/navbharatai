@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { messageText, conversationToEvents, type PersistedConversation } from './agentV3History';
+import { messageText, conversationToEvents, conversationToUserMessages, cleanRestoredUserPrompt, type PersistedConversation } from './agentV3History';
 import { agentV3Reducer } from './agentV3Reducer';
 import { initialAgentV3State } from './agentV3Types';
 
@@ -67,5 +67,52 @@ describe('conversationToEvents', () => {
   it('handles an empty / malformed transcript without throwing', () => {
     expect(conversationToEvents(conv({ messages: [] })).filter((e) => e.type === 'narration')).toHaveLength(0);
     expect(conversationToEvents(conv({ messages: [null, 1, 'x', { role: 'assistant' }] as unknown[] })).filter((e) => e.type === 'narration')).toHaveLength(0);
+  });
+});
+
+describe('cleanRestoredUserPrompt (strips server augmentation)', () => {
+  it('returns a plain prompt unchanged', () => {
+    expect(cleanRestoredUserPrompt('make a todo app')).toBe('make a todo app');
+  });
+  it('strips a leading "Language: …" instruction paragraph', () => {
+    expect(cleanRestoredUserPrompt('Language: generate all user-facing text in Hindi.\n\nmake a todo app')).toBe('make a todo app');
+  });
+  it('keeps only the real prompt after the last lessons/attachment separator', () => {
+    expect(cleanRestoredUserPrompt('Lesson: prefer X\n\n---\n\nmake a todo app')).toBe('make a todo app');
+    expect(cleanRestoredUserPrompt('The user attached file(s); here is the extracted content:\n\nblah\n\n---\n\nmake a todo app')).toBe('make a todo app');
+  });
+  it('strips a trailing "Approved plan: …" block', () => {
+    expect(cleanRestoredUserPrompt('make a todo app\n\nApproved plan:\n- step one\n- step two')).toBe('make a todo app');
+  });
+  it('handles combined augmentation', () => {
+    expect(cleanRestoredUserPrompt('Language: use Hindi.\n\nLesson: prefer X\n\n---\n\nmake a todo app')).toBe('make a todo app');
+  });
+});
+
+describe('conversationToUserMessages (R5 reload fix — user bubbles no longer vanish)', () => {
+  it('restores the user prompt(s), skipping tool_result user turns, cleaned of augmentation', () => {
+    const c = conv({
+      messages: [
+        { role: 'user', content: 'Language: use Hindi.\n\nbuild a todo app' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Building.' }] },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'ok' }] }, // tool result — skipped
+        { role: 'assistant', content: 'Done.' },
+      ],
+    });
+    const users = conversationToUserMessages(c);
+    expect(users.map((u) => u.text)).toEqual(['build a todo app']);
+    expect(users[0].role).toBe('user');
+  });
+
+  it('interleaves correctly with agent narration by transcript-position timestamp', () => {
+    const c = conv();
+    const users = conversationToUserMessages(c); // user at idx 0 → ts 1
+    const narration = conversationToEvents(c).filter((e) => e.type === 'narration') as Array<{ ts: number }>;
+    // The first user message (ts 1) sorts before the first agent narration (ts 2).
+    expect(users[0].ts).toBeLessThan(narration[0].ts);
+  });
+
+  it('returns [] for an empty transcript', () => {
+    expect(conversationToUserMessages(conv({ messages: [] }))).toEqual([]);
   });
 });

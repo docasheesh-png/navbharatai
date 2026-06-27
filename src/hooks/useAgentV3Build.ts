@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { agentV3Reducer } from '../components/agentv3/agentV3Reducer';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent } from '../components/agentv3/agentV3Types';
-import { conversationToEvents, type PersistedConversation } from '../components/agentv3/agentV3History';
+import { conversationToEvents, conversationToUserMessages, type PersistedConversation } from '../components/agentv3/agentV3History';
 import { auth } from '../App';
 
 /**
@@ -25,6 +25,9 @@ async function authJsonHeaders(): Promise<Record<string, string>> {
  * reads the NDJSON stream line by line, and folds each event through the pure
  * agentV3Reducer. Everything the UI shows is REAL engine activity (D9).
  */
+/** A restored user-authored chat row (transcript-position timestamp for correct interleaving). */
+export type UserChatMsg = { role: 'user'; text: string; ts: number };
+
 export interface UseAgentV3Build {
   state: AgentV3ClientState;
   running: boolean;
@@ -45,11 +48,12 @@ export interface UseAgentV3Build {
   /** Ask the server whether a build is running for this account (sets serverBuildRunning). */
   checkRunning: (opts?: { userId?: string; email?: string }) => Promise<void>;
   /**
-   * D7 — on (re)load, fetch the user's most recent persisted build and re-display its chat
-   * history (option (a): chat + git-restore). Returns true if a build was loaded. No-op while a
-   * build is running. Best-effort: any failure resolves false and leaves the state untouched.
+   * D7 — on (re)load, fetch the user's most recent persisted build and re-display its chat history
+   * (option (a): chat + git-restore). Rebuilds the agent narration into state and RETURNS the user's
+   * own restored messages so the panel can re-display them too. Returns null if nothing was loaded.
+   * No-op while a build is running. Best-effort: any failure resolves null and leaves state untouched.
    */
-  loadConversation: (opts?: { userId?: string; email?: string }) => Promise<boolean>;
+  loadConversation: (opts?: { userId?: string; email?: string }) => Promise<UserChatMsg[] | null>;
 }
 
 export function useAgentV3Build(): UseAgentV3Build {
@@ -137,29 +141,31 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, []);
 
-  const loadConversation = useCallback(async (opts?: { userId?: string; email?: string }): Promise<boolean> => {
-    if (running) return false;
+  const loadConversation = useCallback(async (opts?: { userId?: string; email?: string }): Promise<UserChatMsg[] | null> => {
+    if (running) return null;
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     try {
       const params = new URLSearchParams();
       if (userIdRef.current) params.set('userId', userIdRef.current);
       if (emailRef.current) params.set('email', emailRef.current);
       const listRes = await fetch(`/api/agentv3/conversations?${params.toString()}`);
-      if (!listRes.ok) return false;
+      if (!listRes.ok) return null;
       const listJson = await listRes.json().catch(() => ({}));
       const recent = Array.isArray(listJson?.conversations) ? listJson.conversations[0] : undefined;
-      if (!recent?.id) return false;
+      if (!recent?.id) return null;
       const oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(String(recent.id))}?${params.toString()}`);
-      if (!oneRes.ok) return false;
+      if (!oneRes.ok) return null;
       const oneJson = await oneRes.json().catch(() => ({}));
       const conv = oneJson?.conversation as PersistedConversation | undefined;
-      if (!conv || !Array.isArray(conv.messages)) return false;
+      if (!conv || !Array.isArray(conv.messages)) return null;
       let next = initialAgentV3State();
       for (const e of conversationToEvents(conv)) next = agentV3Reducer(next, e);
       setState(next);
-      return true;
+      // Return the user's OWN messages so the panel can restore them too (the reducer/narration
+      // path only rebuilds the AGENT side — without this the user's bubbles vanish on reload).
+      return conversationToUserMessages(conv);
     } catch {
-      return false; // best-effort — never disrupt the panel on a load failure
+      return null; // best-effort — never disrupt the panel on a load failure
     }
   }, [running]);
 

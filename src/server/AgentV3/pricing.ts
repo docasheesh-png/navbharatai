@@ -15,8 +15,21 @@
 
 /** Normal-mode markup: Sonnet-equivalent × 3.5. */
 export const NORMAL_MULTIPLIER = 3.5;
-/** Power-mode markup: real Opus 4.8 cost × 2.5. */
+/**
+ * Legacy power-mode markup (real Opus 4.8 cost × 2.5). Retained for the boolean
+ * `billedAmountUsd(usage, true)` path so existing callers/tests are unchanged.
+ * New code uses the three power-level multipliers below (admin override 2026-06-27).
+ */
 export const POWER_MULTIPLIER = 2.5;
+
+/**
+ * Admin-authorized power-level markups (aashishcpmt09, 2026-06-27), applied to the
+ * real Opus-equivalent token cost: 5× (mini) / 10× (medium) / 20× (max/ultracode).
+ */
+export const POWER_MULTIPLIERS = { mini: 5, medium: 10, max: 20 } as const;
+
+/** A power level for billing. 'off' bills at the normal Sonnet rate. */
+export type BillingPowerLevel = 'off' | 'mini' | 'medium' | 'max';
 
 function envRate(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -70,19 +83,25 @@ export function sonnetEquivalentUsd(usage: BilledUsage): number {
 
 /**
  * The USD amount to bill the user.
- * - POWER mode → real Opus 4.8 cost × 2.5
- * - NORMAL mode → Sonnet-equivalent cost × 3.5
+ * - Power level 'mini'/'medium'/'max' → real Opus 4.8 cost × 5 / 10 / 20
+ * - Power level 'off' → Sonnet-equivalent cost × 3.5
+ * - Legacy boolean: `true` → real Opus 4.8 cost × 2.5 (the old POWER_MULTIPLIER);
+ *   `false` → normal. Kept so existing callers/tests behave exactly as before.
  */
-export function billedAmountUsd(usage: BilledUsage, powerMode = false): number {
-  return powerMode
-    ? opusEquivalentUsd(usage) * POWER_MULTIPLIER
-    : sonnetEquivalentUsd(usage) * NORMAL_MULTIPLIER;
+export function billedAmountUsd(usage: BilledUsage, power: BillingPowerLevel | boolean = false): number {
+  if (power === true) return opusEquivalentUsd(usage) * POWER_MULTIPLIER;
+  if (power === false || power === 'off') return sonnetEquivalentUsd(usage) * NORMAL_MULTIPLIER;
+  return opusEquivalentUsd(usage) * POWER_MULTIPLIERS[power];
 }
 
 /**
  * The INR amount to bill the user = billedAmountUsd × the (real-time) USD→INR rate.
  * The rate is passed in (resolved from UsdInrRate) so this stays pure/testable.
  */
-export function billedAmountInr(usage: BilledUsage, powerMode: boolean, usdInrRate: number): number {
-  return billedAmountUsd(usage, powerMode) * Math.max(0, usdInrRate);
+export function billedAmountInr(
+  usage: BilledUsage,
+  power: BillingPowerLevel | boolean,
+  usdInrRate: number,
+): number {
+  return billedAmountUsd(usage, power) * Math.max(0, usdInrRate);
 }

@@ -65,6 +65,19 @@ describe('pricing — billed amount (the admin model)', () => {
     // Power: billed (225) ≥ real Opus cost (90).
     expect(billedAmountUsd(usage, true)).toBeGreaterThan(opusEquivalentUsd(usage));
   });
+
+  it('power-level tiers bill real Opus cost × 5 / 10 / 20 (admin override 2026-06-27)', () => {
+    // Opus real = 90 → ×5 = 450, ×10 = 900, ×20 = 1800.
+    expect(billedAmountUsd(usage, 'off')).toBeCloseTo(63, 6); // Sonnet × 3.5
+    expect(billedAmountUsd(usage, 'mini')).toBeCloseTo(450, 6);
+    expect(billedAmountUsd(usage, 'medium')).toBeCloseTo(900, 6);
+    expect(billedAmountUsd(usage, 'max')).toBeCloseTo(1800, 6);
+  });
+
+  it('power-level INR billing scales by the USD→INR rate', () => {
+    expect(billedAmountInr(usage, 'max', 85)).toBeCloseTo(1800 * 85, 4);
+    expect(billedAmountInr(usage, 'off', 85)).toBeCloseTo(63 * 85, 4);
+  });
 });
 
 describe('pricing — INR conversion', () => {

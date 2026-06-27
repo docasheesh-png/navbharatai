@@ -73,6 +73,7 @@ import { deploymentStore, withDeploymentPersistence } from '../AgentV3/Deploymen
 import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
 // Side-effect imports: each provider self-registers into the DeployProviders registry on load.
 import '../AgentV3/VercelProvider';
+import '../AgentV3/NetlifyProvider';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';

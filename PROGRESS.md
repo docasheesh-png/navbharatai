@@ -4297,3 +4297,21 @@ template id exists (so the old create-vite-fails bug is never re-introduced by
 pointing at a half-built template).
 
 No code/TS touched → tsc clean, existing test suite unaffected.
+
+## 2026-06-27 (cont.) — MODE A infra: one-click GitHub Actions build for the E2B template
+
+The custom E2B template (added previous PR) must be built where Docker + Docker
+Hub egress + E2B_API_KEY are all available — NOT the Claude web sandbox (Docker
+Hub blobs AND api.e2b.dev are both egress-blocked there; key not mounted).
+
+Added `.github/workflows/e2b-template.yml` (workflow_dispatch, manual): builds +
+publishes the template on a GitHub runner using an `E2B_API_KEY` repo secret, and
+prints the resulting Template ID into the job summary (+ uploads the updated
+e2b.toml as an artifact). This is the turnkey "infra build" path — admin adds one
+repo secret and clicks Run; no local terminal/Docker needed. README updated to
+make this the recommended path. Manual-only so it never incurs E2B build cost on
+ordinary pushes.
+
+Next (gated on the printed Template ID): set Cloud Run E2B_TEMPLATE_ID, then the
+code-wiring PR (Sandbox.create template + template-aware ScaffoldGuard + MODE A→B
+fallback + create-vite vite.config host/allowedHosts patch).

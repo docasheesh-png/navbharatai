@@ -35,9 +35,14 @@ export function opusModel(): string {
   return process.env.AGENTV3_OPUS_MODEL || DEFAULT_OPUS;
 }
 
-/** Resolve the model to run with. Only-Opus (super toggle) → Opus, else Sonnet. */
-export function resolveModel(onlyOpus: boolean): string {
-  return onlyOpus ? opusModel() : sonnetModel();
+/**
+ * Resolve the model to run with. Any power-on level (boolean true, or a
+ * 'mini'/'medium'/'max' power level) → Opus; normal mode (false / 'off') → Sonnet.
+ * The Opus reasoning EFFORT for each power level lives in powerLevel.ts.
+ */
+export function resolveModel(power: boolean | 'off' | 'mini' | 'medium' | 'max'): string {
+  const isPowerOn = power === true || power === 'mini' || power === 'medium' || power === 'max';
+  return isPowerOn ? opusModel() : sonnetModel();
 }
 
 /** The Anthropic ladder tiers, low → high cost (excludes the Gemini/Vertex base). */

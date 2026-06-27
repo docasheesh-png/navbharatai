@@ -4371,3 +4371,57 @@ egress-blocked from the Claude sandbox).
 
 Next: admin re-runs the workflow → template publishes → set Cloud Run
 E2B_TEMPLATE_ID=navbharat-builder → code-wiring PR.
+
+## 2026-06-27 — AgentV3 phase bump: P0→P3, ready:true
+
+PR #480 (spinner fix + 0.0.0.0 preview fix) merged and live.
+Following that, bumped the engine status to reflect real state:
+- `AGENTV3_PHASE` constant: `'P0'` → `'P3'` (types.ts)
+- `agentV3Status().ready`: `false` → `true` (index.ts)
+- Status note updated to list actual capabilities: native tool-use,
+  multi-provider routing, E2B sandbox, auto-fix loop, host-binding fix.
+
+Verified: ts-morph pre-existing errors unchanged; vitest 2668/2676 pass (same
+8 pre-existing CodemodeExecutor failures, none new).
+
+Pushed to branch `claude/kind-lovelace-chcxp6`. PR needed to merge to main.
+GitHub MCP tools unavailable in this session — admin can open PR from branch
+or merge directly once CI is green.
+
+## 2026-06-27 — Power levels: 3-tier Opus billing (5×/10×/20×) + reasoning effort
+
+Admin (aashishcpmt09 / doc.asheesh) authorized a new power/billing structure for
+NavBharatAI Pro v3.0:
+- Power OFF (normal): Sonnet routing, billed ×3.5; the empty-build retry now
+  escalates to Opus at its LOWEST effort as the ceiling ("opus ka sabse lower
+  version") — billing stays normal (no surprise).
+- Power 5× (mini): Opus, reasoning effort "low", billed ×5.
+- Power 10× (medium): Opus, effort "medium", billed ×10.
+- Power 20× (max / ultracode): Opus, effort "max", billed ×20.
+
+Implementation (real, end-to-end, fully wired):
+- NEW `src/server/AgentV3/powerLevel.ts` (pure, tested): PowerLevel type,
+  toPowerLevel() (back-compat with legacy onlyOpus boolean → 'mini'), powerSpec()
+  → {powerMode, effort, ceilingEffort, multiplier}.
+- `pricing.ts`: POWER_MULTIPLIERS {mini:5, medium:10, max:20}; billedAmountUsd /
+  billedAmountInr accept `BillingPowerLevel | boolean` (old boolean path unchanged).
+- `models.ts`: resolveModel accepts boolean | PowerLevel (power-on → Opus).
+- `ClaudeClient.ts`: RunTurnParams.effort → output_config.effort (Opus 4.8 lever;
+  budget_tokens is removed on Opus 4.8 per claude-api skill). Only sent for Opus runs.
+- `AgentRunner.ts`: powerLevel + effort options; bills by powerLevel; threads effort
+  into every runTurn.
+- route `agentv3.ts`: parses `powerLevel` (falls back to onlyOpus); passes
+  powerLevel + effort into base/plan/retry runners; empty-build retry forces Opus +
+  ceiling effort. Billing flows through result.billedUsd (power-level aware).
+- Frontend `AgentV3Panel.tsx`: replaced the single Power toggle with a 4-way
+  segmented selector (Off / 5× / 10× / 20×) + plain-language hint; `useAgentV3Build.ts`
+  sends `powerLevel` in the build request body.
+- `AppKnowledgeBase.ts`: updated the v3.0 entry to describe the Power selector.
+
+Verified: frontend tsc clean, server tsc clean (only pre-existing ts-morph errors),
+new tests 26/26 pass (powerLevel 8 + pricing 12 + models 5; pricing/models extended).
+Full suite: 2678 pass, same 8 pre-existing CodemodeExecutor/ts-morph failures, none new.
+
+API mapping confirmed against the claude-api skill: Opus 4.8 effort =
+output_config.effort (low|medium|high|xhigh|max), GA, no beta header; budget_tokens
+is rejected (400) on Opus 4.8 — adaptive thinking + effort only.

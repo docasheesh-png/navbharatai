@@ -42,7 +42,11 @@ interface ChatMsg {
 export function AgentV3Panel({ userId, email, resume }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null }) {
   const { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
-  const [onlyOpus, setOnlyOpus] = useState(false);
+  // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
+  // 5× = Opus minimum power; 10× = Opus medium; 20× = Opus max / ultracode.
+  const [powerLevel, setPowerLevel] = useState<'off' | 'mini' | 'medium' | 'max'>('off');
+  // Derived for the existing boolean call sites (start/telemetry) — any Opus power level.
+  const onlyOpus = powerLevel !== 'off';
   const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default
   const [thinking, setThinking] = useState(false); // adaptive thinking, off by default
   const [tab, setTab] = useState<SurfaceTab>('preview');
@@ -268,7 +272,7 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
     setFiles([]);
     const pendingImportUrl = importUrl.trim();
     setImportUrl(''); // consume import URL on first send
-    start(msgText, { userId, email, onlyOpus, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, importUrl: pendingImportUrl || undefined });
+    start(msgText, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, importUrl: pendingImportUrl || undefined });
   };
 
   // Start a brand-new project: fresh sandbox/memory (new session id) and clear chat.
@@ -398,7 +402,7 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
     setUserMsgs((c) => [...c, { role: 'user', text: `🚀 Deploy to ${providerName}`, ts: Date.now() }]);
     start(
       'Deploy this app to a permanent public live URL. Run "npm run build" first, then call the deploy tool, and finish by giving me the live link.',
-      { userId, email, onlyOpus, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, deployProvider },
+      { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, deployProvider },
     );
   };
 
@@ -644,7 +648,41 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
                     <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
                       <ToggleRow label="Planning" checked={planFirst} disabled={running} onClick={() => setPlanFirst((v) => !v)} />
                       <ToggleRow label="Thinking" checked={thinking} disabled={running} onClick={() => setThinking((v) => !v)} />
-                      <ToggleRow label="Power" hint="5×" checked={onlyOpus} disabled={running} onClick={() => setOnlyOpus((v) => !v)} />
+                      {/* Power level: Off (Sonnet) / 5× (Opus min) / 10× (Opus medium) / 20× (Opus max, ultracode). */}
+                      <div className="px-3 py-2">
+                        <div className="text-sm text-zinc-200 mb-1.5">Power</div>
+                        <div className="flex gap-1">
+                          {([
+                            { key: 'off', label: 'Off' },
+                            { key: 'mini', label: '5×' },
+                            { key: 'medium', label: '10×' },
+                            { key: 'max', label: '20×' },
+                          ] as const).map((opt) => (
+                            <button
+                              key={opt.key}
+                              type="button"
+                              disabled={running}
+                              onClick={() => setPowerLevel(opt.key)}
+                              className={`flex-1 px-2 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 ${
+                                powerLevel === opt.key
+                                  ? 'bg-indigo-600 text-white'
+                                  : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="text-[11px] text-zinc-500 mt-1">
+                          {powerLevel === 'off'
+                            ? 'Normal — fast & lowest cost'
+                            : powerLevel === 'mini'
+                            ? 'Opus minimum power'
+                            : powerLevel === 'medium'
+                            ? 'Opus medium power'
+                            : 'Opus max — ultracode'}
+                        </div>
+                      </div>
                       <div className="border-t border-zinc-800 my-1" />
                       <button
                         className="w-full flex items-center justify-between px-3 py-2 rounded hover:bg-zinc-800 text-left"

@@ -73,6 +73,12 @@ export interface RunTurnParams {
    */
   thinking?: boolean;
   /**
+   * Opus reasoning effort (output_config.effort): low | medium | high | xhigh | max.
+   * Controls thinking depth + token spend on Opus 4.8 (budget_tokens is removed there).
+   * Only send for Opus/Sonnet-4.6 runs — effort errors on Haiku 4.5. Omitted → model default.
+   */
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  /**
    * Optional streaming callback for the assistant's visible text. When provided
    * (and the underlying client supports streaming), the turn streams and each
    * text delta is delivered here token-by-token. Omitting it keeps the original
@@ -230,6 +236,12 @@ export class ClaudeClient implements TurnRunner {
       // Adaptive thinking with a summarized display — the correct shape for
       // claude-opus-4-8 / claude-sonnet-4-6 (do NOT use budget_tokens here).
       createParams.thinking = { type: 'adaptive', display: 'summarized' };
+    }
+
+    if (params.effort) {
+      // Opus 4.8 reasoning-effort lever (GA, no beta header). Drives the power tiers
+      // (mini=low / medium=medium / max=max). Only set for Opus / Sonnet 4.6 runs.
+      createParams.output_config = { effort: params.effort };
     }
 
     // Stream the turn when a streaming callback is provided AND the client

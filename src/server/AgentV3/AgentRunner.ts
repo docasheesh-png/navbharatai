@@ -31,8 +31,16 @@ export interface AgentRunnerOptions {
   /** Max model turns before the loop stops (backstop). Default 50. */
   maxSteps?: number;
   maxTokensPerTurn?: number;
-  /** D6 — bill at the Only-Opus 5× rate instead of the standard 2.5×. */
+  /** D6 — bill at the Only-Opus rate instead of the standard rate. Legacy boolean. */
   onlyOpus?: boolean;
+  /**
+   * Power level for billing + Opus reasoning effort (admin override 2026-06-27):
+   * 'off' (Sonnet×3.5) | 'mini' (Opus low, ×5) | 'medium' (Opus medium, ×10) |
+   * 'max' (Opus max, ×20). When set it takes precedence over `onlyOpus` for billing.
+   */
+  powerLevel?: 'off' | 'mini' | 'medium' | 'max';
+  /** Opus reasoning effort (output_config.effort) for every turn. Omitted → model default. */
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /** Enable Anthropic adaptive thinking (streams a thinking summary to the UI). */
   thinking?: boolean;
   /** Optional hard budget (USD billed to the user). Stops honestly when reached. */
@@ -151,9 +159,13 @@ export class AgentRunner {
       tools,
       maxTokensPerTurn,
       onlyOpus,
+      powerLevel,
+      effort,
       thinking,
       maxBudgetUsd,
     } = this.opts;
+    // Bill by explicit power level when set; else fall back to the legacy onlyOpus boolean.
+    const billingPower = powerLevel ?? onlyOpus;
     const maxSteps = this.opts.maxSteps ?? 50;
     const agentRole: AgentRole = this.opts.agentRole ?? 'architect';
     const toolConcurrency = Math.max(1, this.opts.toolConcurrency ?? 4);
@@ -171,7 +183,7 @@ export class AgentRunner {
     };
 
     const billed = (): number =>
-      billedAmountUsd({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }, onlyOpus);
+      billedAmountUsd({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }, billingPower);
 
     // ── Durable persistence (D7), all best-effort — a store error never breaks the build. ──
     const persistence = this.opts.persistence;
@@ -233,6 +245,7 @@ export class AgentRunner {
           tools,
           maxTokens: maxTokensPerTurn,
           thinking,
+          effort,
           onText: (delta) =>
             events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'text', delta, ts: Date.now() }),
           onThinking: (delta) =>

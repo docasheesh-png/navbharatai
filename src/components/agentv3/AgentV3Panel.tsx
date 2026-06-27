@@ -129,10 +129,17 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
   // live build or a thread already opened from History. Best-effort.
   const loadedConvoRef = useRef(false);
   useEffect(() => {
-    if (loadedConvoRef.current || running || !userId || state.narration.length > 0) return;
+    if (loadedConvoRef.current || running || !userId || state.narration.length > 0 || userMsgs.length > 0) return;
     loadedConvoRef.current = true;
-    void loadConversation({ userId, email });
-  }, [userId, email, running, state.narration.length, loadConversation]);
+    void (async () => {
+      const restoredUserMsgs = await loadConversation({ userId, email });
+      // Restore the user's OWN messages too — the narration path only rebuilds the agent side, so
+      // without this the user's bubbles vanish on reload (only AI replies would remain).
+      if (restoredUserMsgs && restoredUserMsgs.length > 0) {
+        setUserMsgs((cur) => (cur.length > 0 ? cur : restoredUserMsgs.map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts }))));
+      }
+    })();
+  }, [userId, email, running, state.narration.length, userMsgs.length, loadConversation]);
 
   // Resume a saved v3.0 conversation opened from History ("open chat"). Adopt its
   // sessionId so the backend continues with the SAME workspace/memory (best-effort,

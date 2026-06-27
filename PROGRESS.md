@@ -4263,6 +4263,35 @@ real E2B cloud VM with an API key. The unit/integration suite verifies the per-f
 logic, long-running detection, template scaffolding, and the health-check gate deterministically;
 the live multi-framework smoke matrix remains a manual/staging step.
 
+---
+
+## 2026-06-27 — Multi-provider deploy (no lock-in): foundation + 3 providers + chooser
+
+Admin direction: NavBharatAI must never depend on a single hosting provider. Built the full
+no-lock-in deploy system, each piece real and gate-green:
+
+- **Foundation (PR #466):** DeployProvider abstraction + registry + deployProviderStatus() +
+  GET /api/agentv3/deploy-providers. The real deploy flows through the registry. No placeholders —
+  only working providers are registered.
+- **Vercel provider (PR #468):** sha1 file upload + production deployment, idempotent by project
+  name. Token-gated on VERCEL_TOKEN (+ optional VERCEL_TEAM_ID).
+- **Netlify provider (PR #473):** digest deploy + ProviderStateStore for a stable site/URL across
+  re-deploys. Token-gated on NETLIFY_AUTH_TOKEN.
+- **Provider chooser (PR #474):** the build route honors req.body.deployProvider; the UI shows a
+  chooser next to Deploy when >1 provider is configured (only configured ones offered). Honest
+  "configure <PROVIDER>" error if an unconfigured one is somehow chosen. AppKnowledgeBase updated.
+
+End-to-end: add a provider's API token → it appears in the chooser → pick it → deploy there.
+Firebase stays the always-available default; everything else is OFF until its token is set (zero
+risk to the live app). Live-API paths verified once the admin adds tokens; pure parts fully tested.
+
+Remaining (more complex / infra decisions): GitHub Pages (user token + repo), Railway (runs
+servers, not static), Hostinger (FTP), and per-app custom domain on mitrify.xyz (DNS/infra design).
+
+Gate at each merge: frontend tsc 0, server tsc 0, vitest PASS (2643→2661), boot:check PASS.
+
+---
+
 ## 2026-06-27 — MODE A infra: custom E2B builder template (artifacts, build-ready)
 
 Admin asked for BOTH scaffolding modes rock-solid: MODE B (internal templates,

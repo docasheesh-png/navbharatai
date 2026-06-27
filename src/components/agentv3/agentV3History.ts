@@ -44,21 +44,60 @@ export function messageText(content: unknown): string {
 export function conversationToEvents(conv: PersistedConversation): AgentV3WireEvent[] {
   const events: AgentV3WireEvent[] = [];
   if (conv.workspaceId) events.push({ type: 'workspace', workspaceId: conv.workspaceId, ts: 0 });
-  let ts = 1;
-  for (const m of conv.messages ?? []) {
-    if (!m || typeof m !== 'object') continue;
+  const msgs = conv.messages ?? [];
+  // Timestamp by TRANSCRIPT POSITION (idx+1), not by assistant-only counter, so restored agent
+  // narration interleaves correctly with the restored USER messages (which use the same scheme).
+  msgs.forEach((m, idx) => {
+    if (!m || typeof m !== 'object') return;
     const msg = m as { role?: unknown; content?: unknown };
-    if (msg.role !== 'assistant') continue;
+    if (msg.role !== 'assistant') return;
     const text = messageText(msg.content).trim();
-    if (text) events.push({ type: 'narration', agent: 'architect', text, ts: ts++ });
-  }
+    if (text) events.push({ type: 'narration', agent: 'architect', text, ts: idx + 1 });
+  });
   if (conv.status === 'complete' || conv.status === 'stopped' || conv.status === 'error') {
     events.push({
       type: 'done',
       ok: conv.status === 'complete',
       summary: `Reloaded a previous build (${conv.status}).`,
-      ts: ts++,
+      ts: msgs.length + 1,
     });
   }
   return events;
+}
+
+/**
+ * The build prompt persisted in the transcript is AUGMENTED server-side (a leading "Language: …"
+ * instruction, recalled-lesson blocks, attachment text, an "Approved plan:" suffix). Strip those so
+ * the restored user bubble shows what the user actually typed, not the engine's internal wrapping.
+ */
+export function cleanRestoredUserPrompt(text: string): string {
+  let t = typeof text === 'string' ? text : '';
+  // The real prompt always sits AFTER the last "\n\n---\n\n" separator (lessons / attachment blocks).
+  const sep = '\n\n---\n\n';
+  const last = t.lastIndexOf(sep);
+  if (last !== -1) t = t.slice(last + sep.length);
+  // Drop a leading single-line "Language: …" instruction paragraph.
+  t = t.replace(/^Language:[^\n]*\n\n/, '');
+  // Drop a trailing "Approved plan: …" block appended after plan approval.
+  t = t.replace(/\n\nApproved plan:[\s\S]*$/, '');
+  return t.trim();
+}
+
+/**
+ * Rebuild the user's OWN chat messages from a persisted conversation (the part conversationToEvents
+ * deliberately omits). Returns them as user-role chat rows with transcript-position timestamps so the
+ * UI can merge them with the restored agent narration in the right order. Tool-result "user" turns
+ * (no visible text) are skipped — only real prompts are kept.
+ */
+export function conversationToUserMessages(conv: PersistedConversation): Array<{ role: 'user'; text: string; ts: number }> {
+  const out: Array<{ role: 'user'; text: string; ts: number }> = [];
+  const msgs = conv.messages ?? [];
+  msgs.forEach((m, idx) => {
+    if (!m || typeof m !== 'object') return;
+    const msg = m as { role?: unknown; content?: unknown };
+    if (msg.role !== 'user') return;
+    const text = cleanRestoredUserPrompt(messageText(msg.content).trim());
+    if (text) out.push({ role: 'user', text, ts: idx + 1 });
+  });
+  return out;
 }

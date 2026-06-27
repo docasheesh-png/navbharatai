@@ -50,11 +50,11 @@ describe('AgentV3 feature flag (strangler-fig, default OFF)', () => {
   });
 });
 
-describe('AgentV3 status is honest (not ready until P1)', () => {
-  it('reports ready:false and the five merged surfaces', () => {
+describe('AgentV3 status is honest (operational at P3)', () => {
+  it('reports ready:true at phase P3 with the five merged surfaces', () => {
     const s = agentV3Status();
-    expect(s.ready).toBe(false);
-    expect(s.phase).toBe('P0');
+    expect(s.ready).toBe(true);
+    expect(s.phase).toBe('P3');
     expect(s.surfaces).toEqual(['preview', 'ide', 'files', 'git', 'history']);
   });
 });

@@ -807,6 +807,52 @@ export function registerAgentV3Routes(app: Express): void {
     }
   });
 
+  // "Restore all files" (History / Files tab) — a REAL restore, no fake. Brings the user's whole
+  // project back into the workspace and returns the actual file list:
+  //   • If the sandbox is warm and already has the files, return them (nothing to do).
+  //   • Otherwise load the last durably-saved files (Firestore WorkspaceFileStore) and WRITE them
+  //     back into the sandbox, so the restored project is genuinely there — buildable, previewable
+  //     and deployable — not just shown.
+  // Ownership-checked. Honest source flag ('sandbox' | 'saved' | 'none') + count.
+  app.post('/api/agentv3/restore-files', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    try {
+      const actuator = buildActuator();
+      // 'import' type starts EMPTY (no scaffold), so a cold sandbox doesn't mask "no files".
+      try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing */ }
+      // If the sandbox already holds the project (warm session), those are the freshest files.
+      const current = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] as string[] }));
+      if (Object.keys(current.files).length > 0) {
+        res.json({ files: Object.keys(current.files), count: Object.keys(current.files).length, restored: false, source: 'sandbox' });
+        return;
+      }
+      // Cold sandbox → genuinely restore the last durably-saved files into it.
+      const saved = await loadWorkspaceFiles(workspaceId);
+      if (saved && Object.keys(saved).length > 0) {
+        const { written } = await writeWorkspaceFiles(actuator, workspaceId, saved);
+        res.json({ files: written, count: written.length, restored: true, source: 'saved' });
+        return;
+      }
+      res.json({ files: [], count: 0, restored: false, source: 'none' });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to restore the workspace files.' });
+    }
+  });
+
   // Build entry — runs the native tool-use loop and streams events as NDJSON.
   app.post('/api/agentv3/chat', buildRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;

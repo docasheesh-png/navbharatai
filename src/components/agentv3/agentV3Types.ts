@@ -45,6 +45,7 @@ export type AgentV3WireEvent =
   | { type: 'tool_call'; agent: AgentRole; tool: string; input: unknown; callId: string; ts: number }
   | { type: 'tool_result'; agent: AgentRole; callId: string; ok: boolean; summary: string; ts: number }
   | { type: 'file_changed'; agent: AgentRole; change: FileChange; ts: number }
+  | { type: 'files_restored'; files: FileChange[]; ts: number }
   | { type: 'diff'; agent: AgentRole; diff: { path: string; patch: string }; ts: number }
   | { type: 'todo_updated'; todos: TodoItem[]; ts: number }
   | { type: 'plan_updated'; plan: string; ts: number }

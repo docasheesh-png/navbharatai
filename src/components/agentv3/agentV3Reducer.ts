@@ -134,6 +134,10 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'file_changed':
       return { ...state, files: applyFileChange(state.files, event.change) };
 
+    case 'files_restored':
+      // "Restore all files" replaced the whole file list with what's genuinely in the workspace now.
+      return { ...state, files: event.files };
+
     case 'diff':
       return { ...state, diffs: { ...state.diffs, [event.diff.path]: event.diff.patch } };
 

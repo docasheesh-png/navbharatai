@@ -40,7 +40,7 @@ interface ChatMsg {
 }
 
 export function AgentV3Panel({ userId, email, resume }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null }) {
-  const { state, running, error, start, respond, restore, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   const [onlyOpus, setOnlyOpus] = useState(false);
   const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default
@@ -402,6 +402,26 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
     );
   };
 
+  // "Restore all files" — genuinely bring the whole project back into the workspace (the server
+  // writes the durably-saved files back in), then show the real file list. Honest status, no fake.
+  const [restoring, setRestoring] = useState(false);
+  const [restoreMsg, setRestoreMsg] = useState<string>('');
+  const handleRestoreAll = async () => {
+    if (restoring || !state.workspaceId) return;
+    setRestoring(true);
+    setRestoreMsg('');
+    try {
+      const r = await restoreAllFiles();
+      if (!r.ok) { setRestoreMsg('Could not restore — please try again in a moment.'); return; }
+      if (r.count === 0) { setRestoreMsg('No saved files found to restore for this project yet.'); return; }
+      setRestoreMsg(r.restored ? `Restored ${r.count} file(s) into your workspace.` : `${r.count} file(s) are in your workspace.`);
+      setTab('files');
+      setShowWorkspace(true);
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   const agents = Object.values(state.agents).sort((a, b) => b.updatedTs - a.updatedTs);
   const diffPaths = Object.keys(state.diffs);
 
@@ -709,7 +729,22 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
             <PreviewSurface url={state.previewUrl} workspaceId={state.workspaceId} userId={userId} email={email} />
           ) : (
             <div className="flex-1 overflow-auto p-3 font-mono text-xs">
-              {tab === 'files' && (state.files.length === 0 ? <Empty>No files yet.</Empty> : (
+              {tab === 'files' && (state.files.length === 0 ? (
+                <div className="flex flex-col items-start gap-2">
+                  <Empty>No files shown.</Empty>
+                  {state.workspaceId && (
+                    <button
+                      onClick={handleRestoreAll}
+                      disabled={restoring}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-700/60 text-indigo-300 hover:text-white hover:border-indigo-500 disabled:opacity-40"
+                    >
+                      {restoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                      {restoring ? 'Restoring…' : 'Restore all files'}
+                    </button>
+                  )}
+                  {restoreMsg && <span className="text-[11px] text-zinc-400">{restoreMsg}</span>}
+                </div>
+              ) : (
                 <ul className="space-y-0.5">
                   {state.files.map((f) => <li key={f.path} className="flex items-center gap-2"><span className={fileDot(f.kind)} /> {f.path}</li>)}
                 </ul>
@@ -722,22 +757,42 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
               {tab === 'terminal' && (state.terminal.length === 0 ? <Empty>No terminal output yet.</Empty> : (
                 <pre className="whitespace-pre-wrap text-zinc-300">{state.terminal.join('\n')}</pre>
               ))}
-              {tab === 'history' && (allCheckpoints.length === 0 ? <Empty>No checkpoints yet.</Empty> : (
-                <ul className="space-y-1">
-                  {allCheckpoints.map((c) => (
-                    <li key={c.id} className="flex items-center gap-2 group">
-                      <History className="w-3.5 h-3.5 text-zinc-500" />
-                      <span className="text-zinc-500">{c.sha.slice(0, 7) || '—'}</span>
-                      <span className="flex-1 truncate">{c.message}</span>
-                      {c.sha && (
-                        <button onClick={() => restore(c.sha)} className="opacity-0 group-hover:opacity-100 flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300" title="Restore to this checkpoint">
-                          <RotateCcw className="w-3 h-3" /> Restore
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ))}
+              {tab === 'history' && (
+                <div className="space-y-2">
+                  {/* Restore the WHOLE project at once — a real restore (files written back into the
+                      workspace), available even when there are no in-session checkpoints (e.g. after a reload). */}
+                  {state.workspaceId && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={handleRestoreAll}
+                        disabled={restoring}
+                        title="Bring your whole project back into the workspace"
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-700/60 text-indigo-300 hover:text-white hover:border-indigo-500 disabled:opacity-40"
+                      >
+                        {restoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                        {restoring ? 'Restoring…' : 'Restore all files'}
+                      </button>
+                      {restoreMsg && <span className="text-[11px] text-zinc-400">{restoreMsg}</span>}
+                    </div>
+                  )}
+                  {allCheckpoints.length === 0 ? <Empty>No checkpoints yet.</Empty> : (
+                    <ul className="space-y-1">
+                      {allCheckpoints.map((c) => (
+                        <li key={c.id} className="flex items-center gap-2">
+                          <History className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                          <span className="text-zinc-500 shrink-0">{c.sha.slice(0, 7) || '—'}</span>
+                          <span className="flex-1 truncate">{c.message}</span>
+                          {c.sha && (
+                            <button onClick={() => restore(c.sha)} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 shrink-0" title="Restore to this checkpoint">
+                              <RotateCcw className="w-3 h-3" /> Restore
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -37,6 +37,9 @@ export interface UseAgentV3Build {
   respond: (requestId: string, approved: boolean) => Promise<void>;
   /** Restore the workspace to a checkpoint commit (History → restore). */
   restore: (sha: string) => Promise<boolean>;
+  /** "Restore all files" — genuinely bring the whole project back into the workspace (writes the
+   *  durably-saved files back) and reflect the real file list. Returns count + whether it restored. */
+  restoreAllFiles: () => Promise<{ ok: boolean; count: number; restored: boolean }>;
   stop: () => void;
   reset: () => void;
   /** True when a build is running server-side but this UI is NOT attached to it
@@ -232,6 +235,29 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, []);
 
+  // "Restore all files" — calls the REAL restore endpoint (writes the user's saved project back into
+  // the workspace) and reflects the actual restored file list in the UI. Returns the count + whether
+  // a durable restore happened, so the panel can show honest feedback (never a fake "done").
+  const restoreAllFiles = useCallback(async (): Promise<{ ok: boolean; count: number; restored: boolean }> => {
+    const workspaceId = workspaceIdRef.current;
+    if (!workspaceId) return { ok: false, count: 0, restored: false };
+    try {
+      const res = await fetch('/api/agentv3/restore-files', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId, userId: userIdRef.current, email: emailRef.current }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, count: 0, restored: false };
+      const paths: string[] = Array.isArray(j?.files) ? j.files.filter((p: unknown): p is string => typeof p === 'string') : [];
+      // Reflect the genuinely-present files in the Files view.
+      setState((prev) => agentV3Reducer(prev, { type: 'files_restored', files: paths.map((path) => ({ path, kind: 'create' as const })), ts: Date.now() }));
+      return { ok: true, count: paths.length, restored: j?.restored === true };
+    } catch {
+      return { ok: false, count: 0, restored: false };
+    }
+  }, []);
+
   const start = useCallback(
     async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string }) => {
       if (running) return;
@@ -334,5 +360,5 @@ export function useAgentV3Build(): UseAgentV3Build {
     [running],
   );
 
-  return { state, running, error, start, respond, restore, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation };
+  return { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation };
 }

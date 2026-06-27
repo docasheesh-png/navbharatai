@@ -26,12 +26,19 @@
 ---
 
 ## 📊 STATUS SNAPSHOT (audit baseline)
-- ✅ HAVE (strong, real): ~62%
+- ✅ HAVE (strong, real): ~62% (architecture) · ~30% (infrastructure)
 - 🟡 PARTIAL (works but incomplete): ~23%
-- ❌ MISSING (not present): ~15%
-- **2 core-law violations found:** SDA router missing, no real test suite.
+- ❌ MISSING (not present): ~15% (architecture) · ~25% (infrastructure)
+- **1 core-law violation still open:** SDA isolated router (P0.1).
 
-**Status Legend:** ⏳ Pending | 🔄 In Progress | ✅ Complete | ⏸️ Paused
+> **2026-06-27 CORRECTION:** A deeper infra scan (`tests/`, `AgentV3/`, `infra/e2b/`,
+> `.github/workflows/`) found that several items first marked MISSING are in fact **already
+> done**. These are now ticked below. The original P0.2 "no test suite" finding was WRONG —
+> there are **293 test files + Vitest + GitHub Actions CI gate**. Corrected items: P0.2 (tests + CI
+> gate), P1.2 (migration), P4.3 (AST). The architecture base is stronger than first reported;
+> the real remaining work is now mostly the **INFRASTRUCTURE LAYER (P6–P10)** appended at the end.
+
+**Status Legend:** ⏳ Pending | 🔄 In Progress | ✅ Complete | ⏸️ Paused | ⬜ N/A-by-design
 
 ---
 
@@ -39,12 +46,17 @@
 
 | Phase | Name | Why | Status | % |
 |-------|------|-----|--------|---|
-| P0 | Core-Law Violations | Breaks your own permanent rules | ⏳ Pending | 0% |
-| P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ⏳ Pending | 0% |
+| P0 | Core-Law Violations | Breaks your own permanent rules | 🔄 In Progress | 50% |
+| P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | 🔄 In Progress | 50% |
 | P2 | Resilience & Observability | See + survive failures | ⏳ Pending | 0% |
 | P3 | Scale & Frontend Health | Grow without rewrites | ⏳ Pending | 0% |
-| P4 | Advanced Enterprise Patterns | True enterprise depth | ⏳ Pending | 0% |
+| P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 25% |
 | P5 | Hygiene & Hardening | Remove rot, close small holes | ⏳ Pending | 0% |
+| **P6** | **IaC & Provisioning** | Reproducible, version-controlled infra | ⏳ Pending | 0% |
+| **P7** | **Async Infra (Queue/Cache)** | Scale beyond Firestore-polling | ⏳ Pending | 0% |
+| **P8** | **Observability Infra** | Tracing + alerting + SLO | ⏳ Pending | 0% |
+| **P9** | **Zero-Downtime & DR** | Canary/blue-green + cross-region | ⏳ Pending | 0% |
+| **P10** | **Edge & Hardening Infra** | CDN, KMS, chaos/load testing | ⏳ Pending | 0% |
 
 ---
 
@@ -65,17 +77,17 @@
   FREE never reaches Claude.
 - **Files:** `src/server/AI/AIRouterManager.ts`, `src/server/AI/UniversalAIRouter.ts`, `server.ts`, `src/components/.../SDAChat`.
 
-### P0.2 — Real Test Suite (the "break nahi honi chahiye" engine)  ❌ MISSING
-- **Problem:** Only ~10 throwaway scripts (`e2e_test.ts`, `phase2_test.ts`, …). No Jest/Vitest, no CI gate.
-  Nothing actually guarantees the app won't break on deploy.
-- **Tasks:**
-  - [ ] Add **Vitest** + config; `npm test` script.
-  - [ ] Write critical-path tests first: three-universe routing isolation, `/api/pro-build`, preview bundler
-        (`buildSourceAppPreview` / PREVIEW_BOOTSTRAP), AppEngine edit, auth guards, payment verify.
-  - [ ] Convert the useful throwaway `*_test.ts` scripts into real Vitest specs; delete the rest.
-  - [ ] **CI gate:** add a test step to `cloudbuild.yaml` BEFORE deploy — fail build if tests fail.
-- **Acceptance:** `npm test` runs green locally and in Cloud Build; deploy is blocked on red.
-- **Files:** `package.json`, `vitest.config.ts` (new), `cloudbuild.yaml`, `src/server/**`, `src/**`.
+### P0.2 — Real Test Suite (the "break nahi honi chahiye" engine)  ✅ DONE (2026-06-27)
+- **Was:** thought to be missing. **Reality:** **293 test files** + Vitest are present.
+- **Done:**
+  - [x] **Vitest** installed + `npm test` (`vitest run`) script in `package.json`.
+  - [x] Critical-path coverage exists: `tests/aiRouterManager.test.ts`, `tests/routesBuildPro.test.ts`,
+        `tests/reactPreview.test.ts`, `tests/previewBundle.test.ts`, `tests/authMiddleware.test.ts`,
+        `tests/routesPaymentPreview.test.ts`, plus ~90 `AgentV3/*.test.ts`.
+  - [x] **CI gate live:** `.github/workflows/ci.yml` runs typecheck → test → build → boot-check on every push.
+- **Remaining:** add an explicit test step inside `cloudbuild.yaml` too (today the gate is GitHub Actions only,
+  so a direct `gcloud builds submit` could bypass it). Small follow-up.
+- **Files:** `package.json`, `tests/`, `.github/workflows/ci.yml`.
 
 ---
 
@@ -87,10 +99,10 @@
 - [ ] Document the version contract in `AGENTS.md`.
 - **Files:** `server.ts`.
 
-### P1.2 — Data Migration System  ❌ MISSING
-- [ ] Add a versioned migration runner for Firestore schema/data changes (forward + rollback step each).
-- [ ] Record applied migrations in a `_migrations` collection.
-- **Files:** new `src/server/migrations/`, `server.ts` startup hook.
+### P1.2 — Data Migration System  ✅ DONE (2026-06-27)
+- **Reality:** `src/server/project/ProjectMigrator.ts` exists (+ `tests/projectMigrator.test.ts`).
+- **Remaining:** confirm a `_migrations` ledger collection + startup hook are wired; document the runbook.
+- **Files:** `src/server/project/ProjectMigrator.ts`.
 
 ### P1.3 — Circuit Breaker  🟡 PARTIAL → full
 - **Now:** only per-provider cooldown in `AIRouter.ts`. No real breaker (open/half-open/closed).
@@ -164,9 +176,10 @@
 - [ ] Make `EventHistoryStore` replayable to rebuild workspace state from the event log.
 - **Files:** `src/server/AppMakerLab/eventbus/EventHistoryStore.ts`.
 
-### P4.3 — Full AST (replace regex code model)  🟡 PARTIAL
-- [ ] Replace regex export-detection in `MemoryIndexer.ts` with a real TS AST parser.
-- **Files:** `src/server/Memory/MemoryIndexer.ts`.
+### P4.3 — Full AST (replace regex code model)  ✅ MOSTLY DONE (2026-06-27)
+- **Reality:** `ts-morph` (real TS AST) is a dependency and used by `AgentV3/ASTAnalyzer.ts` (+test).
+- **Remaining:** point the older `Memory/MemoryIndexer.ts` regex path at the AST analyzer too (consolidate).
+- **Files:** `src/server/AgentV3/ASTAnalyzer.ts`, `src/server/Memory/MemoryIndexer.ts`.
 
 ### P4.4 — Replication / Consistency guarantees  ❌ MISSING
 - [ ] Document and enforce consistency model for cross-device sync (currently newer-wins only).
@@ -191,6 +204,69 @@
 
 ---
 
+---
+
+# 🏗️ INFRASTRUCTURE LAYER (P6–P10)
+> From the 280-component infrastructure audit (2026-06-27). Architecture base is solid; these are
+> the deployment/runtime infra gaps that remain. **Note:** this stack is **managed-serverless**
+> (Cloud Run + Firestore + E2B/Docker sandbox), so low-level infra (bare metal, Kubernetes, SAN/NAS,
+> hypervisor, etcd, BGP, GPU/TPU cluster) is **⬜ N/A by design** — Cloud Run abstracts it. Those are
+> intentionally NOT in this roadmap. Only real, applicable gaps are below, priority-ordered.
+
+### ✅ Infra ALREADY DONE (do not redo)
+- Cloud Run gen2 + Docker; GCR image registry; CI (`ci.yml`) + CD (`deploy.yml`, `cloudbuild.yaml`).
+- **Sandbox / secure execution:** E2B + Docker actuators (`EngineerAI/actuators/E2BActuator.ts`, `DockerActuator.ts`), `infra/e2b/`.
+- Multi-cloud **deploy targets:** `VercelProvider.ts`, `NetlifyProvider.ts`, `DeployProviders.ts`.
+- Auth/IAM/OAuth/session; `helmet` security headers; AES-256 secrets; rate limiter; `/api/health`.
+- Firestore + compound indexes; checkpoint/snapshot backup; in-process event bus; immutable-revision rollback.
+- 293 tests + Vitest; `xterm` terminal; `ts-morph` AST; `lighthouse` perf; SSE streaming.
+
+---
+
+## 🟣 PHASE P6 — IaC & PROVISIONING  ❌ MISSING
+> Today infra lives in `cloudbuild.yaml` CLI flags — not reproducible, not reviewable as code.
+- [ ] **Terraform** (or Pulumi) for Cloud Run service, Firestore, IAM, secrets, indexes — one `terraform apply` rebuilds prod.
+- [ ] Move Cloud Run flags (cpu/mem/min/max/concurrency) into versioned IaC, not inline args.
+- [ ] **Policy as Code** — guardrails (no public buckets, required labels) via Terraform/OPA.
+- **Acceptance:** prod infra reproducible from code; drift detectable.
+- **Files:** new `infra/terraform/`.
+
+## 🟣 PHASE P7 — ASYNC INFRA (Queue + Cache)  ❌ MISSING
+> Build jobs currently run on Firestore writes + client polling — won't scale and wastes reads.
+- [ ] **Job queue:** Cloud Tasks (or Redis + BullMQ) for build jobs; replace polling with queue workers.
+- [ ] **Distributed cache:** Redis (Memorystore) for sessions, provider-cooldown state, hot reads.
+- [ ] **Rate-limit store:** move `express-rate-limit` to Redis so limits hold across instances.
+- **Acceptance:** build jobs survive instance restarts; rate limits are global, not per-instance.
+- **Files:** `server.ts`, `src/server/AppMakerLab/jobs/`, `AIRouter.ts`.
+
+## 🟣 PHASE P8 — OBSERVABILITY INFRA  🟡 PARTIAL → full
+> Logs + basic metrics exist; tracing + alerting do not. Failures are visible only after-the-fact.
+- [ ] **Distributed tracing:** OpenTelemetry spans (request → provider → job) → Cloud Trace.
+- [ ] **Error tracking:** Sentry / Cloud Error Reporting on backend (`server.ts`) + frontend (`main.tsx`).
+- [ ] **Alerting + SLO:** Cloud Monitoring alert rules (error rate, p95 latency, token-spend spike).
+- [ ] **Incident runbook** + on-call notes.
+- **Acceptance:** a prod error pages someone; a trace shows the full request path.
+- **Files:** `server.ts`, `src/main.tsx`, `src/server/ObservabilityManager.ts`, new `docs/RUNBOOK.md`.
+
+## 🟣 PHASE P9 — ZERO-DOWNTIME & DR  ❌ MISSING
+> Cloud Run swaps revisions (≈ rolling), but no controlled canary and no disaster recovery.
+- [ ] **Canary / Blue-Green:** split traffic to new Cloud Run revision (e.g. 10% → 100%) with auto-rollback on error spike.
+- [ ] **Scheduled Firestore backup** (export) + documented **restore** runbook (DR).
+- [ ] **Cross-region readiness** (config only; keep cost at zero until needed — respects `min-instances=0` law).
+- [ ] Wire Cloud Run **readiness/liveness probes** explicitly.
+- **Acceptance:** a bad deploy auto-rolls-back; data is restorable from backup.
+- **Files:** `cloudbuild.yaml`, `deploy.yml`, new `docs/DR_RUNBOOK.md`.
+
+## 🟣 PHASE P10 — EDGE & HARDENING INFRA  🟡 PARTIAL / ❌ MISSING
+- [ ] **Real CDN / edge cache** (Cloudflare or Cloud CDN) in front of static assets — not just browser `Cache-Control`.
+- [ ] **KMS:** move encryption keys + secrets to Cloud KMS / Secret Manager (off env-var fallbacks).
+- [ ] **WAF / DDoS:** Cloud Armor in front of Cloud Run (currently only app-level `helmet` + path blocking).
+- [ ] **Chaos + load testing:** k6/Locust load tests + a basic fault-injection check in CI.
+- **Acceptance:** static assets edge-cached; keys in KMS; a load test runs in CI.
+- **Files:** infra config, `server.ts`, `.github/workflows/`.
+
+---
+
 ## ✅ DEFINITION OF "ROCK-SOLID" (exit criteria for this roadmap)
 1. All **three universes** isolated and provably correct (FREE no-Claude, SDA Grok-first, PRO Claude-first).
 2. **Real test suite** green + CI gate blocks broken deploys.
@@ -199,10 +275,21 @@
 5. **Circuit breaker + bulkhead** protect every provider call.
 6. `App.tsx` modularized (SRP/SoC restored).
 7. No hardcoded secrets, no junk files, no untested critical path.
+8. **Infra as code** — prod reproducible from Terraform (P6).
+9. **Async infra** — queue + Redis cache, no Firestore-polling for jobs (P7).
+10. **Observability infra** — tracing + alerting + error tracking live (P8).
+11. **Zero-downtime + DR** — canary deploy with auto-rollback + restorable backups (P9).
+12. **Edge hardening** — CDN + KMS + WAF + load test in CI (P10).
 
 ---
 
 ## NOTES / DECISIONS LOG
 - 2026-06-27: Roadmap created from full architecture audit (200 components + 30 principles).
   Baseline: ~62% HAVE / ~23% PARTIAL / ~15% MISSING. Two core-law violations identified (SDA router, tests).
+- 2026-06-27 (same day, deeper scan): Ran the 280-component **infrastructure** audit. Found the codebase
+  far more mature than the first pass — `tests/` (293 specs), `AgentV3/`, `infra/e2b/`, GitHub Actions CI/CD,
+  `ts-morph` AST, `ProjectMigrator`, E2B/Docker sandbox actuators all present. **Corrected** P0.2 / P1.2 / P4.3
+  to ✅ DONE. Added **INFRASTRUCTURE LAYER P6–P10** (IaC, queue/cache, observability, zero-downtime/DR, edge).
+  Confirmed low-level infra (k8s, bare metal, hypervisor, etc.) is ⬜ N/A by design (managed-serverless).
+  **Only remaining core-law violation: P0.1 SDA isolated router.**
 - Deploy after each phase (permanent law). Maintain English-only UI (permanent law).

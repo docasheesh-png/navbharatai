@@ -94,6 +94,7 @@ import {
   restoreWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { saveWorkspaceFiles, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
 import { GrokProvider } from '../AI/Router/providers/GrokProvider';
@@ -1165,21 +1166,27 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: `Could not import the repository (${m}). Starting with an empty workspace instead.`, ts: Date.now() });
           }
         }
-        // DURABLE FILE RESTORE: the sandbox is ephemeral — if it was lost/recycled (or this is a
-        // later message that got a fresh sandbox), re-seed it with the files we persisted last
-        // time so the build continues from where it left off instead of an "empty directory".
-        // Only when the sandbox actually came up empty, so we never clobber a live sandbox.
+        // FILE GUARDIAN: the files v3.0 created must STAY. The sandbox is ephemeral, so at the start
+        // of every turn we compare what's in it against the durable history (WorkspaceFileStore) and
+        // AUTO-RECOVER anything that went missing — a one-off deleted file is re-added, and a fully
+        // recycled sandbox is restored whole (overwriting bare scaffold placeholders). It runs BEFORE
+        // the agent edits anything, so it can only recover loss, never clobber legitimate new work.
         try {
           const saved = await loadWorkspaceFiles(workspaceId);
-          const savedPaths = Object.keys(saved);
-          if (savedPaths.length > 0) {
-            const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
-            if (Object.keys(existing.files).length === 0) {
-              await writeWorkspaceFiles(actuator, workspaceId, saved);
-              events.emit({ type: 'narration', agent: 'architect', text: `Restored ${savedPaths.length} file(s) from your previous session.`, ts: Date.now() });
-            }
+          const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+          const plan = planFileGuardian(saved, existing.files);
+          if (plan.count > 0) {
+            await writeWorkspaceFiles(actuator, workspaceId, plan.restore);
+            events.emit({
+              type: 'narration',
+              agent: 'architect',
+              text: plan.mode === 'full'
+                ? `🛡️ Your project looked lost from the sandbox, so I restored all ${plan.count} file(s) from history.`
+                : `🛡️ Recovered ${plan.count} file(s) that were missing — pulled back from history.`,
+              ts: Date.now(),
+            });
           }
-        } catch { /* best-effort — restore never blocks a build */ }
+        } catch { /* best-effort — the guardian never blocks a build */ }
         // Real git repo → real checkpoints/History/restore (best-effort on
         // sandboxes without a shell).
         git = new GitManager(actuator, workspaceId);

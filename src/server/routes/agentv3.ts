@@ -1267,7 +1267,21 @@ export function registerAgentV3Routes(app: Express): void {
       // straight from the write op, not a later listFiles that can come back empty). Persisted to
       // Firestore at build end so the source survives a sandbox loss and restores next session.
       const writtenFiles = new Map<string, string>();
-      const onFileWrite = (path: string, content: string) => { writtenFiles.set(path, content); };
+      // Fix 2 — PROGRESSIVE SERVER PERSISTENCE: save every written file to Firestore
+      // within 3 s of each write. If the client connection drops mid-build (tab close,
+      // network hiccup), the files already written are safely on the server. The final
+      // save at build-end (below) is still the authoritative snapshot; this is the
+      // mid-build safety net. GitHub push still happens only after 100% completion.
+      let _progressPersistTimer: ReturnType<typeof setTimeout> | null = null;
+      const onFileWrite = (path: string, content: string) => {
+        writtenFiles.set(path, content);
+        if (_progressPersistTimer) clearTimeout(_progressPersistTimer);
+        _progressPersistTimer = setTimeout(() => {
+          if (writtenFiles.size > 0) {
+            saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)).catch(() => {});
+          }
+        }, 3_000);
+      };
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework);
 
       // Surgical edit mode (gold standard): when the user is editing an existing

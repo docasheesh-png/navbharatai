@@ -1,0 +1,9 @@
+{
+  "name": "navbharat-e2b-template",
+  "private": true,
+  "type": "module",
+  "description": "E2B build system v2 definition for the NavBharatAI Pro v3.0 builder sandbox.",
+  "dependencies": {
+    "e2b": "latest"
+  }
+}

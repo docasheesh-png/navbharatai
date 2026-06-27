@@ -4344,3 +4344,30 @@ ordinary pushes.
 Next (gated on the printed Template ID): set Cloud Run E2B_TEMPLATE_ID, then the
 code-wiring PR (Sandbox.create template + template-aware ScaffoldGuard + MODE A→B
 fallback + create-vite vite.config host/allowedHosts patch).
+
+## 2026-06-27 (cont.) — MODE A infra fix: migrate E2B template build to build system v2
+
+First workflow run (PR #477) failed: E2B has DEPRECATED the v1 build system —
+`e2b template build` (e2b.toml + Dockerfile CLI path) now exits non-zero. The run
+confirmed the E2B_API_KEY repo secret is correctly set (logs: "E2B_API_KEY is
+present (length 44)"); the only failure was the deprecated CLI path.
+
+Migrated to E2B build system v2 (SDK-based, builds on E2B cloud infra):
+- `infra/e2b/build.mjs` — defines the template via `Template().fromDockerfile()`
+  (reuses the committed e2b.Dockerfile as single source of truth) and publishes
+  with `Template.build(template, 'navbharat-builder', { cpuCount:2, memoryMB:2048,
+  onBuildLogs: defaultBuildLogger() })`.
+- `infra/e2b/package.json` — declares the `e2b` SDK dep (installed e2b@2.31.0).
+- workflow `e2b-template.yml` — replaced the v1 CLI step with `npm install && node
+  build.mjs`; Node 22; surfaces the usable template alias in the job summary.
+- README updated: e2b.toml marked legacy (v2 doesn't use it); no local Docker
+  needed (v2 builds remotely).
+
+Verified locally (npm registry is allowed in the Claude sandbox): `node --check`
+passes, `e2b` SDK installs, and the v2 exports resolve — `Template` (fn),
+`defaultBuildLogger` (fn), `Template().fromDockerfile()` (builder), `Template.build`
+(fn). The actual remote build still needs to run via the workflow (api.e2b.dev is
+egress-blocked from the Claude sandbox).
+
+Next: admin re-runs the workflow → template publishes → set Cloud Run
+E2B_TEMPLATE_ID=navbharat-builder → code-wiring PR.

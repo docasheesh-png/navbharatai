@@ -1,0 +1,21 @@
+# E2B template config — NavBharatAI Pro v3.0 builder sandbox.
+#
+# Build & publish (from a machine with Docker + Docker Hub egress + E2B_API_KEY):
+#     cd infra/e2b
+#     e2b template build --name navbharat-builder
+#
+# After a successful build, E2B writes the resulting `template_id` back into
+# this file. Copy that id into the Cloud Run env var E2B_TEMPLATE_ID so the
+# server points new sandboxes at this image (see README.md → "Code wiring").
+
+template_name = "navbharat-builder"
+dockerfile    = "e2b.Dockerfile"
+
+# Resources — sized for a real `npm install` + `vite build` of a non-trivial
+# app. Bump if large builds OOM; these are sane defaults.
+cpu_count = 2
+memory_mb = 2048
+
+# No start_cmd: E2B's envd manages the sandbox lifecycle and the builders exec
+# commands on demand (npm install, npm run dev, …). A long-running dev server is
+# started per-build by the agent, not by the image.

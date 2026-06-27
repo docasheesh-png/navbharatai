@@ -4262,3 +4262,38 @@ Gate at merge: frontend tsc 0, server tsc 0, vitest 2643/2643 PASS, CI green bef
 real E2B cloud VM with an API key. The unit/integration suite verifies the per-framework port
 logic, long-running detection, template scaffolding, and the health-check gate deterministically;
 the live multi-framework smoke matrix remains a manual/staging step.
+
+## 2026-06-27 — MODE A infra: custom E2B builder template (artifacts, build-ready)
+
+Admin asked for BOTH scaffolding modes rock-solid: MODE B (internal templates,
+already working) AND MODE A (`npm create vite` / `create-next-app`). Forensic
+finding: MODE A fails ONLY because `Sandbox.create()` uses E2B's default base
+image (no template id) whose Node is too old for modern generators. ScaffoldGuard
+correctly blocks MODE A today as a result. The fix is infra (a modern pinned-Node
+sandbox image), not code.
+
+**Verified live:** `npm create vite@latest -- --template react-ts` run on Node
+v22.22 in this environment → succeeded (React 19 + Vite 8 scaffold). Confirms the
+ONLY blocker is the sandbox Node version.
+
+**Shipped (this PR) — `infra/e2b/`:**
+- `e2b.Dockerfile` — Node 22 (pinned) + git, netcat-openbsd (`nc` for the
+  update_preview port health-check), python3/venv (FastAPI/Flask/Django),
+  build-essential, pre-warmed create-vite/create-next-app; build-time sanity gate
+  that fails the image build if Node < 20.19.
+- `e2b.toml` — template config (name navbharat-builder, cpu 2 / 2 GB).
+- `README.md` — turnkey build+publish+verify guide AND the deferred code-wiring
+  plan (point Sandbox.create at E2B_TEMPLATE_ID with default-base fallback;
+  template-aware ScaffoldGuard allow; MODE A→MODE B automatic fallback; post-
+  scaffold patch to add `server:{host:true,allowedHosts:true}` to create-vite's
+  vite.config for the E2B proxy; AppKnowledgeBase entry).
+
+**Honest blockers (cannot run from the Claude web sandbox):** Docker Hub image
+blobs are blocked by egress policy (403 from production.cloudfront.docker.com)
+and no E2B_API_KEY is mounted — so the `e2b template build` + publish step must
+run on a machine with Docker + Docker Hub access + the E2B key. Artifacts are
+build-ready; code wiring is intentionally deferred to a follow-up PR until a real
+template id exists (so the old create-vite-fails bug is never re-introduced by
+pointing at a half-built template).
+
+No code/TS touched → tsc clean, existing test suite unaffected.

@@ -354,19 +354,44 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
     return () => { cancelled = true; };
   }, [state.workspaceId, state.done, userId, email]);
 
+  // R5 §5.1 (no lock-in) — the hosting providers available + which the user picked. Fetched once;
+  // only CONFIGURED providers are offered so a deploy can never target an unconfigured host.
+  const [providers, setProviders] = useState<Array<{ id: string; name: string; configured: boolean; requirement: string }>>([]);
+  const [deployProvider, setDeployProvider] = useState<string>('firebase');
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const params = new URLSearchParams();
+        if (userId) params.set('userId', userId);
+        if (email) params.set('email', email);
+        try { if (localStorage.getItem('gh_token')) params.set('hasGithub', 'true'); } catch { /* ignore */ }
+        const res = await fetch(`/api/agentv3/deploy-providers?${params.toString()}`);
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && Array.isArray(data?.providers)) {
+          setProviders(data.providers);
+          if (typeof data.default === 'string') setDeployProvider(data.default);
+        }
+      } catch { /* best-effort — default to Firebase */ }
+    })();
+    return () => { cancelled = true; };
+  }, [userId, email]);
+  const configuredProviders = providers.filter((p) => p.configured);
+
   // One-click deploy: drive the REAL build+deploy pipeline (the agent runs `npm run build` then the
-  // deploy tool, publishing to a permanent Firebase Hosting URL). Routed through the normal stream so
-  // the user watches real progress; the live URL is then refreshed from the server (effect above).
+  // deploy tool, publishing to the CHOSEN provider's permanent public URL). Routed through the normal
+  // stream so the user watches real progress; the live URL is then refreshed from the server.
   const deployLive = () => {
     if (running || !state.workspaceId) return;
     if (state.narration.length > 0) {
       setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind }))]);
     }
     if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
-    setUserMsgs((c) => [...c, { role: 'user', text: '🚀 Deploy to a live URL', ts: Date.now() }]);
+    const providerName = configuredProviders.find((p) => p.id === deployProvider)?.name || 'a live URL';
+    setUserMsgs((c) => [...c, { role: 'user', text: `🚀 Deploy to ${providerName}`, ts: Date.now() }]);
     start(
       'Deploy this app to a permanent public live URL. Run "npm run build" first, then call the deploy tool, and finish by giving me the live link.',
-      { userId, email, onlyOpus, planFirst: false, thinking, sessionId: sessionIdRef.current, framework },
+      { userId, email, onlyOpus, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, deployProvider },
     );
   };
 
@@ -456,7 +481,22 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
               <ExternalLink className="w-3 h-3 opacity-60" />
             </a>
           )}
-          {/* R5 §5.1 — one-click deploy: publish the built app to a PERMANENT public URL. */}
+          {/* R5 §5.1 — one-click deploy: publish the built app to a PERMANENT public URL.
+              When more than one hosting provider is configured, a chooser lets the user pick
+              WHERE to deploy (no lock-in); with only one, the button alone keeps it simple. */}
+          {configuredProviders.length > 1 && (
+            <select
+              value={deployProvider}
+              onChange={(e) => setDeployProvider(e.target.value)}
+              disabled={running}
+              title="Choose where to deploy (no lock-in)"
+              className="text-xs px-1.5 py-1 rounded border border-emerald-700/60 bg-zinc-900 text-emerald-300 disabled:opacity-40"
+            >
+              {configuredProviders.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          )}
           <button
             onClick={deployLive}
             disabled={running || !state.workspaceId}

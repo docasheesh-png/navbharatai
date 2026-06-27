@@ -1177,7 +1177,11 @@ export function registerAgentV3Routes(app: Express): void {
       // Hosting today; as Netlify/Vercel/etc. land, the chosen provider routes here. Wrapped so every
       // successful publish is durably recorded (DeploymentStore) and recoverable after a reconnect.
       const githubTokenForDeploy = typeof req.body?.githubToken === 'string' ? req.body.githubToken : undefined;
-      const deployProvider = getDeployProvider(DEFAULT_DEPLOY_PROVIDER) ?? getDeployProvider('firebase')!;
+      // Honor the user's chosen hosting provider (no lock-in). Falls back to the default when the
+      // choice is absent or unknown; an unconfigured choice still routes there and returns an honest
+      // "configure <PROVIDER>" error rather than silently deploying somewhere else.
+      const chosenProviderId = typeof req.body?.deployProvider === 'string' ? req.body.deployProvider : DEFAULT_DEPLOY_PROVIDER;
+      const deployProvider = getDeployProvider(chosenProviderId) ?? getDeployProvider(DEFAULT_DEPLOY_PROVIDER) ?? getDeployProvider('firebase')!;
       const deploy = withDeploymentPersistence(
         (ws, files) => deployProvider.deploy(ws, files, { userId, githubToken: githubTokenForDeploy }),
         userId,

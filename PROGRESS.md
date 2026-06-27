@@ -4371,3 +4371,19 @@ egress-blocked from the Claude sandbox).
 
 Next: admin re-runs the workflow → template publishes → set Cloud Run
 E2B_TEMPLATE_ID=navbharat-builder → code-wiring PR.
+
+## 2026-06-27 — AgentV3 phase bump: P0→P3, ready:true
+
+PR #480 (spinner fix + 0.0.0.0 preview fix) merged and live.
+Following that, bumped the engine status to reflect real state:
+- `AGENTV3_PHASE` constant: `'P0'` → `'P3'` (types.ts)
+- `agentV3Status().ready`: `false` → `true` (index.ts)
+- Status note updated to list actual capabilities: native tool-use,
+  multi-provider routing, E2B sandbox, auto-fix loop, host-binding fix.
+
+Verified: ts-morph pre-existing errors unchanged; vitest 2668/2676 pass (same
+8 pre-existing CodemodeExecutor failures, none new).
+
+Pushed to branch `claude/kind-lovelace-chcxp6`. PR needed to merge to main.
+GitHub MCP tools unavailable in this session — admin can open PR from branch
+or merge directly once CI is green.

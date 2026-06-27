@@ -17,7 +17,7 @@ const PKG = JSON.stringify({
 const ASTRO_CONFIG = `import { defineConfig } from 'astro/config';
 
 export default defineConfig({
-  server: { host: true, port: 4321 },
+  server: { host: true, port: 4321, allowedHosts: true },
 });
 `;
 

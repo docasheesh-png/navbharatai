@@ -51,7 +51,7 @@ function parseReviewOutput(text: string): ReviewIssue[] {
 }
 
 /** Source-file extensions that mean "there is real reviewable code in the workspace". */
-const SOURCE_RE = /\.(tsx?|jsx?|html?|css|scss|vue|svelte|astro|mjs|cjs)$/i;
+const SOURCE_RE = /\.(tsx?|jsx?|html?|css|scss|vue|svelte|astro|mjs|cjs|py|go|java|php|rb|rs|swift|kt)$/i;
 
 /**
  * Whether the file listing contains real source the reviewer can judge. Used to GUARD the

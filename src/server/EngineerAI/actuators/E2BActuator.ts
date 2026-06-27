@@ -3,6 +3,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
+import { ensureHostBinding } from './devServerHost';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
@@ -441,7 +442,10 @@ export class E2BActuator implements IEngineerActuator {
     if (isLongRunning) {
       let stdout = '';
       let stderr = '';
-      const handle = await sandbox.commands.run(command, {
+      // Force a 0.0.0.0 bind so the dev server is reachable via the external
+      // preview URL (a localhost-only bind silently 502s the preview).
+      const launchCommand = ensureHostBinding(command);
+      const handle = await sandbox.commands.run(launchCommand, {
         cwd: WORKSPACE_ROOT,
         background: true,
         onStdout: s => { stdout += s; },
@@ -452,7 +456,7 @@ export class E2BActuator implements IEngineerActuator {
 
       // Health check: confirm the dev server port is actually listening.
       // If not, attempt one automatic restart so transient startup crashes self-heal.
-      const port = extractDevPort(command);
+      const port = extractDevPort(launchCommand);
       const portCheck = await sandbox.commands.run(
         `nc -z localhost ${port} 2>/dev/null && echo PORT_UP || echo PORT_DOWN`,
         { timeoutMs: 5000 },
@@ -463,7 +467,7 @@ export class E2BActuator implements IEngineerActuator {
           `fuser -k ${port}/tcp 2>/dev/null; pkill -f "node.*${port}" 2>/dev/null || true`,
           { timeoutMs: 5000 },
         ).catch(() => {});
-        const retry = await sandbox.commands.run(command, {
+        const retry = await sandbox.commands.run(launchCommand, {
           cwd: WORKSPACE_ROOT,
           background: true,
           onStdout: s => { stdout += s; },

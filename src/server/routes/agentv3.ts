@@ -21,6 +21,7 @@ import {
   architectSystemPrompt,
   planSystemPrompt,
   editModePrefix,
+  LANGUAGE_RULE,
   awaitApproval,
   resolveApproval,
   GitManager,
@@ -981,8 +982,10 @@ export function registerAgentV3Routes(app: Express): void {
           : prompt;
         const { response } = await chatRouter.route(
           chatPrompt,
-          "You are NavBharatAI's friendly assistant. Reply briefly and warmly in " +
-            "the user's language. Do not mention which model you are.\n\n" + CREATOR_IDENTITY,
+          LANGUAGE_RULE + '\n\n' +
+            "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
+            "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
+            "mention which model you are.\n\n" + CREATOR_IDENTITY,
         );
         const reply = response.content + providerDebugTag(response.provider);
         // Record the turn in project memory so iterative context is preserved

@@ -9,6 +9,21 @@
 import { rosterBriefing } from './AgentRegistry';
 import { CREATOR_IDENTITY } from '../lib/prompts';
 
+/**
+ * The #1 conversation rule — mirror the user's language, never default to Hindi. The platform's
+ * Indian branding (and the Hindi phrases in CREATOR_IDENTITY) otherwise bias cheaper models into
+ * replying in Hindi even when the user wrote in English. This is deliberately blunt and goes at the
+ * very top of every prompt that produces user-facing text (build, plan, and the chat path).
+ */
+export const LANGUAGE_RULE =
+  'LANGUAGE — MIRROR THE USER, NEVER DEFAULT: Reply, narrate every step, and write your final ' +
+  "summary in the SAME language the user wrote their message in. English in → answer 100% in " +
+  'English; Hindi in → answer in Hindi; Tamil/Bengali/Marathi/any language in → that exact same ' +
+  "language out. Decide the language ONLY from the user's own words — do NOT default to Hindi (or " +
+  'any other language) just because NavBharatAI is an Indian product. If the user typed in English, ' +
+  'you MUST reply entirely in English. (Code identifiers, file names and code comments always stay ' +
+  'in English regardless.)';
+
 const FRAMEWORK_HINTS: Record<string, string> = {
   'vite-react': 'SCAFFOLDING — a Vite + React + TypeScript project is ALREADY scaffolded (package.json, vite.config, index.html, src/main.tsx, src/App.tsx). Just EDIT/ADD files at ROOT. Do NOT run `npm create vite`. Run: `npm run dev` → PORT 5173. Call update_preview(5173).',
   'nextjs': 'SCAFFOLDING — a Next.js 14 App Router project is scaffolded (package.json, next.config.js, app/layout.tsx, app/page.tsx). Edit files at ROOT. Use `app/` dir (Server Components default). Do NOT run `npx create-next-app`. Run: `npm run dev` → PORT 3000. Call update_preview(3000).',
@@ -39,11 +54,13 @@ function frameworkScaffoldHint(framework?: string): string {
  */
 export function planSystemPrompt(): string {
   return [
+    LANGUAGE_RULE,
+    '',
     'You are the Architect planning a build. Produce a concise, concrete step-by-step',
     'plan for the requested app and record it by calling the update_todo tool (one',
     'todo per major step, status "pending"). Briefly explain the approach in your',
-    'message. Do NOT write any files or run any commands yet — only plan. End your',
-    'turn after calling update_todo.',
+    'message (in the user\'s language, per the rule above). Do NOT write any files or run',
+    'any commands yet — only plan. End your turn after calling update_todo.',
   ].join('\n') + '\n\n' + CREATOR_IDENTITY;
 }
 
@@ -123,14 +140,13 @@ export function architectSystemPrompt(framework?: string): string {
     'Code. You chat naturally AND build complete, working web apps inside a cloud',
     'sandbox using the tools provided.',
     '',
+    LANGUAGE_RULE,
+    '',
     'Conversation:',
     '- Reply to anything the user says. If they greet you (e.g. "hello") or ask a',
     '  question, respond warmly and briefly — do NOT call any tools, just talk.',
     '  Invite them to describe the app they want to build.',
-    '- Reply, narrate your progress, and write your final summary in the SAME',
-    '  language the user writes to you in — match their language naturally (Hindi,',
-    '  Tamil, Bengali, Marathi, any Indian or world language). Default to English',
-    '  only when they write in English. Keep code identifiers and comments English.',
+    '- Follow the LANGUAGE rule above for every reply, progress note and summary.',
     '- Only start building when the user actually asks for an app or a change.',
     '',
     'When building:',

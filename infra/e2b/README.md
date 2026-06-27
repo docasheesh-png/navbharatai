@@ -41,9 +41,16 @@ here pins Node 22, so MODE A will run the same way in the sandbox.
 
 | File | Purpose |
 |------|---------|
-| `e2b.Dockerfile` | The sandbox image: Node 22 (pinned) + git, netcat, python3, build tools + pre-warmed `create-vite` / `create-next-app` |
-| `e2b.toml` | E2B template config (name, dockerfile, CPU/RAM) |
+| `e2b.Dockerfile` | The sandbox image recipe: Node 22 (pinned) + git, netcat, python3, build tools + pre-warmed `create-vite` / `create-next-app` |
+| `build.mjs` | **Build system v2** script — defines the template from `e2b.Dockerfile` (`fromDockerfile()`) and calls `Template.build()` |
+| `package.json` | Declares the `e2b` SDK dependency for `build.mjs` |
+| `e2b.toml` | Legacy v1 config — **not used by the v2 build** (CPU/RAM now live in `build.mjs`). Kept for reference only. |
 | `README.md` | This guide |
+
+> **Build system v1 vs v2:** E2B deprecated the v1 `e2b template build` CLI path
+> (it now exits non-zero). This directory uses **build system v2**: the template
+> is defined in code (`build.mjs`) and built via the `e2b` SDK. The Dockerfile is
+> reused as the single source of truth via `fromDockerfile()`.
 
 ---
 
@@ -57,35 +64,29 @@ template on GitHub's runners (which have Docker + Docker Hub egress):
 1. Repo → **Settings → Secrets and variables → Actions → New repository secret**
    - Name: `E2B_API_KEY`  · Value: your e2b.dev API key
 2. Repo → **Actions → "Build E2B Builder Template" → Run workflow**
-3. Open the finished run → the **job summary prints the Template ID** (and the
-   updated `e2b.toml` is attached as an artifact).
-4. Set Cloud Run env `E2B_TEMPLATE_ID=<that id>`, then run the code-wiring PR.
+3. Open the finished run → the **job summary shows the usable template alias**
+   (`navbharat-builder`).
+4. Set Cloud Run env `E2B_TEMPLATE_ID=navbharat-builder`, then run the
+   code-wiring PR.
 
-> The build **cannot** run in the Claude Code web sandbox — Docker Hub image
-> blobs and `api.e2b.dev` are both blocked by egress policy there, and no E2B
-> key is mounted. The GitHub Actions runner (or your own machine, below) is the
-> place it runs.
+> The build **cannot** run in the Claude Code web sandbox — `api.e2b.dev` is
+> egress-blocked there and no E2B key is mounted. The GitHub Actions runner (or
+> your own machine, below) is where it runs.
 
 ### Alternative: from your own machine
 
-> **Requires:** an E2B account, `E2B_API_KEY`, Docker installed, and outbound
-> access to Docker Hub.
+> **Requires:** an E2B account and `E2B_API_KEY`. (No local Docker needed — the
+> v2 build runs on E2B's cloud build infra.)
 
 ```bash
-# 1. Install the E2B CLI
-npm install -g @e2b/cli            # or: npx @e2b/cli@latest <cmd>
-
-# 2. Authenticate (either works)
 export E2B_API_KEY=e2b_xxx          # from https://e2b.dev/dashboard
-#   or:  e2b auth login
-
-# 3. Build + publish the template from this directory
 cd infra/e2b
-e2b template build --name navbharat-builder
-
-# 4. Note the template id printed at the end (also written into e2b.toml),
-#    e.g.  "navbharat-builder" / "abc123def456".
+npm install                          # installs the e2b SDK
+node build.mjs                       # builds + publishes via build system v2
 ```
+
+The template is published under the alias `navbharat-builder` (override with
+`TEMPLATE_NAME=...`). That alias is what `Sandbox.create({ template })` uses.
 
 ---
 
@@ -93,7 +94,7 @@ e2b template build --name navbharat-builder
 
 ```bash
 # Spawn a one-off sandbox from the new template and check Node + MODE A:
-e2b sandbox spawn navbharat-builder
+e2b sandbox spawn navbharat-builder    # (needs @e2b/cli: npm i -g @e2b/cli)
 #   inside the sandbox shell:
 node -v                                   # must be >= v22
 npm create vite@latest smoke -- --template react-ts

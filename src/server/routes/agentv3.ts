@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter } from '../lib/authMiddleware';
+import { buildRateLimiter, workspaceRateLimiter, verifyFirebaseToken } from '../lib/authMiddleware';
 import {
   isAgentV3Enabled,
   agentV3Status,
@@ -14,17 +14,31 @@ import {
   makeSubAgentSpawn,
   makeSecondOpinion,
   makeConsensus,
+  makeWebSearch,
   type OpinionRouter,
   resolveModel,
+  haikuModel,
   architectSystemPrompt,
   planSystemPrompt,
+  editModePrefix,
   awaitApproval,
   resolveApproval,
   GitManager,
+  GitRepoSync,
+  GitHubAppClient,
+  UserGitHubClient,
+  githubConfigFromEnv,
+  githubStorageActive,
+  githubPrMode,
+  mergeViaPullRequest,
+  repoNameForProject,
+  type RepoInfo,
+  type PrCapableClient,
   registerSession,
   restoreSession,
   agentLifecycle,
   getWorkspaceMemory,
+  warmIndexFiles,
   reflectOnBuild,
   reflectionNote,
   summarizeProject,
@@ -39,23 +53,46 @@ import {
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
-import type { IEngineerActuator } from '../EngineerAI/actuators/IEngineerActuator';
-import { LocalActuator } from '../EngineerAI/actuators/LocalActuator';
-import { E2BActuator } from '../EngineerAI/actuators/E2BActuator';
-import { DockerActuator } from '../EngineerAI/actuators/DockerActuator';
+import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
+import { LocalActuator } from '../AgentV3/sandbox/EngineerAI/actuators/LocalActuator';
+import { E2BActuator } from '../AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
+import { DockerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
+import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { makeResilientTurnRunner } from './agentv3Resilient';
 import { GoogleGenAI } from '@google/genai';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
-import { makeMultiProviderTurnRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
+import { fenceUntrusted } from '../AgentV3/UntrustedContent';
+import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
+import { deploymentStore, withDeploymentPersistence } from '../AgentV3/DeploymentStore';
+import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
+// Side-effect imports: each provider self-registers into the DeployProviders registry on load.
+import '../AgentV3/VercelProvider';
+import '../AgentV3/NetlifyProvider';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
+import { VirtualFileSystem } from '../project/ProjectModel';
+import { renderPreview } from '../runtime/renderPreview';
+import { isReactProject } from '../runtime/ReactPreview';
+import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY } from '../lib/prompts';
+import { classifyIntentSmart } from '../AgentV3/IntentClassifier';
+import { decidePlanning } from '../AgentV3/ComplexityClassifier';
+import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
+import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
+import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
+import { reviewBuild, formatReview, hasReviewableSource } from '../AgentV3/ReviewerAgent';
+import {
+  saveWorkspaceMemory,
+  restoreWorkspaceMemory,
+} from '../AgentV3/FirestoreWorkspaceMemoryStore';
+import { saveWorkspaceFiles, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
 import { GrokProvider } from '../AI/Router/providers/GrokProvider';
@@ -135,6 +172,27 @@ const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
  * (reused across messages = iterative building). No/invalid sessionId → a fresh,
  * timestamped one-shot workspace (the previous behaviour).
  */
+/**
+ * Ownership guard for the workspaceId-bearing endpoints (IDOR fix). A workspaceId is always
+ * `agentv3-{uid}-{sessionId}` (see deriveWorkspaceId), so a workspace belongs to a user iff the id
+ * carries that user's uid. We prefer a SERVER-VERIFIED uid (Firebase ID token) — spoof-proof — and
+ * fall back to the request's claimed userId for callers without a token (the synthetic admin user,
+ * and anonymous sessions, which also rely on the unguessable random sessionId). Returns false for a
+ * malformed id or a uid mismatch, so one user can never read/write another user's workspace.
+ */
+async function assertWorkspaceOwner(req: Request, workspaceId: string): Promise<boolean> {
+  if (!workspaceId || !workspaceId.startsWith('agentv3-')) return false;
+  const verifiedUid = await verifyFirebaseToken(req);
+  // Claimed id may come from the JSON body (POST) or the query string (GET). The verified token
+  // always takes precedence over either, so this only widens the token-less admin/anon fallback.
+  const claimedUid =
+    (typeof req.body?.userId === 'string' ? req.body.userId : null) ??
+    (typeof req.query?.userId === 'string' ? req.query.userId : null);
+  const id = verifiedUid ?? claimedUid;
+  const uid = id && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : 'anon';
+  return workspaceId.startsWith(`agentv3-${uid}-`);
+}
+
 export function deriveWorkspaceId(userId: string | null, sessionId: unknown): string {
   const uid = userId && /^[A-Za-z0-9_-]{1,64}$/.test(userId) ? userId : 'anon';
   if (typeof sessionId === 'string' && SESSION_ID_RE.test(sessionId)) {
@@ -146,6 +204,48 @@ export function deriveWorkspaceId(userId: string | null, sessionId: unknown): st
 function maxBuildBudgetUsd(): number {
   const raw = Number(process.env.AGENTV3_MAX_BUILD_USD);
   return Number.isFinite(raw) && raw > 0 ? raw : 25;
+}
+
+/**
+ * Per-user monthly spend ceiling (R1, roadmap §3.1). The hard per-BUILD cap
+ * (maxBuildBudgetUsd) stops one runaway build; this caps a user's TOTAL billed
+ * spend across the calendar month so a single user can never run the platform's
+ * D2 (NavBharatAI-pays) exposure to the moon. Returns 0 (disabled) unless the admin
+ * sets AGENTV3_USER_MONTHLY_CAP_USD to a positive number, so existing behaviour is
+ * unchanged until it is opted into.
+ */
+export function userMonthlyCapUsd(): number {
+  const raw = Number(process.env.AGENTV3_USER_MONTHLY_CAP_USD);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
+/**
+ * R2 §1.1 — the mandatory end-of-build readiness gate is ON by default; the admin can disable
+ * it with AGENTV3_READINESS_GATE=off (a safe escape hatch should it ever over-block). When on,
+ * a top-level build that finished with unresolved-import / secret-leak / fake-code / can't-run
+ * blockers is reported as NOT a clean success (ok:false) instead of a fake "done".
+ */
+export function readinessGateEnabled(): boolean {
+  return process.env.AGENTV3_READINESS_GATE !== 'off';
+}
+
+/**
+ * Check whether a user is at or over their monthly spend ceiling. Returns the cap and
+ * the current monthly total so the caller can return an honest, specific message.
+ * Best-effort: a Firestore read failure (or no userId) NEVER blocks a build — we fail
+ * OPEN so a transient store outage cannot lock every user out (the per-build cap still
+ * bounds the blast radius). Disabled (cap<=0) → always allowed.
+ */
+export async function checkMonthlyCap(userId: string | null): Promise<{ allowed: boolean; cap: number; spent: number }> {
+  const cap = userMonthlyCapUsd();
+  if (cap <= 0 || !userId) return { allowed: true, cap, spent: 0 };
+  try {
+    const usage = await userCostStore.get(userId);
+    const spent = usage?.totalCostUsd ?? 0;
+    return { allowed: spent < cap, cap, spent };
+  } catch {
+    return { allowed: true, cap, spent: 0 };
+  }
 }
 
 function envInt(name: string, fallback: number): number {
@@ -212,9 +312,23 @@ function isBuildRunning(buildKey: string): boolean {
  * if no Gemini/Vertex provider is configured, falls back to the Claude-only resilient
  * runner. Build models are env-overridable (AGENTV3_{VERTEX,GEMINI}_BUILD_MODEL).
  */
-function buildTurnRunner(): TurnRunner {
+/**
+ * Cost-ladder (P2): map the analyser's start tier to the cheapest CAPABLE Gemini
+ * build model. Trivial/simple work (greeting, calculator, todo) starts on Gemini
+ * Flash — a fraction of Pro's cost; anything the analyser scored as real coding or
+ * a complex/architecture app keeps gemini-2.5-pro, with the Claude backstop intact.
+ * Billing is UNCHANGED (Opus-equivalent × 2.5 / × 5) — this lowers ONLY NavBharatAI's
+ * own provider cost, so the margin is strictly wider. Exported for unit testing.
+ */
+export function tierToGeminiBuildModel(tier: StartTier): string {
+  return tier === 'gemini' ? 'gemini-2.5-flash' : 'gemini-2.5-pro';
+}
+
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean }): TurnRunner {
+  // Explicit env overrides always win; absent them the cost-ladder tier model
+  // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
-    process.env[envName] || process.env.AGENTV3_BUILD_MODEL || 'gemini-2.5-pro';
+    process.env[envName] || process.env.AGENTV3_BUILD_MODEL || opts?.geminiModel || 'gemini-2.5-pro';
   const cheap: NamedRunner[] = [];
   // Vertex (function-calling, via the Cloud Run service account / ADC).
   const project = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID;
@@ -233,11 +347,55 @@ function buildTurnRunner(): TurnRunner {
   }
   if (cheap.length === 0) return makeResilientTurnRunner(new ClaudeClient()); // Claude-only env
   const claude: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient() };
-  const chain = process.env.AGENTV3_BUILD_CLAUDE_FIRST === '1' ? [claude, ...cheap] : [...cheap, claude];
+  // P7 failover hardening: a final Claude-HAIKU backstop that FORCES the Haiku model
+  // regardless of the turn's requested model. It only ever runs after every prior provider
+  // (Vertex → Gemini → primary Claude) has thrown, so normal builds are unaffected — but if
+  // Sonnet/Opus is overloaded or rate-limited, Haiku still completes the turn and the build
+  // never breaks. Billing is unchanged (Opus-equivalent markup, D5/D6) regardless of which
+  // model actually answers. AGENTV3_DISABLE_HAIKU_BACKSTOP=1 removes it if ever needed.
+  const haikuBackstop: NamedRunner = { name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(), haikuModel()) };
+  const withBackstop = process.env.AGENTV3_DISABLE_HAIKU_BACKSTOP === '1' ? [] : [haikuBackstop];
+  // claudeFirst (escalation): put the stronger Claude model at the head of the chain so an
+  // escalated tier actually leads with Claude, not Gemini. Else cheap-first (env override honoured).
+  const claudeFirst = opts?.claudeFirst || process.env.AGENTV3_BUILD_CLAUDE_FIRST === '1';
+  const chain = claudeFirst ? [claude, ...cheap, ...withBackstop] : [...cheap, claude, ...withBackstop];
   return makeMultiProviderTurnRunner(chain, {
     onProviderUsed: (used, from) => { if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`); },
     onProviderError: (name, err) => console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
   });
+}
+
+/**
+ * Cost-ladder escalation (P3) — DORMANT by default. Wiring exists but the rebuild-on-
+ * gate-fail loop only activates when AGENTV3_ESCALATION=on (the design doc's "behind the
+ * rollout flag" instruction). With it OFF, the build runs exactly once on the start tier —
+ * byte-identical to pre-P3 behaviour. Exported pure for unit testing.
+ */
+export function escalationEnabled(): boolean {
+  return process.env.AGENTV3_ESCALATION === 'on';
+}
+
+/**
+ * Whether THIS build should run through the escalation orchestrator. Only when: the flag is
+ * on, we have an analyser verdict, it is NOT power/Only-Opus mode (power bypasses the ladder),
+ * and the escalation path actually has a higher tier to climb to. Otherwise the single-build
+ * fast path is used (and stays identical to today).
+ */
+export function shouldEscalateBuild(analysis: AnalysisResult | undefined, onlyOpus: boolean): boolean {
+  if (!escalationEnabled()) return false;
+  if (!analysis || onlyOpus) return false;
+  return (analysis.escalationPath?.length ?? 0) > 1;
+}
+
+/**
+ * Objective build gate: a build that did not complete (ok=false) fails the gate and triggers
+ * escalation; a completed build passes. Deterministic, free, no LLM call — the honest signal
+ * the AgentRunner already computes. (Richer 22-dimension gating can replace this later.)
+ */
+export function escalationGate(ok: boolean): GateVerdict {
+  return ok
+    ? { pass: true, score: 100, reason: 'build completed' }
+    : { pass: false, score: 0, reason: 'build did not complete — escalate to a stronger tier' };
 }
 
 /**
@@ -482,7 +640,7 @@ export function registerAgentV3Routes(app: Express): void {
   });
 
   // History → restore: roll the workspace back to a checkpoint commit (P-git).
-  app.post('/api/agentv3/restore', async (req: Request, res: Response) => {
+  app.post('/api/agentv3/restore', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
@@ -495,8 +653,53 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(400).json({ error: 'workspaceId and sha are required.' });
       return;
     }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
     const ok = await restoreSession(workspaceId, sha, userId ?? undefined);
     res.json({ ok });
+  });
+
+  // R5 §5.1 — return a workspace's latest LIVE deployment URL (durable, survives reconnect).
+  // Lets the UI restore the "Live site" link after a refresh/new session instead of losing it
+  // with the build stream. Ownership-checked; null url when the app has never been deployed.
+  app.get('/api/agentv3/deployment', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const rec = await deploymentStore.get(workspaceId);
+    res.json({ url: rec?.url ?? null, fileCount: rec?.fileCount ?? 0, updatedAt: rec?.updatedAt ?? null });
+  });
+
+  // R5 §5.1 — list the available deploy providers and which are configured right now (no lock-in).
+  // Honest status: a provider whose API token is missing reports configured:false with what to set,
+  // so the UI can show "available — add token" instead of faking a deploy target.
+  app.get('/api/agentv3/deploy-providers', async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    // hasGithub is a boolean hint only — never accept a token in a GET query string.
+    const hasGithub = req.query.hasGithub === 'true' || req.query.hasGithub === '1';
+    res.json({
+      providers: deployProviderStatus({ userId, githubToken: hasGithub ? 'present' : undefined }),
+      default: DEFAULT_DEPLOY_PROVIDER,
+    });
   });
 
   // §12.2 — deploy/git support: return the built app's source files as a
@@ -504,7 +707,7 @@ export function registerAgentV3Routes(app: Express): void {
   // accept (`/api/pro/deploy`, `/api/github/push-enhanced`), so v3.0 reuses that
   // backend for durable deploy + GitHub push instead of rebuilding any of it.
   // Read-only; never returns node_modules / build output / live .env secrets.
-  app.post('/api/agentv3/workspace-files', async (req: Request, res: Response) => {
+  app.post('/api/agentv3/workspace-files', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
@@ -516,6 +719,10 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
     try {
       const actuator = buildActuator();
       const { files, skipped } = await collectWorkspaceFiles(actuator, workspaceId);
@@ -525,11 +732,49 @@ export function registerAgentV3Routes(app: Express): void {
     }
   });
 
+  // DUAL PREVIEW (Phase 5) — in-browser preview. Builds ONE self-contained HTML document from the
+  // workspace files (static HTML/CSS/JS inlined, or React/Vue bundled in-browser via the existing
+  // runtime renderers) and returns it for the client to render in an <iframe srcdoc>. This needs NO
+  // running dev server, so it works even when the E2B sandbox preview is unavailable (the "Blocked
+  // request" / sandbox-down case) — the second of the two preview paths the builder offers.
+  app.post('/api/agentv3/inbrowser-preview', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    try {
+      const actuator = buildActuator();
+      const { files } = await collectWorkspaceFiles(actuator, workspaceId);
+      if (Object.keys(files).length === 0) {
+        res.status(404).json({ error: 'No files to preview yet — build something first.' });
+        return;
+      }
+      const vfs = VirtualFileSystem.fromRecord(files);
+      const html = renderPreview(vfs);
+      // Detect the renderer used so the client can label the mode honestly.
+      const kind = isReactProject(vfs) ? 'react' : isVueProject(vfs) ? 'vue' : 'static';
+      res.json({ html, kind, count: Object.keys(files).length });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
+    }
+  });
+
   // §12.2 — import an existing project (e.g. fetched from GitHub via the existing
   // `/api/github/fetch` route, or any source) into the v3.0 sandbox so the agent can
   // edit/update and then deploy/push it back. Path-safe (no traversal/absolute), and
   // never imports node_modules / .git / live .env secrets.
-  app.post('/api/agentv3/import-files', async (req: Request, res: Response) => {
+  app.post('/api/agentv3/import-files', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
@@ -546,6 +791,10 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(400).json({ error: 'files (a path→content object) is required.' });
       return;
     }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
     try {
       const actuator = buildActuator();
       // Best-effort: make sure the sandbox exists (an unknown type starts empty, so an
@@ -555,6 +804,52 @@ export function registerAgentV3Routes(app: Express): void {
       res.json({ imported: written.length, skipped: skipped.length });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to import the files.' });
+    }
+  });
+
+  // "Restore all files" (History / Files tab) — a REAL restore, no fake. Brings the user's whole
+  // project back into the workspace and returns the actual file list:
+  //   • If the sandbox is warm and already has the files, return them (nothing to do).
+  //   • Otherwise load the last durably-saved files (Firestore WorkspaceFileStore) and WRITE them
+  //     back into the sandbox, so the restored project is genuinely there — buildable, previewable
+  //     and deployable — not just shown.
+  // Ownership-checked. Honest source flag ('sandbox' | 'saved' | 'none') + count.
+  app.post('/api/agentv3/restore-files', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    try {
+      const actuator = buildActuator();
+      // 'import' type starts EMPTY (no scaffold), so a cold sandbox doesn't mask "no files".
+      try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing */ }
+      // If the sandbox already holds the project (warm session), those are the freshest files.
+      const current = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] as string[] }));
+      if (Object.keys(current.files).length > 0) {
+        res.json({ files: Object.keys(current.files), count: Object.keys(current.files).length, restored: false, source: 'sandbox' });
+        return;
+      }
+      // Cold sandbox → genuinely restore the last durably-saved files into it.
+      const saved = await loadWorkspaceFiles(workspaceId);
+      if (saved && Object.keys(saved).length > 0) {
+        const { written } = await writeWorkspaceFiles(actuator, workspaceId, saved);
+        res.json({ files: written, count: written.length, restored: true, source: 'saved' });
+        return;
+      }
+      res.json({ files: [], count: 0, restored: false, source: 'none' });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to restore the workspace files.' });
     }
   });
 
@@ -579,6 +874,17 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(400).json({ error: `Prompt is too long (max ${MAX_PROMPT_LEN} chars).` });
       return;
     }
+    // Per-user monthly spend ceiling (R1 §3.1). When the admin has set a cap and this user
+    // has reached it this month, deny new builds with an honest, specific message (HTTP 402).
+    // Disabled by default and fails open on a store error, so it never locks users out wrongly.
+    const monthly = await checkMonthlyCap(userId);
+    if (!monthly.allowed) {
+      res.status(402).json({
+        error: `Monthly usage limit reached (≈$${monthly.spent.toFixed(2)} of $${monthly.cap.toFixed(2)}). ` +
+          `Your limit resets at the start of next month.`,
+      });
+      return;
+    }
     const buildKey = userId ?? 'anon';
     if (activeBuilds.has(buildKey)) {
       res.status(409).json({ error: 'A build is already running for this account. Stop it before starting another.', resumable: isBuildRunning(buildKey) });
@@ -586,7 +892,12 @@ export function registerAgentV3Routes(app: Express): void {
     }
     activeBuilds.add(buildKey);
     const onlyOpus = req.body?.onlyOpus === true;
-    const planFirst = req.body?.planFirst !== false; // plan-mode ON by default (P4)
+    // Smart planning gate: skip for simple apps (todo, calculator, etc.) to save
+    // 2-3 min. planFirst=false from the client always wins (explicit user skip).
+    // planFirst=true (or absent) defers to the complexity classifier — a simple
+    // prompt skips planning even when the client hasn't explicitly disabled it.
+    const planFirstRequested = req.body?.planFirst !== false;
+    const planFirst = planFirstRequested && decidePlanning(prompt) !== 'skip';
     const thinking = req.body?.thinking === true; // adaptive thinking, off by default
 
     // NDJSON stream (mirrors the Engineer route's streaming contract).
@@ -607,7 +918,7 @@ export function registerAgentV3Routes(app: Express): void {
     // so the user can't tell which model answered — it reads as a normal reply.
     //
     // Conservative gate (any doubt → fall through to the real build path):
-    //  • classifyIntent must say 'chat' (defaults to 'build' on any ambiguity), and
+    //  • classifyIntent must say 'chat' (defaults to a build intent on any ambiguity), and
     //  • plan-mode must not be forcing a plan (a plain conversational turn).
     // A file attachment no longer forces the build path — it is pre-read into text
     // (below) so "read this file" can be answered cheaply via the chat path too.
@@ -630,18 +941,38 @@ export function registerAgentV3Routes(app: Express): void {
       try {
         const docs = await buildDocumentContext(rawAttachments);
         const vis = await describeVisionAttachments(rawAttachments, { useClaude: onlyOpus });
-        attachmentContext = [docs, vis].filter(Boolean).join('\n\n');
+        const extracted = [docs, vis].filter(Boolean).join('\n\n');
+        // Prompt-injection defense (R1 §3.3): the user may have innocently uploaded a document
+        // or repo that carries an injection payload. Fence the extracted content as untrusted
+        // DATA so the agent reads it but never executes instructions hidden inside it.
+        attachmentContext = fenceUntrusted('attached files', extracted);
       } catch { /* best-effort — a bad file never blocks the turn */ }
     }
 
     // A clearly-conversational turn (greeting, thanks, small-talk) has NOTHING to
     // plan, so it takes the cheap chat path EVEN when plan-mode is on. classifyIntent
-    // is conservative (defaults to 'build' on any doubt), so a real build request is
+    // is conservative (defaults to a build intent on any doubt), so a real build request is
     // unaffected. This keeps a "hi" cheap AND avoids running the heavy build loop
     // (E2B sandbox + Claude) for small-talk — that heavy path sat silent during
     // sandbox setup and could reset the stream on Cloud Run / mobile Safari ("Load
     // failed") instead of just replying.
-    const isPlainChatTurn = classifyIntent(prompt) === 'chat';
+    // Level 1 (LLM intent): fast keyword classification first; if confidence is
+    // low, upgrade with a cheap LLM call via the free router (never blocks — any
+    // LLM failure falls back to the keyword result). Best-effort, no await on the
+    // hot path: we fire the upgrade async and fall through immediately.
+    let intent = classifyIntent(prompt);
+    try {
+      const freeRouter = AIRouterManager.getRouter('free');
+      intent = await classifyIntentSmart(
+        prompt,
+        (p) => freeRouter.route(p, 'You are a classifier. Reply with one word only.').then((r) => r.response.content),
+      );
+    } catch { /* LLM upgrade is best-effort — keyword result stands */ }
+    const isPlainChatTurn = intent === 'chat';
+    // Surgical edit mode: the user is modifying an existing app (fix/change/update/
+    // refactor/…), not building from scratch. When true, the build loop reads the
+    // current files and makes minimum targeted edits instead of rebuilding everything.
+    const isEditMode = intent === 'edit_existing';
     if (isPlainChatTurn) {
       try {
         const chatRouter = AIRouterManager.getRouter('free');
@@ -696,16 +1027,40 @@ export function registerAgentV3Routes(app: Express): void {
 
     const actuator = buildActuator();
     const workspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
+    const framework = typeof req.body?.framework === 'string' && req.body.framework ? req.body.framework : 'vite-react';
+    const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
     try {
       // Native Claude for real tool-use, with a multi-provider text fallback
       // (Vertex → Gemini → Grok) so chat never dies if Claude is down/misconfigured.
       // Multi-provider build engine: Vertex/Gemini do the REAL build (function-calling),
       // Claude is the backstop — so builds work even when Claude is out of credits.
-      const client = buildTurnRunner();
+      // Cost-ladder routing (P2): the deterministic request analyser picks the
+      // cheapest capable START model so a simple app (calculator/todo) builds on
+      // Gemini Flash instead of Pro. Active within v3.0 (itself flag-gated); set
+      // AGENTV3_COST_LADDER=off to fall back to the fixed model. Billing is
+      // unchanged (Opus-equivalent markup) — this only trims real provider cost.
+      // No provider name is surfaced to the user (kept to server telemetry only).
+      const costLadderOn = process.env.AGENTV3_COST_LADDER !== 'off';
+      const analysis = costLadderOn
+        ? analyzeRequest({ prompt, powerMode: onlyOpus })
+        : undefined;
+      if (analysis) {
+        console.log(
+          `[AGENTV3] cost-ladder: ${analysis.reasoning} → build model ${tierToGeminiBuildModel(analysis.startTier)}`,
+        );
+      }
+      const client = buildTurnRunner(
+        analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : undefined,
+      );
       const model = resolveModel(onlyOpus);
+      // Build start time — used for cost-ladder telemetry duration (P2 measurement).
+      const buildStartedAt = Date.now();
       const budget = maxBuildBudgetUsd();
       const maxSteps = envInt('AGENTV3_MAX_STEPS', 80);
       const subAgentMaxSteps = envInt('AGENTV3_SUBAGENT_MAX_STEPS', 40);
+      // How many parallel-safe tools / review sub-agents may run at once in a turn (rate-limit
+      // safe default; lower it if Anthropic concurrency limits are hit).
+      const toolConcurrency = envInt('AGENTV3_TOOL_CONCURRENCY', 4);
 
       // Sandbox + git setup is best-effort: a plain chat (e.g. "hello") must still
       // get a reply even when no sandbox is available (no E2B key, or a read-only
@@ -713,13 +1068,115 @@ export function registerAgentV3Routes(app: Express): void {
       // the build tools will report the real sandbox error only if the user asks
       // to build. This is what makes v3.0 conversational like Claude Code.
       let git: GitManager | undefined;
+      // Git-native storage (Phase 2, flag-gated OFF by default): when active, the user's project
+      // lives in a real private repo in the platform GitHub org — the durable, ~free source of
+      // truth. We clone it into the (empty) sandbox at start and push it back at end. These stay
+      // unset when storage is dormant, so every line below is a no-op on the live build path.
+      let repoSync: GitRepoSync | undefined;
+      let repoAuthedUrl = '';
+      let repoBranch = 'main';
+      // The PR/CI/merge client for build-end: the USER'S own GitHub (when they signed in with
+      // GitHub) or the platform App (org storage). Either implements PrCapableClient.
+      let prClient: PrCapableClient | undefined;
+      let repoNameRef = '';
       try {
         // Emit an immediate status so the NDJSON stream is never silent while the
         // sandbox is being created (E2B VM setup can take several seconds). A long
         // silent gap after the headers is what trips Cloud Run / mobile-Safari
         // request timeouts and surfaces as a bare "Load failed" on the client.
         events.emit({ type: 'narration', agent: 'architect', text: 'Setting up your workspace…', ts: Date.now() });
-        await actuator.ensureWorkspace(workspaceId, 'react');
+        await actuator.ensureWorkspace(workspaceId, framework);
+        // GIT-NATIVE HYDRATE: when storage is active, ensure the project repo exists and seed the
+        // sandbox from it BEFORE the Firestore fallback. Best-effort — any failure here leaves the
+        // build on the existing (Firestore) durability path, never blocking it.
+        if (githubStorageActive()) {
+          const projectId = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : workspaceId;
+          const repoName = repoNameForProject(userId, projectId);
+          const userToken = typeof req.body?.githubToken === 'string' && req.body.githubToken ? req.body.githubToken : '';
+          // PREFER THE USER'S OWN GITHUB: when the user signed in with GitHub, store the project in a
+          // repo under THEIR account (their code, no lock-in) and run PR/CI/merge there. Best-effort —
+          // any failure falls through to the platform-org store below.
+          if (userToken) {
+            try {
+              const userClient = new UserGitHubClient(userToken);
+              const login = await userClient.getLogin();
+              const repo = await userClient.ensureRepo(repoName);
+              repoAuthedUrl = userClient.authedCloneUrl(repoName, login);
+              repoBranch = repo.defaultBranch || 'main';
+              prClient = userClient;
+              repoNameRef = repoName;
+              repoSync = new GitRepoSync(actuator, workspaceId);
+              const h = await repoSync.hydrateFromRepo(repoAuthedUrl);
+              // Surface the repo so the UI can offer a "View on GitHub" link (full app control).
+              if (repo.htmlUrl) events.emit({ type: 'repo', url: repo.htmlUrl, fullName: repo.fullName || `${login}/${repoName}`, ts: Date.now() });
+              events.emit({
+                type: 'narration', agent: 'architect',
+                text: h.hydrated
+                  ? `Loaded your project from your GitHub (${login}/${repoName}).`
+                  : `Connected to your GitHub — this build will be saved to ${login}/${repoName}.`,
+                ts: Date.now(),
+              });
+            } catch { repoSync = undefined; prClient = undefined; /* fall through to the platform store */ }
+          }
+          // PLATFORM-ORG STORE (Email/Phone users, or if the user-token path failed): the invisible
+          // durable repo in the platform GitHub org via the App installation token.
+          if (!repoSync) {
+            try {
+              const cfg = githubConfigFromEnv();
+              if (cfg) {
+                const ghClient = new GitHubAppClient(cfg);
+                const repo: RepoInfo = await ghClient.ensureRepo(repoName);
+                const token = await ghClient.getInstallationToken();
+                repoAuthedUrl = ghClient.authedCloneUrl(repoName, token);
+                repoBranch = repo.defaultBranch || 'main';
+                prClient = ghClient;
+                repoNameRef = repoName;
+                repoSync = new GitRepoSync(actuator, workspaceId);
+                const h = await repoSync.hydrateFromRepo(repoAuthedUrl);
+                if (repo.htmlUrl) events.emit({ type: 'repo', url: repo.htmlUrl, fullName: repo.fullName || repoName, ts: Date.now() });
+                if (h.hydrated) {
+                  events.emit({ type: 'narration', agent: 'architect', text: 'Loaded your project from its GitHub repo.', ts: Date.now() });
+                }
+              }
+            } catch { /* git-native is best-effort — fall back to Firestore durability below */ }
+          }
+        }
+        // GITHUB IMPORT: if the user specified an existing repo URL, clone it now (before
+        // durable-restore and git-native hydrate, so the import takes priority). Best-effort —
+        // any failure emits a friendly narration and falls through to the normal empty workspace.
+        if (importUrl) {
+          try {
+            events.emit({ type: 'narration', agent: 'architect', text: `Importing your project from ${importUrl}…`, ts: Date.now() });
+            const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+            if (Object.keys(existing.files).length === 0) {
+              const importSync = new GitRepoSync(actuator, workspaceId);
+              const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
+              const cloneUrl = githubToken ? importUrl.replace('https://', `https://${githubToken}@`) : importUrl;
+              const h = await importSync.hydrateFromRepo(cloneUrl);
+              if (h.hydrated) {
+                events.emit({ type: 'narration', agent: 'architect', text: `Imported your project files from the repository. I'll analyze and improve this project.`, ts: Date.now() });
+              }
+            }
+          } catch (importErr) {
+            const m = importErr instanceof Error ? importErr.message : String(importErr);
+            events.emit({ type: 'narration', agent: 'architect', text: `Could not import the repository (${m}). Starting with an empty workspace instead.`, ts: Date.now() });
+          }
+        }
+        // DURABLE FILE RESTORE: the sandbox is ephemeral — if it was lost/recycled (or this is a
+        // later message that got a fresh sandbox), re-seed it with the files we persisted last
+        // time so the build continues from where it left off instead of an "empty directory".
+        // Only when the sandbox actually came up empty, so we never clobber a live sandbox.
+        try {
+          const saved = await loadWorkspaceFiles(workspaceId);
+          const savedPaths = Object.keys(saved);
+          if (savedPaths.length > 0) {
+            const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+            if (Object.keys(existing.files).length === 0) {
+              await writeWorkspaceFiles(actuator, workspaceId, saved);
+              events.emit({ type: 'narration', agent: 'architect', text: `Restored ${savedPaths.length} file(s) from your previous session.`, ts: Date.now() });
+            }
+          }
+        } catch { /* best-effort — restore never blocks a build */ }
         // Real git repo → real checkpoints/History/restore (best-effort on
         // sandboxes without a shell).
         git = new GitManager(actuator, workspaceId);
@@ -757,21 +1214,97 @@ export function registerAgentV3Routes(app: Express): void {
       // convene a multi-perspective panel (correctness, security, UX) on a hard
       // decision, using the SAME non-Claude free router. Never throws.
       const consensus = makeConsensus(opinionRouter);
-      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus);
-      const runner = new AgentRunner({
-        client,
+      // Web search (ported from Engineer AI): the Architect can look up package versions,
+      // framework docs, and error meanings (Brave if BRAVE_API_KEY set, else DuckDuckGo).
+      const webSearch = makeWebSearch();
+      // Real persistent deploy (Firebase Hosting, ported from Engineer AI): publish the built app
+      // to a permanent public URL. Uses ADC (Cloud Run service account); honest error if missing.
+      // R5 §5.1 — deploy through the multi-provider registry (no lock-in). Defaults to Firebase
+      // Hosting today; as Netlify/Vercel/etc. land, the chosen provider routes here. Wrapped so every
+      // successful publish is durably recorded (DeploymentStore) and recoverable after a reconnect.
+      const githubTokenForDeploy = typeof req.body?.githubToken === 'string' ? req.body.githubToken : undefined;
+      // Honor the user's chosen hosting provider (no lock-in). Falls back to the default when the
+      // choice is absent or unknown; an unconfigured choice still routes there and returns an honest
+      // "configure <PROVIDER>" error rather than silently deploying somewhere else.
+      const chosenProviderId = typeof req.body?.deployProvider === 'string' ? req.body.deployProvider : DEFAULT_DEPLOY_PROVIDER;
+      const deployProvider = getDeployProvider(chosenProviderId) ?? getDeployProvider(DEFAULT_DEPLOY_PROVIDER) ?? getDeployProvider('firebase')!;
+      const deploy = withDeploymentPersistence(
+        (ws, files) => deployProvider.deploy(ws, files, { userId, githubToken: githubTokenForDeploy }),
+        userId,
+      );
+      // DURABLE FILE CAPTURE: record the exact content of every file the agent writes (reliable —
+      // straight from the write op, not a later listFiles that can come back empty). Persisted to
+      // Firestore at build end so the source survives a sandbox loss and restores next session.
+      const writtenFiles = new Map<string, string>();
+      const onFileWrite = (path: string, content: string) => { writtenFiles.set(path, content); };
+      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework);
+
+      // Surgical edit mode (gold standard): when the user is editing an existing
+      // app rather than building fresh, inject the CURRENT file tree and the
+      // edit-mode prefix so the agent reads existing files and makes minimum,
+      // targeted edit_file patches — never rebuilding everything from scratch.
+      // Best-effort: a listFiles failure falls back to the edit prefix without a
+      // tree, and a non-edit turn uses the normal architect prompt unchanged.
+      let architectSystem = architectSystemPrompt(framework);
+      if (isEditMode) {
+        let fileTree: string[] = [];
+        try {
+          fileTree = await actuator.listFiles(workspaceId);
+        } catch { /* listing is best-effort — fall through to the normal build prompt */ }
+        // Engage surgical-edit mode ONLY when there are real files to patch. On an
+        // empty or failed workspace there is nothing to edit, so the normal build
+        // prompt (which freely creates files) is the correct, non-misleading default.
+        if (fileTree.length > 0) {
+          events.emit({
+            type: 'narration',
+            agent: 'architect',
+            text: `✏️ Editing your existing app (${fileTree.length} file${fileTree.length === 1 ? '' : 's'}) — I'll make targeted changes, not rebuild it.`,
+            ts: Date.now(),
+          });
+          architectSystem = editModePrefix(fileTree) + '\n\n---\n\n' + architectSystem;
+          // Warm the project graph from the PERSISTED sandbox files when memory is
+          // cold (process restarted but the sandbox survived). This makes the agent's
+          // recall / evaluate tools see the existing codebase immediately on a resumed
+          // edit session, instead of only after it manually re-reads files. Best-effort,
+          // capped, and a no-op when memory is already warm — never blocks the build.
+          try {
+            // Level 9: restore persisted memory snapshot before warming from files —
+            // episodes and file-list hints survive server restarts this way.
+            const wsMem = getWorkspaceMemory(workspaceId);
+            await restoreWorkspaceMemory(workspaceId, wsMem).catch(() => {});
+            await warmIndexFiles(wsMem, fileTree, (p) => actuator.readFile(workspaceId, p));
+          } catch { /* warming is best-effort — never blocks a build */ }
+        }
+      }
+
+      // Base runner options — shared by the default build AND any escalated rebuild (P3).
+      // Only client/model/conversationId vary per tier; everything else is identical so the
+      // escalated build streams to the same surfaces and writes to the same workspace.
+      // A new build or an edit MUST produce files — tell the runner so it reports a no-tool
+      // "I'm preparing a plan…" reply as a FAILED build (ok:false) instead of a fake success.
+      const expectsArtifacts = intent === 'new_build' || intent === 'edit_existing';
+      const baseRunnerOpts = {
         dispatcher,
         state,
         events,
-        model,
-        system: architectSystemPrompt(),
+        system: architectSystem,
         tools: catalogForTools(roleConfig('architect').tools),
         onlyOpus,
         thinking,
         maxBudgetUsd: budget,
         maxSteps,
-        agentRole: 'architect',
+        toolConcurrency,
+        agentRole: 'architect' as const,
         signal: abort.signal,
+        expectsArtifacts,
+        // R2 §1.1 — top-level build runners (which spread baseRunnerOpts) get the mandatory
+        // readiness gate; sub-agents (SubAgent.ts, separate opts) never do.
+        readinessGate: readinessGateEnabled(),
+      };
+      const runner = new AgentRunner({
+        ...baseRunnerOpts,
+        client,
+        model,
         // D7: persist the build transcript so it survives a reconnect/refresh. Best-effort —
         // a store failure never breaks the build (see AgentRunner). Reloadable via the
         // GET /api/agentv3/conversations endpoints below.
@@ -875,7 +1408,112 @@ export function registerAgentV3Routes(app: Express): void {
         }
       }
 
-      const result = await runner.run(buildPrompt);
+      // Cost-ladder escalation (P3) — DORMANT unless AGENTV3_ESCALATION=on. When off,
+      // this is exactly `await runner.run(buildPrompt)` (the start-tier build, once). When
+      // on, the build runs cheap-first and climbs the analyser's escalation path ONLY when
+      // the objective gate (build completed?) fails — the last tier is always delivered as a
+      // best-effort backstop, so the build never "breaks". `deliveredTier` feeds telemetry.
+      let result: Awaited<ReturnType<typeof runner.run>>;
+      let deliveredTier: StartTier = analysis?.startTier ?? (onlyOpus ? 'opus' : 'gemini');
+      if (analysis && shouldEscalateBuild(analysis, onlyOpus)) {
+        const esc = await runWithEscalation(analysis.escalationPath, {
+          buildOnTier: async (tier, attempt) => {
+            if (attempt === 1) return runner.run(buildPrompt); // reuse the start-tier runner
+            // Escalated attempt: a stronger, Claude-first runner on the same workspace/stream.
+            events.emit({ type: 'narration', agent: 'architect', text: `Escalating to a stronger model to finish the build…`, ts: Date.now() });
+            const escRunner = new AgentRunner({
+              ...baseRunnerOpts,
+              client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true }),
+              model: resolveModel(tier === 'opus'),
+              persistence: {
+                store: getConversationStore(),
+                conversationId: randomUUID(),
+                userId: userId ?? 'anon',
+                workspaceId,
+                title: deriveTitle(prompt),
+              },
+            });
+            return escRunner.run(buildPrompt);
+          },
+          gate: async (build) => escalationGate(build.ok),
+          onAttempt: (tier, attempt) => console.log(`[AGENTV3] escalation attempt ${attempt} on tier ${tier}`),
+          onEscalate: (from, to, reason) => console.log(`[AGENTV3] escalate ${from} → ${to}: ${reason}`),
+        });
+        result = esc.build;
+        deliveredTier = esc.tier;
+        if (esc.escalations > 0) {
+          console.log(`[AGENTV3] delivered tier=${esc.tier} after ${esc.escalations} escalation(s), gatePassed=${esc.gatePassed}`);
+        }
+      } else {
+        result = await runner.run(buildPrompt);
+      }
+
+      // SAFETY NET (the "fake build" fix): if a build/edit was expected to produce files but
+      // produced ZERO — the cheap model replied ("I'm preparing a plan…") instead of building —
+      // retry ONCE with a Claude-first runner. Claude reliably uses the build tools, so this
+      // turns a fake "done" into a real app. Always on for this hard failure, independent of the
+      // P3 quality-escalation flag. Skipped if the user already stopped the build.
+      if (expectsArtifacts && writtenFiles.size === 0 && !abort.signal.aborted) {
+        events.emit({ type: 'narration', agent: 'architect', text: 'The first attempt produced no files — rebuilding with a stronger model…', ts: Date.now() });
+        const retryRunner = new AgentRunner({
+          ...baseRunnerOpts,
+          client: buildTurnRunner({ claudeFirst: true }),
+          model: resolveModel(onlyOpus),
+          persistence: {
+            store: getConversationStore(),
+            conversationId: randomUUID(),
+            userId: userId ?? 'anon',
+            workspaceId,
+            title: deriveTitle(prompt),
+          },
+        });
+        try {
+          const retry = await retryRunner.run(buildPrompt);
+          if (retry.ok || writtenFiles.size > 0) { result = retry; deliveredTier = 'sonnet'; }
+        } catch (e) {
+          console.log(`[AGENTV3] empty-build Claude retry failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
+      // R4 §2.3 — RUNTIME-ERROR AUTO-FIX LOOP (opt-in: AGENTV3_AUTOFIX=on). A build can compile
+      // and even render yet still throw runtime errors the browser captured (an undefined call, a
+      // failed fetch, a React render crash). Feed those captured errors back into a bounded,
+      // Claude-first repair pass that fixes → reloads → re-verifies, then WARN honestly if any
+      // remain. Best-effort and budget-capped per attempt — it can never break or hang the build.
+      if (autoFixEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted && actuator.getConsoleErrors) {
+        const maxAttempts = autoFixMaxAttempts();
+        // Advancing window: each capture only considers errors NEWER than the previous fix attempt,
+        // so a repaired error logged before the fix is never re-detected and we cannot loop on it.
+        let sinceMs = Date.now() - 180_000;
+        for (let attempt = 1; attempt <= maxAttempts && !abort.signal.aborted; attempt++) {
+          let captured: RuntimeError[] = [];
+          try {
+            captured = filterActionableErrors((await actuator.getConsoleErrors!(workspaceId, sinceMs)).errors);
+          } catch { break; /* console capture needs a real sandbox — skip silently */ }
+          if (captured.length === 0) break; // ran clean — nothing to fix
+          events.emit({ type: 'narration', agent: 'architect', text: `🔧 Detected ${captured.length} runtime error(s) — auto-fixing (attempt ${attempt}/${maxAttempts})…`, ts: Date.now() });
+          const fixStart = Date.now();
+          const fixRunner = new AgentRunner({
+            ...baseRunnerOpts,
+            client: buildTurnRunner({ claudeFirst: true }),
+            model: resolveModel(onlyOpus),
+            persistence: { store: getConversationStore(), conversationId: randomUUID(), userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+          });
+          try {
+            const fix = await fixRunner.run(buildRepairPrompt(captured));
+            if (fix.ok) result = fix;
+          } catch (e) {
+            console.log(`[AGENTV3] auto-fix attempt ${attempt} failed: ${e instanceof Error ? e.message : String(e)}`);
+            break;
+          }
+          sinceMs = fixStart; // next check only sees errors from the post-fix reload
+        }
+        // Honest final check: if errors remain after the repair budget is spent, WARN — never claim clean.
+        try {
+          const remaining = filterActionableErrors((await actuator.getConsoleErrors!(workspaceId, sinceMs)).errors);
+          if (remaining.length) events.emit({ type: 'narration', agent: 'architect', text: autoFixWarning(remaining), ts: Date.now() });
+        } catch { /* best-effort */ }
+      }
 
       // Build Reflection (Layer 57, seed): derive a short reflection from what
       // happened this build (errors hit, fixes applied, outcome) and store it
@@ -903,19 +1541,146 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* summary is best-effort — never affects the build */ }
       }
 
+      // Level 8: Post-build multi-agent quality review — independent agent checks the
+      // produced code for real defects, anti-patterns and missed requirements.
+      // Only fires on successful builds; result is advisory narration, never blocks.
+      if (result.ok) {
+        try {
+          let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
+          // If sandbox listFiles came back empty but the build wrote real files, use the
+          // captured write-time paths as a fallback so the reviewer is never skipped after
+          // a successful build due to a transient sandbox read hiccup.
+          if (!hasReviewableSource(rFiles) && writtenFiles.size > 0) {
+            rFiles = [...writtenFiles.keys()];
+          }
+          const rSample = await Promise.all(
+            rFiles.slice(0, 5).map(async (p) => ({
+              path: p,
+              content: writtenFiles.has(p)
+                ? (writtenFiles.get(p) ?? '')
+                : await actuator.readFile(workspaceId, p).catch(() => ''),
+            })),
+          );
+          const review = await reviewBuild({
+            userRequest: prompt,
+            fileTree: rFiles,
+            fileSample: rSample,
+            spawn: spawnSubAgent,
+          });
+          const reviewText = formatReview(review);
+          if (reviewText) {
+            events.emit({ type: 'narration', agent: 'architect', text: reviewText, ts: Date.now() });
+          }
+        } catch { /* reviewer is best-effort — never affects the build result */ }
+      }
+
+      // Level 9: Persist workspace memory to Firestore so the NEXT session (or build)
+      // can restore file-list hints and episode history without re-reading all files.
+      // Best-effort: Firestore unavailability must never affect the build outcome.
+      try {
+        saveWorkspaceMemory(workspaceId, getWorkspaceMemory(workspaceId).snapshot()).catch(() => {});
+      } catch { /* memory persist is best-effort */ }
+
+      // DURABLE FILE SAVE: persist the build's source so it never vanishes. Start from the files
+      // we captured at write-time (reliable), then supplement with a sandbox scan (catches sub-
+      // agent writes when listFiles works). Skip if BOTH are empty so a read hiccup never
+      // overwrites a previously-good saved set with nothing. Best-effort — never blocks the build.
+      try {
+        const toSave: Record<string, string> = {};
+        try {
+          const scanned = await collectWorkspaceFiles(actuator, workspaceId);
+          Object.assign(toSave, scanned.files);
+        } catch { /* listFiles can be flaky — the captured writes below are the reliable source */ }
+        for (const [p, c] of writtenFiles) toSave[p] = c; // captured writes win (freshest, reliable)
+        if (Object.keys(toSave).length > 0) {
+          saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
+        }
+      } catch { /* file persist is best-effort */ }
+
+      // GIT-NATIVE PUSH: when storage is active, commit + push the sandbox back to the project's
+      // GitHub repo so it is the durable source of truth for next session. Best-effort and only
+      // when files were actually produced — never blocks or fails the build.
+      if (repoSync && repoAuthedUrl && writtenFiles.size > 0) {
+        try {
+          const msg = `NavBharatAI build: ${deriveTitle(prompt)}`;
+          // PR MODE (Phase 3, opt-in GITHUB_PR_MODE): push to a build branch, open a PR, and merge
+          // it ONLY when CI is green (Claude-Code-style). Default mode force-pushes straight to the
+          // project's default branch. Both best-effort — never block or fail the build.
+          if (githubPrMode() && prClient && repoNameRef) {
+            const buildBranch = `nbi/build-${Date.now()}`;
+            const pushed = await repoSync.pushAll(repoAuthedUrl, buildBranch, msg);
+            if (pushed.pushed) {
+              const flow = await mergeViaPullRequest(prClient, repoNameRef, {
+                head: buildBranch, base: repoBranch, title: msg,
+                body: 'Automated build by NavBharatAI Pro v3.0.',
+              });
+              if (flow.note) {
+                events.emit({ type: 'narration', agent: 'architect', text: flow.note, ts: Date.now() });
+              }
+            }
+          } else {
+            const pushed = await repoSync.pushAll(repoAuthedUrl, repoBranch, msg);
+            if (pushed.pushed) {
+              events.emit({ type: 'narration', agent: 'architect', text: 'Saved your project to its GitHub repo.', ts: Date.now() });
+            }
+          }
+        } catch { /* git-native push is best-effort */ }
+      }
+
+      // P9 — new-user free onboarding builds (DORMANT unless AGENTV3_FREE_ONBOARDING_BUILDS>0).
+      // For an eligible new user, a SUCCESSFUL build is on the house: nothing is recorded and
+      // the user sees ₹0. Only consumed on result.ok (a failed build never burns a free credit),
+      // and fail-safe — any error leaves the user billed normally. effectiveBilledUsd flows into
+      // both the cost record AND the result event so the customer-facing amount matches.
+      let effectiveBilledUsd = result.billedUsd;
+      // NEVER charge for a build that produced nothing. If the user asked for an app/edit and
+      // zero files were created (even after the Claude retry), the build failed — bill ₹0.
+      // "Preview is EARNED" cuts both ways: no artifacts, no charge.
+      if (expectsArtifacts && writtenFiles.size === 0) {
+        effectiveBilledUsd = 0;
+      }
+      if (userId && result.ok && effectiveBilledUsd > 0 && freeOnboardingLimit() > 0) {
+        const isFree = await onboardingCreditStore
+          .consumeFreeBuild(userId, freeOnboardingLimit())
+          .catch(() => false);
+        if (isFree) {
+          effectiveBilledUsd = 0;
+          events.emit({ type: 'narration', agent: 'architect', text: '🎁 This build is on us — welcome to NavBharatAI Pro!', ts: Date.now() });
+        }
+      }
+
       // Bill the user the marked-up cost (D5/D6), recorded in the same place the
       // platform records every build's cost. Best-effort — never blocks the run.
       // Internal accounting stays in USD (currency-stable); the customer-facing amount
       // is shown in INR (billedInr = billedUsd × the real-time USD→INR rate).
-      if (userId && result.billedUsd > 0) {
-        userCostStore.record(userId, result.billedUsd).catch(() => {});
+      if (userId && effectiveBilledUsd > 0) {
+        userCostStore.record(userId, effectiveBilledUsd).catch(() => {});
       }
+
+      // Cost-ladder telemetry (P2 measurement): record this build's task type, start
+      // tier, billed amount, tokens, success, and duration so the savings AND the
+      // per-tier quality are MEASURABLE (the P8 cutover gate needs this data). Best-
+      // effort — never blocks the run. Recorded for every build, signed-in or not.
+      agentV3CostTelemetry
+        .record({
+          taskType: analysis?.taskType ?? 'unknown',
+          // Record the tier the build was actually DELIVERED on (after any P3 escalation),
+          // so per-tier success rates reflect what really ran, not just the start tier.
+          startTier: deliveredTier,
+          billedUsd: result.billedUsd,
+          inputTokens: result.usage?.inputTokens ?? 0,
+          outputTokens: result.usage?.outputTokens ?? 0,
+          ok: result.ok,
+          powerMode: onlyOpus,
+          durationMs: Math.max(0, Date.now() - buildStartedAt),
+        })
+        .catch(() => {});
 
       // TEMP DEBUG: tag the build reply with the provider/model (Claude primary; the
       // resilient runner already self-labels in the text if it fell back to a free provider).
       const buildTag = providerDebugTag(`Claude (${model})`);
       if (buildTag) events.emit({ type: 'narration', agent: 'architect', text: buildTag.trim(), ts: Date.now() });
-      emit({ type: 'result', ...result, billedInr: Math.round(result.billedUsd * usdInrRate() * 100) / 100 });
+      emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100 });
     } catch (err) {
       emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {

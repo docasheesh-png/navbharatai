@@ -1,4 +1,4 @@
-// AgentV3 (Vargen 3.0) — intent classification for cost routing.
+// AgentV3 (Vargen 3.0) — intent classification for cost routing + surgical edit detection.
 //
 // Every v3.0 message currently runs the full Claude native-tool-use agent loop,
 // which is expensive even for a plain "hello". This pure classifier lets the
@@ -7,17 +7,59 @@
 // build/engineering requests — WITHOUT changing the user experience.
 //
 // SAFETY: this is conservative by design. It returns 'chat' ONLY for messages
-// that are clearly social; on any doubt it returns 'build', so a real build
+// that are clearly social; on any doubt it returns 'new_build', so a real build
 // request is NEVER answered conversationally. Pure and deterministic (no I/O),
 // so it is trivially unit-testable.
-
-/** Whether a message is plain conversation ('chat') or a real build request ('build'). */
-export type BuildIntent = 'chat' | 'build';
+//
+// EDIT DETECTION: distinguishes 'new_build' (create something fresh) from
+// 'edit_existing' (modify what is already there). When 'edit_existing' is
+// detected the route injects the current file tree and the surgical-edit system
+// prompt, preventing the agent from rebuilding everything from scratch.
 
 /**
- * Build/engineering signal words and verbs (English + common Hindi/Hinglish
- * forms). ANY of these in the message forces 'build' — these take precedence
- * over every social pattern, so "thanks now build me a login page" stays a build.
+ * Three-way intent classification:
+ *  'chat'          — plain social / conversational turn (greeting, thanks, …)
+ *  'new_build'     — creating a fresh app / feature from scratch
+ *  'edit_existing' — modifying / fixing / refactoring something that already exists
+ */
+export type BuildIntent = 'chat' | 'new_build' | 'edit_existing';
+
+// ── Signal arrays ─────────────────────────────────────────────────────────────
+
+/**
+ * Signals that clearly indicate CREATING something new.
+ * If any of these appear, the intent is 'new_build' regardless of EDIT_SIGNALS
+ * (so "build a new page and fix the footer" stays 'new_build').
+ */
+const NEW_BUILD_SIGNALS: readonly string[] = [
+  // English creation verbs
+  'build', 'create', 'make', 'generate', 'develop', 'design', 'deploy',
+  'implement', 'scaffold', 'launch', 'migrate', 'install', 'integrate',
+  'connect', 'configure', 'setup', 'set up', 'wire', 'style', 'render',
+  // Hindi/Hinglish creation
+  'banao', 'bana do', 'banade', 'bana de', 'banade do', 'banana',
+  'banwao', 'likho', 'likh do', 'bana dena', 'bana doge', 'design karo',
+];
+
+/**
+ * Signals that clearly indicate MODIFYING something that already exists.
+ * Triggers 'edit_existing' ONLY when no NEW_BUILD_SIGNAL is also present.
+ */
+const EDIT_SIGNALS: readonly string[] = [
+  // English modification verbs
+  'fix', 'debug', 'update', 'change', 'edit', 'modify', 'refactor',
+  'remove', 'delete', 'rename', 'correct', 'tweak', 'adjust', 'repair',
+  'improve', 'replace', 'patch', 'revert', 'undo', 'rewrite',
+  // Hindi/Hinglish modification
+  'theek karo', 'thik karo', 'badlo', 'badal do', 'sudharo', 'sahi karo',
+  'hatao', 'hata do', 'fix karo', 'update karo',
+];
+
+/**
+ * Catch-all build signals — tech nouns and ambiguous verbs (e.g. 'add',
+ * 'code', 'script') that mean "a real engineering task" without clearly
+ * indicating new creation vs modification. Anything matched here (and not
+ * matched by the two arrays above) is conservatively treated as 'new_build'.
  */
 const BUILD_SIGNALS: readonly string[] = [
   // English verbs / nouns
@@ -79,6 +121,20 @@ const SOCIAL_PATTERNS: readonly RegExp[] = [
   /\b(ok|okay|okey|k|nice|great|cool|wow|good|awesome|amazing|perfect|fine|alright|nope|yep|yes|no|haan|haa|nahi|theek|thik|achha|acha|accha|badhiya|bye|byee|goodbye|see\s+ya|ttyl|good\s+night|good\s+morning|gn|gm|lol|haha|hehe)\b/,
 ];
 
+/** Returns true if the lowercased message contains any signal using word-boundary-ish matching. */
+function matchesSignal(lower: string, signals: readonly string[]): boolean {
+  for (const signal of signals) {
+    const idx = lower.indexOf(signal);
+    if (idx === -1) continue;
+    const before = idx === 0 ? '' : lower[idx - 1];
+    const after = idx + signal.length >= lower.length ? '' : lower[idx + signal.length];
+    const beforeOk = before === '' || !/[a-z0-9]/.test(before);
+    const afterOk = after === '' || !/[a-z0-9]/.test(after);
+    if (beforeOk && afterOk) return true;
+  }
+  return false;
+}
+
 /** Strip a trailing fenced code block check / file path / URL detection helper. */
 function hasCodeOrPathOrUrl(message: string): boolean {
   if (message.includes('```')) return true; // fenced code block
@@ -90,44 +146,143 @@ function hasCodeOrPathOrUrl(message: string): boolean {
 const LONG_MESSAGE_THRESHOLD = 120;
 const SHORT_WORD_COUNT = 3;
 
+// ── Level 1: confidence-annotated classification ─────────────────────────────
+
 /**
- * Classify a message as plain conversation ('chat') or a real build request
- * ('build'). Pure and deterministic. Conservative: defaults to 'build' on any
- * doubt, so a real build request is never answered conversationally.
+ * Classification result including a confidence level.
+ *  'high' — a clear signal drove the decision (strong keyword match).
+ *  'low'  — the classifier defaulted (short message, no signals, or social pattern
+ *            only) and an LLM call could produce a better result.
  */
-export function classifyIntent(message: string): BuildIntent {
+export interface IntentWithConfidence {
+  intent: BuildIntent;
+  confidence: 'high' | 'low';
+  /** The first signal that triggered the decision, if any. */
+  signal?: string;
+}
+
+/**
+ * Same as classifyIntent but also returns a confidence level so callers can
+ * optionally upgrade borderline results with an LLM call.
+ */
+export function classifyIntentWithConfidence(message: string): IntentWithConfidence {
   const text = typeof message === 'string' ? message.trim() : '';
-  if (!text) return 'build'; // safe default — never treat an empty/odd input as chat
+  if (!text) return { intent: 'new_build', confidence: 'low' };
 
   const lower = text.toLowerCase();
 
-  // 1) Build signals take precedence — any build/engineering cue → 'build'.
-  for (const signal of BUILD_SIGNALS) {
-    // Word-boundary-ish match: signal surrounded by non-letters (handles
-    // punctuation and Hinglish multi-word phrases). Avoids matching inside
-    // unrelated longer words where possible.
+  // Steps 1–4 → high confidence (strong, explicit signals)
+  for (const signal of NEW_BUILD_SIGNALS) {
     const idx = lower.indexOf(signal);
     if (idx === -1) continue;
     const before = idx === 0 ? '' : lower[idx - 1];
     const after = idx + signal.length >= lower.length ? '' : lower[idx + signal.length];
-    const beforeOk = before === '' || !/[a-z0-9]/.test(before);
-    const afterOk = after === '' || !/[a-z0-9]/.test(after);
-    if (beforeOk && afterOk) return 'build';
+    if ((before === '' || !/[a-z0-9]/.test(before)) && (after === '' || !/[a-z0-9]/.test(after))) {
+      return { intent: 'new_build', confidence: 'high', signal };
+    }
+  }
+  for (const signal of EDIT_SIGNALS) {
+    const idx = lower.indexOf(signal);
+    if (idx === -1) continue;
+    const before = idx === 0 ? '' : lower[idx - 1];
+    const after = idx + signal.length >= lower.length ? '' : lower[idx + signal.length];
+    if ((before === '' || !/[a-z0-9]/.test(before)) && (after === '' || !/[a-z0-9]/.test(after))) {
+      return { intent: 'edit_existing', confidence: 'high', signal };
+    }
+  }
+  if (text.length > LONG_MESSAGE_THRESHOLD) {
+    return { intent: 'new_build', confidence: 'high', signal: 'long-message' };
+  }
+  if (hasCodeOrPathOrUrl(text)) {
+    return { intent: 'new_build', confidence: 'high', signal: 'code-or-url' };
+  }
+  if (matchesSignal(lower, BUILD_SIGNALS)) {
+    return { intent: 'new_build', confidence: 'high', signal: 'build-signal' };
   }
 
-  // 2) Long messages, code blocks, file paths or URLs → a real task → 'build'.
-  if (text.length > LONG_MESSAGE_THRESHOLD) return 'build';
-  if (hasCodeOrPathOrUrl(text)) return 'build';
+  // Steps 5–7 → low confidence (social pattern, short message, or default)
+  for (const pattern of SOCIAL_PATTERNS) {
+    if (pattern.test(lower)) return { intent: 'chat', confidence: 'low', signal: 'social' };
+  }
+  const wordCount = lower.split(/\s+/).filter(Boolean).length;
+  if (wordCount <= SHORT_WORD_COUNT) return { intent: 'chat', confidence: 'low', signal: 'short' };
+  return { intent: 'new_build', confidence: 'low', signal: 'default' };
+}
 
-  // 3) Clear social patterns (no build signal present) → 'chat'.
+/**
+ * Upgrade a low-confidence classification by calling a lightweight LLM.
+ * `llmCall` receives a short prompt and must return one of: 'chat', 'build', 'edit'.
+ * If the LLM returns an unrecognised value or throws, the original intent is kept.
+ * Best-effort — never throws to the caller.
+ */
+export async function classifyIntentSmart(
+  message: string,
+  llmCall: (prompt: string) => Promise<string>,
+): Promise<BuildIntent> {
+  const { intent, confidence } = classifyIntentWithConfidence(message);
+  if (confidence === 'high') return intent;
+
+  const prompt = [
+    'Classify this user message into exactly one of three categories:',
+    '  chat    — plain conversation, greeting, question, thanks',
+    '  build   — create a new app / feature / component from scratch',
+    '  edit    — fix, modify, or update something that already exists',
+    '',
+    `Message: "${message.slice(0, 300)}"`,
+    '',
+    'Reply with ONLY one word: chat, build, or edit.',
+  ].join('\n');
+
+  try {
+    const raw = (await llmCall(prompt)).trim().toLowerCase().split(/\s/)[0] ?? '';
+    if (raw === 'chat') return 'chat';
+    if (raw === 'build') return 'new_build';
+    if (raw === 'edit') return 'edit_existing';
+  } catch {
+    /* LLM call failed — fall back to keyword result */
+  }
+  return intent;
+}
+
+/**
+ * Classify a message as plain conversation ('chat'), a fresh build ('new_build'),
+ * or a modification of an existing app ('edit_existing').
+ *
+ * Pure and deterministic. Conservative: defaults to 'new_build' on any doubt,
+ * so a real build request is never answered conversationally, and a creation
+ * request is never misidentified as an edit.
+ */
+export function classifyIntent(message: string): BuildIntent {
+  const text = typeof message === 'string' ? message.trim() : '';
+  if (!text) return 'new_build'; // safe default — never treat an empty/odd input as chat
+
+  const lower = text.toLowerCase();
+
+  // 1) NEW_BUILD signals take TOP priority — any "build/create/make/generate/…" → 'new_build'.
+  //    This ensures "build a page AND fix the footer" stays 'new_build', not 'edit_existing'.
+  if (matchesSignal(lower, NEW_BUILD_SIGNALS)) return 'new_build';
+
+  // 2) Pure edit signals (fix, debug, update, change, refactor, …) → 'edit_existing'.
+  //    Only fires when no new-build signal was found above.
+  if (matchesSignal(lower, EDIT_SIGNALS)) return 'edit_existing';
+
+  // 3) Long messages, code blocks, file paths or URLs → likely a real task → 'new_build'.
+  if (text.length > LONG_MESSAGE_THRESHOLD) return 'new_build';
+  if (hasCodeOrPathOrUrl(text)) return 'new_build';
+
+  // 4) Remaining build signals (tech nouns: 'app', 'react', 'button', etc., and
+  //    ambiguous verbs like 'add', 'install') → conservative 'new_build'.
+  if (matchesSignal(lower, BUILD_SIGNALS)) return 'new_build';
+
+  // 5) Clear social patterns (no build signal present) → 'chat'.
   for (const pattern of SOCIAL_PATTERNS) {
     if (pattern.test(lower)) return 'chat';
   }
 
-  // 4) Very short, signal-free messages (<= 3 words) are treated as chit-chat.
+  // 6) Very short, signal-free messages (≤ 3 words) are treated as chit-chat.
   const wordCount = lower.split(/\s+/).filter(Boolean).length;
   if (wordCount <= SHORT_WORD_COUNT) return 'chat';
 
-  // 5) Default: when unsure, treat as a build request (never risk it).
-  return 'build';
+  // 7) Default: when unsure, treat as a new build (never risk answering a build request as chat).
+  return 'new_build';
 }

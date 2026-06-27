@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
-import { AgentV3Panel } from './components/agentv3/AgentV3Panel';
+// AgentV3Panel is rendered via ProV3Surface (the gated v3.0 surface), not directly here.
 import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
 import { GitViewPanel } from './components/panels/GitViewPanel';
 import { DeploySuccessPanel } from './components/panels/DeploySuccessPanel';
@@ -10,16 +10,17 @@ import { AdminLoginPanel } from './components/panels/AdminLoginPanel';
 // FilesPanel → moved to ViewPanels.tsx
 import { DonationPanel } from './components/panels/DonationPanel';
 import { BillingPanel } from './components/panels/BillingPanel';
+import { ProfilePage } from './components/profile/ProfilePage';
 import { DeployModal } from './components/panels/DeployModal';
 import { WorkspacePane } from './components/panels/WorkspacePane';
 import { SettingsPanel } from './components/panels/SettingsPanel';
-import { ProChatPanel } from './components/panels/ProChatPanel';
+import { ProV3Surface } from './components/agentv3/ProV3Surface';
 import { NBIChatPanel } from './components/panels/NBIChatPanel';
 import { ViewPanels } from './components/panels/ViewPanels';
 import { SidebarNav } from './components/panels/SidebarNav';
 import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
-import { AgentV3Launcher } from './components/agentv3/AgentV3Launcher';
+// AgentV3Launcher removed — v3.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
 import { ConnectDomainPanel } from './components/panels/ConnectDomainPanel';
 import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
 import { CommandPalette } from './components/ide/CommandPalette';
@@ -49,11 +50,11 @@ import { ProfessionalsView } from './components/professionals/ProfessionalsView'
 import { ProfessionalChat } from './components/professionals/ProfessionalChat';
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { RepoAnalystTool } from './components/repoAnalyst/RepoAnalystTool';
-import { EngineerAIChat } from './components/engineer/EngineerAIChat';
+// EngineerAIChat retired — replaced by NavBharatAI Pro v3.0 (ProV3Surface).
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, getRedirectResult, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, getRedirectResult, GithubAuthProvider, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { firebaseConfig } from './config/firebase';
 
@@ -1298,19 +1299,54 @@ export default function App() {
 
 
   useEffect(() => {
-    // Complete a pending Google redirect sign-in on app load. signInWithRedirect
-    // navigates the whole page to Google and back, so the auth modal that started it
-    // is no longer mounted on return — getRedirectResult MUST be called here, at the
-    // app root, or the sign-in is never finalized and the user stays logged out.
+    // Finalize a social sign-in that used the REDIRECT fallback (popup is primary).
+    // signInWithRedirect navigates the whole page away and back, so the auth modal
+    // that started it is gone on return — getRedirectResult MUST run here at the app
+    // root to complete it. For a GitHub redirect we also capture the OAuth token so
+    // NavBharatAI can connect to the user's repos.
     getRedirectResult(auth)
-      .then((result) => { if (result?.user) { setUser(result.user); setLoadingUser(false); } })
-      .catch((e) => { console.error('[auth] redirect sign-in failed:', e?.code || e?.message || e); });
+      .then((result) => {
+        if (result?.user) {
+          try {
+            const ghCred = GithubAuthProvider.credentialFromResult(result);
+            if (ghCred?.accessToken) {
+              localStorage.setItem('gh_token', ghCred.accessToken);
+              setGithubToken(ghCred.accessToken);
+            }
+          } catch { /* not a GitHub sign-in — ignore */ }
+          setUser(result.user);
+          setLoadingUser(false);
+          setShowAuth(false);
+        }
+      })
+      .catch((e) => {
+        const code = e?.code || '';
+        console.error('[auth] social redirect failed:', code || e?.message || e);
+        // auth/no-auth-event = no pending redirect (normal on most loads — ignore).
+        if (code && code !== 'auth/no-auth-event') {
+          addToast('Sign-in failed. Please try again.', 'error');
+        }
+      });
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoadingUser(false);
+      if (currentUser) {
+        setShowAuth(false);
+        // Pick up a GitHub OAuth token captured during social sign-in (popup or
+        // redirect) so the rest of the app sees the connection without a reload.
+        try { const t = localStorage.getItem('gh_token'); if (t) setGithubToken(t); } catch { /* ignore */ }
+      }
     });
     return unsubscribe;
   }, []);
+
+  // Close auth modal the moment any login method completes (defensive belt-and-
+  // suspenders — onAuthStateChanged above handles it, but the extra effect
+  // catches any edge case where user becomes non-null without the listener firing
+  // before the modal is shown again).
+  useEffect(() => {
+    if (user) setShowAuth(false);
+  }, [user]);
 
   // Admin login = full app access. When the admin is signed in (separate server
   // password auth), treat them as a logged-in user so the app never forces the
@@ -1369,7 +1405,7 @@ export default function App() {
 
     if ((view === 'nbi_pro_chat' || view === 'sda_chat' || view === 'engineer_ai') && !user) {
       setShowAuth(true);
-      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI v2.0' : view === 'sda_chat' ? 'Doctor AI' : 'Engineer AI'} is available for logged-in users only. Please sign in.`, 'warn');
+      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI Pro v3.0' : view === 'sda_chat' ? 'Doctor AI' : 'NavBharatAI Pro v3.0'} is available for logged-in users only. Please sign in.`, 'warn');
       return;
     }
 
@@ -4320,7 +4356,7 @@ ${buildLanguageRule(preferredLanguage)}`;
   const menuItems = useMemo(() => [
     { id: 'home',         label: 'Home',              icon: Bot },
     { id: 'nbi_chat',     label: 'NavBharatAI FREE',  icon: MessageSquare },
-    { id: 'nbi_pro_chat', label: 'NavBharatAI v2.0',   icon: Bot },
+    { id: 'nbi_pro_chat', label: 'NavBharatAI Pro v3.0', icon: Bot },
     { id: 'preview',      label: 'Preview',           icon: Monitor },
     { id: 'files',        label: 'Files',             icon: FolderOpen },
     { id: 'history',      label: 'History',           icon: History },
@@ -4361,7 +4397,7 @@ ${buildLanguageRule(preferredLanguage)}`;
         ts: mm.timestamp ? (Date.parse(mm.timestamp) || Date.now()) : (mm.ts ?? Date.now()),
       }));
       setV3Resume({ sessionId: sid, messages: msgs, nonce: Date.now() });
-      toggleTab('engine_builder');
+      toggleTab('nbi_pro_chat'); // v3.0 now lives in nbi_pro_chat
       addLog(`Resumed v3.0 session: ${session.title}`, 'info');
       return;
     }
@@ -4455,7 +4491,7 @@ ${buildLanguageRule(preferredLanguage)}`;
       }));
       setV3Resume({ sessionId: sid, messages: msgs, nonce: Date.now() });
       setCurrentSessionId(targetSession.id);
-      toggleTab('engine_builder');
+      toggleTab('nbi_pro_chat'); // v3.0 now lives in nbi_pro_chat
       addToast('Resumed v3.0 session.', 'success');
       return true;
     }
@@ -5205,6 +5241,8 @@ ${buildLanguageRule(preferredLanguage)}`;
         auth={auth}
         theme={theme}
         setTheme={setTheme}
+        onOpenProfile={() => setActiveView('my_profile')}
+        onOpenSettings={() => setActiveView('settings')}
       />
 
       {/* Main Content Area */}
@@ -5349,71 +5387,10 @@ ${buildLanguageRule(preferredLanguage)}`;
           )}
 
           {activeView === 'nbi_pro_chat' && (
-            <ProChatPanel
-              theme={theme}
-              themeClasses={themeClasses}
-              mode={mode}
-              setMode={setMode}
-              buildVersionStack={buildVersionStack}
-              handleUndoBuild={handleUndoBuild}
-              proMessages={proMessages}
-              proInput={proInput}
-              setProInput={setProInput}
-              isProLoading={isProLoading}
-              handleStopPro={handleStopPro}
-              showDeployPanel={showDeployPanel}
-              setShowDeployPanel={setShowDeployPanel}
-              deployPlatform={deployPlatform}
-              setDeployPlatform={setDeployPlatform}
-              deployToken={deployToken}
-              setDeployToken={setDeployToken}
-              deployProjectName={deployProjectName}
-              setDeployProjectName={setDeployProjectName}
-              deployOwner={deployOwner}
-              setDeployOwner={setDeployOwner}
-              deployRepo={deployRepo}
-              setDeployRepo={setDeployRepo}
-              deployPanelError={deployPanelError}
-              setDeployPanelError={setDeployPanelError}
-              isDeploying={isDeploying}
-              handleDeployApp={handleDeployApp}
-              showWorkspace={showWorkspace}
-              setShowWorkspace={setShowWorkspace}
-              files={files}
-              isAppBuilt={isAppBuilt}
-              generatedCode={generatedCode}
-              setFiles={(f) => setFiles(f as any)}
-              updatePreview={updatePreview}
-              toggleTab={toggleTab}
-              setIsMenuOpen={setIsMenuOpen}
-              previewHistory={previewHistory}
-              setGeneratedCode={setGeneratedCode}
-              proBuildProgress={proBuildProgress}
-              setProBuildProgress={setProBuildProgress}
-              proGuiderPlan={proGuiderPlan}
-              setProGuiderPlan={setProGuiderPlan}
-              proGuiderReplanning={proGuiderReplanning}
-              setProGuiderReplanning={setProGuiderReplanning}
-              proGuiderSpecRef={proGuiderSpecRef}
-              proGuiderRefineRef={proGuiderRefineRef}
-              providerRetryCountdown={providerRetryCountdown}
-              setProviderRetryCountdown={setProviderRetryCountdown}
-              providerRetryTimerRef={providerRetryTimerRef}
-              providerRetryPromptRef={providerRetryPromptRef}
-              handleSendForPro={handleSendForPro}
-              sessions={sessions}
-              currentProSessionId={currentProSessionId}
-              togglePin={togglePin}
-              user={user}
-              setShowAuth={setShowAuth}
-              handleRestoreUci={handleRestoreUci}
-              pendingGHEdit={pendingGHEdit}
-              handleGHConfirmPush={handleGHConfirmPush}
-              isPushing={isPushing}
-              wallet={wallet}
-              downloadAppZip={downloadAppZip}
-              activeIntent={activeIntent}
-            />
+            /* NavBharatAI Pro v3.0 — replaces the retired Pro v2.0 builder. ProV3Surface shows the
+               real v3.0 builder when it's enabled for this account, else an honest "rolling out"
+               message (never a broken builder). The old ProChatPanel (v2.0) is retired. */
+            <ProV3Surface userId={user?.uid} email={user?.email} resume={v3Resume} />
           )}
 
           {/* ── Senior Doctor Assistant ── */}
@@ -5427,7 +5404,8 @@ ${buildLanguageRule(preferredLanguage)}`;
           {activeView === 'professionals' && (
             <ProfessionalsView onSelect={(id) => {
               if (id === 'sda_chat') toggleTab('sda_chat');
-              else if (id === 'engineer_ai') toggleTab('engineer_ai');
+              else if (id === 'nbi_pro_chat') toggleTab('nbi_pro_chat'); // NavBharatAI Pro v3.0 gate
+              else if (id === 'engineer_ai') toggleTab('nbi_pro_chat'); // legacy id → Pro v3.0
               else if (id === 'teacher_ai') toggleTab('teacher_ai');
               else if (id === 'mentor_ai') toggleTab('mentor_ai');
               else if (id === 'thesis_ai') toggleTab('thesis_ai');
@@ -5877,10 +5855,7 @@ ${buildLanguageRule(preferredLanguage)}`;
             </div>
           )}
 
-          {/* ── Engineer AI ── */}
-          {activeView === 'engineer_ai' && (
-            <EngineerAIChat userId={user?.uid} />
-          )}
+          {/* ── Engineer AI — RETIRED (replaced by NavBharatAI Pro v3.0). UI entry removed. ── */}
 
                     {activeView === 'about' && (
             <AboutPanel
@@ -5949,6 +5924,32 @@ ${buildLanguageRule(preferredLanguage)}`;
             />
           )}
 
+          {activeView === 'my_profile' && (
+            <ProfilePage
+              user={user}
+              onNavigateToBilling={() => { setActiveView('billing'); }}
+              onNavigateToSettings={() => { setActiveView('settings'); }}
+              onLogout={async () => {
+                if (!confirm('Sign out from NavBharatAI?')) return;
+                try {
+                  await Promise.race([
+                    signOut(auth).catch(() => {}),
+                    new Promise(r => setTimeout(r, 2500)),
+                  ]);
+                } catch { /* ignore */ }
+                try {
+                  for (const k of Object.keys(localStorage)) {
+                    if (/^firebase:authUser/i.test(k) || /firebaseLocalStorage/i.test(k)) localStorage.removeItem(k);
+                  }
+                  localStorage.removeItem('navbharat_admin_v1');
+                  sessionStorage.removeItem('admin_token');
+                } catch { /* ignore */ }
+                try { indexedDB.deleteDatabase('firebaseLocalStorageDb'); } catch { /* ignore */ }
+                window.location.reload();
+              }}
+            />
+          )}
+
             {activeView === 'git' && (
               // Phase 1.7 — extracted to GitViewPanel component
               <GitViewPanel
@@ -6002,15 +6003,9 @@ ${buildLanguageRule(preferredLanguage)}`;
             />
           )}
 
-          {/* v3.0 stays MOUNTED while its header tab is open — switching to another
-              tab (or mobile back) only hides it, so the build keeps running and the
-              chat/history are preserved. It is unmounted (and fully reset) ONLY when
-              its tab is closed via the ✕. */}
-          {openTabs.includes('engine_builder') && (
-            <div className="flex-1" style={{ height: '100vh', display: activeView === 'engine_builder' ? undefined : 'none' }}>
-              <AgentV3Panel userId={user?.uid} email={user?.email} resume={v3Resume} />
-            </div>
-          )}
+          {/* Separate 'engine_builder' v3.0 view REMOVED — v3.0 is now reached only via the two
+              gates (sidebar "NavBharatAI Pro v3.0" = nbi_pro_chat, and Professionals → Pro v3.0),
+              both rendering ProV3Surface above. The floating launcher is removed too. */}
 
           {activeView === 'entertainment' && (
             <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0d1117] min-h-screen">
@@ -6118,7 +6113,7 @@ ${buildLanguageRule(preferredLanguage)}`;
  
               
       {/* AgentV3 (Vargen 3.0) launcher — admin-only, flag-gated; renders nothing when disabled. */}
-      <AgentV3Launcher userId={user?.uid} email={user?.email} onOpen={() => toggleTab('engine_builder')} />
+      {/* Floating v3.0 launcher REMOVED — v3.0 is reached via the two gates only (see ProV3Surface). */}
 
       {/* Auth Modal + all overlay modals → AppModals */}
       <AppModals

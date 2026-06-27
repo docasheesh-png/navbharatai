@@ -32,6 +32,15 @@ if (import.meta.env.PROD) {
   console.info = () => {};
 }
 
+// Motion preference (default: animations ON). The OS prefers-reduced-motion is NOT auto-applied;
+// users opt into reduced motion via Settings → General → "Reduce Animations". Apply the saved
+// choice as early as possible so there's no flash of motion before React mounts.
+try {
+  if (localStorage.getItem('navbharat_reduce_motion') === 'true') {
+    document.documentElement.classList.add('nb-reduce-motion');
+  }
+} catch { /* storage unavailable — default to animations on */ }
+
 // Chunk load error recovery — new deployment invalidates old Vite chunks.
 // When a lazy import 404s, force a hard reload ONCE to pick up the new bundle.
 window.addEventListener('unhandledrejection', (e) => {

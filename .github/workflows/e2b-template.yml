@@ -1,0 +1,74 @@
+# Build & publish the NavBharatAI Pro v3.0 custom E2B builder template.
+#
+# WHY A WORKFLOW: building an E2B template needs the E2B API key (and, for the
+# legacy path, Docker). GitHub's runners have what's needed; the Claude web
+# sandbox does not (api.e2b.dev is egress-blocked there, no key is mounted). So
+# the one-time template build runs here.
+#
+# BUILD SYSTEM v2: E2B deprecated the v1 `e2b template build` CLI path (it now
+# exits non-zero). This workflow uses the v2 SDK build — infra/e2b/build.mjs
+# defines the template from e2b.Dockerfile and calls Template.build(). The image
+# build itself runs on E2B's cloud build infra.
+#
+# HOW TO RUN:
+#   1. Repo → Settings → Secrets and variables → Actions → New repository secret
+#        Name:  E2B_API_KEY     Value: <your e2b.dev API key>
+#   2. Repo → Actions → "Build E2B Builder Template" → Run workflow.
+#   3. When it finishes, the job summary shows the usable template ALIAS.
+#   4. Set Cloud Run env  E2B_TEMPLATE_ID=<alias>  (the follow-up code-wiring PR
+#      makes the server use it). Until then nothing changes in prod.
+#
+# Manual-only (workflow_dispatch) so it never rebuilds — and never incurs E2B
+# build cost — on ordinary pushes.
+
+name: Build E2B Builder Template
+
+on:
+  workflow_dispatch:
+    inputs:
+      template_name:
+        description: 'E2B template name (alias used by Sandbox.create)'
+        required: true
+        default: 'navbharat-builder'
+
+jobs:
+  build-template:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify E2B_API_KEY secret is configured
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+        run: |
+          if [ -z "$E2B_API_KEY" ]; then
+            echo "::error::E2B_API_KEY repo secret is not set. Add it under Settings → Secrets and variables → Actions, then re-run."
+            exit 1
+          fi
+          echo "E2B_API_KEY is present (length ${#E2B_API_KEY})."
+
+      - name: Build & publish template (E2B build system v2)
+        working-directory: infra/e2b
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+          TEMPLATE_NAME: ${{ github.event.inputs.template_name }}
+        run: |
+          npm install
+          node build.mjs
+
+      - name: Surface the template alias
+        if: success()
+        run: |
+          NAME="${{ github.event.inputs.template_name }}"
+          echo "## E2B template build complete ✅" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Template alias:** \`$NAME\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "The alias is usable directly as the template id. Next:" >> "$GITHUB_STEP_SUMMARY"
+          echo "1. Set Cloud Run env \`E2B_TEMPLATE_ID=$NAME\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "2. Run the code-wiring PR (Sandbox.create template + MODE A enable + MODE A→B fallback)." >> "$GITHUB_STEP_SUMMARY"

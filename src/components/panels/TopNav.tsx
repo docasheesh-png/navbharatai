@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Menu, Search, X, RotateCcw, LogOut, Sun, Moon } from 'lucide-react';
+import { Menu, Search, X, RotateCcw, LogOut, Sun, Moon, User, Settings, ChevronDown } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { ViewType } from '../../types';
 import type { ThemeMode } from '../../lib/theme';
@@ -37,6 +37,9 @@ export interface TopNavProps {
   /** G1: quick dark/light theme toggle */
   theme?: ThemeMode;
   setTheme?: (t: ThemeMode) => void;
+  /** Profile navigation */
+  onOpenProfile?: () => void;
+  onOpenSettings?: () => void;
 }
 
 export function TopNav({
@@ -44,7 +47,44 @@ export function TopNav({
   setIsMenuOpen, openTabs, activeView, setActiveView, toggleTab, closeTab,
   menuItems, hasGeneratedCode, canUndo, canRedo, undoCode, redoCode,
   user, setShowAuth, setShowCommandPalette, auth, theme, setTheme,
+  onOpenProfile, onOpenSettings,
 }: TopNavProps) {
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    if (dropdownOpen) document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [dropdownOpen]);
+
+  const handleLogout = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDropdownOpen(false);
+    if (!confirm('Sign out from NavBharatAI?')) return;
+    try {
+      await Promise.race([
+        signOut(auth).catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]);
+    } catch { /* ignore */ }
+    try {
+      for (const k of Object.keys(localStorage)) {
+        if (/^firebase:authUser/i.test(k) || /firebaseLocalStorage/i.test(k)) localStorage.removeItem(k);
+      }
+    } catch { /* storage may be unavailable */ }
+    try {
+      localStorage.removeItem('navbharat_admin_v1');
+      sessionStorage.removeItem('admin_token');
+    } catch { /* ignore */ }
+    try { indexedDB.deleteDatabase('firebaseLocalStorageDb'); } catch { /* ignore */ }
+    window.location.reload();
+  };
+
   return (
     <nav className={cn(
       "h-10 border-b flex items-center justify-between px-4 shrink-0 transition-all z-[100] gap-4 select-none w-full",
@@ -175,28 +215,74 @@ export function TopNav({
             Login
           </button>
         ) : (
-          <div className="flex items-center gap-2">
-            <div className="hidden sm:flex flex-col items-end mr-1">
-              <span className="text-[9px] font-black text-white uppercase tracking-tighter truncate max-w-[80px]">{user.email?.split('@')[0]}</span>
-              <span className="text-[7px] font-bold text-emerald-400 uppercase tracking-widest">Active</span>
-            </div>
+          <div className="relative" ref={dropdownRef}>
+            {/* Avatar button */}
             <button
-              onClick={async (e) => {
-                e.stopPropagation();
-                if (confirm('Logout from NavBharat?')) {
-                  try {
-                    await signOut(auth);
-                    window.location.reload();
-                  } catch (error) {
-                    console.error('Logout failed:', error);
-                  }
-                }
-              }}
-              className="w-10 h-10 bg-white/5 hover:bg-red-500/10 rounded-xl flex items-center justify-center text-[#484f58] hover:text-red-500 transition-all border border-white/5 active:scale-90"
-              title="Logout"
+              onClick={() => setDropdownOpen(v => !v)}
+              className="flex items-center gap-2 h-9 pl-1 pr-2 bg-white/5 hover:bg-white/8 border border-white/5 hover:border-white/15 rounded-xl transition-all active:scale-95"
+              title="My Account"
             >
-              <LogOut className="w-5 h-5" />
+              {user.photoURL ? (
+                <img src={user.photoURL} alt="" className="w-7 h-7 rounded-lg object-cover" referrerPolicy="no-referrer" />
+              ) : (
+                <div className="w-7 h-7 rounded-lg bg-indigo-600/30 border border-indigo-500/30 flex items-center justify-center">
+                  <span className="text-xs font-black text-indigo-400">
+                    {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
+                  </span>
+                </div>
+              )}
+              <span className="hidden sm:block text-[11px] font-bold text-white truncate max-w-[72px]">
+                {(user.displayName || user.email?.split('@')[0] || 'User')}
+              </span>
+              <ChevronDown className={`w-3 h-3 text-[#484f58] transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
             </button>
+
+            {/* Dropdown */}
+            <AnimatePresence>
+              {dropdownOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                  transition={{ duration: 0.1 }}
+                  className="absolute right-0 top-full mt-1 w-48 bg-[#161b22] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50"
+                >
+                  {/* User info row */}
+                  <div className="px-4 py-3 border-b border-white/5">
+                    <p className="text-xs font-black text-white truncate">
+                      {user.displayName || user.email?.split('@')[0]}
+                    </p>
+                    <p className="text-[10px] text-[#484f58] truncate">{user.email}</p>
+                  </div>
+                  {/* Menu items */}
+                  <div className="py-1">
+                    <button
+                      onClick={() => { setDropdownOpen(false); onOpenProfile?.(); }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
+                    >
+                      <User className="w-4 h-4 text-indigo-400" />
+                      <span className="text-sm font-bold text-white">My Profile</span>
+                    </button>
+                    <button
+                      onClick={() => { setDropdownOpen(false); onOpenSettings?.(); }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
+                    >
+                      <Settings className="w-4 h-4 text-[#8b949e]" />
+                      <span className="text-sm font-bold text-[#8b949e]">Settings</span>
+                    </button>
+                  </div>
+                  <div className="border-t border-white/5 py-1">
+                    <button
+                      onClick={handleLogout}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-red-500/10 transition-colors text-left group"
+                    >
+                      <LogOut className="w-4 h-4 text-[#484f58] group-hover:text-red-400 transition-colors" />
+                      <span className="text-sm font-bold text-[#484f58] group-hover:text-red-400 transition-colors">Sign Out</span>
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
       </div>

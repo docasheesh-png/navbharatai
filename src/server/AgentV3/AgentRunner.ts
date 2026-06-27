@@ -1,6 +1,6 @@
 import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
-import type { ClaudeToolDef, TurnRunner, TurnUsage } from './ClaudeClient';
+import type { ClaudeToolDef, TurnRunner, TurnUsage, ToolUse } from './ClaudeClient';
 import type { ToolDispatcher } from './ToolDispatcher';
 import type { AgentRole } from './types';
 import type { ConversationStore, ConversationStatus } from './ConversationStore';
@@ -39,6 +39,21 @@ export interface AgentRunnerOptions {
   maxBudgetUsd?: number;
   /** Which agent this loop represents (for event attribution). Default 'architect'. */
   agentRole?: AgentRole;
+  /**
+   * True when this run is expected to PRODUCE artifacts (a build/edit), not just chat. When
+   * set, a turn that ends with NO tool calls and where the run NEVER called a single tool is
+   * reported as ok:false — a build that wrote nothing is a FAILED build, not a success. This
+   * stops the "model replied instead of building, but it was billed as done" fake-success bug.
+   */
+  expectsArtifacts?: boolean;
+  /**
+   * R2 §1.1 — when true (top-level build only, never sub-agents), the loop runs the objective
+   * `evaluate` readiness scan before reporting a successful build, and DOWNGRADES ok:true →
+   * ok:false if the verdict is not ready (a build-breaker, secret leak, fake code, or an app
+   * that cannot run). Makes the quality gate MANDATORY instead of "only if the agent calls it",
+   * so "done" means verified. Off by default; never applied to sub-agents.
+   */
+  readinessGate?: boolean;
   /** When aborted (e.g. the user pressed Stop), the loop stops between turns. */
   signal?: AbortSignal;
   /**
@@ -56,6 +71,53 @@ export interface AgentRunnerOptions {
     /** Injected clock (defaults to Date.now) — lets tests assert timestamps deterministically. */
     now?: () => number;
   };
+  /**
+   * Max tool calls to run CONCURRENTLY within a single turn's parallel-safe group (read-only
+   * tools + review-only sub-agents). Default 4 — keeps concurrent Claude calls within rate
+   * limits while still parallelising the review/test phase. Mutating tools always run serially.
+   */
+  toolConcurrency?: number;
+}
+
+// ── Parallel tool execution (capped) ───────────────────────────────────────────
+// Read-only / side-effect-free tools — safe to run concurrently with each other.
+const PARALLEL_SAFE_TOOLS = new Set<string>([
+  'read_file', 'grep', 'glob', 'recall', 'evaluate', 'second_opinion', 'consensus',
+]);
+// Sub-agent (task) roles that only READ and REPORT (no write_file/edit) — safe to run in
+// parallel. Builder/fixer roles (frontend, debugger, tester, …) WRITE, so they stay serial to
+// avoid two agents editing the same file at once ("find in parallel, fix serially").
+const PARALLEL_SAFE_TASK_ROLES = new Set<string>([
+  'qa', 'security', 'performance', 'accessibility', 'reviewer', 'researcher', 'monitor',
+]);
+
+/**
+ * A tool call is parallel-safe when it cannot mutate shared sandbox state: a read-only tool, or
+ * a `task` spawn of a review-only specialist. Everything else (write/edit/bash, todo/preview
+ * updates, generators, and builder sub-agents) runs serially.
+ */
+export function isParallelSafeToolUse(toolUse: ToolUse): boolean {
+  if (toolUse.name === 'task') {
+    const role = typeof toolUse.input?.role === 'string' ? toolUse.input.role : '';
+    return PARALLEL_SAFE_TASK_ROLES.has(role);
+  }
+  return PARALLEL_SAFE_TOOLS.has(toolUse.name);
+}
+
+/** Run `fn` over `items` with at most `limit` in flight; results keep input order. */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  const lanes = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, () => worker());
+  await Promise.all(lanes);
+  return results;
 }
 
 export interface AgentRunResult {
@@ -70,7 +132,9 @@ export interface AgentRunResult {
 interface ToolResultBlock {
   type: 'tool_result';
   tool_use_id: string;
-  content: string;
+  // A string, OR an Anthropic content-block array (used to attach a screenshot image so the
+  // model can actually SEE the page it captured/drove — vision feedback for browser tools).
+  content: string | Array<Record<string, unknown>>;
   is_error: boolean;
 }
 
@@ -92,6 +156,11 @@ export class AgentRunner {
     } = this.opts;
     const maxSteps = this.opts.maxSteps ?? 50;
     const agentRole: AgentRole = this.opts.agentRole ?? 'architect';
+    const toolConcurrency = Math.max(1, this.opts.toolConcurrency ?? 4);
+    const expectsArtifacts = this.opts.expectsArtifacts === true;
+    const readinessGate = this.opts.readinessGate === true;
+    // Total tool calls across the whole run — a build that never called a tool built nothing.
+    let totalToolUses = 0;
 
     const messages: unknown[] = [{ role: 'user', content: userPrompt }];
     const usage: TurnUsage = {
@@ -182,23 +251,76 @@ export class AgentRunner {
         // Record the assistant turn verbatim so tool_use ids resolve next turn.
         messages.push({ role: 'assistant', content: turn.rawContent });
 
-        // No tools requested → the model has finished.
+        // No tools requested → the model has finished its turn.
         if (turn.toolUses.length === 0) {
-          const summary = turn.text.trim() || 'Build complete.';
-          await persist('complete');
-          events.emit({ type: 'done', ok: true, summary, ts: Date.now() });
-          return { ok: true, summary, steps, usage, billedUsd: billed() };
-        }
+          // A build/edit that NEVER called a single tool produced nothing — that is a FAILED
+          // build, not a success. Reporting ok:true here is the fake-success bug (the model
+          // replies "I'm preparing a plan…" instead of building, and gets billed as done).
+          // Only treat a no-tool turn as success for chat, or when real work already happened.
+          const builtNothing = expectsArtifacts && totalToolUses === 0;
+          let ok = !builtNothing;
+          let summary = builtNothing
+            ? (turn.text.trim()
+                ? `${turn.text.trim()}\n\n(No files were created — the build did not run. Retrying with a stronger model…)`
+                : 'The build did not produce any files — the model replied without building.')
+            : (turn.text.trim() || 'Build complete.');
 
-        // Execute each requested tool and gather results for the next turn.
-        const resultBlocks: ToolResultBlock[] = [];
-        for (const toolUse of turn.toolUses) {
-          const result = await dispatcher.dispatch(toolUse, agentRole);
-          resultBlocks.push({
-            type: 'tool_result',
-            tool_use_id: result.tool_use_id,
-            content: result.content,
-            is_error: result.is_error,
+          // R2 §1.1 — MANDATORY readiness gate (top-level build only). Before reporting a
+          // successful build, run the objective evaluate scan; if it is NOT ready (a build-
+          // breaker, secret leak, fake code, or an app that cannot run), DOWNGRADE to ok:false
+          // with an honest summary of the blockers. The work is preserved (files/preview still
+          // exist) — we simply refuse to claim success that wasn't earned ("Preview is EARNED").
+          // When escalation is active, this ok:false is exactly what triggers a stronger retry.
+          let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[] } | undefined;
+          if (ok && readinessGate && expectsArtifacts && totalToolUses > 0) {
+            try {
+              const readiness = await dispatcher.assessBuildReadiness();
+              // Surface the verdict to the UI as a build-health card (R2 §4.6) — pass or fail.
+              buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings };
+              if (!readiness.ready) {
+                ok = false;
+                const blockers = readiness.blockers.length
+                  ? ` Must fix before it's production-ready: ${readiness.blockers.join('; ')}.`
+                  : '';
+                summary = `${turn.text.trim() || 'Build finished.'}\n\n⚠️ Readiness gate: NOT READY (score ${readiness.score}/100).${blockers}`;
+              }
+            } catch { /* gate is best-effort — a scan error never fails a real build */ }
+          }
+
+          await persist(ok ? 'complete' : 'error');
+          events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
+          return { ok, summary, steps, usage, billedUsd: billed() };
+        }
+        totalToolUses += turn.toolUses.length;
+
+        // Execute the requested tools and gather results (in the original order, so tool_use
+        // ids resolve). Mutating tools (write/edit/bash, builder sub-agents) run SERIALLY and
+        // first; independent read-only work and review-only sub-agents then run in a
+        // concurrency-capped PARALLEL group — so the review/test phase finishes far faster
+        // ("find in parallel, fix serially"). Each is dispatched once; order is preserved.
+        const resultBlocks: ToolResultBlock[] = new Array(turn.toolUses.length);
+        const toBlock = (r: { tool_use_id: string; content: string; is_error: boolean; image?: { base64: string; mimeType: string } }): ToolResultBlock => ({
+          type: 'tool_result',
+          tool_use_id: r.tool_use_id,
+          // When a browser tool returns a screenshot, feed it back as an image block so the
+          // model can SEE the result (vision), alongside the text summary.
+          content: r.image
+            ? [
+                { type: 'text', text: r.content },
+                { type: 'image', source: { type: 'base64', media_type: r.image.mimeType, data: r.image.base64 } },
+              ]
+            : r.content,
+          is_error: r.is_error,
+        });
+        const serialIdx: number[] = [];
+        const parallelIdx: number[] = [];
+        turn.toolUses.forEach((tu, i) => (isParallelSafeToolUse(tu) ? parallelIdx : serialIdx).push(i));
+        for (const i of serialIdx) {
+          resultBlocks[i] = toBlock(await dispatcher.dispatch(turn.toolUses[i], agentRole));
+        }
+        if (parallelIdx.length > 0) {
+          await mapWithConcurrency(parallelIdx, toolConcurrency, async (i) => {
+            resultBlocks[i] = toBlock(await dispatcher.dispatch(turn.toolUses[i], agentRole));
           });
         }
         messages.push({ role: 'user', content: resultBlocks });

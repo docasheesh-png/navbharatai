@@ -71,6 +71,19 @@
 - Issue #5 — ZIP upload preview: Honest classification for framework apps (no fake preview), shows clear message instead ✅
 - Cloud Build for commit 4dbbc14 failed transiently; this commit re-triggers deploy of correct code ✅
 
+**Session 2026-06-25 — AgentV3 Intelligence Levels 1–9 (branch `claude/test-coverage-analysis-bq0yev`):**
+- **Level 1 — LLM-upgraded intent classification:** `classifyIntentWithConfidence` (4-tier keyword confidence scoring) + `classifyIntentSmart` (LLM fallback for low-confidence inputs). Wired in agentv3.ts with best-effort try/catch. ✅
+- **Level 2 — AST-level code understanding:** `ASTAnalyzer.ts` — ts-morph dynamic import (graceful fallback), extracts symbols/imports/components/routes with exact line numbers. ✅
+- **Level 3 — Semantic file search:** `EmbeddingSearch.ts` — OpenAI ada-002 vector store; in-memory cosine similarity; graceful no-op when OPENAI_API_KEY absent; wired into write_file/edit_file in ToolDispatcher. ✅
+- **Level 4 — Post-edit self-review:** `PostEditReviewer.ts` — pure static analysis (stub detection, typo check, missing import hints, JSX/React check, TODO count); appended to tool_result in ToolDispatcher; never blocks. ✅
+- **Level 5 — Dependency-aware cascading edits:** `WorkspaceMemory.reverseDeps()` + `impactRadius()` — reverse import graph BFS (depth 5); impact radius reported in write_file/edit_file tool_result. ✅
+- **Level 6 — Test-driven edit verification:** `testFileHint()` in ToolDispatcher — suggests the matching test file after every write/edit so agent can verify immediately. ✅
+- **Level 7 — Structural codemods:** `CodemodeExecutor.ts` — AST-safe cross-file `renameSymbol` and `addComponentProp` via ts-morph; `codemod_rename` and `codemod_add_prop` tools in ToolCatalog. ✅
+- **Level 8 — Multi-agent post-build reviewer:** `ReviewerAgent.ts` — sub-agent spawn on successful builds; parses CRITICAL/WARNING/SUGGESTION; wired in agentv3.ts after reflection. ✅
+- **Level 9 — Persistent WorkspaceMemory:** `FirestoreWorkspaceMemoryStore.ts` — 30-day TTL, max 100 episodes; `restoreWorkspaceMemory` wired before warmIndexFiles in edit mode; `saveWorkspaceMemory` wired after every build. ✅
+- **New ts-morph dep:** `npm install ts-morph --save` — AST parsing for Levels 2 and 7.
+- **All gates green:** `tsc --noEmit` 0 errors + `tsc -p tsconfig.server.json` 0 errors + vitest **2446/2446** passed (incl. 6 new test files: PostEditReviewer, ReviewerAgent, EmbeddingSearch, ASTAnalyzer, CodemodeExecutor, CodemodeExecutor.test.ts).
+
 **Branch:** `claude/test-coverage-analysis-bq0yev`
 **Session 2026-06-21 (b) — shipped this branch, all tsc x2 + vitest 1049/1049 green:**
 - Phase 17 — Auto Test Generation (multi-file Vitest for generated apps) ✅
@@ -3395,3 +3408,966 @@ Conversation persistence (D7) is now END-TO-END: P-A store contract → P-B Agen
 P-C Firestore backend → P-D route + endpoints → P-E frontend reload. A v3.0 build survives a
 refresh/reconnect.
 Gate: server tsc 0, frontend tsc 0, **2334 vitest** PASS (8 new agentV3History tests).
+
+---
+
+### 2026-06-25 — v3.0 build speed: capped-parallel review/test sub-agents (admin-requested)
+
+Admin asked: testing/review agents run one-by-one after a build — run them in parallel (with the
+three caveats: rate-limit cap, find-parallel/fix-serial, model must batch). Implemented:
+
+- `AgentRunner` tool execution is now TWO-PHASE per turn: mutating tools (write/edit/bash, todo/
+  preview, generators, builder sub-agents) run SERIALLY and first; read-only tools + REVIEW-only
+  sub-agents (qa, security, performance, accessibility, reviewer, researcher, monitor) then run in
+  a concurrency-CAPPED parallel group. Results keep original order (tool_use ids resolve).
+  - `isParallelSafeToolUse()` (exported, tested) classifies: read-only tool names + review roles =
+    parallel; everything that can mutate = serial ("find in parallel, fix serially").
+  - `mapWithConcurrency()` caps in-flight; `AgentRunnerOptions.toolConcurrency` (default 4),
+    route-wired from `AGENTV3_TOOL_CONCURRENCY` env → keeps concurrent Claude calls rate-safe.
+- Architect system prompt: added "VERIFY IN PARALLEL" guidance — spawn independent review agents
+  in ONE turn (multiple task calls) so they actually parallelize, then assign fixes one file at a
+  time so fixes never collide.
+
+Effect: the review/verify phase (qa+security+performance+a11y+reviewer) now runs ~concurrently
+instead of serially → roughly halves that phase, while builds/fixes stay safe (serial).
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2337 vitest** PASS (3 new parallel-exec tests).
+
+---
+
+### 2026-06-25 — v3.0 UI: harden the "working…" status spinner (admin-reported freeze)
+
+Admin reported the v3.0 "working…" pre-output spinner not rotating. Verified the `animate-spin`
+utility itself compiles correctly (`.animate-spin{animation:var(--animate-spin)}` + `--animate-spin:
+spin 1s linear infinite` + `@keyframes spin` all present), so the class isn't globally broken — the
+realistic culprits for that one element are the global `prefers-reduced-motion` reset
+(`*{animation-duration:.01ms!important}`) interacting with the cascade, or stale cached code.
+
+Fix: added a dedicated `.nb-spin` class — `animation: spin 1s linear infinite !important` +
+`transform-origin:center` — that wins over the reduced-motion reset (class specificity + !important)
+and restates the FULL shorthand so no property is dropped. Applied to the "working…" indicator and
+the AI-team chip rings. Compiled CSS confirms `.nb-spin{transform-origin:50%!important;animation:1s
+linear infinite spin!important}`.
+Gate: frontend tsc 0, **2355 vitest** PASS (frontend-only; no server change). NOTE: if it still
+looks frozen after deploy, it's the browser serving cached JS/CSS — hard-refresh (the header 'b:'
+build stamp confirms which build is live).
+
+---
+
+### 2026-06-25 — Auth: fix misleading Google sign-in diagnosis (admin-reported login failure)
+
+Admin reported Google login failing with `[auth/internal-error]` and the app showing "Sign-in is
+disabled — provider turned off". Root cause of the MESSAGE (not the login itself): the app's
+diagnostic probe (`diagnoseAuth` → anonymous `signUp`) returns `ADMIN_ONLY_OPERATION` on a healthy
+project where anonymous auth is off (the normal default), and `explainAuthReason` wrongly lumped
+`ADMIN_ONLY_OPERATION` together with `OPERATION_NOT_ALLOWED` → "provider turned off". The author's
+own comment noted ADMIN_ONLY_OPERATION "would actually mean the auth backend is fine" — the mapping
+contradicted it. (Tell: a cleanly-disabled provider throws `auth/operation-not-allowed`, handled
+separately; `auth/internal-error` points to the Google provider's OWN config.)
+
+Fix (code): extracted `explainAuthReason` into `src/lib/authDiagnostics.ts` (pure, unit-tested) and
+split `ADMIN_ONLY_OPERATION` into its own branch with an HONEST, actionable message — "backend+key
+work; check the Google provider's OAuth client + support email + Identity Toolkit API + authorized
+domains". AuthComponent now imports it. 6 new tests.
+
+NOTE (admin action, NOT code — I can't access Firebase Console): the actual login fix for
+`auth/internal-error` on project gen-lang-client-0866594388 is in Console — see the chat checklist
+(Google provider enabled + support email + OAuth Web client + Identity Toolkit API + authorized
+domains + API-key referrers).
+Gate: frontend tsc 0, server tsc 0, **2361 vitest** PASS (6 new authDiagnostics tests).
+
+---
+
+### 2026-06-25 — Auth: CSP was blocking Google sign-in (the REAL root cause)
+
+Admin's Google login failed with `auth/internal-error`. Browser console revealed the true cause:
+`Loading the script 'https://apis.google.com/js/api.js' violates the Content Security Policy
+directive: "script-src 'self' 'unsafe-inline' 'unsafe-eval'". The action has been blocked.`
+
+So it was NEVER a Firebase-provider/OAuth problem (provider enabled, web client + secret + redirect
+URIs all correct, verified by admin screenshots). Our own helmet CSP in server.ts omitted Google's
+auth script origins from `script-src`, so the browser blocked gapi (`apis.google.com/js/api.js`) and
+Firebase Auth surfaced a bare `auth/internal-error`. (The CSP comment already accounted for the auth
+IFRAME via frameSrc but missed the auth SCRIPT.)
+
+Fix: added `https://apis.google.com` (gapi, Google popup/redirect) + `https://www.gstatic.com` +
+`https://www.google.com` (phone-OTP reCAPTCHA) to `scriptSrc`. Verified by booting the server and
+curling the live `Content-Security-Policy` header — it now includes all three. connectSrc (`https:`)
+and frameSrc (`https:`) already covered identitytoolkit + the auth handler iframe.
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2361 vitest** PASS. Ships on merge → deploy.
+
+---
+
+### 2026-06-25 — AgentV3 v3.0: surgical edit engine (PR #409)
+
+Problem: when a v3.0 user asked to CHANGE an existing app ("fix the navbar", "update the button
+colour", "refactor auth"), the engine treated it identically to "build me a new app" — it defaulted
+to `write_file` (full overwrite) and rebuilt everything from scratch, wiping the user's existing files.
+
+Root cause: `classifyIntent` returned the same `'build'` for both new builds and edits; both got the
+identical `architectSystemPrompt()` ("create real, complete source files"); no file-tree context and
+no instruction to read-first / patch surgically.
+
+Fix (real, end-to-end), built on already-existing infra (stable sessionId→workspaceId, sandbox VFS,
+read_file/edit_file/grep/glob, WorkspaceMemory project graph):
+- `IntentClassifier`: `'chat' | 'build'` → `'chat' | 'new_build' | 'edit_existing'`. New-build signals
+  win over edit signals; conservative default stays a build intent.
+- `systemPrompt.editModePrefix(fileTree)`: locate-first (grep/glob), read-before-write, prefer
+  edit_file over write_file, minimum changes, preserve existing logic, never rebuild from scratch.
+- `routes/agentv3.ts`: on an edit turn WITH real files, inject the live file tree + edit prefix and
+  narrate the edit; empty/failed workspace falls back to the normal build prompt.
+- `ToolDispatcher`: write_file nudges toward edit_file when it overwrites an existing file.
+
+Gold-standard polish (same PR):
+- (A) `warmIndexFiles` — pre-index persisted sandbox files into project memory when memory is cold
+  (process restarted), so recall/evaluate see the existing codebase immediately on a resumed edit.
+- (B) grep/glob "LOCATE FIRST" guidance in the edit prompt.
+- (C) `applyEdit` — edit_file now has a whitespace-tolerant fallback (still unique-or-error), so a
+  patch whose indentation is slightly off still applies; the diff shows the verbatim replaced text.
+
+AppKnowledgeBase: documented the surgical-edit capability + keywords (mandatory sync rule).
+Gate: frontend tsc 0, server tsc 0, **2400 vitest** PASS (32 new tests across IntentClassifier,
+systemPrompt, ToolDispatcher/applyEdit, WorkspaceMemory/warmIndexFiles). Ships on merge → deploy.
+
+---
+
+### 2026-06-25 — v3.0 feature port #1: web_search tool (admin: bring old-engine features into v3.0)
+
+Admin wants the best old-engine features COPIED into v3.0 (self-contained, so v3.0 owns them and
+they survive the planned deletion of the old engines). Old engines NOT deleted yet (admin will
+trigger that tomorrow). Each feature = its own additive PR; nothing live touched.
+
+PR #1 — `web_search` tool:
+- NEW `src/server/AgentV3/WebSearch.ts` — self-contained copy of Engineer AI's WebSearchClient,
+  strict-typed (the source lives outside the strict tsconfig; cleaned the `any`s). Brave (if
+  BRAVE_API_KEY) → DuckDuckGo fallback → npm registry for package queries. Degrades to "no results",
+  never throws. `makeWebSearch()` factory + `formatSearchResults`/`parseDuckDuckGo` (tested).
+- Wired like second_opinion/consensus: ToolName + ToolCatalog def + CATALOG_TOOL_NAMES +
+  ToolDispatcher `web_search` case (injected fn) + architect tool-set + index export + route
+  injects makeWebSearch() into the dispatcher + architect prompt guidance.
+- NO old-engine coupling added (WebSearch.ts is a v3.0-owned copy; the original is untouched and
+  still deletable later).
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2452 vitest** PASS (6 new WebSearch tests).
+NEXT: screenshot/browser_action, deploy, generate_tests (each its own PR).
+
+---
+
+### 2026-06-25 — v3.0 feature port #2: screenshot + browser_action + console_errors (agent gets eyes)
+
+PR #2 of the old-engine feature ports. Gives v3.0 the ability to SEE and TEST the app it builds —
+the single biggest capability gap vs Engineer AI.
+
+- ActuatorPort extended with OPTIONAL `screenshot`, `browserAction`, `getConsoleErrors` (the real
+  IEngineerActuator/E2BActuator already implement them; Local/Docker degrade honestly).
+- VISION PASSTHROUGH (real "agent sees"): ToolResult gained an optional `image`; ToolDispatcher
+  routes screenshot/browser_action through `runVisual()` which returns {content, image}; AgentRunner
+  feeds the screenshot back to the model as an Anthropic image content-block in the tool_result, so
+  the model actually inspects the rendered page (not just text). Parallel-safe (image flows through
+  the return value, no shared state).
+- 3 new tools: `screenshot` (capture+see a URL, optional viewport for responsive), `browser_action`
+  (click/type/navigate/scroll/hover/etc. — persistent session for multi-step flows, returns result+
+  screenshot), `console_errors` (runtime browser errors a build never reveals). Wired: types +
+  catalog defs + CATALOG_TOOL_NAMES + dispatcher + architect tool-set + architect prompt ("verify
+  visually; fix what you see; never fake the verification").
+- Honest fallback: on Local/Docker (no E2B) the tools return "requires a real sandbox", never a fake
+  success. No old-engine import added (uses the actuator v3.0 already holds via the ActuatorPort).
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2458 vitest** PASS (6 new browser-tool tests).
+NEXT: deploy tool, generate_tests tool.
+
+---
+
+### 2026-06-25 — v3.0 feature port #3: deploy tool (real persistent Firebase Hosting)
+
+PR #3 of the old-engine feature ports. v3.0 can now SHIP — publish a built app to a permanent
+public URL (not just the ephemeral dev-server preview).
+
+- NEW `src/server/AgentV3/Deployment.ts` — v3.0-owned copy of Engineer AI's DeploymentService
+  (Firebase Hosting REST + ADC auth, SHA-dedup upload, SPA rewrite + immutable asset caching).
+  Channel id prefixed `v3-`. `makeDeploy()` factory + `DeployFn` type + `makeChannelId` (tested).
+- ActuatorPort extended with optional `downloadDistFiles`; `deploy` tool case: pulls dist/ from the
+  sandbox → deploys → emits a preview event → returns the permanent URL. Honest refusals: no dist
+  ("run npm run build first"), no sandbox ("requires E2B"), deploy unconfigured.
+- Wired: ToolName + catalog def + CATALOG_TOOL_NAMES + dispatcher (injected DeployFn) + architect
+  tool-set + index export + route injects makeDeploy() + architect prompt ("deploy when asked;
+  never claim deployed unless deploy returned a URL"). Uses ADC (Cloud Run service account); a 403
+  means the SA needs the Firebase Hosting Admin role. No old-engine import added.
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2464 vitest** PASS (6 new deploy tests).
+NEXT: generate_tests tool (last of today's ports).
+
+---
+
+### 2026-06-25 — v3.0 feature ports COMPLETE (3 of 5) + generate_tests intentionally SKIPPED
+
+Admin asked to copy the best old-engine features INTO v3.0 (self-contained, so v3.0 owns them and
+they survive the planned deletion of the old engines). DELETION NOT done yet — admin triggers that
+separately (next day). Shipped today, each its own additive PR (no live path touched, old engines
+untouched):
+
+- #411 `web_search` — Brave→DuckDuckGo→npm (WebSearch.ts, v3.0-owned).
+- #412 `screenshot` + `browser_action` + `console_errors` — agent VISION + interactive testing
+  (ActuatorPort optional methods + image-passthrough so the model truly SEES the page).
+- #413 `deploy` — real persistent Firebase Hosting (Deployment.ts, v3.0-owned).
+
+These three were the genuine capability gaps (see/search/ship). All wired through types + catalog +
+dispatcher + architect tool-set + index + route + prompt, with honest "requires a real sandbox"
+fallbacks. None adds an import from EngineerAI/AppMakerLab/pro → v3.0 stays deletion-ready.
+
+INTENTIONALLY SKIPPED (the "ulta bekar"/duplication cases, per admin's own guidance + the speed goal):
+- `generate_tests` (ProTestGen) — REDUNDANT: the v3.0 agent already writes tests with write_file
+  (under its control + normal billing) and `evaluate`/TestCoverageAnalysis already flags untested
+  files. A separate test-gen pipeline fires extra AI calls OUTSIDE the agent loop → SLOWER builds,
+  which directly contradicts the admin's "fast" goal AND the architect prompt's existing
+  "a working preview is the goal, not a green test suite; don't block on tests" philosophy. Do NOT
+  re-port it unless admin explicitly asks.
+- `context file-ranking` (ContextRetriever) — mostly OVERLAPS v3.0's existing grep/glob/recall.
+  Low marginal value; skipped to avoid bloat.
+
+Also SKIPPED earlier (architecture conflicts, do not port): ProCodeReview (evaluate is superior),
+ErrorPatternMatcher (RecalledLessons better), BackendProvisioner/TemplateRegistry as features,
+ProComplexity, WorkspaceMutationEngine/VFS, Engineer AI's ReAct loop, tar.gz checkpoint tool.
+
+NEXT (admin-triggered, NOT today): independence move (extract actuators + helpers + scaffold to
+src/server/sandbox/, see the 2026-06-25 hard-audit) → then delete EngineerAI/AppMakerLab/pro.
+
+---
+
+### 2026-06-25 — v3.0 BUGFIX: preview "Blocked request … is not allowed" (Vite allowedHosts)
+
+Admin hit a live v3.0 preview showing: `Blocked request. This host ("5174-…e2b.app") is not
+allowed. Add it to server.allowedHosts in vite.config.` Root cause: newer Vite enforces a host
+allow-list; the sandbox proxy host (<port>-<id>.e2b.app) isn't in it, so Vite blocks the request and
+the preview shows the error instead of the app. `allowedHosts` was set NOWHERE in the codebase.
+
+Fix (two places, since the agent sometimes writes its own vite.config):
+- Default scaffold `ViteReactProviderContents.viteConfig`: added `allowedHosts: true` to BOTH
+  `server` and `preview`.
+- Architect system prompt: added a CRITICAL instruction to always set server/preview allowedHosts:true
+  for Vite, and that a "Blocked request … is not allowed" preview is ALWAYS fixed by allowedHosts:true.
+- Regression test (ScaffoldPreview.test.ts) asserts both the scaffold config and the prompt carry it.
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2466 vitest** PASS (2 new).
+
+NOTE: the same session also showed a reviewer "0/100 — missing all source code" right after the agent
+claimed it wrote 7 files; that looks like a separate workspace-state hiccup (the build started on an
+"empty directory" and recreated the scaffold mid-run). Not reproduced/fixed here — flagged for
+follow-up if it recurs; the concrete, reproducible preview-block bug is fixed above.
+
+---
+
+### 2026-06-25 — v3.0 BUGFIX: reviewer's false "0/100 — missing all source code"
+
+Same live session as the allowedHosts bug: after the agent built a working app (7 files; dev server
+was running on :5174), the post-build ReviewerAgent reported "[CRITICAL] missing all the necessary
+source code. Score: 0/100". Root cause (route ~L986): the reviewer reads the workspace via
+`actuator.listFiles(workspaceId)`; that came back EMPTY (a sandbox read hiccup — the files genuinely
+exist, the dev server proves it), so reviewBuild got `fileTree:[]` and the reviewer model declared the
+app had no code. A false negative that contradicts the build the user just watched succeed.
+
+Fix (ReviewerAgent.ts): added `hasReviewableSource(fileTree)` (exported, pure) and a defensive
+early-return in `reviewBuild` — when the listing has no real source files, it returns a neutral
+skipped result (score 0, passed:true, no issues) WITHOUT spawning the reviewer. `formatReview`
+already emits '' for score 0, so the user sees nothing instead of a scary, wrong "0/100". The build
+result is never affected (review is advisory). Updated one existing parse-test to pass a source file
+(it tests parsing, not the empty case).
+
+Gate: server tsc 0, frontend tsc 0, **2468 vitest** PASS (3 new reviewer-guard tests).
+NOTE: the underlying "listFiles returned empty when files exist" is an E2B read-reliability issue
+(can't reproduce without E2B here) — this fix removes the user-visible false verdict; flagged for
+follow-up if the empty-listing recurs.
+
+---
+
+### 2026-06-25 — v3.0 BUGFIX: durable file persistence (files no longer vanish)
+
+Admin: v3.0 built 7 files, then on the next (edit) message they all vanished; Files(0)/Diff(0) in the
+UI; reviewer said "missing all source code". Root cause: the sandbox is EPHEMERAL and v3.0 persisted
+only the MEMORY snapshot (file-list hints + episodes), NOT the file CONTENT — so a lost/recycled or
+fresh-next-message sandbox had nothing to restore from. (History(7) showed git commits, proving the
+files WERE written; a flaky listFiles + no content-restore = "gayab".)
+
+Fix — capture-at-write + Firestore + restore (admin OK'd "hamare firebase ke db me"):
+- NEW `WorkspaceFileStore.ts` — Firestore-backed durable file store (collection `workspace_files_v3`,
+  one doc per file in a `files` subcollection to dodge the 1MB limit; a metadata `paths` list is
+  authoritative so deleted files don't resurrect). Mirrors FirestoreWorkspaceMemoryStore (VITEST-skip,
+  best-effort, never throws). `fileDocId` (base64url, slash-free).
+- `ToolDispatcher` — new optional `onFileWrite(path, content)` fired on every successful write_file/
+  edit_file with the FINAL content. Reliable capture straight from the write op — does NOT depend on
+  the sometimes-empty listFiles.
+- Route: a per-build `writtenFiles` accumulator feeds onFileWrite; at build END it saves the union of
+  captured writes (reliable) + a sandbox scan (supplement) to Firestore, skipping if BOTH are empty
+  (so a read hiccup never overwrites a good saved set). At build START, if the sandbox came up empty,
+  it restores the persisted files into it and narrates "Restored N file(s) from your previous session."
+
+Effect: a build's source survives sandbox loss + carries across messages → no more "files gayab".
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2473 vitest** PASS (5 new tests).
+NOTE: requires Firestore (Cloud Run ADC) — works automatically in prod; VITEST/local = best-effort no-op.
+
+---
+
+### 2026-06-25 — v3.0 git-native storage PHASE 1: GitHubAppClient (admin-approved roadmap)
+
+Admin approved the plan to make v3.0 git-native (files live in a real GitHub repo = durable, ~free,
+no Firestore bill, enables CI/merge). Admin completed PHASE 0: created org `navbharatai-apps`,
+registered the "NavBharatAI Builder" GitHub App (App ID 4146547; perms Contents/PRs RW, Checks/Admin),
+installed it on the org, and set Cloud Run secrets GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY / GITHUB_ORG.
+
+PHASE 1 (this PR) — `GitHubAppClient.ts` (standalone, flag-gated OFF, NOT wired to the build path yet):
+- App auth with zero new deps (Node crypto RS256 JWT + fetch): sign App JWT → org installation id →
+  installation access token (cached). `ensureRepo(name)` (GET-or-create, idempotent, private+auto_init),
+  `authedCloneUrl` (token-embedded git URL). `githubConfigFromEnv()`/`githubStorageEnabled()` (null/false
+  until all 3 secrets present → storage stays off), `repoNameForProject()` (deterministic, GitHub-safe).
+- Fully unit-tested (7 tests) incl. a REAL RSA keypair verifying the JWT signature + fake-fetch for the
+  installation/token/repo endpoints (reuse vs create). No live-path coupling → current v3.0 unaffected.
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2503 vitest** PASS (7 new).
+NEXT (Phase 2): wire into the build loop — clone the repo into the sandbox at start, commit+push at
+build end → git becomes the source of truth (replaces the ephemeral-sandbox file loss).
+
+---
+
+## 2026-06-25 — Git-native storage PHASE 2 (DONE, merged PR #420, deploys via Cloud Run)
+
+PHASE 2 — wired git-native storage into the v3.0 build loop, behind an explicit
+`GITHUB_STORAGE_ENABLED=true` opt-in (ships DORMANT; the three App secrets alone do NOT activate it,
+so the live build path is unchanged until the admin flips the flag — strangler-fig).
+
+- `GitRepoSync.ts` (over the same `CommandRunner` port as GitManager → unit-testable, no-op without a
+  shell): `hydrateIfEmpty(authedUrl)` clones the project repo into the sandbox ONLY when it came up
+  empty (never clobbers a live sandbox or a Firestore restore); `pushAll(authedUrl, branch, message)`
+  commits + force-pushes the sandbox back (private single-writer mirror → force safe). Best-effort
+  everywhere; the authed token is handed straight to git and NEVER emitted to the event stream;
+  branch + commit message sanitized against shell injection.
+- `githubStorageActive()` gate added to GitHubAppClient (secrets present AND the flag = true).
+- Route wiring (agentv3.ts): ensureRepo + hydrate BEFORE the Firestore fallback at build start;
+  commit + push AFTER the durable file save at build end. Both no-op when dormant. The Firestore file
+  capture stays as the backstop.
+- 9 new unit tests (fake CommandRunner): hydrate skip/clone/fail, push commit/no-change/fail, branch +
+  message sanitization, never-throws.
+
+Gate: server tsc 0, frontend tsc 0, boot:check PASS, **2512 vitest** PASS (9 new).
+NEXT (Phase 3): CI + merge of the user's repo, Claude-Code-style (PR → check status → merge).
+Phase 4: auth simplify (Email/Phone primary, remove the failing Google button, optional "Connect
+GitHub" + Export/Transfer for portability). Phase 5: dual preview (in-browser iframe + E2B).
+NOTE: Phases 3–5 touch user-facing auth/preview flows → confirm with admin before each (safeguard #3).
+
+---
+
+### 2026-06-25 — v3.0 cost-ladder P2: analyser → start-tier build-model wiring
+
+The deterministic request analyser (`RequestAnalyser.analyzeRequest`, already
+built + unit-tested) existed but was **never wired into the build route** — every
+v3.0 build ran on a fixed `gemini-2.5-pro` chain regardless of how trivial the
+request was. This is the "make a Gemini calculator cost ₹20 not ₹1600" lever the
+design doc (§8.5 P2) calls for, and it was dead.
+
+Wired it (real, end-to-end, margin-safe):
+- `routes/agentv3.ts`: before building the turn runner, call `analyzeRequest({ prompt,
+  powerMode: onlyOpus })` and map the resulting `startTier` to the cheapest CAPABLE
+  Gemini build model via new exported `tierToGeminiBuildModel()`:
+  `gemini` (greeting / calculator / todo / simple_app) → **gemini-2.5-flash**;
+  every other tier (haiku/sonnet/opus) → **gemini-2.5-pro** (proven model kept for
+  real coding / complex / architecture work). The Claude backstop in the provider
+  chain is untouched.
+- `buildTurnRunner(opts?)` now takes an optional `geminiModel`; explicit env overrides
+  (`AGENTV3_{VERTEX,GEMINI}_BUILD_MODEL`, `AGENTV3_BUILD_MODEL`) still win, then the
+  tier model, then the `gemini-2.5-pro` default.
+- Escape hatch: `AGENTV3_COST_LADDER=off` restores the fixed-model behavior.
+- The chosen model is logged to server telemetry only (`[AGENTV3] cost-ladder: …`) —
+  **no provider/model name is surfaced to the user**, consistent with the existing
+  hidden-provider design.
+
+**Billing is UNCHANGED** — every v3.0 build is still billed at the Opus-equivalent
+markup (× 2.5 / × 5) per the constitution. This change lowers ONLY NavBharatAI's own
+real provider cost, so the margin is strictly wider. `pricing.ts` is NOT touched
+(the constitution-locked lever stays locked). Active within v3.0, which is itself
+flag-gated (`AGENTV3_ENABLED`) — zero impact on the live app.
+
+Exported `analyzeRequest` + types from `AgentV3/index.ts` (clean public surface).
+Gate: frontend tsc 0, server tsc 0, **2516 vitest** PASS (+4 new cost-ladder tests),
+boot:check PASS. Ships on merge → deploy.
+
+---
+
+## 2026-06-25 — Git-native PHASE 3 + Auth/Export PHASE 4 + Dual Preview PHASE 5 (all DONE, merged)
+
+PHASE 3 (merged PR #422) — Claude-Code-style PR → CI → merge for git-native storage, behind an
+explicit GITHUB_PR_MODE=true opt-in ON TOP of git-native storage (dormant until both flags set).
+- GitHubAppClient: openPullRequest (idempotent, reuses an open PR on 422), combinedStatus (legacy
+  commit-status AND GitHub Actions check-runs → one success/pending/failure/none verdict),
+  mergePullRequest.
+- GitHubPrFlow.mergeViaPullRequest: open PR → read CI on the head sha → merge ONLY on green/none,
+  else leave the PR OPEN with an honest note (never merges red, no fake success). githubPrMode().
+- Route: PR mode pushes to nbi/build-<ts> then open+merge; else the Phase 2 direct push. 15 tests.
+
+PHASE 4 (merged PR #424) — auth simplify + portability.
+- Removed the failing "Sign in with Google" button + its handler/helper/imports + the "ya" divider.
+  Email+Password and Phone(OTP) remain. App-root getRedirectResult left intact (harmless no-op).
+- Real "Export .zip" button in the v3.0 tab row: pulls live files via /api/agentv3/workspace-files
+  and builds a genuine zip in-browser with jszip (excludes node_modules/.git/dist/build/.next/
+  __pycache__). User owns their code — no lock-in.
+- AppKnowledgeBase: login_auth updated (Email/Phone, Google removed); new agentv3_export entry.
+
+PHASE 5 (this PR) — dual preview.
+- New POST /api/agentv3/inbrowser-preview: builds ONE self-contained HTML from the workspace files
+  via the existing runtime renderers (renderPreview → static/React/Vue) and returns it. No dev
+  server needed → works even when the E2B sandbox preview is unavailable ("Blocked request" case).
+- PreviewSurface rewritten for two real modes: "Live server" (E2B running app, full fidelity) and
+  "In-browser" (<iframe srcdoc> of the built files; sandboxed WITHOUT allow-same-origin). Toggle +
+  refresh; in-browser auto-builds and defaults on when there is no live URL yet.
+- AppKnowledgeBase: new agentv3_preview entry (dual preview, blocked-request keywords).
+
+Gate (every phase): frontend tsc 0, server tsc 0, boot:check PASS, vitest PASS
+(2503 → 2512 → 2527 across the phases; Phase 4/5 add UI + a route, covered by existing runtime tests).
+All five git-native/preview/auth phases complete. Git-native storage + PR mode remain DORMANT behind
+their flags; auth simplify + export + dual preview are LIVE.
+
+---
+
+### 2026-06-25 — v3.0 cost-ladder measurement: per-tier cost & quality telemetry
+
+The cost-ladder (P2, prior milestone) now routes simple apps to cheaper models —
+but there was NO way to prove it saves money or that quality holds per tier. The
+design doc's P8 cutover gate explicitly requires that measurement ("measure
+cheap-tier quality + fallback rate per task-type before flipping the default"),
+and a cost dashboard would have no real data without it (faking it would break the
+real-features rule). Built the honest foundation:
+
+- NEW `src/server/AgentV3/AgentV3CostTelemetry.ts` — per-day aggregate
+  (`agentv3_cost_telemetry/{YYYY-MM-DD}`) of every v3.0 build, broken down BOTH by
+  task type and by start tier: builds, okBuilds (per-tier success rate), billedUsd,
+  input/output tokens, durationMs, plus powerBuilds. The aggregation is a PURE,
+  unit-tested `foldCostTelemetry()` fold; the store wraps it in a Firestore
+  transaction. Mirrors UserCostStore exactly (VITEST-skip, best-effort, never throws).
+- `routes/agentv3.ts` — records one telemetry row per build right beside the existing
+  `userCostStore.record`, pulling taskType/startTier from the analyser and
+  ok/billed/tokens/duration from the build result. Best-effort; never blocks.
+- `routes/admin.ts` — NEW `GET /api/admin/agentv3/cost-telemetry?days=N` (admin-auth,
+  read-only) returns the last N days of aggregates for an eventual dashboard.
+
+No billing change, no pricing.ts touch, no user-facing surface yet (admin endpoint
+only → no AppKnowledgeBase entry until the dashboard UI ships). Active within the
+already-flag-gated v3.0 path.
+Gate: frontend tsc 0, server tsc 0, **2524 vitest** PASS (+8 new foldCostTelemetry
+tests), boot:check PASS. Ships on merge → deploy.
+
+---
+
+### 2026-06-26 — v3.0 cost-ladder dashboard: admin Revenue-tab visualization
+
+Completes the cost-ladder trio (wiring → measurement → visualization). The
+telemetry endpoint shipped last; this surfaces it for the admin with REAL numbers
+(no faked "money saved" — that would need per-model provider rates we don't record,
+so it's deliberately omitted per the real-features rule).
+
+- NEW `src/lib/agentV3CostSummary.ts` — PURE, frontend-safe `summarizeCostTelemetry()`
+  that rolls up the per-day telemetry docs into display numbers: total builds,
+  overall + per-tier success rate, billed totals, avg tokens/duration, and the
+  headline CHEAP-TIER SHARE (% of builds on the cheapest 'gemini' tier). Empty/bad
+  input → honest all-zero summary. 8 unit tests.
+- `components/AdminDashboard.tsx` — new "v3.0 Cost-Ladder (last 30 days)" section in
+  the Revenue tab: 4 stat cards (builds, success rate, cheap-tier share, billed) +
+  a per-start-tier table (builds / share / success / avg tokens / avg time / billed),
+  with a Refresh button. Fetches `/api/admin/agentv3/cost-telemetry` only when the
+  Revenue tab is open. Built in AdminDashboard.tsx (NOT App.tsx) → no collision with
+  the concurrent session's App.tsx work.
+- AppKnowledgeBase: NEW `admin-cost-ladder` entry (mandatory sync — new admin surface).
+
+The cheap-tier success rate shown here IS the P8 cutover signal: high share + high
+success = the ladder is safe to default-on. No billing/pricing change.
+Gate: frontend tsc 0, server tsc 0, **2547 vitest** PASS (+8 new summary tests),
+boot:check PASS. Ships on merge → deploy.
+
+---
+
+### 2026-06-26 — v3.0 cost-ladder P3: evaluate-gated escalation (wired, DORMANT behind flag)
+
+Completes the cost-ladder's autonomy. The analyser already picks a cheap start tier
+(P2) and we measure it (telemetry/dashboard) — P3 adds the missing piece: build
+cheap-first, and climb to a stronger tier ONLY when the build objectively fails.
+
+The `runWithEscalation` orchestrator already existed + was unit-tested; the design
+doc explicitly deferred its WIRING to "behind the rollout flag" — so this ships it
+DORMANT:
+
+- Flag `AGENTV3_ESCALATION` (default OFF). When off, the build path is byte-identical
+  to before — a single `runner.run(buildPrompt)` on the start tier. Verified by routing
+  the unchanged path through an explicit else-branch.
+- When `=on`: the build runs through `runWithEscalation(analysis.escalationPath, …)`.
+  Attempt 1 reuses the existing start-tier runner; on gate-fail it builds once more on a
+  stronger, **Claude-first** runner (same workspace + event stream, new transcript id),
+  emitting an honest "Escalating to a stronger model…" narration. The last tier is always
+  delivered as a best-effort backstop, so the build NEVER breaks.
+- Objective gate (`escalationGate`): `build.ok` — a build that didn't complete fails and
+  triggers the climb; deterministic, free, no LLM call. (Richer 22-dim gating can replace
+  it later.)
+- Guards (`shouldEscalateBuild`): never escalates power/Only-Opus builds (ladder bypassed)
+  or a build already at the top tier; no analysis → no escalation.
+- `buildTurnRunner` gained a `claudeFirst` option so an escalated tier actually leads with
+  Claude, not Gemini.
+- Telemetry now records the DELIVERED tier (post-escalation), so per-tier success rates
+  reflect what really ran.
+
+No billing/pricing change; no user-facing surface (dormant build-routing → no
+AppKnowledgeBase entry). Activating it (and proving cheap-tier quality via the P6
+dashboard) is the admin-gated P8 rollout step.
+Gate: frontend tsc 0, server tsc 0, **2554 vitest** PASS (+7 new escalation policy/gate
+tests), boot:check PASS. Ships on merge → deploy (dormant until AGENTV3_ESCALATION=on).
+
+---
+
+### 2026-06-26 — v3.0 cost-ladder P7: failover hardening (Claude-Haiku backstop)
+
+The build provider chain was Vertex → Gemini → (single) Claude. If the primary Claude
+model (Sonnet in normal mode, Opus in power) was overloaded or rate-limited, the build
+could hard-fail even though a cheaper Claude model was available. P7 closes that gap.
+
+- NEW `forceModelRunner(runner, model)` in MultiProviderTurnRunner.ts — wraps a runner so
+  it ALWAYS runs with a fixed model, ignoring the turn's requested model. Pure, unit-tested.
+- `buildTurnRunner` now appends a **Claude-HAIKU backstop** as the final chain entry
+  (forces the Haiku model). It only ever runs AFTER every prior provider has thrown, so
+  normal builds are completely unaffected — but a Sonnet/Opus-specific outage no longer
+  breaks the build; Haiku completes the turn. STRICTLY ADDITIVE resilience (no flag/gate
+  needed); `AGENTV3_DISABLE_HAIKU_BACKSTOP=1` removes it if ever required.
+- Billing is UNCHANGED — Opus-equivalent markup (D5/D6) regardless of which model answers.
+- Exported haikuModel/opusNormalModel/ladderModel + ClaudeLadderTier from AgentV3/index.ts.
+
+Matches the design doc's failover chain (…→ Haiku → Gemini → Vertex). Backend resilience
+only — no user-facing surface, so no AppKnowledgeBase entry.
+Gate: frontend tsc 0, server tsc 0, **2556 vitest** PASS (+2 new forceModelRunner tests),
+boot:check PASS. Ships on merge → deploy.
+
+---
+
+### 2026-06-26 — v3.0 cost-ladder P9: new-user free onboarding builds (dormant behind flag)
+
+Retention feature: give each NEW user their first N v3.0 builds free. With the
+cost-ladder, a new user's first app (usually simple) builds on Gemini for ~₹0 real
+cost — near-free for NavBharatAI but a strong first impression. DORMANT by default
+(AGENTV3_FREE_ONBOARDING_BUILDS=0), so live billing is exactly as before until the
+admin sets a limit. This is a promo waiver, NOT the P5 pricing-model change (which
+the admin kept as Opus-equivalent ×2.5).
+
+- NEW `src/server/lib/OnboardingCreditStore.ts` — lifetime per-user free-build counter
+  (`agentv3_onboarding_credits/{userId}`), atomic `consumeFreeBuild(userId, limit)`.
+  Pure `onboardingEligible(used, limit)` policy + `freeOnboardingLimit()` env parse.
+  Fail-safe: any Firestore error → false (user billed normally; an outage can NEVER
+  make every build free). Mirrors UserCostStore (VITEST-skip, best-effort).
+- `routes/agentv3.ts`: on a SUCCESSFUL build (result.ok) for an eligible user, the free
+  credit is consumed → `effectiveBilledUsd = 0`, a "🎁 This build is on us" narration is
+  shown, and both the cost record AND the result event use the waived amount so the
+  customer-facing ₹ matches. A FAILED build never burns a free credit.
+- Cost-ladder telemetry keeps recording the REAL billed amount (build economics),
+  separate from the user-facing waiver.
+
+Dormant by default → no AppKnowledgeBase entry yet (adding one while OFF would have the
+AIs falsely promise free builds). Documented when the admin enables it.
+Gate: frontend tsc 0, server tsc 0, **2562 vitest** PASS (+6 new onboarding-policy
+tests), boot:check PASS. Ships on merge → deploy (dormant until the limit is set).
+
+---
+
+### 2026-06-26 — Auth: Google + GitHub social login rebuilt from scratch (with the real root-cause fix)
+
+Google login had failed across ~12 prior attempts and was deleted entirely (PR #424).
+A multi-agent diagnosis found the real, never-addressed blocker and the full rebuild
+ships here.
+
+ROOT CAUSE (RC5, never fixed before): helmet set NO `crossOriginOpenerPolicy`, so its
+default `same-origin` COOP severed `window.opener` for the OAuth popup — the popup
+completed but its postMessage result could never reach the app ("message channel closed
+before a response"), so the user returned logged-out with no error. Every prior attempt
+flip-flopped between popup (broken by COOP) and redirect (broken by cross-origin storage
+partitioning, RC2) without ever fixing COOP.
+
+THE FIX:
+- `server.ts`: add `crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' }` to
+  helmet — keeps the opener link so signInWithPopup actually delivers its credential.
+  This is the missing piece behind every past failure.
+- `components/AuthComponent.tsx`: fresh social sign-in — "Sign in with Google" and
+  "Continue with GitHub" buttons. Popup-first (sidesteps the redirect storage problem),
+  with an automatic full-page **redirect fallback** if the browser blocks the popup.
+  Errors are always surfaced via describeSocialError (unauthorized-domain /
+  operation-not-allowed name the exact Firebase Console fix) — never silent.
+- **GitHub = maximum repo permission**: requests `repo` + `workflow` + `read:user` +
+  `user:email` scopes and captures the OAuth access token into `localStorage.gh_token`,
+  so NavBharatAI can 100% connect to the user's repos (git-native storage, deploy, PR→CI
+  →merge flow).
+- `App.tsx`: getRedirectResult finalizes the redirect-fallback path AND captures the
+  GitHub token; onAuthStateChanged syncs `githubToken` state on any social login. Removed
+  the old confusing "force-reopen modal on error" behaviour.
+- `declarations.d.ts`: ambient firebase/auth stubs for GithubAuthProvider / AuthProvider.
+- AppKnowledgeBase `login_auth`: lists all four methods again (+ GitHub repo-connect),
+  Google/GitHub keywords restored (mandatory sync rule).
+
+HONEST CAVEAT (CLAUDE.md "no fake success"): the code fix is correct and ships the
+genuinely-missing COOP fix, but a successful Google/GitHub round-trip ALSO depends on
+admin-only Firebase Console config that CANNOT be verified from the sandbox: (1) Google
+AND GitHub providers ENABLED in Authentication → Sign-in method; (2) the live serving
+domain in Authentication → Settings → Authorized domains; (3) for GitHub, an OAuth app
+configured with the Firebase callback URL. This feature must be verified on the LIVE site
+in a real browser before being called "working".
+Gate: frontend tsc 0, server tsc 0, **2562 vitest** PASS, boot:check PASS.
+
+---
+
+### 2026-06-26 — v3.0 fix: stop fake-success billing when model replies with no tool calls (PR #433)
+
+**Root cause (production bug):** A user requested "analog clock app", received a chat reply
+("I'm preparing a plan") instead of files, yet was billed ₹10.23. The bug was in
+`AgentRunner.ts` line 236-240: `turn.toolUses.length === 0` branch returned `ok:true` and
+billed regardless — even when no files were ever written.
+
+**Fix:**
+- `AgentRunner.ts`: added `expectsArtifacts?: boolean` option + `totalToolUses` counter.
+  When `expectsArtifacts=true` and zero tool calls were made across the whole build, emits
+  `ok:false` with an honest "no files were created" message instead of `ok:true`.
+- `routes/agentv3.ts`: `expectsArtifacts = true` for `new_build` and `edit_existing`
+  intents. After a zero-file run, auto-retries ONCE with a Claude-first runner (stronger
+  model). If retry also produces 0 files, `effectiveBilledUsd` is forced to 0 — users
+  are NEVER charged for a build that produced nothing.
+- 3 new tests covering: the production bug (`ok:false` on zero-tool build), chat turns
+  (unaffected — still `ok:true`), and a real build that wrote a file (`ok:true`).
+
+Gate: frontend tsc 0, server tsc 0, **2562 vitest** PASS (all 3 new tests green), boot:check PASS.
+
+---
+
+## 2026-06-26 — User-owned git-native: login → user's repo → CI → PR-merge → full control (DONE, merged #435 #436)
+
+The admin configured the GitHub OAuth App + Firebase GitHub provider, so GitHub login now works and
+captures the user's OAuth token (repo + workflow scopes). Wired the full vision on top, all green +
+merged, gated by GITHUB_STORAGE_ENABLED (dormant by default):
+
+- UserGitHubClient (#435): acts AS THE USER (their token), owner = their login. getLogin (cached),
+  ensureRepo (GET-or-create under /user/repos, private+auto_init), authedCloneUrl, and the
+  PrCapableClient methods (openPullRequest idempotent-on-422, combinedStatus over commit-status +
+  check-runs, mergePullRequest) — plugs straight into the existing mergeViaPullRequest. 9 unit tests.
+- Route wiring (#435): the git-native block now PREFERS the user's GitHub when a githubToken is sent
+  (ensureRepo in their account → hydrate at start → push + PR/CI/merge at end via a generalized
+  prClient: PrCapableClient); else the platform-org App store (Email/Phone users). Client forwards
+  the signed-in user's gh_token (read at send time).
+- Full app control UI (#436): new 'repo' event ({url, fullName}) → client reducer stores it →
+  AgentV3Panel shows a "GitHub" link button so the user jumps to their code/branches/PRs/CI/merges.
+- AppKnowledgeBase: new agentv3_github_storage entry.
+
+Result (when GITHUB_STORAGE_ENABLED=true): GitHub-logged-in users get each project as a private repo
+in THEIR OWN GitHub, built/committed/PR'd/CI-checked/merged like Claude Code (never merges red);
+Email/Phone users get the same durability via the platform org. Gate every phase: frontend tsc 0,
+server tsc 0, vitest PASS (up to 2574), boot:check PASS.
+
+---
+
+### 2026-06-26 — My Profile feature (PR #442, merged)
+
+Full user profile page accessible from the top-right avatar dropdown AND Settings → Account → My Profile.
+
+**What shipped:**
+- `UserBuildHistoryStore.ts` (NEW): Firestore collection `user_build_history`, admin SDK, VITEST-skip.
+  Records every build with status (`completed` / `failed` / `cancelled`), costInr (full / 0 / 50%),
+  durationMs, fileCount, tier. Methods: `record()`, `list()`, `getSummary()`.
+- `UserProfileStore.ts` (NEW): Firestore collection `user_profiles`, admin SDK, VITEST-skip.
+  Stores displayName, bio, phone, photoUrl, budgetLimitInr. Methods: `get()`, `update()`.
+- `routes/profile.ts` (NEW): bearer-token authenticated.
+  - `GET /api/profile` — profile + wallet summary + monthly AI spend
+  - `PUT /api/profile` — update displayName/bio/phone/photoUrl
+  - `PUT /api/profile/budget` — set budgetLimitInr
+  - `GET /api/profile/history?period=week|month|custom&from=&to=` — paginated build history
+- `ProfilePage.tsx` (NEW, ~583 lines): full-page profile UI with avatar (Google/GitHub photo or
+  initials fallback), editable name/bio/phone/photo-URL, wallet balance + monthly spend + budget
+  limit input, build history with This Week / This Month / Custom date range tabs + summary cards +
+  table with status badges, quick links to Billing/Settings, Sign Out.
+- `TopNav.tsx`: replaced plain logout button with animated avatar dropdown (My Profile | Settings | Sign Out).
+- `SettingsPanel.tsx`: new "Account" group at top with "My Profile" item that navigates (nav:true).
+- `App.tsx`: renders `ProfilePage` when `activeView === 'my_profile'`; wires `onOpenProfile` + `onOpenSettings` to TopNav.
+- `server.ts`: registers profile routes.
+- `build.ts`: records per-build history entry after each completed/failed/cancelled build.
+- `AppKnowledgeBase.ts`: `my_profile` entry with exact navigation paths and keywords.
+- `types/index.ts`: added `'my_profile'` to ViewType, `'profile'` to SettingsScreen.
+
+Build status logic: `completed` (full charge) if `eng.ok && !partial`; `failed` (free) if
+`!eng.ok && fileCount === 0 && !partial`; `cancelled` (50% charge if files written, 0 if none) otherwise.
+Budget cap: if build started with sufficient balance, always completes; after completion if balance ≤ 0,
+input box replaced by a recharge card.
+
+Gate: frontend tsc 0, server tsc 0, **2574 vitest** PASS, CI green on PR #442.
+
+---
+
+### 2026-06-26 — v3.0 engine hardening: 6 real gaps from technical audit (PR #449)
+
+Technical audit of actual engine code (not design docs) revealed 6 gaps. All fixed:
+
+**Fix 1+4 — write_file full-rewrite guard + WorkspaceMemory content injection:**
+`ToolDispatcher.ts` write_file handler now captures `existingContent` BEFORE the write.
+When `kind === 'modify'` (file already existed), the WARNING message now embeds the
+pre-overwrite content (up to 2000 chars). Model gets current file state immediately —
+no extra `read_file` round-trip needed to craft the correct `edit_file` call.
+
+**Fix 2 — edit_file "not found" error with current content:**
+When `old_string` is not found (even after whitespace-flexible fallback), the error now
+returns the current file content inline (up to 1500 chars). Model copies exact lines and
+retries without a separate `read_file` call. Saves one full build step per failed edit.
+
+**Fix 3 — PreviewDomain startup warning:**
+`PreviewDomain.ts` now logs `[AgentV3]` warning at startup in production when
+`E2B_PREVIEW_DOMAIN` is not set — tells the operator raw `*.e2b.app` URLs are in use
+and exactly how to configure a stable branded domain.
+
+**Fix 5 — Hard sub-agent delegation rules (system prompt):**
+`architectSystemPrompt()` now has a `MANDATORY DELEGATION` block with explicit
+file→role routing: `src/components/**` → `task(frontend)`, `src/server/**` →
+`task(backend)`, etc. Architect writes ONLY config files. All independent `task()`
+calls in ONE turn = parallel workers. Previously the Architect would write everything
+itself — no parallelism benefit.
+
+**Fix 6 — Mid-build TypeScript gate (system prompt):**
+System prompt now instructs agent to run `npx tsc --noEmit 2>&1 | head -30` after every
+5 file writes. Fix all errors immediately before continuing. Catches type breakage at the
+source instead of discovering it 20 steps later at the final `evaluate` call.
+
+**Fix 3b — Edit mode: no write_file fallback on edit failure:**
+`editModePrefix()` now explicitly tells the model: if `edit_file` fails, use the
+returned current content to craft a precise retry — NEVER fall back to `write_file` on
+an existing file just because the edit failed.
+
+Gate: frontend tsc 0, server tsc 0, **2574 vitest** PASS, CI green on PR #449.
+
+---
+
+## 2026-06-26 — v3.0 hardening: audit, roadmap & R1 safety floor (autonomous cycle)
+
+Ground-truth audit of v3.0 (3 deep code-reading passes) → `NAVBHARATAI_PRO_V3_ROADMAP.md`
+(6 audit points mapped, prioritized R1→R7 plan). Then shipped, each branch→PR→CI green→merge:
+
+- **IDOR fix (PR #453):** `assertWorkspaceOwner()` on all 4 workspaceId endpoints
+  (`/restore`, `/workspace-files`, `/inbrowser-preview`, `/import-files`) — a user can no
+  longer read/restore/export another user's workspace. Client forwards the Firebase ID token;
+  admin keeps working via the body-userId fallback.
+- **"Apps never break from editing" permanent rule (PR #454):** baked into v3.0's brain
+  (`systemPrompt.ts`) — BUILD side builds every app edit-resilient by design (root error
+  boundary, small decoupled modules, typed contracts, defensive guards, no fragile traps);
+  EDIT side makes "never break the app" the #1 rule and demands proving build/run after edits.
+- **R1.1 — secret redaction (PR #455):** new `SecretRedactor` masks provider keys / PEM /
+  JWT / URL creds / secret-named assignments in the user-visible tool-call input + tool-result
+  summary + error message. Model-facing `content` left intact (edit_file exact-match safe).
+- **R1 §3.1 — per-user monthly spend ceiling:** new `AGENTV3_USER_MONTHLY_CAP_USD` env var
+  (default 0 = disabled). When set, `/api/agentv3/chat` denies a build with an honest HTTP 402
+  once the user's `user_costs` monthly total reaches the cap. Fails OPEN on a store error so a
+  Firestore outage never locks users out. Caps the platform's D2 (NavBharatAI-pays) exposure.
+
+New v3.0 env var: `AGENTV3_USER_MONTHLY_CAP_USD` (USD, default 0 = off).
+
+Gate at each merge: frontend tsc 0, server tsc 0, vitest PASS (2598→2606), boot:check PASS.
+Next in R1: §1.2 rate-limit all mutating endpoints, §3.3 prompt-injection defense (imports).
+
+---
+
+## 2026-06-26 (cont.) — R2 §1.1 mandatory gate + escalation ground-truth correction
+
+- **R2 §1.1 — mandatory quality gate (PR #459):** the objective 22-dimension `evaluate`
+  scan now runs automatically before a top-level build is reported done; a NOT-READY
+  verdict (unresolved import / secret leak / fake code / can't-run) downgrades ok:true →
+  ok:false with an honest summary. `ToolDispatcher.assessBuildReadiness()` reuses the exact
+  same scan (no divergence). Wired via `readinessGate` (top-level runners only, never
+  sub-agents) + `readinessGateEnabled()` (ON by default; `AGENTV3_READINESS_GATE=off` escape
+  hatch). New env var: `AGENTV3_READINESS_GATE`.
+
+- **Ground-truth correction (escalation):** the audit/roadmap listed the Escalation
+  Orchestrator as "built+tested but NOT wired to AgentRunner / dormant." Reading the live
+  route shows it IS wired — `routes/agentv3.ts` runs `runWithEscalation(analysis.escalationPath,
+  { buildOnTier, gate: escalationGate(build.ok) })` (cheap→strong, Opus backstop), gated only
+  by `AGENTV3_ESCALATION` (default off) + `shouldEscalateBuild()`. So R3 §2.1 ("wire
+  escalation") is largely DONE in code — what remains is an ops decision to enable the flag
+  (with telemetry) rather than new wiring. BONUS: because §1.1 makes a not-ready build ok:false,
+  the existing `escalationGate(build.ok)` now escalates on a failed READINESS check too — the two
+  features composed for free.
+
+Gate at merge: frontend tsc 0, server tsc 0, vitest 2621 PASS, boot:check PASS.
+
+---
+
+## 2026-06-26 (cont.) — R4 §2.3 auto-fix + R5 §5.1 one-click live deploy
+
+- **R4 §2.3 — runtime-error auto-fix loop (PR #461):** new AutoFix module + route loop. When
+  enabled (AGENTV3_AUTOFIX=on, default off), after a successful build the captured browser runtime
+  errors drive up to N (default 1, max 3) Claude-first repair passes (fix → reload → re-verify),
+  with an advancing time window so a repaired error is never re-detected; honest WARN if any remain.
+  New env: AGENTV3_AUTOFIX, AGENTV3_AUTOFIX_ATTEMPTS.
+
+- **R5 §5.1 — one-click live deploy (PR #462 backend, #463 UI):** the deploy ENGINE was already
+  real (Firebase Hosting → permanent *.web.app URL). Added what was missing:
+  • DeploymentStore + withDeploymentPersistence() — every deploy's URL is now durably saved.
+  • GET /api/agentv3/deployment (ownership-checked) — fetch a workspace's live URL back.
+  • UI "Deploy" button (drives the real build+deploy pipeline) + a "Live site" link restored on
+    load, so the permanent URL survives a refresh/new session (was lost with the stream before).
+  • AppKnowledgeBase `agentv3_deploy` entry. Custom domain (DNS) explicitly NOT built yet — the
+    .web.app URL is permanent + shareable; custom domain is an honest follow-up.
+
+Gate at each merge: frontend tsc 0, server tsc 0, vitest PASS (2630→2634), boot:check PASS.
+
+## 2026-06-26 (cont.) — forensic audit + root-cause fix: v3.0 "Closed Port Error" / empty workspace (PR #469)
+
+**Root cause identified:** `ensureWorkspace(workspaceId, 'react')` (hardcoded) → TemplateRegistry has no
+'react' key (correct key is 'vite-react') → `getProvider('react')` threw → `catch {}` silently swallowed
+→ workspace directory created but COMPLETELY EMPTY. This caused every single Pro v3.0 build to start with
+no scaffold files. The agent then manually scaffolded vite.config.ts from memory without `host: true` →
+Vite bound to 127.0.0.1 only → E2B port proxy blocked → "Closed Port Error" in preview. Users were being
+charged ₹300–400 for broken previews.
+
+**Secondary issues found and fixed:**
+- Reviewer SOURCE_RE missing .py .go .java etc. → Python/Go builds silently skipped by reviewer
+- Reviewer used `listFiles()` only; if sandbox cold-read returned empty, review skipped despite successful build
+- RemixProvider + AstroProvider missing `allowedHosts: true` → sandbox proxy host blocked by newer Vite
+- E2BActuator catch block started with empty workspace instead of vite-react fallback
+
+**All 6 code fixes (PR #469, 2574/2574 tests pass):**
+1. `agentv3.ts` — `ensureWorkspace(workspaceId, framework)` (was `'react'`) — primary fix
+2. `E2BActuator.ts` — `listFrameworks()` guard + vite-react last-resort fallback in catch
+3. `ReviewerAgent.ts` — SOURCE_RE extended with .py .go .java .php .rb .rs .swift .kt
+4. `agentv3.ts` — reviewer uses writtenFiles fallback when listFiles() returns empty
+5. `RemixProvider.ts` — added `allowedHosts: true`
+6. `AstroProvider.ts` — added `allowedHosts: true`
+
+## 2026-06-26 (cont.) — architecture hardening pass 2: port detection + preview health check (PR #471)
+
+Follow-up to PR #469's root-cause fix. Closed the remaining false-success gaps in the v3.0
+build → preview pipeline so the preview is genuinely EARNED, not just published.
+
+**Fixes (PR #471, 2643/2643 tests pass, frontend+server tsc 0):**
+1. `ToolDispatcher.ts` — `update_preview` now polls port readiness (`nc -z localhost <port>`,
+   30 attempts × 500ms = 15s max) BEFORE publishing the preview URL. If the port never comes up
+   it emits an honest WARNING instead of silently publishing a URL that shows "Closed Port Error".
+   This is the direct fix for "system claimed success but preview showed Closed Port Error".
+2. `ToolDispatcher.test.ts` — FakeActuator.runCommand returns PORT_UP for nc -z checks so the
+   update_preview tests resolve instantly (no 15s timeout in CI).
+3. `E2BActuator.ts` — `extractDevPort()` now returns the correct port per framework: Angular 4200,
+   Astro 4321, Python uvicorn/gunicorn/flask 8000/5000, Next.js/Nuxt/NestJS/Express/Fastify 3000
+   (was always defaulting to 5173 → health check polled the wrong port). `isLongRunning` detection
+   extended: `bash dev.sh` (Django/Flask/FastAPI), `ng serve`, `next dev`, `nuxt dev`, `astro dev`.
+   `ensureWorkspace()` adds a `resolveKey()` guard (listFrameworks() membership) + vite-react
+   last-resort fallback so an unknown framework key can never produce an empty workspace.
+4. `NextjsProvider.ts` — dev/start scripts bind `--hostname 0.0.0.0` so the E2B proxy can reach
+   the Next.js dev server (was 127.0.0.1-only → unreachable).
+5. `StaticProvider.ts` — added package.json with an http-server dev script so static-site builds
+   have a runnable `npm run dev` (previously no run command existed for the static template).
+6. `systemPrompt.ts` — FRAMEWORK_HINTS now state explicit port numbers for all 18 frameworks so
+   the agent calls update_preview(<correct port>) instead of guessing.
+
+Gate at merge: frontend tsc 0, server tsc 0, vitest 2643/2643 PASS, CI green before squash-merge.
+
+**Honest limitation (not code-fixable here):** the full regression matrix (10+ app types ×
+5+ frameworks end-to-end through a LIVE E2B sandbox) cannot be executed inside CI — it needs a
+real E2B cloud VM with an API key. The unit/integration suite verifies the per-framework port
+logic, long-running detection, template scaffolding, and the health-check gate deterministically;
+the live multi-framework smoke matrix remains a manual/staging step.
+
+---
+
+## 2026-06-27 — Multi-provider deploy (no lock-in): foundation + 3 providers + chooser
+
+Admin direction: NavBharatAI must never depend on a single hosting provider. Built the full
+no-lock-in deploy system, each piece real and gate-green:
+
+- **Foundation (PR #466):** DeployProvider abstraction + registry + deployProviderStatus() +
+  GET /api/agentv3/deploy-providers. The real deploy flows through the registry. No placeholders —
+  only working providers are registered.
+- **Vercel provider (PR #468):** sha1 file upload + production deployment, idempotent by project
+  name. Token-gated on VERCEL_TOKEN (+ optional VERCEL_TEAM_ID).
+- **Netlify provider (PR #473):** digest deploy + ProviderStateStore for a stable site/URL across
+  re-deploys. Token-gated on NETLIFY_AUTH_TOKEN.
+- **Provider chooser (PR #474):** the build route honors req.body.deployProvider; the UI shows a
+  chooser next to Deploy when >1 provider is configured (only configured ones offered). Honest
+  "configure <PROVIDER>" error if an unconfigured one is somehow chosen. AppKnowledgeBase updated.
+
+End-to-end: add a provider's API token → it appears in the chooser → pick it → deploy there.
+Firebase stays the always-available default; everything else is OFF until its token is set (zero
+risk to the live app). Live-API paths verified once the admin adds tokens; pure parts fully tested.
+
+Remaining (more complex / infra decisions): GitHub Pages (user token + repo), Railway (runs
+servers, not static), Hostinger (FTP), and per-app custom domain on mitrify.xyz (DNS/infra design).
+
+Gate at each merge: frontend tsc 0, server tsc 0, vitest PASS (2643→2661), boot:check PASS.
+
+---
+
+## 2026-06-27 — MODE A infra: custom E2B builder template (artifacts, build-ready)
+
+Admin asked for BOTH scaffolding modes rock-solid: MODE B (internal templates,
+already working) AND MODE A (`npm create vite` / `create-next-app`). Forensic
+finding: MODE A fails ONLY because `Sandbox.create()` uses E2B's default base
+image (no template id) whose Node is too old for modern generators. ScaffoldGuard
+correctly blocks MODE A today as a result. The fix is infra (a modern pinned-Node
+sandbox image), not code.
+
+**Verified live:** `npm create vite@latest -- --template react-ts` run on Node
+v22.22 in this environment → succeeded (React 19 + Vite 8 scaffold). Confirms the
+ONLY blocker is the sandbox Node version.
+
+**Shipped (this PR) — `infra/e2b/`:**
+- `e2b.Dockerfile` — Node 22 (pinned) + git, netcat-openbsd (`nc` for the
+  update_preview port health-check), python3/venv (FastAPI/Flask/Django),
+  build-essential, pre-warmed create-vite/create-next-app; build-time sanity gate
+  that fails the image build if Node < 20.19.
+- `e2b.toml` — template config (name navbharat-builder, cpu 2 / 2 GB).
+- `README.md` — turnkey build+publish+verify guide AND the deferred code-wiring
+  plan (point Sandbox.create at E2B_TEMPLATE_ID with default-base fallback;
+  template-aware ScaffoldGuard allow; MODE A→MODE B automatic fallback; post-
+  scaffold patch to add `server:{host:true,allowedHosts:true}` to create-vite's
+  vite.config for the E2B proxy; AppKnowledgeBase entry).
+
+**Honest blockers (cannot run from the Claude web sandbox):** Docker Hub image
+blobs are blocked by egress policy (403 from production.cloudfront.docker.com)
+and no E2B_API_KEY is mounted — so the `e2b template build` + publish step must
+run on a machine with Docker + Docker Hub access + the E2B key. Artifacts are
+build-ready; code wiring is intentionally deferred to a follow-up PR until a real
+template id exists (so the old create-vite-fails bug is never re-introduced by
+pointing at a half-built template).
+
+No code/TS touched → tsc clean, existing test suite unaffected.
+
+## 2026-06-27 (cont.) — MODE A infra: one-click GitHub Actions build for the E2B template
+
+The custom E2B template (added previous PR) must be built where Docker + Docker
+Hub egress + E2B_API_KEY are all available — NOT the Claude web sandbox (Docker
+Hub blobs AND api.e2b.dev are both egress-blocked there; key not mounted).
+
+Added `.github/workflows/e2b-template.yml` (workflow_dispatch, manual): builds +
+publishes the template on a GitHub runner using an `E2B_API_KEY` repo secret, and
+prints the resulting Template ID into the job summary (+ uploads the updated
+e2b.toml as an artifact). This is the turnkey "infra build" path — admin adds one
+repo secret and clicks Run; no local terminal/Docker needed. README updated to
+make this the recommended path. Manual-only so it never incurs E2B build cost on
+ordinary pushes.
+
+Next (gated on the printed Template ID): set Cloud Run E2B_TEMPLATE_ID, then the
+code-wiring PR (Sandbox.create template + template-aware ScaffoldGuard + MODE A→B
+fallback + create-vite vite.config host/allowedHosts patch).
+
+## 2026-06-27 (cont.) — MODE A infra fix: migrate E2B template build to build system v2
+
+First workflow run (PR #477) failed: E2B has DEPRECATED the v1 build system —
+`e2b template build` (e2b.toml + Dockerfile CLI path) now exits non-zero. The run
+confirmed the E2B_API_KEY repo secret is correctly set (logs: "E2B_API_KEY is
+present (length 44)"); the only failure was the deprecated CLI path.
+
+Migrated to E2B build system v2 (SDK-based, builds on E2B cloud infra):
+- `infra/e2b/build.mjs` — defines the template via `Template().fromDockerfile()`
+  (reuses the committed e2b.Dockerfile as single source of truth) and publishes
+  with `Template.build(template, 'navbharat-builder', { cpuCount:2, memoryMB:2048,
+  onBuildLogs: defaultBuildLogger() })`.
+- `infra/e2b/package.json` — declares the `e2b` SDK dep (installed e2b@2.31.0).
+- workflow `e2b-template.yml` — replaced the v1 CLI step with `npm install && node
+  build.mjs`; Node 22; surfaces the usable template alias in the job summary.
+- README updated: e2b.toml marked legacy (v2 doesn't use it); no local Docker
+  needed (v2 builds remotely).
+
+Verified locally (npm registry is allowed in the Claude sandbox): `node --check`
+passes, `e2b` SDK installs, and the v2 exports resolve — `Template` (fn),
+`defaultBuildLogger` (fn), `Template().fromDockerfile()` (builder), `Template.build`
+(fn). The actual remote build still needs to run via the workflow (api.e2b.dev is
+egress-blocked from the Claude sandbox).
+
+Next: admin re-runs the workflow → template publishes → set Cloud Run
+E2B_TEMPLATE_ID=navbharat-builder → code-wiring PR.

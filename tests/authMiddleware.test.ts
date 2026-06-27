@@ -4,7 +4,7 @@
  * no-auth fast-paths and basic input validation.
  */
 import { describe, it, expect } from 'vitest';
-import { verifyFirebaseToken, requireUserMatch, buildRateLimiter } from '../src/server/lib/authMiddleware';
+import { verifyFirebaseToken, requireUserMatch, buildRateLimiter, workspaceRateLimiter, rateLimiter } from '../src/server/lib/authMiddleware';
 import type { Request, Response, NextFunction } from 'express';
 
 function makeReq(overrides: Partial<Request> = {}): Request {
@@ -91,6 +91,34 @@ describe('buildRateLimiter (VITEST-skip: always calls next)', () => {
     for (let i = 0; i < 20; i++) {
       await middleware(req, res as any, () => {});
     }
+    expect(res._status).toBeUndefined();
+  });
+});
+
+// ── workspaceRateLimiter + generic rateLimiter (R1 §1.2) ──────────────────────
+
+describe('workspaceRateLimiter (VITEST-skip: always calls next)', () => {
+  it('calls next() immediately and never 429s in VITEST mode', async () => {
+    const req = makeReq();
+    const res = makeRes();
+    let nextCount = 0;
+    const middleware = workspaceRateLimiter();
+    for (let i = 0; i < 80; i++) {
+      await middleware(req, res as any, () => { nextCount++; });
+    }
+    expect(nextCount).toBe(80);
+    expect(res._status).toBeUndefined();
+  });
+});
+
+describe('rateLimiter (generic factory)', () => {
+  it('builds a usable middleware that passes through in VITEST', async () => {
+    const req = makeReq();
+    const res = makeRes();
+    let nextCalled = false;
+    const middleware = rateLimiter({ name: 'unit-test', authed: 3, anon: 2, noun: 'requests' });
+    await middleware(req, res as any, () => { nextCalled = true; });
+    expect(nextCalled).toBe(true);
     expect(res._status).toBeUndefined();
   });
 });

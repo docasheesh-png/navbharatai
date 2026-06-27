@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ToolDispatcher, type ActuatorPort } from './ToolDispatcher';
+import { ToolDispatcher, applyEdit, type ActuatorPort } from './ToolDispatcher';
 import { defaultToolCatalog, CATALOG_TOOL_NAMES } from './ToolCatalog';
 import { WorkspaceState } from './WorkspaceState';
 import { AgentEventStream } from './AgentEventStream';
@@ -26,6 +26,8 @@ class FakeActuator implements ActuatorPort {
   }
   async runCommand(_ws: string, command: string) {
     this.commands.push(command);
+    // Automatically simulate a live port for port-readiness checks so update_preview doesn't time out.
+    if (command.includes('nc -z')) return { exitCode: 0, stdout: 'PORT_UP', stderr: '' };
     return this.commandResult;
   }
   async getPortUrl(_ws: string, port: number): Promise<string> {
@@ -72,12 +74,19 @@ describe('ToolDispatcher', () => {
     expect(events.find((e) => e.type === 'tool_call')).toBeTruthy();
     expect(events.find((e) => e.type === 'tool_result' && e.ok)).toBeTruthy();
     expect(events.find((e) => e.type === 'file_changed')).toBeTruthy();
+    // Creating a NEW file gives a plain confirmation — no edit_file nudge.
+    expect(res.content).toContain('Created src/App.tsx');
+    expect(res.content).not.toContain('edit_file');
   });
 
-  it('write_file on an existing path records a modify', async () => {
+  it('write_file on an existing path records a modify and nudges toward edit_file', async () => {
     act.files.set('a.ts', 'old');
-    await d.dispatch(call('write_file', { path: 'a.ts', content: 'new' }));
+    const res = await d.dispatch(call('write_file', { path: 'a.ts', content: 'new' }));
     expect(state.snapshot().files[0].kind).toBe('modify');
+    // Overwriting an EXISTING file warns the agent to prefer a surgical edit_file patch.
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('already existed');
+    expect(res.content).toContain('edit_file');
   });
 
   it('read_file returns contents', async () => {
@@ -113,6 +122,20 @@ describe('ToolDispatcher', () => {
     const res = await d.dispatch(call('edit_file', { path: 'a.ts', old_string: 'zzz', new_string: 'x' }));
     expect(res.is_error).toBe(true);
     expect(res.content).toContain('not found');
+  });
+
+  it('edit_file applies a patch whose whitespace is slightly off (flexible fallback)', async () => {
+    // File uses two-space indent; the model supplies four-space indent + extra blank.
+    act.files.set('a.ts', 'function f() {\n  return 1;\n}');
+    const res = await d.dispatch(call('edit_file', {
+      path: 'a.ts',
+      old_string: 'function f() {\n    return 1;\n}',  // wrong indentation
+      new_string: 'function f() {\n  return 2;\n}',
+    }));
+    expect(res.is_error).toBe(false);
+    expect(act.files.get('a.ts')).toBe('function f() {\n  return 2;\n}');
+    expect(res.content).toContain('ignoring whitespace');
+    expect(events.find((e) => e.type === 'diff')).toBeTruthy();
   });
 
   it('bash runs the command and records terminal output', async () => {
@@ -611,5 +634,84 @@ describe('ToolDispatcher — evaluate integration (compliance + env vars)', () =
     const out = await evalText(dd);
     expect(out).toContain('Env var check');
     expect(out).toContain('MISSING_SECRET_TOKEN');
+  });
+});
+
+describe('applyEdit (edit_file matching with whitespace-tolerant fallback)', () => {
+  it('replaces an exact unique match with no note', () => {
+    const r = applyEdit('const x = 1;\nconst y = 2;', 'const x = 1;', 'const x = 42;');
+    expect(r.updated).toBe('const x = 42;\nconst y = 2;');
+    expect(r.matchedOld).toBe('const x = 1;');
+    expect(r.note).toBe('');
+  });
+
+  it('throws when an exact match is not unique', () => {
+    expect(() => applyEdit('dup\ndup', 'dup', 'x')).toThrow(/not unique/);
+  });
+
+  it('falls back to a whitespace-flexible match when exact fails', () => {
+    // File has single-space indent; supplied old_string has different spacing.
+    const file = 'if (a) {\n  doThing();\n}';
+    const r = applyEdit(file, 'if (a) {\n      doThing();\n}', 'if (a) {\n  doOther();\n}');
+    expect(r.updated).toBe('if (a) {\n  doOther();\n}');
+    expect(r.note).toContain('whitespace');
+    // matchedOld is the VERBATIM text from the file (real indentation), not the input.
+    expect(r.matchedOld).toBe('if (a) {\n  doThing();\n}');
+  });
+
+  it('throws "not found" when neither exact nor flexible matches', () => {
+    expect(() => applyEdit('abc', 'xyz', 'q')).toThrow(/not found/);
+  });
+
+  it('throws "not unique" when the flexible match is ambiguous', () => {
+    // 'a + b' (single spaces) does not appear exactly, but matches BOTH
+    // double-spaced occurrences under whitespace-flexible matching → ambiguous.
+    const file = 'x = a  +  b\ny = a  +  b';
+    expect(() => applyEdit(file, 'a + b', 'a - b')).toThrow(/not unique/);
+  });
+
+  it('does not treat regex metacharacters in old_string as patterns', () => {
+    const file = 'const re = /a.+b/;\nconst ok = 1;';
+    const r = applyEdit(file, 'const re = /a.+b/;', 'const re = /done/;');
+    expect(r.updated).toBe('const re = /done/;\nconst ok = 1;');
+    expect(r.note).toBe('');
+  });
+});
+
+describe('ToolDispatcher — secret redaction on the user-visible event surface (R1.1)', () => {
+  let act: FakeActuator;
+  let state: WorkspaceState;
+  let stream: AgentEventStream;
+  let events: AgentEvent[];
+  let d: ToolDispatcher;
+
+  beforeEach(() => {
+    act = new FakeActuator();
+    stream = new AgentEventStream();
+    events = [];
+    stream.subscribe((e) => events.push(e), false);
+    state = new WorkspaceState(stream);
+    d = new ToolDispatcher(act, 'ws-1', state, stream);
+  });
+
+  it('redacts a secret in bash stdout from the tool_result summary, but keeps it in model content', async () => {
+    const secret = 'sk-ant-api03-' + 'A'.repeat(30);
+    act.commandResult = { exitCode: 0, stdout: `ANTHROPIC_API_KEY=${secret}`, stderr: '' };
+    const res = await d.dispatch(call('bash', { command: 'printenv ANTHROPIC_API_KEY' }));
+
+    const result = events.find((e) => e.type === 'tool_result');
+    // User-visible summary must NOT contain the raw secret.
+    expect(result && 'summary' in result ? (result as { summary: string }).summary : '').not.toContain(secret);
+    expect(result && 'summary' in result ? (result as { summary: string }).summary : '').toContain('[REDACTED:');
+    // Model-facing content is intact (so the agent can still reason; exact-match edits never break).
+    expect(res.content).toContain(secret);
+  });
+
+  it('redacts a secret inlined in the tool_call input shown to the user', async () => {
+    const secret = 'ghp_' + 'b'.repeat(36);
+    await d.dispatch(call('bash', { command: `git remote set-url origin https://${secret}@github.com/x/y.git` }));
+    const callEvt = events.find((e) => e.type === 'tool_call') as { input?: { command?: string } } | undefined;
+    expect(callEvt?.input?.command ?? '').not.toContain(secret);
+    expect(callEvt?.input?.command ?? '').toContain('[REDACTED:');
   });
 });

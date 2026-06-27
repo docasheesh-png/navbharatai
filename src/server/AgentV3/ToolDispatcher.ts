@@ -22,11 +22,12 @@ import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
 import { classifyCommandRisk, governanceNote } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
-import { ViteReactProvider } from '../AppMakerLab/generator/templates/ViteReactProvider';
+import { ViteReactProvider } from './sandbox/AppMakerLab/generator/templates/ViteReactProvider';
+import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
-import { assessReadiness, readinessVerdict, type ExtraFinding } from './Readiness';
+import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
 import { analyzeRequirementCoverage, requirementCoverageSummary } from './RequirementCoverage';
 import { generateReadme } from './ReadmeGenerator';
@@ -45,6 +46,13 @@ import { scanEnvTemplateSecrets, envTemplateSecretSummary, type EnvTemplateSecre
 import { scanAsyncPatterns, asyncPatternSummary, type AsyncPatternIssue } from './AsyncPatternAnalysis';
 import type { SecondOpinion } from './SecondOpinion';
 import type { Consensus } from './Consensus';
+import type { WebSearchFn } from './WebSearch';
+import type { DeployFn } from './Deployment';
+import { reviewEdit, formatReviewResult } from './PostEditReviewer';
+import { renameSymbol, addComponentProp } from './CodemodeExecutor';
+import type { CodemodeFile } from './CodemodeExecutor';
+import { getEmbeddingStore } from './EmbeddingSearch';
+import { redactSecrets, redactDeep } from './SecretRedactor';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -52,6 +60,10 @@ import type { Consensus } from './Consensus';
  * the composition root wires the real implementation (see SubAgent.ts).
  */
 export type SubAgentSpawn = (role: AgentRole, instruction: string) => Promise<{ ok: boolean; summary: string }>;
+
+/** The browser interactions browser_action supports (mirrors the actuator's union). */
+export const BROWSER_ACTIONS = ['click', 'type', 'navigate', 'scroll', 'press', 'wait', 'hover', 'double_click', 'select_option'] as const;
+export type BrowserActionName = (typeof BROWSER_ACTIONS)[number];
 
 /**
  * ActuatorPort — the narrow slice of the sandbox actuator the dispatcher needs.
@@ -69,6 +81,25 @@ export interface ActuatorPort {
   ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** Public HTTPS URL for a port in the sandbox (real sandboxes only). Optional. */
   getPortUrl?(workspaceId: string, port: number): Promise<string>;
+  /** Capture a PNG screenshot of a URL from inside the sandbox (real sandboxes only). */
+  screenshot?(
+    workspaceId: string,
+    url: string,
+    viewport?: { width: number; height: number },
+  ): Promise<{ base64: string; mimeType: 'image/png' }>;
+  /** Drive a real headless browser (click/type/navigate/…) and return a screenshot + result. */
+  browserAction?(
+    workspaceId: string,
+    action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option',
+    args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
+  ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }>;
+  /** Runtime browser errors (console.error / uncaught / failed requests) since `sinceMs`. */
+  getConsoleErrors?(
+    workspaceId: string,
+    sinceMs: number,
+  ): Promise<{ errors: { t: number; kind: string; text: string }[] }>;
+  /** The built static site (dist/) as path→bytes, for a real persistent deploy. */
+  downloadDistFiles?(workspaceId: string): Promise<Map<string, Buffer>>;
 }
 
 /** One source file read into the shared evaluate snapshot (path + content). */
@@ -82,6 +113,8 @@ export interface ToolResult {
   tool_use_id: string;
   content: string;
   is_error: boolean;
+  /** Optional screenshot to feed back to the model as a vision block (browser tools). */
+  image?: { base64: string; mimeType: string };
 }
 
 const MAX_SUMMARY = 200;
@@ -103,29 +136,79 @@ export class ToolDispatcher {
     private readonly checkpointer?: Checkpointer,
     private readonly secondOpinion?: SecondOpinion,
     private readonly consensus?: Consensus,
+    private readonly webSearch?: WebSearchFn,
+    private readonly deploy?: DeployFn,
+    /**
+     * Called with the path + FINAL content on every successful write_file/edit_file, so the
+     * composition root can durably persist exactly what the agent wrote (not relying on a later,
+     * sometimes-empty, sandbox listFiles). This is what makes a build's files survive a sandbox
+     * loss / the next message getting a fresh sandbox.
+     */
+    private readonly onFileWrite?: (path: string, content: string) => void,
+    /** Framework id from FrameworkRegistry (e.g. 'nextjs', 'vue'). Defaults to 'vite-react'. */
+    private readonly framework?: string,
   ) {}
 
   /**
-   * Self-heal the workspace scaffold. The actuator normally seeds a Vite+React+TS
-   * starter at the root when the workspace is created; this is the safety net for
-   * the case where the root has no package.json (unknown project type, or a seed
-   * that silently failed). Called when the scaffold guard blocks a create-* command
-   * so the redirect it returns is always actionable. Best-effort — never throws.
+   * The structured readiness verdict from the most recent `evaluate` run. Captured as a
+   * side-effect so the mandatory end-of-build gate (assessBuildReadiness) can reuse the exact
+   * same objective scan the agent uses — never a second, divergent implementation.
+   */
+  private lastReadiness: ReadinessReport | null = null;
+
+  /**
+   * Run the real `evaluate` scan and return its structured readiness verdict (R2 §1.1).
+   * Used by AgentRunner to make the quality gate MANDATORY: a build cannot be reported as a
+   * clean success while `ready` is false (a build-breaker, secret leak, fake code, or an app
+   * that cannot run). Best-effort: if the scan throws, returns a permissive READY so the gate
+   * never wrongly fails a real build on an internal error.
+   */
+  async assessBuildReadiness(): Promise<ReadinessReport> {
+    try {
+      await this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect');
+      return this.lastReadiness ?? { score: 100, ready: true, blockers: [], warnings: [] };
+    } catch {
+      return { score: 100, ready: true, blockers: [], warnings: [] };
+    }
+  }
+
+  /**
+   * Self-heal the workspace scaffold using the configured framework template.
+   * The actuator normally seeds a starter at workspace creation; this is the
+   * safety net for when no package.json (or equivalent entry file) is present.
+   * Called when the scaffold guard blocks a create-* command — best-effort, never throws.
    */
   private async ensureViteScaffold(): Promise<void> {
+    const entryFile = this.frameworkEntryFile();
     try {
-      await this.actuator.readFile(this.workspaceId, 'package.json');
+      await this.actuator.readFile(this.workspaceId, entryFile);
       return; // root already scaffolded — nothing to do
     } catch {
       /* missing — write the starter below */
     }
     try {
-      const files = new ViteReactProvider().getFiles([]);
+      const registry = new TemplateRegistry();
+      const frameworkId = this.framework ?? 'vite-react';
+      const provider = (() => {
+        try { return registry.getProvider(frameworkId); } catch { return new ViteReactProvider(); }
+      })();
+      const files = provider.getFiles([]);
       for (const [path, content] of Object.entries(files)) {
         await this.actuator.writeFile(this.workspaceId, path, content).catch(() => {});
       }
     } catch {
       /* self-heal is best-effort; the redirect message still guides the agent */
+    }
+  }
+
+  /** Returns the canonical entry file to probe for an existing scaffold (framework-aware). */
+  private frameworkEntryFile(): string {
+    switch (this.framework) {
+      case 'python-fastapi':
+      case 'flask': return 'requirements.txt';
+      case 'django': return 'manage.py';
+      case 'static': return 'index.html';
+      default: return 'package.json';
     }
   }
 
@@ -425,25 +508,34 @@ export class ToolDispatcher {
   }
 
   async dispatch(call: ToolUse, agent: AgentRole = 'architect'): Promise<ToolResult> {
+    // Secret redaction (R1.1, roadmap §3.2): tool_call input and tool_result summaries are
+    // streamed to the user's screen, so a command/output that inlines an API key, a .env value
+    // or a connection-string password must be masked BEFORE it is shown. We redact ONLY the
+    // user-visible event surface (input + summary + error message) — the model-facing `content`
+    // is left intact so edit_file's exact-string matching never breaks on a redacted value.
     this.events?.emit({
       type: 'tool_call',
       agent,
       tool: call.name as ToolName,
-      input: call.input,
+      input: redactDeep(call.input),
       callId: call.id,
       ts: Date.now(),
     });
     try {
-      const content = await this.run(call, agent);
+      // Browser tools return a screenshot image alongside their text; everything else is text.
+      const visual = call.name === 'screenshot' || call.name === 'browser_action'
+        ? await this.runVisual(call)
+        : null;
+      const content = visual ? visual.content : await this.run(call, agent);
       this.events?.emit({
         type: 'tool_result',
         agent,
         callId: call.id,
         ok: true,
-        summary: summarize(content),
+        summary: redactSecrets(summarize(content)),
         ts: Date.now(),
       });
-      return { tool_use_id: call.id, content, is_error: false };
+      return { tool_use_id: call.id, content, is_error: false, image: visual?.image };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.events?.emit({
@@ -451,11 +543,55 @@ export class ToolDispatcher {
         agent,
         callId: call.id,
         ok: false,
-        summary: message,
+        summary: redactSecrets(message),
         ts: Date.now(),
       });
       return { tool_use_id: call.id, content: `Error: ${message}`, is_error: true };
     }
+  }
+
+  /**
+   * Browser tools (screenshot / browser_action) — return a text summary PLUS the screenshot so
+   * the model can SEE the page. Requires a real sandbox with a browser; degrades to an honest
+   * "not available" message on Local/Docker actuators (or any actuator that lacks the method).
+   */
+  private async runVisual(call: ToolUse): Promise<{ content: string; image?: { base64: string; mimeType: string } }> {
+    const input = call.input;
+    if (call.name === 'screenshot') {
+      if (!this.actuator.screenshot) {
+        return { content: 'Screenshots require a real cloud sandbox (set E2B_API_KEY) — not available here.' };
+      }
+      const url = reqStr(input, 'url');
+      const width = typeof input.width === 'number' ? input.width : undefined;
+      const height = typeof input.height === 'number' ? input.height : undefined;
+      const viewport = width && height ? { width, height } : undefined;
+      const shot = await this.actuator.screenshot(this.workspaceId, url, viewport);
+      return {
+        content: `Screenshot of ${url} captured (${viewport ? `${viewport.width}×${viewport.height}` : '1280×720'}). The image is attached — inspect it for layout/visual issues.`,
+        image: { base64: shot.base64, mimeType: shot.mimeType },
+      };
+    }
+    // browser_action
+    if (!this.actuator.browserAction) {
+      return { content: 'Browser interaction requires a real cloud sandbox (set E2B_API_KEY) — not available here.' };
+    }
+    const action = reqStr(input, 'action');
+    if (!BROWSER_ACTIONS.includes(action as BrowserActionName)) {
+      return { content: `browser_action: unknown action "${action}". Valid: ${BROWSER_ACTIONS.join(', ')}.` };
+    }
+    const dir = input.direction;
+    const direction: 'up' | 'down' | undefined = dir === 'up' ? 'up' : dir === 'down' ? 'down' : undefined;
+    const args = {
+      selector: optStr(input, 'selector'),
+      text: optStr(input, 'text'),
+      url: optStr(input, 'url'),
+      direction,
+    };
+    const res = await this.actuator.browserAction(this.workspaceId, action as BrowserActionName, args);
+    return {
+      content: `Browser ${action}${args.selector ? ` on "${args.selector}"` : ''}${args.url ? ` → ${args.url}` : ''}: ${res.result}. Screenshot attached.`,
+      image: res.screenshot ? { base64: res.screenshot, mimeType: 'image/png' } : undefined,
+    };
   }
 
   private async run(call: ToolUse, agent: AgentRole): Promise<string> {
@@ -468,17 +604,77 @@ export class ToolDispatcher {
         const path = reqStr(input, 'path');
         const content = reqStr(input, 'content');
         let kind: 'create' | 'modify' = 'create';
+        let existingContent = '';
         try {
-          await this.actuator.readFile(this.workspaceId, path);
+          existingContent = await this.actuator.readFile(this.workspaceId, path);
           kind = 'modify';
         } catch {
           kind = 'create';
         }
         await this.actuator.writeFile(this.workspaceId, path, content);
+        this.onFileWrite?.(path, content);
         this.state?.recordFileChange({ path, kind }, agent);
-        getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+        const mem = getWorkspaceMemory(this.workspaceId);
+        mem.indexFile(path, content);
+        // Level 3: update embedding index for semantic search (best-effort, async, non-blocking).
+        getEmbeddingStore(this.workspaceId).addFile(path, content).catch(() => {});
         await this.maybeCheckpoint(`${kind} ${path}`);
-        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} (${content.length} bytes).`;
+        // Level 4: post-write static review — flag missing imports, typos, stub files.
+        const review = reviewEdit(path, content);
+        const reviewNote = formatReviewResult(review, path);
+        // Level 5: impact cascade — warn the agent which files import the edited file.
+        const { direct: impactFiles } = mem.impactRadius(path);
+        const cascadeNote =
+          impactFiles.length > 0
+            ? `\nIMPACT: ${impactFiles.length} file(s) import ${path}: ${impactFiles.slice(0, 5).join(', ')}${impactFiles.length > 5 ? '…' : ''}. Verify they still compile.`
+            : '';
+        // Level 6: test file hint — if a test file exists, suggest running it.
+        const testHint = testFileHint(path);
+        if (kind === 'modify') {
+          // write_file replaced an EXISTING file wholesale. For anything except a
+          // deliberate full-rewrite, this risks silently dropping unrelated code.
+          // Return the CURRENT (pre-overwrite) content so the agent can immediately
+          // issue a precise edit_file call instead — no extra read_file round-trip.
+          // The write already happened above; we can't undo it, but we make the next
+          // step as cheap as possible and strongly discourage this pattern.
+          const preview =
+            existingContent.length <= 2000
+              ? existingContent
+              : existingContent.slice(0, 2000) + '\n…(truncated — use read_file for full content)';
+          return (
+            `Updated ${path} (${content.length} bytes).\n` +
+            `⚠️  FULL-REWRITE WARNING: ${path} already existed and write_file replaced the ENTIRE file. ` +
+            `Unless you intentionally wanted a full rewrite, use edit_file (old_string → new_string) next time — ` +
+            `it is surgical and safe. The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
+            reviewNote + cascadeNote + testHint
+          );
+        }
+        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint;
+      }
+
+      case 'write_files_batch': {
+        const rawFiles = (input as Record<string, unknown>)?.files;
+        if (!Array.isArray(rawFiles) || rawFiles.length === 0) {
+          return 'write_files_batch: files array is empty or missing.';
+        }
+        const batchFiles: { path: string; content: string }[] = rawFiles.map((f: unknown) => {
+          if (typeof f !== 'object' || f === null) throw new Error('Each file entry must be an object.');
+          const obj = f as Record<string, unknown>;
+          return { path: reqStr(obj, 'path'), content: reqStr(obj, 'content') };
+        });
+        // Sort by import dependencies: files that import others go after their deps.
+        const sorted = topoSortBatch(batchFiles);
+        const written: string[] = [];
+        for (const file of sorted) {
+          await this.actuator.writeFile(this.workspaceId, file.path, file.content);
+          this.state?.recordFileChange({ path: file.path, kind: 'create' }, agent);
+          const batchMem = getWorkspaceMemory(this.workspaceId);
+          batchMem.indexFile(file.path, file.content);
+          getEmbeddingStore(this.workspaceId).addFile(file.path, file.content).catch(() => {});
+          await this.maybeCheckpoint(`create ${file.path}`);
+          written.push(file.path);
+        }
+        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.`;
       }
 
       case 'edit_file': {
@@ -486,27 +682,38 @@ export class ToolDispatcher {
         const oldStr = reqStr(input, 'old_string');
         const newStr = reqStr(input, 'new_string');
         const existing = await this.actuator.readFile(this.workspaceId, path);
-        const occurrences = existing.split(oldStr).length - 1;
-        if (occurrences === 0) {
-          throw new Error(`edit_file: old_string not found in ${path}.`);
-        }
-        if (occurrences > 1) {
-          throw new Error(
-            `edit_file: old_string is not unique in ${path} (${occurrences} matches) — include more surrounding context.`,
-          );
-        }
-        const updated = existing.replace(oldStr, newStr);
+        // Exact match first, with a whitespace-tolerant fallback so a patch whose
+        // indentation/spacing is slightly off still applies (still required to be
+        // unique). applyEdit throws the same honest "not found" / "not unique" errors.
+        const { updated, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
         await this.actuator.writeFile(this.workspaceId, path, updated);
+        this.onFileWrite?.(path, updated);
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);
-        getWorkspaceMemory(this.workspaceId).indexFile(path, updated);
+        const editMem = getWorkspaceMemory(this.workspaceId);
+        editMem.indexFile(path, updated);
+        // Level 3: update embedding index (best-effort, non-blocking).
+        getEmbeddingStore(this.workspaceId).addFile(path, updated).catch(() => {});
         this.events?.emit({
           type: 'diff',
           agent,
-          diff: { path, patch: miniDiff(oldStr, newStr) },
+          // Show the text that was ACTUALLY replaced (verbatim from the file) so the
+          // diff is honest even when a whitespace-flexible match was used.
+          diff: { path, patch: miniDiff(matchedOld, newStr) },
           ts: Date.now(),
         });
         await this.maybeCheckpoint(`edit ${path}`);
-        return `Edited ${path}.`;
+        // Level 4: post-edit static review — catch missing imports, typos, stub content.
+        const editReview = reviewEdit(path, updated);
+        const editReviewNote = formatReviewResult(editReview, path);
+        // Level 5: impact cascade — warn about files that import the changed file.
+        const { direct: editImpact } = editMem.impactRadius(path);
+        const editCascadeNote =
+          editImpact.length > 0
+            ? `\nIMPACT: ${editImpact.length} file(s) import ${path}: ${editImpact.slice(0, 5).join(', ')}${editImpact.length > 5 ? '…' : ''}. Check they still compile.`
+            : '';
+        // Level 6: test file hint.
+        const editTestHint = testFileHint(path);
+        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint;
       }
 
       case 'bash': {
@@ -723,6 +930,8 @@ export class ToolDispatcher {
         if (errorBoundary.findings.length) extra.push({ severity: 'medium', label: 'React app has no error boundary' });
         if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
         const readiness = assessReadiness(archReport, findings, extra);
+        // Stash for the mandatory end-of-build gate (R2 §1.1) — same scan, no divergence.
+        this.lastReadiness = readiness;
         const verdict = readinessVerdict(readiness);
         const confidence = computeBuildConfidence({
           readinessScore: readiness.score,
@@ -822,12 +1031,28 @@ export class ToolDispatcher {
         if (!this.actuator.getPortUrl) {
           throw new Error('Live preview is not available in this sandbox.');
         }
-        const rawUrl = await this.actuator.getPortUrl(this.workspaceId, port);
+        // Verify the port is actually listening before publishing (30 attempts × 500 ms = 15 s max).
+        // This prevents a false-success preview when the dev server hasn't started yet.
+        let portReady = false;
+        for (let attempt = 0; attempt < 30 && !portReady; attempt++) {
+          try {
+            const chk = await this.actuator.runCommand(
+              this.workspaceId,
+              `nc -z localhost ${port} 2>/dev/null && echo PORT_UP || echo PORT_DOWN`,
+            );
+            if (chk.stdout.includes('PORT_UP')) { portReady = true; break; }
+          } catch { /* keep polling */ }
+          if (!portReady) await new Promise(r => setTimeout(r, 500));
+        }
         // §12: v3.0-built apps are previewed under the platform's E2B custom domain
         // (mitrify.xyz) instead of the raw *.e2b.app host. Idempotent + scoped to v3.0.
+        const rawUrl = await this.actuator.getPortUrl(this.workspaceId, port);
         const url = applyPreviewDomain(rawUrl);
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
-        return `Live preview published at ${url}`;
+        if (!portReady) {
+          return `WARNING: port ${port} did not respond after 15 s. Check that the dev server started correctly — if the preview shows a connection error, run the dev server then call update_preview again.`;
+        }
+        return `Live preview published at ${url} (port ${port} verified UP)`;
       }
 
       case 'task': {
@@ -861,10 +1086,184 @@ export class ToolDispatcher {
         return await this.consensus(question);
       }
 
+      case 'web_search': {
+        const query = reqStr(input, 'query');
+        if (!this.webSearch) {
+          return 'Web search is not available in this context.';
+        }
+        const limit = typeof input.limit === 'number' ? input.limit : 5;
+        return await this.webSearch(query, limit);
+      }
+
+      case 'deploy': {
+        if (!this.deploy) {
+          return 'Deployment is not configured in this context.';
+        }
+        if (!this.actuator.downloadDistFiles) {
+          return 'Deployment requires a real cloud sandbox (set E2B_API_KEY) — not available here.';
+        }
+        let files: Map<string, Buffer>;
+        try {
+          files = await this.actuator.downloadDistFiles(this.workspaceId);
+        } catch (err) {
+          const m = err instanceof Error ? err.message : String(err);
+          return `Could not read the built site: ${m}. Run "npm run build" first so a dist/ directory exists.`;
+        }
+        if (files.size === 0) {
+          return 'No built files found. Run "npm run build" to produce dist/ before deploying.';
+        }
+        const url = await this.deploy(this.workspaceId, files);
+        this.events?.emit({ type: 'preview', url, ts: Date.now() });
+        return `Deployed to a permanent public URL: ${url} (${files.size} files). This stays live after the sandbox stops.`;
+      }
+
+      case 'console_errors': {
+        if (!this.actuator.getConsoleErrors) {
+          return 'Runtime console errors require a real cloud sandbox — not available here.';
+        }
+        const sinceSec = typeof input.since_seconds === 'number' ? input.since_seconds : 120;
+        const since = Date.now() - Math.max(1, sinceSec) * 1000;
+        const { errors } = await this.actuator.getConsoleErrors(this.workspaceId, since);
+        if (errors.length === 0) return 'No runtime browser errors captured in the window — the page ran clean.';
+        return `Runtime browser errors (${errors.length}):\n` + errors.slice(0, 30).map((e) => `- [${e.kind}] ${e.text}`).join('\n');
+      }
+
+      // Level 7: structural codemods (AST-safe cross-file refactoring via ts-morph).
+      case 'codemod_rename': {
+        const oldName = reqStr(input, 'old_name');
+        const newName = reqStr(input, 'new_name');
+        let files: string[];
+        try {
+          files = await this.actuator.listFiles(this.workspaceId);
+        } catch {
+          return 'codemod_rename: failed to list workspace files.';
+        }
+        // Read all TS/TSX source files (capped at 50 for performance).
+        const CODE = /\.(t|j)sx?$/;
+        const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
+        const codeFiles = files.filter((f) => CODE.test(f) && !SKIP.test(f)).slice(0, 50);
+        const fileContents: CodemodeFile[] = [];
+        for (const f of codeFiles) {
+          try {
+            fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) });
+          } catch { /* skip unreadable file */ }
+        }
+        const result = await renameSymbol(fileContents, oldName, newName);
+        if (!result.ok) return `codemod_rename failed: ${result.error}`;
+        // Write back changed files.
+        for (const { path, after } of result.changes) {
+          try {
+            await this.actuator.writeFile(this.workspaceId, path, after);
+            getWorkspaceMemory(this.workspaceId).indexFile(path, after);
+          } catch { /* best-effort */ }
+        }
+        await this.maybeCheckpoint(`codemod rename ${oldName} → ${newName}`);
+        return result.summary || `Renamed "${oldName}" → "${newName}" in ${result.changes.length} file(s).`;
+      }
+
+      case 'codemod_add_prop': {
+        const componentName = reqStr(input, 'component_name');
+        const propName = reqStr(input, 'prop_name');
+        const propType = reqStr(input, 'prop_type');
+        const defaultValue = optStr(input, 'default_value');
+        let files: string[];
+        try {
+          files = await this.actuator.listFiles(this.workspaceId);
+        } catch {
+          return 'codemod_add_prop: failed to list workspace files.';
+        }
+        const CODE = /\.(t|j)sx?$/;
+        const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
+        const tsxFiles = files.filter((f) => CODE.test(f) && !SKIP.test(f)).slice(0, 50);
+        const fileContents: CodemodeFile[] = [];
+        for (const f of tsxFiles) {
+          try {
+            fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) });
+          } catch { /* skip */ }
+        }
+        const result = await addComponentProp(fileContents, componentName, propName, propType, defaultValue);
+        if (!result.ok) return `codemod_add_prop failed: ${result.error}`;
+        for (const { path, after } of result.changes) {
+          try {
+            await this.actuator.writeFile(this.workspaceId, path, after);
+            getWorkspaceMemory(this.workspaceId).indexFile(path, after);
+          } catch { /* best-effort */ }
+        }
+        await this.maybeCheckpoint(`codemod add prop ${propName} to ${componentName}`);
+        return result.summary || `Added prop "${propName}" to ${componentName} in ${result.changes.length} file(s).`;
+      }
+
       default:
         throw new Error(`Unknown tool: ${call.name}`);
     }
   }
+}
+
+/**
+ * Topological sort for write_files_batch: ensures dependency files are written
+ * before files that import them. Handles cycles safely (cycle → original order for
+ * affected nodes). Pure, no I/O.
+ */
+function topoSortBatch(
+  files: { path: string; content: string }[],
+): { path: string; content: string }[] {
+  if (files.length <= 1) return files;
+  const pathSet = new Set(files.map(f => f.path));
+  const fileMap = new Map(files.map(f => [f.path, f]));
+
+  // For each file, find which other batch files it imports (relative imports only).
+  const getDeps = (file: { path: string; content: string }): string[] => {
+    const deps: string[] = [];
+    const importRe = /from\s+['"](\.[^'"]+)['"]/g;
+    let m: RegExpExecArray | null;
+    while ((m = importRe.exec(file.content)) !== null) {
+      const spec = m[1].replace(/^\.\.?\//, ''); // strip leading ./ or ../
+      for (const p of pathSet) {
+        if (p === file.path) continue;
+        const base = p.replace(/\.(ts|tsx|js|jsx)$/, '');
+        const tail = base.split('/').slice(-1)[0] ?? '';
+        if (tail === spec || base.endsWith('/' + spec) || base === spec) {
+          deps.push(p);
+        }
+      }
+    }
+    return deps;
+  };
+
+  const sorted: { path: string; content: string }[] = [];
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+
+  const visit = (path: string): void => {
+    if (visited.has(path)) return;
+    if (visiting.has(path)) return; // cycle — skip to avoid infinite loop
+    visiting.add(path);
+    for (const dep of getDeps(fileMap.get(path)!)) {
+      if (pathSet.has(dep)) visit(dep);
+    }
+    visiting.delete(path);
+    visited.add(path);
+    sorted.push(fileMap.get(path)!);
+  };
+
+  for (const file of files) visit(file.path);
+  return sorted;
+}
+
+/**
+ * Level 6 — Test file hint: if a matching test file name can be inferred from
+ * the given path, return a short note suggesting the test command. Pure, no I/O.
+ */
+function testFileHint(filePath: string): string {
+  const CODE = /\.(t|j)sx?$/;
+  if (!CODE.test(filePath)) return '';
+  const base = filePath.replace(/\.(t|j)sx?$/, '');
+  const basename = base.split('/').pop() ?? '';
+  // Emit a hint so the agent knows to look for a test file and run it.
+  return (
+    `\nTEST HINT: if a test file exists (e.g. ${basename}.test.tsx), run it to verify: ` +
+    `npm test -- --run ${basename}`
+  );
 }
 
 function reqStr(input: Record<string, unknown>, key: string): string {
@@ -909,6 +1308,87 @@ function miniDiff(oldStr: string, newStr: string): string {
   const minus = oldStr.split('\n').map((l) => `- ${l}`).join('\n');
   const plus = newStr.split('\n').map((l) => `+ ${l}`).join('\n');
   return `${minus}\n${plus}`;
+}
+
+/**
+ * Build a regex that matches `literal` but treats every run of whitespace as
+ * flexible (\s+), so an edit whose indentation/spacing is slightly off still
+ * matches. Regex metacharacters are escaped first, so the ONLY special behavior
+ * is the whitespace flexibility — there are no nested quantifiers, so it cannot
+ * backtrack catastrophically. Returns null for whitespace-only input (a
+ * meaningless flexible match).
+ */
+function flexibleWhitespaceRegex(literal: string): RegExp | null {
+  if (!literal.trim()) return null;
+  const escaped = literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = escaped.replace(/\s+/g, '\\s+');
+  try {
+    return new RegExp(pattern, 'g');
+  } catch {
+    return null;
+  }
+}
+
+/** Result of applying a single edit_file replacement. */
+export interface EditResult {
+  /** The full file content after the replacement. */
+  updated: string;
+  /** The exact text that was replaced (verbatim from the file) — used for the diff. */
+  matchedOld: string;
+  /** Human-readable note ('' on an exact hit; explains a whitespace-flexible match). */
+  note: string;
+}
+
+/**
+ * Apply one edit_file replacement with a whitespace-tolerant fallback.
+ *
+ *  1. EXACT: if `oldStr` occurs exactly once, replace it. More than once →
+ *     ambiguous, throw (the model must add surrounding context).
+ *  2. FLEXIBLE: if `oldStr` is not found exactly (0 matches), retry treating any
+ *     run of whitespace as flexible. This rescues edits where the model's
+ *     indentation or spacing is slightly off. The flexible match must STILL be
+ *     unique — 0 or >1 flexible matches throw the same honest errors.
+ *
+ * Pure and deterministic — unit-testable without a sandbox. The `path` is only
+ * used to make error messages specific.
+ */
+export function applyEdit(existing: string, oldStr: string, newStr: string, path = 'file'): EditResult {
+  const exact = existing.split(oldStr).length - 1;
+  if (exact === 1) {
+    return { updated: existing.replace(oldStr, newStr), matchedOld: oldStr, note: '' };
+  }
+  if (exact > 1) {
+    throw new Error(
+      `edit_file: old_string is not unique in ${path} (${exact} matches) — include more surrounding context.`,
+    );
+  }
+  // exact === 0 → whitespace-flexible fallback.
+  const flexible = flexibleWhitespaceRegex(oldStr);
+  const matches = flexible ? [...existing.matchAll(flexible)] : [];
+  if (matches.length === 0) {
+    // Give the model the current file so it can craft the correct old_string without
+    // an extra read_file round-trip, which wastes a step.
+    const contentPreview =
+      existing.length <= 1500
+        ? existing
+        : existing.slice(0, 1500) + '\n…(truncated — call read_file for full content)';
+    throw new Error(
+      `edit_file: old_string not found in ${path}. ` +
+        `The string you supplied does not appear verbatim (or close enough) in the current file. ` +
+        `Current file content:\n\`\`\`\n${contentPreview}\n\`\`\`\n` +
+        `Copy the exact lines you want to change from the content above and retry.`,
+    );
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `edit_file: old_string is not unique in ${path} (${matches.length} whitespace-flexible matches) — include more surrounding context.`,
+    );
+  }
+  const m = matches[0];
+  const start = m.index ?? 0;
+  const matchedOld = m[0];
+  const updated = existing.slice(0, start) + newStr + existing.slice(start + matchedOld.length);
+  return { updated, matchedOld, note: ' (matched ignoring whitespace differences)' };
 }
 
 function shellQuote(s: string): string {

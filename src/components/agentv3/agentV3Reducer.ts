@@ -134,6 +134,10 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'file_changed':
       return { ...state, files: applyFileChange(state.files, event.change) };
 
+    case 'files_restored':
+      // "Restore all files" replaced the whole file list with what's genuinely in the workspace now.
+      return { ...state, files: event.files };
+
     case 'diff':
       return { ...state, diffs: { ...state.diffs, [event.diff.path]: event.diff.patch } };
 
@@ -149,6 +153,9 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'preview':
       return { ...state, previewUrl: event.url };
 
+    case 'repo':
+      return { ...state, repoUrl: event.url, repoFullName: event.fullName };
+
     case 'permission_request':
       return {
         ...state,
@@ -157,7 +164,7 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       };
 
     case 'done':
-      return { ...state, done: true, ok: event.ok, summary: event.summary, pendingPermission: undefined };
+      return { ...state, done: true, ok: event.ok, summary: event.summary, pendingPermission: undefined, ...(event.readiness ? { buildHealth: event.readiness } : {}) };
 
     case 'result':
       return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, billedInr: event.billedInr, pendingPermission: undefined };

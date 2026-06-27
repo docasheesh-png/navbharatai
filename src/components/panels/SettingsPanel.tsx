@@ -7,7 +7,7 @@ import {
   Figma, Rocket, Smartphone, CloudUpload, Package, IndianRupee, Users2, Palette, TrendingUp,
   BarChart2, Cpu, Sparkles, Eye, EyeOff, Github, List, LogOut, GitBranch as GitBranchIcon,
   Folder, Check, Search, RefreshCw, Box, Zap, Globe as GlobeIcon, Search as SearchIcon,
-  Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy,
+  Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { SettingsScreen, ViewType, ApiKeys, PROVIDER_CONFIG } from '../../types';
@@ -100,6 +100,43 @@ export interface SettingsPanelProps {
 
   // logging
   addLog: (msg: string, type: 'info' | 'error' | 'success' | 'warn') => void;
+}
+
+/**
+ * "Reduce Animations" toggle (Settings → General). Animations are ON by default; turning this ON
+ * sets the `nb-reduce-motion` class on <html> (CSS minimises every animation/transition, and the
+ * JS-driven waving tiranga goes static). The choice is persisted in localStorage and re-applied on
+ * load (see main.tsx). Self-contained so it needs no prop wiring.
+ */
+function ReduceMotionToggle() {
+  const [reduced, setReduced] = React.useState<boolean>(() => {
+    try { return localStorage.getItem('navbharat_reduce_motion') === 'true'; } catch { return false; }
+  });
+  const apply = (next: boolean) => {
+    setReduced(next);
+    try { localStorage.setItem('navbharat_reduce_motion', next ? 'true' : 'false'); } catch { /* ignore */ }
+    try { document.documentElement.classList.toggle('nb-reduce-motion', next); } catch { /* ignore */ }
+  };
+  return (
+    <div className="flex items-center justify-between p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
+      <div className="flex items-center gap-4">
+        <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center text-lg">🇮🇳</div>
+        <div>
+          <div className="text-sm font-bold text-white">Reduce Animations</div>
+          <div className="text-[11px] text-[#8b949e] mt-0.5 max-w-xs">Animations (like the waving flag) are on by default. Turn this on to minimise motion for comfort.</div>
+        </div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={reduced}
+        onClick={() => apply(!reduced)}
+        className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ${reduced ? 'bg-indigo-600' : 'bg-white/15'}`}
+      >
+        <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${reduced ? 'translate-x-5' : ''}`} />
+      </button>
+    </div>
+  );
 }
 
 export function SettingsPanel({
@@ -219,6 +256,14 @@ export function SettingsPanel({
                 {/* 6 grouped sections */}
                 {[
                   {
+                    title: 'Account',
+                    color: 'text-indigo-400',
+                    icon: User as any,
+                    items: [
+                      { id: 'profile', label: 'My Profile', icon: User as any, nav: true },
+                    ],
+                  },
+                  {
                     title: 'App Settings',
                     color: 'text-blue-400',
                     icon: Settings,
@@ -307,7 +352,11 @@ export function SettingsPanel({
                       {group.items.map(item => (
                         <button
                           key={item.id}
-                          onClick={() => (item as any).tab ? toggleTab(item.id as any) : setSettingsScreen(item.id as any)}
+                          onClick={() => {
+                            if ((item as any).tab) { toggleTab(item.id as any); }
+                            else if ((item as any).nav) { setActiveView(item.id as any); }
+                            else { setSettingsScreen(item.id as any); }
+                          }}
                           className="flex items-center gap-2 p-2.5 bg-[#0d1117] border border-white/5 rounded-xl hover:border-indigo-500/30 hover:bg-indigo-600/10 transition-all group text-left"
                         >
                           <item.icon className="w-3.5 h-3.5 text-[#484f58] group-hover:text-indigo-400 transition-colors flex-shrink-0" />
@@ -400,6 +449,11 @@ export function SettingsPanel({
                            </button>
                           ))}
                         </div>
+                     </div>
+
+                     <div className="space-y-3 pt-6 border-t border-white/10">
+                        <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block pl-1">Motion</label>
+                        <ReduceMotionToggle />
                      </div>
 
                      <div className="space-y-3 pt-6 border-t border-white/10">

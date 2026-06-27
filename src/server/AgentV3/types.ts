@@ -25,7 +25,12 @@ export type ToolName =
   | 'generate_gitignore'
   | 'task'
   | 'second_opinion'
-  | 'consensus';
+  | 'consensus'
+  | 'web_search'
+  | 'screenshot'
+  | 'browser_action'
+  | 'console_errors'
+  | 'deploy';
 
 /**
  * The multi-agent team roles (§3.3). 'architect' is the lead/orchestrator; every
@@ -120,8 +125,17 @@ export type AgentEvent =
   | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
   | { type: 'preview'; url: string; ts: number }
-  | { type: 'done'; ok: boolean; summary: string; ts: number }
+  | { type: 'repo'; url: string; fullName: string; ts: number }
+  | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number };
+
+/** R2 §4.6 — the objective readiness verdict surfaced to the user as a build-health card. */
+export interface BuildHealth {
+  score: number;
+  ready: boolean;
+  blockers: string[];
+  warnings: string[];
+}
 
 export type AgentEventType = AgentEvent['type'];
 

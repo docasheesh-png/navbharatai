@@ -7,13 +7,19 @@ import {
   signInWithPhoneNumber,
   ConfirmationResult,
   GoogleAuthProvider,
+  GithubAuthProvider,
   signInWithPopup,
   signInWithRedirect,
+  fetchSignInMethodsForEmail,
+  linkWithCredential,
+  AuthProvider,
+  UserCredential,
 } from 'firebase/auth';
 import { motion } from 'motion/react';
-import { X, AlertCircle, Loader2 } from 'lucide-react';
+import { X, AlertCircle, Loader2, Github } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
+import { explainAuthReason } from '../lib/authDiagnostics';
 
 /**
  * Temporary diagnostic: hit the Identity Toolkit sign-up endpoint directly from
@@ -23,31 +29,6 @@ import { firebaseConfig } from '../config/firebase';
  * "PROJECT_DISABLED", "API key not valid", or "ADMIN_ONLY_OPERATION" (which
  * would actually mean the auth backend is fine).
  */
-/**
- * Translate a raw Identity Toolkit error message into a plain, ACTIONABLE reason.
- * These are the causes behind a bare auth/internal-error in production — almost all
- * are Firebase Console config, so name the exact fix and project.
- */
-function explainAuthReason(message: string): string {
-  const m = (message || '').toUpperCase();
-  if (!m) return '';
-  if (m.includes('CONFIGURATION_NOT_FOUND')) {
-    return `Firebase Authentication is not set up for this project. An admin must open Firebase Console → Authentication → "Get started" and enable the sign-in providers (project ${firebaseConfig.projectId}).`;
-  }
-  if (m.includes('PASSWORD_LOGIN_DISABLED') || m.includes('OPERATION_NOT_ALLOWED') || m.includes('ADMIN_ONLY_OPERATION')) {
-    return `Sign-in is disabled for this project — the required provider (Email/Password or Google) is turned off. An admin must enable it in Firebase Console → Authentication → Sign-in method (project ${firebaseConfig.projectId}).`;
-  }
-  if (m.includes('INVALID_LOGIN_CREDENTIALS') || m.includes('EMAIL_NOT_FOUND') || m.includes('INVALID_PASSWORD')) {
-    return 'Wrong email or password — or no account exists for this email yet. Switch to Sign up to create one.';
-  }
-  if (m.includes('USER_DISABLED')) return 'This account has been disabled.';
-  if (m.includes('TOO_MANY_ATTEMPTS')) return 'Too many attempts — wait a bit and try again.';
-  if (m.includes('API KEY') || m.includes('API_KEY') || m.includes('REFERER')) {
-    return `The Firebase API key is invalid or restricted for this site. An admin must check the key and its allowed referrers (project ${firebaseConfig.projectId}).`;
-  }
-  return `Server said: ${message}`;
-}
-
 /**
  * Probe the REAL Identity Toolkit endpoint to surface the actual reason behind a
  * bare auth/internal-error. When email+password are supplied we hit
@@ -98,21 +79,39 @@ function describeAuthError(err: any): string {
 }
 
 /**
- * Turn a Google sign-in failure into an ACTIONABLE message. The two failures that
- * silently break Google login in production are config, not code — name the exact
- * fix (which domain to authorize, which project) so it can be resolved without a
- * console. Everything else falls back to the generic auth describer.
+ * Honest, actionable messages for social (Google/GitHub) sign-in failures. The two
+ * failures that are config — not code — name the exact Firebase Console fix so the
+ * admin can resolve them without a developer console.
  */
-function describeGoogleError(err: any): string {
+function describeSocialError(err: any): string {
   const code = err?.code || '';
-  const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
-  if (code === 'auth/unauthorized-domain') {
-    return `Google sign-in is blocked for "${host}". An admin must add this exact domain in Firebase Console → Authentication → Settings → Authorized domains (project ${firebaseConfig.projectId}).`;
+  switch (code) {
+    case 'auth/unauthorized-domain':
+      return `This site's domain isn't authorized for sign-in. Admin: add it under Firebase Console → Authentication → Settings → Authorized domains (project ${firebaseConfig.projectId}).`;
+    case 'auth/operation-not-allowed':
+      return `This sign-in provider isn't enabled. Admin: enable it under Firebase Console → Authentication → Sign-in method (project ${firebaseConfig.projectId}).`;
+    case 'auth/account-exists-with-different-credential':
+      return 'An account already exists with this email using a different sign-in method. Sign in with that method first.';
+    case 'auth/network-request-failed':
+      return 'Network error reaching the sign-in provider. Check your connection and try again.';
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return 'Sign-in was cancelled. Please try again.';
+    default:
+      return describeAuthError(err);
   }
-  if (code === 'auth/operation-not-allowed') {
-    return `Google sign-in is not enabled for this project. An admin must enable the Google provider in Firebase Console → Authentication → Sign-in method (project ${firebaseConfig.projectId}).`;
-  }
-  return describeAuthError(err);
+}
+
+/**
+ * Capture the GitHub OAuth access token from a successful sign-in and store it so
+ * NavBharatAI can connect to the user's repos (git-native storage, deploy, PR flow).
+ * The token carries the scopes we requested (repo, workflow, …) — 100% app connection.
+ */
+function captureGithubToken(result: UserCredential): void {
+  try {
+    const cred = GithubAuthProvider.credentialFromResult(result);
+    if (cred?.accessToken) localStorage.setItem('gh_token', cred.accessToken);
+  } catch { /* best-effort — never block sign-in */ }
 }
 
 export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser: any, onClose: () => void }) => {
@@ -278,63 +277,6 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     }
   };
 
-  // getRedirectResult is handled once at the App root (App.tsx) so it's not
-  // duplicated here — calling it twice causes a race where one gets null.
-
-  const handleGoogleSignIn = async () => {
-    setError('');
-    setLoading(true);
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
-
-    // Try popup first — instant result, no page reload, works on desktop + modern mobile.
-    // Fall back to redirect only if the popup is explicitly blocked by the browser.
-    try {
-      const result = await signInWithPopup(auth, provider);
-      if (result?.user) {
-        setUser(result.user);
-        onClose();
-      }
-      return;
-    } catch (err: any) {
-      const code = err?.code || '';
-      if (code === 'auth/popup-blocked') {
-        // Browser blocked the popup — fall through to redirect below.
-      } else if (
-        code === 'auth/popup-closed-by-user' ||
-        code === 'auth/popup-cancelled-by-user' ||
-        code === 'auth/cancelled-popup-request'
-      ) {
-        // User dismissed the popup intentionally — stop silently, let them retry.
-        setLoading(false);
-        return;
-      } else {
-        // Real error (disabled provider, bad API key, unauthorized domain, etc.) — show it.
-        if (code === 'auth/internal-error') {
-          setError(`${describeGoogleError(err)}\n${await diagnoseAuth()}`);
-        } else {
-          setError(describeGoogleError(err));
-        }
-        setLoading(false);
-        return;
-      }
-    }
-
-    // Redirect fallback — navigates the whole page to Google.
-    // getRedirectResult() in App.tsx root picks up the result on return.
-    try {
-      await signInWithRedirect(auth, provider);
-    } catch (err: any) {
-      const code = err?.code || '';
-      if (code === 'auth/internal-error') {
-        setError(`${describeGoogleError(err)}\n${await diagnoseAuth()}`);
-      } else {
-        setError(describeGoogleError(err));
-      }
-      setLoading(false);
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (authMethod === 'phone' && !isLogin) {
@@ -362,6 +304,121 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   // Helper for IDE logs integration if needed
   const addTerminalLine = (text: string, type: 'info' | 'error' | 'success' | 'warn' = 'info') => {
       console.log(`[IDE LOG] ${type}: ${text}`);
+  };
+
+  // ── Social sign-in (Google + GitHub) — popup-first, redirect fallback ─────────
+  // Popup is the primary path: it sidesteps the cross-origin storage partitioning
+  // that makes signInWithRedirect return logged-out on a different serving domain,
+  // and the COOP header (server.ts) now lets the popup deliver its result. If the
+  // browser blocks the popup, we fall back to a full-page redirect (finalized at the
+  // app root via getRedirectResult). Errors are always surfaced — never silent.
+  const socialSignIn = async (provider: AuthProvider, onCredential?: (r: UserCredential) => void) => {
+    try {
+      const result = await signInWithPopup(auth, provider);
+      onCredential?.(result);
+      onClose(); // success — App.tsx onAuthStateChanged also closes/syncs state
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/popup-blocked' || code === 'auth/cancelled-popup-request' || code === 'auth/popup-closed-by-user') {
+        // Popup unavailable — fall back to full-page redirect (navigates away).
+        await signInWithRedirect(auth, provider);
+        return;
+      }
+      throw err;
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setLoading(true);
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    try {
+      await socialSignIn(provider);
+    } catch (err: any) {
+      console.error('[GOOGLE SIGN-IN]', err);
+      setError(describeSocialError(err));
+      setLoading(false);
+    }
+  };
+
+  const handleGithubSignIn = async () => {
+    setError('');
+    setLoading(true);
+    const provider = new GithubAuthProvider();
+    // Maximum repo permission so NavBharatAI can fully connect to the user's apps:
+    // repo (full read/write to code + statuses + deployments), workflow (manage CI/
+    // Actions for the git-native PR→CI→merge flow), and identity scopes.
+    provider.addScope('repo');
+    provider.addScope('workflow');
+    provider.addScope('read:user');
+    provider.addScope('user:email');
+    provider.setCustomParameters({ allow_signup: 'true' });
+    try {
+      await socialSignIn(provider, captureGithubToken);
+    } catch (err: any) {
+      // The user's GitHub email already belongs to an account created with another method
+      // (Google or Email/Password). Instead of dead-ending, LINK GitHub onto that account so the
+      // user actually signs in and can use their GitHub repos. Real account-linking, not a message.
+      if (err?.code === 'auth/account-exists-with-different-credential') {
+        const linked = await linkGithubToExistingAccount(err);
+        if (linked) return; // signed in + GitHub linked — done
+        return; // linkGithubToExistingAccount already set an actionable error/loading state
+      }
+      console.error('[GITHUB SIGN-IN]', err);
+      setError(describeSocialError(err));
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Resolve `auth/account-exists-with-different-credential`: the GitHub email is already registered
+   * with Google or Email/Password. Sign in with that existing method, then link the pending GitHub
+   * credential onto the SAME account — so the user ends up signed in with GitHub connected (one
+   * account, both methods). Returns true when the user is signed in + linked.
+   */
+  const linkGithubToExistingAccount = async (err: any): Promise<boolean> => {
+    try {
+      const pendingCred = GithubAuthProvider.credentialFromError(err);
+      const email: string = err?.customData?.email || err?.email || '';
+      if (!pendingCred || !email) { setError(describeSocialError(err)); setLoading(false); return false; }
+      // Firebase "Email Enumeration Protection" (ON by default) makes fetchSignInMethodsForEmail
+      // return an EMPTY array — so we can't always learn the existing method. Treat "password-only"
+      // as the only case that needs a typed password; for everything else (google.com, OR unknown
+      // because of enumeration protection) verify via Google — the enabled social provider — then
+      // link GitHub onto that account.
+      const methods: string[] = await fetchSignInMethodsForEmail(auth, email).catch(() => [] as string[]);
+      const passwordOnly = methods.includes('password') && !methods.includes('google.com');
+      let signedIn: UserCredential | null = null;
+      if (passwordOnly) {
+        if (!password) {
+          setError(`This email (${email}) already has a password account. Type your password above, then click "Continue with GitHub" again to connect it.`);
+          setLoading(false);
+          return false;
+        }
+        signedIn = await signInWithEmailAndPassword(auth, email, password);
+      } else {
+        const g = new GoogleAuthProvider();
+        g.setCustomParameters({ login_hint: email });
+        signedIn = await signInWithPopup(auth, g); // verify ownership via Google, then link GitHub
+      }
+      if (signedIn?.user) {
+        // Attach GitHub to the now-authenticated account, and keep the GitHub OAuth token (for
+        // git-native storage) straight from the pending credential.
+        await linkWithCredential(signedIn.user, pendingCred);
+        try { if (pendingCred.accessToken) localStorage.setItem('gh_token', pendingCred.accessToken); } catch { /* best-effort */ }
+        setUser(signedIn.user);
+        onClose();
+        return true;
+      }
+      setLoading(false);
+      return false;
+    } catch (e: any) {
+      console.error('[GITHUB LINK]', e);
+      setError(describeSocialError(e));
+      setLoading(false);
+      return false;
+    }
   };
 
   return (
@@ -632,29 +689,40 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             </div>
           )}
 
-          {/* Hidden Recaptcha */}
-          <div ref={recaptchaRef} id="recaptcha-container"></div>
-
-          <div className="pt-4 flex flex-col items-center gap-4">
-            <div className="w-full flex items-center gap-3">
+          {/* ── Social sign-in: Google + GitHub ─────────────────────────────── */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
               <div className="flex-1 h-px bg-white/10" />
-              <span className="text-[9px] text-[#484f58] font-black uppercase tracking-widest">ya</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-[#484f58]">or continue with</span>
               <div className="flex-1 h-px bg-white/10" />
             </div>
             <button
               type="button"
               onClick={handleGoogleSignIn}
               disabled={loading}
-              className="w-full py-4 bg-white hover:bg-gray-100 disabled:opacity-40 text-gray-900 rounded-2xl font-black text-[11px] uppercase tracking-widest flex items-center justify-center gap-3 transition-all shadow-lg active:scale-95"
+              className="w-full py-4 bg-white hover:bg-gray-100 disabled:opacity-50 text-gray-900 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"
             >
-              <svg width="18" height="18" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
-                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-              </svg>
-              Google se Sign In Karo
+              <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"/></svg>
+              Sign in with Google
             </button>
+            <button
+              type="button"
+              onClick={handleGithubSignIn}
+              disabled={loading}
+              className="w-full py-4 bg-[#24292e] hover:bg-[#2f363d] disabled:opacity-50 text-white border border-white/10 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"
+            >
+              <Github className="w-4 h-4" />
+              Continue with GitHub
+            </button>
+            <p className="text-[9px] text-[#484f58] text-center leading-relaxed">
+              GitHub connects your repos so NavBharatAI can build, commit &amp; deploy your apps.
+            </p>
+          </div>
+
+          {/* Hidden Recaptcha */}
+          <div ref={recaptchaRef} id="recaptcha-container"></div>
+
+          <div className="pt-4 flex flex-col items-center gap-4">
             <button
               type="button"
               onClick={() => {

@@ -80,6 +80,24 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(s.workspaceId).toBe('ws-42');
   });
 
+  it('replaces the whole file list on files_restored (Restore all files)', () => {
+    let s = agentV3Reducer(initialAgentV3State(), { type: 'file_changed', agent: 'frontend', change: { path: 'old.ts', kind: 'create' }, ts: 1 });
+    expect(s.files.map((f) => f.path)).toEqual(['old.ts']);
+    s = agentV3Reducer(s, { type: 'files_restored', files: [{ path: 'src/App.tsx', kind: 'create' }, { path: 'index.html', kind: 'create' }], ts: 2 });
+    expect(s.files.map((f) => f.path)).toEqual(['src/App.tsx', 'index.html']);
+  });
+
+  it('captures the build-health readiness from a done event (R2 §4.6)', () => {
+    const health = { score: 70, ready: false, blockers: ['1 unresolved import(s)'], warnings: ['2 medium-severity'] };
+    const s = agentV3Reducer(initialAgentV3State(), { type: 'done', ok: false, summary: 'not ready', ts: 1, readiness: health });
+    expect(s.buildHealth).toEqual(health);
+  });
+
+  it('leaves buildHealth undefined when a done event carries no readiness', () => {
+    const s = agentV3Reducer(initialAgentV3State(), { type: 'done', ok: true, summary: 'built', ts: 1 });
+    expect(s.buildHealth).toBeUndefined();
+  });
+
   it('stores the live preview URL', () => {
     const s = agentV3Reducer(initialAgentV3State(), { type: 'preview', url: 'https://app.sandbox.dev', ts: 1 });
     expect(s.previewUrl).toBe('https://app.sandbox.dev');

@@ -188,6 +188,66 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'write_files_batch',
+      description:
+        'Write multiple NEW files to the workspace in one operation — faster than ' +
+        'calling write_file one-by-one when creating several independent files. ' +
+        'Files are automatically ordered by import dependencies (dependencies written ' +
+        'first), so this is safe when files import each other in one direction. ' +
+        'Use this ONLY for creating new files. For editing existing files use edit_file.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          files: {
+            type: 'array',
+            description: 'List of files to create.',
+            items: {
+              type: 'object',
+              properties: {
+                path: { type: 'string', description: 'Workspace-relative file path.' },
+                content: { type: 'string', description: 'The complete file contents.' },
+              },
+              required: ['path', 'content'],
+            },
+          },
+        },
+        required: ['files'],
+      },
+    },
+    {
+      name: 'codemod_rename',
+      description:
+        'AST-safe cross-file symbol rename. Renames every usage of an exported ' +
+        'identifier (function, variable, type, class, interface) across the whole ' +
+        'workspace — import sites, call sites, and JSX tags — without touching ' +
+        'string literals. Far safer than a global find-and-replace.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          old_name: { type: 'string', description: 'The current symbol name to rename.' },
+          new_name: { type: 'string', description: 'The new name to replace it with.' },
+        },
+        required: ['old_name', 'new_name'],
+      },
+    },
+    {
+      name: 'codemod_add_prop',
+      description:
+        'Add a new prop (with its type and optional default) to a React component: ' +
+        'updates the Props interface/type and every JSX usage site in one atomic ' +
+        'operation. Use instead of manually hunting every call site.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          component_name: { type: 'string', description: 'The component to add the prop to (e.g. "Button").' },
+          prop_name: { type: 'string', description: 'The new prop name (e.g. "disabled").' },
+          prop_type: { type: 'string', description: 'The TypeScript type (e.g. "boolean", "string").' },
+          default_value: { type: 'string', description: 'Optional default value for JSX usage sites (e.g. "false").' },
+        },
+        required: ['component_name', 'prop_name', 'prop_type'],
+      },
+    },
+    {
       name: 'generate_gitignore',
       description:
         'Generate a correct, stack-aware .gitignore so node_modules, build output and ' +
@@ -200,6 +260,82 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         },
       },
     },
+    {
+      name: 'web_search',
+      description:
+        'Search the web for up-to-date information — package versions, framework/API docs, ' +
+        'or the meaning of an unfamiliar error. Returns a short ranked list of titles, URLs ' +
+        'and snippets. Use it when the answer is not in the workspace and you would otherwise guess.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'What to look up (e.g. "vite 5 config server.host" or "npm zod").' },
+          limit: { type: 'number', description: 'Max results (1–10, default 5).' },
+        },
+        required: ['query'],
+      },
+    },
+    {
+      name: 'screenshot',
+      description:
+        'Capture a screenshot of a running URL inside the sandbox and SEE the result image, so ' +
+        'you can verify the app actually renders correctly (layout, broken UI, missing elements). ' +
+        'Use the preview URL (or http://localhost:<devPort>) after the dev server is up. Optional ' +
+        'width/height check responsive layouts. Requires a real sandbox.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'The URL to capture (e.g. http://localhost:5173).' },
+          width: { type: 'number', description: 'Optional viewport width (e.g. 390 for mobile).' },
+          height: { type: 'number', description: 'Optional viewport height.' },
+        },
+        required: ['url'],
+      },
+    },
+    {
+      name: 'browser_action',
+      description:
+        'Drive a real headless browser to TEST interactive flows: click, type, navigate, scroll, ' +
+        'press, hover, double_click, select_option, or wait. State (cookies/DOM/URL) persists across ' +
+        'calls so you can complete a multi-step flow (fill a form → submit → verify). Returns the ' +
+        'action result and a screenshot you can SEE. Requires a real sandbox.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            description: 'The interaction to perform.',
+            enum: ['click', 'type', 'navigate', 'scroll', 'press', 'wait', 'hover', 'double_click', 'select_option'],
+          },
+          selector: { type: 'string', description: 'CSS selector for click/type/hover/select (when applicable).' },
+          text: { type: 'string', description: 'Text to type, key to press, or option to select.' },
+          url: { type: 'string', description: 'URL for the navigate action.' },
+          direction: { type: 'string', description: 'Scroll direction.', enum: ['up', 'down'] },
+        },
+        required: ['action'],
+      },
+    },
+    {
+      name: 'console_errors',
+      description:
+        'Read runtime browser errors (console.error, uncaught exceptions, failed requests) captured ' +
+        'while the app ran — failures a successful BUILD never reveals. Use after loading/driving the ' +
+        'app to catch runtime breakage. Requires a real sandbox.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          since_seconds: { type: 'number', description: 'Look back this many seconds (default 120).' },
+        },
+      },
+    },
+    {
+      name: 'deploy',
+      description:
+        'Publish the built app to a PERMANENT public URL (Firebase Hosting) that stays live after the ' +
+        'sandbox stops — use when the user asks to deploy/publish/go live. Run "npm run build" first so ' +
+        'a dist/ directory exists, then call deploy. Returns the public https URL. Requires a real sandbox.',
+      input_schema: { type: 'object', properties: {} },
+    },
   ];
 }
 
@@ -207,6 +343,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
 export const CATALOG_TOOL_NAMES = [
   'read_file',
   'write_file',
+  'write_files_batch',
   'edit_file',
   'bash',
   'grep',
@@ -215,9 +352,16 @@ export const CATALOG_TOOL_NAMES = [
   'update_preview',
   'recall',
   'evaluate',
+  'codemod_rename',
+  'codemod_add_prop',
   'generate_readme',
   'generate_env_example',
   'generate_gitignore',
+  'web_search',
+  'screenshot',
+  'browser_action',
+  'console_errors',
+  'deploy',
 ] as const;
 
 /**

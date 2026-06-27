@@ -62,6 +62,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • MERGED SURFACES from one live stream: file explorer, Code Studio diffs (red/green), terminal, git/history checkpoints, todos and plan — all in sync, zero drift.
 • HYBRID sandbox: a fast E2B cloud sandbox initialised as a real Git repo you own.
 • ITERATIVE sessions: each message continues the SAME project (same sandbox, files and memory), so you can refine step by step ("add a login page" after "build a todo app"). Use the "New" button to start a fresh project.
+• SURGICAL EDITING: when you ask v3.0 to CHANGE an existing app — "fix the navbar", "update the button colour", "refactor the auth", "remove the sidebar" — it detects this is an EDIT (not a new build), loads the current file tree, reads the affected files first, and makes MINIMUM targeted patches (edit_file old→new) instead of rebuilding everything from scratch. Your existing files and working code are never wiped to start over; a one-line fix touches one place. New files are still created when a change genuinely needs them.
 • BUILDS IN YOUR LANGUAGE (Layer 73 — Universal Language): write your request in any language — all 22 Indian languages (Hindi, Tamil, Bengali, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Odia, Urdu and more) or major world languages — and the app's user-facing text (labels, buttons, headings, placeholders, messages) is generated in THAT language, while the code stays in English. Apni bhasha mein likho, app usi bhasha mein banega.
 • SMART COST ROUTING: plain conversation (a greeting, thanks, "who are you", small-talk) is answered by a fast, economical model and only REAL build/engineering requests use the premium engine — the experience is unchanged, you just don't pay build-grade cost for a "hello".
 • WHAT I BUILT summary (Layer 27 — Product Understanding): after each successful build it shows a short, friendly recap in the chat — the detected stack/framework, how many files/components/routes were created, a few key components/routes, and how to run it (plus the Preview tab) — so you understand what was created at a glance.
@@ -94,7 +95,61 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'hindi', 'tamil', 'bengali', 'apni bhasha', 'language', 'multilingual',
       'regional language', 'bhasha', 'build in my language', 'app in hindi',
       'chat', 'cost', 'economical', 'cheap chat', 'cost routing', 'smart routing',
+      'edit', 'edit existing', 'surgical edit', 'targeted change', 'modify app', 'modify existing app',
+      'change app', 'fix existing', 'update existing', 'dont rebuild', "don't rebuild", 'not rebuild',
+      'rebuilds everything', 'wipes my app', 'deleted my files', 'edit_file', 'minimum changes',
+      'edit karo', 'badlo', 'change karo', 'thik karo', 'wapas se bana diya', 'pura dobara bana diya',
     ],
+  },
+  {
+    id: 'agentv3_export',
+    name: 'Export project (.zip) — your code, no lock-in',
+    path: 'NavBharatAI Pro v3.0 → header tab row → "Export .zip" button',
+    description: 'Download your entire v3.0 project as a real .zip file that you fully own. It contains the source files (generated folders like node_modules, dist and .git are excluded so it stays the clean source). Open it in any code editor (VS Code, etc.) or host it on any provider — there is no lock-in. The zip is built right in your browser from the live project files.',
+    howToUse: 'Open NavBharatAI Pro v3.0 and build or open a project. In the tab row at the top of the builder, click "Export .zip". The download starts automatically once the project files are packaged.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['export', 'download', 'zip', 'download project', 'export code', 'download code', 'my code', 'source code', 'no lock-in', 'portability', 'take my code', 'code nikalo', 'project download', 'download karo', 'zip nikalo', 'apna code'],
+    aiSurface: 'nbi_chat',
+  },
+  {
+    id: 'agentv3_restore_files',
+    name: 'Restore all files (bring your whole project back)',
+    path: 'NavBharatAI Pro v3.0 → header → History tab (or Files tab when empty) → "Restore all files" button',
+    description: 'Bring your ENTIRE project back into the workspace with one click — a real restore, not a preview. If your files look gone (for example after a page refresh, or a build that did not finish), open the History tab (or the Files tab) and click "Restore all files". NavBharatAI writes your last durably-saved project files back into the workspace so they are genuinely there again — listed in Files, previewable, buildable and deployable. It honestly tells you how many files were restored, or says so if there are no saved files yet. You can also restore to a specific earlier checkpoint from the History list.',
+    howToUse: 'Open NavBharatAI Pro v3.0. Tap the "History" tab at the top (or the "Files" tab if it shows no files). Click "Restore all files" — the workspace is repopulated and the Files tab opens showing your restored files. To go back to an earlier version instead, click "Restore" next to a specific checkpoint in History.',
+    relatedFeatures: ['agentv3_builder', 'agentv3_export', 'agentv3_deploy'],
+    keywords: ['restore', 'restore files', 'restore all', 'files gone', 'files missing', 'files 0', 'lost files', 'get files back', 'recover', 'recover files', 'checkpoint', 'history', 'restore karo', 'files wapas', 'file gayab', 'files nahi dikh rahi', 'project wapas', 'restore project'],
+    aiSurface: 'nbi_chat',
+  },
+  {
+    id: 'agentv3_deploy',
+    name: 'Deploy to a live URL (one click)',
+    path: 'NavBharatAI Pro v3.0 → header tab row → "Deploy" button (the live link then shows as "Live site")',
+    description: 'Publish your built app to a PERMANENT public URL with one click. The "Deploy" button runs the production build and publishes the app, returning a real https URL that anyone can open and that STAYS LIVE even after the cloud sandbox stops. NO LOCK-IN: NavBharatAI supports MULTIPLE hosting providers — Firebase Hosting (always available) plus Vercel and Netlify (and more) when their API token is configured by the admin. When more than one is available, a small chooser next to the Deploy button lets you pick WHERE to deploy. Once deployed, a "Live site" link appears in the same header row — click it to open your live app, or share the URL with anyone. The live link is saved, so it comes back even after you refresh or return in a new session. (A custom domain like yourname.com is a separate upcoming feature — the provider URL is already permanent and shareable.)',
+    howToUse: 'Build an app in NavBharatAI Pro v3.0, then click "Deploy" in the tab row at the top. v3.0 builds and publishes it; watch the progress in the chat. When it finishes, click the "Live site" link that appears to open your permanent public URL, and share that URL with anyone.',
+    relatedFeatures: ['agentv3_builder', 'agentv3_preview', 'agentv3_export'],
+    keywords: ['deploy', 'publish', 'go live', 'live url', 'public url', 'host', 'hosting', 'share app', 'live site', 'make it live', 'put online', 'deploy karo', 'live karo', 'publish karo', 'app live', 'website live', 'permanent url', 'share link', 'firebase hosting', 'vercel', 'netlify', 'hosting provider', 'kahan deploy', 'no lock-in', 'launch'],
+    aiSurface: 'nbi_chat',
+  },
+  {
+    id: 'agentv3_preview',
+    name: 'Preview (dual: Live server + In-browser)',
+    path: 'NavBharatAI Pro v3.0 → header → Preview tab → "Live server" / "In-browser" switch',
+    description: 'Two ways to preview your app inside the v3.0 builder. "Live server" shows the real running app from the cloud (E2B) sandbox — full fidelity, supports any framework and a backend. "In-browser" renders a self-contained build of your files right inside the browser with no server, so it still works when the sandbox preview is unavailable (e.g. a "Blocked request" error) and is instant for static HTML/CSS/JS and simple React/Vue apps. Switch between them with the toggle at the top of the Preview tab; use the refresh icon to rebuild the in-browser preview from the latest files.',
+    howToUse: 'Open the Preview tab in NavBharatAI Pro v3.0. If the app is running you will see the Live server preview. Click "In-browser" to render the files locally without a server (useful if the live preview is blocked or not started). Click the refresh icon to rebuild it after changes.',
+    relatedFeatures: ['agentv3_builder', 'agentv3_export'],
+    keywords: ['preview', 'live preview', 'in-browser preview', 'browser preview', 'blocked request', 'preview not working', 'preview nahi chal raha', 'app dekho', 'see app', 'run app', 'sandbox preview', 'static preview', 'dual preview', 'preview kaise'],
+    aiSurface: 'nbi_chat',
+  },
+  {
+    id: 'agentv3_github_storage',
+    name: 'Save apps to your own GitHub (git-native)',
+    path: 'Sign in with GitHub → build in NavBharatAI Pro v3.0 → your project is committed to a private repo in YOUR GitHub account',
+    description: 'When you sign in with GitHub, NavBharatAI Pro v3.0 stores each project as a real private repo in YOUR OWN GitHub account (not on our servers). Every build commits there, so your code is durable and 100% owned by you — no lock-in. It works like Claude Code: the build is pushed to a branch, a pull request is opened, CI is checked, and the PR is merged only when checks are green (never merged red). Users who sign in with Email/Phone instead get the same durability via a private repo in the platform GitHub org behind the scenes. Requires GitHub git-native storage to be enabled by the admin.',
+    howToUse: 'Click "Continue with GitHub" on the login screen and approve the repo permissions. Then build normally in NavBharatAI Pro v3.0 — the builder creates/uses a private repo in your GitHub for the project and commits every build to it. Open your GitHub to see the repo, branches, pull requests and merges.',
+    relatedFeatures: ['agentv3_builder', 'agentv3_export', 'login_auth'],
+    keywords: ['github', 'github storage', 'my github', 'save to github', 'git', 'repo', 'repository', 'commit', 'pull request', 'pr', 'ci', 'merge', 'own code', 'no lock-in', 'github me save', 'github par', 'apni github', 'git native', 'version control'],
+    aiSurface: 'nbi_chat',
   },
   // ─── ENGINEER AI ─────────────────────────────────────────────────────────
   {
@@ -117,9 +172,9 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
   },
   {
     id: 'engineer_ai',
-    name: 'Engineer AI',
-    path: 'Header → Engineer AI tab  OR  Sidebar → Professionals → Engineer AI',
-    description: `Autonomous full-stack AI coding agent. Complete capabilities:
+    name: 'Engineer AI (retired → use NavBharatAI Pro v3.0)',
+    path: 'RETIRED. App building is now NavBharatAI Pro v3.0 — Sidebar → "NavBharatAI Pro v3.0".',
+    description: `RETIRED — replaced by NavBharatAI Pro v3.0, the new agentic app builder (everything Engineer AI did, now in v3.0: builds full-stack apps, live preview, GitHub storage, deploy, multi-agent team). Direct users to "NavBharatAI Pro v3.0" in the sidebar. Original Engineer AI capabilities (for reference):
 • BUILDS apps from plain-language descriptions — React/Vite, Next.js, Vue, Svelte, Node/Express, Python/FastAPI, or plain HTML.
 • SEES the running app via screenshots — visually verifies layout, UI, and bugs.
 • DRIVES the browser — clicks buttons, fills forms, navigates pages, tests flows end-to-end.
@@ -1241,6 +1296,15 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     keywords: ['settings', 'options', 'configuration', 'preferences', 'config', 'setting kahan', 'settings kahan hai'],
   },
   {
+    id: 'settings_reduce_motion',
+    name: 'Reduce Animations (Motion)',
+    path: 'Settings → App Settings → General → Motion → "Reduce Animations"',
+    description: 'Controls on-screen motion. Animations are ON by default (e.g. the waving Indian flag shown while an agent works). Turn "Reduce Animations" ON to minimise motion across the app — useful for comfort or for users sensitive to motion. The choice is saved on your device and re-applied on every load. (The app no longer auto-follows the OS reduce-motion setting; this in-app toggle is the control.)',
+    howToUse: 'Open Settings → App Settings → General, find the "Motion" section, and toggle "Reduce Animations" on or off. On = less motion (the waving flag becomes static); Off (default) = animations on.',
+    relatedFeatures: ['settings_general', 'settings_root'],
+    keywords: ['animation', 'animations', 'reduce motion', 'reduce animations', 'motion', 'flag', 'tiranga', 'waving flag', 'turn off animation', 'disable animation', 'animation band karo', 'animation off', 'motion kam karo'],
+  },
+  {
     id: 'settings_database',
     name: 'Database Settings (Bring Your Own Database)',
     path: 'Settings → App Settings → Database',
@@ -1339,13 +1403,22 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     keywords: ['donate', 'donation', 'support', 'contribute', 'help', 'fund'],
   },
   {
+    id: 'my_profile',
+    name: 'My Profile',
+    path: 'Top-right avatar → My Profile  OR  Settings → Account → My Profile',
+    description: 'Personal profile page showing: (1) Avatar (auto-loaded from Google/GitHub or a custom URL), display name, bio, phone — all editable. (2) Wallet summary: current INR balance, this month\'s spend, and a monthly budget cap. (3) Full build history with This Week / This Month / Custom date range tabs — each row shows build title, date, duration, file count, cost charged, and status (Completed / Failed / Cancelled). (4) Quick links to Add Balance (Billing) and App Settings. (5) Sign Out button.',
+    howToUse: 'Click your profile photo (or initials circle) in the top-right corner of the header → select "My Profile" from the dropdown. Or: open Settings → Account → My Profile. On the profile page: click "Edit" to update name / bio / phone / photo URL; click "Set a limit" under Monthly Budget to cap monthly spend; use the period tabs in Build History to filter by week, month, or a custom date range.',
+    relatedFeatures: ['billing', 'login_auth', 'settings_root'],
+    keywords: ['profile', 'my profile', 'account', 'avatar', 'photo', 'display name', 'bio', 'phone', 'edit profile', 'build history', 'usage history', 'wallet balance', 'budget limit', 'monthly budget', 'spend cap', 'billing history', 'cost history', 'completed builds', 'failed builds', 'cancelled builds', 'profile page', 'apna profile', 'mera account', 'kharcha dekho', 'balance dekho', 'history dekho'],
+  },
+  {
     id: 'login_auth',
     name: 'Login / Sign Up',
     path: 'Header → Login button (top right)',
-    description: 'Sign in or create a NavBharatAI account. Authentication is required to save sessions, use Engineer AI, access Pro features, and store settings. Login with email/password or Google sign-in.',
-    howToUse: 'Click the Login button in the top-right of the header. Create an account or sign in with an existing account.',
+    description: 'Sign in or create a NavBharatAI account. Authentication is required to save sessions, use Engineer AI, access Pro features, and store settings. Four ways to sign in: (1) Email + Password, (2) Phone number (OTP), (3) Sign in with Google, (4) Continue with GitHub. GitHub sign-in also connects your repositories (repo + workflow scope) so NavBharatAI can build, commit, and deploy your apps directly to your GitHub.',
+    howToUse: 'Click the Login button in the top-right of the header. Choose Email or Phone for a NavBharatAI account, or use "Sign in with Google" / "Continue with GitHub" under "or continue with". GitHub will ask permission to access your repositories — granting it lets NavBharatAI push your generated apps to your own GitHub.',
     relatedFeatures: ['history', 'settings_root'],
-    keywords: ['login', 'sign in', 'sign up', 'register', 'account', 'auth', 'logout', 'google login', 'login kaise', 'account kahan'],
+    keywords: ['login', 'sign in', 'sign up', 'register', 'account', 'auth', 'logout', 'email login', 'phone login', 'otp', 'mobile login', 'google login', 'google sign in', 'sign in with google', 'github login', 'github sign in', 'connect github', 'login kaise', 'account kahan', 'google se login'],
   },
   {
     id: 'app_navigation',
@@ -1437,6 +1510,21 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     howToUse: 'Admin login required. Open Settings → App Settings → scroll to bottom → Live Metrics button (visible only when logged in as admin). Click Refresh Metrics to update.',
     relatedFeatures: ['admin', 'engineer_ai', 'pro_chat'],
     keywords: ['metrics', 'stats', 'cost', 'admin', 'dashboard', 'builds', 'usage', 'ai cost', 'success rate', 'observability', 'logs', 'monitoring'],
+  },
+  {
+    id: 'admin-cost-ladder',
+    name: 'v3.0 Cost-Ladder Dashboard',
+    path: 'Admin Dashboard → Revenue tab → "v3.0 Cost-Ladder (last 30 days)" (admin only)',
+    description: `Admin-only panel showing how NavBharatAI Pro v3.0 routes builds across model tiers to control cost, with REAL telemetry (never faked):
+• Total v3.0 builds and overall success rate over the last 30 days
+• CHEAP-TIER SHARE — what % of builds ran on the cheapest 'gemini' start tier (the cost-ladder's whole point: simple apps build on Gemini Flash, not Pro)
+• Per-start-tier breakdown table (gemini → haiku → sonnet → opus): builds, share %, success rate %, average tokens, average build time, billed amount
+• Power-mode (Only-Opus) build count
+• The cheap-tier success rate is the P8 cutover signal — high share + high success means the ladder is safe to enable by default
+• Backend: GET /api/admin/agentv3/cost-telemetry, aggregated daily in Firestore (agentv3_cost_telemetry). Billing is unchanged (Opus-equivalent markup) — the ladder only lowers NavBharatAI's own provider cost.`,
+    howToUse: 'Admin login required. Open the Admin Dashboard → Revenue tab → scroll to "v3.0 Cost-Ladder". Click Refresh to pull the latest 30-day telemetry. Data appears once Pro v3.0 builds have run.',
+    relatedFeatures: ['admin', 'admin-metrics', 'pro_chat'],
+    keywords: ['cost ladder', 'cost', 'tier', 'gemini', 'cheap tier', 'savings', 'model routing', 'v3.0 cost', 'build cost', 'admin', 'success rate', 'telemetry', 'opus', 'sonnet', 'haiku'],
   },
   {
     id: 'auto-dependency-sync',
@@ -1608,6 +1696,30 @@ Hints are cleared after a successful build so they don't carry over to unrelated
     relatedFeatures: ['pro_chat', 'auto-dependency-sync', 'iterative-agent-build'],
     aiSurface: 'pro_chat',
     keywords: ['error', 'build fail', 'fix', 'retry', 'learn', 'pattern', 'cannot find module', 'eresolve', 'peer dep', 'jsx error', 'tailwind', 'supabase', 'smart build', 'auto fix', 'error detection', 'build smarter', 'galti', 'error fix', 'dobara banao'],
+  },
+  {
+    id: 'v3-framework-selector',
+    name: 'Multi-Framework Builder (v3.0)',
+    path: 'NavBharatAI Pro v3.0 → header → framework badge (or ⚙ → Framework)',
+    description: `NavBharatAI Pro v3.0 can build apps in 17 different frameworks and tech stacks:
+Frontend: React + Vite, Next.js, Remix, Vue 3, Nuxt 3, Svelte, SvelteKit, Angular, Astro, Vanilla TypeScript.
+Backend / API: Express.js, NestJS, Fastify, FastAPI (Python), Django (Python), Flask (Python).
+Static: plain HTML/CSS/JS.
+Each framework gets a full starter scaffold (package.json, config, entry files) pre-seeded in the workspace so the agent can start building immediately. The agent's instructions are also tailored per framework — it knows the routing conventions, dev server port, and common pitfalls for each.`,
+    howToUse: 'In Pro v3.0 chat: click the framework badge in the header (shows e.g. "⚛ React + Vite") or open ⚙ → Framework. A picker appears with All / Frontend / Full-Stack / Backend / Static filters. Select your framework and click Confirm. Then describe your app — the agent will build using that framework.',
+    relatedFeatures: ['pro_chat', 'v3-github-import', 'iterative-agent-build'],
+    aiSurface: 'pro_chat',
+    keywords: ['framework', 'nextjs', 'vue', 'svelte', 'angular', 'astro', 'django', 'flask', 'fastapi', 'nestjs', 'express', 'fastify', 'nuxt', 'remix', 'vanilla', 'python', 'stack', 'technology', 'kaunsa framework', 'react', 'typescript', 'javascript', 'tech stack', 'choose framework', 'framework select'],
+  },
+  {
+    id: 'v3-github-import',
+    name: 'GitHub / URL Import (v3.0)',
+    path: 'NavBharatAI Pro v3.0 → ⚙ → Import Repo',
+    description: `Import an existing project from any public GitHub repository (or any git URL) directly into the v3.0 workspace. Once imported, you can ask the agent to understand the code, fix bugs, add features, or continue building on top of it. The import clones the repo into the live sandbox — the agent then works on the real files just as if it had created them. Private repos work if you have connected your GitHub account in Settings → Connections (your OAuth token is automatically forwarded).`,
+    howToUse: '1. In Pro v3.0, open ⚙ (build options) → Import Repo. 2. Paste the GitHub URL (e.g. https://github.com/username/my-app). 3. Click "Set Import". 4. Then send your first message (e.g. "Analyze this project" or "Add dark mode"). The repo will be cloned into the workspace before the agent starts.',
+    relatedFeatures: ['pro_chat', 'v3-framework-selector', 'iterative-agent-build'],
+    aiSurface: 'pro_chat',
+    keywords: ['import', 'github', 'clone', 'existing app', 'existing project', 'repo', 'repository', 'my app', 'upload', 'firebase import', 'github se import', 'apni app', 'existing code', 'already made', 'meri app', 'koi bhi app'],
   },
 ];
 

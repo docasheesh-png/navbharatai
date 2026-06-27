@@ -143,21 +143,26 @@ html, body {
   50% { opacity: 0; }
 }
 
-/* L9: Respect user prefers-reduced-motion preference */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-  /* …but KEEP functional loading spinners turning. A loading spinner conveys live
-     status ("working…"); frozen, it reads as broken. This is an allowed exception to
-     reduced-motion (status indicators), not decorative motion. */
-  .animate-spin {
-    animation-duration: 1s !important;
-    animation-iteration-count: infinite !important;
-  }
+/* Dedicated, unbreakable status spinner. A live "working…" ring conveys that the build is
+   alive; if it freezes it reads as a hung app. `!important` + class specificity make it win
+   over the global reduced-motion reset below (which !important-zeroes every animation), and it
+   restates the FULL shorthand (name + duration + timing + iteration) so nothing is left for an
+   earlier rule to drop. Use this for functional loading spinners instead of relying on the
+   utility class alone. */
+.nb-spin {
+  animation: spin 1s linear infinite !important;
+  transform-origin: center !important;
+}
+
+/* Animations are ON by default. The OS prefers-reduced-motion is NOT auto-respected anymore;
+   instead users control motion via Settings → General → "Reduce Animations" (default OFF). When
+   they turn it ON, the `nb-reduce-motion` class is set on <html> and every animation/transition is
+   minimised. (The JS-driven waving tiranga reads the same class and goes static.) */
+.nb-reduce-motion *, .nb-reduce-motion *::before, .nb-reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }
 
 /* L18: Visible focus outline for keyboard navigation */

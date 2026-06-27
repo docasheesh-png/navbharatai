@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { AgentRunner, type AgentRunnerOptions } from './AgentRunner';
+import { AgentRunner, isParallelSafeToolUse, type AgentRunnerOptions } from './AgentRunner';
 import { ClaudeClient, type MessagesCreateClient } from './ClaudeClient';
 import { ToolDispatcher, type ActuatorPort } from './ToolDispatcher';
 import { WorkspaceState } from './WorkspaceState';
@@ -43,7 +43,7 @@ function scriptedClient(messages: unknown[]): MessagesCreateClient {
 
 function buildRunner(
   script: unknown[],
-  opts: { maxSteps?: number; maxBudgetUsd?: number; signal?: AbortSignal; persistence?: AgentRunnerOptions['persistence'] } = {},
+  opts: { maxSteps?: number; maxBudgetUsd?: number; signal?: AbortSignal; persistence?: AgentRunnerOptions['persistence']; expectsArtifacts?: boolean } = {},
 ) {
   const actuator = new FakeActuator();
   const stream = new AgentEventStream();
@@ -232,5 +232,185 @@ describe('AgentRunner persistence (D7)', () => {
     const { runner } = buildRunner(twoTurn);
     const result = await runner.run('plain build');
     expect(result.ok).toBe(true);
+  });
+});
+
+describe('AgentRunner parallel tool execution (capped)', () => {
+  function trackingDispatcher() {
+    let inFlight = 0;
+    let serialInFlight = 0;
+    const max = { all: 0, serial: 0 };
+    const order: string[] = [];
+    const dispatcher = {
+      dispatch: async (tu: { id: string; name: string; input: Record<string, unknown> }) => {
+        const parallel = isParallelSafeToolUse(tu);
+        inFlight++; if (inFlight > max.all) max.all = inFlight;
+        if (!parallel) { serialInFlight++; if (serialInFlight > max.serial) max.serial = serialInFlight; }
+        await new Promise((r) => setTimeout(r, 15));
+        order.push(tu.id);
+        if (!parallel) serialInFlight--;
+        inFlight--;
+        return { tool_use_id: tu.id, content: 'ok', is_error: false };
+      },
+    };
+    return { dispatcher, max, order };
+  }
+
+  function runnerWith(dispatcher: unknown, script: unknown[], toolConcurrency = 3) {
+    const stream = new AgentEventStream();
+    const state = new WorkspaceState(stream);
+    const client = new ClaudeClient(scriptedClient(script));
+    return new AgentRunner({
+      client,
+      dispatcher: dispatcher as never,
+      state,
+      events: stream,
+      model: 'm',
+      system: 's',
+      tools: defaultToolCatalog(),
+      toolConcurrency,
+    });
+  }
+
+  const task = (id: string, role: string) => ({ type: 'tool_use', id, name: 'task', input: { role, instruction: 'check' } });
+  const end = { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } };
+
+  it('runs review sub-agents concurrently (capped) while the write stays serial', async () => {
+    const { dispatcher, max, order } = trackingDispatcher();
+    const turn1 = {
+      content: [
+        { type: 'tool_use', id: 'w', name: 'write_file', input: { path: 'a.ts', content: 'x' } },
+        task('qa', 'qa'), task('sec', 'security'), task('perf', 'performance'),
+        task('a11y', 'accessibility'), task('rev', 'reviewer'),
+      ],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 10, output_tokens: 5 },
+    };
+    const result = await runnerWith(dispatcher, [turn1, end], 3).run('build then review');
+    expect(result.ok).toBe(true);
+    expect(max.all).toBeGreaterThan(1);     // review agents really ran in parallel
+    expect(max.all).toBeLessThanOrEqual(3); // …but never above the cap
+    expect(max.serial).toBe(1);             // the write never overlapped anything
+    expect(order).toHaveLength(6);          // every tool was dispatched exactly once
+  });
+
+  it('keeps a pure-write turn fully serial regardless of the cap', async () => {
+    const { dispatcher, max } = trackingDispatcher();
+    const writes = {
+      content: [
+        { type: 'tool_use', id: 'w1', name: 'write_file', input: { path: 'a', content: '1' } },
+        { type: 'tool_use', id: 'w2', name: 'write_file', input: { path: 'b', content: '2' } },
+        { type: 'tool_use', id: 'w3', name: 'write_file', input: { path: 'c', content: '3' } },
+      ],
+      stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 },
+    };
+    await runnerWith(dispatcher, [writes, end], 4).run('write three');
+    expect(max.all).toBe(1); // never more than one mutating tool at a time
+  });
+
+  it('classifies builder sub-agents + writes as serial, read-only ones as parallel', () => {
+    expect(isParallelSafeToolUse({ id: '1', name: 'task', input: { role: 'qa' } })).toBe(true);
+    expect(isParallelSafeToolUse({ id: '2', name: 'task', input: { role: 'reviewer' } })).toBe(true);
+    expect(isParallelSafeToolUse({ id: '3', name: 'task', input: { role: 'frontend' } })).toBe(false);
+    expect(isParallelSafeToolUse({ id: '4', name: 'task', input: { role: 'tester' } })).toBe(false);
+    expect(isParallelSafeToolUse({ id: '5', name: 'read_file', input: {} })).toBe(true);
+    expect(isParallelSafeToolUse({ id: '6', name: 'grep', input: {} })).toBe(true);
+    expect(isParallelSafeToolUse({ id: '7', name: 'write_file', input: {} })).toBe(false);
+    expect(isParallelSafeToolUse({ id: '8', name: 'bash', input: {} })).toBe(false);
+  });
+});
+
+describe('AgentRunner — empty-build detection (fake-success fix)', () => {
+  it('reports ok:false when a BUILD replies with no tool calls and creates nothing', async () => {
+    // The cheap model "replies" instead of building — the exact production bug.
+    const { runner, actuator, events } = buildRunner(
+      [{ content: [{ type: 'text', text: "I'm preparing a plan so we can build this app." }], stop_reason: 'end_turn', usage: { input_tokens: 100, output_tokens: 30 } }],
+      { expectsArtifacts: true },
+    );
+    const result = await runner.run('Build an analog clock');
+    expect(result.ok).toBe(false); // NOT a fake success
+    expect(actuator.files.size).toBe(0); // nothing built
+    expect(result.summary.toLowerCase()).toContain('no files');
+    const done = events.find((e) => e.type === 'done') as { ok?: boolean } | undefined;
+    expect(done?.ok).toBe(false);
+  });
+
+  it('still reports ok:true for a CHAT turn with no tool calls (chat unaffected)', async () => {
+    const { runner } = buildRunner(
+      [{ content: [{ type: 'text', text: 'Hello! How can I help you today?' }], stop_reason: 'end_turn', usage: { input_tokens: 20, output_tokens: 10 } }],
+      { expectsArtifacts: false },
+    );
+    const result = await runner.run('hi');
+    expect(result.ok).toBe(true);
+  });
+
+  it('reports ok:true for a real build that DID write a file then wrapped up', async () => {
+    const { runner, actuator } = buildRunner(
+      [
+        { content: [{ type: 'tool_use', id: 'tu1', name: 'write_file', input: { path: 'index.html', content: '<h1>Clock</h1>' } }], stop_reason: 'tool_use', usage: { input_tokens: 200, output_tokens: 50 } },
+        { content: [{ type: 'text', text: 'Done — your clock is ready.' }], stop_reason: 'end_turn', usage: { input_tokens: 60, output_tokens: 20 } },
+      ],
+      { expectsArtifacts: true },
+    );
+    const result = await runner.run('Build an analog clock');
+    expect(result.ok).toBe(true); // real work happened → genuine success
+    expect(actuator.files.get('index.html')).toBe('<h1>Clock</h1>');
+  });
+});
+
+describe('AgentRunner — mandatory readiness gate (R2 §1.1)', () => {
+  // A stub dispatcher with a controllable readiness verdict, isolating the gate's
+  // ok-downgrade logic from the full evaluate scan.
+  function gateDispatcher(ready: boolean) {
+    return {
+      dispatch: async (tu: { id: string; name: string; input: Record<string, unknown> }) =>
+        ({ tool_use_id: tu.id, content: 'ok', is_error: false }),
+      assessBuildReadiness: async () =>
+        ready
+          ? { score: 100, ready: true, blockers: [] as string[], warnings: [] as string[] }
+          : { score: 40, ready: false, blockers: ['1 unresolved import(s) — the build will fail'], warnings: [] as string[] },
+    };
+  }
+
+  function gateRunner(dispatcher: unknown, opts: Partial<AgentRunnerOptions>, events?: AgentEvent[]) {
+    const stream = new AgentEventStream();
+    if (events) stream.subscribe((e) => events.push(e), false);
+    const state = new WorkspaceState(stream);
+    const client = new ClaudeClient(scriptedClient([
+      { content: [{ type: 'tool_use', id: 'w', name: 'write_file', input: { path: 'src/App.tsx', content: 'x' } }], stop_reason: 'tool_use', usage: { input_tokens: 10, output_tokens: 5 } },
+      { content: [{ type: 'text', text: 'Build complete.' }], stop_reason: 'end_turn', usage: { input_tokens: 5, output_tokens: 5 } },
+    ]));
+    return new AgentRunner({
+      client, dispatcher: dispatcher as never, state, events: stream,
+      model: 'm', system: 's', tools: defaultToolCatalog(),
+      expectsArtifacts: true, ...opts,
+    });
+  }
+
+  it('downgrades a NOT-READY build to ok:false instead of a fake success', async () => {
+    const result = await gateRunner(gateDispatcher(false), { readinessGate: true }).run('build an app');
+    expect(result.ok).toBe(false);
+    expect(result.summary).toContain('NOT READY');
+    expect(result.summary).toContain('unresolved import');
+  });
+
+  it('keeps a READY build as a genuine success', async () => {
+    const result = await gateRunner(gateDispatcher(true), { readinessGate: true }).run('build an app');
+    expect(result.ok).toBe(true);
+  });
+
+  it('does NOT gate when readinessGate is off (default) — a not-ready scan cannot fail the build', async () => {
+    const result = await gateRunner(gateDispatcher(false), { readinessGate: false }).run('build an app');
+    expect(result.ok).toBe(true);
+  });
+
+  it('emits the build-health readiness in the done event (R2 §4.6)', async () => {
+    const events: AgentEvent[] = [];
+    await gateRunner(gateDispatcher(false), { readinessGate: true }, events).run('build an app');
+    const done = events.find((e) => e.type === 'done') as { readiness?: { score: number; ready: boolean; blockers: string[] } } | undefined;
+    expect(done?.readiness).toBeTruthy();
+    expect(done?.readiness?.ready).toBe(false);
+    expect(done?.readiness?.score).toBe(40);
+    expect(done?.readiness?.blockers?.length).toBeGreaterThan(0);
   });
 });

@@ -2,11 +2,24 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
-  SlidersHorizontal, Check, X, Paperclip, FileText,
+  SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github, Circle,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
-import type { AgentCard, GitCheckpoint } from './agentV3Types';
-import { db, sanitizeFirestoreData } from '../../App';
+import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
+import type { AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
+import { db, sanitizeFirestoreData, auth } from '../../App';
+
+/** Best-effort Firebase ID-token header so the server can verify workspace ownership (IDOR guard).
+ *  Returns {} for the synthetic admin / anonymous users (no Firebase user) — the server falls back
+ *  to its claimed-id + random-sessionId check for those. */
+async function authJsonHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const tok = await auth.currentUser?.getIdToken();
+    if (tok) headers.Authorization = `Bearer ${tok}`;
+  } catch { /* no token — server soft-falls-back */ }
+  return headers;
+}
 import { doc, setDoc } from 'firebase/firestore';
 
 /**
@@ -27,7 +40,7 @@ interface ChatMsg {
 }
 
 export function AgentV3Panel({ userId, email, resume }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null }) {
-  const { state, running, error, start, respond, restore, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   const [onlyOpus, setOnlyOpus] = useState(false);
   const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default
@@ -42,6 +55,11 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
   // ZIP, text/code). Read and analyzed by v3.0 — converted to base64 on send.
   const [files, setFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Framework selector + import
+  const [framework, setFramework] = useState('vite-react');
+  const [importUrl, setImportUrl] = useState('');
+  const [showFrameworkPicker, setShowFrameworkPicker] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [userMsgs, setUserMsgs] = useState<ChatMsg[]>([]);
   // Finalized agent replies from PREVIOUS turns. The live build state
   // (state.narration) is reset by start() on every new message, so without
@@ -111,10 +129,17 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
   // live build or a thread already opened from History. Best-effort.
   const loadedConvoRef = useRef(false);
   useEffect(() => {
-    if (loadedConvoRef.current || running || !userId || state.narration.length > 0) return;
+    if (loadedConvoRef.current || running || !userId || state.narration.length > 0 || userMsgs.length > 0) return;
     loadedConvoRef.current = true;
-    void loadConversation({ userId, email });
-  }, [userId, email, running, state.narration.length, loadConversation]);
+    void (async () => {
+      const restoredUserMsgs = await loadConversation({ userId, email });
+      // Restore the user's OWN messages too — the narration path only rebuilds the agent side, so
+      // without this the user's bubbles vanish on reload (only AI replies would remain).
+      if (restoredUserMsgs && restoredUserMsgs.length > 0) {
+        setUserMsgs((cur) => (cur.length > 0 ? cur : restoredUserMsgs.map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts }))));
+      }
+    })();
+  }, [userId, email, running, state.narration.length, userMsgs.length, loadConversation]);
 
   // Resume a saved v3.0 conversation opened from History ("open chat"). Adopt its
   // sessionId so the backend continues with the SAME workspace/memory (best-effort,
@@ -241,7 +266,9 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
     setUserMsgs((c) => [...c, { role: 'user', text: displayText, ts: Date.now() }]);
     setPrompt('');
     setFiles([]);
-    start(msgText, { userId, email, onlyOpus, planFirst, thinking, sessionId: sessionIdRef.current, attachments });
+    const pendingImportUrl = importUrl.trim();
+    setImportUrl(''); // consume import URL on first send
+    start(msgText, { userId, email, onlyOpus, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, importUrl: pendingImportUrl || undefined });
   };
 
   // Start a brand-new project: fresh sandbox/memory (new session id) and clear chat.
@@ -267,6 +294,134 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
   };
   const anyToggleOn = planFirst || thinking || onlyOpus;
 
+  // Portability / no-lock-in (Phase 4): export the WHOLE project as a real .zip the user owns and
+  // can open in any editor or host anywhere. Pulls the live file contents from the sandbox (the
+  // file explorer only carries paths) and zips them in-browser — no server round-trip beyond the
+  // existing read endpoint. Honest about failures; never silent.
+  const [exporting, setExporting] = useState(false);
+  const downloadProjectZip = async () => {
+    if (exporting) return;
+    const wsId = state.workspaceId;
+    if (!wsId) { alert('Open or build a project first — there is nothing to export yet.'); return; }
+    setExporting(true);
+    try {
+      const res = await fetch('/api/agentv3/workspace-files', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId: wsId, userId, email }),
+      });
+      if (!res.ok) throw new Error(`server returned ${res.status}`);
+      const data = await res.json() as { files?: Record<string, string> };
+      const files = data.files ?? {};
+      const paths = Object.keys(files);
+      if (paths.length === 0) { alert('No files found to export yet — build something first.'); return; }
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+      // Skip heavy generated dirs so the archive is the SOURCE the user actually owns.
+      const EXCLUDED = /^(node_modules\/|\.git\/|dist\/|build\/|\.next\/|__pycache__\/)/;
+      for (const p of paths) {
+        if (EXCLUDED.test(p)) continue;
+        zip.file(p, files[p] ?? '');
+      }
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `navbharatai-project-${Date.now()}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) {
+      alert(`Export failed: ${e instanceof Error ? e.message : String(e)}. Please try again.`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // R5 §5.1 — the app's permanent LIVE deployment URL (Firebase Hosting). Restored durably from the
+  // server so it survives a reconnect/new session, not just the current build stream.
+  const [liveUrl, setLiveUrl] = useState<string | null>(null);
+
+  // Fetch the persisted live URL whenever the workspace changes or a build/deploy finishes.
+  useEffect(() => {
+    const wsId = state.workspaceId;
+    if (!wsId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const params = new URLSearchParams({ workspaceId: wsId });
+        if (userId) params.set('userId', userId);
+        if (email) params.set('email', email);
+        const res = await fetch(`/api/agentv3/deployment?${params.toString()}`, { headers: await authJsonHeaders() });
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && typeof data?.url === 'string' && data.url) setLiveUrl(data.url);
+      } catch { /* best-effort — no live URL shown */ }
+    })();
+    return () => { cancelled = true; };
+  }, [state.workspaceId, state.done, userId, email]);
+
+  // R5 §5.1 (no lock-in) — the hosting providers available + which the user picked. Fetched once;
+  // only CONFIGURED providers are offered so a deploy can never target an unconfigured host.
+  const [providers, setProviders] = useState<Array<{ id: string; name: string; configured: boolean; requirement: string }>>([]);
+  const [deployProvider, setDeployProvider] = useState<string>('firebase');
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const params = new URLSearchParams();
+        if (userId) params.set('userId', userId);
+        if (email) params.set('email', email);
+        try { if (localStorage.getItem('gh_token')) params.set('hasGithub', 'true'); } catch { /* ignore */ }
+        const res = await fetch(`/api/agentv3/deploy-providers?${params.toString()}`);
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && Array.isArray(data?.providers)) {
+          setProviders(data.providers);
+          if (typeof data.default === 'string') setDeployProvider(data.default);
+        }
+      } catch { /* best-effort — default to Firebase */ }
+    })();
+    return () => { cancelled = true; };
+  }, [userId, email]);
+  const configuredProviders = providers.filter((p) => p.configured);
+
+  // One-click deploy: drive the REAL build+deploy pipeline (the agent runs `npm run build` then the
+  // deploy tool, publishing to the CHOSEN provider's permanent public URL). Routed through the normal
+  // stream so the user watches real progress; the live URL is then refreshed from the server.
+  const deployLive = () => {
+    if (running || !state.workspaceId) return;
+    if (state.narration.length > 0) {
+      setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind }))]);
+    }
+    if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
+    const providerName = configuredProviders.find((p) => p.id === deployProvider)?.name || 'a live URL';
+    setUserMsgs((c) => [...c, { role: 'user', text: `🚀 Deploy to ${providerName}`, ts: Date.now() }]);
+    start(
+      'Deploy this app to a permanent public live URL. Run "npm run build" first, then call the deploy tool, and finish by giving me the live link.',
+      { userId, email, onlyOpus, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, deployProvider },
+    );
+  };
+
+  // "Restore all files" — genuinely bring the whole project back into the workspace (the server
+  // writes the durably-saved files back in), then show the real file list. Honest status, no fake.
+  const [restoring, setRestoring] = useState(false);
+  const [restoreMsg, setRestoreMsg] = useState<string>('');
+  const handleRestoreAll = async () => {
+    if (restoring || !state.workspaceId) return;
+    setRestoring(true);
+    setRestoreMsg('');
+    try {
+      const r = await restoreAllFiles();
+      if (!r.ok) { setRestoreMsg('Could not restore — please try again in a moment.'); return; }
+      if (r.count === 0) { setRestoreMsg('No saved files found to restore for this project yet.'); return; }
+      setRestoreMsg(r.restored ? `Restored ${r.count} file(s) into your workspace.` : `${r.count} file(s) are in your workspace.`);
+      setTab('files');
+      setShowWorkspace(true);
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   const agents = Object.values(state.agents).sort((a, b) => b.updatedTs - a.updatedTs);
   const diffPaths = Object.keys(state.diffs);
 
@@ -278,6 +433,14 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
           <Bot className="w-5 h-5 text-indigo-400" />
           <span className="font-semibold">NavBharatAI Pro v3.0</span>
           <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
+          <button
+            onClick={() => setShowFrameworkPicker(true)}
+            className="flex items-center gap-1 text-[10px] bg-white/5 hover:bg-white/10 border border-white/5 text-zinc-400 hover:text-white px-2 py-0.5 rounded-full transition-all"
+            title="Change framework"
+          >
+            <span>{FRAMEWORKS.find(f => f.id === framework)?.iconChar ?? '⚛'}</span>
+            <span>{FRAMEWORKS.find(f => f.id === framework)?.name ?? 'React + Vite'}</span>
+          </button>
           <span className="text-[9px] text-zinc-600 font-mono" title="Deployed build time — if this doesn't change after a deploy, your browser is serving cached code.">{(() => { try { return 'b:' + (typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '').slice(5, 16).replace('T', ' '); } catch { return ''; } })()}</span>
           {running ? (
             // Attached + streaming here → Stop.
@@ -323,6 +486,66 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
           <TabPill active={showWorkspace && tab === 'diff'} onClick={() => openTab('diff')} icon={<FileDiff className="w-3.5 h-3.5" />}>Diff ({diffPaths.length})</TabPill>
           <TabPill active={showWorkspace && tab === 'terminal'} onClick={() => openTab('terminal')} icon={<Terminal className="w-3.5 h-3.5" />}>Terminal</TabPill>
           <TabPill active={showWorkspace && tab === 'history'} onClick={() => openTab('history')} icon={<History className="w-3.5 h-3.5" />}>History ({allCheckpoints.length})</TabPill>
+          <button
+            onClick={downloadProjectZip}
+            disabled={exporting || !state.workspaceId}
+            title="Download your whole project as a .zip you own — open it in any editor or host it anywhere (no lock-in)"
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            {exporting ? 'Exporting…' : 'Export .zip'}
+          </button>
+          {state.repoUrl && (
+            <a
+              href={state.repoUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={`Open this project's GitHub repo${state.repoFullName ? ` (${state.repoFullName})` : ''} — your code, branches, pull requests, CI and merges`}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 transition-colors"
+            >
+              <Github className="w-3.5 h-3.5" />
+              GitHub
+              <ExternalLink className="w-3 h-3 opacity-60" />
+            </a>
+          )}
+          {/* R5 §5.1 — one-click deploy: publish the built app to a PERMANENT public URL.
+              When more than one hosting provider is configured, a chooser lets the user pick
+              WHERE to deploy (no lock-in); with only one, the button alone keeps it simple. */}
+          {configuredProviders.length > 1 && (
+            <select
+              value={deployProvider}
+              onChange={(e) => setDeployProvider(e.target.value)}
+              disabled={running}
+              title="Choose where to deploy (no lock-in)"
+              className="text-xs px-1.5 py-1 rounded border border-emerald-700/60 bg-zinc-900 text-emerald-300 disabled:opacity-40"
+            >
+              {configuredProviders.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          )}
+          <button
+            onClick={deployLive}
+            disabled={running || !state.workspaceId}
+            title="Publish your app to a permanent public live URL (it stays online after the sandbox stops)"
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-emerald-700/60 text-emerald-300 hover:text-white hover:border-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <Rocket className="w-3.5 h-3.5" />
+            Deploy
+          </button>
+          {liveUrl && (
+            <a
+              href={liveUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={`Your live site: ${liveUrl}`}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-emerald-700/60 bg-emerald-950/40 text-emerald-300 hover:text-white hover:border-emerald-500 transition-colors"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              Live site
+              <ExternalLink className="w-3 h-3 opacity-60" />
+            </a>
+          )}
         </div>
       </div>
 
@@ -357,9 +580,7 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
                   <AlertCircle className="w-4 h-4" /> {state.pendingPermission.action}
                 </div>
                 {state.todos.length > 0 && (
-                  <ul className="mb-2 space-y-0.5">
-                    {state.todos.map((t) => <li key={t.id} className="text-xs text-amber-100/90">• {t.title}</li>)}
-                  </ul>
+                  <div className="mb-2"><TodoList todos={state.todos} /></div>
                 )}
                 <div className="flex gap-2">
                   <button onClick={() => respond(state.pendingPermission!.callId, true)} className="px-3 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white">Approve &amp; build</button>
@@ -375,10 +596,18 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
                   : `$${(state.billedUsd as number).toFixed(4)}`}
               </div>
             )}
+            {state.done && state.buildHealth && <BuildHealthCard health={state.buildHealth} />}
           </div>
 
           {/* Bottom: live AI-team chips + input (Claude-Code style — at the bottom) */}
           <div className="shrink-0 sticky bottom-0 bg-zinc-950 border-t border-zinc-800 pb-[env(safe-area-inset-bottom)]">
+            {/* Live plan progress (only when there's no pending plan-approval gate, which shows its
+                own copy) — lets the user watch the AI work through its real todo list as it builds. */}
+            {state.todos.length > 0 && !state.pendingPermission && (
+              <div className="px-3 pt-2 max-h-28 overflow-auto">
+                <TodoList todos={state.todos} />
+              </div>
+            )}
             {agents.length > 0 && (
               <div className="px-3 pt-2 flex gap-1.5 overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
                 {agents.map((a) => <AgentChip key={a.agent} card={a} running={running} />)}
@@ -412,10 +641,25 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
                   <>
                     {/* outside-click catcher */}
                     <div className="fixed inset-0 z-10" onClick={() => setSettingsOpen(false)} />
-                    <div className="absolute bottom-full left-0 mb-2 z-20 w-48 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
+                    <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
                       <ToggleRow label="Planning" checked={planFirst} disabled={running} onClick={() => setPlanFirst((v) => !v)} />
                       <ToggleRow label="Thinking" checked={thinking} disabled={running} onClick={() => setThinking((v) => !v)} />
                       <ToggleRow label="Power" hint="5×" checked={onlyOpus} disabled={running} onClick={() => setOnlyOpus((v) => !v)} />
+                      <div className="border-t border-zinc-800 my-1" />
+                      <button
+                        className="w-full flex items-center justify-between px-3 py-2 rounded hover:bg-zinc-800 text-left"
+                        onClick={() => { setShowFrameworkPicker(true); setSettingsOpen(false); }}
+                      >
+                        <span className="text-xs text-zinc-300">Framework</span>
+                        <span className="text-[11px] text-indigo-400 font-medium">{FRAMEWORKS.find(f => f.id === framework)?.name ?? 'React + Vite'}</span>
+                      </button>
+                      <button
+                        className="w-full flex items-center justify-between px-3 py-2 rounded hover:bg-zinc-800 text-left"
+                        onClick={() => { setShowImportModal(true); setSettingsOpen(false); }}
+                      >
+                        <span className="text-xs text-zinc-300">Import Repo</span>
+                        {importUrl ? <span className="text-[10px] text-green-400 truncate max-w-[100px]">✓ set</span> : <span className="text-[10px] text-zinc-500">GitHub / URL</span>}
+                      </button>
                     </div>
                   </>
                 )}
@@ -482,10 +726,25 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
           </div>
 
           {tab === 'preview' ? (
-            <PreviewSurface url={state.previewUrl} />
+            <PreviewSurface url={state.previewUrl} workspaceId={state.workspaceId} userId={userId} email={email} />
           ) : (
             <div className="flex-1 overflow-auto p-3 font-mono text-xs">
-              {tab === 'files' && (state.files.length === 0 ? <Empty>No files yet.</Empty> : (
+              {tab === 'files' && (state.files.length === 0 ? (
+                <div className="flex flex-col items-start gap-2">
+                  <Empty>No files shown.</Empty>
+                  {state.workspaceId && (
+                    <button
+                      onClick={handleRestoreAll}
+                      disabled={restoring}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-700/60 text-indigo-300 hover:text-white hover:border-indigo-500 disabled:opacity-40"
+                    >
+                      {restoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                      {restoring ? 'Restoring…' : 'Restore all files'}
+                    </button>
+                  )}
+                  {restoreMsg && <span className="text-[11px] text-zinc-400">{restoreMsg}</span>}
+                </div>
+              ) : (
                 <ul className="space-y-0.5">
                   {state.files.map((f) => <li key={f.path} className="flex items-center gap-2"><span className={fileDot(f.kind)} /> {f.path}</li>)}
                 </ul>
@@ -498,28 +757,173 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
               {tab === 'terminal' && (state.terminal.length === 0 ? <Empty>No terminal output yet.</Empty> : (
                 <pre className="whitespace-pre-wrap text-zinc-300">{state.terminal.join('\n')}</pre>
               ))}
-              {tab === 'history' && (allCheckpoints.length === 0 ? <Empty>No checkpoints yet.</Empty> : (
-                <ul className="space-y-1">
-                  {allCheckpoints.map((c) => (
-                    <li key={c.id} className="flex items-center gap-2 group">
-                      <History className="w-3.5 h-3.5 text-zinc-500" />
-                      <span className="text-zinc-500">{c.sha.slice(0, 7) || '—'}</span>
-                      <span className="flex-1 truncate">{c.message}</span>
-                      {c.sha && (
-                        <button onClick={() => restore(c.sha)} className="opacity-0 group-hover:opacity-100 flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300" title="Restore to this checkpoint">
-                          <RotateCcw className="w-3 h-3" /> Restore
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ))}
+              {tab === 'history' && (
+                <div className="space-y-2">
+                  {/* Restore the WHOLE project at once — a real restore (files written back into the
+                      workspace), available even when there are no in-session checkpoints (e.g. after a reload). */}
+                  {state.workspaceId && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={handleRestoreAll}
+                        disabled={restoring}
+                        title="Bring your whole project back into the workspace"
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-700/60 text-indigo-300 hover:text-white hover:border-indigo-500 disabled:opacity-40"
+                      >
+                        {restoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                        {restoring ? 'Restoring…' : 'Restore all files'}
+                      </button>
+                      {restoreMsg && <span className="text-[11px] text-zinc-400">{restoreMsg}</span>}
+                    </div>
+                  )}
+                  {allCheckpoints.length === 0 ? <Empty>No checkpoints yet.</Empty> : (
+                    <ul className="space-y-1">
+                      {allCheckpoints.map((c) => (
+                        <li key={c.id} className="flex items-center gap-2">
+                          <History className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                          <span className="text-zinc-500 shrink-0">{c.sha.slice(0, 7) || '—'}</span>
+                          <span className="flex-1 truncate">{c.message}</span>
+                          {c.sha && (
+                            <button onClick={() => restore(c.sha)} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 shrink-0" title="Restore to this checkpoint">
+                              <RotateCcw className="w-3 h-3" /> Restore
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
         )}
       </div>
+
+      {/* Framework Picker Modal */}
+      {showFrameworkPicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowFrameworkPicker(false)} />
+          <div className="relative z-10 w-full max-w-sm bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-widest">Choose Framework</h3>
+                <p className="text-[10px] text-[#8b949e] mt-0.5">Pick the technology stack for your new project</p>
+              </div>
+              <button onClick={() => setShowFrameworkPicker(false)} className="text-zinc-500 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <FrameworkPicker value={framework} onChange={setFramework} />
+            <button
+              onClick={() => setShowFrameworkPicker(false)}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-all"
+            >
+              Confirm
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Import Repo Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowImportModal(false)} />
+          <div className="relative z-10 w-full max-w-sm bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-widest">Import Project</h3>
+                <p className="text-[10px] text-[#8b949e] mt-0.5">Clone a GitHub repo into your v3.0 workspace</p>
+              </div>
+              <button onClick={() => setShowImportModal(false)} className="text-zinc-500 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-[#8b949e] uppercase tracking-widest">Repository URL</label>
+              <input
+                type="url"
+                value={importUrl}
+                onChange={e => setImportUrl(e.target.value)}
+                placeholder="https://github.com/username/my-app"
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
+              />
+              <p className="text-[10px] text-[#484f58]">
+                Public repos work without a token. For private repos, make sure you've signed in with GitHub in Settings → Connections.
+              </p>
+            </div>
+            {importUrl.trim() && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg">
+                <Github className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                <span className="text-[11px] text-green-300 truncate">{importUrl.trim()}</span>
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setImportUrl(''); setShowImportModal(false); }}
+                className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 text-zinc-300 text-sm font-medium rounded-xl transition-all"
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => setShowImportModal(false)}
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-all"
+              >
+                {importUrl.trim() ? 'Set Import' : 'Close'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+/**
+ * A live, waving Indian flag (tiranga) 🇮🇳 shown while an agent is working — replacing the old
+ * loading spinner. The wave is driven by requestAnimationFrame writing an INLINE transform each
+ * frame (not a CSS animation), so it cannot be killed by the global prefers-reduced-motion reset
+ * that was freezing the spinner. When the work finishes, the caller swaps this for a green check.
+ */
+function WavingTiranga({ size = 16 }: { size?: number }) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    let raf = 0;
+    let start = 0;
+    const tick = (t: number) => {
+      // Respect the user's "Reduce Animations" choice (Settings → General): hold the flag static.
+      if (document.documentElement.classList.contains('nb-reduce-motion')) {
+        if (ref.current) ref.current.style.transform = 'none';
+        raf = requestAnimationFrame(tick); // keep checking so it resumes if they toggle back
+        return;
+      }
+      if (!start) start = t;
+      const e = (t - start) / 1000;
+      // Flutter: the trailing (right) edge swings while the pole (left) edge stays — a cloth-in-wind feel.
+      const skew = Math.sin(e * 6) * 9;
+      const rot = Math.sin(e * 6 + 0.9) * 3.2;
+      const sy = 1 + Math.sin(e * 6) * 0.07;
+      if (ref.current) ref.current.style.transform = `skewY(${skew}deg) rotate(${rot}deg) scaleY(${sy})`;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  const h = Math.max(8, Math.round(size * 0.7));
+  const chakra = Math.max(2.5, h / 3.2);
+  return (
+    <span
+      ref={ref}
+      role="img"
+      aria-label="Indian flag waving"
+      className="inline-flex flex-col rounded-[1.5px] overflow-hidden shrink-0 shadow-sm"
+      style={{ width: size, height: h, transformOrigin: 'left center', willChange: 'transform' }}
+    >
+      <span style={{ flex: 1, background: '#FF9933' }} />
+      <span style={{ flex: 1, background: '#ffffff', position: 'relative' }}>
+        <span style={{ position: 'absolute', top: '50%', left: '50%', width: chakra, height: chakra, transform: 'translate(-50%,-50%)', borderRadius: '50%', border: '1px solid #000080' }} />
+      </span>
+      <span style={{ flex: 1, background: '#138808' }} />
+    </span>
   );
 }
 
@@ -537,7 +941,7 @@ function WorkingIndicator() {
   const label = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
   return (
     <div className="flex items-center gap-2 text-xs text-zinc-500">
-      <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+      <WavingTiranga size={16} />
       <span>working… {label}</span>
     </div>
   );
@@ -598,17 +1002,166 @@ function Bubble({ msg }: { msg: ChatMsg }) {
   );
 }
 
-function PreviewSurface({ url }: { url?: string }) {
-  if (!url) {
-    return <div className="h-full flex items-center justify-center p-6"><Empty>No live preview yet — it appears the moment the agent starts the app.</Empty></div>;
+/** Status icon for a single todo — lets the user watch the agent work through its plan live. */
+function todoStatusIcon(status: TodoStatus) {
+  switch (status) {
+    case 'done': return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />;
+    case 'in_progress': return <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin shrink-0" />;
+    case 'blocked': return <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />;
+    default: return <Circle className="w-3.5 h-3.5 text-zinc-600 shrink-0" />; // pending
   }
+}
+
+/**
+ * R2 §4.6 — Build-health card. Shows the OBJECTIVE readiness verdict from the mandatory quality
+ * gate (real `evaluate` scan): a 0–100 score, READY / NOT READY, and the exact blockers/warnings.
+ * Honest by construction — the same gate that decides whether a build is reported as a success.
+ */
+function BuildHealthCard({ health }: { health: BuildHealth }) {
+  const ready = health.ready;
+  return (
+    <div className={`mt-1 rounded-lg border px-2.5 py-1.5 text-[11px] ${ready ? 'border-emerald-800/60 bg-emerald-950/30' : 'border-amber-800/60 bg-amber-950/30'}`}>
+      <div className="flex items-center gap-1.5 font-semibold">
+        {ready
+          ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          : <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+        <span className={ready ? 'text-emerald-300' : 'text-amber-300'}>Build health: {ready ? 'READY' : 'NOT READY'}</span>
+        <span className="text-zinc-500">· {health.score}/100</span>
+      </div>
+      {health.blockers.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-amber-200/90">
+          {health.blockers.slice(0, 6).map((b, i) => (
+            <li key={`b${i}`} className="flex gap-1"><span className="text-amber-500">✗</span><span>{b}</span></li>
+          ))}
+        </ul>
+      )}
+      {health.warnings.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-zinc-400">
+          {health.warnings.slice(0, 4).map((w, i) => (
+            <li key={`w${i}`} className="flex gap-1"><span className="text-zinc-500">•</span><span>{w}</span></li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The agent's live plan/todo list with real status (done ✓ / in-progress ⏳ / pending ○ / blocked ⚠)
+ * and a progress count — so the build is engaging and honest: the user sees exactly what the AI is
+ * doing and how far along it is, driven by real `todo_updated` events (never a fake animation).
+ */
+function TodoList({ todos }: { todos: TodoItem[] }) {
+  if (!todos.length) return null;
+  const done = todos.filter((t) => t.status === 'done').length;
+  return (
+    <div className="text-left">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 mb-1">
+        <span>Plan</span>
+        <span className="text-zinc-500">{done}/{todos.length}</span>
+      </div>
+      <ul className="space-y-1">
+        {todos.map((t) => (
+          <li key={t.id} className="flex items-center gap-1.5 text-xs">
+            {todoStatusIcon(t.status)}
+            <span className={t.status === 'done' ? 'line-through text-zinc-500' : 'text-zinc-200'}>{t.title}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * Dual preview (Phase 5). Two real preview paths:
+ *  • "Live server" — the running app in the E2B sandbox (state.previewUrl), full-fidelity (a real
+ *    dev server, supports any framework/backend). Shown whenever a preview URL exists.
+ *  • "In-browser" — a self-contained HTML build of the workspace files rendered in an <iframe
+ *    srcdoc>, with NO running server. Works even when the sandbox preview is unavailable (the
+ *    "Blocked request" / sandbox-down case) and for plain static or simple React/Vue apps.
+ * The user can switch between them; in-browser defaults on when there is no live URL yet.
+ */
+function PreviewSurface({ url, workspaceId, userId, email }: { url?: string; workspaceId?: string; userId?: string; email?: string }) {
+  const [mode, setMode] = useState<'live' | 'inbrowser'>(url ? 'live' : 'inbrowser');
+  const [html, setHtml] = useState<string>('');
+  const [kind, setKind] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string>('');
+
+  // Follow the live URL: when one arrives and the user hasn't deliberately chosen in-browser,
+  // prefer the higher-fidelity live server.
+  useEffect(() => { if (url) setMode('live'); }, [url]);
+
+  const loadInBrowser = async () => {
+    if (!workspaceId) { setErr('Build something first — there are no files to preview yet.'); return; }
+    setLoading(true);
+    setErr('');
+    try {
+      const res = await fetch('/api/agentv3/inbrowser-preview', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId, userId, email }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);
+      setHtml(typeof data.html === 'string' ? data.html : '');
+      setKind(typeof data.kind === 'string' ? data.kind : '');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setHtml('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Auto-build the in-browser preview the first time that mode is shown.
+  useEffect(() => {
+    if (mode === 'inbrowser' && !html && !loading && !err && workspaceId) { void loadInBrowser(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, workspaceId]);
+
+  const canLive = !!url;
+  const switcher = (
+    <div className="flex items-center gap-1">
+      {canLive && (
+        <button onClick={() => setMode('live')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app in the cloud sandbox (full fidelity)">Live server</button>
+      )}
+      <button onClick={() => setMode('inbrowser')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'inbrowser' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="A self-contained preview rendered in your browser — no server needed">In-browser</button>
+    </div>
+  );
+
+  if (mode === 'live' && url) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
+          {switcher}
+          <span className="truncate flex-1">{url}</span>
+          <a href={url} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
+        </div>
+        <iframe title="Live preview" src={url} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+      </div>
+    );
+  }
+
+  // In-browser mode.
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
-        <span className="truncate flex-1">{url}</span>
-        <a href={url} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
+        {switcher}
+        <span className="flex-1 truncate">{kind ? `In-browser preview (${kind})` : 'In-browser preview'}</span>
+        <button onClick={loadInBrowser} disabled={loading || !workspaceId} className="flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Rebuild the in-browser preview from the current files">
+          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+        </button>
       </div>
-      <iframe title="Live preview" src={url} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm"><Loader2 className="w-4 h-4 animate-spin mr-2" /> Building preview…</div>
+      ) : err ? (
+        <div className="flex-1 flex items-center justify-center p-6"><Empty>Couldn't build the in-browser preview: {err}</Empty></div>
+      ) : html ? (
+        <iframe title="In-browser preview" srcDoc={html} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-forms allow-popups" />
+      ) : (
+        <div className="flex-1 flex items-center justify-center p-6"><Empty>{workspaceId ? 'No preview yet — build something first.' : 'No live preview yet — it appears the moment the agent starts the app.'}</Empty></div>
+      )}
     </div>
   );
 }
@@ -620,7 +1173,7 @@ function AgentChip({ card, running }: { card: AgentCard; running: boolean }) {
   return (
     <div className="flex items-center gap-1 text-[11px] bg-zinc-900 rounded-full px-2 py-1" title={card.lastAction}>
       {running
-        ? <Loader2 className="w-3 h-3 text-indigo-400 animate-spin" />
+        ? <WavingTiranga size={14} />
         : <CheckCircle2 className="w-3 h-3 text-emerald-500" />}
       <span className="font-medium capitalize text-zinc-200">{card.agent}</span>
     </div>

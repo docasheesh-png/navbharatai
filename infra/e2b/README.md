@@ -47,12 +47,29 @@ here pins Node 22, so MODE A will run the same way in the sandbox.
 
 ---
 
-## Build & publish (the one infra step that must run outside this repo CI)
+## Build & publish
+
+### Recommended: one-click via GitHub Actions (no terminal needed)
+
+A workflow at `.github/workflows/e2b-template.yml` builds + publishes the
+template on GitHub's runners (which have Docker + Docker Hub egress):
+
+1. Repo → **Settings → Secrets and variables → Actions → New repository secret**
+   - Name: `E2B_API_KEY`  · Value: your e2b.dev API key
+2. Repo → **Actions → "Build E2B Builder Template" → Run workflow**
+3. Open the finished run → the **job summary prints the Template ID** (and the
+   updated `e2b.toml` is attached as an artifact).
+4. Set Cloud Run env `E2B_TEMPLATE_ID=<that id>`, then run the code-wiring PR.
+
+> The build **cannot** run in the Claude Code web sandbox — Docker Hub image
+> blobs and `api.e2b.dev` are both blocked by egress policy there, and no E2B
+> key is mounted. The GitHub Actions runner (or your own machine, below) is the
+> place it runs.
+
+### Alternative: from your own machine
 
 > **Requires:** an E2B account, `E2B_API_KEY`, Docker installed, and outbound
-> access to Docker Hub. This step **cannot** run in the Claude Code web sandbox
-> (Docker Hub image blobs are blocked by egress policy there, and no E2B key is
-> mounted). Run it on your own machine or a CI runner that has those.
+> access to Docker Hub.
 
 ```bash
 # 1. Install the E2B CLI

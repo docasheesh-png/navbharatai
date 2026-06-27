@@ -1,5 +1,16 @@
 import { ITemplateProvider } from './ViteReactProvider';
 
+const PKG = JSON.stringify({
+  name: 'static-site',
+  version: '1.0.0',
+  scripts: {
+    dev: 'npx http-server . -p 3000 -c-1 --cors -o',
+    start: 'npx http-server . -p 3000 -c-1 --cors',
+    build: 'echo "Static site — no build step needed"',
+  },
+  devDependencies: {},
+}, null, 2);
+
 const INDEX_HTML = `<!doctype html>
 <html lang="en">
   <head>
@@ -82,6 +93,7 @@ btn.addEventListener('click', () => {
 export class StaticProvider implements ITemplateProvider {
   getFiles(_features: string[]): Record<string, string> {
     return {
+      'package.json': PKG,
       'index.html': INDEX_HTML,
       'style.css': STYLE_CSS,
       'script.js': SCRIPT_JS,

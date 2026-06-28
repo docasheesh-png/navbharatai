@@ -61,6 +61,7 @@
 | **P-PE** | **Prompt Engine Gaps** | AI quality, cost, safety | ⏳ Pending | 0% |
 | **P-AI** | **AI Intelligence Gaps** | Deeper reasoning, RAG, safety, personalization | ⏳ Pending | 0% |
 | **P-CGE** | **Code Generation Engine Gaps** | Incremental gen, test gen, docs, contracts, lint-fix | ⏳ Pending | 0% |
+| **P-PME** | **Project Management Engine Gaps** | Cross-session memory, release notes, debt tracker, AI estimator | ⏳ Pending | 0% |
 
 ---
 
@@ -268,6 +269,156 @@
 - [ ] **Chaos + load testing:** k6/Locust load tests + a basic fault-injection check in CI.
 - **Acceptance:** static assets edge-cached; keys in KMS; a load test runs in CI.
 - **Files:** infra config, `server.ts`, `.github/workflows/`.
+
+---
+
+## 🟡 PHASE P-PME — PROJECT MANAGEMENT ENGINE GAPS
+> From the 300-component PME audit (2026-06-28). Scope: only PME gaps relevant to an AI app maker.
+> Enterprise PM (OKRs, SAFe, portfolio, resource/capacity planning, Jira/Teams) is ⬜ N/A by design —
+> navBharatAI is a code generator, not a general PM tool.
+> Only PARTIAL → Full and MISSING items that directly improve the app-maker experience, priority-ordered.
+
+### ✅ PME Already Strong (do not redo)
+- **Build job tracking**: BuildJobManager (QUEUED→PREVIEW_READY, progress, log streaming).
+- **Execution tracking**: ExecutionOrchestrator (task status RUNNING/COMPLETED/FAILED + events),
+  TaskScheduler (batch DAG), BlueprintPlanner (execution plan).
+- **Deployment lifecycle**: DeploymentEngine + DeploymentStateManager + DeploymentAuditManager +
+  DeploymentRollbackManager + DeploymentArtifactBuilder (full PREPARING→DEPLOYED state machine).
+- **Quality/health**: QualityEvaluationEngine (5 evaluators), AppHealthMonitor.tsx (health score,
+  incident timeline), AuditManager, CheckpointManager (state snapshots).
+- **Collaboration**: LiveCollaboration.tsx (Firestore real-time), TeamCollaboration.tsx (presence +
+  activity feed), CodeVersioning.tsx (named history snapshots), CICDPipeline.tsx (status + pipeline monitor).
+- **AI project planning**: AIProjectManager.tsx (Kanban + milestone, AI task gen from description),
+  ImpactAnalyzer.ts (dependency risk score), CostEstimator.tsx, AISuggestions.tsx.
+- **Requirements**: RequirementIntelligenceEngine + RequirementsAgent + RequirementModels, ProjectMemoryManager.
+
+### P-PME.1 — Cross-Session Project Memory / Context Preservation  🟡 PARTIAL → full  [HIGH]
+- `ProjectMemoryManager.ts` stores project metadata (structure, features, build history) in-process as JSON.
+  All context is lost when Cloud Run instance restarts (min-instances=0 → every session is fresh).
+- [ ] Persist `ProjectMemoryManager` state to Firestore: `projectMemory/{userId}/{projectId}` on every
+  build completion. Load on first AI request in a new session.
+- [ ] Add `CrossSessionContextLoader.ts` — on session start, inject last-known project state (tech stack,
+  entity names, last blueprint, last 3 errors) into the first AI system prompt.
+- [ ] Expose "Resume Project" in the UI — show last saved state with a "Continue where you left off" CTA.
+- **Files:** `src/server/Memory/ProjectMemoryManager.ts`, new `src/server/Memory/CrossSessionContextLoader.ts`,
+  `server.ts`, `src/App.tsx`.
+
+### P-PME.2 — Release Notes Generator  ❌ MISSING  [HIGH]
+- When a user deploys their app, nothing is generated to document what was built. No release notes,
+  no changelog, no build summary. Users can't share what changed between builds.
+- [ ] Add `ReleaseNotesGenerator.ts` — post-deploy step in `AppMakerOrchestrator.ts` that:
+  - Diffs the current blueprint vs. previous blueprint (features added/removed/changed).
+  - Generates a structured release note: version, date, new features, bug fixes, tech stack.
+  - Emits to `projectMemory/{userId}/{projectId}/releases[]` in Firestore.
+- [ ] Surface in the UI: "View Release Notes" button after deploy, with copy/share to clipboard.
+- **Files:** new `src/server/AppMakerLab/generator/ReleaseNotesGenerator.ts`,
+  `src/server/AppMakerLab/AppMakerOrchestrator.ts`, `src/App.tsx`.
+
+### P-PME.3 — Technical Debt Tracker  🟡 PARTIAL → full  [HIGH]
+- `QualityEvaluationEngine.ts` finds lint errors, architecture violations, security issues. These are
+  either repaired immediately or silently dropped. No accumulating debt register exists.
+- [ ] Add `TechnicalDebtTracker.ts` — after every quality evaluation, persist unfixed issues to
+  Firestore `techDebt/{userId}/{projectId}/items[]` (issue type, file, severity, first-seen date).
+- [ ] UI: show a "Tech Debt" badge count in the IDE header; clicking opens a prioritised list.
+- [ ] Auto-prioritize: CRITICAL security issues surfaced first; architecture violations grouped by file.
+- **Files:** new `src/server/AppMakerLab/intelligence/TechnicalDebtTracker.ts`,
+  `src/server/QualityEvaluationEngine/QualityEvaluationEngine.ts`, `src/App.tsx`.
+
+### P-PME.4 — AI Build Time Estimator / Deadline Predictor  ❌ MISSING  [HIGH]
+- When a user starts a build, there is no estimate of how long it will take. Users see a spinner
+  with no ETA. Build times vary from 15s (simple app) to 5min+ (complex multi-module).
+- [ ] Add `BuildTimeEstimator.ts` — before generation starts, estimate duration from:
+  - Blueprint complexity (module count × avg tokens per module).
+  - Historical average from `buildHistory[]` in `ProjectMemoryManager` for this project type.
+- [ ] Show "Estimated: ~2 min" in the build progress UI alongside the progress bar.
+- [ ] After completion, record actual duration → used to improve future estimates.
+- **Files:** new `src/server/AppMakerLab/intelligence/BuildTimeEstimator.ts`,
+  `src/server/AppMakerLab/jobs/BuildJobManager.ts`, `src/App.tsx`.
+
+### P-PME.5 — Lessons Learned / Retrospective Engine  ❌ MISSING  [HIGH]
+- `KnowledgeEvolution.ts` (AgentV3) stores per-session lessons in memory. Failed builds beyond the
+  current session are not systematically learned from. No "why did this build fail" retrospective.
+- [ ] Add `BuildRetrospectiveEngine.ts` — after a failed build reaches maxAttempts (RepairBudgetManager),
+  capture: failure classification, repair strategies attempted, final error, root cause, time spent.
+- [ ] Persist to `buildRetrospectives/{userId}/{projectId}[]` in Firestore.
+- [ ] On next similar build (same framework + intent), inject top-3 past failures as warnings in system prompt.
+- [ ] Connects with `KnowledgeEvolution.ts` — promote retrospective lessons to long-term knowledge.
+- **Files:** new `src/server/AppMakerLab/intelligence/BuildRetrospectiveEngine.ts`,
+  `src/server/AppMakerLab/AppMakerOrchestrator.ts`, `src/server/AgentV3/KnowledgeEvolution.ts`.
+
+### P-PME.6 — Scope Change Control (mid-build requirement change)  ❌ MISSING  [MED]
+- If a user sends a new prompt while a build is in progress (changing scope mid-flight), the system
+  has no handler. The new request races with the running build and can corrupt workspace state.
+- [ ] Add `ScopeChangeController.ts` — detect when a new AI request arrives while `BuildJobManager`
+  reports status === 'building'. Options: (a) queue the new request for after build, (b) abort current
+  build + restart with merged requirements, (c) reject with "Build in progress — please wait".
+- [ ] Show a user-facing "Build in progress — your change will be applied after this completes" message.
+- **Files:** new `src/server/AppMakerLab/intelligence/ScopeChangeController.ts`,
+  `src/server/AppMakerLab/jobs/BuildJobManager.ts`, `server.ts`.
+
+### P-PME.7 — Changelog Manager  🟡 PARTIAL → full  [MED]
+- `CodeVersioning.tsx` keeps named snapshots but no structured changelog (what changed, why, when).
+  No auto-generated `CHANGELOG.md` in the generated workspace.
+- [ ] Add `ChangelogManager.ts` — on every successful build, diff current vs. previous blueprint and
+  append a changelog entry to `CHANGELOG.md` in the generated workspace.
+- [ ] Format: Keep-a-Changelog standard (Added / Changed / Fixed / Removed sections).
+- **Files:** new `src/server/AppMakerLab/generator/ChangelogManager.ts`,
+  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+
+### P-PME.8 — Feature Flag Manager (replace hardcoded flags)  🟡 PARTIAL → full  [MED]
+- `server.ts` has `featureFlags: { doctorAI: true, navBharatPro: true, appBuilder: true }` hardcoded.
+  Turning a feature on/off requires a code deploy. No per-user or percentage-rollout flags.
+- [ ] Move feature flags to Firestore `config/featureFlags` document — editable by admin without deploy.
+- [ ] Expose `/api/admin/feature-flags` (admin-only) to toggle flags at runtime.
+- [ ] Extend with per-userId overrides: `config/featureFlags/overrides/{userId}` for beta users.
+- **Files:** `server.ts`, new `src/server/FeatureFlagManager.ts`.
+
+### P-PME.9 — Webhook Manager (build/deploy event notifications)  ❌ MISSING  [MED]
+- No external callbacks when a build completes or fails. Users cannot wire navBharatAI into their
+  own CI/CD systems or receive Slack/Discord alerts on deploy success.
+- [ ] Add `WebhookManager.ts` — allow users to register webhook URLs per project.
+- [ ] Fire `POST` to registered URLs with payload: `{event, projectId, status, buildUrl, timestamp}`
+  on: `BUILD_COMPLETE`, `BUILD_FAILED`, `DEPLOY_COMPLETE`, `DEPLOY_FAILED`.
+- [ ] Store webhooks in Firestore `webhooks/{userId}[]`; add `/api/webhooks` CRUD endpoint.
+- **Files:** new `src/server/WebhookManager.ts`, `server.ts`.
+
+### P-PME.10 — Architecture Decision Records (ADR) Auto-Capture  ❌ MISSING  [MED]
+- Every build implicitly makes architecture decisions (React vs React Native, Firestore vs Postgres,
+  REST vs GraphQL). None are recorded. Users cannot understand why a tech choice was made.
+- [ ] Add `ADRManager.ts` — when `ArchitectureSelector.ts` picks a pattern, auto-generate an ADR entry:
+  - Title, chosen pattern, alternatives considered, reason (from PatternMatcher scores), date.
+  - Emit `ADR-001.md` into the generated workspace under `docs/decisions/`.
+- **Files:** new `src/server/AppMakerLab/intelligence/ADRManager.ts`,
+  `src/server/AppMakerLab/intelligence/ArchitectureSelector.ts`.
+
+### P-PME.11 — SLA / Build-Time SLO Tracker  ❌ MISSING  [MED]
+- No tracking of whether builds complete within an acceptable time. A build that takes 10+ minutes
+  is a degraded experience, but nothing detects or alerts on it.
+- [ ] Add `BuildSLATracker.ts` — record build start/end timestamps. Flag builds exceeding SLO:
+  - Simple app: SLO = 60s. Complex app: SLO = 300s.
+- [ ] Persist SLO violations to `sloViolations/{userId}[]` in Firestore.
+- [ ] Admin dashboard: show p95 build time per app type.
+- **Files:** new `src/server/AppMakerLab/intelligence/BuildSLATracker.ts`,
+  `src/server/AppMakerLab/jobs/BuildJobManager.ts`.
+
+### P-PME.12 — Requirement Traceability (requirement → file → test)  🟡 PARTIAL → full  [LOW]
+- `RequirementIntelligenceEngine.ts` parses requirements. `FilePlanningEngine.ts` maps them to files.
+  But there is no traceability link: requirement #3 → generated `authService.ts` → test `auth.test.ts`.
+- [ ] Add `RequirementTraceabilityMatrix.ts` — build a mapping: requirement → files generated → tests.
+- [ ] Persist per build in Firestore; expose as a JSON download in the IDE.
+- **Files:** new `src/server/AppMakerLab/intelligence/RequirementTraceabilityMatrix.ts`,
+  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+
+### P-PME.13 — Semantic Version Manager  🟡 PARTIAL → full  [LOW]
+- `CodeVersioning.tsx` stores named snapshots but no semantic versioning (no major.minor.patch logic).
+  Users cannot distinguish breaking changes from minor updates.
+- [ ] Add `SemanticVersionManager.ts` — auto-bump version on each successful build:
+  - Major: if blueprint `pages` or `entities` count changes.
+  - Minor: if new features added.
+  - Patch: if repair/fix applied without blueprint change.
+- [ ] Persist current semver in `projectMemory/{userId}/{projectId}/version` in Firestore.
+- **Files:** new `src/server/AppMakerLab/intelligence/SemanticVersionManager.ts`,
+  `src/server/Memory/ProjectMemoryManager.ts`.
 
 ---
 
@@ -737,6 +888,8 @@
     preference learning, PII detection, human review gate (P-AI.1–5, P-AI.6, P-AI.8).
 16. **CGE production-grade** — AST incremental patches, test generation, documentation gen,
     convention engine, OpenAPI contract, lint-fix pass (P-CGE.1–5, P-CGE.7).
+17. **PME baseline** — cross-session memory, release notes, debt tracker, AI estimator,
+    lessons learned, scope change control (P-PME.1–5, P-PME.6).
 
 ---
 
@@ -754,6 +907,18 @@
   Already-strong: theme, PWA, Ctrl+K, onboarding modal, toast, AI Suggestions, LiveCollaboration. MISSING:
   privacy consent/GDPR, one-click AI fix, product tour, breadcrumbs, NPS/CSAT, token gauge, forgot-password,
   session replay, Storybook. Added as **PHASE P-UX**.
+- 2026-06-28 (PME audit): Ran 300-component **Project Management Engine** audit → found 13 gaps (5 HIGH, 6 MED, 2 LOW).
+  Scope note: ~55% of 300 PME components are enterprise PM (OKRs, SAFe, resource allocation, portfolio) → ⬜ N/A by
+  design for an AI app maker. Only app-maker-relevant gaps captured.
+  Already-strong (~25%): BuildJobManager (full job lifecycle), ExecutionOrchestrator + TaskScheduler (execution
+  tracking), DeploymentEngine + DeploymentAuditManager (deployment state machine), QualityEvaluationEngine +
+  AppHealthMonitor (quality/health), CheckpointManager (state recovery), LiveCollaboration + TeamCollaboration
+  (real-time collab), AIProjectManager.tsx (AI task gen + Kanban), ImpactAnalyzer, ProjectMemoryManager.
+  HIGH gaps: ProjectMemoryManager not Firestore-persisted (lost on restart = cross-session memory lost),
+  no release notes generator, no technical debt register, no build time estimator, no lessons-learned retrospective.
+  MED gaps: no scope change control, no changelog manager, feature flags hardcoded (no runtime toggle),
+  no webhook manager, no ADR auto-capture, no SLA/SLO tracking.
+  LOW gaps: no requirement traceability matrix, no semantic version manager. Added as **PHASE P-PME**.
 - 2026-06-28 (CGE audit): Ran 300-component **Code Generation Engine** audit → found 13 gaps (5 HIGH, 6 MED, 2 LOW).
   Already-strong (~40%): full orchestration pipeline (AppMakerOrchestrator→BlueprintPlanner→TaskScheduler→
   ExecutionOrchestrator→EngineRegistry/Dispatcher→[LLM/Frontend/Backend/Database/Scaffold engines]→

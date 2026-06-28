@@ -5010,3 +5010,26 @@ mode; the `(default)` DB on Blaze has full quota), then set Cloud Run env
 FIRESTORE_DATABASE_ID=<that-database-id>. Then chat + files + memory persist across reloads.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.
+
+## 2026-06-28 — Build Diagnostics: self-diagnosing report of every issue v3.0 hits
+
+Admin asked for a self-diagnostics tool: when v3.0 builds an app, capture EVERY issue it hit
+(whether auto-solved or not) into a downloadable technical report, so it can be handed to Claude
+and the rough edges fixed in code — goal: v3.0 never struggles to build an app.
+
+New BuildDiagnostics (src/server/AgentV3/BuildDiagnostics.ts, pure + 7 unit tests): collects
+structured BuildIssue records { ts, phase, severity, code, message, autoResolved, detail }. It both
+DERIVES issues from the live AgentEvent stream (failed tool_result → TOOL_ERROR, done.readiness
+blockers → READINESS_BLOCKER, warnings → READINESS_WARNING, error → BUILD_ERROR, preview info) and
+accepts explicitly-RECORDED issues (provider fallback, sandbox-unavailable, empty-build retry).
+finish(ok) back-fills ambiguous issues (tool errors / nudges / empty-build retry) as auto-resolved
+when the build ultimately succeeded. report() returns counts + the issue list; renderDiagnosticsText
+makes a readable .txt.
+
+Wired into routes/agentv3.ts: a BuildDiagnostics per build, subscribed to the event stream; provider
+fallbacks captured via buildTurnRunner's new onProviderError hook; sandbox-setup failure + empty-build
+retry recorded; finalized at build end and shipped on the `result` event + cached per session. New
+GET /api/agentv3/diagnostics (owner-scoped) returns the last build's report. Client: a "Build report"
+button in the v3.0 header downloads it as JSON. AppKnowledgeBase agentv3_build_report entry added.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2881/2881 PASS, boot:check PASS.

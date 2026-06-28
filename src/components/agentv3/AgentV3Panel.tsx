@@ -398,6 +398,38 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
     }
   };
 
+  // Download the LAST build's diagnostics report (every issue v3.0 hit — provider fallbacks,
+  // tool errors, "replied without building" nudges, readiness blockers, sandbox problems) as
+  // JSON, so the admin can hand it to Claude and the rough edges get fixed in code.
+  const [downloadingDiag, setDownloadingDiag] = useState(false);
+  const downloadDiagnostics = async () => {
+    if (downloadingDiag) return;
+    setDownloadingDiag(true);
+    try {
+      const params = new URLSearchParams();
+      if (userId) params.set('userId', userId);
+      if (email) params.set('email', email);
+      const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
+      if (res.status === 404) { alert('No build report yet — build an app first, then download the report.'); return; }
+      if (!res.ok) throw new Error(`server returned ${res.status}`);
+      const data = await res.json() as { diagnostics?: unknown };
+      if (!data.diagnostics) { alert('No build report available yet.'); return; }
+      const blob = new Blob([JSON.stringify(data.diagnostics, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `navbharatai-v3-build-diagnostics-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) {
+      alert(`Could not download the report: ${e instanceof Error ? e.message : String(e)}.`);
+    } finally {
+      setDownloadingDiag(false);
+    }
+  };
+
   // R5 §5.1 — the app's permanent LIVE deployment URL (Firebase Hosting). Restored durably from the
   // server so it survives a reconnect/new session, not just the current build stream.
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
@@ -634,6 +666,15 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
           >
             {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
             {exporting ? 'Exporting…' : 'Export .zip'}
+          </button>
+          <button
+            onClick={downloadDiagnostics}
+            disabled={downloadingDiag}
+            title="Download the diagnostics report from your last build — every issue v3.0 hit (provider fallbacks, tool errors, readiness blockers, sandbox problems). Send it to support to get the build engine improved."
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {downloadingDiag ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+            {downloadingDiag ? 'Preparing…' : 'Build report'}
           </button>
           {state.repoUrl && (
             <a

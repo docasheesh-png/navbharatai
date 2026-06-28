@@ -132,6 +132,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'agentv3_build_report',
+    name: 'Download build diagnostics report (every issue v3.0 hit)',
+    path: 'NavBharatAI Pro v3.0 → header tab row → "Build report" button',
+    description: 'A self-diagnostics report of your LAST build: a structured, technical list of every issue NavBharatAI Pro v3.0 ran into while building your app — whether it auto-recovered or not. It captures provider fallbacks (e.g. Claude to Haiku), failed tool calls, "replied without building" nudges, readiness-gate blockers, sandbox problems and runtime errors, each tagged with a code, severity, and whether it was auto-resolved or remained unresolved. Click "Build report" in the v3.0 header to download it as a JSON file. Send that file to support so the build engine can be improved and v3.0 stops struggling on similar apps.',
+    howToUse: 'Build an app in NavBharatAI Pro v3.0. Then click "Build report" in the header tab row — a JSON diagnostics file downloads. Share it with support / the developers to get the exact issues fixed.',
+    relatedFeatures: ['agentv3_builder', 'agentv3_files', 'agentv3_export'],
+    keywords: ['build report', 'diagnostics', 'diagnostic report', 'issues', 'errors report', 'download report', 'self diagnose', 'build issues', 'kya dikkat aayi', 'report download', 'json report', 'struggle', 'build log', 'issue list', 'technical report'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'agentv3_files',
     name: 'View file contents + Files synced to the main Files view',
     path: 'NavBharatAI Pro v3.0 → header → Files tab → click any file to read its contents (also appears in sidebar → Files)',

@@ -1310,6 +1310,44 @@
 - [ ] Future: accept Figma export JSON → code (FigmaImporter exists in frontend; backend generation not wired).
 - **Files:** `src/server/AI/AIRouterManager.ts` (add vision model routing), new `src/server/Vision/`.
 
+> **2026-06-28 (2nd-pass enrichment):** A deeper 300-component re-audit confirmed P-AI.1–13 above, and
+> surfaced 4 additional gap-groups (P-AI.14–17) not previously listed. (Build-ETA/deadline prediction is
+> already tracked in **P-PME.4**, and DB query/migration generation in **P-CGE.6** — not duplicated here.)
+
+### P-AI.14 — Explicit Reasoning Engines  ❌ MISSING  [LOW — mostly academic for a code-gen app]
+- All reasoning today is implicit inside LLM prompts. There are no explicit, testable reasoning modules.
+  Most of these are low-ROI for a code-generation product, but the **constraint solver** is the one with
+  real near-term value (resolving conflicting blueprint requirements / dependency version constraints).
+- [ ] (MED) `ConstraintSolver.ts` — resolve conflicting requirements & dependency version ranges during planning.
+- [ ] (LOW) Causal & temporal reasoning helpers for multi-step build/debug ordering.
+- [ ] (SKIP unless needed) symbolic / probabilistic / spatial / scientific reasoning — track as N/A-by-design for now.
+- **Files:** new `src/server/AI/reasoning/ConstraintSolver.ts`.
+
+### P-AI.15 — Ensemble / Voting / Arbitration  🟡 PARTIAL → full  [MED]
+- `Consensus.ts` runs a multi-persona expert panel on hard design decisions, but there is no general
+  **ensemble** for routine outputs: no majority **voting** across providers, no **arbitration** when two
+  providers disagree, no **response fusion** that merges the best parts of multiple completions.
+- [ ] Add `EnsembleCoordinator.ts` — for high-stakes generations, sample N providers and pick via a scorer.
+- [ ] Add a voting/arbitration step: when 2 providers diverge on critical code, score both via `QualityEvaluationEngine` and keep the winner (reuse the P-AI.12 model-eval scorer).
+- **Files:** new `src/server/AgentV3/EnsembleCoordinator.ts`, `src/server/AgentV3/Consensus.ts`.
+
+### P-AI.16 — Tool Discovery & Invocation Planner  🟡 PARTIAL → full  [MED]
+- `ToolDispatcher.ts` executes a fixed, hardcoded tool set by name. There is no **tool discovery**
+  (dynamic registry the agent can query for available tools + schemas) and no **invocation planner**
+  (deciding the order/batching of tool calls before executing them).
+- [ ] Add a tool registry the agent can introspect (name, description, schema, when-to-use) instead of a hardcoded switch.
+- [ ] Add a lightweight invocation planner: batch independent tool calls, sequence dependent ones.
+- **Files:** `src/server/AgentV3/ToolDispatcher.ts`, new `src/server/AgentV3/ToolRegistry.ts`.
+
+### P-AI.17 — Provider Latency / Reliability Prediction + Smart Job Scheduling  🟡 PARTIAL → full  [LOW]
+- `HealthRegistry.ts` + `AIRouter` cooldowns track provider health reactively. Missing: **predictive**
+  latency/reliability scoring to pick the fastest healthy provider, and **priority-aware job scheduling**
+  in `BuildJobManager` (today it is FIFO, no priority/queue intelligence).
+- *(Build-duration ETA is out of scope here — already tracked in **P-PME.4**.)*
+- [ ] Record rolling p50/p95 latency + success-rate per provider; bias `routeRaced` toward the predicted-best.
+- [ ] Add priority + concurrency-aware scheduling to `BuildJobManager` (paid/PRO jobs ahead of free).
+- **Files:** `src/server/AI/HealthRegistry.ts`, `src/server/AI/Router/AIRouter.ts`, `src/server/AppMakerLab/jobs/BuildJobManager.ts`.
+
 ---
 
 ## 🔶 PHASE P-UX — UX ENGINE GAPS
@@ -1534,6 +1572,13 @@
   MED gaps: PII detection (general), test generation, human-in-the-loop gate, decision trace, abuse detection.
   LOW gaps: log/stack trace parser, model evaluation engine, multimodal/vision (future scope).
   Added as **PHASE P-AI**.
+- 2026-06-28 (P-AI 2nd-pass enrichment, by a parallel session): An independent 300-component re-audit
+  (7 deep-scan agents, cited files verified) reproduced the same picture — 164 DONE / 69 PARTIAL / 67
+  MISSING — and confirmed P-AI.1–13 hold. It surfaced 4 gap-groups not previously listed, added as
+  **P-AI.14–17**: explicit reasoning engines (constraint solver = the only near-term-valuable one),
+  ensemble/voting/arbitration, tool discovery + invocation planner, and provider latency/reliability
+  prediction + smart job scheduling. Deliberately NOT duplicated: build-ETA/deadline → already P-PME.4;
+  DB query/migration generation → already P-CGE.6. (Doc-only change; no code touched.)
 - 2026-06-28 (TQA audit): Ran 300-component **Testing & QA Engine** audit → found 13 gaps (5 HIGH, 5 MED, 3 LOW).
   Scope note: gRPC, SQL injection (Firestore), k8s/Helm/Terraform, device farm/browser farm, HIPAA/ISO,
   message queue testing, microservices testing — all ⬜ N/A by design.

@@ -402,15 +402,21 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean })
       cheap.push({ name: 'GEMINI', runner: new GeminiToolRunner(gemini as unknown as GeminiGenAiClient, { model: buildModel('AGENTV3_GEMINI_BUILD_MODEL') }) });
     } catch { /* skip */ }
   }
-  if (cheap.length === 0) return makeResilientTurnRunner(new ClaudeClient()); // Claude-only env
-  const claude: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient() };
+  // Bound Claude's retry ladder on the BUILD hot path. Claude now LEADS every build turn
+  // (claudeFirst), so the default 5× exponential backoff (≈30-60s) would stall each turn
+  // when the Anthropic account is overloaded — looking like "stuck midway / infinite
+  // loading". 2 retries falls through to Gemini/Vertex in a few seconds instead.
+  // AGENTV3_BUILD_CLAUDE_RETRIES overrides.
+  const buildRetry = { maxRetries: Math.max(0, parseInt(process.env.AGENTV3_BUILD_CLAUDE_RETRIES || '', 10) || 2) };
+  if (cheap.length === 0) return makeResilientTurnRunner(new ClaudeClient(undefined, buildRetry)); // Claude-only env
+  const claude: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient(undefined, buildRetry) };
   // P7 failover hardening: a final Claude-HAIKU backstop that FORCES the Haiku model
   // regardless of the turn's requested model. It only ever runs after every prior provider
   // (Vertex → Gemini → primary Claude) has thrown, so normal builds are unaffected — but if
   // Sonnet/Opus is overloaded or rate-limited, Haiku still completes the turn and the build
   // never breaks. Billing is unchanged (Opus-equivalent markup, D5/D6) regardless of which
   // model actually answers. AGENTV3_DISABLE_HAIKU_BACKSTOP=1 removes it if ever needed.
-  const haikuBackstop: NamedRunner = { name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(), haikuModel()) };
+  const haikuBackstop: NamedRunner = { name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), haikuModel()) };
   const withBackstop = process.env.AGENTV3_DISABLE_HAIKU_BACKSTOP === '1' ? [] : [haikuBackstop];
   // Claude-first by default (v3.0 runs on Claude — see the doc comment above); Vertex/Gemini
   // remain as fallback. Escalation passes claudeFirst:true; AGENTV3_BUILD_CLAUDE_FIRST=0 reverts.
@@ -445,7 +451,7 @@ function grokPlanRunner(): TurnRunner | null {
     const client = new OpenAI({ apiKey, baseURL: 'https://api.x.ai/v1', timeout: 60_000, maxRetries: 0 });
     const model = process.env.AGENTV3_GROK_PLAN_MODEL || 'grok-3';
     const grok: NamedRunner = { name: 'GROK', runner: new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }) };
-    const claudeFallback: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient() };
+    const claudeFallback: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient(undefined, { maxRetries: 2 }) };
     return makeMultiProviderTurnRunner([grok, claudeFallback], {
       onProviderError: (name, err) => console.log(`[AGENTV3] plan ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
     });

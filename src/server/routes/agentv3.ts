@@ -17,6 +17,8 @@ import {
   makeWebSearch,
   type OpinionRouter,
   resolveModel,
+  toPowerLevel,
+  powerSpec,
   haikuModel,
   architectSystemPrompt,
   planSystemPrompt,
@@ -893,7 +895,13 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     activeBuilds.add(buildKey);
-    const onlyOpus = req.body?.onlyOpus === true;
+    // Power level (admin override 2026-06-27): 'off' | 'mini' (5×) | 'medium' (10×) |
+    // 'max' (20×). Accepts the new `powerLevel` field; falls back to the legacy `onlyOpus`
+    // boolean (→ 'mini'). `onlyOpus` below stays a boolean (true for any Opus power level)
+    // so every existing boolean call site — vision, cost-ladder, escalation — is unchanged.
+    const powerLevelReq = toPowerLevel(req.body?.powerLevel ?? (req.body?.onlyOpus === true));
+    const powerSpecResolved = powerSpec(powerLevelReq);
+    const onlyOpus = powerSpecResolved.powerMode;
     // Smart planning gate: skip for simple apps (todo, calculator, etc.) to save
     // 2-3 min. planFirst=false from the client always wins (explicit user skip).
     // planFirst=true (or absent) defers to the complexity classifier — a simple
@@ -1300,6 +1308,8 @@ export function registerAgentV3Routes(app: Express): void {
         system: architectSystem,
         tools: catalogForTools(roleConfig('architect').tools),
         onlyOpus,
+        powerLevel: powerLevelReq,
+        effort: powerSpecResolved.effort,
         thinking,
         maxBudgetUsd: budget,
         maxSteps,
@@ -1373,6 +1383,8 @@ export function registerAgentV3Routes(app: Express): void {
           system: planSystemPrompt(),
           tools: catalogForTools(['update_todo']),
           onlyOpus,
+          powerLevel: powerLevelReq,
+          effort: powerSpecResolved.effort,
           thinking,
           maxBudgetUsd: budget,
           maxSteps: 4,
@@ -1465,10 +1477,16 @@ export function registerAgentV3Routes(app: Express): void {
       // P3 quality-escalation flag. Skipped if the user already stopped the build.
       if (expectsArtifacts && writtenFiles.size === 0 && !abort.signal.aborted) {
         events.emit({ type: 'narration', agent: 'architect', text: 'The first attempt produced no files — rebuilding with a stronger model…', ts: Date.now() });
+        // The "stronger model" is the power-OFF ceiling: Opus at its LOWEST effort
+        // (admin rule 2026-06-27 — "power off me Opus ka sabse lower version"). In a
+        // power-ON build it's already Opus at the selected effort; here we force Opus
+        // for the retry even in normal mode, at the ceiling effort. Billing is unchanged
+        // (normal mode still bills Sonnet×3.5 via baseRunnerOpts.powerLevel) — no surprise.
         const retryRunner = new AgentRunner({
           ...baseRunnerOpts,
           client: buildTurnRunner({ claudeFirst: true }),
-          model: resolveModel(onlyOpus),
+          model: resolveModel(true), // Opus
+          effort: powerSpecResolved.effort ?? powerSpecResolved.ceilingEffort,
           persistence: {
             store: getConversationStore(),
             conversationId: randomUUID(),

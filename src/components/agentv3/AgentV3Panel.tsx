@@ -3,6 +3,7 @@ import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
   SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github, Circle,
+  ChevronLeft, ChevronRight, ChevronDown,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
@@ -39,10 +40,14 @@ interface ChatMsg {
   streaming?: boolean;
 }
 
-export function AgentV3Panel({ userId, email, resume }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null }) {
+export function AgentV3Panel({ userId, email, resume, onFilesSync }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; onFilesSync?: (files: Record<string, string>) => void }) {
   const { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
-  const [onlyOpus, setOnlyOpus] = useState(false);
+  // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
+  // 5× = Opus minimum power; 10× = Opus medium; 20× = Opus max / ultracode.
+  const [powerLevel, setPowerLevel] = useState<'off' | 'mini' | 'medium' | 'max'>('off');
+  // Derived for the existing boolean call sites (start/telemetry) — any Opus power level.
+  const onlyOpus = powerLevel !== 'off';
   const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default
   const [thinking, setThinking] = useState(false); // adaptive thinking, off by default
   const [tab, setTab] = useState<SurfaceTab>('preview');
@@ -268,7 +273,7 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
     setFiles([]);
     const pendingImportUrl = importUrl.trim();
     setImportUrl(''); // consume import URL on first send
-    start(msgText, { userId, email, onlyOpus, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, importUrl: pendingImportUrl || undefined });
+    start(msgText, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, importUrl: pendingImportUrl || undefined });
   };
 
   // Start a brand-new project: fresh sandbox/memory (new session id) and clear chat.
@@ -398,7 +403,7 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
     setUserMsgs((c) => [...c, { role: 'user', text: `🚀 Deploy to ${providerName}`, ts: Date.now() }]);
     start(
       'Deploy this app to a permanent public live URL. Run "npm run build" first, then call the deploy tool, and finish by giving me the live link.',
-      { userId, email, onlyOpus, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, deployProvider },
+      { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, deployProvider },
     );
   };
 
@@ -422,8 +427,72 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
     }
   };
 
+  // ── File-content viewer + sidebar sync ────────────────────────────────────
+  // The Files surface only carries paths (state.files); the actual contents live
+  // in the sandbox. We pull them on demand from the existing read endpoint, cache
+  // them, and reuse the same map both to (a) show a file's content when clicked
+  // and (b) sync the built project into the main app's Files view (onFilesSync).
+  const [workspaceFiles, setWorkspaceFiles] = useState<Record<string, string> | null>(null);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [fileError, setFileError] = useState<string>('');
+  // Heavy generated dirs are never shown/synced — the user cares about source.
+  const FILE_EXCLUDE = /^(node_modules\/|\.git\/|dist\/|build\/|\.next\/|__pycache__\/)/;
+
+  const loadWorkspaceFiles = async (): Promise<Record<string, string> | null> => {
+    const wsId = state.workspaceId;
+    if (!wsId) return null;
+    try {
+      const res = await fetch('/api/agentv3/workspace-files', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId: wsId, userId, email }),
+      });
+      if (!res.ok) throw new Error(`server returned ${res.status}`);
+      const data = await res.json() as { files?: Record<string, string> };
+      const files = data.files ?? {};
+      setWorkspaceFiles(files);
+      return files;
+    } catch (e) {
+      setFileError(e instanceof Error ? e.message : 'Failed to load file contents');
+      return null;
+    }
+  };
+
+  // Open a file in the viewer — fetch contents once, then read from cache.
+  const openFile = async (path: string) => {
+    setSelectedFile(path);
+    setFileError('');
+    if (workspaceFiles && path in workspaceFiles) return;
+    setFileLoading(true);
+    await loadWorkspaceFiles();
+    setFileLoading(false);
+  };
+
+  // Sidebar sync (Task 2): when a build finishes, pull the real file contents and
+  // push the source files up so they also appear in the app's main Files view.
+  useEffect(() => {
+    if (!state.done || !state.workspaceId || state.files.length === 0) return;
+    let cancelled = false;
+    loadWorkspaceFiles().then((files) => {
+      if (cancelled || !files || !onFilesSync) return;
+      const source = Object.fromEntries(
+        Object.entries(files).filter(([p]) => !FILE_EXCLUDE.test(p)),
+      );
+      if (Object.keys(source).length > 0) onFilesSync(source);
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.done, state.workspaceId]);
+
+  // Plan (todo list) collapse toggle (Task 3) — keeps the chat area readable.
+  const [planCollapsed, setPlanCollapsed] = useState(false);
+
   const agents = Object.values(state.agents).sort((a, b) => b.updatedTs - a.updatedTs);
   const diffPaths = Object.keys(state.diffs);
+  const planDone = state.todos.filter((t) => t.status === 'done').length;
+  const currentTodo = state.todos.find((t) => t.status === 'in_progress')
+    ?? state.todos.find((t) => t.status !== 'done');
 
   return (
     <div className="flex flex-col h-full max-h-full w-full min-h-0 bg-zinc-950 text-zinc-100">
@@ -604,8 +673,25 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
             {/* Live plan progress (only when there's no pending plan-approval gate, which shows its
                 own copy) — lets the user watch the AI work through its real todo list as it builds. */}
             {state.todos.length > 0 && !state.pendingPermission && (
-              <div className="px-3 pt-2 max-h-28 overflow-auto">
-                <TodoList todos={state.todos} />
+              <div className="px-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setPlanCollapsed((v) => !v)}
+                  className="w-full flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 hover:text-zinc-200"
+                  title={planCollapsed ? 'Expand plan' : 'Minimize plan'}
+                >
+                  {planCollapsed ? <ChevronRight className="w-3 h-3 shrink-0" /> : <ChevronDown className="w-3 h-3 shrink-0" />}
+                  <span>Plan</span>
+                  <span className="text-zinc-500">{planDone}/{state.todos.length}</span>
+                  {planCollapsed && currentTodo && (
+                    <span className="text-zinc-600 truncate normal-case font-normal">· {currentTodo.title}</span>
+                  )}
+                </button>
+                {!planCollapsed && (
+                  <div className="mt-1 max-h-28 overflow-auto">
+                    <TodoList todos={state.todos} hideHeader />
+                  </div>
+                )}
               </div>
             )}
             {agents.length > 0 && (
@@ -644,7 +730,41 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
                     <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
                       <ToggleRow label="Planning" checked={planFirst} disabled={running} onClick={() => setPlanFirst((v) => !v)} />
                       <ToggleRow label="Thinking" checked={thinking} disabled={running} onClick={() => setThinking((v) => !v)} />
-                      <ToggleRow label="Power" hint="5×" checked={onlyOpus} disabled={running} onClick={() => setOnlyOpus((v) => !v)} />
+                      {/* Power level: Off (Sonnet) / 5× (Opus min) / 10× (Opus medium) / 20× (Opus max, ultracode). */}
+                      <div className="px-3 py-2">
+                        <div className="text-sm text-zinc-200 mb-1.5">Power</div>
+                        <div className="flex gap-1">
+                          {([
+                            { key: 'off', label: 'Off' },
+                            { key: 'mini', label: '5×' },
+                            { key: 'medium', label: '10×' },
+                            { key: 'max', label: '20×' },
+                          ] as const).map((opt) => (
+                            <button
+                              key={opt.key}
+                              type="button"
+                              disabled={running}
+                              onClick={() => setPowerLevel(opt.key)}
+                              className={`flex-1 px-2 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 ${
+                                powerLevel === opt.key
+                                  ? 'bg-indigo-600 text-white'
+                                  : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="text-[11px] text-zinc-500 mt-1">
+                          {powerLevel === 'off'
+                            ? 'Normal — fast & lowest cost'
+                            : powerLevel === 'mini'
+                            ? 'Opus minimum power'
+                            : powerLevel === 'medium'
+                            ? 'Opus medium power'
+                            : 'Opus max — ultracode'}
+                        </div>
+                      </div>
                       <div className="border-t border-zinc-800 my-1" />
                       <button
                         className="w-full flex items-center justify-between px-3 py-2 rounded hover:bg-zinc-800 text-left"
@@ -744,9 +864,42 @@ export function AgentV3Panel({ userId, email, resume }: { userId?: string; email
                   )}
                   {restoreMsg && <span className="text-[11px] text-zinc-400">{restoreMsg}</span>}
                 </div>
+              ) : selectedFile ? (
+                /* File-content viewer (Task 1): show what's inside the clicked file. */
+                <div className="flex flex-col min-h-0">
+                  <div className="shrink-0 flex items-center gap-2 mb-2">
+                    <button
+                      onClick={() => setSelectedFile(null)}
+                      className="flex items-center gap-1 text-zinc-400 hover:text-white shrink-0"
+                      title="Back to file list"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" /> Files
+                    </button>
+                    <span className="text-zinc-300 truncate" title={selectedFile}>{selectedFile}</span>
+                  </div>
+                  {fileLoading ? (
+                    <div className="flex items-center gap-2 text-zinc-500"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading file…</div>
+                  ) : fileError ? (
+                    <Empty>{fileError}</Empty>
+                  ) : (
+                    <pre className="whitespace-pre-wrap break-words text-zinc-200 leading-relaxed">{workspaceFiles?.[selectedFile] ?? '(empty file)'}</pre>
+                  )}
+                </div>
               ) : (
                 <ul className="space-y-0.5">
-                  {state.files.map((f) => <li key={f.path} className="flex items-center gap-2"><span className={fileDot(f.kind)} /> {f.path}</li>)}
+                  {state.files.map((f) => (
+                    <li key={f.path}>
+                      <button
+                        onClick={() => openFile(f.path)}
+                        className="w-full flex items-center gap-2 text-left hover:bg-zinc-800/60 rounded px-1 py-0.5 transition-colors"
+                        title="Open file"
+                      >
+                        <span className={fileDot(f.kind)} />
+                        <span className="truncate flex-1">{f.path}</span>
+                        <ChevronRight className="w-3 h-3 shrink-0 text-zinc-600" />
+                      </button>
+                    </li>
+                  ))}
                 </ul>
               ))}
               {tab === 'diff' && (diffPaths.length === 0 ? <Empty>No diffs yet.</Empty> : (
@@ -1051,15 +1204,17 @@ function BuildHealthCard({ health }: { health: BuildHealth }) {
  * and a progress count — so the build is engaging and honest: the user sees exactly what the AI is
  * doing and how far along it is, driven by real `todo_updated` events (never a fake animation).
  */
-function TodoList({ todos }: { todos: TodoItem[] }) {
+function TodoList({ todos, hideHeader }: { todos: TodoItem[]; hideHeader?: boolean }) {
   if (!todos.length) return null;
   const done = todos.filter((t) => t.status === 'done').length;
   return (
     <div className="text-left">
-      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 mb-1">
-        <span>Plan</span>
-        <span className="text-zinc-500">{done}/{todos.length}</span>
-      </div>
+      {!hideHeader && (
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 mb-1">
+          <span>Plan</span>
+          <span className="text-zinc-500">{done}/{todos.length}</span>
+        </div>
+      )}
       <ul className="space-y-1">
         {todos.map((t) => (
           <li key={t.id} className="flex items-center gap-1.5 text-xs">

@@ -49,6 +49,7 @@ import { registerProfileRoutes } from './src/server/routes/profile';
 import { apiVersionMiddleware } from './src/server/routes/apiVersion';
 import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
 import { registerObservabilityRoutes } from './src/server/routes/observability';
+import { errorTracker, installGlobalErrorHandlers } from './src/server/observability/ErrorTracker';
 
 
 // Traceability Infrastructure
@@ -225,6 +226,10 @@ setInterval(() => {
 }, 60 * 60 * 1000);
 
 (async () => {
+  // P2.2 — install process-level error handlers ASAP so nothing goes unreported
+  // (best-effort capture to Cloud Error Reporting; report-and-continue, never crash).
+  installGlobalErrorHandlers();
+
   const app = express();
   app.use(helmet({
     contentSecurityPolicy: {
@@ -504,6 +509,20 @@ setInterval(() => {
 
   // Telemetry / analysis routes — extracted to src/server/routes/telemetry.ts (Phase 1).
   registerTelemetryRoutes(app);
+
+  // P2.2 — Express error-handling middleware (must be LAST, after all routes). Captures
+  // any error thrown/forwarded by a route into Cloud Error Reporting + the admin view,
+  // correlated with the request's trace, and returns a clean 500 (no internals leaked).
+  app.use((err: any, req: any, res: any, _next: any) => {
+    errorTracker.capture(err, {
+      source: 'middleware',
+      httpMethod: req.method,
+      httpUrl: req.originalUrl || req.url,
+      httpStatus: 500,
+    });
+    if (res.headersSent) return;
+    res.status(500).json({ error: 'Internal server error' });
+  });
 
   // Final diagnostic and server start
 

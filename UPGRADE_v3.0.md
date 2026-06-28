@@ -52,7 +52,7 @@
 |-------|------|-----|--------|---|
 | P0 | Core-Law Violations | Breaks your own permanent rules | ✅ Complete | 100% |
 | P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ✅ Complete | 100% |
-| P2 | Resilience & Observability | See + survive failures | 🔄 In Progress | 25% |
+| P2 | Resilience & Observability | See + survive failures | 🔄 In Progress | 50% |
 | P3 | Scale & Frontend Health | Grow without rewrites | ⏳ Pending | 0% |
 | P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 25% |
 | P5 | Hygiene & Hardening | Remove rot, close small holes | ⏳ Pending | 0% |
@@ -191,9 +191,21 @@
       `/api/observability/traces?admin=…`; unauthenticated → 403 ✅.
 - **Files:** `src/server/observability/Tracer.ts` (+ `.test.ts`), `src/server/routes/observability.ts`, `server.ts`, `AIRouter.ts`, `ObservabilityManager.ts`.
 
-### P2.2 — Error Tracking (external)  ❌ MISSING
-- [ ] Wire Sentry (or Cloud Error Reporting) on both backend (`server.ts`) and frontend (`main.tsx`).
-- **Files:** `server.ts`, `src/main.tsx`.
+### P2.2 — Error Tracking (external)  ✅ DONE (2026-06-28)
+- [x] Wired **Cloud Error Reporting** (real external tracking, no SDK / no creds — same proven log-correlation
+      pattern as P2.1). New `src/server/observability/ErrorTracker.ts` emits each captured error as a Cloud Error
+      Reporting-compatible structured log (`@type: …ReportedErrorEvent` + `serviceContext` + full-stack `message`),
+      which Cloud Run auto-ingests (grouped, counted, alertable). Errors are also kept in a bounded ring buffer and
+      correlated with the active trace (P2.1). Every capture is best-effort and never throws.
+- [x] **Backend:** `installGlobalErrorHandlers()` (uncaughtException + unhandledRejection → report-and-continue, never
+      crash the service) installed at startup; an Express error-handling middleware (registered LAST) captures any
+      route error with request context and returns a clean 500.
+- [x] **Frontend:** the existing `window.error` / `unhandledrejection` reporters (→ `/api/logs/error`) now flow through
+      the tracker; `ErrorBoundary.componentDidCatch` additionally reports React render errors (prod-only, best-effort).
+- [x] Admin view: `GET /api/observability/errors` (recent errors + grouped summary).
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2784/2784 ✅ (9 new) ·
+      server boots + LIVE check: a POSTed client error was captured and read back via `/api/observability/errors?admin=…`; no-admin → 403 ✅.
+- **Files:** `src/server/observability/ErrorTracker.ts` (+ `.test.ts`), `server.ts`, `src/server/routes/telemetry.ts`, `src/server/routes/observability.ts`, `src/components/ErrorBoundary.tsx`.
 
 ### P2.3 — Bulkhead Isolation  🟡 PARTIAL
 - [ ] Separate in-flight pools per universe so a FREE-tier spike can't starve PRO/SDA.

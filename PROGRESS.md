@@ -4565,3 +4565,25 @@ server boots, and a LIVE curl proved it end-to-end: GET /api/health produced a r
 end-user surface) → no AppKnowledgeBase entry.
 Files: observability/Tracer.ts (+.test.ts), routes/observability.ts, server.ts,
 AIRouter.ts, ObservabilityManager.ts, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P2.2 Error Tracking (external) DONE (Phase P2 → 50%)
+
+Real external error tracking via Cloud Error Reporting (no SDK, no creds — same
+log-correlation pattern as P2.1). New src/server/observability/ErrorTracker.ts:
+captured errors emit a Cloud Error Reporting-compatible structured log
+(@type ReportedErrorEvent + serviceContext + full-stack message) → Cloud Run
+auto-ingests (grouped/alertable); also kept in a bounded ring buffer and correlated
+with the active trace. Best-effort, never throws.
+
+Backend: installGlobalErrorHandlers() (uncaughtException + unhandledRejection →
+report-and-continue, never crash the service) at startup; Express error-handling
+middleware (registered LAST) captures route errors with request context → clean 500.
+Frontend: existing window.error/unhandledrejection reporters now flow through the
+tracker; ErrorBoundary.componentDidCatch additionally reports React render errors
+(prod-only, best-effort). Admin view: GET /api/observability/errors (recent + summary).
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2784/2784 PASS (9 new),
+server boots, LIVE: POST /api/logs/error captured + read back via
+/api/observability/errors?admin=…; no-admin → 403. Backend/admin observability →
+no AppKnowledgeBase entry. Files: observability/ErrorTracker.ts (+.test.ts), server.ts,
+routes/telemetry.ts, routes/observability.ts, components/ErrorBoundary.tsx, UPGRADE_v3.0.md.

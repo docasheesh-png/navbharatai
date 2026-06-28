@@ -5,6 +5,7 @@
 
 import type { Express, Request, Response } from 'express';
 import { tracer } from '../observability/Tracer';
+import { errorTracker } from '../observability/ErrorTracker';
 import { getProviderStats } from '../AI/Router/AIRouter';
 
 function adminOk(req: Request): boolean {
@@ -28,5 +29,13 @@ export function registerObservabilityRoutes(app: Express): void {
       providers: getProviderStats(),
       generatedAt: Date.now(),
     });
+  });
+
+  // P2.2 — recent captured errors (server + client) and a grouped summary. The same
+  // errors are also in Cloud Error Reporting; this is the in-app admin view.
+  app.get('/api/observability/errors', (req: Request, res: Response) => {
+    if (!adminOk(req)) { res.status(403).json({ error: 'admin only' }); return; }
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+    res.json({ errors: errorTracker.recent(limit), summary: errorTracker.summary() });
   });
 }

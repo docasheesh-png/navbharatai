@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from 'express';
+import { errorTracker } from '../observability/ErrorTracker';
 
 /**
  * Registers self-contained telemetry/analysis routes extracted from the
@@ -37,12 +38,17 @@ export function registerTelemetryRoutes(app: Express): void {
     }
   });
 
-  // Frontend error ingestion endpoint
+  // Frontend error ingestion endpoint. P2.2 — also routed through the ErrorTracker so
+  // client-side errors reach Cloud Error Reporting (grouped/alertable) + the admin view.
   app.post('/api/logs/error', (req: Request, res: Response) => {
     try {
       const { message, source, line, col, stack, url, ts, type } = req.body || {};
       const ip = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || '').split(',')[0].trim();
       console.error('[CLIENT_ERROR]', JSON.stringify({ message, source, line, col, stack, url, ts, type, ip }));
+      // Reconstruct an Error so the stack groups correctly in Cloud Error Reporting.
+      const err = new Error(String(message || type || 'client error'));
+      if (typeof stack === 'string' && stack) err.stack = stack;
+      errorTracker.capture(err, { source: 'client', httpUrl: typeof url === 'string' ? url : undefined, meta: { line, col, source, type } });
       res.status(204).end();
     } catch {
       res.status(204).end();

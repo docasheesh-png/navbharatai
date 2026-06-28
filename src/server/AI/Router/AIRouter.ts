@@ -1,35 +1,45 @@
 import { AIProvider, AIProviderResponse, ProviderTelemetry } from './ProviderTypes';
 import { providerCooldownStore } from '../../lib/ProviderCooldownStore';
+import { getBreaker, allBreakerNames } from './CircuitBreaker';
 
-// Per-provider cooldown tracker (module-level singleton — shared across all requests)
-const cooldownUntil = new Map<string, number>();
+// P1.3 — per-provider state is now backed by a real CircuitBreaker (CLOSED / OPEN /
+// HALF_OPEN) instead of a flat cooldown map. The three router chokepoints below
+// (isOnCooldown / setCooldown / success) drive the breaker; the rest of the routing
+// control flow is unchanged, so this is a strict, break-proof superset of the old behaviour.
+//
 // Per-provider in-flight request counter (concurrency limiter)
 const inFlight = new Map<string, number>();
 const MAX_IN_FLIGHT = 8;
 
 function isOnCooldown(name: string): boolean {
-  return Date.now() < (cooldownUntil.get(name) || 0);
+  // OPEN → skip on the fast path. HALF_OPEN (cooldown elapsed) returns false so the
+  // next request flows through as a recovery trial probe.
+  return getBreaker(name).isBlocking();
 }
 
 function setCooldown(name: string, seconds: number) {
-  const until = Date.now() + seconds * 1000;
-  cooldownUntil.set(name, until);
-  console.log(`[CIRCUIT] ${name} on cooldown for ${seconds}s (until ${new Date(until).toISOString()})`);
+  // A failure → open the breaker (escalates on consecutive failures, capped).
+  const until = getBreaker(name).recordFailure(seconds * 1000);
+  console.log(`[CIRCUIT] ${name} OPEN for ~${seconds}s (until ${new Date(until).toISOString()}, state=${getBreaker(name).state()})`);
   // Phase 4.1 — share this cooldown with other Cloud Run instances (fire-and-forget).
   void providerCooldownStore.write(name, until);
 }
 
+/** A successful call → close the breaker and reset the failure streak. */
+function markProviderSuccess(name: string) {
+  getBreaker(name).recordSuccess();
+}
+
 /**
- * Phase 4.1 — merge cooldowns set by OTHER instances into our in-memory map.
- * Called by the background sync loop. Keeps the later (max) deadline so a longer
- * remote cooldown is honored; never shortens a local cooldown.
+ * Phase 4.1 — merge cooldowns set by OTHER instances into our breakers.
+ * Called by the background sync loop. Honors the later (max) deadline so a longer
+ * remote cooldown sticks; never shortens a local cooldown.
  */
 function mergeRemoteCooldowns(remote: Record<string, number>) {
   const now = Date.now();
   for (const [name, until] of Object.entries(remote)) {
     if (until <= now) continue; // expired remotely
-    const local = cooldownUntil.get(name) || 0;
-    if (until > local) cooldownUntil.set(name, until);
+    getBreaker(name).honorRemoteOpenUntil(until);
   }
 }
 
@@ -355,15 +365,21 @@ export function recordProviderLatency(name: string, latencyMs: number, failed: b
     count: cur.count + 1,
     errors: cur.errors + (failed ? 1 : 0),
   });
+  // P1.3 — success is the single chokepoint that closes the breaker (every router
+  // success path funnels through here with failed=false). Failures open it via setCooldown.
+  if (!failed) markProviderSuccess(name);
 }
 
-export function getProviderStats(): Record<string, { cooldownUntil: number; inFlight: number; avgLatencyMs: number; errorCount: number; requestCount: number }> {
+export function getProviderStats(): Record<string, { cooldownUntil: number; circuitState: string; consecutiveFailures: number; inFlight: number; avgLatencyMs: number; errorCount: number; requestCount: number }> {
   const result: Record<string, any> = {};
-  const allNames = new Set([...cooldownUntil.keys(), ...inFlight.keys(), ...latencyAccum.keys()]);
+  const allNames = new Set([...allBreakerNames(), ...inFlight.keys(), ...latencyAccum.keys()]);
   for (const name of allNames) {
     const acc = latencyAccum.get(name) || { total: 0, count: 0, errors: 0 };
+    const breaker = getBreaker(name).snapshot();
     result[name] = {
-      cooldownUntil: cooldownUntil.get(name) || 0,
+      cooldownUntil: breaker.openedUntil,
+      circuitState: breaker.state,
+      consecutiveFailures: breaker.consecutiveFailures,
       inFlight: inFlight.get(name) || 0,
       avgLatencyMs: acc.count > 0 ? Math.round(acc.total / Math.max(1, acc.count - acc.errors)) : 0,
       errorCount: acc.errors,

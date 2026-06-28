@@ -139,11 +139,19 @@
 - **Remaining:** confirm a `_migrations` ledger collection + startup hook are wired; document the runbook.
 - **Files:** `src/server/project/ProjectMigrator.ts`.
 
-### P1.3 — Circuit Breaker  🟡 PARTIAL → full
-- **Now:** only per-provider cooldown in `AIRouter.ts`. No real breaker (open/half-open/closed).
-- [ ] Add a `CircuitBreaker` class per provider: trip after N consecutive failures, half-open probe, auto-close.
-- [ ] Integrate into the router fallback path for all three universes.
-- **Files:** new `src/server/AI/Router/CircuitBreaker.ts`, `AIRouter.ts`.
+### P1.3 — Circuit Breaker  ✅ DONE (2026-06-28)
+- **Was:** only a flat per-provider cooldown in `AIRouter.ts` (every failure → fixed cooldown; no states, no recovery, no escalation).
+- [x] Added a real `CircuitBreaker` class (`src/server/AI/Router/CircuitBreaker.ts`) with CLOSED / OPEN / HALF_OPEN states:
+      a failure opens it; consecutive failures ESCALATE the cooldown (exponential backoff, capped at 5 min); once the
+      cooldown elapses it goes HALF_OPEN and the next request is a trial probe — success → CLOSED (reset), failure → OPEN again.
+- [x] Integrated into the router via the THREE existing chokepoints, so all three universes (FREE / PRO / PROFESSIONAL)
+      and every path (`route` / `routeRaced` / `routeStream`) get it with zero control-flow changes:
+      `isOnCooldown` → `breaker.isBlocking()`, `setCooldown` → `breaker.recordFailure()` (still shared cross-instance
+      via `ProviderCooldownStore`), and success (the single `recordProviderLatency(...,false)` chokepoint) → `breaker.recordSuccess()`.
+- [x] `getProviderStats()` now also reports `circuitState` + `consecutiveFailures` (additive; existing `cooldownUntil` kept so the Admin dashboard is unchanged).
+- **Strictly break-proof:** below the failure threshold the cooldown equals exactly the old value — a pure superset, never worse.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2750/2750 ✅ (29 new) · server boots + `/api/health` 200 ✅.
+- **Files:** `src/server/AI/Router/CircuitBreaker.ts` (+ `.test.ts`), `src/server/AI/Router/AIRouter.ts`.
 
 ### P1.4 — Idempotency & Deterministic Jobs  🟡 PARTIAL
 - [ ] Add idempotency keys to build-job creation (`BuildJobManager.ts`) so retries don't double-run.

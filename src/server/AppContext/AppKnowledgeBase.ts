@@ -112,6 +112,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'agentv3_build_continuity',
+    name: 'Build survives reload & tab switch (no lost work)',
+    path: 'NavBharatAI Pro v3.0 — automatic; the build keeps running and re-attaches on its own',
+    description: 'A running v3.0 build does NOT stop when you reload the page or switch tabs. The build keeps running on the server; when the page reloads or the tab becomes visible again, v3.0 automatically re-attaches to the live build and resumes streaming where it left off — no "Resume" click needed (the manual Resume button stays as a fallback). Your project is sticky too: the session id is saved per account, so a reload reuses the SAME workspace, memory and files (the next message continues the same project, never a blank one). Chat history is restored on reload, and if files ever look missing you can also use "Restore all files".',
+    howToUse: 'Just keep using NavBharatAI Pro v3.0 — if you refresh or switch tabs during a build, it reconnects by itself and continues. Your previous messages, plan, files and live preview come back automatically. If anything still looks missing, open History or Files and click "Restore all files".',
+    relatedFeatures: ['agentv3_builder', 'agentv3_restore_files', 'agentv3_files'],
+    keywords: ['reload', 'refresh', 'tab switch', 'tab change', 'build stopped', 'build band', 'reload pe band', 'tab badalne par', 'lost work', 'work gayab', 'memory lost', 'context lost', 'resume', 'reconnect', 'build continue', 'kaam wapas', 'session', 'page refresh', 'build ruk gaya'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'agentv3_restore_files',
     name: 'Restore all files (bring your whole project back)',
     path: 'NavBharatAI Pro v3.0 → header → History tab (or Files tab when empty) → "Restore all files" button',

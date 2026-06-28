@@ -4635,3 +4635,26 @@ Phase P2 (Resilience & Observability) now 100%: P2.1 tracing, P2.2 error trackin
 P2.3 bulkhead, P2.4 DR/backup — all DONE.
 Files: lib/FirestoreBackup.ts (+.test.ts), routes/health.ts (+.test.ts), server.ts,
 docs/DR_RUNBOOK.md, cloudbuild.yaml, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P3.2 Offline-First Runtime DONE (Phase P3 begins, 25%)
+
+Note: P3.1 (split 9,156→6,252-line App.tsx into <1,500) deferred — a large multi-PR
+refactor with high regression risk on the live app; not safe for a single autonomous
+cycle (safeguard #3 / rule #1). Picked P3.2 (self-contained, real, low-risk).
+
+P3.2 — offline-first, built SAFELY (break-proof on a payments app):
+- public/sw.js: network-first → cache-fallback for an ALLOWLIST of safe read-only GET
+  API endpoints (/api/agentv3/conversations, /api/agentv3/status). Online users always
+  get fresh data; cache served only when offline. New navbharat-api-v1 cache preserved
+  across SW activations (activate KEEP list updated).
+- src/lib/offlineQueue.ts (IndexedDB-backed): fire-and-forget writes that fail offline
+  are buffered + replayed on the 'online' event. Replay STRICTLY allowlisted to
+  idempotent/harmless endpoints (/api/analytics/event, /api/logs/error) — payments/
+  builds/auth NEVER queued. Injectable store+fetch for tests; never throws.
+- main.tsx: client error reporters routed through offlineQueue.postWithFallback;
+  installOfflineQueueFlush() drives reconnect replay.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2805/2805 PASS (9 new),
+production vite build OK, node --check public/sw.js OK (dist/sw.js has new logic).
+Runtime resilience (no new navigable surface) → no AppKnowledgeBase entry.
+Files: public/sw.js, src/lib/offlineQueue.ts (+.test.ts), src/main.tsx, UPGRADE_v3.0.md.

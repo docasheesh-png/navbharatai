@@ -5065,3 +5065,30 @@ re-seed that writes durable files back into the sandbox), a retry continues edit
 instead of starting from a blank 0.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2881/2881 PASS.
+
+## 2026-06-28 — OneShot fast lane (Item 1): cheap one-call build for simple apps (additive)
+
+Admin spec (merged understanding): add a fast+cheap OneShot lane INSIDE v3.0 — a complexity router at
+the entry sends simple apps to OneShot, complex apps to the current multi-agent loop (untouched).
+Additive, flag-gated, with the loop as the safety net → "v3.0 toot jayega" risk ~zero.
+
+New OneShotBuilder.ts (pure helpers + injected side-effects → 11 unit tests):
+- classifyForOneShot(startTier): gemini/haiku tier → one-shot; sonnet/opus → loop.
+- oneShotEnabled(): on by default; AGENTV3_ONESHOT=off instantly disables (rollback).
+- parseFileBlocks(): parses <<<FILE path>>> … <<<ENDFILE>>> blocks (survives ``` / JSON in code),
+  rejects absolute/traversal paths, de-dupes (last wins).
+- oneShotSystemPrompt/oneShotUserPrompt: one structured generation, no tools, no prose.
+- runOneShot(deps): generate → parse → writeFiles (batch) → startPreview (best-effort). Returns
+  ok:false (never throws) on no-files / model error → caller FALLS THROUGH to the agentic loop.
+
+Wired into routes/agentv3.ts BEFORE the escalation/loop block: for a SIMPLE new_build, try OneShot
+(one Haiku text call → write files via the same dispatcher so file_changed/onFileWrite/Firestore
+all fire → install + dev + update_preview). On success result is set (steps:1, billed via
+billedAmountUsd on the real Haiku usage, NEVER Opus) and the loop is skipped; on any failure it
+falls through to the existing loop unchanged. New oneShotDevPort(framework) for the preview port.
+BuildDiagnostics records ONESHOT_SUCCESS / ONESHOT_FALLBACK.
+
+Net: simple apps build in ONE cheap call (no Architect, sub-agents, Opus, or rebuild spiral —
+kills the "$26 failed todo"); complex apps keep the full loop; worst case = today's behavior.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2892/2892 PASS, boot:check PASS.

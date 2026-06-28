@@ -71,6 +71,8 @@ import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/G
 import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
+import { runOneShot, classifyForOneShot, oneShotEnabled } from '../AgentV3/OneShotBuilder';
+import { billedAmountUsd } from '../AgentV3/pricing';
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
@@ -389,6 +391,17 @@ export function selectBuildModel(tier: StartTier | undefined, powerOn: boolean):
   if (powerOn) return opusModel();
   if (tier === 'sonnet' || tier === 'opus') return sonnetModel();
   return haikuModel();
+}
+
+/** The dev-server port a framework's `npm run dev` listens on — used by the OneShot lane to
+ *  publish the preview after a one-shot build. Pure + exported for testing. */
+export function oneShotDevPort(framework: string): number {
+  if (/next|nuxt|nest|express|fastify|node/i.test(framework)) return 3000;
+  if (/angular/i.test(framework)) return 4200;
+  if (/astro/i.test(framework)) return 4321;
+  if (/static|vanilla/i.test(framework)) return 3000;
+  if (/fastapi|flask|django|python/i.test(framework)) return 8000;
+  return 5173; // vite-react / vue / svelte and the default
 }
 
 function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; onProviderError?: (name: string, err: unknown) => void }): TurnRunner {
@@ -1653,9 +1666,47 @@ export function registerAgentV3Routes(app: Express): void {
       // on, the build runs cheap-first and climbs the analyser's escalation path ONLY when
       // the objective gate (build completed?) fails — the last tier is always delivered as a
       // best-effort backstop, so the build never "breaks". `deliveredTier` feeds telemetry.
-      let result: Awaited<ReturnType<typeof runner.run>>;
+      let result: Awaited<ReturnType<typeof runner.run>> | undefined;
       let deliveredTier: StartTier = analysis?.startTier ?? (onlyOpus ? 'opus' : 'gemini');
-      if (analysis && shouldEscalateBuild(analysis, onlyOpus)) {
+
+      // ── ONE-SHOT FAST LANE (additive, flag-gated; the agentic loop is untouched) ──
+      // For a SIMPLE new-build app, try ONE cheap generation call first (no Architect, no
+      // sub-agents, no per-file round-trips, no Opus, no rebuild loop). On success the build is
+      // done. On ANY failure (no usable files / model error) it falls through to the agentic loop
+      // below — the safety net — so behavior is NEVER worse than today. AGENTV3_ONESHOT=off disables.
+      if (oneShotEnabled() && intent === 'new_build' && classifyForOneShot(analysis?.startTier)) {
+        let osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
+        const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
+          .filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
+        const os = await runOneShot({
+          prompt, framework, scaffoldPaths: scaffold,
+          generate: async (system, user) => {
+            const t = await new ClaudeClient(undefined, { maxRetries: 2 }).runTurn({
+              model: haikuModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
+            });
+            osUsage = t.usage;
+            return t.text;
+          },
+          writeFiles: async (files) => {
+            for (let i = 0; i < files.length; i++) {
+              await dispatcher.dispatch({ id: `oneshot-w${i}`, name: 'write_file', input: { path: files[i].path, content: files[i].content } }, 'frontend');
+            }
+          },
+          startPreview: async () => {
+            await dispatcher.dispatch({ id: 'oneshot-install', name: 'bash', input: { command: 'npm install' } }, 'frontend');
+            await dispatcher.dispatch({ id: 'oneshot-dev', name: 'bash', input: { command: 'npm run dev' } }, 'frontend');
+            await dispatcher.dispatch({ id: 'oneshot-preview', name: 'update_preview', input: { port: oneShotDevPort(framework) } }, 'frontend');
+          },
+          log: (msg) => events.emit({ type: 'narration', agent: 'architect', text: msg, ts: Date.now() }),
+        });
+        buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
+        if (os.ok) {
+          result = { ok: true, summary: os.summary, steps: 1, usage: osUsage, billedUsd: billedAmountUsd({ inputTokens: osUsage.inputTokens, outputTokens: osUsage.outputTokens }, powerLevelReq) };
+          deliveredTier = analysis?.startTier ?? 'haiku';
+        }
+      }
+
+      if (!result && analysis && shouldEscalateBuild(analysis, onlyOpus)) {
         const esc = await runWithEscalation(analysis.escalationPath, {
           buildOnTier: async (tier, attempt) => {
             if (attempt === 1) return runner.run(buildPrompt); // reuse the start-tier runner
@@ -1686,9 +1737,12 @@ export function registerAgentV3Routes(app: Express): void {
         if (esc.escalations > 0) {
           console.log(`[AGENTV3] delivered tier=${esc.tier} after ${esc.escalations} escalation(s), gatePassed=${esc.gatePassed}`);
         }
-      } else {
+      } else if (!result) {
+        // OneShot did not run or fell back → the full agentic loop (today's behavior).
         result = await runner.run(buildPrompt);
       }
+      // result is always set here (OneShot, escalation, or the loop above).
+      if (!result) result = await runner.run(buildPrompt);
 
       // SAFETY NET (the "fake build" fix): if a build/edit was expected to produce files but
       // produced ZERO — the cheap model replied ("I'm preparing a plan…") instead of building —

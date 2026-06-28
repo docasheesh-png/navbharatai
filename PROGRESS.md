@@ -4425,3 +4425,32 @@ Full suite: 2678 pass, same 8 pre-existing CodemodeExecutor/ts-morph failures, n
 API mapping confirmed against the claude-api skill: Opus 4.8 effort =
 output_config.effort (low|medium|high|xhigh|max), GA, no beta header; budget_tokens
 is rejected (400) on Opus 4.8 — adaptive thinking + effort only.
+
+## 2026-06-28 — forensic root cause: v3.0 "cannot build an app" → readiness gate false-fail
+
+Four parallel forensic audits (build-path, gates, sandbox, model-provider) of why v3.0
+still couldn't build. Admin confirmed ANTHROPIC_API_KEY is a REAL Anthropic key (no proxy),
+which rules out the provider-degradation theory and points squarely at:
+
+**ROOT CAUSE:** the mandatory readiness gate (#459, AgentRunner.ts:288-301 → ToolDispatcher
+.assessBuildReadiness → evaluate scan) judges an INCOMPLETE in-memory project graph. The graph
+is populated ONLY by the indexing write-tools (write_file/edit_file/apply_patch). Files seeded by
+the actuator scaffold or created via bash/npm — and the index.html entry — never enter the graph.
+So analyzeArchitecture flags their imports as "unresolved import" and analyzeRunnability claims
+"no index.html" — both HARD blockers — and the gate downgrades a real, working build to ok:false
+("build did not complete"). warmIndexFiles only ran in EDIT mode, never on a fresh build, so fresh
+builds tripped this almost every time. The files existed; the verdict was the lie.
+
+**FIX (this PR):** ToolDispatcher.assessBuildReadiness() now calls a new seedGraphFromWorkspace()
+BEFORE the evaluate scan — it reads the REAL workspace file tree (code + index.html + key configs,
+excluding node_modules/.git/dist/build/.next/__pycache__, capped 500 files × 250KB) and indexes
+them into the project graph. The gate now judges the app that actually exists, so scaffold/bash
+files resolve and runnability sees index.html. Best-effort: never throws, already-indexed files
+keep their write-tool facts. Test added asserting the graph is seeded from actuator-only files.
+
+Other confirmed (separate follow-ups): #480's 0.0.0.0 host-bind + public-host health-check fix
+landed in the LEGACY actuator (src/server/EngineerAI/) not the v3.0 one (src/server/AgentV3/
+sandbox/EngineerAI/) — can cause blank/502 previews; and buildActuator() silently falls back to
+LocalActuator when E2B_API_KEY is missing. These are preview-quality issues, tracked next.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2687/2687 PASS.

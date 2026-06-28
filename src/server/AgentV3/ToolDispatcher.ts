@@ -165,11 +165,44 @@ export class ToolDispatcher {
    */
   async assessBuildReadiness(): Promise<ReadinessReport> {
     try {
+      // CRITICAL — seed the project graph from the REAL workspace before judging it.
+      // The in-memory graph is otherwise populated ONLY by the indexing write-tools
+      // (write_file / edit_file / apply_patch); files seeded by the actuator scaffold
+      // or created via bash/npm — and the index.html entry — never enter the graph.
+      // The architecture pass then flags their imports as "unresolved import" and
+      // runnability claims "no index.html", both HARD blockers, so the gate falsely
+      // reports a real, working build as NOT READY ("build did not complete").
+      // Reading the actual file tree first makes the gate judge the app that exists.
+      await this.seedGraphFromWorkspace();
       await this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect');
       return this.lastReadiness ?? { score: 100, ready: true, blockers: [], warnings: [] };
     } catch {
       return { score: 100, ready: true, blockers: [], warnings: [] };
     }
+  }
+
+  /**
+   * Index the real workspace files into the project graph so a graph-based scan
+   * (architecture / runnability) sees the actual app, not just files written via
+   * the indexing tools. Best-effort: never throws, capped, skips heavy/generated
+   * dirs. Already-indexed files are left untouched (write-tool facts win).
+   */
+  private async seedGraphFromWorkspace(): Promise<void> {
+    try {
+      const mem = getWorkspaceMemory(this.workspaceId);
+      const tree = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+      const EXCLUDE = /(^|\/)(node_modules|\.git|dist|build|\.next|__pycache__|coverage)\//;
+      // Code (for import resolution) + index.html (runnability/SEO) + key configs.
+      const INDEXABLE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|astro|html?|css|scss|json)$/i;
+      const known = new Set(mem.graph().files);
+      const targets = tree
+        .filter((p) => !EXCLUDE.test(p) && INDEXABLE.test(p) && !known.has(p))
+        .slice(0, 500);
+      for (const p of targets) {
+        const content = await this.actuator.readFile(this.workspaceId, p).catch(() => '');
+        if (typeof content === 'string' && content.length <= 250_000) mem.indexFile(p, content);
+      }
+    } catch { /* best-effort pre-seed — never blocks the gate */ }
   }
 
   /**

@@ -267,6 +267,22 @@ export function maxBuildSeconds(): number {
 }
 
 /**
+ * Resolve `p`, but REJECT with a labelled error if it has not settled within `ms`. Used to bound the
+ * request-setup calls (intent classify, plain chat, vision describe, monthly-cap) that run BEFORE the
+ * 12-min build deadline timer is armed — without this, a single stalled provider/Firestore call hangs
+ * the whole HTTP request forever (the deadline never starts). Pure + exported for testing.
+ */
+export function raceTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
+/**
  * Check whether a user is at or over their monthly spend ceiling. Returns the cap and
  * the current monthly total so the caller can return an honest, specific message.
  * Best-effort: a Firestore read failure (or no userId) NEVER blocks a build — we fail
@@ -1073,7 +1089,10 @@ export function registerAgentV3Routes(app: Express): void {
     // Per-user monthly spend ceiling (R1 §3.1). When the admin has set a cap and this user
     // has reached it this month, deny new builds with an honest, specific message (HTTP 402).
     // Disabled by default and fails open on a store error, so it never locks users out wrongly.
-    const monthly = await checkMonthlyCap(userId);
+    // Bounded (5s) so a degraded Firestore can't stall the build at startup, before the deadline
+    // timer is armed — fails OPEN on timeout, exactly like the store-error path.
+    const monthly = await raceTimeout(checkMonthlyCap(userId), 5_000, 'checkMonthlyCap')
+      .catch(() => ({ allowed: true, cap: 0, spent: 0 }));
     if (!monthly.allowed) {
       res.status(402).json({
         error: `Monthly usage limit reached (≈$${monthly.spent.toFixed(2)} of $${monthly.cap.toFixed(2)}). ` +
@@ -1149,7 +1168,10 @@ export function registerAgentV3Routes(app: Express): void {
       send({ type: 'narration', agent: 'architect', text: `📎 Reading ${rawAttachments.length} file(s)…`, ts: Date.now() });
       try {
         const docs = await buildDocumentContext(rawAttachments);
-        const vis = await describeVisionAttachments(rawAttachments, { useClaude: onlyOpus });
+        // Bounded (8s) — a stalled vision provider must not hang the request before the deadline
+        // timer is armed; on timeout we proceed without the image description.
+        const vis = await raceTimeout(describeVisionAttachments(rawAttachments, { useClaude: onlyOpus }), 8_000, 'describeVisionAttachments')
+          .catch(() => '');
         const extracted = [docs, vis].filter(Boolean).join('\n\n');
         // Prompt-injection defense (R1 §3.3): the user may have innocently uploaded a document
         // or repo that carries an injection payload. Fence the extracted content as untrusted
@@ -1172,9 +1194,15 @@ export function registerAgentV3Routes(app: Express): void {
     let intent = classifyIntent(prompt);
     try {
       const freeRouter = AIRouterManager.getRouter('free');
-      intent = await classifyIntentSmart(
-        prompt,
-        (p) => freeRouter.route(p, 'You are a classifier. Reply with one word only.').then((r) => r.response.content),
+      // Bounded (6s) — this LLM upgrade runs before the deadline timer is armed; a stalled free
+      // provider must not hang the request. On timeout the keyword classification (above) stands.
+      intent = await raceTimeout(
+        classifyIntentSmart(
+          prompt,
+          (p) => freeRouter.route(p, 'You are a classifier. Reply with one word only.').then((r) => r.response.content),
+        ),
+        6_000,
+        'classifyIntentSmart',
       );
     } catch { /* LLM upgrade is best-effort — keyword result stands */ }
     const isPlainChatTurn = intent === 'chat';
@@ -1188,12 +1216,19 @@ export function registerAgentV3Routes(app: Express): void {
         const chatPrompt = attachmentContext
           ? `${prompt}\n\nThe user attached file(s); here is the extracted content:\n\n${attachmentContext}`
           : prompt;
-        const { response } = await chatRouter.route(
-          chatPrompt,
-          LANGUAGE_RULE + '\n\n' +
-            "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
-            "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
-            "mention which model you are.\n\n" + CREATOR_IDENTITY,
+        // Bounded (30s) — the plain-chat reply runs on an early-exit path BEFORE the deadline timer
+        // is armed; without this a stalled provider hangs the whole request forever. On timeout the
+        // catch below falls through to the normal build path so the user still gets an answer.
+        const { response } = await raceTimeout(
+          chatRouter.route(
+            chatPrompt,
+            LANGUAGE_RULE + '\n\n' +
+              "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
+              "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
+              "mention which model you are.\n\n" + CREATOR_IDENTITY,
+          ),
+          30_000,
+          'chatRouter.route',
         );
         const reply = response.content + providerDebugTag(response.provider);
         // Record the turn in project memory so iterative context is preserved

@@ -5333,25 +5333,15 @@ build. No AppKnowledgeBase entry (bug fix to an existing surface, not a new feat
 
 Gate: frontend tsc 0, server tsc 0, vitest 2933/2933 PASS (+7), boot:check PASS.
 
-## 2026-06-28 — P-BRE.3 Structured Logging (build-correlation core) DONE
+## 2026-06-28 — Audit P0-A: bound the request-setup calls that hang BEFORE the build deadline is armed
 
-New src/server/logger.ts: dependency-free structured Logger (no Pino/Winston) emitting one
-Cloud Logging JSON line per log {severity, message, timestamp, traceId?, ...context, ...meta}.
-Level-filtered by LOG_LEVEL (debug<info<warn<error; prod→info, dev→debug via pure
-resolveLogLevel). traceId pulled from the P2.1 tracer's active span → logs ↔ traces
-auto-correlate. Never throws.
+The exhaustive pipeline audit (30 agents, 22 confirmed findings) identified the worst category: four
+calls run during request setup, BEFORE #541's 12-min deadline timer is created — so if any stalls, the
+whole HTTP request hangs TRULY forever (the deadline never starts). Fix: new raceTimeout(p, ms, label)
+helper (pure, 4 tests) wraps each, all fail-safe: (1) checkMonthlyCap (5s, fails OPEN like its error
+path); (2) describeVisionAttachments (8s → ''); (3) classifyIntentSmart (6s → keyword fallback already
+computed); (4) chatRouter.route plain-chat reply (30s → the existing catch falls through to the build
+path). This closes the "stuck at 'setting up workspace…' forever" hole for slow providers / degraded
+Firestore. (First of the audit's P0 fixes; readiness-gate parallelize + E2B file-op timeouts next.)
 
-Build correlation via AsyncLocalStorage: withLogContext({jobId,...}, fn) propagates
-correlation fields to every log inside. AppMakerOrchestrator.runBuildJob wrapped in
-withLogContext({jobId, namespace}) → every structured build log carries jobId ("filter all
-logs for jobId X" works). Converted the build-path log sites (spec's named files):
-BuildManager.ts (10), generator/ExecutionOrchestrator.ts (2), AppMakerOrchestrator.ts.
-
-Incremental (noted): the broad legacy console.* migration across the 6000-line server.ts is
-mechanical cleanup (mostly debug prints), done lazily — the high-value build-correlation
-core is complete and used now.
-
-VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2882/2882 PASS (12 new logger
-tests: level filtering, severity mapping, JSON shape, ALS context propagate/merge/no-leak,
-never-throws), server bundles. Backend infra → no AppKnowledgeBase entry.
-Files: src/server/logger.ts (+.test.ts), AppMakerLab/AppMakerOrchestrator.ts, BuildManager.ts, generator/ExecutionOrchestrator.ts, UPGRADE_v3.0.md.
+Gate: frontend tsc 0, server tsc 0, vitest 2937/2937 PASS (+4), boot:check PASS.

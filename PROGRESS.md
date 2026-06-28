@@ -5203,3 +5203,23 @@ the memory gap-list (1 project context, 2 conversation, 3 cross-instance hydrati
 5 smarter recall, 6 rolling summary) is COMPLETE — v3.0 memory now resumes a session like Claude does.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2914/2914 PASS (+3 new), boot:check PASS.
+
+## 2026-06-28 — Fix: v3.0 build "restart from 0" loop (watchdog false-positive + missing heartbeat)
+
+User report: a simple to-do app "restarts" ~10 times — works/loads for ~2 min, then the UI goes back to
+"Setting up your workspace…" and starts over (History showed 6+ runs). Root cause (two real bugs in the
+client stall-watchdog path):
+1. useAgentV3Build.start()'s inline NDJSON reader updated the UI but NEVER refreshed lastEventTsRef
+   (pumpStream did, at line 122). So even though the /chat stream sends an event/ping every 15s, the
+   watchdog saw the timestamp frozen at mount time and fired at its 100s "silence" threshold (~the 2 min
+   the user saw). With the server build still running, it aborted + resume()d → resume() does
+   setState(initialAgentV3State()) → the UI blanks → "Setting up your workspace…" reappears = "0 se start".
+2. The /api/agentv3/attach (resume) endpoint had NO heartbeat (unlike /chat), so the reconnected stream
+   went silent again during the next quiet build phase (a long model/one-shot call) → watchdog re-fired →
+   reconnect loop, repeating indefinitely.
+Fix A (client): start() now resets lastEventTsRef at build start AND updates it on every event (incl. the
+15s pings), so the watchdog only fires on a GENUINELY dead stream. Fix B (server): /attach sends the same
+15s ping keepalive and clears it on close. Now a healthy long build streams uninterrupted; the watchdog
+remains as the real safety net for a truly dead stream.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2914/2914 PASS, boot:check PASS.

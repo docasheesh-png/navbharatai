@@ -5033,3 +5033,18 @@ GET /api/agentv3/diagnostics (owner-scoped) returns the last build's report. Cli
 button in the v3.0 header downloads it as JSON. AppKnowledgeBase agentv3_build_report entry added.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2881/2881 PASS, boot:check PASS.
+
+## 2026-06-28 — Opus ONLY in power mode (admin rule, supersedes 2026-06-27)
+
+Admin: power-off builds must NEVER use Opus, no matter what — ladder is Haiku → Sonnet (max) in
+normal mode; Opus only when the Power toggle is on. selectBuildModel already obeyed this; the two
+violators were the escalation paths:
+- Empty-build retry forced model = resolveModel(true) (Opus) "even in normal mode" (the 2026-06-27
+  rule). Now resolveModel(onlyOpus) → Sonnet in normal mode, Opus only in power. Effort no longer
+  forces the Opus ceiling in normal mode. Retrying a simple app's Haiku attempt on Sonnet is still
+  a real step up, and it stops a failed build from ever burning the most-expensive model (the
+  "$26 failed todo" driver).
+- Cost-ladder escalation (P3, dormant by default) used resolveModel(tier === 'opus'); now
+  resolveModel(tier === 'opus' && onlyOpus) → caps at Sonnet in normal mode.
+
+Gate: server tsc 0, vitest 2881/2881 PASS, boot:check PASS.

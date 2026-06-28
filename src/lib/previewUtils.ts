@@ -166,8 +166,10 @@ export const PREVIEW_BOOTSTRAP = `
   window.__nbLoading=true;
   (async function(){
     try{
-      // Load Babel if primary CDN (<script src>) failed — try unpkg fallback
-      if(typeof Babel==='undefined'){await loadScript('https://unpkg.com/@babel/standalone@7.26.4/babel.min.js');}
+      // Primary compiler is self-hosted (same-origin <script src> in <head>). If that
+      // failed, fall back through multiple CDNs before giving up.
+      var babelCdns=['https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js','https://unpkg.com/@babel/standalone@7.26.4/babel.min.js','https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js'];
+      for(var bi=0;bi<babelCdns.length&&typeof Babel==='undefined';bi++){await loadScript(babelCdns[bi]);}
       if(typeof Babel==='undefined'){window.__nbLoading=false;fail('Could not load the preview compiler (network blocked?). Check internet connection.');return;}
       var bare;try{bare=collectBare();}catch(ce){bare=[];}
       forced.forEach(function(s){if(bare.indexOf(s)<0)bare.push(s);});
@@ -473,10 +475,13 @@ export function buildSourceAppPreview(f: FileSystem): string {
   // closing the tag early when file content contains that string.
   const sj = (v: unknown) => JSON.stringify(v).replace(/<\//g, '<\\/');
 
+  // Load the compiler from NavBharatAI's OWN origin first (self-hosted, never
+  // third-party-CDN-blocked); the bootstrap falls back to CDNs if this 404s.
+  const ORIGIN = (typeof location !== 'undefined' && location.origin) ? location.origin : '';
   return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
     + PREVIEW_HARNESS
     + '<script type="importmap">' + importmap + '</' + 'script>'
-    + '<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js"></' + 'script>'
+    + '<script src="' + ORIGIN + '/vendor/babel.min.js"></' + 'script>'
     + '</head><body>' + bodyInner
     + '<script>window.__FILES=' + sj(srcFiles) + ';window.__ENTRY=' + sj(entry) + ';window.__IMAP=' + sj(imapEntries) + ';</' + 'script>'
     + '<script>' + PREVIEW_BOOTSTRAP + '</' + 'script>'

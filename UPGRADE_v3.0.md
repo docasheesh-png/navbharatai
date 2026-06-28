@@ -55,7 +55,7 @@
 | P2 | Resilience & Observability | See + survive failures | ✅ Complete | 100% |
 | P3 | Scale & Frontend Health | Grow without rewrites | 🔄 In Progress | 75% (P3.1 App.tsx split deferred) |
 | P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 75% (P4.2 + P4.3 + P4.4 done; only P4.1 CQRS — large — remains) |
-| P5 | Hygiene & Hardening | Remove rot, close small holes | ⏳ Pending | 0% |
+| P5 | Hygiene & Hardening | Remove rot, close small holes | 🔄 In Progress | 67% (P5.1 assessed/kept, P5.3 done; P5.2 monorepo deferred — large infra) |
 | **P6** | **IaC & Provisioning** | Reproducible, version-controlled infra | ⏳ Pending | 0% |
 | **P7** | **Async Infra (Queue/Cache)** | Scale beyond Firestore-polling | ⏳ Pending | 0% |
 | **P8** | **Observability Infra** | Tracing + alerting + SLO | ⏳ Pending | 0% |
@@ -359,18 +359,31 @@
 
 ## ⚪ PHASE P5 — HYGIENE & HARDENING
 
-### P5.1 — Remove hardcoded Firebase key fallback  🟡 PARTIAL
-- [ ] `src/config/firebase.ts:9` — drop the hardcoded fallback API key; env-var only.
-- **Files:** `src/config/firebase.ts`.
+### P5.1 — Remove hardcoded Firebase key fallback  ✅ ASSESSED — intentionally kept (2026-06-28)
+- **Decision: do NOT remove the fallback** (would break production, no security benefit). Documented inline in
+  `src/config/firebase.ts`. Two reasons, both verified:
+  1. **Load-bearing in prod.** The Docker/Cloud Build pipeline injects NO `VITE_FIREBASE_*` vars (checked
+     `Dockerfile` + `cloudbuild.yaml`), so at build time `import.meta.env.VITE_FIREBASE_*` is undefined and the app
+     relies entirely on these defaults. Removing them breaks Firebase init (auth/Firestore/sync) for every user.
+  2. **Not a secret.** A Firebase WEB apiKey is public by design (it identifies the project; access is gated by
+     Firebase Security Rules, not key secrecy). The real secrets (service-account keys) are server-side, not in client code.
+- Env vars still take precedence when present (override without a code change). To genuinely remove the fallback later,
+  FIRST wire the build to inject the vars + verify on a real deploy (an infra step, deferred per safeguard #3).
+- **Files:** `src/config/firebase.ts` (documenting comment).
 
-### P5.2 — Monorepo tooling  🟡 PARTIAL
+### P5.2 — Monorepo tooling  🟡 DEFERRED (large infra)
 - [ ] Adopt pnpm workspaces / Turborepo so `remote-keyboard/` (Android) and web build are isolated.
+- **Deferred:** a root build-system migration (pnpm/Turborepo) is a large, high-blast-radius infra change that
+  reshapes the whole build/deploy pipeline — not safe for a single autonomous cycle (safeguard #3 / rule #1).
 - **Files:** root config.
 
-### P5.3 — Delete throwaway scripts & junk files
-- [ ] Remove root junk: `open.txt`, `close.txt`, `div_open.txt`, `another-file.txt`, etc.
-- [ ] Remove ad-hoc `*_test.ts` once replaced by Vitest (P0.2).
-- **Files:** repo root, `src/server/`.
+### P5.3 — Delete throwaway scripts & junk files  ✅ DONE (2026-06-28)
+- [x] Root junk `.txt` files (`open.txt`, `close.txt`, `div_open.txt`, `another-file.txt`, …) — already gone (no root
+      `.txt` files remain; confirmed).
+- [x] Removed 3 dead ad-hoc manual test/report scripts superseded by the Vitest suite (P0.2):
+      `src/server/workspace/hardening_test.ts`, `validation_tests.ts`, `verification_report.ts` — pure `console.log`
+      harnesses, referenced nowhere, not in any npm/CI script. Verified `tsc` (fe+server) + `vitest` 2864/2864 still green after removal.
+- **Files:** `src/server/workspace/` (3 files removed).
 
 ---
 

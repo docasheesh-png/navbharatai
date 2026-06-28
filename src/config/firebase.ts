@@ -1,7 +1,19 @@
 /// <reference types="vite/client" />
 // Firebase configuration — reads from Vite env vars with compile-time fallbacks.
 // To override locally: create .env.local with VITE_FIREBASE_* values (gitignored).
-// For production: set substitution variables in cloudbuild.yaml.
+//
+// P5.1 (assessed 2026-06-28): the hardcoded fallbacks below are INTENTIONALLY KEPT, not a
+// leaked secret. Two reasons:
+//  1) They are LOAD-BEARING in production. The Docker/Cloud Build pipeline does NOT inject
+//     any VITE_FIREBASE_* vars, so at build time import.meta.env.VITE_FIREBASE_* is undefined
+//     and the app relies entirely on these defaults. Removing them would break Firebase init
+//     (auth, Firestore, sync) for every user. They may ONLY be removed AFTER the build is
+//     wired to inject the vars — and verified on a real deploy.
+//  2) A Firebase WEB apiKey is public by design — it identifies the project, it is not a
+//     secret; access is controlled by Firebase Security Rules, not key secrecy. So there is
+//     no security benefit to hiding it. (Server-side service-account keys are the real
+//     secrets and are NOT in client code.)
+// The env vars still take precedence when present (override without a code change).
 
 // Always use Firebase's own authDomain. Using a custom domain (navbharatai.com)
 // requires a server-side /__/auth proxy AND the domain to be in Firebase's

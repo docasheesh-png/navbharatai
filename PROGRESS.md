@@ -4853,3 +4853,28 @@ server bundles. Backend sync infra (no new user surface) → no AppKnowledgeBase
 Phase P4 at 75%: P4.2 event replay, P4.3 AST consolidation, P4.4 replication all DONE.
 Only P4.1 (CQRS — large refactor of the legacy AppMakerLab path) remains.
 Files: project/SyncMerge.ts (+.test.ts), routes/sync.ts, docs/SYNC_CONSISTENCY.md, UPGRADE_v3.0.md.
+
+## 2026-06-28 — Phase P5 Hygiene: P5.1 assessed/kept + P5.3 done (P5 → 67%)
+
+P5.1 (hardcoded Firebase key fallback) — ASSESSED, intentionally KEPT (do NOT remove):
+- Load-bearing in prod: verified the Docker/Cloud Build pipeline injects NO VITE_FIREBASE_*
+  vars, so at build time import.meta.env.VITE_FIREBASE_* is undefined and the app relies
+  entirely on these defaults — removing them would break Firebase init (auth/Firestore/sync)
+  for every user.
+- Not a secret: a Firebase WEB apiKey is public by design (access gated by Firebase Security
+  Rules, not key secrecy); real secrets are server-side service-account keys, not in client.
+- Documented the rationale inline in src/config/firebase.ts. Env vars still take precedence
+  when present. Genuine removal requires wiring the build to inject vars FIRST (infra,
+  deferred per safeguard #3). This is the correct engineering decision, not avoidance.
+
+P5.3 (delete throwaway scripts/junk) — DONE:
+- Root junk .txt files already gone (confirmed none remain).
+- Removed 3 dead ad-hoc manual test/report scripts (console.log harnesses superseded by the
+  Vitest suite, referenced nowhere, not in any npm/CI script):
+  src/server/workspace/hardening_test.ts, validation_tests.ts, verification_report.ts.
+
+P5.2 (monorepo tooling pnpm/Turborepo) — DEFERRED: large, high-blast-radius build-system
+migration; not safe for a single autonomous cycle.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2864/2864 PASS after removal.
+Files: src/config/firebase.ts (comment), src/server/workspace/{hardening_test,validation_tests,verification_report}.ts (removed), UPGRADE_v3.0.md.

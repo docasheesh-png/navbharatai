@@ -72,7 +72,7 @@ import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from 
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { runOneShot, classifyForOneShot, oneShotEnabled } from '../AgentV3/OneShotBuilder';
-import { buildProjectContext } from '../AgentV3/ProjectContext';
+import { buildProjectContext, extractConversationSummary } from '../AgentV3/ProjectContext';
 import { billedAmountUsd } from '../AgentV3/pricing';
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
@@ -1585,6 +1585,21 @@ export function registerAgentV3Routes(app: Express): void {
         const projectCtx = buildProjectContext({ files: tree, projectMap: ctxMem.projectMap(), recentRequests });
         if (projectCtx) buildPrompt = `${projectCtx}\n\n---\n\n${buildPrompt}`;
       } catch { /* project context is best-effort — never blocks a build */ }
+
+      // MEMORY FIX 2 (Claude-level conversation memory): load the most recent PRIOR build transcript
+      // for THIS workspace from the durable conversation store and prepend a short "User: … / You: …"
+      // recap, so the model remembers what was discussed/done (not just the files). This is what
+      // turns "continue" from amnesia into a real resume. Best-effort — never blocks the build.
+      try {
+        const store = getConversationStore();
+        const recent = await store.listByUser(userId ?? 'anon', 10);
+        const prior = recent.find((r) => r.workspaceId === workspaceId);
+        if (prior) {
+          const full = await store.get(prior.id);
+          const recap = extractConversationSummary(full?.messages ?? [], 8);
+          if (recap) buildPrompt = `[CONVERSATION SO FAR — your memory of this session]\n${recap}\n\n---\n\n${buildPrompt}`;
+        }
+      } catch { /* conversation recall is best-effort — never blocks a build */ }
 
       // Continual learning (Layer 79): recall the relevant lessons recorded by
       // the Layer 57 reflection of earlier builds in this session (and any past

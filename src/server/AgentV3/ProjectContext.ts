@@ -47,3 +47,37 @@ export function buildProjectContext(input: ProjectContextInput): string {
   lines.push('Use this context as your memory. Do NOT ask "what would you like me to continue with" — read the files above and CONTINUE the same project. If the user just said "continue", resume building/fixing exactly this project from where it was left.');
   return lines.join('\n');
 }
+
+/**
+ * Summarize a prior build transcript (raw Anthropic messages) into a short, readable
+ * "User: … / You: …" recap of the last `maxTurns` turns — so the model REMEMBERS the
+ * conversation (what was asked, what it did) on a follow-up. Tool calls are noted compactly;
+ * tool results are skipped (noisy). Pure + exported for testing.
+ */
+export function extractConversationSummary(messages: unknown[], maxTurns = 8): string {
+  const turns: string[] = [];
+  for (const m of messages ?? []) {
+    if (!m || typeof m !== 'object') continue;
+    const role = (m as { role?: unknown }).role;
+    const content = (m as { content?: unknown }).content;
+    let text = '';
+    if (typeof content === 'string') {
+      text = content;
+    } else if (Array.isArray(content)) {
+      const parts: string[] = [];
+      for (const b of content) {
+        if (b && typeof b === 'object') {
+          const bb = b as { type?: string; text?: string; name?: string };
+          if (bb.type === 'text' && typeof bb.text === 'string') parts.push(bb.text);
+          else if (bb.type === 'tool_use' && bb.name) parts.push(`[called ${bb.name}]`);
+          // tool_result blocks are intentionally skipped — too noisy for a recap.
+        }
+      }
+      text = parts.join(' ');
+    }
+    text = text.replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    turns.push(`${role === 'user' ? 'User' : 'You'}: ${text.slice(0, 280)}`);
+  }
+  return turns.slice(-maxTurns).join('\n');
+}

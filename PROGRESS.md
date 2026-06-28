@@ -5136,3 +5136,16 @@ Cloud Run instance, then prepend the context. Best-effort, never blocks a build.
 (the durable file list) gives the model memory even when the in-process episodes were lost.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2899/2899 PASS, boot:check PASS.
+
+## 2026-06-28 — Claude-level memory, Fix 2: prior conversation recap into the model
+
+Gap #2: the model never saw the prior conversation (only the new prompt), so it forgot what was
+discussed/decided. Fix: new extractConversationSummary(messages, maxTurns) (pure, 3 tests) recaps a
+prior transcript into "User: … / You: …" lines (notes tool calls, skips tool_result noise, caps to
+last N turns). Wired into routes/agentv3.ts: load the most recent PRIOR conversation for THIS
+workspace from the durable ConversationStore (listByUser → match workspaceId → get full transcript),
+recap it, and prepend "[CONVERSATION SO FAR — your memory of this session]" before the build prompt.
+Best-effort, never blocks. Together with Fix 1 (file/project context) the agent now resumes with both
+the project state AND the conversation memory.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2902/2902 PASS, boot:check PASS.

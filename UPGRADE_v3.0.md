@@ -63,6 +63,7 @@
 | **P-CGE** | **Code Generation Engine Gaps** | Incremental gen, test gen, docs, contracts, lint-fix | ⏳ Pending | 0% |
 | **P-PME** | **Project Management Engine Gaps** | Cross-session memory, release notes, debt tracker, AI estimator | ⏳ Pending | 0% |
 | **P-DEV** | **Dev Environment Gaps** | LSP navigation, real debugger, crash recovery, merge editor, pkg manager | ⏳ Pending | 0% |
+| **P-BRE** | **Build & Runtime Engine Gaps** | Tracing, incremental builds, structured logs, smoke tests, remote cache | ⏳ Pending | 0% |
 
 ---
 
@@ -270,6 +271,160 @@
 - [ ] **Chaos + load testing:** k6/Locust load tests + a basic fault-injection check in CI.
 - **Acceptance:** static assets edge-cached; keys in KMS; a load test runs in CI.
 - **Files:** infra config, `server.ts`, `.github/workflows/`.
+
+---
+
+## 🔵 PHASE P-BRE — BUILD & RUNTIME ENGINE GAPS
+> From the 300-component Build & Runtime Engine audit (2026-06-28). Already-strong items not listed.
+> Only PARTIAL → Full and MISSING items, priority-ordered.
+> Scope note: native compilers (Java/Go/Rust/Swift/C/C++), LLVM, binary generators, Webpack/Parcel/Rspack,
+> K8s/Podman/Hypervisor/GPU runtimes, Deno/Bun/JVM/.NET/PHP — all ⬜ N/A by design (managed Node.js +
+> Cloud Run + E2B sandbox stack). Items below are relevant to the AI app maker context only.
+
+### ✅ Build & Runtime Already Strong (do not redo)
+- **Orchestration**: AppMakerOrchestrator.ts (top-level), BuildManager.ts (npm build lifecycle),
+  RuntimeKernel.ts (KernelState: STARTING→RUNNING→STOPPED, graceful shutdown), BuildJobManager.ts
+  (full job lifecycle QUEUED→PREVIEW_READY with LocalFile + Firestore job stores), TaskScheduler.ts (DAG batch execution).
+- **Graph/Intelligence**: ModuleGraph.ts (DAG validation + topological ordering), GraphGenerator.ts
+  (file dependency graph), FileAnalyzer.ts (TypeScript AST source scanner),
+  RepositoryIntelligenceEngine.ts (project structure scanner), DependencyResolver.ts.
+- **Code Generation**: FrontendGenerationEngine, BackendGenerationEngine, DatabaseGenerationEngine,
+  DefaultGenerationEngine; BlueprintCompiler.ts (AST compiler); EngineRegistry + EngineDispatcher;
+  PatchAggregator → PatchToWorkspaceBridge → WorkspaceMutationEngine (ACID 3-phase).
+- **Bundler**: Vite 6 (HMR, Fast Refresh, tree-shaking, code splitting, asset bundling, CSS optimizer),
+  esbuild (AOT transpiler + JS minifier + server bundle); vite.config.ts with React plugin.
+- **Artifacts & Manifests**: BuildManifestGenerator.ts, ManifestMapper.ts, DeploymentArtifactBuilder.ts
+  (SHA256 checksums), TemplateRegistry, ViteReactProvider.
+- **Event Bus**: InProcessEventBus.ts (pub/sub, BUILD_STARTED/COMPLETED/FAILED events),
+  EventHistoryStore.ts (500-entry audit per namespace).
+- **Checkpoints**: CheckpointManager.ts + CheckpointStorage.ts (ACID save/restore across build phases).
+- **Auto-Repair**: AutoRepairEngine.ts, FailureClassifier.ts (14 error types), RootCauseAnalyzer.ts,
+  RepairPlanner.ts, BuildVerifier.ts.
+- **Deployment**: DeploymentEngine.ts + DeploymentPlanner.ts + DeploymentValidator.ts +
+  DeploymentRollbackManager.ts + DeploymentStateManager.ts + DeploymentAuditManager.ts.
+- **Sandbox/Process**: SandboxManager.ts (spawn-based isolation, NODE_OPTIONS --max-old-space-size),
+  PortManager.ts (ports 3001-4000), PreviewRunner.ts (PreviewSession, auto-restart on crash),
+  PreviewHealthChecker.ts (HTTP health checks), SubprocessManager via child_process.
+- **Observability**: ObservabilityManager.ts (latency tracking, crash logging), TokenUsageManager.ts.
+- **Config/Env**: dotenv + server.ts (env var loading, .env/.env.example fallback),
+  Feature flags runtime, NODE_ENV isolation.
+- **CI/CD**: cloudbuild.yaml (Cloud Build → Cloud Run, Docker layer caching), Dockerfile (Node.js 22),
+  Package manager detection (npm/pnpm/yarn in BuildEvaluator.ts).
+
+### P-BRE.1 — Distributed Tracing / OpenTelemetry  ❌ MISSING  [HIGH — observability]
+- `ObservabilityManager.ts` captures basic latency + crashes, but there is no distributed trace spanning
+  the full build pipeline (AppMakerOrchestrator → TaskScheduler → EngineDispatcher → FrontendEngine → PatchAggregator).
+  When a 30-second build fails, it's impossible to know which stage was slow or blocked.
+- [ ] Add `TracingManager.ts` wrapping `@opentelemetry/sdk-node` — create a span per build stage, link them with `traceId` = `jobId`.
+- [ ] Instrument AppMakerOrchestrator, ExecutionOrchestrator, EngineDispatcher, DeploymentEngine with `span.start()` / `span.end()`.
+- [ ] Export traces to Cloud Trace (GCP) via OTLP exporter — already available in Cloud Run environment.
+- [ ] Attach `traceId` to every log line (enables log↔trace correlation).
+- **Files:** new `src/server/telemetry/TracingManager.ts`, `src/server/AppMakerLab/AppMakerOrchestrator.ts`,
+  `src/server/AppMakerLab/generator/ExecutionOrchestrator.ts`, `src/server/AppMakerLab/generator/EngineDispatcher.ts`.
+
+### P-BRE.2 — Incremental Build Engine (Skip-Unchanged Files)  🟡 PARTIAL → full  [HIGH]
+- Every AI generation triggers a full rebuild of all files — even when only one component changed.
+  `FileAnalyzer.ts` scans files but there is no persistent content-hash cache that skips unchanged modules.
+- [ ] Add `IncrementalBuildCache.ts`: on build start, hash each source file (SHA256). On rebuild, compare hashes
+  — only re-generate + re-patch files whose hash changed or whose dependents changed (use `ModuleGraph.ts` for impact).
+- [ ] Store hash cache in Firestore per `workspaceId` (survives server restarts).
+- [ ] Emit `INCREMENTAL_SKIP` events for skipped files to EventHistoryStore.
+- **Files:** new `src/server/AppMakerLab/IncrementalBuildCache.ts`, `src/server/AppMakerLab/BuildManager.ts`,
+  `src/server/AppMakerLab/generator/ModuleGraph.ts`.
+
+### P-BRE.3 — Structured Logging with Build Correlation IDs  🟡 PARTIAL → full  [HIGH]
+- Logging is `console.log` / `console.error` scattered across 6000+ lines of `server.ts` and AppMakerLab.
+  No JSON structured format, no `jobId`/`userId`/`traceId` fields, no log level filtering.
+  Cloud Logging sees flat text — impossible to filter "all logs for jobId X".
+- [ ] Replace `console.*` with a `Logger` singleton (Pino or Winston) that emits JSON with `{level, timestamp, jobId, userId, traceId, message, ...meta}`.
+- [ ] Inject `jobId` into every AppMakerLab log call via an `AsyncLocalStorage` context.
+- [ ] Set `LOG_LEVEL=info` in prod Cloud Run env, `debug` in dev.
+- **Files:** new `src/server/logger.ts`, `server.ts`, `src/server/AppMakerLab/BuildManager.ts`, `src/server/AppMakerLab/generator/ExecutionOrchestrator.ts`.
+
+### P-BRE.4 — Smoke Test Runner (Post-Build Validation)  ❌ MISSING  [HIGH]
+- When a build completes successfully (QualityEvaluationEngine passes), there is no automated smoke test
+  that verifies the generated app actually *starts* and *responds to HTTP*. Silent runtime failures ship to users.
+- `PreviewHealthChecker.ts` exists (HTTP health check) but is NOT invoked at the end of the build pipeline.
+- [ ] After `AutoRepairEngine` marks a build stable, call `PreviewHealthChecker.check(session)` and gate
+  `BUILD_COMPLETED` event on a passing health check. On fail → trigger `AutoRepairEngine` repair loop.
+- [ ] Add a smoke test step to `BuildManager.ts`: verify `/` returns 200, CSS loads, no `<script>` errors in preview.
+- [ ] Surface smoke test result in the build status shown to the user.
+- **Files:** `src/server/AppMakerLab/BuildManager.ts`, `src/server/PreviewRunner/PreviewHealthChecker.ts`,
+  `src/server/AppMakerLab/eventbus/EventTypes.ts`.
+
+### P-BRE.5 — Remote Build Cache (GCS)  ❌ MISSING  [HIGH — CI speed]
+- `cloudbuild.yaml` uses Docker layer caching (`--cache-from`) but there is no application-level remote cache.
+  Every Cloud Build run re-runs `npm install` (2-3 min) and re-bundles unchanged code.
+- `IncrementalBuildCache.ts` (P-BRE.2) covers per-workspace caching; this item covers the CI build itself.
+- [ ] Add a GCS bucket `navbharatai-build-cache` with Vite's experimental persistent cache (`cacheDir` → mounted GCS FUSE or pre/post build sync steps).
+- [ ] In `cloudbuild.yaml`: add a `gsutil rsync` step before `npm install` to restore `node_modules` cache; after build, sync it back.
+- [ ] Reduce cold build time from ~5 min to < 2 min.
+- **Files:** `cloudbuild.yaml`, `Dockerfile`.
+
+### P-BRE.6 — Durable Background Job Queue (Build Jobs Survive Restarts)  ❌ MISSING  [MED]
+- `BuildJobManager.ts` stores jobs in Firestore but the actual build *execution* is in-memory Promise chains.
+  If Cloud Run scales to 0 mid-build (min-instances=0) or crashes, in-flight jobs are lost silently.
+- [ ] Add a job queue layer (BullMQ with Redis, or a Cloud Tasks trigger) so each build job is enqueued as a durable task.
+- [ ] Worker picks up job from queue, executes build, marks complete in Firestore — survives server restarts.
+- [ ] `BuildJobManager.ts` becomes the queue producer; a dedicated `BuildWorker.ts` is the consumer.
+- **Files:** `src/server/AppMakerLab/jobs/BuildJobManager.ts`, new `src/server/AppMakerLab/jobs/BuildWorker.ts`,
+  new `src/server/AppMakerLab/jobs/BuildQueue.ts`.
+
+### P-BRE.7 — Build & Deploy Notifications  ❌ MISSING  [MED]
+- When a user's app build completes or fails, they get no push notification. They must stay on the page and watch the status indicator. Background builds (triggered by AI agent) are silent.
+- [ ] Add `NotificationManager.ts`: on `BUILD_COMPLETED` / `BUILD_FAILED` events, send a toast to the frontend via SSE push (`/api/notifications` stream already exists as a pattern in server.ts).
+- [ ] Add email notification option (via Firebase email or SendGrid) for builds > 30s.
+- [ ] Add webhook option (per-project URL) — fire a POST with `{jobId, status, previewUrl}` on completion.
+- **Files:** new `src/server/NotificationManager.ts`, `server.ts`, `src/server/AppMakerLab/jobs/BuildJobManager.ts`.
+
+### P-BRE.8 — Build Analytics Dashboard  🟡 PARTIAL → full  [MED]
+- `BuildJobManager.ts` tracks per-job status + timestamps. `AppAnalytics.tsx` shows AI model usage.
+  But there is no dashboard showing build pipeline health: avg build duration, failure rate, most common failure type, slowest stage.
+- [ ] Add build metrics aggregation endpoint `/api/analytics/builds` — query Firestore job store for last 100 jobs, compute: avg duration, p95 duration, success rate, top 5 failure error types.
+- [ ] Render as a "Build Performance" card in `AppAnalytics.tsx` with a 7-day trend line.
+- **Files:** `src/server/AppMakerLab/jobs/BuildJobManager.ts`, `server.ts` (new endpoint),
+  `src/components/ide/AppAnalytics.tsx`.
+
+### P-BRE.9 — Circuit Breaker for Build Pipeline Steps  🟡 PARTIAL → full  [MED]
+- `ExecutionOrchestrator.ts` has `maxRetries` but no circuit breaker. If the AI provider call inside
+  a generation engine hangs or times out, the entire build hangs until the outer timeout fires.
+  No fast-fail, no half-open state, no fallback strategy per stage.
+  *(Note: P2 captures circuit breaker for AI provider HTTP calls generally; this item is the
+  build-pipeline-specific integration — wrapping each engine dispatch with the breaker.)*
+- [ ] Wrap each `EngineDispatcher.dispatch()` call with the existing circuit breaker pattern (from P2) or introduce `BuildStepBreaker.ts`.
+- [ ] Per-engine breaker: 3 failures → open (fast-fail for 60s) → half-open probe.
+- [ ] On breaker open: emit `STAGE_CIRCUIT_OPEN` event → `AutoRepairEngine` picks a fallback strategy.
+- **Files:** `src/server/AppMakerLab/generator/EngineDispatcher.ts`, new `src/server/AppMakerLab/BuildStepBreaker.ts`,
+  `src/server/AppMakerLab/autorepair/AutoRepairEngine.ts`.
+
+### P-BRE.10 — SBOM Generator + License Validator  ❌ MISSING  [MED — enterprise compliance]
+- No Software Bill of Materials generated for apps built by navBharatAI. Enterprise users need to know
+  what OSS dependencies are in generated apps (compliance, security audits, supply chain verification).
+- [ ] After each successful build, run `npm sbom --json` (Node 20+ built-in) or `syft` to generate a CycloneDX SBOM.
+- [ ] Store SBOM in Firestore `sboms/{workspaceId}/{buildId}` and expose via `/api/workspace/sbom`.
+- [ ] Add license checker: flag any GPL/AGPL packages in the SBOM — warn user if generated app inadvertently pulls a copyleft dep.
+- **Files:** new `src/server/AppMakerLab/SBOMGenerator.ts`, `server.ts`, `src/server/AppMakerLab/BuildManager.ts`.
+
+### P-BRE.11 — AI Build Optimizer  ❌ MISSING  [LOW]
+- No AI agent analyzes build telemetry to suggest optimizations: "your BackendEngine step takes 12s — consider splitting it", "80% of failures are missing-import errors — adjust code gen prompt".
+- [ ] Add `AIBuildOptimizer.ts`: after 10+ builds, aggregate stage timings + failure patterns from Firestore job store → send to AgentV3 with `intent: optimize_build` → return a structured suggestion.
+- [ ] Surface suggestions as a toast notification or in Build Analytics dashboard.
+- **Files:** new `src/server/AppMakerLab/AIBuildOptimizer.ts`, `src/server/AppMakerLab/jobs/BuildJobManager.ts`.
+
+### P-BRE.12 — Watchdog Service (Zombie Process Detection)  ❌ MISSING  [LOW]
+- `AutoRepairEngine.ts` catches build failures reported through the event bus. But if a sandbox child process becomes a zombie (no `exit` event fired, no HTTP response, no OS signal), it sits alive consuming ports until `PreviewRunner.ts` session expiry (default timeout).
+- [ ] Add `WatchdogService.ts`: every 30s, iterate all active `SandboxManager` child processes — if PID is still in OS process table but preview HTTP is not responding, force-kill + clean up port + trigger rebuild.
+- [ ] Register Watchdog in `RuntimeKernel.ts` as a managed service.
+- **Files:** new `src/server/PreviewRunner/WatchdogService.ts`, `src/server/AppMakerLab/kernel/RuntimeKernel.ts`,
+  `src/server/PreviewRunner/SandboxManager.ts`.
+
+### P-BRE.13 — Deterministic / Reproducible Builds  ❌ MISSING  [LOW — audit trail]
+- The same source code may produce slightly different output across builds (non-deterministic timestamps in bundles, non-locked transitive deps). Makes audit trails and build caching less reliable.
+- [ ] Enforce `package-lock.json` / `pnpm-lock.yaml` in `cloudbuild.yaml` (`npm ci` instead of `npm install`).
+- [ ] Pin all direct + transitive deps in `package.json` (no `^` or `~` ranges on production deps).
+- [ ] Strip build timestamps from esbuild output (use `--define:process.env.BUILD_TIME=undefined` or a fixed value from `$COMMIT_SHA`).
+- [ ] Add a `BuildReproducibilityChecker.ts` that SHA256-compares two consecutive builds of the same commit — alert if output differs.
+- **Files:** `cloudbuild.yaml`, `package.json`, `Dockerfile`, new `src/server/AppMakerLab/BuildReproducibilityChecker.ts`.
 
 ---
 
@@ -1013,6 +1168,8 @@
     lessons learned, scope change control (P-PME.1–5, P-PME.6).
 18. **Dev Environment baseline** — LSP code navigation, Firestore workspace persistence,
     real debugger (breakpoints + call stack), merge conflict resolver, real package manager (P-DEV.1–5).
+19. **Build & Runtime hardened** — distributed tracing, incremental builds, structured logging,
+    post-build smoke tests, remote build cache (P-BRE.1–5).
 
 ---
 
@@ -1064,6 +1221,27 @@
   MED gaps: PII detection (general), test generation, human-in-the-loop gate, decision trace, abuse detection.
   LOW gaps: log/stack trace parser, model evaluation engine, multimodal/vision (future scope).
   Added as **PHASE P-AI**.
+- 2026-06-28 (BRE audit): Ran 300-component **Build & Runtime Engine** audit → found 13 gaps (5 HIGH, 5 MED, 3 LOW).
+  Scope note: native compilers (Java/Go/Rust/C/C++), LLVM, Webpack/Parcel/Rspack, K8s/Podman/Hypervisor/GPU,
+  Deno/Bun/JVM/.NET/PHP — all ⬜ N/A by design (managed Node.js + Cloud Run + E2B stack).
+  Already-strong (~60%): AppMakerOrchestrator, BuildManager, RuntimeKernel (KernelState lifecycle),
+  BuildJobManager (QUEUED→PREVIEW_READY + Firestore job store), TaskScheduler (DAG batch),
+  ModuleGraph (topological order), GraphGenerator (dep graph), FileAnalyzer (TypeScript AST scanner),
+  RepositoryIntelligenceEngine, all 4 code generation engines, Vite 6 (HMR/Fast Refresh/tree-shaking/splitting),
+  esbuild (AOT transpiler + server bundle), InProcessEventBus, EventHistoryStore (500-entry audit),
+  CheckpointManager + CheckpointStorage (ACID), AutoRepairEngine + FailureClassifier + RootCauseAnalyzer + RepairPlanner,
+  full Deployment pipeline (Engine/Planner/Validator/Rollback/State/Audit), SandboxManager (process isolation,
+  memory limits), PortManager (3001-4000), PreviewRunner (auto-restart), PreviewHealthChecker, ObservabilityManager,
+  Docker + Cloud Run + cloudbuild.yaml CI/CD.
+  HIGH gaps: no distributed tracing (ObservabilityManager is basic — no span-per-stage), no incremental build cache
+  (every build = full rebuild despite ModuleGraph existing), console.log everywhere (no structured JSON logging with
+  jobId correlation), smoke test runner not wired to build completion (PreviewHealthChecker exists but not called),
+  no remote GCS build cache (npm install re-runs every Cloud Build).
+  MED gaps: build jobs not durable (in-memory Promise chains lost on min-instances=0 scale-to-zero),
+  no build/deploy notifications (users must watch page), no build analytics dashboard (data exists in
+  BuildJobManager but no UI), no circuit breaker wrapping EngineDispatcher, no SBOM/license validator.
+  LOW gaps: no AI build optimizer, no watchdog for zombie sandbox processes, no deterministic build enforcement.
+  Added as **PHASE P-BRE**.
 - 2026-06-28 (DEV audit): Ran 300-component **Development Environment** audit → found 13 gaps (5 HIGH, 5 MED, 3 LOW).
   Scope note: remote DevContainers, k8s-native dev, Codespaces, WSL, bare-metal GPU are ⬜ N/A by design (managed-serverless + E2B sandbox).
   Already-strong (~60%): Monaco Editor (multi-tab, minimap, folding, multi-cursor, bracket colorization), DiffViewer (LCS), VisualEditor (WYSIWYG),

@@ -4754,6 +4754,28 @@ zero quality compromise (complex work still gets Sonnet; power gets Opus). Step 
 
 Gate: frontend tsc 0, server tsc 0, vitest 2829/2829 PASS.
 
+## 2026-06-28 — cost routing step 2: PLAN phase runs on Grok (admin policy)
+
+Step 2 of the admin provider policy (small→Haiku, complex→Sonnet, power→Opus, chat→Gemini
+already; now PLAN→Grok). The plan/todo phase uses the update_todo tool, so it needs tool-use —
+Grok's API is OpenAI-compatible and the existing OpenAiToolRunner drives it.
+
+- New grokPlanRunner(): OpenAI client at https://api.x.ai/v1 (GROK_API_KEY/XAI_API_KEY) wrapped
+  in OpenAiToolRunner (model grok-3, env AGENTV3_GROK_PLAN_MODEL), inside a multi-provider
+  [Grok → Claude] runner so a Grok outage/limit falls back to a cheap Claude (Haiku) and the
+  plan NEVER breaks. Returns null when no Grok key (→ caller keeps the normal build client).
+- Plan runner now uses planGrok ?? client, with model = haikuModel() on the Grok path (Grok
+  forces grok-3; the cheap Haiku id is only the Claude fallback model).
+- New pure planGrokEnabled(apiKey, disableFlag) (AGENTV3_PLAN_GROK=0/off opt-out) — 3 tests.
+
+Backend router-priority change → no AppKnowledgeBase entry needed (per CLAUDE.md). Chat already
+runs on the free router (Vertex/Gemini/Grok), matching "simple chat → Gemini/Vertex".
+
+Full admin policy now live: chat→Gemini/Vertex, plan→Grok, small build→Haiku, complex→Sonnet,
+power→Opus — with Claude/Gemini fallbacks so builds never break. Cost down, quality preserved.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2832/2832 PASS, boot:check PASS.
+
 ## 2026-06-28 — P4.2 Event Sourcing + Replay DONE (ultracode workflows) (Phase P4 → 50%)
 
 Made EventHistoryStore replayable. New WorkspaceProjection.ts: PURE replayWorkspaceState

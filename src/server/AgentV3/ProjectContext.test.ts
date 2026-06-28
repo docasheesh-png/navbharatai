@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildProjectContext, extractConversationSummary } from './ProjectContext';
+import { buildProjectContext, extractConversationSummary, formatPlanState } from './ProjectContext';
 
 describe('extractConversationSummary — recap prior turns so the model remembers', () => {
   it('summarizes user + assistant turns, notes tool calls, skips tool results', () => {
@@ -62,5 +62,54 @@ describe('buildProjectContext — Claude-level memory for a follow-up build', ()
     const files = Array.from({ length: 200 }, (_, i) => `src/f${i}.tsx`);
     const ctx = buildProjectContext({ files });
     expect((ctx.match(/src\/f\d+\.tsx/g) || []).length).toBe(60);
+  });
+
+  it('carries over the last plan so a follow-up CONTINUES instead of resetting to 0/N', () => {
+    const lastPlan = formatPlanState([
+      { title: 'Scaffold the app', status: 'done' },
+      { title: 'Build the timer UI', status: 'in_progress' },
+      { title: 'Wire localStorage', status: 'pending' },
+    ]);
+    const ctx = buildProjectContext({ files: ['src/App.tsx'], lastPlan });
+    expect(ctx).toContain('plan you were working through');
+    expect(ctx).toContain('Build the timer UI');
+    expect(ctx).toContain('CONTINUE the unfinished items');
+    expect(ctx).toContain('✓'); // done marker rendered
+    expect(ctx).toContain('⋯'); // in-progress marker rendered
+  });
+
+  it('renders a plan even when there are no files yet (plan alone is non-empty)', () => {
+    const ctx = buildProjectContext({ files: [], lastPlan: formatPlanState([{ title: 'Do the thing', status: 'pending' }]) });
+    expect(ctx).toContain('Do the thing');
+  });
+});
+
+describe('formatPlanState — durable, compact plan status for carry-over', () => {
+  it('renders each todo with a status marker and label', () => {
+    const s = formatPlanState([
+      { title: 'A', status: 'done' },
+      { title: 'B', status: 'in_progress' },
+      { title: 'C', status: 'blocked' },
+      { title: 'D', status: 'pending' },
+    ]);
+    expect(s).toContain('✓ A [done]');
+    expect(s).toContain('⋯ B [in_progress]');
+    expect(s).toContain('✗ C [blocked]');
+    expect(s).toContain('○ D [pending]');
+  });
+
+  it('returns "" for an empty / malformed plan', () => {
+    expect(formatPlanState([])).toBe('');
+    expect(formatPlanState([{ status: 'done' } as unknown as { title: string }])).toBe('');
+  });
+
+  it('defaults an unknown status to the pending marker', () => {
+    expect(formatPlanState([{ title: 'X', status: 'weird' }])).toContain('○ X [weird]');
+  });
+
+  it('caps at 20 items to stay compact', () => {
+    const todos = Array.from({ length: 40 }, (_, i) => ({ title: `t${i}`, status: 'pending' }));
+    const s = formatPlanState(todos);
+    expect(s.split('\n')).toHaveLength(20);
   });
 });

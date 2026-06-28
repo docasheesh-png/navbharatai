@@ -72,7 +72,7 @@ import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from 
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { runOneShot, classifyForOneShot, oneShotEnabled } from '../AgentV3/OneShotBuilder';
-import { buildProjectContext, extractConversationSummary } from '../AgentV3/ProjectContext';
+import { buildProjectContext, extractConversationSummary, formatPlanState } from '../AgentV3/ProjectContext';
 import { billedAmountUsd } from '../AgentV3/pricing';
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
@@ -1586,8 +1586,16 @@ export function registerAgentV3Routes(app: Express): void {
         await restoreWorkspaceMemory(workspaceId, ctxMem).catch(() => {});
         const tree = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
         await warmIndexFiles(ctxMem, tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''), { maxFiles: 200 });
-        const recentRequests = ctxMem.snapshot().episodes.filter((e) => e.kind === 'request').map((e) => e.text);
-        const projectCtx = buildProjectContext({ files: tree, projectMap: ctxMem.projectMap(), recentRequests });
+        const ctxEpisodes = ctxMem.snapshot().episodes;
+        const recentRequests = ctxEpisodes.filter((e) => e.kind === 'request').map((e) => e.text);
+        // MEMORY FIX 4 (plan carry-over): surface the plan (todo statuses) the LAST build was
+        // working through, persisted as a PLAN_STATE note. Without this a follow-up like "continue"
+        // reset the plan to 0/N and re-scaffolded; now it resumes the unfinished items.
+        const lastPlan = [...ctxEpisodes]
+          .reverse()
+          .find((e) => e.kind === 'note' && e.text.startsWith('PLAN_STATE'))
+          ?.text.replace(/^PLAN_STATE\n?/, '');
+        const projectCtx = buildProjectContext({ files: tree, projectMap: ctxMem.projectMap(), recentRequests, lastPlan });
         if (projectCtx) buildPrompt = `${projectCtx}\n\n---\n\n${buildPrompt}`;
       } catch { /* project context is best-effort — never blocks a build */ }
 
@@ -1937,6 +1945,13 @@ export function registerAgentV3Routes(app: Express): void {
       // can restore file-list hints and episode history without re-reading all files.
       // Best-effort: Firestore unavailability must never affect the build outcome.
       try {
+        // MEMORY FIX 4 (plan carry-over): record the final plan (todo statuses) as a durable
+        // PLAN_STATE note BEFORE the snapshot is persisted, so the NEXT build / a "continue" can
+        // resume the unfinished items instead of resetting the plan to 0/N. Best-effort.
+        try {
+          const planText = formatPlanState(state.snapshot().todos);
+          if (planText) getWorkspaceMemory(workspaceId).recordNote(`PLAN_STATE\n${planText}`);
+        } catch { /* plan-state capture is best-effort */ }
         saveWorkspaceMemory(workspaceId, getWorkspaceMemory(workspaceId).snapshot()).catch(() => {});
       } catch { /* memory persist is best-effort */ }
 

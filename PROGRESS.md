@@ -5161,3 +5161,17 @@ a different instance. Best-effort, never blocks. Now Fix 1 (file/project context
 recap) + Fix 3 (durable memory hydration) all work cross-instance.
 
 Gate: server tsc 0, vitest 2902/2902 PASS, boot:check PASS.
+
+## 2026-06-28 — Claude-level memory, Fix 4: plan/todos carry-over (no more PLAN 0/N reset)
+
+Gap #4: the approved build plan (todo statuses) was used only inside the build that created it. On a
+follow-up like "continue" the plan was gone — the model reset the plan to 0/N and re-scaffolded work
+that was already done. Fix: new pure formatPlanState(todos) (renders each todo as "✓/⋯/✗/○ title
+[status]", caps at 20, 4 tests) + a lastPlan field on buildProjectContext that renders a "plan you were
+working through last time … CONTINUE the unfinished items, do NOT reset to 0" block. Wired into
+routes/agentv3.ts: at build end (before saveWorkspaceMemory) the final plan is persisted as a durable
+PLAN_STATE note; in the Fix-1 context block the latest PLAN_STATE note is found and passed as lastPlan
+so the next build resumes the unfinished items. Best-effort, never blocks. Internal AI-memory behavior
+(no user-facing surface) → no AppKnowledgeBase entry needed.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2908/2908 PASS (+6 new), boot:check PASS.

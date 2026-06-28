@@ -70,6 +70,7 @@ import { GoogleGenAI } from '@google/genai';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
 import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
+import { BuildDiagnostics, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
@@ -317,6 +318,8 @@ interface RunningBuild {
 }
 const runningBuilds = new Map<string, RunningBuild>();
 const MAX_BUILD_BUFFER = 4000;
+/** The most recent build's diagnostics report per build key (userId) — for download/endpoint. */
+const lastDiagnostics = new Map<string, BuildDiagnosticsReport>();
 
 /** Push an event into a build's replay buffer and fan it out to every subscriber. */
 function broadcastBuild(rb: RunningBuild, e: unknown): void {
@@ -388,7 +391,7 @@ export function selectBuildModel(tier: StartTier | undefined, powerOn: boolean):
   return haikuModel();
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean }): TurnRunner {
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; onProviderError?: (name: string, err: unknown) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -437,7 +440,10 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean })
   const chain = claudeFirst ? [claude, ...fallback, ...withBackstop] : [...fallback, claude, ...withBackstop];
   return makeMultiProviderTurnRunner(chain, {
     onProviderUsed: (used, from) => { if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`); },
-    onProviderError: (name, err) => console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
+    onProviderError: (name, err) => {
+      console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`);
+      opts?.onProviderError?.(name, err);
+    },
   });
 }
 
@@ -720,6 +726,22 @@ export function registerAgentV3Routes(app: Express): void {
     // one tiny real call each, so the admin sees which of them actually WORK on live.
     const freeProviders = adminOk ? await probeFreeProviders() : undefined;
     res.json({ ...diag, live, freeProviders });
+  });
+
+  // Build diagnostics — the structured issue report from the user's LAST build (every struggle
+  // v3.0 hit: provider fallbacks, tool errors, "replied without building" nudges, readiness
+  // blockers, sandbox problems). Owner-scoped (keyed by the caller's userId). The v3.0 panel's
+  // "Download report" button reads this so the admin can hand the JSON to Claude for fixes.
+  app.get('/api/agentv3/diagnostics', (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      return;
+    }
+    const report = lastDiagnostics.get(userId ?? 'anon');
+    if (!report) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
+    res.json({ diagnostics: report });
   });
 
   // Public, lightweight preview-capability probe — ONLY the sandbox diagnosis (no
@@ -1216,12 +1238,25 @@ export function registerAgentV3Routes(app: Express): void {
           `[AGENTV3] cost-ladder: ${analysis.reasoning} → build model ${tierToGeminiBuildModel(analysis.startTier)}`,
         );
       }
-      const client = buildTurnRunner(
-        analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : undefined,
-      );
       // Admin routing policy: small app → Haiku, complex app → Sonnet, power → Opus
       // (was always Sonnet). Gemini/Vertex remain the fallback in buildTurnRunner.
       const model = selectBuildModel(analysis?.startTier, onlyOpus);
+      // BUILD DIAGNOSTICS — capture every struggle (provider fallback, tool error, "replied
+      // without building" nudge, readiness blocker, sandbox issue) into a downloadable report,
+      // so the admin can hand it to Claude and the rough edges get fixed in code.
+      const buildDiag = new BuildDiagnostics({
+        sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined,
+        workspaceId, prompt, model, framework,
+      });
+      events.subscribe((e) => buildDiag.ingestEvent(e), false);
+      const client = buildTurnRunner({
+        ...(analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : {}),
+        onProviderError: (name, err) => buildDiag.record({
+          phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
+          message: `Provider ${name} failed — falling back to the next provider`,
+          autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+        }),
+      });
       // Build start time — used for cost-ladder telemetry duration (P2 measurement).
       const buildStartedAt = Date.now();
       const budget = maxBuildBudgetUsd();
@@ -1361,6 +1396,11 @@ export function registerAgentV3Routes(app: Express): void {
       } catch (setupErr) {
         const m = setupErr instanceof Error ? setupErr.message : String(setupErr);
         git = undefined;
+        buildDiag.record({
+          phase: 'sandbox', severity: 'error', code: 'SANDBOX_UNAVAILABLE',
+          message: 'The build sandbox could not be set up — the build cannot create files.',
+          autoResolved: false, detail: m.slice(0, 300),
+        });
         events.emit({
           type: 'narration',
           agent: 'architect',
@@ -1665,6 +1705,11 @@ export function registerAgentV3Routes(app: Express): void {
         });
       }
       if (expectsArtifacts && writtenFiles.size === 0 && !abort.signal.aborted && costAfterFirstAttempt <= capUsd) {
+        buildDiag.record({
+          phase: 'build', severity: 'warning', code: 'EMPTY_BUILD_RETRY',
+          message: 'First attempt produced no files — retried the whole build on a stronger model (Opus).',
+          autoResolved: false, // back-filled to true by finish() if the retry then succeeded
+        });
         events.emit({ type: 'narration', agent: 'architect', text: 'The first attempt produced no files — rebuilding with a stronger model…', ts: Date.now() });
         // The "stronger model" is the power-OFF ceiling: Opus at its LOWEST effort
         // (admin rule 2026-06-27 — "power off me Opus ka sabse lower version"). In a
@@ -1897,7 +1942,16 @@ export function registerAgentV3Routes(app: Express): void {
       // resilient runner already self-labels in the text if it fell back to a free provider).
       const buildTag = providerDebugTag(`Claude (${model})`);
       if (buildTag) events.emit({ type: 'narration', agent: 'architect', text: buildTag.trim(), ts: Date.now() });
-      emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100 });
+      // Finalize the build diagnostics and ship the report with the result so the client
+      // can download it (JSON/text) and hand it to Claude. Also cached per session for the
+      // GET /api/agentv3/diagnostics endpoint. Best-effort — never affects the build result.
+      let diagnostics: BuildDiagnosticsReport | undefined;
+      try {
+        buildDiag.finish(result.ok, result.summary);
+        diagnostics = buildDiag.report();
+        lastDiagnostics.set(buildKey, diagnostics);
+      } catch { /* diagnostics are best-effort */ }
+      emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(diagnostics ? { diagnostics } : {}) });
     } catch (err) {
       emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {

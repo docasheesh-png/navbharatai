@@ -75,6 +75,7 @@
 | **P-DEPLOY** | **DevOps & Deployment Gaps** | DORA metrics, staging/promotion, AI deploy-ops, app-store automation, approval gate, more targets | ⏳ Pending | 0% |
 | **P-COLLAB** | **Collaboration Platform Gaps** | Durable team membership, shared-workspace ACL, client share portal, team libraries, @mention, SSO | ⏳ Pending | 0% |
 | **P-MON** | **Monitoring & Analytics Gaps** | Product analytics pipeline, anomaly/forecasting, LLM observability, real health scores, AI insights, FinOps | ⏳ Pending | 0% |
+| **P-ORCH** | **Automation & Orchestration Gaps** | Cron/scheduled jobs, user workflow builder, saga/compensation (core brain = AgentV3, already DONE) | ⏳ Pending | 0% |
 
 ---
 
@@ -1807,6 +1808,46 @@
 
 ---
 
+## ⚙️ PHASE P-ORCH — AUTOMATION & ORCHESTRATION GAPS
+> From a 300-component **Automation & Orchestration** audit (2026-06-28, 2 deep-scan agents, cited files verified).
+> This category **already exists as NavBharatAI's execution brain (AgentV3 + AppMakerLab)** — the audit confirmed
+> the orchestration core is extensively DONE. Almost everything else is ⬜ N/A-by-design or tracked elsewhere.
+> Only 3 genuinely-new, product-fitting gaps remain.
+
+### ✅ The Execution Brain Already Exists (do not rebuild — extensive DONE)
+- **Orchestration core:** `AgentV3/AgentRunner` (native tool-use loop, step/budget/time caps), `AppMakerLab/AppMakerOrchestrator` (6-stage pipeline: plan→generate→patch→build→repair→preview), `generator/{ExecutionOrchestrator,TaskScheduler}` (DAG scheduling, dependency resolution, retry+checkpoint resume), `jobs/BuildJobManager` (async job lifecycle).
+- **Multi-agent:** `AgentRegistry` (12 roles), `SubAgent` delegation, `AgentEventStream`, `AgentLifecycle`, `ToolDispatcher`/`ToolCatalog` (registry + dispatch + adapters), `Consensus`, `ReviewerAgent`, `Approvals` (HITL), `EscalationOrchestrator` (cheap→expensive).
+- **Reliability:** `AIRouter` (raced model routing, circuit-breaker cooldowns, bulkhead MAX_IN_FLIGHT, graceful degradation), `mutation/{TransactionCoordinator,LockManager,JournalManager,CheckpointManager}` (ACID-ish workspace txns, WAL, checkpoints), `AutoRepairEngine` (self-heal loop), token/context budgets.
+- **State/events:** `lib/{eventBus,eventStore}` + `eventbus/EventHistoryStore` (event sourcing + replay), `ConversationStore` (durable resumable transcripts), payment/billing automation, `CommandGovernance` + `audit`.
+
+### ⬜ N/A-by-design / already tracked elsewhere (NOT added here)
+- **⬜ N/A-by-design:** message brokers (Kafka/RabbitMQ/NATS), distributed-lock/lease/leader-election/consensus-coordinator/cluster-coordinator (single-instance managed-serverless), worker-pool/distributed-worker, multi-cloud/cross-cloud/hybrid/edge orchestration, ERP/CRM/enterprise-integration-hub, BPM/DPA/process-mining, mobile/desktop automation platforms.
+- **Already tracked:** multi-agent/tool registry+dispatch/planner/executor/reviewer/function-calling → **P-AI** (DONE) + **P-AI.16**; reasoning/state-machine/rule/constraint engine → **P-AI.14**; ensemble/critic → **P-AI.15**; priority job scheduling / latency-prediction → **P-AI.17**; HITL/approval → **P-AI.8**; circuit-breaker → **P1.3**; idempotency/dedup → **P1.4**; bulkhead/concurrency/quota → **P2.3**; task/job queue/DLQ → **P7/P-BRE.6**; event-sourcing/replay → **P4.2**; notifications/Slack/email → **P-BRE.7/P-PME.9**; metrics/tracing/workflow-analytics → **P2/P8**; anomaly/failure/cost prediction + bottleneck/critical-path → **P-MON.2**; workflow dashboards → **P-MON.6/P-DESIGN.4**; rollback → **P9**; auto-scaling → **P3.3**.
+
+### P-ORCH.1 — Cron / Scheduled / Recurring Jobs Engine  ❌ MISSING  [MED]
+- There is no time-based scheduler: only `setInterval` timers and request-triggered jobs. No cron, recurring, delayed,
+  or calendar-scheduled jobs. This blocks several other phases that need scheduled work — **P-DATA.4** retention-purge,
+  **P9** scheduled Firestore backup, and recurring user automations.
+- [ ] Add a Cloud Scheduler (or Cloud Tasks `scheduleTime`) integration + a small job-registry for recurring/delayed jobs.
+- [ ] Expose it internally so retention-purge, backups, and digest reports can register schedules.
+- **Files:** new `src/server/lib/ScheduledJobs.ts`, `cloudbuild.yaml` (scheduler), `src/server/AppMakerLab/jobs/BuildJobManager.ts`.
+
+### P-ORCH.2 — User-Defined Automation / Workflow Builder  ❌ MISSING  [MED — product surface]
+- The orchestration engine is hardcoded to the code-gen pipeline; **end users cannot define their own
+  triggers→actions** (e.g. "on schedule, rebuild + redeploy", "on form submit, call API"). No workflow DSL, visual
+  builder, templates, or NL→workflow. (This is a new product surface, distinct from the internal AgentV3 brain.)
+- [ ] Add a declarative trigger→action workflow model (JSON DSL) executed by the existing orchestrator + P-ORCH.1 scheduler.
+- [ ] Add a simple builder UI + starter templates; optionally an AI "describe your automation" → workflow generator.
+- **Files:** new `src/server/AppMakerLab/workflow/{WorkflowEngine,WorkflowTypes}.ts`, new `src/components/ide/WorkflowBuilder.tsx`.
+
+### P-ORCH.3 — Saga / Compensation for Multi-Step Orchestration  🟡 PARTIAL → full  [LOW]
+- `TransactionCoordinator` gives ACID-ish *workspace-file* transactions, but there is no **saga / compensation** across
+  a multi-step pipeline (e.g. build → deploy → verify): if a late step fails, earlier external effects aren't auto-undone.
+- [ ] Define compensation handlers per orchestrator stage; on failure, run compensations in reverse (deploy→rollback, etc.).
+- **Files:** `src/server/AppMakerLab/generator/ExecutionOrchestrator.ts`, `src/server/AppMakerLab/deployment/DeploymentRollbackManager.ts`, new `Saga.ts`.
+
+---
+
 ## ✅ DEFINITION OF "ROCK-SOLID" (exit criteria for this roadmap)
 1. All **three universes** isolated and provably correct (FREE no-Claude, SDA Grok-first, PRO Claude-first).
 2. **Real test suite** green + CI gate blocks broken deploys.
@@ -1901,6 +1942,16 @@
   composite health scores; AI insights/NL-query/report-gen; self-service dashboards + FinOps recommendations).
   **Honest-state finding:** `AppHealthMonitor.tsx` currently shows simulated/demo data (uptime/latency/CPU) —
   P-MON.4 fixes this to use real metrics or an honest "no data" state. Doc-only.
+- 2026-06-28 (Automation & Orchestration audit): Ran a 300-component **Automation & Orchestration** audit
+  (2 deep-scan agents, cited files verified). This category **already exists as NavBharatAI's execution brain**
+  (AgentV3 + AppMakerLab) — the audit confirmed the orchestration core is extensively DONE (AgentRunner,
+  AppMakerOrchestrator 6-stage pipeline, TaskScheduler DAG, multi-agent registry, ToolDispatcher, Consensus,
+  Approvals, EscalationOrchestrator, TransactionCoordinator/LockManager/CheckpointManager, AIRouter
+  circuit-breaker/bulkhead, event sourcing). Everything else is ⬜ N/A-by-design (Kafka/RabbitMQ/leader-election/
+  cluster/multi-cloud/ERP/CRM/BPM) or already tracked (P-AI/P1.3/P1.4/P2.3/P7/P4.2/P-MON/P-BRE/P9). Only **3
+  genuinely-new gaps** remained → added as **PHASE P-ORCH** (cron/scheduled/recurring jobs engine — also unblocks
+  P-DATA.4 purge & P9 backup; user-defined automation/workflow builder; saga/compensation for multi-step pipelines).
+  Doc-only.
 - Deploy after each phase (permanent law). Maintain English-only UI (permanent law).
 - 2026-06-27 (UX + PE audits): Ran 300-component **UX Engine** audit → found 10 gaps (4 HIGH, 4 MED, 2 LOW).
   Already-strong: theme, PWA, Ctrl+K, onboarding modal, toast, AI Suggestions, LiveCollaboration. MISSING:

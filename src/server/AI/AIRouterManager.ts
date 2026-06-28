@@ -111,35 +111,35 @@ export class AIRouterManager {
   }
 
   // PROFESSIONAL universe (Doctor AI / SDA + every config-driven professional:
-  // Teacher, Lawyer, CA, Astrologer, Kisan, …): Grok×2 → Gemini×2 → Vertex×5 →
-  // Claude (last resort ONLY). Fully isolated from FREE and PRO — the professional
-  // universe never shares router state with them. Core law: Grok primary, Claude
-  // reachable only as the final safety net.
+  // Teacher, Lawyer, CA, Astrologer, Kisan, …). Fully isolated from FREE and PRO.
+  // Routing shape (via AIRouter.routeRaced): RACE Grok × Gemini × Vertex
+  // concurrently — first non-empty success wins; ONLY if all three fail, fall back
+  // to Claude Haiku (last resort). Honors the "Grok primary, Claude last" core law.
   private static buildProfessional(): AIRouter {
     const router = new AIRouter();
-    console.log('[ROUTER_MGR] Building PROFESSIONAL chain: Grok×2 → Gemini×2 → Vertex×5 → Claude(last)');
+    console.log('[ROUTER_MGR] Building PROFESSIONAL chain: RACE(Grok × Gemini × Vertex) → Claude Haiku(last resort)');
 
+    // ── Race participants (fired concurrently) ──
     try {
       const grok = new GrokProvider();
       router.registerProvider(slot(grok, 1, 'grok-3'));
-      router.registerProvider(slot(grok, 2, 'grok-3-fast'));
     } catch {}
 
-    const gemini = new GeminiProvider();
-    [['gemini-2.0-flash', 3], ['gemini-2.5-flash', 4]].forEach(([m, p]) => {
-      try { router.registerProvider(slot(gemini, p as number, m as string)); } catch {}
-    });
-
-    const vertex = new VertexProvider();
-    [['gemini-2.5-flash',5],['gemini-2.0-flash',6],['gemini-1.5-pro',7],['gemini-1.5-flash',8],['gemini-2.5-pro',9]].forEach(([m,p]) => {
-      try { router.registerProvider(slot(vertex, p as number, m as string)); } catch {}
-    });
-
-    // Claude — LAST RESORT ONLY. High priority number keeps it strictly last in
-    // the fallback chain, honoring the "Grok primary, Claude last" core law for SDA.
     try {
-      const claude = new AnthropicProvider('claude-3-5-sonnet-20241022');
+      const gemini = new GeminiProvider();
+      router.registerProvider(slot(gemini, 2, 'gemini-2.0-flash'));
+    } catch {}
+
+    try {
+      const vertex = new VertexProvider();
+      router.registerProvider(slot(vertex, 3, 'gemini-2.5-flash'));
+    } catch {}
+
+    // ── Last resort ONLY: Claude Haiku (cheap, reached only if the race fails) ──
+    try {
+      const claude = new AnthropicProvider('claude-haiku-4-5-20251001');
       claude.priority = 99;
+      claude.lastResort = true;
       router.registerProvider(claude);
     } catch {}
 

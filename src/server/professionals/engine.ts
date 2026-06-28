@@ -19,14 +19,14 @@ export function buildProfessionalSystemPrompt(config: ProfessionalConfig, kbBloc
 
 /**
  * Resilient model call through the ISOLATED 'professional' universe router
- * (Grok→Gemini→Vertex→Claude-last, defined once in AIRouterManager). Every
- * professional — Doctor AI, Teacher, Lawyer, CA, Astrologer, Kisan, … — shares
- * this one isolated chain, so it never mixes routing state with FREE or PRO, and
- * Claude is reached only as the final safety net (Grok-primary/Claude-last law).
+ * (defined once in AIRouterManager). Every professional — Doctor AI, Teacher,
+ * Lawyer, CA, Astrologer, Kisan, … — shares this one isolated universe, so it
+ * never mixes routing state with FREE or PRO. routeRaced fires Grok × Gemini ×
+ * Vertex concurrently and uses Claude Haiku ONLY if all three fail.
  */
 async function resilientCall(systemPrompt: string, prompt: string): Promise<string> {
   const router = AIRouterManager.getRouter('professional');
-  const { response, telemetry } = await router.route(prompt, systemPrompt);
+  const { response, telemetry } = await router.routeRaced(prompt, systemPrompt);
   if (telemetry.success && response.content?.trim()) return response.content;
   throw new Error('All AI providers failed for this professional.');
 }

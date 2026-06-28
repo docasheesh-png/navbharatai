@@ -21,8 +21,9 @@
 ### Three Universe Isolation (PERMANENT — never share state)
 - **FREE** (navbharat): Vertex → Gemini → Grok. **Claude NEVER used.**  ✅ implemented
 - **PROFESSIONAL** (Doctor AI/SDA + Teacher, Lawyer, CA, Astrologer, Kisan, … — the whole
-  Professionals universe): Grok → Gemini → Vertex → Claude (Grok primary, Claude last resort).
-  ✅ implemented (2026-06-28, P0.1 — isolated `professional` namespace in `AIRouterManager`).
+  Professionals universe): **RACE Grok × Gemini × Vertex** (concurrent; first success wins) →
+  **Claude Haiku ONLY** if all three fail (last resort). ✅ implemented (2026-06-28, P0.1 —
+  isolated `professional` namespace + `AIRouter.routeRaced` in `AIRouterManager`).
 - **PRO** (build + plan): Claude → Grok → Gemini → Vertex (Claude primary).  ✅ implemented
 
 ---
@@ -74,14 +75,18 @@
 - **Scope (admin direction 2026-06-28):** isolate the WHOLE professional universe, not just SDA —
   Doctor AI/SDA **and** every config-driven professional (Teacher, Lawyer, CA, Astrologer, Kisan, … 70+)
   now share ONE isolated `professional` namespace.
+- **Routing shape (admin spec 2026-06-28):** RACE Grok × Gemini × Vertex concurrently (first
+  non-empty success wins); Claude **Haiku** is reached ONLY if all three racers fail (last resort).
 - **Done:**
-  - [x] Added a third namespace `professional` in `AIRouterManager.ts`: Grok(1-2) → Gemini(3-4) → Vertex(5-9) → Claude(99, last).
+  - [x] Added a third namespace `professional` in `AIRouterManager.ts`: race participants Grok / Gemini / Vertex + Claude Haiku (`lastResort`).
+  - [x] Added `AIRouter.routeRaced()` — concurrent `Promise.any` over non-last-resort providers, sequential last-resort fallback only on total race failure.
+  - [x] Added `lastResort` flag to the `AIProvider` interface; Claude Haiku marked last-resort.
   - [x] Wired tier routing in `UniversalAIRouter.ts`: `sda` / `doctor` / `professional` tier → `professional` namespace; FREE never reaches Claude.
-  - [x] `/api/sda-chat` (already isolated) now uses the `professional` namespace for its text-only path; multimodal (image/PDF) keeps its inline Vertex/Claude safety net.
-  - [x] `professionals/engine.ts` `resilientCall` now routes through the isolated `professional` namespace (replaced the Gemini→Claude→Grok inline chain) — fixes the Claude-last violation for all professionals.
+  - [x] `/api/sda-chat` (already isolated) uses `routeRaced` on the `professional` namespace for its text-only path; multimodal (image/PDF) keeps its inline Vertex/Claude safety net.
+  - [x] `professionals/engine.ts` `resilientCall` now routes through the isolated `professional` namespace via `routeRaced` (replaced the Gemini→Claude→Grok inline chain) — fixes the Claude-2nd violation for all professionals.
   - [x] Added `AIRouter.getProviderChain()` read-only inspector for provable isolation.
-  - [x] Test `tests/professionalRouter.test.ts` proves: Grok first, Claude strictly last, PROFESSIONAL ≠ FREE ≠ PRO instances, FREE never includes Claude, PRO still Claude-first.
-- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2699/2699 ✅ · build ✅ · boot smoke-check ✅
+  - [x] Test `tests/professionalRouter.test.ts` (8 tests) proves: race = Grok/Gemini/Vertex, Claude is the ONLY last-resort; race winner never touches Claude; Claude reached only when all racers fail; graceful failure when everything fails; PROFESSIONAL ≠ FREE ≠ PRO instances; FREE never includes Claude; PRO still Claude-first.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2702/2702 ✅ · build ✅ · boot smoke-check ✅
 - **Files:** `src/server/AI/AIRouterManager.ts`, `src/server/AI/UniversalAIRouter.ts`, `src/server/AI/Router/AIRouter.ts`, `src/server/routes/sda.ts`, `src/server/professionals/engine.ts`, `tests/professionalRouter.test.ts`.
 
 ### P0.2 — Real Test Suite (the "break nahi honi chahiye" engine)  ✅ DONE (2026-06-27)
@@ -300,9 +305,12 @@
   Confirmed low-level infra (k8s, bare metal, hypervisor, etc.) is ⬜ N/A by design (managed-serverless).
   **Only remaining core-law violation: P0.1 SDA isolated router.**
 - 2026-06-28: **P0.1 DONE.** Per admin direction, isolated the ENTIRE professional universe (not just
-  SDA): added the `professional` namespace (Grok→Gemini→Vertex→Claude-last) in `AIRouterManager`, wired
-  `UniversalAIRouter` tier mapping, pointed the SDA route's text path and the config-driven professionals
-  engine at it (fixing the engine's previous Gemini→Claude→Grok Claude-2nd violation), and added a test
-  (`professionalRouter.test.ts`) proving Grok-first/Claude-last + FREE-never-Claude + PRO-Claude-first.
-  Gate green (tsc ×2, 2699 tests, build, boot). **Zero core-law violations now open. P0 complete (100%).**
+  SDA): added the `professional` namespace in `AIRouterManager`, wired `UniversalAIRouter` tier mapping,
+  pointed the SDA route's text path and the config-driven professionals engine at it (fixing the engine's
+  previous Gemini→Claude→Grok Claude-2nd violation).
+- 2026-06-28 (refinement, admin spec): professional routing shape finalized as **RACE Grok × Gemini ×
+  Vertex** (concurrent, first success wins) with **Claude Haiku ONLY as last resort**. Implemented
+  `AIRouter.routeRaced` + a `lastResort` provider flag; consumers (SDA text path, professionals engine)
+  switched to `routeRaced`. Test grown to 8 cases (chain shape + race behavior). Gate green (tsc ×2,
+  2702 tests, build, boot). **Zero core-law violations open. P0 complete (100%).**
 - Deploy after each phase (permanent law). Maintain English-only UI (permanent law).

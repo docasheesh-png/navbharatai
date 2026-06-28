@@ -439,10 +439,11 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       }
 
       // ── Isolated PROFESSIONAL namespace router (text-only) ────────────────
-      // SDA is part of the PROFESSIONAL universe — centralized, provably-isolated
-      // chain Grok→Gemini→Vertex→Claude(last), defined once in AIRouterManager
-      // (P0.1). Multimodal (image/PDF) requests keep the inline Vertex/Claude path
-      // below, which handles attachments.
+      // SDA is part of the PROFESSIONAL universe — one isolated, provably-separate
+      // universe defined once in AIRouterManager (P0.1). routeRaced fires
+      // Grok × Gemini × Vertex concurrently and uses Claude Haiku ONLY if all
+      // three fail. Multimodal (image/PDF) requests keep the inline Vertex/Claude
+      // path below, which handles attachments.
       if (!reply && !isImage && !isPDF) {
         try {
           const histText = historyForAI
@@ -450,12 +451,12 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
             .join('\n');
           const fallbackPrompt = histText ? `${histText}\nDr: ${message}` : message;
           const professionalRouter = AIRouterManager.getRouter('professional');
-          const { response, telemetry } = await professionalRouter.route(fallbackPrompt, SDA_SYSTEM_FINAL);
+          const { response, telemetry } = await professionalRouter.routeRaced(fallbackPrompt, SDA_SYSTEM_FINAL);
           if (telemetry.success && response.content?.trim()) {
             reply = response.content;
-            console.log(`[SDA] Isolated 'professional' namespace router succeeded via ${telemetry.provider}`);
+            console.log(`[SDA] Isolated 'professional' universe router succeeded via ${telemetry.provider}`);
           }
-        } catch (e: any) { console.warn('[SDA] professional-namespace router err:', e.message); }
+        } catch (e: any) { console.warn('[SDA] professional-universe router err:', e.message); }
       }
 
       // ── Sequential fallback: Vertex → Claude (multimodal-capable safety net) ──

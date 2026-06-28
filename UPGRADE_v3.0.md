@@ -54,7 +54,7 @@
 | P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ✅ Complete | 100% |
 | P2 | Resilience & Observability | See + survive failures | ✅ Complete | 100% |
 | P3 | Scale & Frontend Health | Grow without rewrites | 🔄 In Progress | 75% (P3.1 App.tsx split deferred) |
-| P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 50% (P4.2 + P4.3 done; P4.1 CQRS large, P4.4 replication remain) |
+| P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 75% (P4.2 + P4.3 + P4.4 done; only P4.1 CQRS — large — remains) |
 | P5 | Hygiene & Hardening | Remove rot, close small holes | ⏳ Pending | 0% |
 | **P6** | **IaC & Provisioning** | Reproducible, version-controlled infra | ⏳ Pending | 0% |
 | **P7** | **Async Infra (Queue/Cache)** | Scale beyond Firestore-polling | ⏳ Pending | 0% |
@@ -340,9 +340,20 @@
       all-exports, React components, routes, regex-baseline-preserved, never-throws, dedup; 6 existing regex tests still green) · server bundles ✅.
 - **Files:** `src/server/Memory/MemoryIndexer.ts`, `ProjectMemoryManager.ts`, `src/server/AI/WorkspaceManager.ts`, `tests/memoryIndexer.test.ts`.
 
-### P4.4 — Replication / Consistency guarantees  ❌ MISSING
-- [ ] Document and enforce consistency model for cross-device sync (currently newer-wins only).
-- **Files:** `server.ts` sync routes, `src/App.tsx` sync logic.
+### P4.4 — Replication / Consistency guarantees  ✅ DONE (2026-06-28)
+- **Was:** `POST /api/sync/:userId` BLINDLY overwrote the whole stored workspace doc, so a device saving a stale view
+  silently dropped another device's newer sessions (a classic lost-update).
+- [x] Enforced **last-write-wins PER SESSION, server-side**: the POST now reads the stored workspace and MERGES the
+      incoming payload into it (`src/server/project/SyncMerge.ts`) before writing — sessions merged by `id` (newer
+      `lastUpdated` wins; ties → incoming), sessions unique to either side always kept, `lastApp` preserved when the
+      incoming one is empty. The merged UNION is encoded + written. No cross-device session can ever be lost again.
+- [x] **Backward compatible — NO client/App.tsx change needed:** existing clients keep POSTing `{sessions, lastApp}`
+      and get the merge for free (the enforcement is authoritative on the server). Corrupt prior state falls back to a
+      blind write so a save is never lost.
+- [x] Documented the consistency model + boundaries (LWW-per-session, not field-level CRDT) in `docs/SYNC_CONSISTENCY.md`.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2864/2864 ✅ (9 new — incl. the
+      classic lost-update case, stale-no-clobber both directions, lastApp preservation) · server bundles ✅.
+- **Files:** `src/server/project/SyncMerge.ts` (+ `.test.ts`), `src/server/routes/sync.ts`, `docs/SYNC_CONSISTENCY.md`.
 
 ---
 

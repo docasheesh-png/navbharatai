@@ -2,6 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { getDb } from '../lib/db';
 import { encodeWorkspace, decodeWorkspace } from '../project/WorkspaceStore';
+import { mergeWorkspaceState, type WorkspacePayload } from '../project/SyncMerge';
 
 /**
  * Cross-device cloud sync routes (chat sessions + last generated app), stored in
@@ -66,20 +67,43 @@ export function registerSyncRoutes(app: Express): void {
       const sessions = Array.isArray(req.body?.sessions) ? req.body.sessions : [];
       const lastApp = typeof req.body?.lastApp === 'string' ? req.body.lastApp : '';
 
-      const encoded = encodeWorkspace({ sessions, lastApp });
+      // P4.4 — read the existing stored workspace so we can MERGE rather than blindly
+      // overwrite. This enforces last-write-wins PER SESSION on the server, so a device
+      // saving a stale view can never drop another device's newer sessions (lost-update).
+      let prevChunkCount = 0;
+      let storedPayload: WorkspacePayload = { sessions: [], lastApp: '' };
+      const prevSnap = await getDoc(doc(db, 'user_workspaces', userId));
+      if (prevSnap.exists()) {
+        const pdata = prevSnap.data();
+        try {
+          if (pdata.version === 2 && typeof pdata.chunkCount === 'number') {
+            prevChunkCount = pdata.chunkCount;
+            const prevChunks: string[] = [];
+            for (let i = 0; i < pdata.chunkCount; i++) {
+              const cs = await getDoc(doc(db, 'user_workspaces', chunkDocId(userId, i)));
+              prevChunks.push(cs.exists() ? (cs.data().data || '') : '');
+            }
+            const decoded = decodeWorkspace<{ sessions?: any[]; lastApp?: string }>(prevChunks) || {};
+            storedPayload = { sessions: decoded.sessions || [], lastApp: decoded.lastApp || '' };
+          } else {
+            // Legacy v1 inline doc.
+            storedPayload = { sessions: pdata.sessions || [], lastApp: pdata.lastApp || '' };
+          }
+        } catch {
+          // Corrupt/unreadable prior state → fall back to a blind write (never lose this save).
+          storedPayload = { sessions: [], lastApp: '' };
+        }
+      }
+
+      const merged = mergeWorkspaceState(storedPayload, { sessions, lastApp });
+
+      const encoded = encodeWorkspace(merged);
       if (encoded.manifest.totalBytes > MAX_WORKSPACE_BYTES) {
         return res.status(413).json({
           error: 'Workspace too large to sync',
           totalBytes: encoded.manifest.totalBytes,
           limit: MAX_WORKSPACE_BYTES,
         });
-      }
-
-      // Find how many chunks existed before (to clean up stale chunk docs).
-      let prevChunkCount = 0;
-      const prevSnap = await getDoc(doc(db, 'user_workspaces', userId));
-      if (prevSnap.exists() && typeof prevSnap.data().chunkCount === 'number') {
-        prevChunkCount = prevSnap.data().chunkCount;
       }
 
       // Write all chunk docs.
@@ -99,7 +123,7 @@ export function registerSyncRoutes(app: Express): void {
 
       return res.json({
         ok: true,
-        stored: sessions.length,
+        stored: merged.sessions.length, // count AFTER the server-side merge
         chunks: encoded.chunks.length,
         totalBytes: encoded.manifest.totalBytes,
         updatedAt: encoded.manifest.updatedAt,

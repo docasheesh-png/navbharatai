@@ -40,6 +40,27 @@ const TOOLS_DIR = '/home/user/.e-tools';
 // a long build (npm install + AI steps) never gets killed mid-run.
 const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
+// Hard cap on how long Sandbox.create()/connect() may block. The e2b SDK's timeoutMs
+// option is the sandbox LIFETIME, not a connect-request timeout — so without this a
+// slow/throttled/misconfigured E2B makes workspace setup HANG with no event emitted
+// (the "infinite loading then stop" symptom). On timeout we throw, so the route's
+// ensureWorkspace try/catch surfaces an honest "sandbox unavailable" instead of hanging.
+const SANDBOX_CREATE_TIMEOUT_MS = Math.max(
+  10_000,
+  parseInt(process.env.AGENTV3_SANDBOX_CREATE_TIMEOUT_MS || '', 10) || 45_000,
+);
+
+/** Reject if `p` does not settle within `ms` — bounds a call that could otherwise hang forever.
+ *  Exported for unit testing. */
+export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
 
 const CDP_PORT = 9222;
 const CONSOLE_LOG = `${TOOLS_DIR}/console.log`;
@@ -275,19 +296,21 @@ export class E2BActuator implements IEngineerActuator {
       return existing;
     }
 
+    // Every create/connect is bounded by SANDBOX_CREATE_TIMEOUT_MS so a slow E2B can
+    // never hang the build silently — on timeout we throw and the caller surfaces it.
     let sandbox: Sandbox;
     if (resumeSandboxId) {
       // Reconnect to the persisted sandbox — auto-resumes it if paused, restoring
       // all files, node_modules, and any running dev server. Fall back to a fresh
       // sandbox if the resume target was killed/expired.
       try {
-        sandbox = await Sandbox.connect(resumeSandboxId, this._opts());
+        sandbox = await withTimeout(Sandbox.connect(resumeSandboxId, this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.connect');
         await sandbox.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
       } catch {
-        sandbox = await Sandbox.create(this._opts());
+        sandbox = await withTimeout(Sandbox.create(this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
       }
     } else {
-      sandbox = await Sandbox.create(this._opts());
+      sandbox = await withTimeout(Sandbox.create(this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
     }
     this.sandboxes.set(workspaceId, sandbox);
     usageTracker.record(workspaceId, 'sandbox');

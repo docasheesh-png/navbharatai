@@ -54,7 +54,7 @@
 | P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ✅ Complete | 100% |
 | P2 | Resilience & Observability | See + survive failures | ✅ Complete | 100% |
 | P3 | Scale & Frontend Health | Grow without rewrites | 🔄 In Progress | 75% (P3.1 App.tsx split deferred) |
-| P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 25% |
+| P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 50% |
 | P5 | Hygiene & Hardening | Remove rot, close small holes | ⏳ Pending | 0% |
 | **P6** | **IaC & Provisioning** | Reproducible, version-controlled infra | ⏳ Pending | 0% |
 | **P7** | **Async Infra (Queue/Cache)** | Scale beyond Firestore-polling | ⏳ Pending | 0% |
@@ -307,9 +307,25 @@
 - [ ] Separate command (write) and query (read) paths for workspace/build operations.
 - **Files:** `src/server/AppMakerLab/`.
 
-### P4.2 — Event Sourcing + Replay  ❌ MISSING (history store exists, replay doesn't)
-- [ ] Make `EventHistoryStore` replayable to rebuild workspace state from the event log.
-- **Files:** `src/server/AppMakerLab/eventbus/EventHistoryStore.ts`.
+### P4.2 — Event Sourcing + Replay  ✅ DONE (2026-06-28)
+- [x] Made `EventHistoryStore` replayable. New `WorkspaceProjection.ts`: a PURE `replayWorkspaceState(events, id)`
+      reducer folds a workspace's event log into a lifecycle / mutation-ledger / VCS-ref / checkpoint projection,
+      exposed as `EventHistoryStore.replayWorkspace(workspaceId)` + `replayByCorrelationId(correlationId)`.
+- [x] **Honest by construction (the key design choice):** discovery proved AppMakerLab event payloads carry NO file
+      paths and NO file content (mutation events hardcode `workspaceId:'default'` + payload `{id}`). So the projection
+      reconstructs ONLY what the events actually prove — lifecycle, a mutation ledger keyed by transaction id (with
+      final outcome), VCS hashes/branch, checkpoint ids, build/generation errors — and is explicit it CANNOT rebuild
+      file bytes (`reconstructable: false` + `notes[]`; there is deliberately NO fake `filesPresent[]`). Byte-level
+      restore stays the Journal/Checkpoint path. Two entry points honestly handle the workspaceId-vs-correlationId gap.
+- [x] Designed + hardened via multi-agent workflows: a 5-agent discovery (mapped every state-mutating event's exact
+      payload) and a 30-agent adversarial review that caught real bugs, all fixed — **mutation counts are now DERIVED
+      from the final ledger** (a STARTED→FAILED→ROLLED_BACK batch counts once as its final state; duplicate/replayed
+      events never double-count), and `GENERATION_FAILED` / `REPAIR_COMPLETED` now transition lifecycle (no longer
+      stuck). (Pre-existing dual-VCS-event-type and REPAIR_STARTED-payload smells live in the publishers — documented,
+      out of P4.2 scope.)
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2838/2838 ✅ (17 new) ·
+      reducer is pure (identical input → deep-equal output, input never mutated).
+- **Files:** `src/server/AppMakerLab/eventbus/WorkspaceProjection.ts` (+ `.test.ts`), `EventHistoryStore.ts`, `IEventHistoryStore.ts`.
 
 ### P4.3 — Full AST (replace regex code model)  ✅ MOSTLY DONE (2026-06-27)
 - **Reality:** `ts-morph` (real TS AST) is a dependency and used by `AgentV3/ASTAnalyzer.ts` (+test).

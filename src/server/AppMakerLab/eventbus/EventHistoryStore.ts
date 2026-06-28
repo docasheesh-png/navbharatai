@@ -1,5 +1,6 @@
 import { IEvent } from './IEvent';
 import { IEventHistoryStore } from './IEventHistoryStore';
+import { replayWorkspaceState, WorkspaceProjection } from './WorkspaceProjection';
 
 export class EventHistoryStore implements IEventHistoryStore {
     private history: IEvent[] = [];
@@ -28,5 +29,15 @@ export class EventHistoryStore implements IEventHistoryStore {
 
     getByCorrelationId(correlationId: string): IEvent[] {
         return this.history.filter(e => e.correlationId === correlationId);
+    }
+
+    // P4.2 — Event replay. Fold the filtered (chronological, push-only) event slice through
+    // the pure reducer to rebuild the workspace projection from the event log.
+    replayWorkspace(workspaceId: string): WorkspaceProjection {
+        return replayWorkspaceState(this.getByWorkspaceId(workspaceId), workspaceId);
+    }
+
+    replayByCorrelationId(correlationId: string): WorkspaceProjection {
+        return replayWorkspaceState(this.getByCorrelationId(correlationId), correlationId);
     }
 }

@@ -113,12 +113,19 @@ export interface OneShotDeps {
    * Default 90 s.
    */
   previewTimeoutMs?: number;
+  /**
+   * Hard cap (ms) on the WHOLE one-shot attempt (generate + writeFiles + preview). If any step
+   * hangs (e.g. the model call never returns because the HTTP request stalls), the attempt is
+   * abandoned and returns ok:false so the caller FALLS BACK to the agentic loop fast, instead of
+   * the build spinning at "working…" for 10+ minutes. Default 180 s.
+   */
+  overallTimeoutMs?: number;
 }
 
 /** Resolve `p`, but reject with a timeout error if it has not settled within `ms`. */
 async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return await new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`preview did not finish within ${ms}ms`)), ms);
+    const timer = setTimeout(() => reject(new Error(`operation did not finish within ${ms}ms`)), ms);
     p.then(
       (v) => { clearTimeout(timer); resolve(v); },
       (e) => { clearTimeout(timer); reject(e); },
@@ -130,8 +137,22 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  * Run the OneShot lane. Best-effort: returns ok:false (never throws) when it could not produce a
  * usable app, so the caller falls through to the agentic loop. On success the build is DONE — the
  * files are written, the preview is starting, and no loop/escalation runs.
+ *
+ * The whole attempt is bounded by overallTimeoutMs so a hung step (a stalled model call, a sandbox
+ * write that never returns) can NEVER keep the build spinning — on timeout it returns ok:false and
+ * the caller falls back to the agentic loop.
  */
 export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
+  try {
+    return await withTimeout(runOneShotInner(deps), deps.overallTimeoutMs ?? 180_000);
+  } catch (e) {
+    // The inner never throws (its own try/catch returns ok:false), so reaching here means the
+    // overall timeout fired — abandon the one-shot and let the caller use the full builder.
+    return { ok: false, filesWritten: 0, summary: 'One-shot took too long — switching to the full builder.', reason: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+async function runOneShotInner(deps: OneShotDeps): Promise<OneShotResult> {
   const minFiles = deps.minFiles ?? 1;
   try {
     deps.log?.('Trying a fast one-shot build…');

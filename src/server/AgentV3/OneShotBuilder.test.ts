@@ -86,6 +86,17 @@ describe('runOneShot', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('a HUNG generate (model call never returns) does NOT hang — bails to fallback within the overall timeout', async () => {
+    // The exact production hang: the OneShot model call stalls and never resolves, so without an
+    // overall cap the build would spin at "working…" forever. It must bail to ok:false (fallback).
+    const r = await runOneShot(baseDeps({
+      generate: () => new Promise<string>(() => { /* never resolves */ }),
+      overallTimeoutMs: 30,
+    }));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('did not finish');
+  });
+
   it('a HUNG preview (never resolves) does NOT hang the build — it completes within the timeout', async () => {
     // Reproduces the real bug: `npm run dev` never returns, so startPreview never settles. The
     // build must still finish (files are written) instead of spinning at "working…" forever.

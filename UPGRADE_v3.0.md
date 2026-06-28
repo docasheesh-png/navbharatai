@@ -65,6 +65,7 @@
 | **P-DEV** | **Dev Environment Gaps** | LSP navigation, real debugger, crash recovery, merge editor, pkg manager | ⏳ Pending | 0% |
 | **P-BRE** | **Build & Runtime Engine Gaps** | Tracing, incremental builds, structured logs, smoke tests, remote cache | ⏳ Pending | 0% |
 | **P-TQA** | **Testing & QA Engine Gaps** | Code coverage gate, visual regression, load tests, prompt regression, bundle budget | ⏳ Pending | 0% |
+| **P-SEC** | **Security Engine Gaps** | RBAC, DAST, MFA, container scanning, key rotation, SIEM, supply chain | ⏳ Pending | 0% |
 
 ---
 
@@ -272,6 +273,141 @@
 - [ ] **Chaos + load testing:** k6/Locust load tests + a basic fault-injection check in CI.
 - **Acceptance:** static assets edge-cached; keys in KMS; a load test runs in CI.
 - **Files:** infra config, `server.ts`, `.github/workflows/`.
+
+---
+
+## 🔐 PHASE P-SEC — SECURITY ENGINE GAPS
+> From the 300-component Security Engine audit (2026-06-28). Already-strong items not listed.
+> Only PARTIAL → Full and MISSING items, priority-ordered.
+> Scope note: HSM, LDAP, SAML, VPN, K8s admission controllers, Terraform/IaC scanning — ⬜ N/A by design
+> (managed-serverless on Cloud Run; no on-prem or Kubernetes). Enterprise federation (SAML/OIDC) is
+> backlog only. PCI DSS/HIPAA formal programs not in scope for current stage.
+
+### ✅ Security Already Strong (do not redo)
+- Firebase Auth (Google + GitHub OAuth + Phone OTP) + ID token verification middleware (`authMiddleware.ts`)
+- Rate limiting: express-rate-limit (chat 20/min, payment 5/min, admin 5/min) + per-user build quotas (10/hr auth / 5/hr anon)
+- Helmet.js: CSP, COOP, HSTS, X-Frame-Options, frameguard, clickjacking protection (`server.ts`)
+- AES-256-CBC encryption for user secrets with random IV (`src/server/lib/secrets.ts`)
+- SecretRedactor.ts: masks API keys, JWTs, PEM keys in all tool output
+- SecurityAnalysis.ts: 60+ SAST rules — hardcoded secrets, injection, XSS, SSRF, path traversal, weak crypto, eval
+- ComplianceAnalysis.ts: GDPR/DPDP scanning — PII in logs, trackers, consent UI, geolocation usage
+- CommandGovernance.ts: 27 HIGH + 7 MEDIUM shell command risk classification + decision audit trail
+- UntrustedContent.ts: fences prompt injection from tool output before AI sees it
+- audit.ts + logStore.ts: structured JSON audit logging to Firestore `server_logs` (immutable, server-write-only)
+- Firestore rules: owner-based + row-level security (`firestore.rules`)
+- Malware path blocker: `/wp-admin`, `/.env`, `/config.php` → 403 (`server.ts`)
+- CSPRNG: `crypto.randomBytes` used everywhere; Math.random for secrets detected as violation in SecurityAnalysis
+- Payment webhook signature validation (Cashfree HMAC) (`routes/payment.ts`)
+- Admin brute force detection: failed login tracking + timing-safe credential comparison (`routes/admin.ts`)
+- FileSanitizer.ts: path traversal prevention + extension allowlist + `resolveSafePath()` within workspace root
+- Human approval gate for risky commands (Approvals.ts, 10-min timeout + auto-deny)
+- npm audit in CI (`.github/workflows/ci.yml`)
+
+### P-SEC.1 — RBAC / Role-Based Access Control  ❌ MISSING  [HIGH]
+- Auth is binary: Firebase user OR `ADMIN_PASSWORD` hardcoded admin. No role granularity (owner/editor/viewer/billing).
+  No per-route permission matrix. Least-privilege principle violated: all authenticated users can call all user-facing routes.
+- [ ] Define a `UserRole` enum: `owner | admin | editor | viewer | billing_only` stored in Firestore `users/{uid}/role`.
+- [ ] Add `requireRole(...roles)` middleware (wraps `requireAuth`) — inject into routes that need more than "logged in".
+- [ ] Pro v3.0 routes (`/api/agentv3/*`) and billing routes should require `owner` or `billing_only` minimally.
+- **Files:** `src/server/lib/authMiddleware.ts`, `server.ts` (route registration), `src/config/firestore.rules`.
+
+### P-SEC.2 — DAST in CI Pipeline  ❌ MISSING  [HIGH]
+- SecurityScan.tsx runs SAST (pattern-matching via Gemini). No Dynamic Application Security Testing (DAST)
+  that actually hits running endpoints to find auth bypass, injection, path traversal, and misconfigured headers.
+- [ ] Add OWASP ZAP baseline scan step to `.github/workflows/ci.yml` (free, Docker-based, runs against `localhost:3000`).
+- [ ] Or: integrate Nuclei with a custom template targeting NavBharatAI's public routes.
+- [ ] Gate: fail CI on HIGH+ DAST findings; warn on MEDIUM.
+- **Files:** `.github/workflows/ci.yml`, new `security/zap-baseline.yaml` (ZAP config).
+
+### P-SEC.3 — TOTP / App-Based MFA  ❌ MISSING  [HIGH]
+- Phone OTP via Firebase exists but is susceptible to SIM swap. No TOTP (Google Authenticator / Authy) and no
+  WebAuthn/passkeys. High-value accounts (admin, pro billing) have no second factor stronger than SMS.
+- [ ] Add TOTP enrollment flow: `speakeasy` (TOTP library) + QR code in Settings → Security.
+- [ ] On login: if TOTP enabled for uid → prompt for 6-digit code before issuing session.
+- [ ] Store encrypted TOTP secret in Firestore `user_mfa/{uid}` (encrypted with `SECRET_ENCRYPTION_KEY`).
+- [ ] Gate admin panel access on MFA verification (no MFA → deny admin access, show enrollment prompt).
+- **Files:** new `src/server/routes/mfa.ts`, `src/server/lib/authMiddleware.ts`, `src/App.tsx` (settings modal).
+
+### P-SEC.4 — Container Image Vulnerability Scanning  ❌ MISSING  [HIGH]
+- `cloudbuild.yaml` builds the Docker image and pushes to Artifact Registry with no vulnerability scan.
+  A HIGH/CRITICAL CVE in the Node base image goes live undetected (e.g. `node:20-slim` has had critical CVEs).
+- [ ] Add a Trivy scan step in `cloudbuild.yaml` before the push step: `trivy image --exit-code 1 --severity HIGH,CRITICAL $IMAGE`.
+- [ ] On HIGH/CRITICAL: fail the Cloud Build → image does not get pushed → deploy blocked.
+- [ ] Also add to `.github/workflows/ci.yml` as a PR check using `aquasecurity/trivy-action`.
+- **Files:** `cloudbuild.yaml`, `.github/workflows/ci.yml`.
+
+### P-SEC.5 — Encryption Key Rotation  🟡 PARTIAL → full  [HIGH]
+- `SECRET_ENCRYPTION_KEY` is a single static env var in Cloud Run. All `user_secrets` in Firestore are
+  encrypted with this one key — if it leaks, all user credentials are exposed with no rotation possible.
+- [ ] Add key versioning: store `keyVersion` alongside each encrypted secret in Firestore.
+- [ ] Implement a rotation endpoint (`/api/admin/rotate-keys`): re-encrypt all secrets with new key, bump version.
+- [ ] Store multiple key versions in Cloud Run env (`SECRET_KEY_V1`, `SECRET_KEY_V2`), decrypt with correct version, always re-encrypt on write with latest.
+- **Files:** `src/server/lib/secrets.ts`, `src/server/routes/admin.ts`.
+
+### P-SEC.6 — SBOM Generation + License Compliance  ❌ MISSING  [MED]
+- No Software Bill of Materials generated in the build pipeline. No license scanner (FOSSA / Black Duck).
+  GPL-contaminated transitive dependencies can create legal risk. Already captured partially in P-BRE.10
+  (SBOM for build compliance) — this item adds the license violation gate.
+- [ ] Add `syft` (Anchore) to `cloudbuild.yaml` to generate CycloneDX SBOM and upload as build artifact.
+- [ ] Add `license-checker --onlyAllow "MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC"` as CI step — fail on GPL/LGPL.
+- **Files:** `cloudbuild.yaml`, `.github/workflows/ci.yml`.
+
+### P-SEC.7 — SIEM Log Export / Integration  🟡 PARTIAL → full  [MED]
+- Firestore `server_logs` is an immutable audit trail but has no export connector to a SIEM (Splunk, Datadog,
+  ELK, Cloud Logging). Security events cannot be correlated, searched, or alerted on externally.
+- [ ] Add a Cloud Logging export: ship structured audit events to Google Cloud Logging (free for Cloud Run) via `console.log(JSON.stringify(event))` — Cloud Run stdout → Cloud Logging automatically.
+- [ ] In `audit.ts`, format audit events as structured JSON that Cloud Logging can parse as `jsonPayload`.
+- [ ] (Optional Phase 2) Add a Datadog or Grafana Cloud integration for cross-service correlation.
+- **Files:** `src/server/lib/audit.ts`, `src/server/lib/logStore.ts`.
+
+### P-SEC.8 — Adaptive Rate Limiting + Bot Detection  🟡 PARTIAL → full  [MED]
+- Rate limits are static per-IP counts (20/min chat, 5/min payment). A distributed bot with rotating IPs
+  bypasses all limits. No bot fingerprinting, no CAPTCHA, no progressive backoff on suspicious patterns.
+- [ ] Add `express-slow-down` progressive delay after 10 requests: starts delaying at 10 req/min, refuses at 20.
+- [ ] Add `hCaptcha` (privacy-respecting, GDPR-safe) on the signup/login form for new accounts.
+- [ ] Consider IP reputation via `ipqualityscore` or `AbuseIPDB` API for the admin route.
+- **Files:** `server.ts`, `src/App.tsx` (auth form).
+
+### P-SEC.9 — WAF / Cloud Armor  ❌ MISSING  [MED]
+- Cloud Run sits directly on the internet. No Web Application Firewall in front of it. SQL injection,
+  XSS, and LFI payloads hit the Express app directly (Helmet + SecurityAnalysis are detection, not prevention).
+- [ ] Enable Google Cloud Armor (free tier covers basic WAF rules) on the Cloud Run service.
+- [ ] Apply OWASP CRS rule set (preconfigured in Cloud Armor): blocks common injection patterns at the CDN edge.
+- [ ] Set up rate limiting at the Cloud Armor level (complements, doesn't replace, express-rate-limit).
+- **Files:** GCP console / `infra/` (terraform if added in P6), documentation only for now.
+
+### P-SEC.10 — Dependency Pinning + Supply Chain Attestation  🟡 PARTIAL → full  [MED]
+- `package.json` uses caret (`^`) versions throughout. `npm ci` is used in CI (locks to `package-lock.json`),
+  but no package signature verification and no SLSA provenance for build artifacts.
+- [ ] Add `npm audit signatures` check to CI: verifies npm package provenance (npm 8.8+ feature).
+- [ ] Switch `cloudbuild.yaml` Docker push to use Artifact Registry with Binary Authorization enabled.
+- [ ] Add `--ignore-scripts` to CI `npm ci` call to block postinstall hook execution from malicious packages.
+- **Files:** `.github/workflows/ci.yml`, `cloudbuild.yaml`.
+
+### P-SEC.11 — Seccomp / AppArmor for E2B Sandbox  ❌ MISSING  [LOW]
+- `SandboxManager.ts` uses `NODE_OPTIONS` memory limits and process-group killing but no Linux kernel-level
+  syscall filtering. The E2B sandbox `e2b.Dockerfile` doesn't drop Linux capabilities or apply seccomp profiles.
+  A compromised preview server could make arbitrary syscalls.
+- [ ] Add `--security-opt seccomp:unconfined` → replace with a custom seccomp profile (deny `ptrace`, `mount`, `setuid`).
+- [ ] In `e2b.Dockerfile`: add `USER node` (non-root) + `--cap-drop ALL --cap-add NET_BIND_SERVICE`.
+- **Files:** `infra/e2b/e2b.Dockerfile`, `src/server/PreviewRunner/SandboxManager.ts`.
+
+### P-SEC.12 — Formal Incident Response Runbook  ❌ MISSING  [LOW]
+- `metricsAlerts.ts` evaluates alerts (error rate, preview rate, latency). `admin.ts` shows metrics dashboard.
+  But there is no formal incident response playbook: no on-call escalation, no severity classification,
+  no documented steps for credential compromise, data breach, or service outage.
+- [ ] Create `docs/INCIDENT_RESPONSE.md` with severity matrix (P1/P2/P3), escalation chain, and response steps
+  for: data breach, credential leak, service outage, AI abuse.
+- [ ] Wire `metricsAlerts.ts` HIGH alerts to fire a Firestore notification that the admin UI surfaces as a red banner.
+- **Files:** new `docs/INCIDENT_RESPONSE.md`, `src/server/lib/metricsAlerts.ts`, `src/server/routes/admin.ts`.
+
+### P-SEC.13 — Device Fingerprinting + Session Binding  ❌ MISSING  [LOW]
+- Sessions are Firebase ID tokens validated per-request. No device fingerprinting, no impossible-travel detection
+  for regular users (only admin login IPs tracked). Token replay from a different device/IP is undetected.
+- [ ] On login: record device fingerprint (user-agent + IP hash) in Firestore `user_sessions/{uid}/{sessionId}`.
+- [ ] On each authenticated request: compare current IP/UA against recorded session — flag if mismatch.
+- [ ] Step-up auth (re-auth prompt) if device mismatch detected for sensitive operations (billing, secret access).
+- **Files:** `src/server/lib/authMiddleware.ts`, new `src/server/lib/sessionTracker.ts`.
 
 ---
 
@@ -1324,6 +1460,8 @@
     post-build smoke tests, remote build cache (P-BRE.1–5).
 20. **Testing & QA baseline** — code coverage CI gate (≥60%), visual regression tests, bundle size
     budget, vulnerability scan blocks (not warns), quality gate on merge (P-TQA.1–2, P-TQA.5–7).
+21. **Security hardened** — RBAC roles enforced on all routes, DAST in CI, TOTP MFA for admin+pro,
+    container image scanning before push, encryption key rotation mechanism (P-SEC.1–5).
 
 ---
 
@@ -1414,6 +1552,21 @@
   BuildJobManager but no UI), no circuit breaker wrapping EngineDispatcher, no SBOM/license validator.
   LOW gaps: no AI build optimizer, no watchdog for zombie sandbox processes, no deterministic build enforcement.
   Added as **PHASE P-BRE**.
+- 2026-06-28 (Security Engine audit): Ran 300-component **Security Engine** audit (IAM/auth/encryption/secrets/
+  network/threat detection [1-100], supply chain/SAST-DAST/container/data-security/injection/API/audit/compliance
+  [101-200], AI-LLM security/runtime isolation/governance/analytics/SecOps [201-300]).
+  Already-strong (~55%): Firebase Auth (Google+GitHub OAuth+Phone OTP), authMiddleware ID token verification,
+  express-rate-limit (chat/payment/admin/build quotas), Helmet.js (CSP/COOP/HSTS), AES-256-CBC secret encryption,
+  SecretRedactor.ts (tool output masking), SecurityAnalysis.ts (60+ SAST rules), ComplianceAnalysis.ts
+  (GDPR/DPDP), CommandGovernance.ts (27 HIGH + 7 MEDIUM shell rules), UntrustedContent.ts (prompt injection fence),
+  immutable Firestore audit trail, row-level Firestore security rules, malware path blocker, CSPRNG, admin brute
+  force detection, FileSanitizer path traversal prevention, human approval gate (Approvals.ts).
+  HIGH gaps: no RBAC (binary user/admin only, no role granularity), no DAST in CI (only SAST), no TOTP/WebAuthn MFA,
+  no container image vulnerability scanning (Trivy), no encryption key rotation mechanism.
+  MED gaps: no SBOM + license scanner, no SIEM log export, adaptive rate limiting missing (static IP counts only),
+  no WAF/Cloud Armor, dependency pinning without supply chain attestation.
+  LOW gaps: no seccomp/AppArmor for E2B sandbox, no formal incident response runbook, no device fingerprinting.
+  Added as **PHASE P-SEC**.
 - 2026-06-28 (DEV audit): Ran 300-component **Development Environment** audit → found 13 gaps (5 HIGH, 5 MED, 3 LOW).
   Scope note: remote DevContainers, k8s-native dev, Codespaces, WSL, bare-metal GPU are ⬜ N/A by design (managed-serverless + E2B sandbox).
   Already-strong (~60%): Monaco Editor (multi-tab, minimap, folding, multi-cursor, bracket colorization), DiffViewer (LCS), VisualEditor (WYSIWYG),

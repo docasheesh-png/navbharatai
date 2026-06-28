@@ -1265,6 +1265,14 @@ export function registerAgentV3Routes(app: Express): void {
       endBuild(rb);
     }, deadlineMs) : undefined;
 
+    // MINUTE-BY-MINUTE TIMELINE — record a "still working" heartbeat every 60 s so the build report
+    // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
+    // blank gap during a long/slow step. Best-effort; cleared in `finally`.
+    const diagHeartbeatTimer: ReturnType<typeof setInterval> = setInterval(() => {
+      if (rb.ended) return;
+      try { buildDiagRef?.heartbeat(); } catch { /* diagnostics are best-effort */ }
+    }, 60_000);
+
     try {
       // Native Claude for real tool-use, with a multi-provider text fallback
       // (Vertex → Gemini → Grok) so chat never dies if Claude is down/misconfigured.
@@ -2107,8 +2115,9 @@ export function registerAgentV3Routes(app: Express): void {
       emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {
       // Normal completion reached the finally synchronously → cancel the wall-clock deadline so it
-      // can't fire after a clean finish (no double terminal event).
+      // can't fire after a clean finish (no double terminal event), and stop the heartbeat timer.
       if (deadlineTimer) clearTimeout(deadlineTimer);
+      clearInterval(diagHeartbeatTimer);
       activeBuilds.delete(buildKey);
       // Only clear the registry slot if it is STILL this build — a Stop may have already
       // replaced it with a newer run. End every attached stream.

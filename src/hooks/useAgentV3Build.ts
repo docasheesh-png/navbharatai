@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { agentV3Reducer } from '../components/agentv3/agentV3Reducer';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent } from '../components/agentv3/agentV3Types';
@@ -68,6 +68,8 @@ export function useAgentV3Build(): UseAgentV3Build {
   const userIdRef = useRef<string | undefined>(undefined);
   const emailRef = useRef<string | undefined>(undefined);
   const workspaceIdRef = useRef<string | undefined>(undefined);
+  // WATCHDOG — timestamp of the last stream event, so a silent/dead stream can be detected.
+  const lastEventTsRef = useRef<number>(Date.now());
 
   // Keep the latest workspace id available to restore() without a stale closure.
   workspaceIdRef.current = state.workspaceId;
@@ -117,6 +119,7 @@ export function useAgentV3Build(): UseAgentV3Build {
           continue;
         }
         gotEvent = true;
+        lastEventTsRef.current = Date.now(); // WATCHDOG — mark stream activity
         setState((prev) => agentV3Reducer(prev, event));
       }
     }
@@ -362,6 +365,40 @@ export function useAgentV3Build(): UseAgentV3Build {
     },
     [running],
   );
+
+  // WATCHDOG — while a build is "running", if the event stream goes silent for too long the user
+  // would otherwise be stuck on an endless spinner. Reconcile with the server: if the build is gone,
+  // stop honestly; if it's still alive, auto re-attach (resume) to reconnect the stream. This is the
+  // "auto-restart when stuck" safety net — no manual reload needed.
+  useEffect(() => {
+    if (!running) return;
+    const STALL_MS = 100_000;   // ~1.7 min of total stream silence before we act
+    const id = setInterval(() => {
+      if (Date.now() - lastEventTsRef.current < STALL_MS) return;
+      lastEventTsRef.current = Date.now(); // avoid re-firing every tick while we reconcile
+      void (async () => {
+        try {
+          const params = new URLSearchParams();
+          if (userIdRef.current) params.set('userId', userIdRef.current);
+          if (emailRef.current) params.set('email', emailRef.current);
+          const r = await fetch(`/api/agentv3/status?${params.toString()}`);
+          const j = await r.json().catch(() => ({}));
+          if (j?.buildRunning === true) {
+            // The build is alive but OUR stream went quiet — reconnect and keep going.
+            abortRef.current?.abort();
+            await resume({ userId: userIdRef.current, email: emailRef.current });
+          } else {
+            // The build is no longer running server-side — stop the spinner instead of hanging.
+            abortRef.current?.abort();
+            setRunning(false);
+            setServerBuildRunning(false);
+            setError('The build stopped responding — your files are saved. Send a message and I\'ll continue from where it left off.');
+          }
+        } catch { /* probe failed — leave running and try again next tick */ }
+      })();
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [running, resume]);
 
   return { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation };
 }

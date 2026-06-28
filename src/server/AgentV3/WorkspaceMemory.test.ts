@@ -66,6 +66,37 @@ describe('WorkspaceMemory', () => {
     expect(mem.recall('nothingmatchesthis')).toEqual([]);
   });
 
+  it('recall matches a MULTI-WORD query by token overlap (not just contiguous substring)', () => {
+    const mem = new WorkspaceMemory();
+    mem.recordFix('fixed the countdown timer reset bug', 'src/Timer.tsx');
+    // The full phrase "countdown timer logic" is not a contiguous substring of the episode,
+    // but the shared tokens "countdown" + "timer" should still surface it.
+    const hits = mem.recall('countdown timer logic');
+    expect(hits.some((h) => h.type === 'episode' && h.ref.includes('countdown timer'))).toBe(true);
+  });
+
+  it('recall ranks a more RECENT matching episode above an older one at equal relevance', () => {
+    const mem = new WorkspaceMemory();
+    mem.recordNote('timer feature first pass');
+    // Force a later timestamp deterministically by advancing the clock.
+    const realNow = Date.now;
+    try {
+      Date.now = () => realNow() + 60_000;
+      mem.recordNote('timer feature second pass');
+    } finally {
+      Date.now = realNow;
+    }
+    const hits = mem.recall('timer').filter((h) => h.type === 'episode');
+    expect(hits[0].ref).toContain('second pass'); // newer wins the tie
+  });
+
+  it('recall ignores stopwords so the query ranks on the meaningful token', () => {
+    const mem = new WorkspaceMemory();
+    mem.indexFile('src/Dashboard.tsx', 'export function Dashboard(){ return null; }');
+    const hits = mem.recall('please make the Dashboard for me');
+    expect(hits[0]?.ref).toBe('Dashboard');
+  });
+
   it('projectMap summarises files, components and recent errors', () => {
     const mem = new WorkspaceMemory();
     mem.indexFile('src/App.tsx', "import react from 'react'; export function App(){return null;}");

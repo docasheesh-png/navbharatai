@@ -74,6 +74,7 @@
 | **P-DESIGN** | **UI/UX & Design Platform Gaps** | UI primitive library, overlay primitives, a11y engine, charts, AI design-gen, prototyping, design governance | ⏳ Pending | 0% |
 | **P-DEPLOY** | **DevOps & Deployment Gaps** | DORA metrics, staging/promotion, AI deploy-ops, app-store automation, approval gate, more targets | ⏳ Pending | 0% |
 | **P-COLLAB** | **Collaboration Platform Gaps** | Durable team membership, shared-workspace ACL, client share portal, team libraries, @mention, SSO | ⏳ Pending | 0% |
+| **P-MON** | **Monitoring & Analytics Gaps** | Product analytics pipeline, anomaly/forecasting, LLM observability, real health scores, AI insights, FinOps | ⏳ Pending | 0% |
 
 ---
 
@@ -1749,6 +1750,63 @@
 
 ---
 
+## 📈 PHASE P-MON — MONITORING & ANALYTICS GAPS
+> From a 300-component **Monitoring & Analytics** audit (2026-06-28, 2 deep-scan agents, cited files verified).
+> This is the **most-overlapping** category: the observability *core* (metrics/logs/tracing/error-tracking/alerting/
+> SLO/DORA) is already tracked across P2/P8/P-BRE/P-PME/P-DEPLOY, and infra monitoring is ⬜ N/A-by-design.
+> Only the genuinely-new **analytics/intelligence** gaps remain.
+
+### ✅ Monitoring Already Strong / In-Flight (do not duplicate)
+- Metrics: `lib/metrics.ts` (MetricsRegistry) + `metricsStore.ts` (Firestore daily snapshots) + `AgentV3CostTelemetry` (cost/quality per build) + `TokenUsageManager` — token/cost/build/success metrics are real.
+- Logs: `lib/{logStore,audit}.ts` (structured, queryable Firestore `server_logs`, traceId field); admin endpoints `/api/admin/{metrics,logs,events,analytics}`.
+- Alert rules: `lib/metricsAlerts.ts` (error-rate / preview-rate / slow-build thresholds). Event bus + store. Hallucination/authenticity via `BuildConfidence` (P-AI.1). Build-quality score via `BuildConfidence`.
+
+### ⬜ N/A-by-design / already tracked elsewhere (NOT added here)
+- **Already tracked:** OpenTelemetry/distributed-tracing/spans/service-map → **P2.1/P8/P-BRE.1**; error-tracking/Sentry/crash/exception → **P2.2/P8**; structured-logging/correlation-IDs/log-parsing → **P-BRE.3**; SIEM/security-analytics/threat → **P-SEC.7**; alerting-dispatch/notifications/incident/pager/Slack/email → **P8/P-BRE.7/P-PME.9**; SLO/SLA/SLI/error-budget → **P8/P-PME.11**; DORA/MTTR/lead-time → **P-DEPLOY.1**; charts/viz/dashboard-builder/graph/heatmap-render → **P-DESIGN.4**; session-replay/heatmap/RUM → **P-UX.9**; model-eval/benchmark → **P-AI.12**; hallucination-monitoring → **P-AI.1**; data-quality/lineage/retention → **P-DATA**; observability **for generated apps** → existing P-CGE/P-DEV item.
+- **⬜ N/A-by-design (managed-serverless, single-region):** Kubernetes/cluster/pod/node/container/GPU/power/network/disk/filesystem monitoring, multi-cloud/hybrid/edge/geo/multi-region monitoring, OLAP/data-warehouse/time-series-DB integration, carbon/GreenOps.
+
+### P-MON.1 — Server-Side Analytics Pipeline + Product Analytics  🟡 PARTIAL → full  [MED]
+- `lib/analytics.ts` is **client-side localStorage** event tracking; there is no server-side aggregation/ETL, and no
+  **product analytics** (funnels, cohorts, retention, engagement, conversion, segmentation). `AppAnalytics.tsx` reads localStorage.
+- [ ] Add a server `/api/analytics/event` ingestion → Firestore + a daily rollup job; build funnel/cohort/retention queries.
+- [ ] Surface activation, feature-adoption, and conversion (signup→build→deploy→pay) funnels in the admin dashboard.
+- **Files:** `src/lib/analytics.ts`, new `src/server/lib/AnalyticsPipeline.ts`, `src/server/routes/{telemetry,admin}.ts`.
+
+### P-MON.2 — Anomaly Detection + Trend Analysis + Forecasting  ❌ MISSING  [MED]
+- Alerting is **static thresholds only** (`metricsAlerts.ts`). No statistical **anomaly detection** (z-score/IQR), no
+  **trend analysis**, no **forecasting** (cost/usage/capacity/performance) — so regressions/spikes are caught late.
+- [ ] Add a rolling-baseline anomaly detector over the daily metric snapshots (cost, error rate, latency, build volume).
+- [ ] Add simple forecasting (moving-average/linear) for cost + usage with budget-burn projection.
+- **Files:** new `src/server/lib/AnomalyDetector.ts`, `src/server/lib/metricsAlerts.ts`, `metricsStore.ts`.
+
+### P-MON.3 — LLM / AI Observability Dashboard  🟡 PARTIAL → full  [MED]
+- Token/cost are tracked, but there is no **LLM-ops view**: prompt performance, **inference-latency percentiles
+  (p50/p95/p99)** per provider/model, **model-drift** over time, **tool-usage** analytics, and **multi-agent** coordination metrics.
+- [ ] Record per-call latency percentiles + per-tool success/failure; persist a daily LLM-ops snapshot.
+- [ ] Add an admin "AI Observability" view (provider/model latency, drift, tool usage, agent coordination).
+- **Files:** `src/server/lib/metrics.ts`, `src/server/AgentV3/{AgentV3CostTelemetry,ToolDispatcher}.ts`, `src/server/routes/admin.ts`.
+
+### P-MON.4 — Wire Health Monitor to REAL Metrics + Composite Scores  🟡 PARTIAL → full  [MED — honesty]
+- `AppHealthMonitor.tsx` currently renders **simulated/demo data** (fake uptime/latency/CPU) — a violation of the
+  "honest state, no fake success" core law. There is also no composite **health / reliability / risk score**.
+- [ ] Wire `AppHealthMonitor` to the real `/api/admin/metrics` + provider stats (or show an honest "no data" state).
+- [ ] Compute a composite Health/Reliability score (0–100) from real error-rate, latency, success-rate, uptime.
+- **Files:** `src/components/ide/AppHealthMonitor.tsx`, `src/server/routes/admin.ts`, new `src/server/lib/HealthScore.ts`.
+
+### P-MON.5 — AI Insights / NL Query / AI Report Generator  ❌ MISSING  [LOW — AIOps]
+- No way to ask telemetry questions in natural language, get AI-generated insights ("cheap tier success up to 94%"),
+  or auto-generate a periodic ops report.
+- [ ] Add an admin NL→query over the metric snapshots; an AI insights card; a weekly AI-generated ops summary.
+- **Files:** new `src/server/lib/AiInsights.ts`, `src/server/routes/admin.ts`.
+
+### P-MON.6 — Self-Service Dashboards + FinOps Recommendations  🟡 PARTIAL → full  [LOW]
+- Admin dashboards are hardcoded (no custom dashboard/widget builder — render layer tracked in P-DESIGN.4), and cost
+  is tracked but there are no **FinOps recommendations** ("switch to cheaper model", "X% spend on failed builds").
+- [ ] Add a lightweight custom-dashboard/widget config (on top of P-DESIGN.4 charts) + a FinOps recommendations card.
+- **Files:** `src/components/AdminDashboard.tsx`, new `src/server/lib/FinOpsAdvisor.ts`.
+
+---
+
 ## ✅ DEFINITION OF "ROCK-SOLID" (exit criteria for this roadmap)
 1. All **three universes** isolated and provably correct (FREE no-Claude, SDA Grok-first, PRO Claude-first).
 2. **Real test suite** green + CI gate blocks broken deploys.
@@ -1834,6 +1892,15 @@
   shared-workspace backend ACL; client/stakeholder share portal + feedback; team-scoped shared libraries;
   @mention + notification routing; SSO/identity-federation). Notable real finding: teams/invites are currently
   localStorage-only with an email stub. Doc-only.
+- 2026-06-28 (Monitoring & Analytics audit): Ran a 300-component **Monitoring & Analytics** audit (2 deep-scan
+  agents, cited files verified). **Most-overlapping category yet** — the observability core (metrics/logs/tracing/
+  error-tracking/alerting/SLO/DORA) is already tracked (P2/P8/P-BRE/P-PME/P-DEPLOY) and infra monitoring is
+  ⬜ N/A-by-design (K8s/GPU/multi-cloud/OLAP/carbon). Only **6 genuinely-new analytics/intelligence gaps**
+  remained → added as **PHASE P-MON** (server-side product-analytics pipeline w/ funnels/cohorts/retention;
+  anomaly-detection + forecasting; LLM/AI observability dashboard; wire AppHealthMonitor to REAL metrics +
+  composite health scores; AI insights/NL-query/report-gen; self-service dashboards + FinOps recommendations).
+  **Honest-state finding:** `AppHealthMonitor.tsx` currently shows simulated/demo data (uptime/latency/CPU) —
+  P-MON.4 fixes this to use real metrics or an honest "no data" state. Doc-only.
 - Deploy after each phase (permanent law). Maintain English-only UI (permanent law).
 - 2026-06-27 (UX + PE audits): Ran 300-component **UX Engine** audit → found 10 gaps (4 HIGH, 4 MED, 2 LOW).
   Already-strong: theme, PWA, Ctrl+K, onboarding modal, toast, AI Suggestions, LiveCollaboration. MISSING:

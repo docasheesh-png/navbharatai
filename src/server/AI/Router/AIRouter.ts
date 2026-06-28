@@ -66,6 +66,15 @@ export class AIRouter {
     this.providers.sort((a, b) => a.priority - b.priority);
   }
 
+  /**
+   * Read-only view of the registered provider chain, in resolved priority order.
+   * Used by tests (to prove per-universe routing isolation) and observability —
+   * never mutate the returned objects.
+   */
+  getProviderChain(): Array<{ name: string; priority: number }> {
+    return this.providers.map(p => ({ name: p.name, priority: p.priority }));
+  }
+
   async route(prompt: string, systemPrompt?: string, images?: string[], modelOverride?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
     return this.execute(prompt, undefined, systemPrompt, images, modelOverride);
   }

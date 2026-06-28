@@ -5,6 +5,7 @@ import { extractDocumentText } from '../lib/attachmentText';
 import { CREATOR_IDENTITY } from '../lib/prompts';
 import { computeClinicalTool, AVAILABLE_CLINICAL_TOOLS } from '../lib/clinical/calculators';
 import { retrieveClinicalKnowledge, formatKnowledgeForPrompt } from '../lib/clinical/knowledgeBase';
+import { AIRouterManager } from '../AI/AIRouterManager';
 
 /**
  * Senior Doctor Assistant (SDA) chat route extracted from the server.ts monolith
@@ -437,7 +438,27 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         } catch { console.warn('[SDA] Race (Grok+Gemini) both failed → Vertex/Claude'); }
       }
 
-      // ── Sequential fallback: Vertex → Claude ─────────────────────────────
+      // ── Isolated PROFESSIONAL namespace router (text-only) ────────────────
+      // SDA is part of the PROFESSIONAL universe — centralized, provably-isolated
+      // chain Grok→Gemini→Vertex→Claude(last), defined once in AIRouterManager
+      // (P0.1). Multimodal (image/PDF) requests keep the inline Vertex/Claude path
+      // below, which handles attachments.
+      if (!reply && !isImage && !isPDF) {
+        try {
+          const histText = historyForAI
+            .map((m: any) => `${m.role === 'user' ? 'Dr' : 'SDA'}: ${m.content}`)
+            .join('\n');
+          const fallbackPrompt = histText ? `${histText}\nDr: ${message}` : message;
+          const professionalRouter = AIRouterManager.getRouter('professional');
+          const { response, telemetry } = await professionalRouter.route(fallbackPrompt, SDA_SYSTEM_FINAL);
+          if (telemetry.success && response.content?.trim()) {
+            reply = response.content;
+            console.log(`[SDA] Isolated 'professional' namespace router succeeded via ${telemetry.provider}`);
+          }
+        } catch (e: any) { console.warn('[SDA] professional-namespace router err:', e.message); }
+      }
+
+      // ── Sequential fallback: Vertex → Claude (multimodal-capable safety net) ──
       if (!reply) {
         try {
           const sdaProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';

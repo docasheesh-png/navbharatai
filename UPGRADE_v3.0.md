@@ -20,7 +20,9 @@
 
 ### Three Universe Isolation (PERMANENT — never share state)
 - **FREE** (navbharat): Vertex → Gemini → Grok. **Claude NEVER used.**  ✅ implemented
-- **SDA** (Doctor AI): Grok → Gemini → Vertex → Claude (Grok primary, Claude last resort).  ❌ **router missing — P0.1**
+- **PROFESSIONAL** (Doctor AI/SDA + Teacher, Lawyer, CA, Astrologer, Kisan, … — the whole
+  Professionals universe): Grok → Gemini → Vertex → Claude (Grok primary, Claude last resort).
+  ✅ implemented (2026-06-28, P0.1 — isolated `professional` namespace in `AIRouterManager`).
 - **PRO** (build + plan): Claude → Grok → Gemini → Vertex (Claude primary).  ✅ implemented
 
 ---
@@ -29,7 +31,8 @@
 - ✅ HAVE (strong, real): ~62% (architecture) · ~30% (infrastructure)
 - 🟡 PARTIAL (works but incomplete): ~23%
 - ❌ MISSING (not present): ~15% (architecture) · ~25% (infrastructure)
-- **1 core-law violation still open:** SDA isolated router (P0.1).
+- **0 core-law violations open** — the last one (professional isolated router, P0.1) was
+  closed on 2026-06-28.
 
 > **2026-06-27 CORRECTION:** A deeper infra scan (`tests/`, `AgentV3/`, `infra/e2b/`,
 > `.github/workflows/`) found that several items first marked MISSING are in fact **already
@@ -46,7 +49,7 @@
 
 | Phase | Name | Why | Status | % |
 |-------|------|-----|--------|---|
-| P0 | Core-Law Violations | Breaks your own permanent rules | 🔄 In Progress | 50% |
+| P0 | Core-Law Violations | Breaks your own permanent rules | ✅ Complete | 100% |
 | P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | 🔄 In Progress | 50% |
 | P2 | Resilience & Observability | See + survive failures | ⏳ Pending | 0% |
 | P3 | Scale & Frontend Health | Grow without rewrites | ⏳ Pending | 0% |
@@ -63,19 +66,23 @@
 ## 🔴 PHASE P0 — CORE-LAW VIOLATIONS (do FIRST)
 > These break rules you yourself set as permanent. Highest priority.
 
-### P0.1 — SDA "Doctor AI" Isolated Router Chain  ❌ MISSING
-- **Problem:** Backend `src/server/AI/AIRouterManager.ts` only has FREE + PRO namespaces.
-  The SDA chain **Grok → Gemini → Vertex → Claude** (Grok primary, Claude last resort) does NOT exist
-  as an isolated routing namespace. Frontend `SDAChat` UI exists but routes without true isolation.
-- **Tasks:**
-  - [ ] Add a third namespace `sda` in `AIRouterManager.ts` with priority order: Grok(1-2) → Gemini(3-4) → Vertex(5-9) → Claude(last).
-  - [ ] Wire tier routing in `src/server/AI/UniversalAIRouter.ts`: `sda` / `doctor` tier → `sda` namespace.
-  - [ ] Add dedicated SDA endpoint(s) in `server.ts` (e.g. `/api/sda-chat`) that force the `sda` namespace.
-  - [ ] Verify **complete isolation** — SDA must never touch FREE or PRO state/history/cache.
-  - [ ] Frontend: point `SDAChat` at the new isolated endpoint.
-- **Acceptance:** A test proves SDA uses Grok first and Claude only as final fallback, and that
-  FREE never reaches Claude.
-- **Files:** `src/server/AI/AIRouterManager.ts`, `src/server/AI/UniversalAIRouter.ts`, `server.ts`, `src/components/.../SDAChat`.
+### P0.1 — PROFESSIONAL Universe Isolated Router Chain  ✅ DONE (2026-06-28)
+- **Was:** Backend `src/server/AI/AIRouterManager.ts` only had FREE + PRO namespaces. The professional
+  chain **Grok → Gemini → Vertex → Claude** (Grok primary, Claude last resort) did NOT exist as an
+  isolated routing namespace. Worse, the generic config-driven professionals engine routed
+  **Gemini → Claude → Grok** (Claude reached 2nd — a Grok-primary/Claude-last violation).
+- **Scope (admin direction 2026-06-28):** isolate the WHOLE professional universe, not just SDA —
+  Doctor AI/SDA **and** every config-driven professional (Teacher, Lawyer, CA, Astrologer, Kisan, … 70+)
+  now share ONE isolated `professional` namespace.
+- **Done:**
+  - [x] Added a third namespace `professional` in `AIRouterManager.ts`: Grok(1-2) → Gemini(3-4) → Vertex(5-9) → Claude(99, last).
+  - [x] Wired tier routing in `UniversalAIRouter.ts`: `sda` / `doctor` / `professional` tier → `professional` namespace; FREE never reaches Claude.
+  - [x] `/api/sda-chat` (already isolated) now uses the `professional` namespace for its text-only path; multimodal (image/PDF) keeps its inline Vertex/Claude safety net.
+  - [x] `professionals/engine.ts` `resilientCall` now routes through the isolated `professional` namespace (replaced the Gemini→Claude→Grok inline chain) — fixes the Claude-last violation for all professionals.
+  - [x] Added `AIRouter.getProviderChain()` read-only inspector for provable isolation.
+  - [x] Test `tests/professionalRouter.test.ts` proves: Grok first, Claude strictly last, PROFESSIONAL ≠ FREE ≠ PRO instances, FREE never includes Claude, PRO still Claude-first.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2699/2699 ✅ · build ✅ · boot smoke-check ✅
+- **Files:** `src/server/AI/AIRouterManager.ts`, `src/server/AI/UniversalAIRouter.ts`, `src/server/AI/Router/AIRouter.ts`, `src/server/routes/sda.ts`, `src/server/professionals/engine.ts`, `tests/professionalRouter.test.ts`.
 
 ### P0.2 — Real Test Suite (the "break nahi honi chahiye" engine)  ✅ DONE (2026-06-27)
 - **Was:** thought to be missing. **Reality:** **293 test files** + Vitest are present.
@@ -292,4 +299,10 @@
   to ✅ DONE. Added **INFRASTRUCTURE LAYER P6–P10** (IaC, queue/cache, observability, zero-downtime/DR, edge).
   Confirmed low-level infra (k8s, bare metal, hypervisor, etc.) is ⬜ N/A by design (managed-serverless).
   **Only remaining core-law violation: P0.1 SDA isolated router.**
+- 2026-06-28: **P0.1 DONE.** Per admin direction, isolated the ENTIRE professional universe (not just
+  SDA): added the `professional` namespace (Grok→Gemini→Vertex→Claude-last) in `AIRouterManager`, wired
+  `UniversalAIRouter` tier mapping, pointed the SDA route's text path and the config-driven professionals
+  engine at it (fixing the engine's previous Gemini→Claude→Grok Claude-2nd violation), and added a test
+  (`professionalRouter.test.ts`) proving Grok-first/Claude-last + FREE-never-Claude + PRO-Claude-first.
+  Gate green (tsc ×2, 2699 tests, build, boot). **Zero core-law violations now open. P0 complete (100%).**
 - Deploy after each phase (permanent law). Maintain English-only UI (permanent law).

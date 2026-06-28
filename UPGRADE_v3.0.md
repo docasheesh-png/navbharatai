@@ -53,7 +53,7 @@
 | P0 | Core-Law Violations | Breaks your own permanent rules | ✅ Complete | 100% |
 | P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ✅ Complete | 100% |
 | P2 | Resilience & Observability | See + survive failures | ✅ Complete | 100% |
-| P3 | Scale & Frontend Health | Grow without rewrites | ⏳ Pending | 0% |
+| P3 | Scale & Frontend Health | Grow without rewrites | 🔄 In Progress | 25% |
 | P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 25% |
 | P5 | Hygiene & Hardening | Remove rot, close small holes | ⏳ Pending | 0% |
 | **P6** | **IaC & Provisioning** | Reproducible, version-controlled infra | ⏳ Pending | 0% |
@@ -250,9 +250,19 @@
 - [ ] Target: `App.tsx` < 1,500 lines, no behavior change.
 - **Files:** `src/App.tsx` → `src/contexts/`, `src/hooks/`.
 
-### P3.2 — Offline-First Runtime  🟡 PARTIAL
-- [ ] Service worker: cache dynamic API responses + queue writes for replay on reconnect.
-- **Files:** `public/sw.js`, `src/lib/storage.ts`.
+### P3.2 — Offline-First Runtime  ✅ DONE (2026-06-28)
+- [x] Service worker now caches an allowlist of safe, read-only GET API endpoints
+      (`/api/agentv3/conversations`, `/api/agentv3/status`) using **network-first → cache fallback**: online users
+      ALWAYS get fresh data; the cache is served only when the network fails (offline), so the app still shows
+      last-known data. The new `navbharat-api-v1` cache is preserved across SW activations.
+- [x] Offline write queue (`src/lib/offlineQueue.ts`, IndexedDB-backed): fire-and-forget writes that fail because the
+      device is offline are buffered and **replayed on reconnect** (the `online` event). Replay is **STRICTLY
+      allowlisted** to idempotent/harmless endpoints (`/api/analytics/event`, `/api/logs/error`) — a payment or
+      build is NEVER queued or replayed (break-proof on a production payments app). Wired into the client error
+      reporters in `main.tsx`; `installOfflineQueueFlush()` drives the reconnect replay.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2805/2805 ✅ (9 new) ·
+      production `vite build` ✅ · `node --check public/sw.js` ✅ (SW emitted to `dist/sw.js` with the new logic).
+- **Files:** `public/sw.js`, `src/lib/offlineQueue.ts` (+ `.test.ts`), `src/main.tsx`.
 
 ### P3.3 — Scalability / HA  🟡 PARTIAL
 - [ ] Keep `min-instances=0` (budget), but add a lightweight keep-warm ping for PRO/SDA endpoints.

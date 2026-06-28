@@ -1664,7 +1664,9 @@ export function registerAgentV3Routes(app: Express): void {
             const escRunner = new AgentRunner({
               ...baseRunnerOpts,
               client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true }),
-              model: resolveModel(tier === 'opus'),
+              // Opus ONLY in power mode — a power-off escalation caps at Sonnet, never Opus
+              // (admin rule 2026-06-28). Escalation only runs in normal mode anyway.
+              model: resolveModel(tier === 'opus' && onlyOpus),
               persistence: {
                 store: getConversationStore(),
                 conversationId: randomUUID(),
@@ -1707,20 +1709,20 @@ export function registerAgentV3Routes(app: Express): void {
       if (expectsArtifacts && writtenFiles.size === 0 && !abort.signal.aborted && costAfterFirstAttempt <= capUsd) {
         buildDiag.record({
           phase: 'build', severity: 'warning', code: 'EMPTY_BUILD_RETRY',
-          message: 'First attempt produced no files — retried the whole build on a stronger model (Opus).',
+          message: 'First attempt produced no files — retried the whole build on a stronger model (Sonnet in normal mode; Opus only in power mode).',
           autoResolved: false, // back-filled to true by finish() if the retry then succeeded
         });
         events.emit({ type: 'narration', agent: 'architect', text: 'The first attempt produced no files — rebuilding with a stronger model…', ts: Date.now() });
-        // The "stronger model" is the power-OFF ceiling: Opus at its LOWEST effort
-        // (admin rule 2026-06-27 — "power off me Opus ka sabse lower version"). In a
-        // power-ON build it's already Opus at the selected effort; here we force Opus
-        // for the retry even in normal mode, at the ceiling effort. Billing is unchanged
-        // (normal mode still bills Sonnet×3.5 via baseRunnerOpts.powerLevel) — no surprise.
+        // The "stronger model" for the retry: in POWER mode it's Opus; in NORMAL (power-off)
+        // mode it is SONNET — Opus is NEVER used when power is off (admin rule 2026-06-28,
+        // supersedes the 2026-06-27 "power-off Opus" rule). Since a simple app's first attempt
+        // ran on Haiku, retrying on Sonnet is already a real step up, and it keeps a failed
+        // build from ever burning the most-expensive model (the "$26 failed todo" driver).
         const retryRunner = new AgentRunner({
           ...baseRunnerOpts,
           client: buildTurnRunner({ claudeFirst: true }),
-          model: resolveModel(true), // Opus
-          effort: powerSpecResolved.effort ?? powerSpecResolved.ceilingEffort,
+          model: resolveModel(onlyOpus), // Opus only in power mode; Sonnet in normal mode
+          effort: onlyOpus ? (powerSpecResolved.effort ?? powerSpecResolved.ceilingEffort) : undefined,
           persistence: {
             store: getConversationStore(),
             conversationId: randomUUID(),

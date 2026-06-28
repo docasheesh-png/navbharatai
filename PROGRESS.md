@@ -4712,6 +4712,48 @@ Phase P3 at 75%: P3.2 offline-first, P3.3 keep-warm, P3.4 CDN all DONE. P3.1 (sp
 regression risk on the live app, not safe for a single autonomous cycle (safeguard #3).
 Files: lib/staticCache.ts (+.test.ts), server.ts, firebase.json, docs/CDN.md, UPGRADE_v3.0.md.
 
+## 2026-06-28 — ROOT CAUSE: v3.0 builds stopped midway + zero Claude tokens → cheap-first provider order
+
+Admin reported builds "band ho jaate hain bich me" and that NOT ONE Claude token was used.
+Forensic trace of the build provider chain (agentv3.ts buildTurnRunner + MultiProviderTurnRunner):
+
+ROOT CAUSE: the v3.0 build chain was CHEAP-FIRST by default — [Vertex → Gemini → Claude → Haiku].
+buildTurnRunner was called without claudeFirst, and the default was false (only AGENTV3_BUILD_
+CLAUDE_FIRST=1 or escalation flipped it). MultiProviderTurnRunner returns the first NON-THROWING
+result, so Gemini/Vertex handled EVERY turn (→ zero Claude tokens) and when Gemini hit a quota/
+rate/output-token limit mid-build it returned a truncated/poor turn that was ACCEPTED (not thrown),
+so the agent loop stalled/stopped midway instead of falling through to Claude. This also violated
+the v3.0 constitution (CLAUDE.md: "v3.0 always runs on NavBharatAI's own Anthropic/Claude account").
+
+FIX: v3.0 builds now lead with CLAUDE by default. New pure resolveClaudeFirst(opts, env) — Claude-
+first unless AGENTV3_BUILD_CLAUDE_FIRST=0/off (opt-out to the old cheap-first ladder); escalation's
+explicit claudeFirst:true still honoured. Chain becomes [Claude → Vertex → Gemini → Claude-Haiku]
+so builds use the reliable strong-tool-use model and COMPLETE, with Gemini/Vertex as fallback if
+Claude throttles. Billing unchanged (Opus-equivalent markup regardless of model; margin only wider
+since NavBharatAI's real cost ≤ billed). 5 unit tests for resolveClaudeFirst.
+
+This is the 3rd of three converging build fixes this cycle: #489 (readiness gate false-fail),
+#490 (preview host-bind in correct actuator), and now provider order (Claude-first).
+
+Gate: frontend tsc 0, server tsc 0, vitest 2817/2817 PASS.
+
+## 2026-06-28 — cost routing step 1: build model by app complexity (admin policy)
+
+Admin's provider policy: small app → Haiku, complex app → Sonnet, power → Opus
+(planning → Grok and chat → Gemini are step 2). Step 1 implements the build-model
+half: new pure selectBuildModel(startTier, powerOn) replaces the always-Sonnet
+`resolveModel(onlyOpus)` at the build call site. Maps the analyser's start tier:
+gemini/haiku/none → Haiku (cheap, reliable tool-use); sonnet/opus → Sonnet; any
+power level → Opus. Gemini/Vertex stay as the buildTurnRunner fallback so a Claude
+throttle never breaks a build; billing unchanged (Opus-equivalent markup). 4 unit
+tests incl. real analyser verdicts (calculator → Haiku, auth+DB SaaS → Sonnet).
+
+This cuts cost on the common case (most apps are simple → Haiku, not Sonnet) with
+zero quality compromise (complex work still gets Sonnet; power gets Opus). Step 2
+(plan → Grok via OpenAiToolRunner at api.x.ai; chat → Gemini/Vertex confirm) next.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2829/2829 PASS.
+
 ## 2026-06-28 — P4.2 Event Sourcing + Replay DONE (ultracode workflows) (Phase P4 → 50%)
 
 Made EventHistoryStore replayable. New WorkspaceProjection.ts: PURE replayWorkspaceState

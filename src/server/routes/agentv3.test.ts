@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -138,6 +138,18 @@ describe('planGrokEnabled — planning runs on Grok when a key is set', () => {
   it('opt-out with AGENTV3_PLAN_GROK=0 / off even when a key is set', () => {
     expect(planGrokEnabled('xai-abc', '0')).toBe(false);
     expect(planGrokEnabled('xai-abc', 'off')).toBe(false);
+  });
+});
+
+describe('oneShotDevPort — preview port per framework for the one-shot lane', () => {
+  it('maps frameworks to their dev-server port', () => {
+    expect(oneShotDevPort('vite-react')).toBe(5173);
+    expect(oneShotDevPort('vue')).toBe(5173);
+    expect(oneShotDevPort('nextjs')).toBe(3000);
+    expect(oneShotDevPort('angular')).toBe(4200);
+    expect(oneShotDevPort('astro')).toBe(4321);
+    expect(oneShotDevPort('static')).toBe(3000);
+    expect(oneShotDevPort('python-fastapi')).toBe(8000);
   });
 });
 

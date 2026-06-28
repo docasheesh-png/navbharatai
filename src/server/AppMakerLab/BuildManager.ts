@@ -6,6 +6,7 @@ import util from 'util';
 import path from 'path';
 import { AutoRepairEngine } from './autorepair/AutoRepairEngine';
 import { EvaluationStatus } from '../QualityEvaluationEngine/QualityTypes';
+import { log } from '../logger';
 
 const execPromise = util.promisify(exec);
 
@@ -25,31 +26,31 @@ export class BuildManager {
     }
 
     async build(workspaceId: string): Promise<{ success: boolean; logs: string }> {
-         console.log('[ENTER] BuildManager.build', { workspaceId });
+         log.info('BuildManager.build enter', { workspaceId });
          const workspacePath = path.join(this.workspacesRoot, workspaceId);
          
          const runBuild = async () => {
-             console.log('[ENTER] BuildManager.runBuild', { workspacePath });
+             log.info('BuildManager.runBuild enter', { workspacePath });
              const { stdout, stderr } = await execPromise('npm run build', { cwd: workspacePath });
              return { stdout, stderr };
          };
 
          try {
              // 1. Install dependencies
-             console.log('[BuildManager] Installing dependencies');
+             log.info('installing dependencies', { workspaceId });
              await this.eventBus.publish(this.createEvent(EventType.DEPENDENCIES_INSTALLED, workspaceId));
              await execPromise('npm install', { cwd: workspacePath });
 
              // 2. Build
-             console.log('[BuildManager] Starting build');
+             log.info('build starting', { workspaceId });
              await this.eventBus.publish(this.createEvent(EventType.BUILD_STARTED, workspaceId));
              const { stdout, stderr } = await runBuild();
              
-             console.log('[BuildManager] Build completed successfully');
+             log.info('build completed', { workspaceId });
              await this.eventBus.publish(this.createEvent(EventType.BUILD_COMPLETED, workspaceId, { output: stdout }));
              return { success: true, logs: stdout + stderr };
          } catch (e: any) {
-             console.error('[BuildManager] Build failed, attempting repair:', e.message);
+             log.error('build failed, attempting repair', { workspaceId, error: String(e.message) });
              await this.eventBus.publish(this.createEvent(EventType.REPAIR_STARTED, workspaceId));
              
              const repairEngine = new AutoRepairEngine();
@@ -65,11 +66,11 @@ export class BuildManager {
                  overallScore: 0
              };
              
-             console.log('[BuildManager] Running repair engine');
+             log.info('running repair engine', { workspaceId });
              const repairResult = await repairEngine.runRepair(workspaceId, report);
              
              if (repairResult.success) {
-                 console.log('[BuildManager] Repair successful, rebuilding...');
+                 log.info('repair successful, rebuilding', { workspaceId });
                  await this.eventBus.publish(this.createEvent(EventType.REPAIR_COMPLETED, workspaceId));
                  
                  try {
@@ -77,12 +78,12 @@ export class BuildManager {
                      await this.eventBus.publish(this.createEvent(EventType.BUILD_COMPLETED, workspaceId, { output: stdout }));
                      return { success: true, logs: stdout + stderr };
                  } catch (e2: any) {
-                     console.error('[BuildManager] Rebuild failed after repair:', e2.message);
+                     log.error('rebuild failed after repair', { workspaceId, error: String(e2.message) });
                      await this.eventBus.publish(this.createEvent(EventType.BUILD_FAILED, workspaceId, { error: e2.message }));
                      return { success: false, logs: e2.message };
                  }
              } else {
-                 console.error('[BuildManager] Repair failed.');
+                 log.error('repair failed', { workspaceId });
                  await this.eventBus.publish(this.createEvent(EventType.BUILD_FAILED, workspaceId, { error: e.message }));
                  return { success: false, logs: e.message };
              }

@@ -20,6 +20,7 @@ import { LLMGenerationEngine } from './generator/LLMGenerationEngine';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { BuildJobManager, JobStatus } from './jobs/BuildJobManager';
+import { log, withLogContext } from '../logger';
 
 export class AppMakerOrchestrator {
     static async execute(prompt: string, namespace: string = 'default', idempotencyKey?: string): Promise<AppMakerExecutionResult> {
@@ -43,7 +44,11 @@ export class AppMakerOrchestrator {
     }
 
     static async runBuildJob(jobId: string, prompt: string, namespace: string) {
+      // P-BRE.3 — run the whole build under a log-correlation context so every structured
+      // log emitted anywhere inside this build carries { jobId, namespace } and its traceId.
+      return withLogContext({ jobId, namespace }, async () => {
         try {
+            log.info('build started', { phase: 'planning' });
             await BuildJobManager.updateStatus(jobId, JobStatus.PLANNING, 10, "Starting planning...");
             
             const executionId = jobId; // Use jobId as executionId for consistency
@@ -101,10 +106,12 @@ export class AppMakerOrchestrator {
             
             // ... (persist telemetry logic as before) ...
             
+            log.info('build completed', { phase: 'preview_ready' });
             await BuildJobManager.updateStatus(jobId, JobStatus.PREVIEW_READY, 100, "Preview ready");
         } catch (error: any) {
-            console.error(error);
+            log.error('build failed', { error: String(error?.message ?? error) });
             await BuildJobManager.updateStatus(jobId, JobStatus.FAILED, 0, `Error: ${error.message}`);
         }
+      });
     }
 }

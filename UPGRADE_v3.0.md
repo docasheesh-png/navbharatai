@@ -799,14 +799,23 @@
 - **Files:** new `src/server/AppMakerLab/IncrementalBuildCache.ts`, `src/server/AppMakerLab/BuildManager.ts`,
   `src/server/AppMakerLab/generator/ModuleGraph.ts`.
 
-### P-BRE.3 — Structured Logging with Build Correlation IDs  🟡 PARTIAL → full  [HIGH]
-- Logging is `console.log` / `console.error` scattered across 6000+ lines of `server.ts` and AppMakerLab.
-  No JSON structured format, no `jobId`/`userId`/`traceId` fields, no log level filtering.
-  Cloud Logging sees flat text — impossible to filter "all logs for jobId X".
-- [ ] Replace `console.*` with a `Logger` singleton (Pino or Winston) that emits JSON with `{level, timestamp, jobId, userId, traceId, message, ...meta}`.
-- [ ] Inject `jobId` into every AppMakerLab log call via an `AsyncLocalStorage` context.
-- [ ] Set `LOG_LEVEL=info` in prod Cloud Run env, `debug` in dev.
-- **Files:** new `src/server/logger.ts`, `server.ts`, `src/server/AppMakerLab/BuildManager.ts`, `src/server/AppMakerLab/generator/ExecutionOrchestrator.ts`.
+### P-BRE.3 — Structured Logging with Build Correlation IDs  ✅ DONE (build-correlation core) (2026-06-28)
+- [x] New `src/server/logger.ts` — a dependency-free structured `Logger` singleton (no Pino/Winston dep) emitting one
+      Cloud Logging-compatible JSON line per log: `{ severity, message, timestamp, traceId?, ...context, ...meta }`.
+      Level-filtered by `LOG_LEVEL` (debug<info<warn<error; default info in prod, debug in dev — pure `resolveLogLevel`).
+      `traceId` is pulled from the P2.1 tracer's active span, so logs ↔ traces auto-correlate. Never throws.
+- [x] Build correlation via `AsyncLocalStorage`: `withLogContext({ jobId, … }, fn)` propagates correlation fields to
+      every log inside the scope. `AppMakerOrchestrator.runBuildJob` is wrapped in `withLogContext({ jobId, namespace })`,
+      so EVERY structured build log carries the jobId — "filter all logs for jobId X" now works.
+- [x] Converted the build-path log sites (the spec's named files) to the structured logger: `BuildManager.ts` (10),
+      `generator/ExecutionOrchestrator.ts` (2), `AppMakerOrchestrator.ts` (build start/complete/fail).
+- [x] `LOG_LEVEL` honoured (prod→info default). Setting the Cloud Run env var is the documented admin step.
+- **Incremental (noted, not blocking):** the broad legacy `console.*` migration across the 6000-line `server.ts` is a
+      mechanical cleanup (mostly debug prints) — done lazily as those areas are touched; the high-value build-correlation
+      core is complete and used now.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 2882/2882 ✅ (12 new logger tests: level filtering, severity
+      mapping, JSON shape, ALS context propagation/merge/no-leak, never-throws) · server bundles ✅.
+- **Files:** new `src/server/logger.ts` (+ `.test.ts`), `src/server/AppMakerLab/AppMakerOrchestrator.ts`, `BuildManager.ts`, `generator/ExecutionOrchestrator.ts`.
 
 ### P-BRE.4 — Smoke Test Runner (Post-Build Validation)  ❌ MISSING  [HIGH]
 - When a build completes successfully (QualityEvaluationEngine passes), there is no automated smoke test

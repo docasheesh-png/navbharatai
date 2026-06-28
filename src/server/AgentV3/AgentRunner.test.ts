@@ -1,5 +1,17 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { AgentRunner, isParallelSafeToolUse, type AgentRunnerOptions } from './AgentRunner';
+import { AgentRunner, isParallelSafeToolUse, buildTimedOut, type AgentRunnerOptions } from './AgentRunner';
+
+describe('buildTimedOut (watchdog wall-clock cap)', () => {
+  it('is false when no cap is set', () => {
+    expect(buildTimedOut(0, undefined, 999_999)).toBe(false);
+    expect(buildTimedOut(0, 0, 999_999)).toBe(false);
+  });
+  it('is false before the cap and true at/after it', () => {
+    expect(buildTimedOut(1000, 5000, 1000 + 4999)).toBe(false);
+    expect(buildTimedOut(1000, 5000, 1000 + 5000)).toBe(true);
+    expect(buildTimedOut(1000, 5000, 1000 + 9999)).toBe(true);
+  });
+});
 import { ClaudeClient, type MessagesCreateClient } from './ClaudeClient';
 import { ToolDispatcher, type ActuatorPort } from './ToolDispatcher';
 import { WorkspaceState } from './WorkspaceState';

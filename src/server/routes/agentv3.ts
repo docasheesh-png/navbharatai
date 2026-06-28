@@ -240,6 +240,17 @@ export function readinessGateEnabled(): boolean {
 }
 
 /**
+ * WATCHDOG — hard wall-clock cap (seconds) on a single build, so it can NEVER hang for 20-30 minutes
+ * (the agent looping when a broken preview can't be verified). Default 12 minutes; admin-tunable via
+ * AGENTV3_MAX_BUILD_SECONDS. Set to 0 to disable (not recommended).
+ */
+export function maxBuildSeconds(): number {
+  const raw = Number(process.env.AGENTV3_MAX_BUILD_SECONDS);
+  if (raw === 0) return 0;
+  return Number.isFinite(raw) && raw > 0 ? raw : 720;
+}
+
+/**
  * Check whether a user is at or over their monthly spend ceiling. Returns the cap and
  * the current monthly total so the caller can return an honest, specific message.
  * Best-effort: a Firestore read failure (or no userId) NEVER blocks a build — we fail
@@ -1347,6 +1358,8 @@ export function registerAgentV3Routes(app: Express): void {
         // R2 §1.1 — top-level build runners (which spread baseRunnerOpts) get the mandatory
         // readiness gate; sub-agents (SubAgent.ts, separate opts) never do.
         readinessGate: readinessGateEnabled(),
+        // WATCHDOG — hard wall-clock cap so a build can never hang for 20-30 min (0 = disabled).
+        maxBuildMs: maxBuildSeconds() * 1000,
       };
       const runner = new AgentRunner({
         ...baseRunnerOpts,

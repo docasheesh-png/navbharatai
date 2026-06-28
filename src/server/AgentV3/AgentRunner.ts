@@ -45,6 +45,12 @@ export interface AgentRunnerOptions {
   thinking?: boolean;
   /** Optional hard budget (USD billed to the user). Stops honestly when reached. */
   maxBudgetUsd?: number;
+  /**
+   * WATCHDOG — optional hard WALL-CLOCK cap (ms) on the whole build. Checked between turns: once a
+   * build has run this long it stops honestly with whatever it produced, instead of looping for
+   * 20-30 minutes (e.g. when a broken preview can't be verified). 0/undefined = no time cap.
+   */
+  maxBuildMs?: number;
   /** Which agent this loop represents (for event attribution). Default 'architect'. */
   agentRole?: AgentRole;
   /**
@@ -128,6 +134,11 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T,
   return results;
 }
 
+/** WATCHDOG — true once a build has run past its wall-clock cap (pure, testable). */
+export function buildTimedOut(startMs: number, maxBuildMs: number | undefined, nowMs: number): boolean {
+  return typeof maxBuildMs === 'number' && maxBuildMs > 0 && nowMs - startMs >= maxBuildMs;
+}
+
 export interface AgentRunResult {
   ok: boolean;
   summary: string;
@@ -171,6 +182,8 @@ export class AgentRunner {
     const toolConcurrency = Math.max(1, this.opts.toolConcurrency ?? 4);
     const expectsArtifacts = this.opts.expectsArtifacts === true;
     const readinessGate = this.opts.readinessGate === true;
+    const maxBuildMs = this.opts.maxBuildMs;
+    const buildStartMs = Date.now();
     // Total tool calls across the whole run — a build that never called a tool built nothing.
     let totalToolUses = 0;
 
@@ -232,6 +245,20 @@ export class AgentRunner {
           await persist('stopped');
           events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
           return { ok: false, summary, steps, usage, billedUsd: billed() };
+        }
+
+        // WATCHDOG — wall-clock cap. Once the build has run past its time limit, stop honestly with
+        // whatever was produced instead of looping for 20-30 minutes. A build that DID write files is
+        // reported ok:true (the work is real and resumable); one that produced nothing is ok:false.
+        if (buildTimedOut(buildStartMs, maxBuildMs, Date.now())) {
+          const minutes = Math.round((maxBuildMs as number) / 60000);
+          const builtSomething = totalToolUses > 0;
+          const summary = builtSomething
+            ? `I stopped after about ${minutes} min to avoid an endless loop. Your files so far are saved — send another message and I'll continue from here.`
+            : `I stopped after about ${minutes} min — the build wasn't making progress (often a preview that won't come up). Nothing was lost; try again or rephrase.`;
+          await persist(builtSomething ? 'complete' : 'stopped');
+          events.emit({ type: 'done', ok: builtSomething, summary, ts: Date.now() });
+          return { ok: builtSomething, summary, steps, usage, billedUsd: billed() };
         }
 
         // A unique id for this turn — ties the streamed deltas to their final

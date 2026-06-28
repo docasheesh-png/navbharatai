@@ -4923,3 +4923,25 @@ Forensic (parallel agent): two converging server-side causes.
    build chain Claude + Haiku backstop + Claude-only path + the Grok-plan Claude fallback.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2867/2867 PASS, boot:check PASS.
+
+## 2026-06-28 — ROOT CAUSE: "model replied without building" (narrates a plan, writes 0 files)
+
+Admin screenshots: prompt "ek simple search engine page banao", the model narrates a full plan in
+Hindi ("…अब मैं frontend विशेषज्ञ को index.html बनाने का काम सौंप रहा हूँ"), then a yellow banner:
+"The build did not produce any files — the model replied without building", PLAN 0/4. It failed on
+BOTH the first attempt AND the Opus "stronger model" retry — so NOT a model-weakness issue.
+
+ROOT CAUSE (AgentRunner.ts:294): the loop treats ANY no-tool turn as "the model finished its turn"
+and exits. The architect's first turn is usually a plan/delegation narration ("here's my plan, now
+I'll assign the frontend expert…") with NO tool call — and the runner terminated right there →
+builtNothing → "model replied without building". The model intended to ACT on the next turn but
+never got one. Even Opus does this plan-out-loud-first behaviour, which is why the retry also failed.
+
+FIX: when expectsArtifacts && totalToolUses === 0 && a no-tool turn arrives, NUDGE the model to act
+(push a user message: "do NOT just describe/delegate in prose — ACT NOW: use write_file/… to create
+the files this turn; output tool calls, not a description") and give it another turn, up to
+MAX_BUILD_NUDGES (2). Only after the nudges are exhausted with still zero tools do we report
+builtNothing. New test: turn 1 narrates → nudge → turn 2 writes the file → ok:true. The existing
+empty-build test still ends ok:false after nudges (fallback keeps replying text).
+
+Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.

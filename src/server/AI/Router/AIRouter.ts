@@ -71,6 +71,24 @@ function cooldownSeconds(error: any): number {
 
 export class AIRouter {
   private providers: AIProvider[] = [];
+  /**
+   * P2.3 — Bulkhead isolation. Each universe (free / pro / professional) gets its OWN
+   * in-flight concurrency pool, keyed `${universe}:${provider}`, so a FREE-tier traffic
+   * spike that saturates a shared provider (e.g. Grok) can never starve PRO/SDA of slots.
+   * The circuit breaker stays keyed by provider NAME (shared) — a 429 is a provider-wide
+   * health signal that SHOULD back every universe off, whereas concurrency is local capacity.
+   */
+  private readonly universe: string;
+
+  constructor(universe: string = 'default') {
+    this.universe = universe;
+  }
+
+  /** Per-universe slot key for the bulkhead concurrency pool. */
+  private slotKey(name: string): string { return `${this.universe}:${name}`; }
+  private acquire(name: string): boolean { return acquireSlot(this.slotKey(name)); }
+  private release(name: string): void { releaseSlot(this.slotKey(name)); }
+  private inFlightCount(name: string): number { return inFlight.get(this.slotKey(name)) || 0; }
 
   registerProvider(provider: AIProvider) {
     this.providers.push(provider);
@@ -107,14 +125,14 @@ export class AIRouter {
     for (const p of racers) {
       if (isOnCooldown(p.name)) { console.log(`[RACE] skip ${p.name} (cooldown)`); continue; }
       if (!(await p.healthCheck().catch(() => false))) { console.log(`[RACE] skip ${p.name} (unhealthy)`); continue; }
-      if ((inFlight.get(p.name) || 0) >= MAX_IN_FLIGHT) { console.log(`[RACE] skip ${p.name} (at capacity)`); continue; }
+      if (this.inFlightCount(p.name) >= MAX_IN_FLIGHT) { console.log(`[RACE] skip ${p.name} (at capacity)`); continue; }
       eligible.push(p);
     }
 
     if (eligible.length > 0) {
       console.log(`[RACE] racing: ${eligible.map(p => p.name).join(' × ')}`);
       const attempts = eligible.map(async (p) => {
-        if (!acquireSlot(p.name)) throw new Error(`${p.name}: no slot`);
+        if (!this.acquire(p.name)) throw new Error(`${p.name}: no slot`);
         const t = Date.now();
         try {
           const response = await p.execute(prompt, undefined, undefined, systemPrompt, images);
@@ -129,7 +147,7 @@ export class AIRouter {
           errors.push(`${p.name}: ${String(err?.message).slice(0, 60)}`);
           throw err;
         } finally {
-          releaseSlot(p.name);
+          this.release(p.name);
         }
       });
       try {
@@ -147,7 +165,7 @@ export class AIRouter {
     // Last-resort fallback (sequential) — e.g. Claude Haiku.
     for (const p of fallbacks) {
       if (!(await p.healthCheck().catch(() => false))) continue;
-      if (!acquireSlot(p.name)) continue;
+      if (!this.acquire(p.name)) continue;
       const t = Date.now();
       try {
         console.log(`[RACE] last-resort: ${p.name}`);
@@ -163,7 +181,7 @@ export class AIRouter {
         recordProviderLatency(p.name, 0, true);
         errors.push(`${p.name}: ${String(err?.message).slice(0, 60)}`);
       } finally {
-        releaseSlot(p.name);
+        this.release(p.name);
       }
     }
 
@@ -209,7 +227,7 @@ export class AIRouter {
 
     if (!p2) {
       // Only one available — use it directly
-      if (!acquireSlot(p1.name)) { onChunk('AI service at capacity. Try again.'); return; }
+      if (!this.acquire(p1.name)) { onChunk('AI service at capacity. Try again.'); return; }
       const t = Date.now();
       try {
         await p1.executeStream!(prompt, systemPrompt, onChunk);
@@ -218,7 +236,7 @@ export class AIRouter {
         setCooldown(p1.name, cooldownSeconds(err));
         recordProviderLatency(p1.name, 0, true);
         if (!signal?.aborted) onChunk('AI service temporarily busy. Please try again. 🙏');
-      } finally { releaseSlot(p1.name); }
+      } finally { this.release(p1.name); }
       return;
     }
 
@@ -228,7 +246,7 @@ export class AIRouter {
     const commitPromise = new Promise<void>(res => { commitResolve = res; });
 
     const runStream = (p: typeof p1, index: number): Promise<void> => {
-      if (!acquireSlot(p.name)) return Promise.resolve();
+      if (!this.acquire(p.name)) return Promise.resolve();
       const t = Date.now();
       return p.executeStream!(prompt, systemPrompt, (chunk) => {
         if (signal?.aborted) return;
@@ -245,7 +263,7 @@ export class AIRouter {
         recordProviderLatency(p.name, 0, true);
         console.warn(`[RACE_STREAM] ${p.name} failed: ${err?.message?.slice(0, 60)}`);
       }).finally(() => {
-        releaseSlot(p.name);
+        this.release(p.name);
         // If this was the committed provider and it's done, resolve
         if (committed === p.name) commitResolve();
       });
@@ -263,17 +281,17 @@ export class AIRouter {
       console.warn('[RACE_STREAM] No commit in 12s — trying sequential fallbacks');
       for (const p of rest) {
         if (signal?.aborted || !p.executeStream) continue;
-        if (!acquireSlot(p.name)) continue;
+        if (!this.acquire(p.name)) continue;
         const t = Date.now();
         try {
           await p.executeStream(prompt, systemPrompt, onChunk);
           recordProviderLatency(p.name, Date.now() - t, false);
-          releaseSlot(p.name);
+          this.release(p.name);
           return;
         } catch (err: any) {
           setCooldown(p.name, cooldownSeconds(err));
           recordProviderLatency(p.name, 0, true);
-          releaseSlot(p.name);
+          this.release(p.name);
         }
       }
       if (!signal?.aborted) onChunk('AI service temporarily busy. Please try again in 1-2 minutes. 🙏');
@@ -305,12 +323,12 @@ export class AIRouter {
           continue;
         }
 
-        const concurrent = inFlight.get(provider.name) || 0;
+        const concurrent = this.inFlightCount(provider.name);
         if (concurrent >= MAX_IN_FLIGHT) {
           console.log(`[CAPACITY] ${provider.name} at max ${MAX_IN_FLIGHT} concurrent, skipping`);
           continue;
         }
-        if (!acquireSlot(provider.name)) continue;
+        if (!this.acquire(provider.name)) continue;
         try {
           const startTime = Date.now();
           console.log(`[ROUTER] Trying ${provider.name} (pass ${pass}, in-flight ${concurrent + 1})...`);
@@ -337,7 +355,7 @@ export class AIRouter {
           recordProviderLatency(provider.name, 0, true);
           errors.push(`${provider.name}: ${error?.message?.slice(0, 60)}`);
         } finally {
-          releaseSlot(provider.name);
+          this.release(provider.name);
         }
       }
     }
@@ -374,9 +392,23 @@ export function recordProviderLatency(name: string, latencyMs: number, failed: b
   tracer.recordChildSpan(`ai.provider.${name}`, latencyMs, failed ? 'error' : 'ok', { provider: name, success: !failed });
 }
 
-export function getProviderStats(): Record<string, { cooldownUntil: number; circuitState: string; consecutiveFailures: number; inFlight: number; avgLatencyMs: number; errorCount: number; requestCount: number }> {
+export function getProviderStats(): Record<string, { cooldownUntil: number; circuitState: string; consecutiveFailures: number; inFlight: number; inFlightByUniverse: Record<string, number>; avgLatencyMs: number; errorCount: number; requestCount: number }> {
   const result: Record<string, any> = {};
-  const allNames = new Set([...allBreakerNames(), ...inFlight.keys(), ...latencyAccum.keys()]);
+  // P2.3 — in-flight is now keyed `${universe}:${provider}`. Aggregate it back per
+  // provider name (total + per-universe breakdown) so the Admin dashboard shape is kept
+  // and the bulkhead pools are visible.
+  const inFlightTotal = new Map<string, number>();
+  const inFlightByUniverse = new Map<string, Record<string, number>>();
+  for (const [key, count] of inFlight.entries()) {
+    const sep = key.indexOf(':');
+    const universe = sep >= 0 ? key.slice(0, sep) : 'default';
+    const name = sep >= 0 ? key.slice(sep + 1) : key;
+    inFlightTotal.set(name, (inFlightTotal.get(name) || 0) + count);
+    const byU = inFlightByUniverse.get(name) || {};
+    byU[universe] = (byU[universe] || 0) + count;
+    inFlightByUniverse.set(name, byU);
+  }
+  const allNames = new Set([...allBreakerNames(), ...inFlightTotal.keys(), ...latencyAccum.keys()]);
   for (const name of allNames) {
     const acc = latencyAccum.get(name) || { total: 0, count: 0, errors: 0 };
     const breaker = getBreaker(name).snapshot();
@@ -384,7 +416,8 @@ export function getProviderStats(): Record<string, { cooldownUntil: number; circ
       cooldownUntil: breaker.openedUntil,
       circuitState: breaker.state,
       consecutiveFailures: breaker.consecutiveFailures,
-      inFlight: inFlight.get(name) || 0,
+      inFlight: inFlightTotal.get(name) || 0,
+      inFlightByUniverse: inFlightByUniverse.get(name) || {},
       avgLatencyMs: acc.count > 0 ? Math.round(acc.total / Math.max(1, acc.count - acc.errors)) : 0,
       errorCount: acc.errors,
       requestCount: acc.count,

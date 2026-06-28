@@ -4,6 +4,7 @@ import {
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
   SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github, Circle,
   ChevronLeft, ChevronRight, ChevronDown,
+  FileCode, Copy,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
@@ -40,7 +41,14 @@ interface ChatMsg {
   streaming?: boolean;
 }
 
-export function AgentV3Panel({ userId, email, resume, onFilesSync }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; onFilesSync?: (files: Record<string, string>) => void }) {
+const V3_EXT_COLOR: Record<string, string> = {
+  html: 'text-orange-400', css: 'text-blue-400', js: 'text-yellow-400',
+  ts: 'text-cyan-400', tsx: 'text-cyan-400', jsx: 'text-yellow-400',
+  json: 'text-green-400', md: 'text-purple-400', py: 'text-emerald-400',
+  svg: 'text-pink-400', png: 'text-pink-400', jpg: 'text-pink-400',
+};
+
+export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; onFilesSync?: (files: Record<string, string>) => void; onOpenInIDE?: (path: string) => void }) {
   const { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
@@ -886,21 +894,34 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync }: { userId?: 
                   )}
                 </div>
               ) : (
-                <ul className="space-y-0.5">
-                  {state.files.map((f) => (
-                    <li key={f.path}>
-                      <button
-                        onClick={() => openFile(f.path)}
-                        className="w-full flex items-center gap-2 text-left hover:bg-zinc-800/60 rounded px-1 py-0.5 transition-colors"
-                        title="Open file"
-                      >
-                        <span className={fileDot(f.kind)} />
-                        <span className="truncate flex-1">{f.path}</span>
-                        <ChevronRight className="w-3 h-3 shrink-0 text-zinc-600" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <div className="space-y-0.5">
+                  {state.files.filter((f) => f.kind !== 'delete').map((f) => {
+                    const ext = f.path.split('.').pop() ?? '';
+                    const color = V3_EXT_COLOR[ext] ?? 'text-white/50';
+                    return (
+                      <div key={f.path} className="group flex items-center gap-1 rounded-xl hover:bg-white/5 transition-colors">
+                        <button
+                          onClick={() => onOpenInIDE ? onOpenInIDE(f.path) : openFile(f.path)}
+                          title={onOpenInIDE ? `Open ${f.path} in Code Studio` : `View ${f.path}`}
+                          className="flex-1 flex items-center gap-3 px-3 py-2.5 text-left min-w-0"
+                        >
+                          <FileCode className={`w-4 h-4 flex-shrink-0 ${color}`} />
+                          <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{f.path}</span>
+                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${fileDot(f.kind).split(' ').slice(2).join(' ')}`} />
+                        </button>
+                        <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => navigator.clipboard.writeText(f.path)}
+                            title="Copy file path"
+                            className="p-1 rounded hover:bg-white/10 text-zinc-500 hover:text-zinc-300"
+                          >
+                            <Copy className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               ))}
               {tab === 'diff' && (diffPaths.length === 0 ? <Empty>No diffs yet.</Empty> : (
                 <div className="space-y-3">

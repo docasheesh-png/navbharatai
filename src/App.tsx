@@ -5395,6 +5395,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               email={user?.email}
               resume={v3Resume}
               onFilesSync={(synced) => setFiles((prev) => ({ ...prev, ...synced }))}
+              onOpenInIDE={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
             />
           )}
 

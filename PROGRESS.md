@@ -4454,3 +4454,19 @@ sandbox/EngineerAI/) — can cause blank/502 previews; and buildActuator() silen
 LocalActuator when E2B_API_KEY is missing. These are preview-quality issues, tracked next.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2687/2687 PASS.
+
+## 2026-06-28 (cont.) — v3.0 preview blank/502 fix: host-binding in the CORRECT actuator
+
+Secondary cause from the forensic audit: #480's 0.0.0.0 host-bind fix landed in the LEGACY
+actuator (src/server/EngineerAI/actuators/) but v3.0 runs on src/server/AgentV3/sandbox/
+EngineerAI/actuators/E2BActuator.ts — which launched the dev command verbatim. When a project's
+vite/next config does not set host:true, the dev server binds localhost only: the `nc -z localhost`
+health check PASSES but the PUBLIC {port}-{id}.e2b.app preview 502s → "built but preview blank".
+
+Fix: added a v3.0-local devServerHost.ts (ensureHostBinding) — self-contained so v3.0 never
+depends on the retired legacy module — and applied it to the dev command in the actuator's
+long-running branch (both the initial launch and the auto-restart retry). No-op when the command
+already binds a host (e.g. our vite-react template's host:true), so it's pure belt-and-suspenders
+for frameworks/configs that don't. 6 unit tests mirror the legacy helper's coverage.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2707/2707 PASS.

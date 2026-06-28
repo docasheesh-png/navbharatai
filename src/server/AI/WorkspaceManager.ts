@@ -34,7 +34,7 @@ export class WorkspaceManager {
     }
 
     fs.writeFileSync(absolutePath, content);
-    this.memoryManager.update(filePath, content);
+    await this.memoryManager.update(filePath, content);
     this.operationLog.push(`Created: ${filePath}`);
     this.transactionStack.push(() => {
       // Only rollback if it was newly created (not overwritten)
@@ -49,7 +49,7 @@ export class WorkspaceManager {
     }
     const oldContent = fs.readFileSync(absolutePath, 'utf8');
     fs.writeFileSync(absolutePath, newContent);
-    this.memoryManager.update(filePath, newContent);
+    await this.memoryManager.update(filePath, newContent);
     this.operationLog.push(`Modified: ${filePath}`);
     this.transactionStack.push(() => {
       fs.writeFileSync(absolutePath, oldContent);

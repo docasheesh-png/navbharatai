@@ -54,7 +54,7 @@
 | P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ✅ Complete | 100% |
 | P2 | Resilience & Observability | See + survive failures | ✅ Complete | 100% |
 | P3 | Scale & Frontend Health | Grow without rewrites | 🔄 In Progress | 75% (P3.1 App.tsx split deferred) |
-| P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 50% |
+| P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 50% (P4.2 + P4.3 done; P4.1 CQRS large, P4.4 replication remain) |
 | P5 | Hygiene & Hardening | Remove rot, close small holes | ⏳ Pending | 0% |
 | **P6** | **IaC & Provisioning** | Reproducible, version-controlled infra | ⏳ Pending | 0% |
 | **P7** | **Async Infra (Queue/Cache)** | Scale beyond Firestore-polling | ⏳ Pending | 0% |
@@ -327,10 +327,18 @@
       reducer is pure (identical input → deep-equal output, input never mutated).
 - **Files:** `src/server/AppMakerLab/eventbus/WorkspaceProjection.ts` (+ `.test.ts`), `EventHistoryStore.ts`, `IEventHistoryStore.ts`.
 
-### P4.3 — Full AST (replace regex code model)  ✅ MOSTLY DONE (2026-06-27)
-- **Reality:** `ts-morph` (real TS AST) is a dependency and used by `AgentV3/ASTAnalyzer.ts` (+test).
-- **Remaining:** point the older `Memory/MemoryIndexer.ts` regex path at the AST analyzer too (consolidate).
-- **Files:** `src/server/AgentV3/ASTAnalyzer.ts`, `src/server/Memory/MemoryIndexer.ts`.
+### P4.3 — Full AST (replace regex code model)  ✅ DONE (2026-06-28)
+- **Reality:** `ts-morph` (real TS AST) used by `AgentV3/ASTAnalyzer.ts`; the older `Memory/MemoryIndexer.ts` used a
+  single regex that captured only the FIRST export per file.
+- [x] Consolidated: new `MemoryIndexer.indexWithAST()` runs the regex baseline FIRST (so it can NEVER regress — its
+      result is always kept), then ENRICHES via the real `analyzeWithAST` (ts-morph): adds EVERY exported
+      symbol/component name (not just the first) + detected route paths. Graceful — AST returns null on
+      unsupported file / parse failure / ts-morph missing → keeps exactly the regex baseline. Never throws.
+- [x] Wired live end-to-end (not half-done): `ProjectMemoryManager.update` is now async and calls `indexWithAST`;
+      `WorkspaceManager.createFile/modifyFile` await it. Strict-superset design = zero regression risk, only enrichment.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2855/2855 ✅ (6 new AST tests:
+      all-exports, React components, routes, regex-baseline-preserved, never-throws, dedup; 6 existing regex tests still green) · server bundles ✅.
+- **Files:** `src/server/Memory/MemoryIndexer.ts`, `ProjectMemoryManager.ts`, `src/server/AI/WorkspaceManager.ts`, `tests/memoryIndexer.test.ts`.
 
 ### P4.4 — Replication / Consistency guarantees  ❌ MISSING
 - [ ] Document and enforce consistency model for cross-device sync (currently newer-wins only).

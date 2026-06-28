@@ -4608,3 +4608,30 @@ VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2787/2787 PASS (3 ne
 bulkhead tests prove a saturated FREE pool doesn't block PRO; existing 16 router tests
 still green), server bundles. Backend infra → no AppKnowledgeBase entry.
 Files: AI/Router/AIRouter.ts (+ AIRouterBulkhead.test.ts), AI/AIRouterManager.ts, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P2.4 Disaster Recovery / Backup DONE → PHASE P2 COMPLETE (100%)
+
+Real DR/backup + health probes:
+- src/server/lib/FirestoreBackup.ts: real Firestore Admin exportDocuments REST call
+  (auth via Cloud Run SA / ADC) → GCS bucket, timestamped prefix (no overwrite).
+  Admin-triggered POST /api/admin/backup/firestore. Honest "not configured" when
+  FIRESTORE_BACKUP_BUCKET unset — never fakes, never throws.
+- src/server/routes/health.ts: GET /api/live (liveness) + GET /api/ready (503 until
+  init, then 200 w/ dependency report). markServerReady() flips ready on app.listen.
+- docs/DR_RUNBOOK.md: scheduled export (Cloud Scheduler + bucket/IAM), restore
+  (gcloud firestore import), probe wiring (gcloud run services update --startup-probe/
+  --liveness-probe), incident checklist — all copy-pasteable.
+- cloudbuild.yaml: documentation note pointing to runbook §3 for the probe wiring.
+  Per safeguard #3, the probe flags are applied via a manual one-time gcloud command
+  (operator watches deploy) rather than baked into the unattended deploy step — a wrong
+  flag there would fail the auto-deploy.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2796/2796 PASS (9 new),
+server boots, LIVE: /api/live 200, /api/ready 200 (initialized:true), backup trigger →
+honest 400 "not configured", no-admin → 403. Admin/infra/ops endpoints → no
+AppKnowledgeBase entry.
+
+Phase P2 (Resilience & Observability) now 100%: P2.1 tracing, P2.2 error tracking,
+P2.3 bulkhead, P2.4 DR/backup — all DONE.
+Files: lib/FirestoreBackup.ts (+.test.ts), routes/health.ts (+.test.ts), server.ts,
+docs/DR_RUNBOOK.md, cloudbuild.yaml, UPGRADE_v3.0.md.

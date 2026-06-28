@@ -5261,3 +5261,17 @@ Two fixes:
    in ~3 min instead of spinning, complementing #540's startPreview cap.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2916/2916 PASS (+1 hung-generate test), boot:check PASS.
+
+## 2026-06-28 — Fix: per-request LLM timeout so a stalled model call fails fast (not ~10 min)
+
+Repeated builds hung in OneShot's generate() (the model call) for 9+ min. Root: the Anthropic SDK's
+DEFAULT per-request timeout scales with max_tokens and can be ~10 minutes, so a single stalled request
+(connection opens, no response) silently hangs the build. Fix (ClaudeClient.getClient): pin an explicit
+per-request timeout (llmRequestTimeoutMs, env AGENTV3_LLM_TIMEOUT_MS, default 120 s) AND set the SDK's own
+maxRetries:0 so a stall isn't multiplied by the SDK's internal retries on top of our createWithRetry. Now
+a stalled call fails in ~2 min and our retry/fallback + the OneShot 180s cap + the 12-min server deadline
+take over — the build recovers/terminates fast instead of appearing to hang. NOTE: this only helps if the
+deploy actually reaches production — Cloud Build posts no commit status to GitHub, so deploy landing must
+be verified separately (admin: Cloud Build history / trigger 75443609-...).
+
+Gate: frontend tsc 0, server tsc 0, vitest 2919/2919 PASS (+3), boot:check PASS.

@@ -289,3 +289,25 @@ describe('resolveAnthropicBaseUrl', () => {
     expect(resolveAnthropicBaseUrl()).toBe('https://my-gateway.example.com');
   });
 });
+
+import { llmRequestTimeoutMs } from './ClaudeClient';
+
+describe('llmRequestTimeoutMs — fast-fail cap so a stalled model call never hangs the build', () => {
+  const prev = process.env.AGENTV3_LLM_TIMEOUT_MS;
+  afterEach(() => { if (prev === undefined) delete process.env.AGENTV3_LLM_TIMEOUT_MS; else process.env.AGENTV3_LLM_TIMEOUT_MS = prev; });
+
+  it('defaults to 120 s', () => {
+    delete process.env.AGENTV3_LLM_TIMEOUT_MS;
+    expect(llmRequestTimeoutMs()).toBe(120_000);
+  });
+  it('honours a positive override', () => {
+    process.env.AGENTV3_LLM_TIMEOUT_MS = '60000';
+    expect(llmRequestTimeoutMs()).toBe(60_000);
+  });
+  it('falls back to the default on a non-numeric / zero / negative value', () => {
+    process.env.AGENTV3_LLM_TIMEOUT_MS = 'abc';
+    expect(llmRequestTimeoutMs()).toBe(120_000);
+    process.env.AGENTV3_LLM_TIMEOUT_MS = '0';
+    expect(llmRequestTimeoutMs()).toBe(120_000);
+  });
+});

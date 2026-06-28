@@ -165,6 +165,18 @@ export function resolveAnthropicBaseUrl(): string {
   return override && override.length > 0 ? override : 'https://api.anthropic.com';
 }
 
+/**
+ * Per-request HTTP timeout (ms) for a single Claude call. The Anthropic SDK's DEFAULT scales with
+ * max_tokens and can be ~10 minutes — so one stalled request (a connection that opens but never
+ * responds) silently hangs the whole build for minutes. We pin a much shorter cap so a stalled call
+ * fails FAST and our own retry/fallback kicks in, instead of the build spinning at "working…".
+ * Env-tunable via AGENTV3_LLM_TIMEOUT_MS; default 120 s (well above any healthy turn, far below 10 min).
+ */
+export function llmRequestTimeoutMs(): number {
+  const raw = Number(process.env.AGENTV3_LLM_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 120_000;
+}
+
 export class ClaudeClient implements TurnRunner {
   private client?: MessagesCreateClient;
   private readonly maxRetries: number;
@@ -195,6 +207,11 @@ export class ClaudeClient implements TurnRunner {
       this.client = new Anthropic({
         apiKey: sanitizeApiKey(process.env.ANTHROPIC_API_KEY),
         baseURL: resolveAnthropicBaseUrl(),
+        // Pin a sane per-request timeout so a stalled call fails fast (the SDK default is ~10 min).
+        timeout: llmRequestTimeoutMs(),
+        // Our own createWithRetry owns retries with backoff — disable the SDK's internal retry layer
+        // so a stall isn't multiplied (SDK 2× × our retries) into many minutes of compounded waiting.
+        maxRetries: 0,
       }) as unknown as MessagesCreateClient;
     }
     return this.client;

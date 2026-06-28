@@ -62,6 +62,19 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
   });
 }
 
+// Directories excluded from listFiles — dependency/build/VCS output the agent never edits.
+// Mirrors LocalActuator's IGNORED_DIRS so both actuators present the same (small) file tree.
+const IGNORED_LIST_DIRS = new Set([
+  'node_modules', '.git', 'dist', '.next', 'build',
+  '__pycache__', '.venv', '.cache', 'coverage', 'out', '.e-checkpoints',
+]);
+
+/** True if a workspace-relative path lives under an ignored dir (any path segment matches).
+ *  Exported for unit testing. */
+export function isIgnoredListPath(relPath: string): boolean {
+  return relPath.split('/').some(seg => IGNORED_LIST_DIRS.has(seg));
+}
+
 const CDP_PORT = 9222;
 const CONSOLE_LOG = `${TOOLS_DIR}/console.log`;
 
@@ -414,7 +427,12 @@ export class E2BActuator implements IEngineerActuator {
     const entries = await sandbox.files.list(WORKSPACE_ROOT, { depth: 10 });
     return entries
       .filter(e => e.type === 'file')
-      .map(e => e.path.slice(WORKSPACE_ROOT.length + 1));
+      .map(e => e.path.slice(WORKSPACE_ROOT.length + 1))
+      // Exclude dependency / build / VCS dirs (matches LocalActuator). After `npm install`
+      // node_modules holds THOUSANDS of files — without this the edit-mode prompt was fed 5000+
+      // paths ("Editing your existing app (5115 files)"), bloating the context and slowing every
+      // turn. The agent only ever edits the real source files, never these.
+      .filter(p => !isIgnoredListPath(p));
   }
 
   async build(workspaceId: string): Promise<{ success: boolean; logs: string }> {

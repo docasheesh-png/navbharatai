@@ -5288,3 +5288,15 @@ it to a fallback. A simple new app now finishes right after generation instead o
 and timing out. (Combined-plan step A = per-request LLM timeout #542; this is step B.)
 
 Gate: frontend tsc 0, server tsc 0, vitest 2920/2920 PASS (+1 sticky-success test), boot:check PASS.
+
+## 2026-06-28 — Fix (combined plan, step C): E2B listFiles excludes node_modules — kills the "5115 files" edit-prompt bloat
+
+User screenshot showed "Editing your existing app (5115 files)". A simple Vite+React app has ~10 source
+files — the 5115 were node_modules (thousands of library files after npm install). E2BActuator.listFiles
+did NOT exclude node_modules/.git/dist/etc (LocalActuator already did via IGNORED_DIRS), so the edit-mode
+prompt (editModePrefix(fileTree)) was fed 5000+ paths → huge, slow, expensive context on every turn. Fix:
+add isIgnoredListPath() (mirrors LocalActuator's IGNORED_DIRS) and filter listFiles output. The agent only
+ever edits real source, never these dirs. Edit context drops from 5115 → the ~10 real files → faster,
+cheaper, less-confused turns.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2922/2922 PASS (+2 isIgnoredListPath tests), boot:check PASS.

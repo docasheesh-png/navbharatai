@@ -72,7 +72,7 @@ import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from 
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { runOneShot, classifyForOneShot, oneShotEnabled } from '../AgentV3/OneShotBuilder';
-import { buildProjectContext, extractConversationSummary, formatPlanState } from '../AgentV3/ProjectContext';
+import { buildProjectContext, buildRunningSummary, formatPlanState } from '../AgentV3/ProjectContext';
 import { billedAmountUsd } from '../AgentV3/pricing';
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
@@ -1609,7 +1609,10 @@ export function registerAgentV3Routes(app: Express): void {
         const prior = recent.find((r) => r.workspaceId === workspaceId);
         if (prior) {
           const full = await store.get(prior.id);
-          const recap = extractConversationSummary(full?.messages ?? [], 8);
+          // MEMORY FIX 6 (long sessions): a ROLLING summary — recent turns verbatim PLUS a condensed
+          // digest of everything before them — so the early context (the original ask, what the app
+          // is) is not silently dropped once the session grows past the recap window.
+          const recap = buildRunningSummary(full?.messages ?? [], { recentTurns: 8 });
           if (recap) buildPrompt = `[CONVERSATION SO FAR — your memory of this session]\n${recap}\n\n---\n\n${buildPrompt}`;
         }
       } catch { /* conversation recall is best-effort — never blocks a build */ }

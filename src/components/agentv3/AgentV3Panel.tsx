@@ -1263,10 +1263,31 @@ function PreviewSurface({ url, workspaceId, userId, email }: { url?: string; wor
   const [kind, setKind] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>('');
+  // Honest "why is there no Live server URL?" status, fetched once. This is what makes
+  // the Live server tab explain itself instead of silently vanishing: when the cloud
+  // sandbox isn't configured on this deployment, we say so plainly rather than hiding.
+  const [sandbox, setSandbox] = useState<{ livePreviewAvailable: boolean; actuator: string; previewDomainWarning: string | null } | null>(null);
 
   // Follow the live URL: when one arrives and the user hasn't deliberately chosen in-browser,
   // prefer the higher-fidelity live server.
   useEffect(() => { if (url) setMode('live'); }, [url]);
+
+  // Fetch the sandbox/preview capability once, so the Live server tab can give a real reason
+  // when no preview URL exists (E2B not configured, or a custom preview domain needing DNS).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/agentv3/preview-status');
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (!cancelled && data && typeof data.livePreviewAvailable === 'boolean') {
+          setSandbox({ livePreviewAvailable: data.livePreviewAvailable, actuator: String(data.actuator || ''), previewDomainWarning: data.previewDomainWarning ?? null });
+        }
+      } catch { /* non-fatal — the tab just falls back to a generic message */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const loadInBrowser = async () => {
     if (!workspaceId) { setErr('Build something first — there are no files to preview yet.'); return; }
@@ -1296,12 +1317,11 @@ function PreviewSurface({ url, workspaceId, userId, email }: { url?: string; wor
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, workspaceId]);
 
-  const canLive = !!url;
+  // The "Live server" tab is ALWAYS shown — even with no URL — so it never silently
+  // vanishes. When there's no URL it explains why (see the live-no-URL branch below).
   const switcher = (
     <div className="flex items-center gap-1">
-      {canLive && (
-        <button onClick={() => setMode('live')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app in the cloud sandbox (full fidelity)">Live server</button>
-      )}
+      <button onClick={() => setMode('live')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app in the cloud sandbox (full fidelity)">Live server</button>
       <button onClick={() => setMode('inbrowser')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'inbrowser' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="A self-contained preview rendered in your browser — no server needed">In-browser</button>
     </div>
   );
@@ -1315,6 +1335,38 @@ function PreviewSurface({ url, workspaceId, userId, email }: { url?: string; wor
           <a href={url} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
         </div>
         <iframe title="Live preview" src={url} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+      </div>
+    );
+  }
+
+  // Live server tab selected but no URL yet — explain honestly instead of a blank/missing tab.
+  if (mode === 'live') {
+    const sandboxOff = sandbox && sandbox.livePreviewAvailable === false;
+    return (
+      <div className="h-full flex flex-col">
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
+          {switcher}
+          <span className="flex-1 truncate">Live server</span>
+        </div>
+        <div className="flex-1 flex items-center justify-center p-6 text-center">
+          <div className="max-w-md text-sm text-zinc-400 space-y-2">
+            {sandboxOff ? (
+              <>
+                <p className="text-zinc-200 font-medium">Live server preview isn't available on this deployment.</p>
+                <p>The full-fidelity live preview runs your app inside a cloud sandbox (E2B), which isn't configured here. Your app still builds and runs — use the <button onClick={() => setMode('inbrowser')} className="underline hover:text-zinc-200">In-browser preview</button> to see it.</p>
+                <p className="text-zinc-500 text-xs">Admin: set <code className="text-zinc-400">E2B_API_KEY</code> in the server environment to enable the live cloud preview.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-zinc-200 font-medium">No live preview yet.</p>
+                <p>The live server appears the moment the agent starts your app. While you wait, the <button onClick={() => setMode('inbrowser')} className="underline hover:text-zinc-200">In-browser preview</button> renders the current files instantly.</p>
+                {sandbox?.previewDomainWarning && (
+                  <p className="text-amber-400/80 text-xs">{sandbox.previewDomainWarning}</p>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       </div>
     );
   }

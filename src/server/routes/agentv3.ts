@@ -635,6 +635,14 @@ export function registerAgentV3Routes(app: Express): void {
     res.json({ ...diag, live, freeProviders });
   });
 
+  // Public, lightweight preview-capability probe — ONLY the sandbox diagnosis (no
+  // provider-key info). The preview surface calls this to explain, honestly, WHY the
+  // "Live server" tab has no URL: either the cloud sandbox isn't configured on this
+  // deployment (LocalActuator → no live preview), or a custom preview domain needs DNS.
+  app.get('/api/agentv3/preview-status', (_req: Request, res: Response) => {
+    res.json(sandboxDiag());
+  });
+
   // Approve/reject a pending gate (plan mode / permission prompt, P4).
   app.post('/api/agentv3/respond', (req: Request, res: Response) => {
     const requestId = typeof req.body?.requestId === 'string' ? req.body.requestId : '';

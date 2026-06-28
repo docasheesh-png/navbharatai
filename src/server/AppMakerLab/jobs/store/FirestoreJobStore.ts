@@ -39,4 +39,16 @@ export class FirestoreJobStore implements JobStore {
             await docRef.update({ status, progress, updatedAt: new Date() });
         }
     }
+
+    // P1.4 — look up the most recent job carrying this idempotency key via an indexed
+    // Firestore query, so a duplicate/retried request reuses the existing build.
+    async findJobByIdempotencyKey(key: string): Promise<BuildJob | null> {
+        if (!key) return null;
+        const snap = await this.db.collection(this.collection)
+            .where('idempotencyKey', '==', key)
+            .orderBy('createdAt', 'desc')
+            .limit(1)
+            .get();
+        return snap.empty ? null : (snap.docs[0].data() as BuildJob);
+    }
 }

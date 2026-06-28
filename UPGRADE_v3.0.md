@@ -51,7 +51,7 @@
 | Phase | Name | Why | Status | % |
 |-------|------|-----|--------|---|
 | P0 | Core-Law Violations | Breaks your own permanent rules | ✅ Complete | 100% |
-| P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | 🔄 In Progress | 75% |
+| P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ✅ Complete | 100% |
 | P2 | Resilience & Observability | See + survive failures | ⏳ Pending | 0% |
 | P3 | Scale & Frontend Health | Grow without rewrites | ⏳ Pending | 0% |
 | P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 25% |
@@ -153,10 +153,19 @@
 - **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2750/2750 ✅ (29 new) · server boots + `/api/health` 200 ✅.
 - **Files:** `src/server/AI/Router/CircuitBreaker.ts` (+ `.test.ts`), `src/server/AI/Router/AIRouter.ts`.
 
-### P1.4 — Idempotency & Deterministic Jobs  🟡 PARTIAL
-- [ ] Add idempotency keys to build-job creation (`BuildJobManager.ts`) so retries don't double-run.
-- [ ] Ensure orchestrator steps are replay-safe.
-- **Files:** `src/server/AppMakerLab/jobs/BuildJobManager.ts`, `generator/ExecutionOrchestrator.ts`.
+### P1.4 — Idempotency & Deterministic Jobs  ✅ DONE (2026-06-28)
+- [x] Added idempotency keys to build-job creation. `BuildJobManager.createJob(prompt, idempotencyKey?)`:
+      when a key is supplied, a retried/duplicate request reuses the SAME job (returns its id, never spawns a
+      second build) unless the prior attempt terminally FAILED, in which case a fresh retry is allowed.
+      `BuildJob.idempotencyKey` is persisted; new `findExisting()` + `JobStore.findJobByIdempotencyKey()`
+      implemented for BOTH stores (Firestore indexed query; LocalFile scan). Job ids now carry a monotonic
+      suffix (`job-<ms>-<seq>`) so two jobs in the same millisecond never collide.
+      `AppMakerOrchestrator.execute()` takes the key and only spawns the background worker for a genuinely new job.
+- [x] Orchestrator steps are replay-safe — confirmed: `ExecutionOrchestrator.restoreFromCheckpoint()` +
+      `resumeExecution()` rebuild the scheduler from checkpointed task statuses + patches, so a resume re-runs
+      ONLY the incomplete tasks (completed tasks are never re-executed). Backed by `CheckpointManager` + `EventHistoryStore`.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2759/2759 ✅ (9 new) · server bundles ✅.
+- **Files:** `src/server/AppMakerLab/jobs/BuildJobManager.ts` (+ `.test.ts`), `jobs/store/JobStore.ts`, `store/LocalFileJobStore.ts`, `store/FirestoreJobStore.ts`, `AppMakerOrchestrator.ts`.
 
 ---
 

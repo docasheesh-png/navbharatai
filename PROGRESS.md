@@ -5345,3 +5345,17 @@ path). This closes the "stuck at 'setting up workspace…' forever" hole for slo
 Firestore. (First of the audit's P0 fixes; readiness-gate parallelize + E2B file-op timeouts next.)
 
 Gate: frontend tsc 0, server tsc 0, vitest 2937/2937 PASS (+4), boot:check PASS.
+
+## 2026-06-28 — Audit P0-C: readiness gate parallelized + bounded — a fully-built app no longer dies at the finish line
+
+The audit's highest-leverage finding: the MANDATORY readiness gate (assessBuildReadiness) runs AFTER the
+last agent turn, so the build's wall-clock deadline can no longer interrupt it — and it read up to 800
+files (500 in seedGraphFromWorkspace + 300 in readEvalSnapshot) ONE AT A TIME with no per-file timeout.
+On a build that already used 10-11 min, those 50-160s of sequential remote reads (or a single stalled
+read) pushed it past the 12-min cap and killed a build whose app was ALREADY BUILT, reporting failure.
+Fix: new shared asyncUtils (mapWithConcurrency + withTimeout, 7 tests). Both read loops now run in
+bounded-concurrency batches (12 at a time) with a 5s per-file timeout; the initial listFiles is capped at
+15s; and assessBuildReadiness as a whole is wrapped in a 45s timeout that returns a PERMISSIVE verdict on
+expiry (the gate is best-effort and must never fail a real build on its own slowness). ~80s → ~3s.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2944/2944 PASS (+7), boot:check PASS.

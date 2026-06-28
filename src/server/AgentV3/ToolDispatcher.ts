@@ -5,6 +5,7 @@ import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
 import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
+import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
@@ -164,20 +165,28 @@ export class ToolDispatcher {
    * never wrongly fails a real build on an internal error.
    */
   async assessBuildReadiness(): Promise<ReadinessReport> {
+    const permissive: ReadinessReport = { score: 100, ready: true, blockers: [], warnings: [] };
     try {
-      // CRITICAL — seed the project graph from the REAL workspace before judging it.
-      // The in-memory graph is otherwise populated ONLY by the indexing write-tools
-      // (write_file / edit_file / apply_patch); files seeded by the actuator scaffold
-      // or created via bash/npm — and the index.html entry — never enter the graph.
-      // The architecture pass then flags their imports as "unresolved import" and
-      // runnability claims "no index.html", both HARD blockers, so the gate falsely
-      // reports a real, working build as NOT READY ("build did not complete").
-      // Reading the actual file tree first makes the gate judge the app that exists.
-      await this.seedGraphFromWorkspace();
-      await this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect');
-      return this.lastReadiness ?? { score: 100, ready: true, blockers: [], warnings: [] };
+      // OVERALL TIMEOUT (audit P0-C): the readiness gate runs AFTER the last agent turn, so the
+      // build's wall-clock deadline can no longer interrupt it. Without this bound a single stalled
+      // file read here hangs a build whose app is ALREADY built, until the 12-min cap kills it as a
+      // "failure". On timeout we return a PERMISSIVE verdict — the gate is best-effort and must never
+      // fail a real build on its own slowness.
+      return await withTimeout((async () => {
+        // CRITICAL — seed the project graph from the REAL workspace before judging it.
+        // The in-memory graph is otherwise populated ONLY by the indexing write-tools
+        // (write_file / edit_file / apply_patch); files seeded by the actuator scaffold
+        // or created via bash/npm — and the index.html entry — never enter the graph.
+        // The architecture pass then flags their imports as "unresolved import" and
+        // runnability claims "no index.html", both HARD blockers, so the gate falsely
+        // reports a real, working build as NOT READY ("build did not complete").
+        // Reading the actual file tree first makes the gate judge the app that exists.
+        await this.seedGraphFromWorkspace();
+        await this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect');
+        return this.lastReadiness ?? permissive;
+      })(), 45_000, 'assessBuildReadiness');
     } catch {
-      return { score: 100, ready: true, blockers: [], warnings: [] };
+      return permissive;
     }
   }
 
@@ -198,9 +207,15 @@ export class ToolDispatcher {
       const targets = tree
         .filter((p) => !EXCLUDE.test(p) && INDEXABLE.test(p) && !known.has(p))
         .slice(0, 500);
-      for (const p of targets) {
-        const content = await this.actuator.readFile(this.workspaceId, p).catch(() => '');
-        if (typeof content === 'string' && content.length <= 250_000) mem.indexFile(p, content);
+      // PARALLEL + per-file timeout (audit P0-C): reading up to 500 files one-at-a-time over the
+      // sandbox cost 50-160s and could hang on a single stalled read. Read in bounded-concurrency
+      // batches, each call capped at 5s, then index sequentially (graph mutation is synchronous).
+      const reads = await mapWithConcurrency(targets, 12, async (p) => ({
+        p,
+        content: await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'readFile').catch(() => ''),
+      }));
+      for (const { p, content } of reads) {
+        if (typeof content === 'string' && content && content.length <= 250_000) mem.indexFile(p, content);
       }
     } catch { /* best-effort pre-seed — never blocks the gate */ }
   }
@@ -269,17 +284,21 @@ export class ToolDispatcher {
     let files: string[] = [];
     const sources: EvalSourceFile[] = [];
     try {
-      files = await this.actuator.listFiles(this.workspaceId);
+      // Bound the listing (15s) so a stalled sandbox can't hang the gate before any read starts.
+      files = await withTimeout(this.actuator.listFiles(this.workspaceId), 15_000, 'listFiles');
       const candidates = files.filter((p) => SOURCE.test(p) && !SKIP_DIR.test(p)).slice(0, 300);
-      for (const p of candidates) {
+      // PARALLEL + per-file timeout (audit P0-C): 300 sequential reads after the app is already
+      // built was the #1 "fully-built app dies at the readiness gate" cause. Read in bounded batches,
+      // each capped at 5s; a slow/unreadable file is dropped, never breaks evaluate.
+      const reads = await mapWithConcurrency(candidates, 12, async (p) => {
         try {
-          const content = await this.actuator.readFile(this.workspaceId, p);
-          if (content.length > 200_000) continue;
-          sources.push({ path: p, content });
+          const content = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'readFile');
+          return content.length > 200_000 ? null : { path: p, content };
         } catch {
-          /* skip a single unreadable file — never break evaluate */
+          return null;
         }
-      }
+      });
+      for (const r of reads) if (r) sources.push(r);
     } catch {
       /* listing failed — degrade to an empty snapshot */
     }

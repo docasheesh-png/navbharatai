@@ -4945,3 +4945,25 @@ builtNothing. New test: turn 1 narrates → nudge → turn 2 writes the file →
 empty-build test still ends ok:false after nudges (fallback keeps replying text).
 
 Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.
+
+## 2026-06-28 — ROOT CAUSE: file-creation "hallucination" → builds were silently on Gemini/Vertex
+
+Admin's Anthropic dashboard: $0.00 spend, "No activity in the last 7 days" — PROOF that Claude was
+never being called. Symptom: v3.0 reports creating files but writes ZERO real files (only file
+NAMES), and when asked says "I'm an AI, I have no file system"; on a tab switch the "files" vanish
+(they were never real). Cause: although #511 made builds Claude-FIRST, MultiProviderTurnRunner
+returns the first NON-THROWING provider — so when Claude throws in prod (bad key / wrong model id /
+base-url), the build silently fell through to Vertex/Gemini, which HALLUCINATE in the tool-use loop
+(they describe creating files but never call write_file). Real tool-use (real files) only happens on
+Claude.
+
+FIX: builds now run on CLAUDE ONLY (Haiku → Sonnet → Opus + Claude-Haiku backstop). Gemini/Vertex
+are removed from the BUILD chain (they remain the cheap CHAT providers only). If Claude genuinely
+fails, the build errors HONESTLY with the real Claude error instead of faking files on Gemini.
+AGENTV3_BUILD_ALLOW_GEMINI=1 re-adds Vertex/Gemini as a last-resort build fallback.
+
+To diagnose the $0-Claude prod issue: GET /api/agentv3/diag?test=1&admin=<ADMIN_PASSWORD> makes one
+live Claude call and returns live:{ok,status,error} — e.g. 401 (bad ANTHROPIC_API_KEY) or 404 (wrong
+AGENTV3_{HAIKU,SONNET,OPUS}_MODEL id). That tells the admin exactly which Cloud Run env to fix.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.

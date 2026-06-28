@@ -329,19 +329,19 @@ function isBuildRunning(buildKey: string): boolean {
 }
 
 /**
- * The v3.0 BUILD turn-runner. Per the v3.0 constitution, v3.0 runs on NavBharatAI's own
- * Claude/Anthropic account (NavBharatAI pays the Claude cost; the user is billed the
- * Opus-equivalent markup). So CLAUDE LEADS each turn by default — builds use the reliable,
- * strong tool-use model and actually COMPLETE — with Vertex → Gemini → Claude-Haiku as the
- * fallback chain so a Claude throttle never breaks a build.
+ * The v3.0 BUILD turn-runner. Builds run on CLAUDE ONLY (Haiku → Sonnet → Opus) because only
+ * Claude reliably does REAL tool-use (actually calls write_file). Gemini/Vertex HALLUCINATE in
+ * the tool loop — they describe creating files but never call the tools, so the build finishes
+ * with ZERO real files (and the model later says "I'm an AI, I have no file system"). That is
+ * exactly the "file banane ka hallucination" the admin observed, and why the Anthropic dashboard
+ * showed $0 spend: every build was silently running on Gemini/Vertex, never Claude.
  *
- * Why the default flipped (2026-06-28): the old cheap-first order (Gemini/Vertex lead) meant
- * Claude was never reached on a normal build, AND Gemini's quota/rate/output limits broke
- * builds mid-run (the multi-provider runner returns the first NON-THROWING result, so a
- * truncated Gemini turn is accepted and the loop stalls instead of falling through to Claude).
- * Set AGENTV3_BUILD_CLAUDE_FIRST=0 to revert to the old cheap-first ladder if ever needed.
- * If no Gemini/Vertex provider is configured, falls back to the Claude-only resilient runner.
- * Build models are env-overridable (AGENTV3_{VERTEX,GEMINI}_BUILD_MODEL).
+ * So the build chain is Claude(selected model) → Claude-Haiku backstop. Gemini/Vertex are kept
+ * for cheap CHAT only, NOT builds. If Claude genuinely fails, the build errors HONESTLY with the
+ * real Claude error (bad key / wrong model id / overload) instead of faking files on Gemini.
+ * AGENTV3_BUILD_ALLOW_GEMINI=1 re-adds Vertex/Gemini as a last-resort build fallback.
+ * Per the v3.0 constitution NavBharatAI pays the Claude cost; the user is billed the
+ * Opus-equivalent markup. Models are env-overridable (AGENTV3_{HAIKU,SONNET,OPUS}_MODEL).
  */
 /**
  * Decide whether the v3.0 build chain leads with Claude. Pure + exported for unit testing.
@@ -418,10 +418,16 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean })
   // model actually answers. AGENTV3_DISABLE_HAIKU_BACKSTOP=1 removes it if ever needed.
   const haikuBackstop: NamedRunner = { name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), haikuModel()) };
   const withBackstop = process.env.AGENTV3_DISABLE_HAIKU_BACKSTOP === '1' ? [] : [haikuBackstop];
-  // Claude-first by default (v3.0 runs on Claude — see the doc comment above); Vertex/Gemini
-  // remain as fallback. Escalation passes claudeFirst:true; AGENTV3_BUILD_CLAUDE_FIRST=0 reverts.
+  // Builds run on CLAUDE ONLY (Haiku/Sonnet/Opus do REAL tool-use → real files). Gemini/Vertex
+  // HALLUCINATE in the tool-use loop — they reply describing files ("creating index.html…") but
+  // never actually call write_file, so the build "succeeds" with ZERO real files and the model
+  // later claims "I'm an AI, I have no file system". So they are EXCLUDED from the build chain
+  // (they remain the cheap CHAT providers only). If Claude genuinely fails, the build errors
+  // HONESTLY with the real Claude error (e.g. a bad key or model id) instead of silently making
+  // fake files on Gemini. AGENTV3_BUILD_ALLOW_GEMINI=1 re-adds Vertex/Gemini as a last resort.
+  const fallback = process.env.AGENTV3_BUILD_ALLOW_GEMINI === '1' ? cheap : [];
   const claudeFirst = resolveClaudeFirst(opts?.claudeFirst, process.env.AGENTV3_BUILD_CLAUDE_FIRST);
-  const chain = claudeFirst ? [claude, ...cheap, ...withBackstop] : [...cheap, claude, ...withBackstop];
+  const chain = claudeFirst ? [claude, ...fallback, ...withBackstop] : [...fallback, claude, ...withBackstop];
   return makeMultiProviderTurnRunner(chain, {
     onProviderUsed: (used, from) => { if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`); },
     onProviderError: (name, err) => console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`),

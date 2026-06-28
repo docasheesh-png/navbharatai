@@ -73,6 +73,7 @@
 | **P-DATA** | **Data & Backend Engine Gaps** | Schema validation, durable artifact/embedding store, data retention/GDPR, OpenAPI, uploads, export | ⏳ Pending | 0% |
 | **P-DESIGN** | **UI/UX & Design Platform Gaps** | UI primitive library, overlay primitives, a11y engine, charts, AI design-gen, prototyping, design governance | ⏳ Pending | 0% |
 | **P-DEPLOY** | **DevOps & Deployment Gaps** | DORA metrics, staging/promotion, AI deploy-ops, app-store automation, approval gate, more targets | ⏳ Pending | 0% |
+| **P-COLLAB** | **Collaboration Platform Gaps** | Durable team membership, shared-workspace ACL, client share portal, team libraries, @mention, SSO | ⏳ Pending | 0% |
 
 ---
 
@@ -1691,6 +1692,63 @@
 
 ---
 
+## 🤝 PHASE P-COLLAB — COLLABORATION PLATFORM GAPS
+> From a 300-component **Collaboration** audit (2026-06-28, 2 deep-scan agents, cited files verified).
+> NavBharatAI is primarily a **single-user AI app builder** with light team features. The vast majority of
+> the 300 are either **⬜ N/A-by-design** (it is not a comms platform) or **already tracked** in other phases.
+> Only the genuinely-new, product-fitting, untracked gaps are listed.
+
+### ✅ Collaboration Already Strong (do not redo)
+- Live rooms: `ide/LiveCollaboration.tsx` (Firebase realtime presence + room chat + QR + debounced code push).
+- Team UI + roles: `ide/TeamCollaboration.tsx` (Admin/Editor/Viewer, activity feed, share-link UI), `routes/team.ts` (invite endpoint).
+- Versioning/undo/audit: `ide/CodeVersioning.tsx`, `useUndoRedo`, `lib/audit.ts`; cross-device sync `routes/{sync,cloudsync}.ts`.
+- AI collaboration: AgentV3 multi-agent coordination, `Consensus`, human-in-the-loop `Approvals.ts`, `ReviewerAgent`, shared `WorkspaceMemory`/`AppKnowledgeBase`, semantic search `EmbeddingSearch`, shared `SyncedTemplates`.
+
+### ⬜ N/A-by-design / already tracked elsewhere (NOT added here)
+- **⬜ N/A-by-design (not a comms platform):** team chat/DM/channels (Slack-like), voice/video rooms, screen-share/annotation, remote-control, whiteboard/diagram/canvas co-edit, meeting scheduler/calendar/timezone, recording/transcripts/AI-meeting-notes, task/sprint/milestone management, RACI matrix, expert-finder/skill-discovery, org/relationship graph, enterprise hub, team-health dashboards, eDiscovery/legal-hold.
+- **Already tracked:** RBAC/role enforcement → **P-SEC.1**; inline code comments/review-mode/threads → **P-DEV.11**; cursor-sharing/element-comments/OT/CRDT realtime co-edit → **P-DESIGN.7**; 3-way merge/conflict-resolution → **P-DEV.4**; voice collaboration → **P-DEV.13**; offline mode/sync → **P-DEV.7/P3.2**; cross-session/workspace persistence → **P-DEV.2/P-PME.1**; ADR/decision log → **P-PME.10**; human-approval gate → **P-AI.8**; notification delivery → **P-BRE.7/P-PME.9**; AI code/design reviewers + semantic search → **P-AI**; retention/legal-hold → **P-DATA.4**; data export → **P-DATA.7**; workspace backup/restore → **P-DATA.2/P9**.
+
+### P-COLLAB.1 — Durable Team Membership + Invite Acceptance  🟡 PARTIAL → full  [MED-HIGH]
+- Team members + invites live in **localStorage** and `routes/team.ts` only **records** invites — email delivery is a
+  stub ("coming soon") and there is no accept flow, so teams vanish on logout. (RBAC *enforcement* is P-SEC.1; this is
+  the membership **data model + invite lifecycle**.)
+- [ ] Persist `teams/{teamId}/members` in Firestore (uid, role, status); real invite email + token-based accept route.
+- [ ] Load team + role on login; make `TeamCollaboration.tsx` read/write the backend instead of localStorage.
+- **Files:** `src/server/routes/team.ts`, `src/components/ide/TeamCollaboration.tsx`, new `src/server/lib/TeamStore.ts`.
+
+### P-COLLAB.2 — Shared Workspace Access Model (backend ACL)  🟡 PARTIAL → full  [MED]
+- Share links (`navbharat.ai/shared/{projectId}`) and access toggles are **UI-only**; nothing on the backend enforces
+  *which users can open which project*. Workspaces are owner-scoped with no member-grant.
+- [ ] Add a project membership/ACL: owner can grant team members access; enforce on every workspace/build/deploy route.
+- [ ] Resolve shared-link access server-side (member vs anyone-with-link vs expired).
+- **Files:** `src/server/workspace/WorkspaceManager.ts`, `src/server/routes/{sync,engineer,agentv3}.ts`, new ACL middleware.
+
+### P-COLLAB.3 — Client / Stakeholder Share Portal + Feedback Collection  ❌ MISSING  [MED]
+- No way to share a built app/preview **read-only** with a non-member (client/stakeholder) and collect their feedback
+  or approval — a natural deliverable-handoff for an app builder.
+- [ ] Add a read-only shared preview link + a lightweight feedback/approval widget that records responses to Firestore.
+- **Files:** new `src/server/routes/share.ts`, new `src/components/SharePortal.tsx`, `routes/preview.ts`.
+
+### P-COLLAB.4 — Shared Team Libraries (prompts / templates / components)  🟡 PARTIAL → full  [LOW]
+- `SyncedTemplates` and `ComponentLibrary` are **global** (one instance for everyone); there is no **team-scoped**
+  shared prompt / template / component library a team can curate and reuse.
+- [ ] Add team-scoped libraries (Firestore, keyed by teamId) for prompts, templates, and saved components.
+- **Files:** new `src/server/lib/TeamLibraryStore.ts`, `src/components/ide/{ComponentLibrary,SyncedTemplates}.*`.
+
+### P-COLLAB.5 — Team @Mention + Notification Routing  ❌ MISSING  [LOW]
+- No `@mention` of teammates in the workspace and no routing of an event (mention, role-change, share) to the right
+  member. (Inline-code comments are P-DEV.11; this is workspace-level mention + routing.)
+- [ ] Add an `@mention` picker in chat/comments; route mentions to in-app + email (reusing P-BRE.7 notification delivery).
+- **Files:** `src/components/ide/LiveCollaboration.tsx`, new `src/server/lib/MentionRouter.ts`.
+
+### P-COLLAB.6 — SSO / Identity Federation (SAML / OIDC)  ❌ MISSING  [LOW — enterprise]
+- Auth is Firebase OAuth (Google) + phone OTP only; there is no SAML/OIDC SSO or directory federation for enterprise
+  teams. (Distinct from P-SEC.3 MFA and P-SEC.1 RBAC.)
+- [ ] Add SAML/OIDC SSO via Firebase Auth SAML/OIDC providers; map federated identity → team membership.
+- **Files:** `src/config/firebase.ts`, `src/server/lib/authMiddleware.ts`, `src/components/AuthComponent.tsx`.
+
+---
+
 ## ✅ DEFINITION OF "ROCK-SOLID" (exit criteria for this roadmap)
 1. All **three universes** isolated and provably correct (FREE no-Claude, SDA Grok-first, PRO Claude-first).
 2. **Real test suite** green + CI gate blocks broken deploys.
@@ -1767,6 +1825,15 @@
   release-notes/changelog/semver→P-PME). Only **6 genuinely-new gaps** remained → added as **PHASE P-DEPLOY**
   (DORA metrics; staging + promotion pipeline; AI deploy-ops/risk advisor; app-store distribution automation;
   release approval/freeze gate; expanded deploy targets + wire MultiCloudDeploy UI). Doc-only.
+- 2026-06-28 (Collaboration audit): Ran a 300-component **Collaboration** audit (2 deep-scan agents, cited
+  files verified). NavBharatAI is a single-user-centric AI app builder; the vast majority of the 300 are
+  **⬜ N/A-by-design** (it is not a comms platform — no chat/voice/video/whiteboard/meeting/task-mgmt/RACI/org-graph)
+  or **already tracked** (RBAC→P-SEC.1, comments→P-DEV.11, cursors/OT/CRDT→P-DESIGN.7, merge→P-DEV.4, voice→P-DEV.13,
+  notifications→P-BRE.7, AI-reviewers/semantic-search→P-AI, retention/export/backup→P-DATA). Only **6 genuinely-new,
+  product-fitting gaps** remained → added as **PHASE P-COLLAB** (durable team membership + invite acceptance;
+  shared-workspace backend ACL; client/stakeholder share portal + feedback; team-scoped shared libraries;
+  @mention + notification routing; SSO/identity-federation). Notable real finding: teams/invites are currently
+  localStorage-only with an email stub. Doc-only.
 - Deploy after each phase (permanent law). Maintain English-only UI (permanent law).
 - 2026-06-27 (UX + PE audits): Ran 300-component **UX Engine** audit → found 10 gaps (4 HIGH, 4 MED, 2 LOW).
   Already-strong: theme, PWA, Ctrl+K, onboarding modal, toast, AI Suggestions, LiveCollaboration. MISSING:

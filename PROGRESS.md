@@ -5315,3 +5315,20 @@ stretch is no longer a blank gap. Timeline capped at 2000 entries (TIMELINE_TRUN
 can't grow the report unbounded. Now a timeout report shows the full activity log AND points at the culprit.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2926/2926 PASS (+4 timeline/heartbeat/stuck tests), boot:check PASS.
+
+## 2026-06-28 — Fix: v3.0 plan list now syncs (live spinner + green ticks), no longer frozen at 0/N
+
+User: the plan list (above the input box) doesn't sync — no spinner while working, no green tick on
+completion (it sits at "PLAN 0/N", all items pending). Root: the plan is driven by todo_updated events;
+the model is INSTRUCTED to keep todos updated (mark in_progress/done) but does not do so reliably — Haiku
+especially creates the plan once and never advances the statuses. The client renders status correctly
+(Loader2 spinner for in_progress, CheckCircle2 for done) — the statuses just never change server-side.
+Fix: new pure computePlanProgress(todos, completedSteps, finished) (7 tests) + wiring in routes/agentv3.ts
+so the route drives plan progress from REAL build activity regardless of model compliance: (a) on plan
+approval, the first item → in_progress (spinner appears immediately); (b) each file written advances the
+progress (done → in_progress → pending; the last item is never marked done until the build finishes, so
+no premature 100%); (c) on the build's final outcome, a SUCCESS marks every item done (green ticks), a
+failure keeps the progress reached. A real 'blocked' status is preserved. Best-effort — never affects the
+build. No AppKnowledgeBase entry (bug fix to an existing surface, not a new feature).
+
+Gate: frontend tsc 0, server tsc 0, vitest 2933/2933 PASS (+7), boot:check PASS.

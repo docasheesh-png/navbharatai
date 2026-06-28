@@ -11,7 +11,7 @@
  * the publisher ever awaiting or being affected by a Firestore failure.
  */
 import * as admin from 'firebase-admin';
-import firebaseConfig from '../../../firebase-applet-config.json';
+import { firestoreDatabaseId } from './firestoreDb';
 import { eventBus, type BusEvent } from './eventBus';
 
 const COLLECTION = 'build_events';
@@ -38,7 +38,7 @@ class EventStore {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
         const db = admin.firestore();
-        db.settings({ databaseId: firebaseConfig.firestoreDatabaseId });
+        db.settings({ databaseId: firestoreDatabaseId() });
         this.db = db;
       }
       return this.db;

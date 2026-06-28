@@ -12,6 +12,7 @@
 // the users' own credentials).
 
 import firebaseConfig from '../../../firebase-applet-config.json';
+import { firestoreDatabaseId } from './firestoreDb';
 
 export interface BackupResult {
   ok: boolean;
@@ -31,7 +32,7 @@ function projectId(): string {
 }
 
 function databaseId(): string {
-  return ((firebaseConfig as any).firestoreDatabaseId || '(default)').trim() || '(default)';
+  return firestoreDatabaseId();
 }
 
 /**

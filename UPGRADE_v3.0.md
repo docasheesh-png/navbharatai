@@ -59,6 +59,7 @@
 | **P10** | **Edge & Hardening Infra** | CDN, KMS, chaos/load testing | ⏳ Pending | 0% |
 | **P-UX** | **UX Engine Gaps** | User-facing quality, trust, retention | ⏳ Pending | 0% |
 | **P-PE** | **Prompt Engine Gaps** | AI quality, cost, safety | ⏳ Pending | 0% |
+| **P-AI** | **AI Intelligence Gaps** | Deeper reasoning, RAG, safety, personalization | ⏳ Pending | 0% |
 
 ---
 
@@ -269,6 +270,149 @@
 
 ---
 
+## 🟤 PHASE P-AI — AI INTELLIGENCE GAPS
+> From the 300-component AI Intelligence audit (2026-06-28). Already-strong items not listed.
+> Only PARTIAL → Full and MISSING items, priority-ordered.
+
+### ✅ AI Intelligence Already Strong (do not redo)
+- Full orchestration: AppMakerOrchestrator, ExecutionOrchestrator, RuntimeKernel, BlueprintPlanner,
+  FilePlanningEngine, TaskScheduler (DAG + cycle detection), DeploymentPlanner, RepairPlanner.
+- Agent roles: RequirementsAgent, PlanningAgent, FeatureImplementationAgent, ProjectStructureAgent
+  + AgentV3 13-role roster (architect/planner/engineer/qa/repair/triage/ops/docs/knowledge/evaluator/persona).
+- Code Intelligence: ASTAnalyzer (ts-morph real AST), WorkspaceMemory (project graph), RepositoryIntelligenceEngine,
+  ImpactAnalyzer, FailureClassifier, RootCauseAnalyzer, AutoRepairEngine, RepairKnowledgeBase.
+- Quality Evaluation: QualityEvaluationEngine (Build+Lint+Runtime+Security+Architecture evaluators),
+  PostEditReviewer, BuildEvaluator, RepairConfidenceEngine, QualityScorer.
+- Tool Use: ToolDispatcher (30+ tools, role-based), E2BActuator, DockerActuator, WorkspaceManager,
+  VCSStateManager, DeploymentEngine, VercelProvider, NetlifyProvider.
+- Safety: CommandGovernance, SecretRedactor (12+ providers), UntrustedContent (fenceUntrusted),
+  SecurityEvaluator, rate limiting, auth middleware.
+- Model Routing: AIRouter (2-pass, 8-slot, racing top-2), powerLevel Opus effort, AIRouterManager.
+- Resilience: CheckpointManager (ACID), TransactionCoordinator, LockManager, ConflictDetector,
+  DeploymentRollbackManager, RepairBudgetManager (maxAttempts=3, maxTokens=200k).
+- Governance/Audit: AuditManager, DeploymentAuditManager, AgentV3CostTelemetry, TokenUsageManager.
+- Event System: InProcessEventBus (47+ event types), EventHistoryStore.
+- Consensus/Hallucination mitigation: Consensus.ts, ReviewerGuard.ts (partial, present).
+
+### P-AI.1 — Hallucination Detection  🟡 PARTIAL → full  [HIGH]
+- `Consensus.ts` + `ReviewerGuard.ts` provide multi-hat mitigation but are not wired on every generation path.
+  No dedicated hallucination classifier or confidence threshold gate.
+- [ ] Wire `ReviewerGuard` on every LLM output path in `AppMakerOrchestrator.ts` (currently optional).
+- [ ] Add a lightweight consistency check: re-generate critical code segments twice, compare; flag divergence.
+- [ ] Surface low-confidence outputs to the user with a warning badge instead of silently accepting them.
+- **Files:** `src/server/AgentV3/Consensus.ts`, `src/server/AgentV3/ReviewerGuard.ts`,
+  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+
+### P-AI.2 — Full RAG Pipeline (Reranker + Grounding + Citation)  🟡 PARTIAL → full  [HIGH]
+- `RepositoryIntelligenceEngine.ts` retrieves project files. `EmbeddingSearch.ts` does ada-002 similarity.
+  Missing: reranker (sort retrieved chunks by relevance), grounding engine (attach evidence to claims),
+  citation manager (trace which file/line supported which generated snippet).
+- [ ] Add a `ContextReranker.ts` — BM25 or cross-encoder score on retrieved chunks before injection.
+- [ ] Add a `GroundingEngine.ts` — wrap each generated code block with its source file references.
+- [ ] Citation metadata injected into `AgentV3CostTelemetry.ts` records (which file context was used).
+- **Files:** new `src/server/AgentV3/ContextReranker.ts`, new `src/server/AgentV3/GroundingEngine.ts`,
+  `src/server/AgentV3/EmbeddingSearch.ts`.
+
+### P-AI.3 — Dialogue Manager / Multi-Turn Context Manager  🟡 PARTIAL → full  [HIGH]
+- `ConversationStore.ts` persists transcript (durable `MessageParam[]`). Missing: a stateful dialogue
+  manager that tracks conversation phase (requirements → planning → building → debugging) and adjusts
+  intent classification based on prior turns rather than treating each message as independent.
+- [ ] Add `DialogueStateManager.ts` — tracks phase (REQUIREMENTS / PLANNING / BUILDING / DEBUGGING /
+  DEPLOYED) and injects phase context into `IntentClassifier` decision.
+- [ ] Multi-turn context compression: when transcript > 50 turns, summarize older turns before injection
+  (currently `UniversalAIRouter.ts` does token-based truncation only).
+- **Files:** new `src/server/AgentV3/DialogueStateManager.ts`, `src/server/AgentV3/IntentClassifier.ts`,
+  `src/server/AI/UniversalAIRouter.ts`.
+
+### P-AI.4 — NLU Completion (Entity Recognition + Slot Filling)  🟡 PARTIAL → full  [HIGH]
+- `IntentExtractor.ts` does keyword/heuristic domain detection. `RequirementIntelligenceEngine.ts` does
+  structured requirement parsing via LLM. No named entity extraction or slot filling (e.g. "build me a
+  shop with Razorpay" → entity: Razorpay, slot: payment_gateway).
+- [ ] Add entity recognition pass to `IntentClassifier.ts`: extract named technologies, frameworks, APIs
+  from user message and inject as structured slots into `FilePlanningEngine`.
+- [ ] Map extracted slots → `BlueprintInferenceEngine.ts` template selection for higher accuracy.
+- **Files:** `src/server/AgentV3/IntentClassifier.ts`, `src/server/AppMakerLab/intelligence/IntentExtractor.ts`,
+  `src/server/AppMakerLab/BlueprintInferenceEngine.ts`.
+
+### P-AI.5 — Preference Learning / Personalization  ❌ MISSING  [HIGH]
+- The AI treats every user identically. No tracking of user's preferred tech stack, coding style, or
+  past decisions (e.g. "this user always picks React + Tailwind + Firestore").
+- [ ] Add `UserPreferenceStore.ts` — Firestore collection `userPrefs/{userId}` storing: preferred
+  framework, DB, language, component style, last 5 successful blueprint patterns.
+- [ ] Inject top preferences as context in `architectSystemPrompt()` for returning users.
+- [ ] Update preferences on every successful build (infer from blueprint, not from explicit user input).
+- **Files:** new `src/server/AgentV3/UserPreferenceStore.ts`, `src/server/AgentV3/systemPrompt.ts`,
+  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+
+### P-AI.6 — Dedicated PII Detection  🟡 PARTIAL → full  [MED]
+- `SecretRedactor.ts` masks API keys/tokens (12+ provider patterns). Does not detect general PII:
+  Aadhaar numbers, PAN, phone numbers, emails, Indian bank account numbers in user-submitted code/data.
+- [ ] Extend `SecretRedactor.ts` with Indian PII patterns: Aadhaar (12-digit), PAN (AAAAA0000A),
+  mobile (10-digit starting 6-9), email, IFSC.
+- [ ] Add `redactPII()` export alongside existing `redactSecrets()` — called on user-uploaded file content.
+- **Files:** `src/server/AgentV3/SecretRedactor.ts`.
+
+### P-AI.7 — Test Generation Intelligence  ❌ MISSING  [MED]
+- The system generates app code but never generates corresponding tests. `QualityEvaluationEngine`
+  evaluates existing tests but nothing generates new ones.
+- [ ] Add a `TestGenerationAgent.ts` role in `AgentRegistry.ts` — post-generation step that produces
+  Vitest unit tests for generated services/hooks/utils.
+- [ ] Trigger after successful build: generate tests for the top 3 most-used functions in the built app.
+- **Files:** new `src/server/AgentV3/TestGenerationAgent.ts`, `src/server/AgentV3/AgentRegistry.ts`,
+  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+
+### P-AI.8 — Human-in-the-Loop Coordinator  ❌ MISSING  [MED]
+- The AI executes full build pipelines autonomously. No step asks the user to review/approve before
+  committing a destructive change (e.g. full app regeneration that overwrites existing edits).
+- [ ] Add `HumanReviewGate.ts` — before full-app overwrite, emit a SSE event to frontend asking for
+  user confirmation if existing `generatedCode` is non-empty.
+- [ ] Frontend: show "AI wants to overwrite your app — Approve / Cancel" dialog.
+- **Files:** new `src/server/AgentV3/HumanReviewGate.ts`, `src/server/AppMakerLab/AppMakerOrchestrator.ts`,
+  `src/App.tsx`.
+
+### P-AI.9 — Explainability / Decision Trace  ❌ MISSING  [MED]
+- `AuditManager.ts` logs mutations. `DeploymentAuditManager.ts` logs deploy steps. But no trace of
+  AI *decisions*: why was this architecture chosen? why this repair strategy? why this provider?
+- [ ] Add `DecisionTraceManager.ts` — append-only log of: intent detected → blueprint chosen → provider
+  selected → repair strategy chosen. Stored per build in Firestore `buildTraces/{jobId}`.
+- [ ] Expose via `/api/admin/trace/:jobId` (admin only) for debugging.
+- **Files:** new `src/server/AgentV3/DecisionTraceManager.ts`, `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+
+### P-AI.10 — Adversarial Input / Abuse Detection  🟡 PARTIAL → full  [MED]
+- `CommandGovernance.ts` blocks shell commands. `UntrustedContent.ts` fences prompt injection.
+  Rate limiter throttles requests. No dedicated abuse pattern detection (bulk generation abuse,
+  adversarial prompts to extract training data, prompt-stuffing to bypass governance).
+- [ ] Add `AbuseDetector.ts` — track: requests/minute per userId, unusual prompt patterns (very long
+  prompts, high repetition, requests for "ignore above" variants), generation cost spikes.
+- [ ] On detection: rate-limit tier drop + Firestore `abuseLedger/{userId}` entry + audit log.
+- **Files:** new `src/server/AgentV3/AbuseDetector.ts`, `server.ts` (inject pre-AI call).
+
+### P-AI.11 — Dedicated Log / Stack Trace Intelligence  ❌ MISSING  [LOW]
+- Errors are classified by `FailureClassifier.ts` (pattern matching). No dedicated log parser that
+  understands structured output from Vite, TypeScript, ESLint, or runtime stack traces.
+- [ ] Add `LogIntelligenceEngine.ts` — parse stderr/stdout from build steps into structured error objects
+  (file, line, column, error type, severity).
+- [ ] Feed structured errors directly into `RootCauseAnalyzer.ts` instead of raw string matching.
+- **Files:** new `src/server/AppMakerLab/intelligence/LogIntelligenceEngine.ts`,
+  `src/server/AppMakerLab/autorepair/RootCauseAnalyzer.ts`.
+
+### P-AI.12 — Model Evaluation / Benchmark Engine  ❌ MISSING  [LOW]
+- No systematic comparison of output quality across providers (Claude vs Grok vs Gemini for code gen).
+  A/B flags exist for UI (`featureFlags.ts`) but not for model quality evaluation.
+- [ ] Add `ModelEvaluationEngine.ts` — run a sample prompt against two providers, score both via
+  `QualityEvaluationEngine`, log winner to Firestore `modelEvals/{promptHash}`.
+- [ ] Wire into `AIRouter.ts` as an optional shadow-scoring pass (1% of requests).
+- **Files:** new `src/server/AgentV3/ModelEvaluationEngine.ts`, `src/server/AI/Router/AIRouter.ts`.
+
+### P-AI.13 — Visual Intelligence (Multimodal)  ❌ MISSING  [LOW — future scope]
+- No computer vision, OCR, screenshot understanding, or diagram/document parsing.
+  Low priority for a text-first code-generation app but is a differentiator for "build from screenshot".
+- [ ] Future: integrate Claude's vision API to accept a screenshot and generate matching UI code.
+- [ ] Future: accept Figma export JSON → code (FigmaImporter exists in frontend; backend generation not wired).
+- **Files:** `src/server/AI/AIRouterManager.ts` (add vision model routing), new `src/server/Vision/`.
+
+---
+
 ## 🔶 PHASE P-UX — UX ENGINE GAPS
 > From the 300-component UX Engine audit (2026-06-27). Items already done are NOT listed.
 > Only PARTIAL → Full and MISSING items, priority-ordered.
@@ -417,6 +561,8 @@
 12. **Edge hardening** — CDN + KMS + WAF + load test in CI (P10).
 13. **UX baseline** — consent banner, skeleton screens, one-click AI fix, product tour (P-UX.1–4).
 14. **Prompt engine hardened** — response cache, prompt versioning, jailbreak detection (P-PE.1–3).
+15. **AI Intelligence hardened** — hallucination gated, RAG reranker+grounding, dialogue manager,
+    preference learning, PII detection, human review gate (P-AI.1–5, P-AI.6, P-AI.8).
 
 ---
 
@@ -434,6 +580,15 @@
   Already-strong: theme, PWA, Ctrl+K, onboarding modal, toast, AI Suggestions, LiveCollaboration. MISSING:
   privacy consent/GDPR, one-click AI fix, product tour, breadcrumbs, NPS/CSAT, token gauge, forgot-password,
   session replay, Storybook. Added as **PHASE P-UX**.
+- 2026-06-28 (AI Intelligence audit): Ran 300-component **AI Intelligence** audit → found 13 gaps (5 HIGH, 5 MED, 3 LOW).
+  Already-strong (~45%): full orchestration layer, 13-role AgentV3 roster, real AST (ts-morph), code-gen engines
+  (frontend/backend/database), quality evaluation (5 evaluators), ToolDispatcher 30+ tools, CommandGovernance,
+  SecretRedactor, ACID checkpoints/transactions, audit managers, AIRouter 2-pass + powerLevel.
+  HIGH gaps: hallucination detection not wired everywhere, RAG missing reranker+grounding+citation,
+  no dialogue manager/phase tracking, no NLU entity recognition/slot filling, no preference learning.
+  MED gaps: PII detection (general), test generation, human-in-the-loop gate, decision trace, abuse detection.
+  LOW gaps: log/stack trace parser, model evaluation engine, multimodal/vision (future scope).
+  Added as **PHASE P-AI**.
 - 2026-06-27 (PE audit): Ran 300-component **Prompt Engine** audit → found 8 gaps (3 HIGH, 3 MED, 2 LOW).
   Already-strong: IntentClassifier, RequirementIntelligenceEngine, FilePlanningEngine, Context Building,
   KnowledgeEvolution, ConversationStore, EmbeddingSearch, AIRouter 2-pass, ToolDispatcher 30+ tools,

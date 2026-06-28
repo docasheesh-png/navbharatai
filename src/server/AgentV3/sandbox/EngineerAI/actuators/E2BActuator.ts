@@ -3,6 +3,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
+import { ensureHostBinding } from './devServerHost';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
@@ -471,7 +472,13 @@ export class E2BActuator implements IEngineerActuator {
     if (isLongRunning) {
       let stdout = '';
       let stderr = '';
-      const handle = await sandbox.commands.run(command, {
+      // Force the dev server to bind 0.0.0.0 so the PUBLIC E2B preview URL is
+      // reachable. A localhost-only bind (Vite/Next default unless host:true is
+      // set) passes the `nc -z localhost` check below yet 502s on the public
+      // preview — the #1 "built but the preview is blank" cause. No-op if the
+      // command already binds a host (e.g. our vite-react template's host:true).
+      const devCommand = ensureHostBinding(command);
+      const handle = await sandbox.commands.run(devCommand, {
         cwd: WORKSPACE_ROOT,
         background: true,
         onStdout: s => { stdout += s; },
@@ -493,7 +500,7 @@ export class E2BActuator implements IEngineerActuator {
           `fuser -k ${port}/tcp 2>/dev/null; pkill -f "node.*${port}" 2>/dev/null || true`,
           { timeoutMs: 5000 },
         ).catch(() => {});
-        const retry = await sandbox.commands.run(command, {
+        const retry = await sandbox.commands.run(devCommand, {
           cwd: WORKSPACE_ROOT,
           background: true,
           onStdout: s => { stdout += s; },

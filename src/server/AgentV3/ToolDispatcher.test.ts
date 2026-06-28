@@ -502,6 +502,24 @@ describe('ToolDispatcher — evaluate integration (more dimensions + generators)
   const read = async (dd: ToolDispatcher, path: string): Promise<string> =>
     (await dd.dispatch(call('read_file', { path }))).content;
 
+  it('readiness gate pre-seeds the graph from real workspace files (scaffold/bash files become visible)', async () => {
+    const ws = 'ws-preseed';
+    const a = new FakeActuator();
+    // Files that exist in the sandbox but were NOT written via the indexing
+    // write-tools (actuator scaffold / bash-created) — so they're absent from the graph.
+    a.files.set('index.html', '<!doctype html><div id="root"></div>');
+    a.files.set('src/main.tsx', "import App from './App';");
+    a.files.set('src/App.tsx', 'export default function App(){ return null; }');
+    const s = new AgentEventStream();
+    const dd = new ToolDispatcher(a, ws, new WorkspaceState(s), s);
+    expect(getWorkspaceMemory(ws).graph().files).toEqual([]); // empty before the gate
+    await dd.assessBuildReadiness();
+    const files = getWorkspaceMemory(ws).graph().files;
+    expect(files).toContain('src/App.tsx');   // import target now visible → not "unresolved"
+    expect(files).toContain('src/main.tsx');
+    expect(files).toContain('index.html');    // runnability no longer falsely "no index.html"
+  });
+
   it('flags fake/incomplete code (authenticity) and blocks readiness', async () => {
     const dd = makeDispatcher('ws-eval-auth');
     await write(dd, 'src/api.ts', 'export function getUser() { throw new Error("Not implemented"); }');

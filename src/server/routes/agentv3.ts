@@ -240,6 +240,17 @@ export function readinessGateEnabled(): boolean {
 }
 
 /**
+ * WATCHDOG — hard wall-clock cap (seconds) on a single build, so it can NEVER hang for 20-30 minutes
+ * (the agent looping when a broken preview can't be verified). Default 12 minutes; admin-tunable via
+ * AGENTV3_MAX_BUILD_SECONDS. Set to 0 to disable (not recommended).
+ */
+export function maxBuildSeconds(): number {
+  const raw = Number(process.env.AGENTV3_MAX_BUILD_SECONDS);
+  if (raw === 0) return 0;
+  return Number.isFinite(raw) && raw > 0 ? raw : 720;
+}
+
+/**
  * Check whether a user is at or over their monthly spend ceiling. Returns the cap and
  * the current monthly total so the caller can return an honest, specific message.
  * Best-effort: a Firestore read failure (or no userId) NEVER blocks a build — we fail
@@ -454,6 +465,42 @@ export function agentV3KeyDiag(): {
 }
 
 /**
+ * Non-secret diagnosis of the SANDBOX + live-preview configuration — pinpoints why the
+ * "Live server" (E2B) preview tab is missing. The tab needs a real cloud sandbox (E2B/Docker);
+ * with no E2B_API_KEY the engine falls back to LocalActuator, which has NO live preview, so only
+ * the in-browser tab shows. Also flags a custom E2B_PREVIEW_DOMAIN, which silently breaks every
+ * preview URL unless wildcard DNS is configured.
+ */
+export function sandboxDiag(): {
+  actuator: 'e2b' | 'docker' | 'local';
+  e2bKeySet: boolean;
+  dockerEnabled: boolean;
+  /** False when the active actuator cannot serve a live preview (Local) — the "Live server" tab won't appear. */
+  livePreviewAvailable: boolean;
+  previewDomain: string;
+  previewDomainIsCustom: boolean;
+  /** Set when a custom preview domain is configured — a reminder it needs wildcard DNS, else previews 404. */
+  previewDomainWarning: string | null;
+} {
+  const e2bKeySet = !!(process.env.E2B_API_KEY && process.env.E2B_API_KEY.trim());
+  const dockerEnabled = process.env.DOCKER_ENABLED === 'true';
+  const actuator: 'e2b' | 'docker' | 'local' = e2bKeySet ? 'e2b' : dockerEnabled ? 'docker' : 'local';
+  const domain = (process.env.E2B_PREVIEW_DOMAIN || '').trim() || 'e2b.app';
+  const previewDomainIsCustom = domain !== 'e2b.app';
+  return {
+    actuator,
+    e2bKeySet,
+    dockerEnabled,
+    livePreviewAvailable: actuator !== 'local',
+    previewDomain: domain,
+    previewDomainIsCustom,
+    previewDomainWarning: previewDomainIsCustom
+      ? `Preview URLs are rewritten to *.${domain}; this ONLY resolves if ${domain} is an E2B custom domain with a wildcard *.${domain} DNS record. If previews 404/blank, set E2B_PREVIEW_DOMAIN=e2b.app (raw host, always works).`
+      : null,
+  };
+}
+
+/**
  * Live health probe of the FREE-router providers (Vertex / Gemini / Grok). Makes
  * one tiny real call per provider and reports ok/error for each, so an admin can
  * tell — on the live environment — whether Vertex and Gemini are actually WORKING
@@ -550,7 +597,7 @@ export function registerAgentV3Routes(app: Express): void {
   // tiny real Claude call and reports the exact outcome (success or the precise
   // error), gated by the admin password so it can't be abused for cost.
   app.get('/api/agentv3/diag', async (req: Request, res: Response) => {
-    const diag = agentV3KeyDiag();
+    const diag = { ...agentV3KeyDiag(), sandbox: sandboxDiag() };
     const wantsTest = req.query.test === '1';
     const adminOk =
       !!process.env.ADMIN_PASSWORD && req.query.admin === process.env.ADMIN_PASSWORD;
@@ -586,6 +633,14 @@ export function registerAgentV3Routes(app: Express): void {
     // one tiny real call each, so the admin sees which of them actually WORK on live.
     const freeProviders = adminOk ? await probeFreeProviders() : undefined;
     res.json({ ...diag, live, freeProviders });
+  });
+
+  // Public, lightweight preview-capability probe — ONLY the sandbox diagnosis (no
+  // provider-key info). The preview surface calls this to explain, honestly, WHY the
+  // "Live server" tab has no URL: either the cloud sandbox isn't configured on this
+  // deployment (LocalActuator → no live preview), or a custom preview domain needs DNS.
+  app.get('/api/agentv3/preview-status', (_req: Request, res: Response) => {
+    res.json(sandboxDiag());
   });
 
   // Approve/reject a pending gate (plan mode / permission prompt, P4).
@@ -1347,6 +1402,8 @@ export function registerAgentV3Routes(app: Express): void {
         // R2 §1.1 — top-level build runners (which spread baseRunnerOpts) get the mandatory
         // readiness gate; sub-agents (SubAgent.ts, separate opts) never do.
         readinessGate: readinessGateEnabled(),
+        // WATCHDOG — hard wall-clock cap so a build can never hang for 20-30 min (0 = disabled).
+        maxBuildMs: maxBuildSeconds() * 1000,
       };
       const runner = new AgentRunner({
         ...baseRunnerOpts,

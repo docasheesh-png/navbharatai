@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled } from './agentv3';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { userCostStore } from '../lib/UserCostStore';
 
@@ -305,5 +305,72 @@ describe('readinessGateEnabled (R2 §1.1 — mandatory gate flag)', () => {
   it('any other value keeps it on', () => {
     process.env.AGENTV3_READINESS_GATE = 'on';
     expect(readinessGateEnabled()).toBe(true);
+  });
+});
+
+describe('maxBuildSeconds (watchdog wall-clock cap)', () => {
+  const prev = process.env.AGENTV3_MAX_BUILD_SECONDS;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTV3_MAX_BUILD_SECONDS;
+    else process.env.AGENTV3_MAX_BUILD_SECONDS = prev;
+  });
+  it('defaults to 720s (12 min)', () => {
+    delete process.env.AGENTV3_MAX_BUILD_SECONDS;
+    expect(maxBuildSeconds()).toBe(720);
+  });
+  it('honors a positive override', () => {
+    process.env.AGENTV3_MAX_BUILD_SECONDS = '300';
+    expect(maxBuildSeconds()).toBe(300);
+  });
+  it('allows disabling with 0', () => {
+    process.env.AGENTV3_MAX_BUILD_SECONDS = '0';
+    expect(maxBuildSeconds()).toBe(0);
+  });
+  it('falls back to the default on garbage', () => {
+    process.env.AGENTV3_MAX_BUILD_SECONDS = 'abc';
+    expect(maxBuildSeconds()).toBe(720);
+  });
+});
+
+describe('sandboxDiag (why the Live-server/E2B preview tab is missing)', () => {
+  const keys = ['E2B_API_KEY', 'DOCKER_ENABLED', 'E2B_PREVIEW_DOMAIN'] as const;
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => { for (const k of keys) { saved[k] = process.env[k]; delete process.env[k]; } });
+  afterEach(() => { for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
+
+  it('with no E2B key + no docker → LocalActuator, NO live preview (only in-browser tab)', () => {
+    const d = sandboxDiag();
+    expect(d.actuator).toBe('local');
+    expect(d.e2bKeySet).toBe(false);
+    expect(d.livePreviewAvailable).toBe(false); // ← this is why the "Live server" tab disappears
+  });
+
+  it('with E2B_API_KEY set → E2B actuator, live preview available', () => {
+    process.env.E2B_API_KEY = 'e2b_xxx';
+    const d = sandboxDiag();
+    expect(d.actuator).toBe('e2b');
+    expect(d.e2bKeySet).toBe(true);
+    expect(d.livePreviewAvailable).toBe(true);
+  });
+
+  it('treats a blank E2B key as not set', () => {
+    process.env.E2B_API_KEY = '   ';
+    expect(sandboxDiag().e2bKeySet).toBe(false);
+  });
+
+  it('default preview domain (e2b.app) → no DNS warning', () => {
+    const d = sandboxDiag();
+    expect(d.previewDomain).toBe('e2b.app');
+    expect(d.previewDomainIsCustom).toBe(false);
+    expect(d.previewDomainWarning).toBeNull();
+  });
+
+  it('custom preview domain → warns it needs wildcard DNS (else previews 404)', () => {
+    process.env.E2B_PREVIEW_DOMAIN = 'mitrify.xyz';
+    const d = sandboxDiag();
+    expect(d.previewDomainIsCustom).toBe(true);
+    expect(d.previewDomain).toBe('mitrify.xyz');
+    expect(d.previewDomainWarning).toContain('wildcard');
+    expect(d.previewDomainWarning).toContain('mitrify.xyz');
   });
 });

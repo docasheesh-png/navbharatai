@@ -85,4 +85,18 @@ describe('runOneShot', () => {
     const r = await runOneShot(baseDeps({ startPreview: async () => { throw new Error('port down'); } }));
     expect(r.ok).toBe(true);
   });
+
+  it('a HUNG preview (never resolves) does NOT hang the build — it completes within the timeout', async () => {
+    // Reproduces the real bug: `npm run dev` never returns, so startPreview never settles. The
+    // build must still finish (files are written) instead of spinning at "working…" forever.
+    let logged = '';
+    const r = await runOneShot(baseDeps({
+      startPreview: () => new Promise<void>(() => { /* never resolves */ }),
+      previewTimeoutMs: 30,
+      log: (m) => { logged = m; },
+    }));
+    expect(r.ok).toBe(true);
+    expect(r.filesWritten).toBe(1);
+    expect(logged).toContain('Preview is still starting');
+  });
 });

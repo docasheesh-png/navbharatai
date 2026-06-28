@@ -105,6 +105,25 @@ export interface OneShotDeps {
   log?: (msg: string) => void;
   /** Minimum files a real one-shot build must produce (default 1). */
   minFiles?: number;
+  /**
+   * Hard cap (ms) on how long we WAIT for startPreview before completing the build anyway.
+   * Critical: a dev server (`npm run dev`) never exits, and on some sandboxes its command
+   * promise never resolves — without this cap the build would hang at "working…" forever even
+   * though the files are already written. Preview is best-effort, so on timeout we just finish.
+   * Default 90 s.
+   */
+  previewTimeoutMs?: number;
+}
+
+/** Resolve `p`, but reject with a timeout error if it has not settled within `ms`. */
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return await new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`preview did not finish within ${ms}ms`)), ms);
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
 }
 
 /**
@@ -124,7 +143,14 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
     await deps.writeFiles(files);
     deps.log?.(`Generated ${files.length} file(s) in one shot.`);
     if (deps.startPreview) {
-      try { await deps.startPreview(); } catch { /* preview is best-effort; files are already written */ }
+      // Best-effort AND time-bounded: a hung dev-server start (a command that never resolves)
+      // must NOT keep the build spinning forever — the files are already written, so on a
+      // timeout OR a thrown error we simply finish and let the preview come up on its own.
+      try {
+        await withTimeout(deps.startPreview(), deps.previewTimeoutMs ?? 90_000);
+      } catch {
+        deps.log?.('Preview is still starting — your files are ready; opening the preview will reconnect it.');
+      }
     }
     return { ok: true, filesWritten: files.length, summary: `Built your app in one shot — ${files.length} file(s).` };
   } catch (e) {

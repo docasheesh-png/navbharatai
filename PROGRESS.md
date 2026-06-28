@@ -5223,3 +5223,19 @@ Fix A (client): start() now resets lastEventTsRef at build start AND updates it 
 remains as the real safety net for a truly dead stream.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2914/2914 PASS, boot:check PASS.
+
+## 2026-06-28 — Fix: OneShot build hangs forever at "working…" after generating files
+
+User report: "make a calculator" → "Generated 9 file(s) in one shot." → then "working… 16m 58s" and it
+never finishes (would spin for hours). Restart-loop (#539) was already fixed, so this is a DIFFERENT hang.
+Root cause: OneShot's startPreview() runs `npm install` → `npm run dev` → update_preview, each awaited. On
+LocalActuator (used when E2B_API_KEY is unset — the 16-min duration rules out E2B, whose commands cap at
+5 min) `npm run dev` is run as a FOREGROUND exec; Node's exec timeout does not reliably kill a dev server
+(vite keeps the stdout pipe open), so the command promise NEVER resolves → `await startPreview()` hangs →
+the whole build spins at "working…" forever even though the files are already written. runOneShot's
+try/catch only catches a THROW, not an infinite wait. Fix: wrap startPreview() in a hard timeout
+(withTimeout, default 90 s, configurable via previewTimeoutMs) — preview is best-effort, so on a hang OR a
+throw the build finishes (files are already written) and tells the user the preview is still starting.
+Now the build ALWAYS completes within ~90 s of file generation regardless of sandbox/actuator behavior.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2915/2915 PASS (+1 hang-repro test), boot:check PASS.

@@ -61,6 +61,9 @@ export interface BuildDiagnosticsMeta {
   framework?: string;
   /** Injected clock for deterministic tests; defaults to Date.now. */
   now?: () => number;
+  /** Fired after EVERY recorded issue / ingested event / finish, with the current report — so the
+   *  route can persist it in REAL TIME (the report is never empty mid-build and survives a crash). */
+  onUpdate?: (report: BuildDiagnosticsReport) => void;
 }
 
 export class BuildDiagnostics {
@@ -78,9 +81,15 @@ export class BuildDiagnostics {
     this.startedAt = this.now();
   }
 
+  /** Persist the current report in REAL TIME (best-effort; never throws). */
+  private notify(): void {
+    try { this.meta.onUpdate?.(this.report()); } catch { /* persistence is best-effort */ }
+  }
+
   /** Record an issue explicitly (provider fallback, sandbox timeout, …). */
   record(issue: Omit<BuildIssue, 'ts'> & { ts?: number }): void {
     this.issues.push({ ts: issue.ts ?? this.now(), ...issue });
+    this.notify();
   }
 
   /**
@@ -118,12 +127,24 @@ export class BuildDiagnostics {
             this.record({ phase: 'readiness', severity: 'warning', code: 'READINESS_WARNING', message: w, autoResolved: true });
           }
         }
+        this.notify();
         break;
       case 'preview':
         this.record({ phase: 'preview', severity: 'info', code: 'PREVIEW_PUBLISHED', message: `Preview published at ${e.url}`, autoResolved: true });
         break;
+      case 'narration': {
+        // Capture narration lines that signal a problem the agent hit and is talking about
+        // (sandbox unavailable, port/preview not responding, errors remaining, retries) — these
+        // are the "struggles" that otherwise never reach the report.
+        const t = (e.text || '').trim();
+        if (/\b(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying|stuck|timed out|blocked request|closed port|won'?t come up|no files|warning)\b/i.test(t)) {
+          this.record({ phase: 'build', severity: /\b(error|failed|cannot|could not|unavailable|timed out)\b/i.test(t) ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });
+        }
+        break;
+      }
       default:
-        // Other events (narration, todo, etc.) are not diagnostics.
+        // Other events (todo, agent_spawned, etc.) are not diagnostics.
+        this.notify();
         break;
     }
   }
@@ -142,6 +163,7 @@ export class BuildDiagnostics {
         issue.autoResolved = true;
       }
     }
+    this.notify();
   }
 
   report(): BuildDiagnosticsReport {

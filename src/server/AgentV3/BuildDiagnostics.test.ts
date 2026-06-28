@@ -67,6 +67,25 @@ describe('BuildDiagnostics', () => {
     expect(text).toContain('UNRESOLVED');
   });
 
+  it('fires onUpdate in REAL TIME after every record / ingest / finish', () => {
+    const reports: number[] = [];
+    const d = new BuildDiagnostics({ now, onUpdate: (r) => reports.push(r.counts.total) });
+    d.record({ phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK', message: 'x', autoResolved: true });
+    d.ingestEvent({ type: 'tool_result', agent: 'architect', callId: 'c', ok: false, summary: 'boom', ts: 1 } as AgentEvent);
+    d.finish(false);
+    // 1 after record, 2 after the failed tool_result, and a final emit on finish.
+    expect(reports).toEqual([1, 2, 2]);
+  });
+
+  it('captures problem narration lines (struggles the agent talks about)', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: 'port 5173 is not responding yet', ts: 1 } as AgentEvent);
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: 'Building the UI…', ts: 2 } as AgentEvent); // ignored (no problem keyword)
+    const r = d.report();
+    expect(r.issues.filter((i) => i.code === 'AGENT_NOTE')).toHaveLength(1);
+    expect(r.issues[0].message).toContain('not responding');
+  });
+
   it('clean build → zero issues, friendly text', () => {
     const d = fresh();
     d.finish(true, 'done');

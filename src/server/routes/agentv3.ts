@@ -1231,6 +1231,8 @@ export function registerAgentV3Routes(app: Express): void {
     const workspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
     const framework = typeof req.body?.framework === 'string' && req.body.framework ? req.body.framework : 'vite-react';
     const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
+    // Held outside the try so a build CRASH (caught below) is still captured in the diagnostics report.
+    let buildDiagRef: BuildDiagnostics | undefined;
     try {
       // Native Claude for real tool-use, with a multi-provider text fallback
       // (Vertex → Gemini → Grok) so chat never dies if Claude is down/misconfigured.
@@ -1260,7 +1262,11 @@ export function registerAgentV3Routes(app: Express): void {
       const buildDiag = new BuildDiagnostics({
         sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined,
         workspaceId, prompt, model, framework,
+        // REAL-TIME: persist the report after every recorded issue, so "Build report" is never
+        // empty mid-build and survives a crash/hang (the user can download it any time).
+        onUpdate: (r) => { lastDiagnostics.set(buildKey, r); },
       });
+      buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
       events.subscribe((e) => buildDiag.ingestEvent(e), false);
       const client = buildTurnRunner({
         ...(analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : {}),
@@ -2009,6 +2015,11 @@ export function registerAgentV3Routes(app: Express): void {
       } catch { /* diagnostics are best-effort */ }
       emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(diagnostics ? { diagnostics } : {}) });
     } catch (err) {
+      // Capture the crash in the diagnostics report too (real-time onUpdate already persisted it).
+      try {
+        buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_EXCEPTION', message: err instanceof Error ? err.message : String(err), autoResolved: false });
+        buildDiagRef?.finish(false);
+      } catch { /* diagnostics are best-effort */ }
       emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {
       activeBuilds.delete(buildKey);

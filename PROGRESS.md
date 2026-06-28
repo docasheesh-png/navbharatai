@@ -5092,3 +5092,23 @@ Net: simple apps build in ONE cheap call (no Architect, sub-agents, Opus, or reb
 kills the "$26 failed todo"); complex apps keep the full loop; worst case = today's behavior.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2892/2892 PASS, boot:check PASS.
+
+## 2026-06-28 — Build report: real-time + comprehensive (was empty / only saved at build end)
+
+Admin: app still not building, files created but "Build report" shows nothing; wants EVERY issue
+captured in real time. Causes: (1) lastDiagnostics was set only at the END of a build, so a still-
+running / crashed / hung build left the report empty; (2) too few signals were captured.
+
+Fixes:
+- BuildDiagnostics: new onUpdate callback fired after EVERY record / ingestEvent / finish. The route
+  wires it to lastDiagnostics.set(buildKey, report) → the report is persisted in REAL TIME and is
+  downloadable any time, even mid-build or after a crash/hang.
+- Widened capture: ingestEvent now also records problem NARRATION lines (AGENT_NOTE) — sandbox
+  unavailable, port/preview not responding, errors/retries/stuck/closed-port/no-files/warnings — the
+  struggles the agent talks about that never reached the report before.
+- Crash capture: buildDiagRef held outside the build try; the outer catch records BUILD_EXCEPTION and
+  finish(false), so a thrown build is in the report too.
+- Existing capture (tool errors, provider fallbacks, readiness blockers/warnings, sandbox, empty-build
+  retry, one-shot success/fallback, preview) all now flush live.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2895/2895 PASS, boot:check PASS.

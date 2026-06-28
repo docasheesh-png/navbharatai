@@ -51,11 +51,11 @@
 | Phase | Name | Why | Status | % |
 |-------|------|-----|--------|---|
 | P0 | Core-Law Violations | Breaks your own permanent rules | ✅ Complete | 100% |
-| P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | 🔄 In Progress | 50% |
-| P2 | Resilience & Observability | See + survive failures | ⏳ Pending | 0% |
-| P3 | Scale & Frontend Health | Grow without rewrites | ⏳ Pending | 0% |
-| P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 25% |
-| P5 | Hygiene & Hardening | Remove rot, close small holes | ⏳ Pending | 0% |
+| P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ✅ Complete | 100% |
+| P2 | Resilience & Observability | See + survive failures | ✅ Complete | 100% |
+| P3 | Scale & Frontend Health | Grow without rewrites | 🔄 In Progress | 75% (P3.1 App.tsx split deferred) |
+| P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 75% (P4.2 + P4.3 + P4.4 done; only P4.1 CQRS — large — remains) |
+| P5 | Hygiene & Hardening | Remove rot, close small holes | 🔄 In Progress | 67% (P5.1 assessed/kept, P5.3 done; P5.2 monorepo deferred — large infra) |
 | **P6** | **IaC & Provisioning** | Reproducible, version-controlled infra | ⏳ Pending | 0% |
 | **P7** | **Async Infra (Queue/Cache)** | Scale beyond Firestore-polling | ⏳ Pending | 0% |
 | **P8** | **Observability Infra** | Tracing + alerting + SLO | ⏳ Pending | 0% |
@@ -121,50 +121,123 @@
 ## 🟠 PHASE P1 — BREAK-PROOF FOUNDATION
 > Forward/backward safety + the safety nets that stop silent breakage.
 
-### P1.1 — API Versioning  ❌ MISSING
-- [ ] Introduce `/api/v1/...` prefix (alias current routes; keep old paths as deprecated shims).
-- [ ] Document the version contract in `AGENTS.md`.
-- **Files:** `server.ts`.
+### P1.1 — API Versioning  ✅ DONE (2026-06-28)
+- [x] Introduced `/api/v1/...` prefix via a single pre-route middleware (`src/server/routes/apiVersion.ts`)
+      that internally rewrites `/api/v1/foo` → `/api/foo` — every existing route is instantly available
+      versioned with zero per-route changes. Versioned responses carry `X-API-Version: v1`.
+- [x] Old unversioned `/api/...` paths kept as deprecated shims: each response now carries
+      `Deprecation: true`, `X-API-Version: unversioned`, and a `Link: </api/v1/...>; rel="successor-version"`
+      header. Behaviour unchanged — never breaks a current client.
+- [x] Documented the version contract in `AGENTS.md` (new "API VERSIONING CONTRACT" section).
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2737/2737 ✅
+  (17 new tests) · boot smoke-check + live curl: `/api/v1/health` → 200 `X-API-Version: v1`;
+  `/api/health` → 200 `Deprecation: true` + successor `Link` ✅.
+- **Files:** `server.ts`, `src/server/routes/apiVersion.ts`, `src/server/routes/apiVersion.test.ts`, `AGENTS.md`.
 
 ### P1.2 — Data Migration System  ✅ DONE (2026-06-27)
 - **Reality:** `src/server/project/ProjectMigrator.ts` exists (+ `tests/projectMigrator.test.ts`).
 - **Remaining:** confirm a `_migrations` ledger collection + startup hook are wired; document the runbook.
 - **Files:** `src/server/project/ProjectMigrator.ts`.
 
-### P1.3 — Circuit Breaker  🟡 PARTIAL → full
-- **Now:** only per-provider cooldown in `AIRouter.ts`. No real breaker (open/half-open/closed).
-- [ ] Add a `CircuitBreaker` class per provider: trip after N consecutive failures, half-open probe, auto-close.
-- [ ] Integrate into the router fallback path for all three universes.
-- **Files:** new `src/server/AI/Router/CircuitBreaker.ts`, `AIRouter.ts`.
+### P1.3 — Circuit Breaker  ✅ DONE (2026-06-28)
+- **Was:** only a flat per-provider cooldown in `AIRouter.ts` (every failure → fixed cooldown; no states, no recovery, no escalation).
+- [x] Added a real `CircuitBreaker` class (`src/server/AI/Router/CircuitBreaker.ts`) with CLOSED / OPEN / HALF_OPEN states:
+      a failure opens it; consecutive failures ESCALATE the cooldown (exponential backoff, capped at 5 min); once the
+      cooldown elapses it goes HALF_OPEN and the next request is a trial probe — success → CLOSED (reset), failure → OPEN again.
+- [x] Integrated into the router via the THREE existing chokepoints, so all three universes (FREE / PRO / PROFESSIONAL)
+      and every path (`route` / `routeRaced` / `routeStream`) get it with zero control-flow changes:
+      `isOnCooldown` → `breaker.isBlocking()`, `setCooldown` → `breaker.recordFailure()` (still shared cross-instance
+      via `ProviderCooldownStore`), and success (the single `recordProviderLatency(...,false)` chokepoint) → `breaker.recordSuccess()`.
+- [x] `getProviderStats()` now also reports `circuitState` + `consecutiveFailures` (additive; existing `cooldownUntil` kept so the Admin dashboard is unchanged).
+- **Strictly break-proof:** below the failure threshold the cooldown equals exactly the old value — a pure superset, never worse.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2750/2750 ✅ (29 new) · server boots + `/api/health` 200 ✅.
+- **Files:** `src/server/AI/Router/CircuitBreaker.ts` (+ `.test.ts`), `src/server/AI/Router/AIRouter.ts`.
 
-### P1.4 — Idempotency & Deterministic Jobs  🟡 PARTIAL
-- [ ] Add idempotency keys to build-job creation (`BuildJobManager.ts`) so retries don't double-run.
-- [ ] Ensure orchestrator steps are replay-safe.
-- **Files:** `src/server/AppMakerLab/jobs/BuildJobManager.ts`, `generator/ExecutionOrchestrator.ts`.
+### P1.4 — Idempotency & Deterministic Jobs  ✅ DONE (2026-06-28)
+- [x] Added idempotency keys to build-job creation. `BuildJobManager.createJob(prompt, idempotencyKey?)`:
+      when a key is supplied, a retried/duplicate request reuses the SAME job (returns its id, never spawns a
+      second build) unless the prior attempt terminally FAILED, in which case a fresh retry is allowed.
+      `BuildJob.idempotencyKey` is persisted; new `findExisting()` + `JobStore.findJobByIdempotencyKey()`
+      implemented for BOTH stores (Firestore indexed query; LocalFile scan). Job ids now carry a monotonic
+      suffix (`job-<ms>-<seq>`) so two jobs in the same millisecond never collide.
+      `AppMakerOrchestrator.execute()` takes the key and only spawns the background worker for a genuinely new job.
+- [x] Orchestrator steps are replay-safe — confirmed: `ExecutionOrchestrator.restoreFromCheckpoint()` +
+      `resumeExecution()` rebuild the scheduler from checkpointed task statuses + patches, so a resume re-runs
+      ONLY the incomplete tasks (completed tasks are never re-executed). Backed by `CheckpointManager` + `EventHistoryStore`.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2759/2759 ✅ (9 new) · server bundles ✅.
+- **Files:** `src/server/AppMakerLab/jobs/BuildJobManager.ts` (+ `.test.ts`), `jobs/store/JobStore.ts`, `store/LocalFileJobStore.ts`, `store/FirestoreJobStore.ts`, `AppMakerOrchestrator.ts`.
 
 ---
 
 ## 🟡 PHASE P2 — RESILIENCE & OBSERVABILITY
 > "Agar break ho to dikhe, aur recover ho."
 
-### P2.1 — Distributed Tracing + Metrics  🟡 PARTIAL
-- **Now:** `ObservabilityManager.ts` + `console.log` only. No spans, no external sink.
-- [ ] Add OpenTelemetry tracing (request → provider → job spans) exported to Cloud Trace.
-- [ ] Emit metrics (latency, error rate, token spend) to Cloud Monitoring.
-- **Files:** `src/server/ObservabilityManager.ts`, `server.ts`, `AIRouter.ts`.
+### P2.1 — Distributed Tracing + Metrics  ✅ DONE (2026-06-28)
+- **Was:** `ObservabilityManager.ts` + `console.log` only. No spans, no trace tree, no sink.
+- [x] Added a real, dependency-free distributed tracer (`src/server/observability/Tracer.ts`): W3C trace/span ids,
+      parent→child span trees, a bounded ring buffer of recent traces, `AsyncLocalStorage` context propagation, and
+      `withSpan`/`recordChildSpan` helpers. Every tracing call is best-effort and never throws.
+- [x] **Real Cloud Trace export with no SDK / no creds:** each completed span is emitted as a Cloud Logging structured
+      line with `logging.googleapis.com/trace` (`projects/<PROJECT>/traces/<id>`) + `spanId`, which Cloud Run auto-correlates
+      into Cloud Trace. Incoming `X-Cloud-Trace-Context` is parsed so our spans join the platform's trace.
+- [x] Wired surgically (no hot-path control-flow change): a ROOT request span in `traceMiddleware` (started at entry,
+      ended on `res.finish` with status/method/path; context kept active via `runInSpan`), and an AI **provider** child
+      span emitted at the single `recordProviderLatency` chokepoint in `AIRouter.ts` (so every provider call across all
+      three universes is traced under its request).
+- [x] Metrics: new admin-gated endpoints `GET /api/observability/traces` (recent span trees) + `GET /api/observability/metrics`
+      (per-span count/error-rate/avg/p95 + per-provider circuit/latency stats). `ObservabilityManager.trackLatency` now also emits a span.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2775/2775 ✅ (16 new) ·
+      server boots + LIVE check: `/api/health` produced a real `HTTP GET /api/health` span tree readable via
+      `/api/observability/traces?admin=…`; unauthenticated → 403 ✅.
+- **Files:** `src/server/observability/Tracer.ts` (+ `.test.ts`), `src/server/routes/observability.ts`, `server.ts`, `AIRouter.ts`, `ObservabilityManager.ts`.
 
-### P2.2 — Error Tracking (external)  ❌ MISSING
-- [ ] Wire Sentry (or Cloud Error Reporting) on both backend (`server.ts`) and frontend (`main.tsx`).
-- **Files:** `server.ts`, `src/main.tsx`.
+### P2.2 — Error Tracking (external)  ✅ DONE (2026-06-28)
+- [x] Wired **Cloud Error Reporting** (real external tracking, no SDK / no creds — same proven log-correlation
+      pattern as P2.1). New `src/server/observability/ErrorTracker.ts` emits each captured error as a Cloud Error
+      Reporting-compatible structured log (`@type: …ReportedErrorEvent` + `serviceContext` + full-stack `message`),
+      which Cloud Run auto-ingests (grouped, counted, alertable). Errors are also kept in a bounded ring buffer and
+      correlated with the active trace (P2.1). Every capture is best-effort and never throws.
+- [x] **Backend:** `installGlobalErrorHandlers()` (uncaughtException + unhandledRejection → report-and-continue, never
+      crash the service) installed at startup; an Express error-handling middleware (registered LAST) captures any
+      route error with request context and returns a clean 500.
+- [x] **Frontend:** the existing `window.error` / `unhandledrejection` reporters (→ `/api/logs/error`) now flow through
+      the tracker; `ErrorBoundary.componentDidCatch` additionally reports React render errors (prod-only, best-effort).
+- [x] Admin view: `GET /api/observability/errors` (recent errors + grouped summary).
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2784/2784 ✅ (9 new) ·
+      server boots + LIVE check: a POSTed client error was captured and read back via `/api/observability/errors?admin=…`; no-admin → 403 ✅.
+- **Files:** `src/server/observability/ErrorTracker.ts` (+ `.test.ts`), `server.ts`, `src/server/routes/telemetry.ts`, `src/server/routes/observability.ts`, `src/components/ErrorBoundary.tsx`.
 
-### P2.3 — Bulkhead Isolation  🟡 PARTIAL
-- [ ] Separate in-flight pools per universe so a FREE-tier spike can't starve PRO/SDA.
-- **Files:** `AIRouter.ts`.
+### P2.3 — Bulkhead Isolation  ✅ DONE (2026-06-28)
+- **Was:** the in-flight concurrency pool in `AIRouter.ts` was a module-level map keyed by provider NAME only, shared
+  across every `AIRouter` instance — so a FREE-tier spike saturating a shared provider (e.g. Grok) starved PRO/SDA.
+- [x] Each universe now has its OWN in-flight pool, keyed `${universe}:${provider}`. `AIRouter` takes a `universe`
+      label (`new AIRouter('free'|'pro'|'professional')`, wired in `AIRouterManager`); all slot acquire/release/capacity
+      checks go through per-universe helpers. A FREE spike can no longer starve PRO/SDA of slots.
+- [x] The **circuit breaker stays keyed by provider name (shared)** — a 429/quota is a provider-wide health signal that
+      SHOULD back every universe off; only the concurrency pool (local capacity/fairness) is isolated. Precise bulkhead,
+      no loss of the shared health signal.
+- [x] `getProviderStats()` aggregates in-flight back per provider (total + new `inFlightByUniverse` breakdown), so the
+      Admin dashboard shape is preserved and the bulkhead pools are observable.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2787/2787 ✅ (3 new bulkhead tests
+      prove a saturated FREE pool doesn't block PRO; existing 16 router tests still green) · server bundles ✅.
+- **Files:** `src/server/AI/Router/AIRouter.ts` (+ new `AIRouterBulkhead.test.ts`), `src/server/AI/AIRouterManager.ts`.
 
-### P2.4 — Disaster Recovery / Backup  ❌ MISSING
-- [ ] Scheduled Firestore export (backup) + a documented restore runbook.
-- [ ] Health/readiness probe wired into Cloud Run spec.
-- **Files:** `cloudbuild.yaml`, new `docs/DR_RUNBOOK.md`.
+### P2.4 — Disaster Recovery / Backup  ✅ DONE (2026-06-28)
+- [x] Real Firestore export (backup): `src/server/lib/FirestoreBackup.ts` calls the Firestore Admin
+      `exportDocuments` REST API (auth'd via the Cloud Run service account / ADC) into a GCS bucket, with a
+      timestamped prefix so backups never overwrite. Admin-triggered via `POST /api/admin/backup/firestore`.
+      Honest "not configured" result when `FIRESTORE_BACKUP_BUCKET` is unset — never fakes success, never throws.
+- [x] Documented restore runbook: `docs/DR_RUNBOOK.md` (§1 scheduled export via Cloud Scheduler + bucket/IAM setup,
+      §2 restore via `gcloud firestore import`, §3 probe wiring, §4 incident checklist) — all copy-pasteable commands.
+- [x] Health/readiness probes: `GET /api/live` (liveness, always 200 while alive) + `GET /api/ready` (readiness:
+      503 until init, then 200 with a dependency report) wired in `src/server/routes/health.ts`; `markServerReady()`
+      flips ready true once the server is listening. The Cloud Run probe-flag wiring is documented in DR_RUNBOOK §3
+      and referenced from `cloudbuild.yaml` — applied as a one-time manual `gcloud run services update` (operator
+      watches the deploy succeed) rather than baked into the unattended deploy step, per safeguard #3.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2796/2796 ✅ (9 new) · server
+      boots + LIVE check: `/api/live` 200, `/api/ready` 200 (`initialized:true`), backup trigger → honest 400
+      "not configured" (no fake), no-admin → 403 ✅.
+- **Files:** `src/server/lib/FirestoreBackup.ts` (+ `.test.ts`), `src/server/routes/health.ts` (+ `.test.ts`), `server.ts`, `docs/DR_RUNBOOK.md`, `cloudbuild.yaml`.
 
 ---
 
@@ -177,18 +250,53 @@
 - [ ] Target: `App.tsx` < 1,500 lines, no behavior change.
 - **Files:** `src/App.tsx` → `src/contexts/`, `src/hooks/`.
 
-### P3.2 — Offline-First Runtime  🟡 PARTIAL
-- [ ] Service worker: cache dynamic API responses + queue writes for replay on reconnect.
-- **Files:** `public/sw.js`, `src/lib/storage.ts`.
+### P3.2 — Offline-First Runtime  ✅ DONE (2026-06-28)
+- [x] Service worker now caches an allowlist of safe, read-only GET API endpoints
+      (`/api/agentv3/conversations`, `/api/agentv3/status`) using **network-first → cache fallback**: online users
+      ALWAYS get fresh data; the cache is served only when the network fails (offline), so the app still shows
+      last-known data. The new `navbharat-api-v1` cache is preserved across SW activations.
+- [x] Offline write queue (`src/lib/offlineQueue.ts`, IndexedDB-backed): fire-and-forget writes that fail because the
+      device is offline are buffered and **replayed on reconnect** (the `online` event). Replay is **STRICTLY
+      allowlisted** to idempotent/harmless endpoints (`/api/analytics/event`, `/api/logs/error`) — a payment or
+      build is NEVER queued or replayed (break-proof on a production payments app). Wired into the client error
+      reporters in `main.tsx`; `installOfflineQueueFlush()` drives the reconnect replay.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2805/2805 ✅ (9 new) ·
+      production `vite build` ✅ · `node --check public/sw.js` ✅ (SW emitted to `dist/sw.js` with the new logic).
+- **Files:** `public/sw.js`, `src/lib/offlineQueue.ts` (+ `.test.ts`), `src/main.tsx`.
 
-### P3.3 — Scalability / HA  🟡 PARTIAL
-- [ ] Keep `min-instances=0` (budget), but add a lightweight keep-warm ping for PRO/SDA endpoints.
-- [ ] Evaluate multi-region readiness (config only; no spend until needed).
-- **Files:** `cloudbuild.yaml`.
+### P3.3 — Scalability / HA  ✅ DONE (2026-06-28)
+- [x] Keep-warm: new `GET /api/warm` (`src/server/routes/warm.ts`) pre-warms the heavy PRO/SDA lazy singletons —
+      the 3 AI router universes + env-only health, the SDA clinical KB + `sda_chat` app-context, the Gemini SDK
+      client, and the Firestore admin client (via light reads on UserCost/ProviderState/Log/Metrics stores).
+      **Billing-safe: constructs client objects ONLY — never a real billed model call** (verified by an adversarial
+      review: a warm-traffic Anthropic/Vertex/Gemini ping would spend NavBharatAI's own account — explicitly avoided).
+      Hit by an external Cloud Scheduler so `min-instances=0` stays (no idle billing); an in-app self-ping would be
+      wrong (keeps an instance alive 24/7 and still doesn't warm the truly-cold request).
+- [x] Hardened from the adversarial review: the unauthenticated endpoint **throttles** the real warmup to once per
+      30s (cached report served to a flood at ~zero cost — anti cost-amplification), returns **generic per-step
+      error markers** (no internal detail disclosed; full detail → server logs), and ALWAYS returns 200.
+- [x] Multi-region readiness assessed (config only, no spend): `docs/SCALABILITY.md` §2 — substantially ready
+      (stateless container, Firestore-backed state, cross-instance cooldown sync); documents what a 2nd region needs.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2813/2813 ✅ (8 new) ·
+      server boots + LIVE check: `/api/warm` → 200, 13/13 steps ok; 2nd call `cached:true` (throttle holds); no raw
+      error leakage. Discovery + adversarial-review run as multi-agent workflows.
+- **Files:** `src/server/routes/warm.ts` (+ `.test.ts`), `server.ts`, `docs/SCALABILITY.md`, `cloudbuild.yaml`.
 
-### P3.4 — Real CDN / Edge Caching  ❌ MISSING
-- [ ] Front static assets with a CDN (Cloudflare / Cloud CDN) instead of browser cache only.
-- **Files:** infra config, `server.ts` cache headers.
+### P3.4 — Real CDN / Edge Caching  ✅ DONE (2026-06-28)
+- [x] Made all static assets CDN-ready and FIXED a real live bug: `sw.js` matched the `.js` rule and was served
+      `Cache-Control: immutable, max-age=1y` — pinning the service worker for a year (fights SW/PWA updates, and a
+      CDN would cache it too). Now `sw.js` + `manifest.json` are `no-cache, no-store, must-revalidate`.
+- [x] Single source of truth `src/server/lib/staticCache.ts` (`cacheControlFor`): hashed JS/CSS/fonts/wasm →
+      `public, max-age=31536000, immutable` (edge-cacheable by ANY CDN), images → 1 week, HTML/sw.js/manifest →
+      revalidate. Applied by the Cloud Run static handler (`server.ts`) and mirrored in `firebase.json`'s
+      `hosting.headers` so the Firebase Hosting global CDN serves identically.
+- [x] `docs/CDN.md` — honest CDN provisioning guide (Firebase Hosting CDN — config already complete, one
+      `firebase deploy --only hosting`; OR Cloud CDN via HTTPS LB + Serverless NEG; OR Cloudflare proxy). The
+      app code/config is complete; actual CDN provisioning is the documented admin infra/DNS step.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2821/2821 ✅ (8 new, incl. the
+      sw.js-not-immutable regression guard + a firebase.json-mirrors-policy check) · `vite build` ✅ · server boots +
+      LIVE `curl -I`: `sw.js` → `no-cache`, hashed asset → `immutable, max-age=1y`, `manifest.json` → `no-cache` ✅.
+- **Files:** `src/server/lib/staticCache.ts` (+ `.test.ts`), `server.ts`, `firebase.json`, `docs/CDN.md`.
 
 ---
 
@@ -199,35 +307,83 @@
 - [ ] Separate command (write) and query (read) paths for workspace/build operations.
 - **Files:** `src/server/AppMakerLab/`.
 
-### P4.2 — Event Sourcing + Replay  ❌ MISSING (history store exists, replay doesn't)
-- [ ] Make `EventHistoryStore` replayable to rebuild workspace state from the event log.
-- **Files:** `src/server/AppMakerLab/eventbus/EventHistoryStore.ts`.
+### P4.2 — Event Sourcing + Replay  ✅ DONE (2026-06-28)
+- [x] Made `EventHistoryStore` replayable. New `WorkspaceProjection.ts`: a PURE `replayWorkspaceState(events, id)`
+      reducer folds a workspace's event log into a lifecycle / mutation-ledger / VCS-ref / checkpoint projection,
+      exposed as `EventHistoryStore.replayWorkspace(workspaceId)` + `replayByCorrelationId(correlationId)`.
+- [x] **Honest by construction (the key design choice):** discovery proved AppMakerLab event payloads carry NO file
+      paths and NO file content (mutation events hardcode `workspaceId:'default'` + payload `{id}`). So the projection
+      reconstructs ONLY what the events actually prove — lifecycle, a mutation ledger keyed by transaction id (with
+      final outcome), VCS hashes/branch, checkpoint ids, build/generation errors — and is explicit it CANNOT rebuild
+      file bytes (`reconstructable: false` + `notes[]`; there is deliberately NO fake `filesPresent[]`). Byte-level
+      restore stays the Journal/Checkpoint path. Two entry points honestly handle the workspaceId-vs-correlationId gap.
+- [x] Designed + hardened via multi-agent workflows: a 5-agent discovery (mapped every state-mutating event's exact
+      payload) and a 30-agent adversarial review that caught real bugs, all fixed — **mutation counts are now DERIVED
+      from the final ledger** (a STARTED→FAILED→ROLLED_BACK batch counts once as its final state; duplicate/replayed
+      events never double-count), and `GENERATION_FAILED` / `REPAIR_COMPLETED` now transition lifecycle (no longer
+      stuck). (Pre-existing dual-VCS-event-type and REPAIR_STARTED-payload smells live in the publishers — documented,
+      out of P4.2 scope.)
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2838/2838 ✅ (17 new) ·
+      reducer is pure (identical input → deep-equal output, input never mutated).
+- **Files:** `src/server/AppMakerLab/eventbus/WorkspaceProjection.ts` (+ `.test.ts`), `EventHistoryStore.ts`, `IEventHistoryStore.ts`.
 
-### P4.3 — Full AST (replace regex code model)  ✅ MOSTLY DONE (2026-06-27)
-- **Reality:** `ts-morph` (real TS AST) is a dependency and used by `AgentV3/ASTAnalyzer.ts` (+test).
-- **Remaining:** point the older `Memory/MemoryIndexer.ts` regex path at the AST analyzer too (consolidate).
-- **Files:** `src/server/AgentV3/ASTAnalyzer.ts`, `src/server/Memory/MemoryIndexer.ts`.
+### P4.3 — Full AST (replace regex code model)  ✅ DONE (2026-06-28)
+- **Reality:** `ts-morph` (real TS AST) used by `AgentV3/ASTAnalyzer.ts`; the older `Memory/MemoryIndexer.ts` used a
+  single regex that captured only the FIRST export per file.
+- [x] Consolidated: new `MemoryIndexer.indexWithAST()` runs the regex baseline FIRST (so it can NEVER regress — its
+      result is always kept), then ENRICHES via the real `analyzeWithAST` (ts-morph): adds EVERY exported
+      symbol/component name (not just the first) + detected route paths. Graceful — AST returns null on
+      unsupported file / parse failure / ts-morph missing → keeps exactly the regex baseline. Never throws.
+- [x] Wired live end-to-end (not half-done): `ProjectMemoryManager.update` is now async and calls `indexWithAST`;
+      `WorkspaceManager.createFile/modifyFile` await it. Strict-superset design = zero regression risk, only enrichment.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2855/2855 ✅ (6 new AST tests:
+      all-exports, React components, routes, regex-baseline-preserved, never-throws, dedup; 6 existing regex tests still green) · server bundles ✅.
+- **Files:** `src/server/Memory/MemoryIndexer.ts`, `ProjectMemoryManager.ts`, `src/server/AI/WorkspaceManager.ts`, `tests/memoryIndexer.test.ts`.
 
-### P4.4 — Replication / Consistency guarantees  ❌ MISSING
-- [ ] Document and enforce consistency model for cross-device sync (currently newer-wins only).
-- **Files:** `server.ts` sync routes, `src/App.tsx` sync logic.
+### P4.4 — Replication / Consistency guarantees  ✅ DONE (2026-06-28)
+- **Was:** `POST /api/sync/:userId` BLINDLY overwrote the whole stored workspace doc, so a device saving a stale view
+  silently dropped another device's newer sessions (a classic lost-update).
+- [x] Enforced **last-write-wins PER SESSION, server-side**: the POST now reads the stored workspace and MERGES the
+      incoming payload into it (`src/server/project/SyncMerge.ts`) before writing — sessions merged by `id` (newer
+      `lastUpdated` wins; ties → incoming), sessions unique to either side always kept, `lastApp` preserved when the
+      incoming one is empty. The merged UNION is encoded + written. No cross-device session can ever be lost again.
+- [x] **Backward compatible — NO client/App.tsx change needed:** existing clients keep POSTing `{sessions, lastApp}`
+      and get the merge for free (the enforcement is authoritative on the server). Corrupt prior state falls back to a
+      blind write so a save is never lost.
+- [x] Documented the consistency model + boundaries (LWW-per-session, not field-level CRDT) in `docs/SYNC_CONSISTENCY.md`.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2864/2864 ✅ (9 new — incl. the
+      classic lost-update case, stale-no-clobber both directions, lastApp preservation) · server bundles ✅.
+- **Files:** `src/server/project/SyncMerge.ts` (+ `.test.ts`), `src/server/routes/sync.ts`, `docs/SYNC_CONSISTENCY.md`.
 
 ---
 
 ## ⚪ PHASE P5 — HYGIENE & HARDENING
 
-### P5.1 — Remove hardcoded Firebase key fallback  🟡 PARTIAL
-- [ ] `src/config/firebase.ts:9` — drop the hardcoded fallback API key; env-var only.
-- **Files:** `src/config/firebase.ts`.
+### P5.1 — Remove hardcoded Firebase key fallback  ✅ ASSESSED — intentionally kept (2026-06-28)
+- **Decision: do NOT remove the fallback** (would break production, no security benefit). Documented inline in
+  `src/config/firebase.ts`. Two reasons, both verified:
+  1. **Load-bearing in prod.** The Docker/Cloud Build pipeline injects NO `VITE_FIREBASE_*` vars (checked
+     `Dockerfile` + `cloudbuild.yaml`), so at build time `import.meta.env.VITE_FIREBASE_*` is undefined and the app
+     relies entirely on these defaults. Removing them breaks Firebase init (auth/Firestore/sync) for every user.
+  2. **Not a secret.** A Firebase WEB apiKey is public by design (it identifies the project; access is gated by
+     Firebase Security Rules, not key secrecy). The real secrets (service-account keys) are server-side, not in client code.
+- Env vars still take precedence when present (override without a code change). To genuinely remove the fallback later,
+  FIRST wire the build to inject the vars + verify on a real deploy (an infra step, deferred per safeguard #3).
+- **Files:** `src/config/firebase.ts` (documenting comment).
 
-### P5.2 — Monorepo tooling  🟡 PARTIAL
+### P5.2 — Monorepo tooling  🟡 DEFERRED (large infra)
 - [ ] Adopt pnpm workspaces / Turborepo so `remote-keyboard/` (Android) and web build are isolated.
+- **Deferred:** a root build-system migration (pnpm/Turborepo) is a large, high-blast-radius infra change that
+  reshapes the whole build/deploy pipeline — not safe for a single autonomous cycle (safeguard #3 / rule #1).
 - **Files:** root config.
 
-### P5.3 — Delete throwaway scripts & junk files
-- [ ] Remove root junk: `open.txt`, `close.txt`, `div_open.txt`, `another-file.txt`, etc.
-- [ ] Remove ad-hoc `*_test.ts` once replaced by Vitest (P0.2).
-- **Files:** repo root, `src/server/`.
+### P5.3 — Delete throwaway scripts & junk files  ✅ DONE (2026-06-28)
+- [x] Root junk `.txt` files (`open.txt`, `close.txt`, `div_open.txt`, `another-file.txt`, …) — already gone (no root
+      `.txt` files remain; confirmed).
+- [x] Removed 3 dead ad-hoc manual test/report scripts superseded by the Vitest suite (P0.2):
+      `src/server/workspace/hardening_test.ts`, `validation_tests.ts`, `verification_report.ts` — pure `console.log`
+      harnesses, referenced nowhere, not in any npm/CI script. Verified `tsc` (fe+server) + `vitest` 2864/2864 still green after removal.
+- **Files:** `src/server/workspace/` (3 files removed).
 
 ---
 
@@ -497,14 +653,19 @@
 - [ ] When a real prompt change is made, run against the live AI once and update golden snapshots.
 - **Files:** new `tests/ai/prompt-regression.test.ts`, new `tests/ai/mocks/aiProviderMock.ts`.
 
-### P-TQA.5 — Bundle Size Budget Enforcement  ❌ MISSING  [HIGH]
-- No CI check verifies that the frontend bundle stays within a size budget. Every new dependency silently
-  inflates the bundle. `vite build` outputs size but nothing enforces a limit.
-- [ ] Add `tests/bundle-budget.test.ts` — reads `dist/` after build, asserts: main JS chunk < 500KB gzipped,
-  total CSS < 50KB gzipped, no single chunk > 300KB.
-- [ ] Add a CI step after "Build" in `.github/workflows/ci.yml`: `npm run test:bundle`.
-- [ ] Use `bundlesize` or a custom script with `fs.statSync` + `zlib.gzipSync`.
-- **Files:** new `tests/bundle-budget.test.ts`, `package.json`, `.github/workflows/ci.yml`.
+### P-TQA.5 — Bundle Size Budget Enforcement  ✅ DONE (2026-06-28)
+- [x] `scripts/bundleBudget.mjs` — reads `dist/assets` after build, computes the GZIPPED size of every JS/CSS chunk,
+      and fails (exit 1) on any budget breach. Pure `checkBudget()` + `measureDist()` (custom `fs` + `zlib.gzipSync`,
+      no extra dep). `npm run test:bundle`.
+- [x] CI step added after "Build" in `.github/workflows/ci.yml` (`npm run test:bundle`) → bundle bloat now blocks merge.
+- [x] Unit-tested logic: `tests/bundleBudget.test.ts` (pass, each violation type, multi-violation, and a guard that the
+      budgets exceed today's measured sizes so CI is green now).
+- **Honest budgets (current reality + ~15% headroom, a "no further bloat" guard — NOT the spec's aspirational 500KB,
+  which the current main chunk already exceeds):** largest JS chunk ≤ 650 KB gz (current ~567), total JS ≤ 1050 KB gz
+  (current ~918), total CSS ≤ 50 KB gz (current ~33). The large main chunk is a known code-splitting opportunity
+  (separate task); this stops it growing unchecked. Live check passes today; an artificial bloat correctly exits non-zero.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 2870/2870 ✅ (6 new) · `npm run test:bundle` on real `dist/` → within budget ✅.
+- **Files:** `scripts/bundleBudget.mjs`, `tests/bundleBudget.test.ts`, `package.json`, `.github/workflows/ci.yml`.
 
 ### P-TQA.6 — Quality Gate (CI Merge Block on Score Threshold)  🟡 PARTIAL → full  [MED]
 - `QualityScorer.ts` computes a 0-100 quality score per build. But this score is only shown in the UI

@@ -4470,3 +4470,543 @@ already binds a host (e.g. our vite-react template's host:true), so it's pure be
 for frameworks/configs that don't. 6 unit tests mirror the legacy helper's coverage.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2707/2707 PASS.
+
+## 2026-06-28 — P1.1 API Versioning DONE (UPGRADE v3.0 roadmap, phase-by-phase march begin)
+
+First implemented phase of the UPGRADE_v3.0.md roadmap (one phase at a time, fully
+shipped: complete → rock-solid → polish → PR → CI green → merge). Top incomplete
+priority phase was P1 (Break-Proof Foundation); its first ❌ MISSING item was P1.1.
+
+WHAT: introduced `/api/v1/...` API versioning, purely additively (no current request
+ever breaks). New `src/server/routes/apiVersion.ts` mounts ONE pre-route middleware:
+- `/api/v1/foo` is internally rewritten to the existing `/api/foo` handler (req.url
+  mutation, the documented Express way) → every route is instantly versioned, zero
+  per-route edits. Versioned responses stamp `X-API-Version: v1`.
+- bare `/api/foo` still works unchanged but is now a DEPRECATED shim: responses carry
+  `Deprecation: true`, `X-API-Version: unversioned`, and `Link: </api/v1/foo>;
+  rel="successor-version"`. Unversioned paths are a PERMANENT compat layer (never remove).
+Pure helpers `rewriteVersionedPath` / `successorVersionPath` are unit-tested (17 tests).
+Version contract documented in AGENTS.md (new "API VERSIONING CONTRACT" section).
+
+VERIFIED (gate, all green): frontend tsc 0, server tsc 0, vitest 2737/2737 PASS,
+server bundles + boots, and a LIVE curl proved it end-to-end:
+  /api/v1/health   → 200, X-API-Version: v1, real handler body
+  /api/health      → 200, X-API-Version: unversioned, Deprecation: true, successor Link
+Files: server.ts, src/server/routes/apiVersion.ts (+ .test.ts), AGENTS.md, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P1.3 Circuit Breaker DONE (UPGRADE v3.0, phase 2 of the march)
+
+Replaced the router's flat per-provider cooldown with a REAL circuit breaker
+(CLOSED / OPEN / HALF_OPEN). New src/server/AI/Router/CircuitBreaker.ts:
+- failure → OPEN for a cooldown; consecutive failures ESCALATE the cooldown
+  (exponential backoff, capped 5 min); cooldown elapses → HALF_OPEN; next request
+  is a trial probe → success closes + resets, failure re-opens (escalated).
+- Pure/deterministic (every method takes `now`) → fully unit-tested without timers.
+- Below the failure threshold the cooldown equals exactly the OLD value, so this is
+  a strict, break-proof superset of prior behaviour — never worse.
+
+Integrated into AIRouter.ts via the THREE existing chokepoints (zero control-flow
+change → covers all 3 universes + route/routeRaced/routeStream):
+  isOnCooldown → breaker.isBlocking(); setCooldown → breaker.recordFailure()
+  (still mirrored cross-instance via ProviderCooldownStore); the single success
+  chokepoint recordProviderLatency(...,false) → breaker.recordSuccess().
+getProviderStats() additionally reports circuitState + consecutiveFailures
+(existing cooldownUntil field kept → Admin dashboard untouched).
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2750/2750 PASS
+(29 new: CircuitBreaker 24 + existing AIRouter 5 still green), server boots,
+/api/health 200. Backend infra (no user surface) → no AppKnowledgeBase entry needed.
+Files: src/server/AI/Router/CircuitBreaker.ts (+ .test.ts), AIRouter.ts, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P1.4 Idempotency & Deterministic Jobs DONE → PHASE P1 COMPLETE (100%)
+
+Idempotency keys on build-job creation so retries never double-run:
+- BuildJob gains idempotencyKey; BuildJobManager.createJob(prompt, key?) reuses the
+  SAME job for a duplicate key (returns existing id) unless the prior attempt terminally
+  FAILED (then a fresh retry is allowed). New findExisting() +
+  JobStore.findJobByIdempotencyKey() implemented for BOTH stores (Firestore indexed
+  where+orderBy query; LocalFile dir scan). Job ids now `job-<ms>-<seq>` (monotonic
+  suffix → no same-ms collisions). AppMakerOrchestrator.execute(prompt, ns, key?) only
+  spawns the worker for a genuinely-new job. Added a useStore() test seam.
+- Replay-safety confirmed already present: ExecutionOrchestrator.restoreFromCheckpoint()
+  + resumeExecution() rebuild the scheduler from checkpointed task statuses + patches →
+  resume re-runs ONLY incomplete tasks (completed tasks never re-execute).
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2759/2759 PASS (9 new),
+server bundles. Backend infra (no user surface) → no AppKnowledgeBase entry needed.
+
+Phase P1 (Break-Proof Foundation) is now 100%: P1.1 API versioning, P1.2 migrations
+(pre-existing), P1.3 circuit breaker, P1.4 idempotency — all DONE.
+Files: BuildJobManager.ts (+.test.ts), JobStore.ts, LocalFileJobStore.ts,
+FirestoreJobStore.ts, AppMakerOrchestrator.ts, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P2.1 Distributed Tracing + Metrics DONE (Phase P2 begins, 25%)
+
+Real, dependency-free distributed tracer (src/server/observability/Tracer.ts):
+W3C trace/span ids, parent→child span trees, bounded ring buffer, AsyncLocalStorage
+context propagation, withSpan/recordChildSpan helpers — all best-effort, never throws.
+Cloud Trace export with NO SDK + NO creds: each completed span emits a Cloud Logging
+structured line with logging.googleapis.com/trace + spanId → Cloud Run auto-correlates
+into Cloud Trace. Incoming X-Cloud-Trace-Context is parsed so spans join the platform trace.
+
+Wired surgically (no hot-path control-flow change):
+- ROOT request span in server.ts traceMiddleware (start at entry, end on res.finish with
+  status/method/path; context kept active via tracer.runInSpan(span, next)).
+- AI provider child span at the single recordProviderLatency chokepoint in AIRouter.ts
+  (every provider call, all 3 universes, traced under its request).
+New admin-gated endpoints: GET /api/observability/traces (recent span trees) +
+/api/observability/metrics (per-span count/error/avg/p95 + per-provider stats).
+ObservabilityManager.trackLatency now also emits a span (compat facade kept).
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2775/2775 PASS (16 new),
+server boots, and a LIVE curl proved it end-to-end: GET /api/health produced a real
+"HTTP GET /api/health" span (status ok, 5ms, http attributes) readable via
+/api/observability/traces?admin=…; no-admin → 403. Backend/admin observability (no
+end-user surface) → no AppKnowledgeBase entry.
+Files: observability/Tracer.ts (+.test.ts), routes/observability.ts, server.ts,
+AIRouter.ts, ObservabilityManager.ts, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P2.2 Error Tracking (external) DONE (Phase P2 → 50%)
+
+Real external error tracking via Cloud Error Reporting (no SDK, no creds — same
+log-correlation pattern as P2.1). New src/server/observability/ErrorTracker.ts:
+captured errors emit a Cloud Error Reporting-compatible structured log
+(@type ReportedErrorEvent + serviceContext + full-stack message) → Cloud Run
+auto-ingests (grouped/alertable); also kept in a bounded ring buffer and correlated
+with the active trace. Best-effort, never throws.
+
+Backend: installGlobalErrorHandlers() (uncaughtException + unhandledRejection →
+report-and-continue, never crash the service) at startup; Express error-handling
+middleware (registered LAST) captures route errors with request context → clean 500.
+Frontend: existing window.error/unhandledrejection reporters now flow through the
+tracker; ErrorBoundary.componentDidCatch additionally reports React render errors
+(prod-only, best-effort). Admin view: GET /api/observability/errors (recent + summary).
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2784/2784 PASS (9 new),
+server boots, LIVE: POST /api/logs/error captured + read back via
+/api/observability/errors?admin=…; no-admin → 403. Backend/admin observability →
+no AppKnowledgeBase entry. Files: observability/ErrorTracker.ts (+.test.ts), server.ts,
+routes/telemetry.ts, routes/observability.ts, components/ErrorBoundary.tsx, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P2.3 Bulkhead Isolation DONE (Phase P2 → 75%)
+
+Was: AIRouter's in-flight concurrency pool was a module-level map keyed by provider
+NAME only, shared across all AIRouter instances → a FREE spike saturating a shared
+provider (Grok) starved PRO/professional of slots.
+
+Fix: each universe gets its OWN in-flight pool keyed `${universe}:${provider}`.
+AIRouter now takes a `universe` label (new AIRouter('free'|'pro'|'professional'),
+wired in AIRouterManager.buildFree/buildPro/buildProfessional); all slot
+acquire/release/capacity checks go through per-universe helpers (slotKey/acquire/
+release/inFlightCount). The circuit breaker STAYS keyed by provider name (shared) —
+a 429/quota is provider-wide health that should back every universe off; only the
+concurrency pool (local fairness) is isolated. getProviderStats() aggregates in-flight
+back per provider (total + new inFlightByUniverse breakdown) so the Admin dashboard
+shape is preserved and the bulkhead pools are observable.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2787/2787 PASS (3 new
+bulkhead tests prove a saturated FREE pool doesn't block PRO; existing 16 router tests
+still green), server bundles. Backend infra → no AppKnowledgeBase entry.
+Files: AI/Router/AIRouter.ts (+ AIRouterBulkhead.test.ts), AI/AIRouterManager.ts, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P2.4 Disaster Recovery / Backup DONE → PHASE P2 COMPLETE (100%)
+
+Real DR/backup + health probes:
+- src/server/lib/FirestoreBackup.ts: real Firestore Admin exportDocuments REST call
+  (auth via Cloud Run SA / ADC) → GCS bucket, timestamped prefix (no overwrite).
+  Admin-triggered POST /api/admin/backup/firestore. Honest "not configured" when
+  FIRESTORE_BACKUP_BUCKET unset — never fakes, never throws.
+- src/server/routes/health.ts: GET /api/live (liveness) + GET /api/ready (503 until
+  init, then 200 w/ dependency report). markServerReady() flips ready on app.listen.
+- docs/DR_RUNBOOK.md: scheduled export (Cloud Scheduler + bucket/IAM), restore
+  (gcloud firestore import), probe wiring (gcloud run services update --startup-probe/
+  --liveness-probe), incident checklist — all copy-pasteable.
+- cloudbuild.yaml: documentation note pointing to runbook §3 for the probe wiring.
+  Per safeguard #3, the probe flags are applied via a manual one-time gcloud command
+  (operator watches deploy) rather than baked into the unattended deploy step — a wrong
+  flag there would fail the auto-deploy.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2796/2796 PASS (9 new),
+server boots, LIVE: /api/live 200, /api/ready 200 (initialized:true), backup trigger →
+honest 400 "not configured", no-admin → 403. Admin/infra/ops endpoints → no
+AppKnowledgeBase entry.
+
+Phase P2 (Resilience & Observability) now 100%: P2.1 tracing, P2.2 error tracking,
+P2.3 bulkhead, P2.4 DR/backup — all DONE.
+Files: lib/FirestoreBackup.ts (+.test.ts), routes/health.ts (+.test.ts), server.ts,
+docs/DR_RUNBOOK.md, cloudbuild.yaml, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P3.2 Offline-First Runtime DONE (Phase P3 begins, 25%)
+
+Note: P3.1 (split 9,156→6,252-line App.tsx into <1,500) deferred — a large multi-PR
+refactor with high regression risk on the live app; not safe for a single autonomous
+cycle (safeguard #3 / rule #1). Picked P3.2 (self-contained, real, low-risk).
+
+P3.2 — offline-first, built SAFELY (break-proof on a payments app):
+- public/sw.js: network-first → cache-fallback for an ALLOWLIST of safe read-only GET
+  API endpoints (/api/agentv3/conversations, /api/agentv3/status). Online users always
+  get fresh data; cache served only when offline. New navbharat-api-v1 cache preserved
+  across SW activations (activate KEEP list updated).
+- src/lib/offlineQueue.ts (IndexedDB-backed): fire-and-forget writes that fail offline
+  are buffered + replayed on the 'online' event. Replay STRICTLY allowlisted to
+  idempotent/harmless endpoints (/api/analytics/event, /api/logs/error) — payments/
+  builds/auth NEVER queued. Injectable store+fetch for tests; never throws.
+- main.tsx: client error reporters routed through offlineQueue.postWithFallback;
+  installOfflineQueueFlush() drives reconnect replay.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2805/2805 PASS (9 new),
+production vite build OK, node --check public/sw.js OK (dist/sw.js has new logic).
+Runtime resilience (no new navigable surface) → no AppKnowledgeBase entry.
+Files: public/sw.js, src/lib/offlineQueue.ts (+.test.ts), src/main.tsx, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P3.3 Scalability/HA DONE (keep-warm, ultracode workflows) (Phase P3 → 50%)
+
+New GET /api/warm (src/server/routes/warm.ts) pre-warms the heavy PRO/SDA lazy
+singletons: 3 AI router universes + env-only health, SDA clinical KB + sda_chat
+app-context, Gemini SDK client, Firestore admin client (light reads on UserCost/
+ProviderState/Log/Metrics). BILLING-SAFE: constructs client objects ONLY, never a real
+billed model call (a warm-traffic Anthropic/Vertex/Gemini ping would spend NavBharatAI's
+OWN account — explicitly avoided). External Cloud Scheduler hits it → min-instances=0
+stays. Self-ping rejected (keeps instance alive 24/7, doesn't warm the cold request).
+
+Built with ultracode multi-agent workflows:
+- Discovery workflow (6 agents): mapped every heavy lazy-init singleton + multi-region
+  readiness → exact billing-safe warm design.
+- Adversarial review workflow (38 agents, 4 lenses → verify): confirmed billing-safety
+  end-to-end AND surfaced 3 real issues, all fixed:
+  * CRITICAL unauthenticated endpoint had no throttle → cost-amplification. FIX: warmup
+    runs at most once/30s; a flood gets the cached report (cached:true) at ~zero cost;
+    in-flight run shared (a burst = one warmup). Scheduler's 5-min cadence always re-runs.
+  * HIGH raw error messages in public response → info disclosure. FIX: generic 'failed'
+    marker in the response; full detail → server logs (console.warn → Cloud Logging).
+  * MEDIUM Firestore cost undocumented → added cost-model comment (capped by throttle).
+Always returns 200. docs/SCALABILITY.md: keep-warm setup (Cloud Scheduler gcloud cmd) +
+multi-region readiness (config-only). cloudbuild.yaml: doc note.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2813/2813 PASS (8 new),
+server boots, LIVE: /api/warm 200 13/13 ok, 2nd call cached:true (throttle), no raw error
+leak. Admin/ops endpoint → no AppKnowledgeBase entry.
+Files: routes/warm.ts (+.test.ts), server.ts, docs/SCALABILITY.md, cloudbuild.yaml, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P3.4 Real CDN / Edge Caching DONE (Phase P3 → 75%; P3.1 deferred)
+
+Made static assets CDN-ready AND fixed a real live bug found while scoping: sw.js matched
+the .js rule and was served Cache-Control: immutable, max-age=1y — pinning the service
+worker for a year (fights SW/PWA updates; a CDN would cache it too). Now sw.js +
+manifest.json are no-cache, no-store, must-revalidate.
+
+- New src/server/lib/staticCache.ts (cacheControlFor) = single source of truth: hashed
+  JS/CSS/fonts/wasm → public, max-age=31536000, immutable (edge-cacheable by ANY CDN);
+  images → 1 week; HTML/sw.js/manifest → revalidate. server.ts static handler uses it.
+- firebase.json hosting.headers mirrors the policy → Firebase Hosting's global CDN serves
+  identically (config complete; `firebase deploy --only hosting` fronts assets with a real CDN).
+- docs/CDN.md: honest provisioning guide (Firebase Hosting CDN / Cloud CDN via LB+NEG /
+  Cloudflare). App config complete; actual CDN provisioning is the documented admin infra step.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2821/2821 PASS (8 new incl.
+sw.js-not-immutable regression guard + firebase.json-mirrors-policy check), vite build OK,
+server boots, LIVE curl -I: sw.js → no-cache, hashed asset → immutable 1y, manifest → no-cache.
+
+Phase P3 at 75%: P3.2 offline-first, P3.3 keep-warm, P3.4 CDN all DONE. P3.1 (split the
+6,252-line App.tsx into <1,500) intentionally DEFERRED — large multi-PR refactor, high
+regression risk on the live app, not safe for a single autonomous cycle (safeguard #3).
+Files: lib/staticCache.ts (+.test.ts), server.ts, firebase.json, docs/CDN.md, UPGRADE_v3.0.md.
+
+## 2026-06-28 — ROOT CAUSE: v3.0 builds stopped midway + zero Claude tokens → cheap-first provider order
+
+Admin reported builds "band ho jaate hain bich me" and that NOT ONE Claude token was used.
+Forensic trace of the build provider chain (agentv3.ts buildTurnRunner + MultiProviderTurnRunner):
+
+ROOT CAUSE: the v3.0 build chain was CHEAP-FIRST by default — [Vertex → Gemini → Claude → Haiku].
+buildTurnRunner was called without claudeFirst, and the default was false (only AGENTV3_BUILD_
+CLAUDE_FIRST=1 or escalation flipped it). MultiProviderTurnRunner returns the first NON-THROWING
+result, so Gemini/Vertex handled EVERY turn (→ zero Claude tokens) and when Gemini hit a quota/
+rate/output-token limit mid-build it returned a truncated/poor turn that was ACCEPTED (not thrown),
+so the agent loop stalled/stopped midway instead of falling through to Claude. This also violated
+the v3.0 constitution (CLAUDE.md: "v3.0 always runs on NavBharatAI's own Anthropic/Claude account").
+
+FIX: v3.0 builds now lead with CLAUDE by default. New pure resolveClaudeFirst(opts, env) — Claude-
+first unless AGENTV3_BUILD_CLAUDE_FIRST=0/off (opt-out to the old cheap-first ladder); escalation's
+explicit claudeFirst:true still honoured. Chain becomes [Claude → Vertex → Gemini → Claude-Haiku]
+so builds use the reliable strong-tool-use model and COMPLETE, with Gemini/Vertex as fallback if
+Claude throttles. Billing unchanged (Opus-equivalent markup regardless of model; margin only wider
+since NavBharatAI's real cost ≤ billed). 5 unit tests for resolveClaudeFirst.
+
+This is the 3rd of three converging build fixes this cycle: #489 (readiness gate false-fail),
+#490 (preview host-bind in correct actuator), and now provider order (Claude-first).
+
+Gate: frontend tsc 0, server tsc 0, vitest 2817/2817 PASS.
+
+## 2026-06-28 — cost routing step 1: build model by app complexity (admin policy)
+
+Admin's provider policy: small app → Haiku, complex app → Sonnet, power → Opus
+(planning → Grok and chat → Gemini are step 2). Step 1 implements the build-model
+half: new pure selectBuildModel(startTier, powerOn) replaces the always-Sonnet
+`resolveModel(onlyOpus)` at the build call site. Maps the analyser's start tier:
+gemini/haiku/none → Haiku (cheap, reliable tool-use); sonnet/opus → Sonnet; any
+power level → Opus. Gemini/Vertex stay as the buildTurnRunner fallback so a Claude
+throttle never breaks a build; billing unchanged (Opus-equivalent markup). 4 unit
+tests incl. real analyser verdicts (calculator → Haiku, auth+DB SaaS → Sonnet).
+
+This cuts cost on the common case (most apps are simple → Haiku, not Sonnet) with
+zero quality compromise (complex work still gets Sonnet; power gets Opus). Step 2
+(plan → Grok via OpenAiToolRunner at api.x.ai; chat → Gemini/Vertex confirm) next.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2829/2829 PASS.
+
+## 2026-06-28 — cost routing step 2: PLAN phase runs on Grok (admin policy)
+
+Step 2 of the admin provider policy (small→Haiku, complex→Sonnet, power→Opus, chat→Gemini
+already; now PLAN→Grok). The plan/todo phase uses the update_todo tool, so it needs tool-use —
+Grok's API is OpenAI-compatible and the existing OpenAiToolRunner drives it.
+
+- New grokPlanRunner(): OpenAI client at https://api.x.ai/v1 (GROK_API_KEY/XAI_API_KEY) wrapped
+  in OpenAiToolRunner (model grok-3, env AGENTV3_GROK_PLAN_MODEL), inside a multi-provider
+  [Grok → Claude] runner so a Grok outage/limit falls back to a cheap Claude (Haiku) and the
+  plan NEVER breaks. Returns null when no Grok key (→ caller keeps the normal build client).
+- Plan runner now uses planGrok ?? client, with model = haikuModel() on the Grok path (Grok
+  forces grok-3; the cheap Haiku id is only the Claude fallback model).
+- New pure planGrokEnabled(apiKey, disableFlag) (AGENTV3_PLAN_GROK=0/off opt-out) — 3 tests.
+
+Backend router-priority change → no AppKnowledgeBase entry needed (per CLAUDE.md). Chat already
+runs on the free router (Vertex/Gemini/Grok), matching "simple chat → Gemini/Vertex".
+
+Full admin policy now live: chat→Gemini/Vertex, plan→Grok, small build→Haiku, complex→Sonnet,
+power→Opus — with Claude/Gemini fallbacks so builds never break. Cost down, quality preserved.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2832/2832 PASS, boot:check PASS.
+
+## 2026-06-28 — P4.2 Event Sourcing + Replay DONE (ultracode workflows) (Phase P4 → 50%)
+
+Made EventHistoryStore replayable. New WorkspaceProjection.ts: PURE replayWorkspaceState
+reducer folds a workspace's event log into a lifecycle / mutation-ledger / VCS-ref /
+checkpoint projection; exposed as EventHistoryStore.replayWorkspace(workspaceId) +
+replayByCorrelationId(correlationId).
+
+HONEST by construction: discovery (5-agent workflow) proved AppMakerLab event payloads
+carry NO file paths/content (mutation events hardcode workspaceId:'default' + payload
+{id}). So the projection rebuilds ONLY what events prove (lifecycle, mutation ledger by
+tx id, VCS hashes/branch, checkpoint ids, build/gen errors) and is explicit it CANNOT
+rebuild bytes: reconstructable:false + notes[], deliberately NO fake filesPresent[].
+Byte-level restore stays the Journal/Checkpoint path. Two entry points handle the
+workspaceId-vs-correlationId gap honestly.
+
+Adversarial review (30-agent workflow) caught real bugs, all fixed:
+- COUNT-DRIFT (findings 6/8/11/12, root cause): counts were incremented per-event →
+  drifted from the ledger (STARTED→FAILED→ROLLED_BACK double-counted; duplicates
+  double-counted). FIX: counts are now DERIVED from the final ledger state after the fold
+  — each distinct batch counts once as its final state; replays never double-count.
+- GENERATION_FAILED + REPAIR_COMPLETED were unhandled → lifecycle stuck (GENERATING/
+  REPAIRING). FIX: added cases (+ GENERATION_FAILED/REPAIRED lifecycle states,
+  lastGenerationError field).
+- Dual VCS event types (VCS_COMMITTED/commitHash vs VCS_COMMIT_COMPLETED/commitId; LKG
+  pair) + REPAIR_STARTED-no-payload are PRE-EXISTING publisher smells — documented in
+  code, OUT of P4.2 scope (refactoring publishers risks VCS/build flow).
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2838/2838 PASS (17 new),
+reducer pure (deep-equal output, input untouched). Backend module (no live endpoint —
+the per-build store is ephemeral + AppMakerLab is dormant; an endpoint would need risky
+shared-store plumbing, deferred) → no AppKnowledgeBase entry. Files: eventbus/
+WorkspaceProjection.ts (+.test.ts), EventHistoryStore.ts, IEventHistoryStore.ts, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P4.3 Full AST consolidation DONE (Phase P4: P4.2 + P4.3 done)
+
+The older Memory/MemoryIndexer.ts used a single regex capturing only the FIRST export
+per file. Consolidated it onto the real ts-morph AST analyzer (AgentV3/ASTAnalyzer.ts):
+- New MemoryIndexer.indexWithAST(): runs the regex baseline FIRST (zero-regression — its
+  result is always kept), then ENRICHES via analyzeWithAST — adds EVERY exported
+  symbol/component name (not just the first) + detected route paths. Graceful: AST null
+  on unsupported file / parse failure / ts-morph missing → keeps exactly the regex
+  baseline. Never throws. Strict-superset design → can only enrich, never regress.
+- Wired live end-to-end (not half-done): ProjectMemoryManager.update now async →
+  indexWithAST; WorkspaceManager.createFile/modifyFile await it (both already async).
+- Sync MemoryIndexer.index kept unchanged as the back-compat regex fallback.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2855/2855 PASS (6 new AST
+tests: all-exports / React components / routes / regex-baseline-preserved / never-throws
+/ dedup; 6 existing regex tests still green), server bundles. Backend code-model
+internal (no user surface) → no AppKnowledgeBase entry.
+Files: Memory/MemoryIndexer.ts, Memory/ProjectMemoryManager.ts, AI/WorkspaceManager.ts,
+tests/memoryIndexer.test.ts, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P4.4 Replication / Consistency DONE (Phase P4 → 75%)
+
+Was: POST /api/sync/:userId BLINDLY overwrote the whole stored workspace doc → a device
+saving a stale view silently dropped another device's newer sessions (classic lost-update).
+
+Fix: enforced last-write-wins PER SESSION, SERVER-SIDE. The POST now reads the stored
+workspace and MERGES the incoming payload into it (new src/server/project/SyncMerge.ts)
+before writing: sessions merged by id (newer lastUpdated wins; ties → incoming), sessions
+unique to either side always kept, lastApp preserved when incoming is empty. The merged
+UNION is encoded + written. No cross-device session can be lost again.
+
+Backward compatible — NO client/App.tsx change needed: existing clients keep POSTing
+{sessions, lastApp} and get the merge for free (enforcement is authoritative on the
+server). Corrupt prior state falls back to a blind write so a save is never lost.
+Documented the model + boundaries (LWW-per-session, not field-level CRDT) in
+docs/SYNC_CONSISTENCY.md.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2864/2864 PASS (9 new incl.
+the classic lost-update case, stale-no-clobber both directions, lastApp preservation),
+server bundles. Backend sync infra (no new user surface) → no AppKnowledgeBase entry.
+
+Phase P4 at 75%: P4.2 event replay, P4.3 AST consolidation, P4.4 replication all DONE.
+Only P4.1 (CQRS — large refactor of the legacy AppMakerLab path) remains.
+Files: project/SyncMerge.ts (+.test.ts), routes/sync.ts, docs/SYNC_CONSISTENCY.md, UPGRADE_v3.0.md.
+
+## 2026-06-28 — Phase P5 Hygiene: P5.1 assessed/kept + P5.3 done (P5 → 67%)
+
+P5.1 (hardcoded Firebase key fallback) — ASSESSED, intentionally KEPT (do NOT remove):
+- Load-bearing in prod: verified the Docker/Cloud Build pipeline injects NO VITE_FIREBASE_*
+  vars, so at build time import.meta.env.VITE_FIREBASE_* is undefined and the app relies
+  entirely on these defaults — removing them would break Firebase init (auth/Firestore/sync)
+  for every user.
+- Not a secret: a Firebase WEB apiKey is public by design (access gated by Firebase Security
+  Rules, not key secrecy); real secrets are server-side service-account keys, not in client.
+- Documented the rationale inline in src/config/firebase.ts. Env vars still take precedence
+  when present. Genuine removal requires wiring the build to inject vars FIRST (infra,
+  deferred per safeguard #3). This is the correct engineering decision, not avoidance.
+
+P5.3 (delete throwaway scripts/junk) — DONE:
+- Root junk .txt files already gone (confirmed none remain).
+- Removed 3 dead ad-hoc manual test/report scripts (console.log harnesses superseded by the
+  Vitest suite, referenced nowhere, not in any npm/CI script):
+  src/server/workspace/hardening_test.ts, validation_tests.ts, verification_report.ts.
+
+P5.2 (monorepo tooling pnpm/Turborepo) — DEFERRED: large, high-blast-radius build-system
+migration; not safe for a single autonomous cycle.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2864/2864 PASS after removal.
+Files: src/config/firebase.ts (comment), src/server/workspace/{hardening_test,validation_tests,verification_report}.ts (removed), UPGRADE_v3.0.md.
+
+## 2026-06-28 — P-TQA.5 Bundle Size Budget Enforcement DONE
+
+First item from the P-* feature phases (P1-P5 core done modulo deferred big refactors).
+Picked the highest-value, code-ownable, zero-runtime-risk item.
+
+scripts/bundleBudget.mjs: after `vite build`, reads dist/assets, gzips every JS/CSS chunk,
+fails (exit 1) on any budget breach. Pure checkBudget() + measureDist() (custom fs +
+zlib.gzipSync, no new dep). npm run test:bundle. New CI step after Build in ci.yml →
+bundle bloat now BLOCKS merge. Unit-tested: tests/bundleBudget.test.ts (6 — pass, each
+violation type, multi-violation, budgets-exceed-current guard).
+
+Honest budgets = current reality + ~15% headroom (a "no further bloat" regression guard,
+NOT the spec's aspirational 500KB which the current ~567KB main chunk already exceeds):
+largest chunk ≤650KB gz (now ~567), total JS ≤1050KB gz (now ~918), total CSS ≤50KB gz
+(now ~33). The large main chunk is a known code-splitting opportunity (separate task);
+this stops it growing unchecked. Documented inline.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2870/2870 PASS (6 new),
+`npm run test:bundle` on real dist/ → within budget (567/650, 918/1050, 33/50), and an
+artificial-bloat run correctly exits non-zero. CI/tooling (no user surface) → no
+AppKnowledgeBase entry.
+Files: scripts/bundleBudget.mjs, tests/bundleBudget.test.ts, package.json, .github/workflows/ci.yml, UPGRADE_v3.0.md.
+
+## 2026-06-28 — ROOT CAUSE: v3.0 "infinite loading then stop" on even a simple app
+
+Forensic (parallel agent): two converging server-side causes.
+
+1) CRITICAL — Sandbox.create()/connect() in E2BActuator.getSandbox() were awaited with NO
+   request-level timeout and no abort. The e2b SDK's timeoutMs is the sandbox LIFETIME, not a
+   connect-request timeout. So a slow/throttled/misconfigured E2B made ensureWorkspace HANG
+   before any build event was emitted → the UI showed an endless spinner ("infinite loading")
+   until the SDK eventually errored far later → "stop". Fix: SANDBOX_CREATE_TIMEOUT_MS (default
+   45s, env AGENTV3_SANDBOX_CREATE_TIMEOUT_MS) + a withTimeout() wrapper around every
+   create/connect, so a slow sandbox THROWS and the route's ensureWorkspace try/catch surfaces
+   an honest "sandbox unavailable" instead of hanging. 3 unit tests for withTimeout.
+
+2) HIGH (regression from #511 Claude-first) — ClaudeClient retries a single overloaded turn up
+   to 5× with exponential backoff (≈30-60s). Since #511 made Claude LEAD every build turn, an
+   overloaded Anthropic account stalled each turn for tens of seconds = "stuck midway". Fix:
+   bound the build-path Claude runners to maxRetries 2 (env AGENTV3_BUILD_CLAUDE_RETRIES), so a
+   Claude-led turn falls through to Gemini/Vertex in a few seconds instead. Applied to the
+   build chain Claude + Haiku backstop + Claude-only path + the Grok-plan Claude fallback.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2867/2867 PASS, boot:check PASS.
+
+## 2026-06-28 — ROOT CAUSE: "model replied without building" (narrates a plan, writes 0 files)
+
+Admin screenshots: prompt "ek simple search engine page banao", the model narrates a full plan in
+Hindi ("…अब मैं frontend विशेषज्ञ को index.html बनाने का काम सौंप रहा हूँ"), then a yellow banner:
+"The build did not produce any files — the model replied without building", PLAN 0/4. It failed on
+BOTH the first attempt AND the Opus "stronger model" retry — so NOT a model-weakness issue.
+
+ROOT CAUSE (AgentRunner.ts:294): the loop treats ANY no-tool turn as "the model finished its turn"
+and exits. The architect's first turn is usually a plan/delegation narration ("here's my plan, now
+I'll assign the frontend expert…") with NO tool call — and the runner terminated right there →
+builtNothing → "model replied without building". The model intended to ACT on the next turn but
+never got one. Even Opus does this plan-out-loud-first behaviour, which is why the retry also failed.
+
+FIX: when expectsArtifacts && totalToolUses === 0 && a no-tool turn arrives, NUDGE the model to act
+(push a user message: "do NOT just describe/delegate in prose — ACT NOW: use write_file/… to create
+the files this turn; output tool calls, not a description") and give it another turn, up to
+MAX_BUILD_NUDGES (2). Only after the nudges are exhausted with still zero tools do we report
+builtNothing. New test: turn 1 narrates → nudge → turn 2 writes the file → ok:true. The existing
+empty-build test still ends ok:false after nudges (fallback keeps replying text).
+
+Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.
+
+## 2026-06-28 — ROOT CAUSE: file-creation "hallucination" → builds were silently on Gemini/Vertex
+
+Admin's Anthropic dashboard: $0.00 spend, "No activity in the last 7 days" — PROOF that Claude was
+never being called. Symptom: v3.0 reports creating files but writes ZERO real files (only file
+NAMES), and when asked says "I'm an AI, I have no file system"; on a tab switch the "files" vanish
+(they were never real). Cause: although #511 made builds Claude-FIRST, MultiProviderTurnRunner
+returns the first NON-THROWING provider — so when Claude throws in prod (bad key / wrong model id /
+base-url), the build silently fell through to Vertex/Gemini, which HALLUCINATE in the tool-use loop
+(they describe creating files but never call write_file). Real tool-use (real files) only happens on
+Claude.
+
+FIX: builds now run on CLAUDE ONLY (Haiku → Sonnet → Opus + Claude-Haiku backstop). Gemini/Vertex
+are removed from the BUILD chain (they remain the cheap CHAT providers only). If Claude genuinely
+fails, the build errors HONESTLY with the real Claude error instead of faking files on Gemini.
+AGENTV3_BUILD_ALLOW_GEMINI=1 re-adds Vertex/Gemini as a last-resort build fallback.
+
+To diagnose the $0-Claude prod issue: GET /api/agentv3/diag?test=1&admin=<ADMIN_PASSWORD> makes one
+live Claude call and returns live:{ok,status,error} — e.g. 401 (bad ANTHROPIC_API_KEY) or 404 (wrong
+AGENTV3_{HAIKU,SONNET,OPUS}_MODEL id). That tells the admin exactly which Cloud Run env to fix.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.
+
+## 2026-06-28 — "reload pe data gayab": chat history was in-memory by default
+
+Admin: app data disappears on reload. Audit of the persistence system:
+- FILES: WorkspaceFileStore persists file CONTENT to Firestore (collection workspace_files_v3),
+  NOT gated on any flag — saved after a build, re-seeded into a fresh sandbox at the next build.
+  Durable (once REAL files exist; the earlier Gemini hallucination wrote none — #523 fixes that).
+- CHAT/conversation: getConversationStore() used FirestoreConversationStore ONLY when
+  AGENTV3_PERSIST_FIRESTORE === 'true'; otherwise InMemoryConversationStore. So unless that env
+  var was set in Cloud Run, the whole transcript lived in process memory and was LOST on any
+  redeploy, cold start, or — because Cloud Run runs multiple instances — a reload that landed on
+  a different instance. That is the "reload pe data gayab".
+
+FIX: default the conversation store to Firestore (durable across restarts + horizontal scaling).
+Opt out with AGENTV3_PERSIST_FIRESTORE=false; VITEST always uses in-memory. FirestoreConversation
+Store construction is try/caught → falls back to in-memory if Firestore is unreachable, so it
+never breaks boot. Combined with #518 (session id persisted → same workspace on reload) and the
+already-durable WorkspaceFileStore, a reload now restores the chat AND re-seeds the files.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.
+
+## 2026-06-28 — "reload pe data gayab" (part 2): Firestore DB was a free-tier-capped AI-Studio database
+
+Admin upgraded the project (gen-lang-client-0866594388) to Blaze, but persistence STILL failed with
+"Quota exceeded for 'Free daily write units per project (free tier database)' … This database cannot
+exceed free quota limits even when a billing instrument is enabled." Root cause: the configured
+Firestore database id is `ai-studio-cc9cd998-…` — a database Google AI Studio created in a FREE tier
+that stays hard-capped to the free daily write quota EVEN on Blaze. So chat/files/memory writes were
+rejected once the daily free writes ran out → nothing persisted → data gone on reload.
+
+FIX (code): new src/server/lib/firestoreDb.ts → firestoreDatabaseId() returns
+FIRESTORE_DATABASE_ID (env) || firebase-applet-config.json value || '(default)'. Wired it into every
+server-side Firestore store (WorkspaceFileStore, FirestoreConversationStore, FirestoreWorkspaceMemory
+Store, EngineerAI WorkspaceMemoryStore, AppMakerLab FirestoreJobStore, eventStore, FirestoreBackup),
+so ALL stores read the same database id and the admin can point them at a FULL-QUOTA database
+(the project's `(default)` Native DB, or a freshly created one) via the FIRESTORE_DATABASE_ID env var
+— no code change needed.
+
+ADMIN ACTION: create/confirm a full-quota Firestore database in gen-lang-client-0866594388 (Native
+mode; the `(default)` DB on Blaze has full quota), then set Cloud Run env
+FIRESTORE_DATABASE_ID=<that-database-id>. Then chat + files + memory persist across reloads.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.

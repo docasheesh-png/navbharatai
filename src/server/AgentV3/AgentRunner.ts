@@ -186,6 +186,12 @@ export class AgentRunner {
     const buildStartMs = Date.now();
     // Total tool calls across the whole run — a build that never called a tool built nothing.
     let totalToolUses = 0;
+    // How many times we've nudged a build that only NARRATED (described its plan / said it would
+    // "assign the frontend expert") without calling a single tool. The model often plans out loud
+    // on its first turn; terminating there is the "model replied without building" bug. We instead
+    // push it to ACT, up to this cap (then give up honestly to avoid an endless narration loop).
+    let noBuildNudges = 0;
+    const MAX_BUILD_NUDGES = 2;
 
     const messages: unknown[] = [{ role: 'user', content: userPrompt }];
     const usage: TurnUsage = {
@@ -293,6 +299,23 @@ export class AgentRunner {
 
         // No tools requested → the model has finished its turn.
         if (turn.toolUses.length === 0) {
+          // NUDGE-TO-BUILD: a build/edit that only NARRATED a plan ("here's my plan… now I'll
+          // assign the frontend expert to create index.html") without calling a single tool has
+          // not actually built anything — but the model usually intends to act on the NEXT turn.
+          // Terminating here is the "model replied without building" failure (even Opus does it).
+          // So instead of giving up, push the model to ACT and give it another turn (capped).
+          if (expectsArtifacts && totalToolUses === 0 && noBuildNudges < MAX_BUILD_NUDGES) {
+            noBuildNudges++;
+            messages.push({
+              role: 'user',
+              content:
+                'You described a plan but have not created any files yet. Do NOT just describe or ' +
+                'delegate in prose — ACT NOW: use the tools (write_file / write_files_batch, and run ' +
+                'commands as needed) to actually create the project files this turn. Start by writing ' +
+                'the entry file (e.g. index.html or src/main). Output tool calls, not a description.',
+            });
+            continue; // give the model another turn to actually build
+          }
           // A build/edit that NEVER called a single tool produced nothing — that is a FAILED
           // build, not a success. Reporting ok:true here is the fake-success bug (the model
           // replies "I'm preparing a plan…" instead of building, and gets billed as done).

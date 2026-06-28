@@ -4,6 +4,7 @@ import App from './App.tsx';
 import './index.css';
 import { BuildProvider } from './components/ide/BuildContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { offlineQueue, installOfflineQueueFlush } from './lib/offlineQueue';
 
 // Top-level crash fallback — guarantees the app NEVER shows a full white page.
 // Any uncaught render error anywhere in the tree lands here with a recovery option.
@@ -74,34 +75,30 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
   });
 }
 
-// 12.1 — Global error tracking (reports unhandled errors to backend)
+// 12.1 — Global error tracking (reports unhandled errors to backend).
+// P3.2 — routed through the offline queue: if a report fails because the device is
+// offline, it is buffered and replayed on reconnect (these endpoints are allowlisted
+// as safe to replay). installOfflineQueueFlush() drives the reconnect replay.
 if (import.meta.env.PROD) {
+  installOfflineQueueFlush();
   window.addEventListener('error', (e) => {
-    fetch('/api/logs/error', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: e.message,
-        source: e.filename,
-        line: e.lineno,
-        col: e.colno,
-        stack: e.error?.stack?.slice(0, 2000),
-        url: window.location.href,
-        ts: Date.now(),
-      }),
-    }).catch(() => {});
+    void offlineQueue.postWithFallback('/api/logs/error', JSON.stringify({
+      message: e.message,
+      source: e.filename,
+      line: e.lineno,
+      col: e.colno,
+      stack: e.error?.stack?.slice(0, 2000),
+      url: window.location.href,
+      ts: Date.now(),
+    }));
   });
   window.addEventListener('unhandledrejection', (e) => {
-    fetch('/api/logs/error', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: String(e.reason),
-        type: 'unhandledrejection',
-        url: window.location.href,
-        ts: Date.now(),
-      }),
-    }).catch(() => {});
+    void offlineQueue.postWithFallback('/api/logs/error', JSON.stringify({
+      message: String(e.reason),
+      type: 'unhandledrejection',
+      url: window.location.href,
+      ts: Date.now(),
+    }));
   });
 }
 

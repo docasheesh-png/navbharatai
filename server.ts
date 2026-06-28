@@ -46,6 +46,13 @@ import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
 import { registerSyncRoutes } from './src/server/routes/sync';
 import { registerProfileRoutes } from './src/server/routes/profile';
+import { apiVersionMiddleware } from './src/server/routes/apiVersion';
+import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
+import { registerObservabilityRoutes } from './src/server/routes/observability';
+import { errorTracker, installGlobalErrorHandlers } from './src/server/observability/ErrorTracker';
+import { registerHealthRoutes, markServerReady } from './src/server/routes/health';
+import { registerWarmRoute } from './src/server/routes/warm';
+import { cacheControlFor } from './src/server/lib/staticCache';
 
 
 // Traceability Infrastructure
@@ -53,6 +60,8 @@ export interface TraceContext {
   requestId: string;
   sessionId: string;
   conversationId: string;
+  /** P2.1 — the distributed-trace id for this request (W3C 32-hex). */
+  traceId?: string;
 }
 
 declare global {
@@ -67,11 +76,28 @@ const traceMiddleware = (req: any, res: any, next: any) => {
   const requestId = crypto.randomUUID();
   const sessionId = (req.headers['x-session-id'] as string) || crypto.randomUUID();
   const conversationId = (req.headers['x-conversation-id'] as string) || crypto.randomUUID();
-  
+
   req.traceContext = { requestId, sessionId, conversationId };
-  
-  console.log(`[TRACE][API ENTRY] RID:${requestId} SID:${sessionId} CID:${conversationId} Path:${req.path}`);
-  next();
+
+  // P2.1 — start a ROOT request span. Join the platform trace from Cloud Run's
+  // `X-Cloud-Trace-Context` header when present, so our spans correlate into Cloud Trace.
+  const cloudCtx = parseCloudTraceContext(req.headers['x-cloud-trace-context'] as string | undefined);
+  const span = tracer.startSpan(`HTTP ${req.method} ${req.path}`, {
+    traceId: cloudCtx?.traceId,
+    parentSpanId: cloudCtx?.parentSpanId,
+    attributes: { 'http.method': req.method, 'http.path': req.path, requestId },
+  });
+  req.traceContext.traceId = span.data.traceId;
+  res.on('finish', () => {
+    span.setAttribute('http.status_code', res.statusCode);
+    span.setStatus(res.statusCode >= 500 ? 'error' : 'ok');
+    span.end();
+  });
+
+  console.log(`[TRACE][API ENTRY] RID:${requestId} SID:${sessionId} CID:${conversationId} TID:${span.data.traceId} Path:${req.path}`);
+  // Keep the span's context active for everything awaited downstream (so the AI provider
+  // call attaches a child span to THIS request's trace).
+  tracer.runInSpan(span, () => next());
 };
 
 import { Cashfree } from 'cashfree-pg';
@@ -203,6 +229,10 @@ setInterval(() => {
 }, 60 * 60 * 1000);
 
 (async () => {
+  // P2.2 — install process-level error handlers ASAP so nothing goes unreported
+  // (best-effort capture to Cloud Error Reporting; report-and-continue, never crash).
+  installGlobalErrorHandlers();
+
   const app = express();
   app.use(helmet({
     contentSecurityPolicy: {
@@ -299,6 +329,11 @@ setInterval(() => {
     next();
   });
 
+  // P1.1 — API Versioning. Mounted before route matching so `/api/v1/...` is
+  // internally rewritten to the existing `/api/...` handlers (canonical), while
+  // bare `/api/...` keeps working as a deprecated shim (Deprecation + Link headers).
+  app.use(apiVersionMiddleware);
+
   // Cashfree Configuration
   if (process.env.CASHFREE_APP_ID) (Cashfree as any).XClientId = process.env.CASHFREE_APP_ID;
   if (process.env.CASHFREE_SECRET_KEY) (Cashfree as any).XClientSecret = process.env.CASHFREE_SECRET_KEY;
@@ -350,15 +385,12 @@ setInterval(() => {
         maxAge: '1y',          // JS/CSS hashed by Vite → safe to cache 1 year
         immutable: true,
         setHeaders: (res, filePath) => {
-          // HTML must always revalidate (never cache)
+          // P3.4 — CDN/edge cache policy (single source of truth in staticCache.ts).
+          const cc = cacheControlFor(filePath);
+          if (cc) res.setHeader('Cache-Control', cc);
           if (filePath.endsWith('.html')) {
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             res.setHeader('Pragma', 'no-cache');
             res.setHeader('Expires', '0');
-          } else if (/\.(js|css|woff2|woff|ttf|otf)$/.test(filePath)) {
-            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-          } else if (/\.(png|jpg|jpeg|svg|ico|webp)$/.test(filePath)) {
-            res.setHeader('Cache-Control', 'public, max-age=604800'); // 1 week for images
           }
         }
       }));
@@ -392,6 +424,14 @@ setInterval(() => {
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', uptime: process.uptime(), port: PORT });
   });
+
+  // P2.4 — DR: liveness (/api/live), readiness (/api/ready), and the admin Firestore
+  // backup trigger (/api/admin/backup/firestore).
+  registerHealthRoutes(app);
+
+  // P3.3 — keep-warm: GET /api/warm pre-warms the heavy PRO/SDA singletons. Hit by an
+  // external Cloud Scheduler so min-instances=0 stays (see docs/SCALABILITY.md).
+  registerWarmRoute(app);
 
   // RETIRED — AppMaker telemetry/job routes (old engine). Unregistered in the v3.0 cutover.
   // registerAppmakerRoutes(app);
@@ -457,6 +497,8 @@ setInterval(() => {
   registerSyncRoutes(app);
   registerPaymentRoutes(app, paymentLimiter);
   registerAdminRoutes(app, adminLimiter);
+  // P2.1 — observability: recent distributed traces + live metrics (admin-gated).
+  registerObservabilityRoutes(app);
   registerSecretsRoutes(app);
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
@@ -476,11 +518,27 @@ setInterval(() => {
   // Telemetry / analysis routes — extracted to src/server/routes/telemetry.ts (Phase 1).
   registerTelemetryRoutes(app);
 
+  // P2.2 — Express error-handling middleware (must be LAST, after all routes). Captures
+  // any error thrown/forwarded by a route into Cloud Error Reporting + the admin view,
+  // correlated with the request's trace, and returns a clean 500 (no internals leaked).
+  app.use((err: any, req: any, res: any, _next: any) => {
+    errorTracker.capture(err, {
+      source: 'middleware',
+      httpMethod: req.method,
+      httpUrl: req.originalUrl || req.url,
+      httpStatus: 500,
+    });
+    if (res.headersSent) return;
+    res.status(500).json({ error: 'Internal server error' });
+  });
+
   // Final diagnostic and server start
 
   try {
     const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
+      // P2.4 — the server is initialized and listening → readiness probe goes green.
+      markServerReady();
     });
 
     // WebSocket / HMR reverse proxy for live previews. The HTTP side is handled

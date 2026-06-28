@@ -1,7 +1,7 @@
 import * as admin from 'firebase-admin';
 import { BuildJob, JobStatus } from '../BuildJobManager';
 import { JobStore } from './JobStore';
-import firebaseConfig from '../../../../firebase-applet-config.json';
+import { firestoreDatabaseId } from '../../../lib/firestoreDb';
 
 export class FirestoreJobStore implements JobStore {
     private db: admin.firestore.Firestore;
@@ -12,7 +12,7 @@ export class FirestoreJobStore implements JobStore {
             admin.initializeApp({});
         }
         this.db = admin.firestore();
-        this.db.settings({ databaseId: firebaseConfig.firestoreDatabaseId });
+        this.db.settings({ databaseId: firestoreDatabaseId() });
     }
 
     async saveJob(job: BuildJob): Promise<void> {
@@ -38,5 +38,17 @@ export class FirestoreJobStore implements JobStore {
         } else {
             await docRef.update({ status, progress, updatedAt: new Date() });
         }
+    }
+
+    // P1.4 — look up the most recent job carrying this idempotency key via an indexed
+    // Firestore query, so a duplicate/retried request reuses the existing build.
+    async findJobByIdempotencyKey(key: string): Promise<BuildJob | null> {
+        if (!key) return null;
+        const snap = await this.db.collection(this.collection)
+            .where('idempotencyKey', '==', key)
+            .orderBy('createdAt', 'desc')
+            .limit(1)
+            .get();
+        return snap.empty ? null : (snap.docs[0].data() as BuildJob);
     }
 }

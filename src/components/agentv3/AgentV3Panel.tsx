@@ -84,14 +84,30 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
   // checkpoints across an iterative session. Snapshotted in send() before start().
   const [checkpointHistory, setCheckpointHistory] = useState<GitCheckpoint[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  // A stable session id keeps the SAME sandbox + memory across messages, so the
-  // build is iterative (each message continues the same project). "New session"
+  // A stable session id keeps the SAME sandbox + memory + workspace across messages,
+  // so the build is iterative (each message continues the same project). "New session"
   // starts a fresh project.
+  //
+  // CRITICAL — the session id is PERSISTED in localStorage (per account), so a page
+  // RELOAD or a tab switch reuses the SAME id → the same workspaceId
+  // (agentv3-{uid}-{sessionId}) → the same memory and files. Without this, a reload
+  // minted a fresh id, pointing the next message at an EMPTY new workspace — the
+  // user's app/memory looked "lost". Reload now genuinely continues the project.
   const newSessionId = () =>
     typeof crypto !== 'undefined' && crypto.randomUUID
       ? crypto.randomUUID()
       : `s-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  const sessionIdRef = useRef<string>(newSessionId());
+  const sessionStorageKey = `agentv3_session_${userId || 'anon'}`;
+  const persistSessionId = (id: string) => {
+    try { localStorage.setItem(sessionStorageKey, id); } catch { /* storage may be unavailable */ }
+  };
+  const sessionIdRef = useRef<string>('');
+  if (!sessionIdRef.current) {
+    let restored = '';
+    try { restored = localStorage.getItem(sessionStorageKey) || ''; } catch { /* ignore */ }
+    sessionIdRef.current = restored || newSessionId();
+    if (!restored) persistSessionId(sessionIdRef.current);
+  }
 
   // The chat thread merges the user's own messages with the engine's live
   // narration (which streams in word-by-word and finalizes in place), ordered by
@@ -130,11 +146,37 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
   }, [convo.length, state.narration, running]);
 
   // Detect a build that is running server-side but is NOT attached here (its original
-  // connection was lost) — so the header can offer "Resume". Re-checks when the account
-  // loads and whenever this UI goes idle.
+  // connection was lost) — so we can re-attach. Re-checks when the account loads and
+  // whenever this UI goes idle.
   useEffect(() => {
     if (!running) checkRunning({ userId, email });
   }, [userId, email, running, checkRunning]);
+
+  // AUTO-RESUME on reload: when the server reports a build is still running but this
+  // (freshly reloaded) UI isn't attached, re-attach automatically — the user should
+  // never have to click "Resume" after a refresh. The button stays as a manual fallback.
+  // Guarded so it fires once per detected running build.
+  const autoResumedRef = useRef(false);
+  useEffect(() => {
+    if (serverBuildRunning && !running && !autoResumedRef.current) {
+      autoResumedRef.current = true;
+      void resumeBuild({ userId, email });
+    }
+    if (!serverBuildRunning) autoResumedRef.current = false; // re-arm for the next time
+  }, [serverBuildRunning, running, userId, email, resumeBuild]);
+
+  // TAB SWITCH resilience: a backgrounded tab (esp. mobile Safari) suspends timers and
+  // can silently drop the event stream. When the tab becomes visible again, immediately
+  // reconcile with the server — re-attach a still-running build (via the auto-resume
+  // effect above) so the build never looks "stopped" after a tab switch.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!running) checkRunning({ userId, email });
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [running, userId, email, checkRunning]);
 
   // D7 — on first open with a signed-in account, re-display the most recent persisted build's
   // chat history so a refresh/reconnect doesn't lose it (option (a): chat + git-restore). Runs
@@ -161,6 +203,7 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
   useEffect(() => {
     if (!resume) return;
     sessionIdRef.current = resume.sessionId;
+    persistSessionId(resume.sessionId); // keep the reopened project sticky across reloads too
     reset();
     setUserMsgs(resume.messages.filter((m) => m.role === 'user'));
     setAgentHistory(resume.messages.filter((m) => m.role !== 'user'));
@@ -288,6 +331,9 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
   const startNewSession = () => {
     if (running) return;
     sessionIdRef.current = newSessionId();
+    persistSessionId(sessionIdRef.current); // the new project is now the sticky one across reloads
+    setWorkspaceFiles(null);
+    setSelectedFile(null);
     setUserMsgs([]);
     setAgentHistory([]);
     setCheckpointHistory([]);
@@ -492,6 +538,23 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.workspaceId]);
+
+  // Load the file contents when the Files tab is opened (and not already loaded), so each file
+  // row can show its line count — without the user having to click into a file first.
+  useEffect(() => {
+    if (showWorkspace && tab === 'files' && workspaceFiles === null && state.files.length > 0 && state.workspaceId) {
+      void loadWorkspaceFiles();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showWorkspace, tab, workspaceFiles, state.files.length, state.workspaceId]);
+
+  // Refresh the cached contents when a build finishes so line counts reflect the latest files.
+  useEffect(() => {
+    if (state.done && tab === 'files' && showWorkspace && state.workspaceId && state.files.length > 0) {
+      void loadWorkspaceFiles();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.done]);
 
   // Plan (todo list) collapse toggle (Task 3) — keeps the chat area readable.
   const [planCollapsed, setPlanCollapsed] = useState(false);
@@ -898,6 +961,10 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
                   {state.files.filter((f) => f.kind !== 'delete').map((f) => {
                     const ext = f.path.split('.').pop() ?? '';
                     const color = V3_EXT_COLOR[ext] ?? 'text-white/50';
+                    // Line count of the file (from the fetched contents) — shown next to the dot
+                    // so the user sees how much was actually written inside each file.
+                    const fileContent = workspaceFiles?.[f.path];
+                    const lineCount = typeof fileContent === 'string' ? fileContent.split('\n').length : null;
                     return (
                       <div key={f.path} className="group flex items-center gap-1 rounded-xl hover:bg-white/5 transition-colors">
                         <button
@@ -907,6 +974,11 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
                         >
                           <FileCode className={`w-4 h-4 flex-shrink-0 ${color}`} />
                           <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{f.path}</span>
+                          {lineCount !== null && (
+                            <span className="text-[10px] tabular-nums text-zinc-500 flex-shrink-0" title={`${lineCount} line${lineCount === 1 ? '' : 's'}`}>
+                              {lineCount} {lineCount === 1 ? 'line' : 'lines'}
+                            </span>
+                          )}
                           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${fileDot(f.kind).split(' ').slice(2).join(' ')}`} />
                         </button>
                         <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover:opacity-100 transition-opacity">

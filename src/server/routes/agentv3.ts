@@ -20,6 +20,8 @@ import {
   toPowerLevel,
   powerSpec,
   haikuModel,
+  sonnetModel,
+  opusModel,
   architectSystemPrompt,
   planSystemPrompt,
   editModePrefix,
@@ -67,6 +69,8 @@ import { makeResilientTurnRunner } from './agentv3Resilient';
 import { GoogleGenAI } from '@google/genai';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
 import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
+import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
+import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
@@ -148,7 +152,14 @@ let sharedConversationStore: ConversationStore | null = null;
  */
 function getConversationStore(): ConversationStore {
   if (sharedConversationStore) return sharedConversationStore;
-  if (process.env.AGENTV3_PERSIST_FIRESTORE === 'true') {
+  // Durable chat history by DEFAULT — it survives a process restart, a redeploy, and
+  // horizontal scaling across Cloud Run instances. Previously this was OFF unless
+  // AGENTV3_PERSIST_FIRESTORE='true' was set, so the store fell back to IN-MEMORY: a
+  // reload that landed on a different instance — or any redeploy — lost the whole
+  // conversation ("reload pe data gayab"). Now Firestore is the default; opt out with
+  // AGENTV3_PERSIST_FIRESTORE=false. Unit tests (VITEST) always use the in-memory store.
+  const useFirestore = process.env.AGENTV3_PERSIST_FIRESTORE !== 'false' && !process.env.VITEST;
+  if (useFirestore) {
     try {
       sharedConversationStore = new FirestoreConversationStore();
     } catch {
@@ -325,14 +336,29 @@ function isBuildRunning(buildKey: string): boolean {
 }
 
 /**
- * The v3.0 BUILD turn-runner. Multi-provider cost-routing: the cheap function-calling
- * builders (Vertex → Gemini, REAL tool-use) take each turn first, with Claude as the
- * guaranteed backstop — so builds keep WORKING (and NavBharatAI's Claude cost stays
- * minimal) even when Claude is throttled or out of credits. Set
- * AGENTV3_BUILD_CLAUDE_FIRST=1 to prefer Claude (with Vertex/Gemini as the fallback);
- * if no Gemini/Vertex provider is configured, falls back to the Claude-only resilient
- * runner. Build models are env-overridable (AGENTV3_{VERTEX,GEMINI}_BUILD_MODEL).
+ * The v3.0 BUILD turn-runner. Builds run on CLAUDE ONLY (Haiku → Sonnet → Opus) because only
+ * Claude reliably does REAL tool-use (actually calls write_file). Gemini/Vertex HALLUCINATE in
+ * the tool loop — they describe creating files but never call the tools, so the build finishes
+ * with ZERO real files (and the model later says "I'm an AI, I have no file system"). That is
+ * exactly the "file banane ka hallucination" the admin observed, and why the Anthropic dashboard
+ * showed $0 spend: every build was silently running on Gemini/Vertex, never Claude.
+ *
+ * So the build chain is Claude(selected model) → Claude-Haiku backstop. Gemini/Vertex are kept
+ * for cheap CHAT only, NOT builds. If Claude genuinely fails, the build errors HONESTLY with the
+ * real Claude error (bad key / wrong model id / overload) instead of faking files on Gemini.
+ * AGENTV3_BUILD_ALLOW_GEMINI=1 re-adds Vertex/Gemini as a last-resort build fallback.
+ * Per the v3.0 constitution NavBharatAI pays the Claude cost; the user is billed the
+ * Opus-equivalent markup. Models are env-overridable (AGENTV3_{HAIKU,SONNET,OPUS}_MODEL).
  */
+/**
+ * Decide whether the v3.0 build chain leads with Claude. Pure + exported for unit testing.
+ * Explicit opts (escalation passes `true`) win; otherwise Claude-first by default, with
+ * AGENTV3_BUILD_CLAUDE_FIRST=0 / "off" as the opt-out to the old cheap-first ladder.
+ */
+export function resolveClaudeFirst(optsClaudeFirst: boolean | undefined, env: string | undefined): boolean {
+  if (typeof optsClaudeFirst === 'boolean') return optsClaudeFirst;
+  return env !== '0' && env !== 'off';
+}
 /**
  * Cost-ladder (P2): map the analyser's start tier to the cheapest CAPABLE Gemini
  * build model. Trivial/simple work (greeting, calculator, todo) starts on Gemini
@@ -343,6 +369,23 @@ function isBuildRunning(buildKey: string): boolean {
  */
 export function tierToGeminiBuildModel(tier: StartTier): string {
   return tier === 'gemini' ? 'gemini-2.5-flash' : 'gemini-2.5-pro';
+}
+
+/**
+ * Admin build-routing policy (2026-06-28): choose the Claude model that LEADS the build
+ * by app complexity, so cost matches the work without compromising quality:
+ *   • POWER mode (Only-Opus / power level on) → Opus (premium).
+ *   • Complex app (analyser start tier 'sonnet'/'opus') → Sonnet.
+ *   • Small/simple app ('gemini'/'haiku'/none) → Haiku (cheap, reliable tool-use).
+ * Gemini/Vertex stay as the fallback in buildTurnRunner if the chosen Claude model
+ * throttles, so a build never breaks. Billing is unchanged (Opus-equivalent markup,
+ * D5/D6) regardless of which model runs — margin only widens on the cheaper tiers.
+ * Pure + exported for unit testing.
+ */
+export function selectBuildModel(tier: StartTier | undefined, powerOn: boolean): string {
+  if (powerOn) return opusModel();
+  if (tier === 'sonnet' || tier === 'opus') return sonnetModel();
+  return haikuModel();
 }
 
 function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean }): TurnRunner {
@@ -366,24 +409,68 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean })
       cheap.push({ name: 'GEMINI', runner: new GeminiToolRunner(gemini as unknown as GeminiGenAiClient, { model: buildModel('AGENTV3_GEMINI_BUILD_MODEL') }) });
     } catch { /* skip */ }
   }
-  if (cheap.length === 0) return makeResilientTurnRunner(new ClaudeClient()); // Claude-only env
-  const claude: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient() };
+  // Bound Claude's retry ladder on the BUILD hot path. Claude now LEADS every build turn
+  // (claudeFirst), so the default 5× exponential backoff (≈30-60s) would stall each turn
+  // when the Anthropic account is overloaded — looking like "stuck midway / infinite
+  // loading". 2 retries falls through to Gemini/Vertex in a few seconds instead.
+  // AGENTV3_BUILD_CLAUDE_RETRIES overrides.
+  const buildRetry = { maxRetries: Math.max(0, parseInt(process.env.AGENTV3_BUILD_CLAUDE_RETRIES || '', 10) || 2) };
+  if (cheap.length === 0) return makeResilientTurnRunner(new ClaudeClient(undefined, buildRetry)); // Claude-only env
+  const claude: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient(undefined, buildRetry) };
   // P7 failover hardening: a final Claude-HAIKU backstop that FORCES the Haiku model
   // regardless of the turn's requested model. It only ever runs after every prior provider
   // (Vertex → Gemini → primary Claude) has thrown, so normal builds are unaffected — but if
   // Sonnet/Opus is overloaded or rate-limited, Haiku still completes the turn and the build
   // never breaks. Billing is unchanged (Opus-equivalent markup, D5/D6) regardless of which
   // model actually answers. AGENTV3_DISABLE_HAIKU_BACKSTOP=1 removes it if ever needed.
-  const haikuBackstop: NamedRunner = { name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(), haikuModel()) };
+  const haikuBackstop: NamedRunner = { name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), haikuModel()) };
   const withBackstop = process.env.AGENTV3_DISABLE_HAIKU_BACKSTOP === '1' ? [] : [haikuBackstop];
-  // claudeFirst (escalation): put the stronger Claude model at the head of the chain so an
-  // escalated tier actually leads with Claude, not Gemini. Else cheap-first (env override honoured).
-  const claudeFirst = opts?.claudeFirst || process.env.AGENTV3_BUILD_CLAUDE_FIRST === '1';
-  const chain = claudeFirst ? [claude, ...cheap, ...withBackstop] : [...cheap, claude, ...withBackstop];
+  // Builds run on CLAUDE ONLY (Haiku/Sonnet/Opus do REAL tool-use → real files). Gemini/Vertex
+  // HALLUCINATE in the tool-use loop — they reply describing files ("creating index.html…") but
+  // never actually call write_file, so the build "succeeds" with ZERO real files and the model
+  // later claims "I'm an AI, I have no file system". So they are EXCLUDED from the build chain
+  // (they remain the cheap CHAT providers only). If Claude genuinely fails, the build errors
+  // HONESTLY with the real Claude error (e.g. a bad key or model id) instead of silently making
+  // fake files on Gemini. AGENTV3_BUILD_ALLOW_GEMINI=1 re-adds Vertex/Gemini as a last resort.
+  const fallback = process.env.AGENTV3_BUILD_ALLOW_GEMINI === '1' ? cheap : [];
+  const claudeFirst = resolveClaudeFirst(opts?.claudeFirst, process.env.AGENTV3_BUILD_CLAUDE_FIRST);
+  const chain = claudeFirst ? [claude, ...fallback, ...withBackstop] : [...fallback, claude, ...withBackstop];
   return makeMultiProviderTurnRunner(chain, {
     onProviderUsed: (used, from) => { if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`); },
     onProviderError: (name, err) => console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
   });
+}
+
+/**
+ * Admin routing policy: the PLAN phase runs on GROK (xAI) — strong, cheap reasoning for
+ * the short plan/todo step. Grok speaks the OpenAI function-calling API, so the existing
+ * OpenAiToolRunner drives it (the plan uses the update_todo tool). Returns a multi-provider
+ * runner [Grok → Claude] so a Grok outage/limit falls back to a cheap Claude (Haiku) and the
+ * plan never breaks; the Claude fallback model is the params.model passed by the caller
+ * (Grok ignores it and forces grok-3 via opts.model). Returns null when no Grok/xAI key is
+ * configured, so the caller keeps using the normal build client. AGENTV3_GROK_PLAN_MODEL
+ * overrides the model; AGENTV3_PLAN_GROK=0 disables Grok planning (revert to Claude).
+ */
+/** Whether the PLAN phase should run on Grok: a Grok/xAI key is set and not disabled.
+ *  Pure + exported for unit testing. */
+export function planGrokEnabled(apiKey: string | undefined, disableFlag: string | undefined): boolean {
+  return !!apiKey && disableFlag !== '0' && disableFlag !== 'off';
+}
+
+function grokPlanRunner(): TurnRunner | null {
+  const apiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
+  if (!planGrokEnabled(apiKey, process.env.AGENTV3_PLAN_GROK)) return null;
+  try {
+    const client = new OpenAI({ apiKey, baseURL: 'https://api.x.ai/v1', timeout: 60_000, maxRetries: 0 });
+    const model = process.env.AGENTV3_GROK_PLAN_MODEL || 'grok-3';
+    const grok: NamedRunner = { name: 'GROK', runner: new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }) };
+    const claudeFallback: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient(undefined, { maxRetries: 2 }) };
+    return makeMultiProviderTurnRunner([grok, claudeFallback], {
+      onProviderError: (name, err) => console.log(`[AGENTV3] plan ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
+    });
+  } catch {
+    return null; // misconfigured — caller falls back to the normal build client
+  }
 }
 
 /**
@@ -1132,7 +1219,9 @@ export function registerAgentV3Routes(app: Express): void {
       const client = buildTurnRunner(
         analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : undefined,
       );
-      const model = resolveModel(onlyOpus);
+      // Admin routing policy: small app → Haiku, complex app → Sonnet, power → Opus
+      // (was always Sonnet). Gemini/Vertex remain the fallback in buildTurnRunner.
+      const model = selectBuildModel(analysis?.startTier, onlyOpus);
       // Build start time — used for cost-ladder telemetry duration (P2 measurement).
       const buildStartedAt = Date.now();
       const budget = maxBuildBudgetUsd();
@@ -1458,12 +1547,17 @@ export function registerAgentV3Routes(app: Express): void {
       // Plan mode (P4): plan first, then block for the user's approval before
       // building. A real gate — the build does not start until the user answers.
       if (planFirst) {
+        // Admin policy: planning runs on GROK (cheap, strong reasoning) with a Claude
+        // fallback if Grok is down. When no Grok key is set, use the normal build client.
+        // The plan's Claude fallback model stays cheap (Haiku) — Grok ignores it (forces
+        // grok-3); only the fallback path uses it.
+        const planGrok = grokPlanRunner();
         const planRunner = new AgentRunner({
-          client,
+          client: planGrok ?? client,
           dispatcher: new ToolDispatcher(actuator, workspaceId, state, events),
           state,
           events,
-          model,
+          model: planGrok ? haikuModel() : model,
           system: planSystemPrompt(),
           tools: catalogForTools(['update_todo']),
           onlyOpus,

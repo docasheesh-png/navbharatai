@@ -19,6 +19,24 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("ErrorBoundary caught:", error.message, errorInfo.componentStack);
+    // P2.2 — report React render errors to the backend error tracker (→ Cloud Error
+    // Reporting + admin view). Best-effort, production-only, never throws.
+    if (import.meta.env?.PROD) {
+      try {
+        fetch('/api/logs/error', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: error.message,
+            type: 'react-render',
+            stack: (error.stack || '').slice(0, 2000),
+            source: (errorInfo.componentStack || '').slice(0, 1000),
+            url: typeof window !== 'undefined' ? window.location.href : undefined,
+            ts: Date.now(),
+          }),
+        }).catch(() => {});
+      } catch { /* reporting must never break the fallback UI */ }
+    }
   }
 
   public render() {

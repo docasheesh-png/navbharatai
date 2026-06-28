@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
+import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
 
 describe('conversationAccess (D7 ownership gate)', () => {
@@ -122,6 +123,61 @@ describe('agentV3KeyDiag (provider diagnosis)', () => {
         else process.env[k] = saved[k];
       }
     }
+  });
+});
+
+describe('planGrokEnabled — planning runs on Grok when a key is set', () => {
+  it('enabled when a Grok/xAI key is present and not disabled', () => {
+    expect(planGrokEnabled('xai-abc', undefined)).toBe(true);
+    expect(planGrokEnabled('grok-key', '1')).toBe(true);
+  });
+  it('disabled when no key', () => {
+    expect(planGrokEnabled(undefined, undefined)).toBe(false);
+    expect(planGrokEnabled('', undefined)).toBe(false);
+  });
+  it('opt-out with AGENTV3_PLAN_GROK=0 / off even when a key is set', () => {
+    expect(planGrokEnabled('xai-abc', '0')).toBe(false);
+    expect(planGrokEnabled('xai-abc', 'off')).toBe(false);
+  });
+});
+
+describe('selectBuildModel — admin cost-routing (small=Haiku, complex=Sonnet, power=Opus)', () => {
+  it('small/simple app (gemini/haiku tier) builds on Haiku', () => {
+    expect(selectBuildModel('gemini', false)).toBe(haikuModel());
+    expect(selectBuildModel('haiku', false)).toBe(haikuModel());
+    expect(selectBuildModel(undefined, false)).toBe(haikuModel());
+  });
+  it('complex app (sonnet/opus tier) builds on Sonnet', () => {
+    expect(selectBuildModel('sonnet', false)).toBe(sonnetModel());
+    expect(selectBuildModel('opus', false)).toBe(sonnetModel());
+  });
+  it('power mode always wins → Opus, regardless of tier', () => {
+    expect(selectBuildModel('gemini', true)).toBe(opusModel());
+    expect(selectBuildModel('sonnet', true)).toBe(opusModel());
+  });
+  it('maps real analyser verdicts: a calculator stays cheap (Haiku), an auth+DB app uses Sonnet', () => {
+    const calc = analyzeRequest({ prompt: 'build me a calculator' });
+    expect(selectBuildModel(calc.startTier, false)).toBe(haikuModel());
+    const complex = analyzeRequest({ prompt: 'build a multi-tenant SaaS with auth, postgres database, billing and an admin dashboard' });
+    expect(selectBuildModel(complex.startTier, false)).toBe(sonnetModel());
+  });
+});
+
+describe('resolveClaudeFirst — v3.0 builds lead with Claude by default', () => {
+  it('defaults to Claude-first when no opt and no env override', () => {
+    expect(resolveClaudeFirst(undefined, undefined)).toBe(true);
+  });
+  it('reverts to cheap-first only when AGENTV3_BUILD_CLAUDE_FIRST=0 / off', () => {
+    expect(resolveClaudeFirst(undefined, '0')).toBe(false);
+    expect(resolveClaudeFirst(undefined, 'off')).toBe(false);
+  });
+  it('still Claude-first for any other env value', () => {
+    expect(resolveClaudeFirst(undefined, '1')).toBe(true);
+    expect(resolveClaudeFirst(undefined, 'true')).toBe(true);
+  });
+  it('explicit opts win (escalation forces Claude-first; explicit false honoured)', () => {
+    expect(resolveClaudeFirst(true, '0')).toBe(true);
+    expect(resolveClaudeFirst(false, undefined)).toBe(false);
   });
 });
 

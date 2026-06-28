@@ -5048,3 +5048,20 @@ violators were the escalation paths:
   resolveModel(tier === 'opus' && onlyOpus) → caps at Sonnet in normal mode.
 
 Gate: server tsc 0, vitest 2881/2881 PASS, boot:check PASS.
+
+## 2026-06-28 — files vanish to 0 the instant a follow-up/retry message is sent
+
+Admin: "3D rotating watch" build made 7 files but the app failed; on pressing Send for a retry,
+the 7 files instantly became 0. Root cause: the client start() called setState(initialAgentV3State())
+on EVERY new message, wiping the whole client state — including state.files → [] — immediately, before
+the server even responds. So the user's project visibly disappeared the moment Send was pressed.
+
+FIX (client, useAgentV3Build.start): reset only the TRANSIENT build state for the new turn
+(narration, todos, plan, agents, done/health) and PRESERVE the durable project view — files, diffs,
+workspaceId, previewUrl, repoUrl. The build's file_changed events upsert by path (applyFileChange),
+so keeping the existing list shows no duplicates and the project stays visible while the retry runs.
+Combined with the now-working Firestore persistence (saveWorkspaceFiles during build + the build-start
+re-seed that writes durable files back into the sandbox), a retry continues editing the same 7 files
+instead of starting from a blank 0.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2881/2881 PASS.

@@ -266,7 +266,19 @@ export function useAgentV3Build(): UseAgentV3Build {
       if (running) return;
       userIdRef.current = opts?.userId;
       emailRef.current = opts?.email;
-      setState(initialAgentV3State());
+      // Reset only the TRANSIENT build state for the new turn (narration, todos, plan,
+      // agents, done/health). PRESERVE the durable project view — files, workspace, live
+      // preview and repo — so a follow-up/retry message does NOT blank the user's files to
+      // 0 the instant Send is pressed. The build's file_changed events upsert by path, so
+      // keeping the existing list shows no duplicates and the project stays visible.
+      setState((prev) => ({
+        ...initialAgentV3State(),
+        files: prev.files,
+        diffs: prev.diffs,
+        workspaceId: prev.workspaceId,
+        previewUrl: prev.previewUrl,
+        repoUrl: prev.repoUrl,
+      }));
       setError(null);
       setRunning(true);
 

@@ -5239,3 +5239,25 @@ throw the build finishes (files are already written) and tells the user the prev
 Now the build ALWAYS completes within ~90 s of file generation regardless of sandbox/actuator behavior.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2915/2915 PASS (+1 hang-repro test), boot:check PASS.
+
+## 2026-06-28 — Fix: build can NEVER hang at "working…" again (server hard deadline + OneShot overall cap)
+
+User report: another build stuck at "working… 9m 44s", this time WITHOUT a "Generated files" message —
+so the hang was EARLIER than #540's startPreview fix: in OneShot's generate() (the Haiku model call) or
+file-write. Root cause: NO build step had a real deadline. The Anthropic SDK's default request timeout is
+~10 min, so a single stalled model HTTP call hangs for minutes; and crucially, if the build body hangs on
+an un-abortable await, the route's normal result/error/finally path is NEVER reached → no terminal event →
+the client spinner runs forever (the 15s heartbeat keeps the stream "alive", so the client stall-watchdog
+never trips either). The existing maxBuildSeconds() cap was only passed into the agentic runner; it was
+never enforced as a hard wall.
+Two fixes:
+1. Server hard wall-clock deadline (routes/agentv3.ts): a timer that, after maxBuildSeconds() (12 min
+   default, AGENTV3_MAX_BUILD_SECONDS), force-emits a terminal result, aborts the run, frees the
+   per-account slot, and ends the stream — GUARANTEEING the client always gets a terminal event and the
+   spinner stops, no matter where the build hangs. Cleared in finally on normal completion; since JS is
+   single-threaded it can't interleave with the success path, so it only fires on a genuine overrun.
+2. OneShot overall cap (OneShotBuilder.ts): runOneShot now wraps the whole attempt (generate + writeFiles
+   + preview) in overallTimeoutMs (default 180 s) — a hung model call bails to the agentic-loop fallback
+   in ~3 min instead of spinning, complementing #540's startPreview cap.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2916/2916 PASS (+1 hung-generate test), boot:check PASS.

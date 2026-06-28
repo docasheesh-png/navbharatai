@@ -1241,6 +1241,30 @@ export function registerAgentV3Routes(app: Express): void {
     const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
     // Held outside the try so a build CRASH (caught below) is still captured in the diagnostics report.
     let buildDiagRef: BuildDiagnostics | undefined;
+
+    // HARD WALL-CLOCK DEADLINE — guarantees the build can NEVER spin at "working…" forever.
+    // If the build body hangs on an UN-abortable await (a stalled model HTTP call, a sandbox
+    // command that never returns), the normal result/error/finally path is never reached, so no
+    // terminal event is emitted and the client spinner runs indefinitely (the heartbeat keeps the
+    // stream "alive", so the client stall-watchdog never trips either). This timer force-emits a
+    // terminal result, aborts the run, frees the per-account slot, and ends the stream after the
+    // cap. It is cleared in `finally` on normal completion — and because JS is single-threaded it
+    // cannot interleave with the synchronous success/finally path, so it ONLY fires on a real overrun.
+    const deadlineMs = maxBuildSeconds() * 1000;
+    const deadlineTimer: ReturnType<typeof setTimeout> | undefined = deadlineMs > 0 ? setTimeout(() => {
+      if (rb.ended) return;
+      try { abort.abort(); } catch { /* best-effort */ }
+      try {
+        buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_TIMEOUT', message: `Build exceeded the ${Math.round(deadlineMs / 1000)}s wall-clock cap and was stopped.`, autoResolved: false });
+        buildDiagRef?.finish(false);
+      } catch { /* diagnostics are best-effort */ }
+      emit({ type: 'narration', agent: 'architect', text: 'This build hit the time limit and was stopped automatically. Any files already generated are saved — please try again or send a follow-up.', ts: Date.now() });
+      emit({ type: 'result', ok: false, summary: 'Build timed out and was stopped — your files (if any) are saved.', steps: 0, billedUsd: 0, billedInr: 0 });
+      activeBuilds.delete(buildKey);
+      if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
+      endBuild(rb);
+    }, deadlineMs) : undefined;
+
     try {
       // Native Claude for real tool-use, with a multi-provider text fallback
       // (Vertex → Gemini → Grok) so chat never dies if Claude is down/misconfigured.
@@ -2082,6 +2106,9 @@ export function registerAgentV3Routes(app: Express): void {
       } catch { /* diagnostics are best-effort */ }
       emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {
+      // Normal completion reached the finally synchronously → cancel the wall-clock deadline so it
+      // can't fire after a clean finish (no double terminal event).
+      if (deadlineTimer) clearTimeout(deadlineTimer);
       activeBuilds.delete(buildKey);
       // Only clear the registry slot if it is STILL this build — a Stop may have already
       // replaced it with a newer run. End every attached stream.

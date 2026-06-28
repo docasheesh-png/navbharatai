@@ -9,6 +9,7 @@ import { TaskStatus, ExecutionConfig } from './ExecutionTypes';
 import { ICheckpointManager } from '../checkpoint/ICheckpointManager';
 import { IEventBus } from '../eventbus/IEventBus';
 import { Patch } from './IGenerationEngine';
+import { log } from '../../logger';
 
 export class ExecutionOrchestrator {
     private retryCounters: Map<string, number> = new Map();
@@ -101,9 +102,9 @@ export class ExecutionOrchestrator {
             await this.eventBus.publish(this.createEvent(plan, EventType.TASK_STARTED, { taskId: task.id }));
             scheduler.updateTaskStatus(task.id, TaskStatus.RUNNING);
             
-            console.log("Dispatching task:", task.id);
+            log.info('dispatching task', { taskId: task.id });
             const patches = await this.dispatcher.dispatch(task);
-            console.log("Patches received:", patches.length);
+            log.info('patches received', { taskId: task.id, count: patches.length });
             aggregator.addPatches(patches);
             
             scheduler.updateTaskStatus(task.id, TaskStatus.COMPLETED);

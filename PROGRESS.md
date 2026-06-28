@@ -4901,3 +4901,26 @@ VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2870/2870 PASS (6 ne
 artificial-bloat run correctly exits non-zero. CI/tooling (no user surface) → no
 AppKnowledgeBase entry.
 Files: scripts/bundleBudget.mjs, tests/bundleBudget.test.ts, package.json, .github/workflows/ci.yml, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P-BRE.3 Structured Logging (build-correlation core) DONE
+
+New src/server/logger.ts: dependency-free structured Logger (no Pino/Winston) emitting one
+Cloud Logging JSON line per log {severity, message, timestamp, traceId?, ...context, ...meta}.
+Level-filtered by LOG_LEVEL (debug<info<warn<error; prod→info, dev→debug via pure
+resolveLogLevel). traceId pulled from the P2.1 tracer's active span → logs ↔ traces
+auto-correlate. Never throws.
+
+Build correlation via AsyncLocalStorage: withLogContext({jobId,...}, fn) propagates
+correlation fields to every log inside. AppMakerOrchestrator.runBuildJob wrapped in
+withLogContext({jobId, namespace}) → every structured build log carries jobId ("filter all
+logs for jobId X" works). Converted the build-path log sites (spec's named files):
+BuildManager.ts (10), generator/ExecutionOrchestrator.ts (2), AppMakerOrchestrator.ts.
+
+Incremental (noted): the broad legacy console.* migration across the 6000-line server.ts is
+mechanical cleanup (mostly debug prints), done lazily — the high-value build-correlation
+core is complete and used now.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2882/2882 PASS (12 new logger
+tests: level filtering, severity mapping, JSON shape, ALS context propagate/merge/no-leak,
+never-throws), server bundles. Backend infra → no AppKnowledgeBase entry.
+Files: src/server/logger.ts (+.test.ts), AppMakerLab/AppMakerOrchestrator.ts, BuildManager.ts, generator/ExecutionOrchestrator.ts, UPGRADE_v3.0.md.

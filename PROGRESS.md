@@ -4493,3 +4493,27 @@ server bundles + boots, and a LIVE curl proved it end-to-end:
   /api/v1/health   → 200, X-API-Version: v1, real handler body
   /api/health      → 200, X-API-Version: unversioned, Deprecation: true, successor Link
 Files: server.ts, src/server/routes/apiVersion.ts (+ .test.ts), AGENTS.md, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P1.3 Circuit Breaker DONE (UPGRADE v3.0, phase 2 of the march)
+
+Replaced the router's flat per-provider cooldown with a REAL circuit breaker
+(CLOSED / OPEN / HALF_OPEN). New src/server/AI/Router/CircuitBreaker.ts:
+- failure → OPEN for a cooldown; consecutive failures ESCALATE the cooldown
+  (exponential backoff, capped 5 min); cooldown elapses → HALF_OPEN; next request
+  is a trial probe → success closes + resets, failure re-opens (escalated).
+- Pure/deterministic (every method takes `now`) → fully unit-tested without timers.
+- Below the failure threshold the cooldown equals exactly the OLD value, so this is
+  a strict, break-proof superset of prior behaviour — never worse.
+
+Integrated into AIRouter.ts via the THREE existing chokepoints (zero control-flow
+change → covers all 3 universes + route/routeRaced/routeStream):
+  isOnCooldown → breaker.isBlocking(); setCooldown → breaker.recordFailure()
+  (still mirrored cross-instance via ProviderCooldownStore); the single success
+  chokepoint recordProviderLatency(...,false) → breaker.recordSuccess().
+getProviderStats() additionally reports circuitState + consecutiveFailures
+(existing cooldownUntil field kept → Admin dashboard untouched).
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2750/2750 PASS
+(29 new: CircuitBreaker 24 + existing AIRouter 5 still green), server boots,
+/api/health 200. Backend infra (no user surface) → no AppKnowledgeBase entry needed.
+Files: src/server/AI/Router/CircuitBreaker.ts (+ .test.ts), AIRouter.ts, UPGRADE_v3.0.md.

@@ -25,8 +25,9 @@ export class ProjectMemoryManager {
         }
     }
 
-    update(filePath: string, content: string, request: string = '') {
-        this.memory = MemoryIndexer.index(filePath, content, this.memory);
+    async update(filePath: string, content: string, request: string = '') {
+        // P4.3 — AST-backed indexing (regex baseline + ts-morph enrichment, graceful fallback).
+        this.memory = await MemoryIndexer.indexWithAST(filePath, content, this.memory);
         if (request) {
             this.memory.buildHistory.push({
                 timestamp: new Date().toISOString(),

@@ -4808,3 +4808,23 @@ reducer pure (deep-equal output, input untouched). Backend module (no live endpo
 the per-build store is ephemeral + AppMakerLab is dormant; an endpoint would need risky
 shared-store plumbing, deferred) → no AppKnowledgeBase entry. Files: eventbus/
 WorkspaceProjection.ts (+.test.ts), EventHistoryStore.ts, IEventHistoryStore.ts, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P4.3 Full AST consolidation DONE (Phase P4: P4.2 + P4.3 done)
+
+The older Memory/MemoryIndexer.ts used a single regex capturing only the FIRST export
+per file. Consolidated it onto the real ts-morph AST analyzer (AgentV3/ASTAnalyzer.ts):
+- New MemoryIndexer.indexWithAST(): runs the regex baseline FIRST (zero-regression — its
+  result is always kept), then ENRICHES via analyzeWithAST — adds EVERY exported
+  symbol/component name (not just the first) + detected route paths. Graceful: AST null
+  on unsupported file / parse failure / ts-morph missing → keeps exactly the regex
+  baseline. Never throws. Strict-superset design → can only enrich, never regress.
+- Wired live end-to-end (not half-done): ProjectMemoryManager.update now async →
+  indexWithAST; WorkspaceManager.createFile/modifyFile await it (both already async).
+- Sync MemoryIndexer.index kept unchanged as the back-compat regex fallback.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2855/2855 PASS (6 new AST
+tests: all-exports / React components / routes / regex-baseline-preserved / never-throws
+/ dedup; 6 existing regex tests still green), server bundles. Backend code-model
+internal (no user surface) → no AppKnowledgeBase entry.
+Files: Memory/MemoryIndexer.ts, Memory/ProjectMemoryManager.ts, AI/WorkspaceManager.ts,
+tests/memoryIndexer.test.ts, UPGRADE_v3.0.md.

@@ -70,6 +70,10 @@ export function useAgentV3Build(): UseAgentV3Build {
   const workspaceIdRef = useRef<string | undefined>(undefined);
   // WATCHDOG — timestamp of the last stream event, so a silent/dead stream can be detected.
   const lastEventTsRef = useRef<number>(Date.now());
+  // Guards resume() against OVERLAPPING reconnects. (It must NOT guard on `running`: the watchdog
+  // reconnects WHILE running is true, and the old `if (running) return` made that reconnect a no-op,
+  // leaving the spinner stuck forever after a genuinely dead stream.)
+  const resumeInFlightRef = useRef(false);
 
   // Keep the latest workspace id available to restore() without a stale closure.
   workspaceIdRef.current = state.workspaceId;
@@ -176,7 +180,8 @@ export function useAgentV3Build(): UseAgentV3Build {
   }, [running]);
 
   const resume = useCallback(async (opts?: { userId?: string; email?: string }) => {
-    if (running) return;
+    if (resumeInFlightRef.current) return; // don't stack concurrent reconnects
+    resumeInFlightRef.current = true;
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     setState(initialAgentV3State());   // the replayed buffer rebuilds the live state
     setError(null);
@@ -203,10 +208,11 @@ export function useAgentV3Build(): UseAgentV3Build {
         setError(err instanceof Error ? err.message : String(err));
       }
     } finally {
+      resumeInFlightRef.current = false;
       setRunning(false);
       abortRef.current = null;
     }
-  }, [running, pumpStream]);
+  }, [pumpStream]);
 
   const respond = useCallback(async (requestId: string, approved: boolean) => {
     // Clear the gate immediately so the UI is responsive; the build resumes.

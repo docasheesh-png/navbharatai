@@ -5372,3 +5372,16 @@ writeFile, writeBinaryFile, listFiles through it. Also bounded: ensureWorkspace'
 Sandbox.pause (10s, like create/connect).
 
 Gate: frontend tsc 0, server tsc 0, vitest 2944/2944 PASS, boot:check PASS.
+
+## 2026-06-28 — Audit P1/P2 cleanup: OneShot writeFiles timeout + client watchdog reconnect + preview-before-port
+
+Three more confirmed audit fixes: (1) OneShot writeFiles is now INSIDE the overall timeout (generate +
+parse + write wrapped together) — a stalled sandbox write no longer hangs the lane (audit P0-B finish).
+(2) Client watchdog reconnect: resume() guarded on the `running` state, which is ALWAYS true during a
+build, so the stall-watchdog's reconnect was a silent no-op → spinner stuck forever on a genuinely dead
+stream. Replaced with a resumeInFlightRef (guards only against overlapping reconnects), so the watchdog
+can actually reconnect while running (P1). (3) update_preview no longer emits a preview URL when the port
+did NOT come up within 15s — the user never clicks into a blank/502 page ("preview is EARNED"); the agent
+gets a clear "NOT published, bring the dev server up and retry" message (P2).
+
+Gate: frontend tsc 0, server tsc 0, vitest 2957/2957 PASS (+1 hung-writeFiles test), boot:check PASS.

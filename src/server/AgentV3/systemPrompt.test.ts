@@ -1,5 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { editModePrefix, architectSystemPrompt, planSystemPrompt } from './systemPrompt';
+import { editModePrefix, architectSystemPrompt, planSystemPrompt, LANGUAGE_RULE } from './systemPrompt';
+
+describe('LANGUAGE_RULE (mirror the user, never default to Hindi)', () => {
+  it('is blunt about mirroring the user and not defaulting to Hindi', () => {
+    expect(LANGUAGE_RULE).toContain('MIRROR THE USER');
+    expect(LANGUAGE_RULE.toLowerCase()).toContain('do not default to hindi');
+    expect(LANGUAGE_RULE).toContain('English in');
+  });
+  it('is carried by BOTH the architect build prompt and the plan prompt', () => {
+    expect(architectSystemPrompt()).toContain('MIRROR THE USER');
+    expect(planSystemPrompt()).toContain('MIRROR THE USER');
+  });
+});
 
 describe('editModePrefix', () => {
   it('declares EDIT MODE and instructs reading before writing', () => {

@@ -30,7 +30,7 @@ export type { AgentRunnerOptions, AgentRunResult } from './AgentRunner';
 export { resolveModel, sonnetModel, opusModel, haikuModel, opusNormalModel, ladderModel } from './models';
 export { toPowerLevel, powerSpec, type PowerLevel, type ClaudeEffort, type PowerSpec } from './powerLevel';
 export type { ClaudeLadderTier } from './models';
-export { architectSystemPrompt, planSystemPrompt, editModePrefix } from './systemPrompt';
+export { architectSystemPrompt, planSystemPrompt, editModePrefix, LANGUAGE_RULE } from './systemPrompt';
 export { awaitApproval, resolveApproval, pendingApprovalCount } from './Approvals';
 export {
   NORMAL_MULTIPLIER,

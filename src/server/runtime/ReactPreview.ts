@@ -18,7 +18,14 @@
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { normalizePath } from '../project/ProjectModel';
 
-const BABEL_CDN = 'https://unpkg.com/@babel/standalone@7.26.4/babel.min.js';
+// Compiler is self-hosted on NavBharatAI's own origin (served from public/vendor)
+// so it is never blocked by a third-party CDN; CDNs are only a fallback chain.
+const BABEL_PRIMARY = '/vendor/babel.min.js';
+const BABEL_FALLBACKS = [
+  'https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js',
+  'https://unpkg.com/@babel/standalone@7.26.4/babel.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js',
+];
 const ESM = 'https://esm.sh/';
 
 const SOURCE_EXT = ['.jsx', '.js', '.tsx', '.ts', '.mjs'];
@@ -121,7 +128,7 @@ export function buildReactPreview(vfs: VirtualFileSystem): string {
 <title>Preview</title>
 ${css ? `<style>\n${css}\n</style>` : ''}
 <script type="importmap">${importmap}</script>
-<script src="${BABEL_CDN}"></script>
+<script src="${BABEL_PRIMARY}"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -213,11 +220,15 @@ ${css ? `<style>\n${css}\n</style>` : ''}
   window.addEventListener('error', function (e) { showError((e && e.message) || 'Script error'); });
   window.addEventListener('unhandledrejection', function (e) { showError((e && e.reason && e.reason.message) || e.reason || 'Promise rejected'); });
 
-  if (typeof Babel === 'undefined') { showError('Could not load the preview compiler (network blocked?).'); return; }
+  function loadScript(u){return new Promise(function(res){var s=document.createElement('script');s.src=u;s.onload=res;s.onerror=res;document.head.appendChild(s);});}
+  var BABEL_FALLBACKS = ${JSON.stringify(BABEL_FALLBACKS)};
 
   var forced = ['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime'];
   (async function () {
     try {
+      // Self-hosted compiler loads from <head>; if that failed, try CDN fallbacks before giving up.
+      for (var bi = 0; bi < BABEL_FALLBACKS.length && typeof Babel === 'undefined'; bi++) { await loadScript(BABEL_FALLBACKS[bi]); }
+      if (typeof Babel === 'undefined') { showError('Could not load the preview compiler (network blocked?).'); return; }
       var bare = collectBare();
       forced.forEach(function (s) { if (bare.indexOf(s) < 0) bare.push(s); });
       await Promise.all(bare.map(async function (spec) {

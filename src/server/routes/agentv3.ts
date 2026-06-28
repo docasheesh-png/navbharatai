@@ -72,6 +72,7 @@ import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from 
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { runOneShot, classifyForOneShot, oneShotEnabled } from '../AgentV3/OneShotBuilder';
+import { buildProjectContext } from '../AgentV3/ProjectContext';
 import { billedAmountUsd } from '../AgentV3/pricing';
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
@@ -1570,6 +1571,20 @@ export function registerAgentV3Routes(app: Express): void {
       });
 
       let buildPrompt = prompt;
+
+      // MEMORY FIX 1 (Claude-level continuity): inject the current PROJECT CONTEXT — the real
+      // file list + the project map + recent requests — so a follow-up like "continue" KNOWS what
+      // it is building and resumes, instead of the amnesiac "what would you like me to continue
+      // with?". The graph is hydrated from the real (durable, re-seeded) files first so the map is
+      // accurate even on a fresh Cloud Run instance. Best-effort — never blocks the build.
+      try {
+        const ctxMem = getWorkspaceMemory(workspaceId);
+        const tree = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
+        await warmIndexFiles(ctxMem, tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''), { maxFiles: 200 });
+        const recentRequests = ctxMem.snapshot().episodes.filter((e) => e.kind === 'request').map((e) => e.text);
+        const projectCtx = buildProjectContext({ files: tree, projectMap: ctxMem.projectMap(), recentRequests });
+        if (projectCtx) buildPrompt = `${projectCtx}\n\n---\n\n${buildPrompt}`;
+      } catch { /* project context is best-effort — never blocks a build */ }
 
       // Continual learning (Layer 79): recall the relevant lessons recorded by
       // the Layer 57 reflection of earlier builds in this session (and any past

@@ -824,7 +824,14 @@ export function registerAgentV3Routes(app: Express): void {
     };
     for (const e of rb.buffer) sub.write(e);                   // replay so the UI catches up to "now"
     rb.subscribers.add(sub);
-    req.on('close', () => { rb.subscribers.delete(sub); });
+    // Keepalive: like the /chat stream, ping every 15 s so a RESUMED stream is never seen as
+    // silent during a quiet build phase (a long model/one-shot call emits no events). Without
+    // this the client watchdog would mis-detect a stall and reconnect in a loop ("restart from 0").
+    const heartbeatTimer = setInterval(() => {
+      if (!res.writableEnded) res.write(JSON.stringify({ type: 'ping' }) + '\n');
+      else clearInterval(heartbeatTimer);
+    }, 15_000);
+    req.on('close', () => { clearInterval(heartbeatTimer); rb.subscribers.delete(sub); });
   });
 
   // History → restore: roll the workspace back to a checkpoint commit (P-git).

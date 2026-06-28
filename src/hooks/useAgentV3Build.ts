@@ -281,6 +281,9 @@ export function useAgentV3Build(): UseAgentV3Build {
       }));
       setError(null);
       setRunning(true);
+      // WATCHDOG — begin the silence window at build start (not stale mount time), so the
+      // stall detector measures THIS build and never fires before the first event arrives.
+      lastEventTsRef.current = Date.now();
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -351,6 +354,7 @@ export function useAgentV3Build(): UseAgentV3Build {
               continue;
             }
             gotEvent = true;
+            lastEventTsRef.current = Date.now(); // WATCHDOG — mark stream activity (incl. 15s pings)
             setState((prev) => agentV3Reducer(prev, event));
           }
         }

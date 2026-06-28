@@ -4828,3 +4828,28 @@ tests: all-exports / React components / routes / regex-baseline-preserved / neve
 internal (no user surface) → no AppKnowledgeBase entry.
 Files: Memory/MemoryIndexer.ts, Memory/ProjectMemoryManager.ts, AI/WorkspaceManager.ts,
 tests/memoryIndexer.test.ts, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P4.4 Replication / Consistency DONE (Phase P4 → 75%)
+
+Was: POST /api/sync/:userId BLINDLY overwrote the whole stored workspace doc → a device
+saving a stale view silently dropped another device's newer sessions (classic lost-update).
+
+Fix: enforced last-write-wins PER SESSION, SERVER-SIDE. The POST now reads the stored
+workspace and MERGES the incoming payload into it (new src/server/project/SyncMerge.ts)
+before writing: sessions merged by id (newer lastUpdated wins; ties → incoming), sessions
+unique to either side always kept, lastApp preserved when incoming is empty. The merged
+UNION is encoded + written. No cross-device session can be lost again.
+
+Backward compatible — NO client/App.tsx change needed: existing clients keep POSTing
+{sessions, lastApp} and get the merge for free (enforcement is authoritative on the
+server). Corrupt prior state falls back to a blind write so a save is never lost.
+Documented the model + boundaries (LWW-per-session, not field-level CRDT) in
+docs/SYNC_CONSISTENCY.md.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2864/2864 PASS (9 new incl.
+the classic lost-update case, stale-no-clobber both directions, lastApp preservation),
+server bundles. Backend sync infra (no new user surface) → no AppKnowledgeBase entry.
+
+Phase P4 at 75%: P4.2 event replay, P4.3 AST consolidation, P4.4 replication all DONE.
+Only P4.1 (CQRS — large refactor of the legacy AppMakerLab path) remains.
+Files: project/SyncMerge.ts (+.test.ts), routes/sync.ts, docs/SYNC_CONSISTENCY.md, UPGRADE_v3.0.md.

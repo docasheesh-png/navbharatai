@@ -70,6 +70,7 @@
 | **P-BRE** | **Build & Runtime Engine Gaps** | Tracing, incremental builds, structured logs, smoke tests, remote cache | ⏳ Pending | 0% |
 | **P-TQA** | **Testing & QA Engine Gaps** | Code coverage gate, visual regression, load tests, prompt regression, bundle budget | ⏳ Pending | 0% |
 | **P-SEC** | **Security Engine Gaps** | RBAC, DAST, MFA, container scanning, key rotation, SIEM, supply chain | ⏳ Pending | 0% |
+| **P-DATA** | **Data & Backend Engine Gaps** | Schema validation, durable artifact/embedding store, data retention/GDPR, OpenAPI, uploads, export | ⏳ Pending | 0% |
 
 ---
 
@@ -1483,6 +1484,78 @@
 
 ---
 
+## 🟫 PHASE P-DATA — DATA & BACKEND ENGINE GAPS
+> From a 300-component **Data & Backend** audit (2026-06-28, 6 deep-scan agents, cited files verified).
+> NavBharatAI's backend is a **managed-serverless Express monolith** (Cloud Run + Firestore + E2B). Most of
+> the 300 items are either already DONE or **⬜ N/A-by-design**. Only genuinely-actionable, platform-relevant
+> gaps that are **NOT already tracked in another phase** are listed below.
+
+### ✅ Data & Backend Already Strong (do not redo)
+- App server + REST: `server.ts` (Express, Helmet, CORS, rate-limit, trace mw) + 32 modular routes; `AppMakerLab/kernel/ServiceRegistry` (DI + cycle detection); `UnifiedBuildOrchestrator`, `AppMakerOrchestrator`.
+- Persistence: Firestore (`lib/db.ts`, `firestore.indexes.json`), `WorkspaceStore` codec, `FirestoreJobStore`, `FirestoreConversationStore`, `UserProfileStore`, `UserCostStore`, `secrets.ts` (AES-256).
+- Transactions/integrity: `mutation/{TransactionCoordinator,JournalManager,LockManager,ConflictDetector}`, `VersionStore` (git-like snapshots + restore), `CheckpointManager`.
+- Eventing/observability: `lib/{eventBus,eventStore,logStore,metrics,metricsAlerts}`, `ObservabilityManager`, `AgentV3CostTelemetry`.
+- Multi-tenant/billing: namespace-isolated routers, `engineerQuota`, Cashfree payments + wallet/passes, usage metering, cost tracking.
+- AI backend: `AIRouterManager` (3 universes) + `AIRouter` (raced, circuit-breaker, concurrency cap) + `HealthRegistry`; vector search (`EmbeddingSearch`), conversation/memory/agent-state stores.
+- Auth: Firebase ID-token verify (`authMiddleware`), per-user ownership checks; document/PDF/spreadsheet ingestion (`attachmentText`, `visionDescribe`).
+
+### ⬜ N/A-by-design / already tracked elsewhere (NOT added here)
+- Kafka/RabbitMQ/NATS/Redis, distributed cache, pub/sub, worker pools, connection pools, read/write replicas,
+  multi-region/cluster DB, SQL/Graph/Time-series DBs, gRPC, Saga/Outbox/2PC, microservice/service-discovery —
+  **⬜ N/A-by-design** (managed-serverless: Cloud Run + Firestore; single-process). DB query/migration **codegen for
+  user apps** → already **P-CGE.6**.
+- Queue + distributed cache → **P7**; durable build-job queue → **P-BRE.6**; GCS build cache → **P-BRE.5**;
+  build/deploy + email notifications → **P-BRE.7** / webhooks → **P-PME.9**; tracing/alerting → **P8/P2.1**;
+  backup/DR/replication/PITR + health/readiness probes → **P2.4/P9**; CDN/KMS/WAF → **P10**; API versioning →
+  **P1.1**; CQRS → **P4.1**; event-sourcing replay → **P4.2**; RBAC/roles/permissions → **P-SEC.1**; key rotation → **P-SEC.5**.
+
+### P-DATA.1 — Runtime Schema / Request / Response Validation  ❌ MISSING  [HIGH — robustness + injection safety]
+- Routes validate payloads ad-hoc (manual `if` checks) or not at all; there is no runtime schema validation
+  layer. TypeScript types vanish at runtime, so malformed/malicious bodies reach handlers unchecked.
+- [ ] Adopt `zod` (already common in the stack) — define request schemas per route; add a `validate(schema)` Express middleware.
+- [ ] Validate outbound JSON for critical routes (payment, build, secrets) against response schemas in dev/CI.
+- [ ] Centralize Firestore write validation (`sanitizeFirestoreData` + zod) so no `undefined`/unexpected fields persist.
+- **Files:** new `src/server/lib/validate.ts`, `src/server/routes/*`, `src/server/lib/firestoreUtils.ts`.
+
+### P-DATA.2 — Durable Workspace Artifact / Checkpoint Store  🟡 PARTIAL → full  [MED — data-loss risk]
+- Workspace *files* are durable in Firestore, but **checkpoints / VersionStore snapshots are written to local disk**
+  (`.checkpoints`), which is **ephemeral on Cloud Run** with `min-instances=0` — undo/rollback history is lost on
+  scale-to-zero or instance recycle. (Distinct from P-BRE.5 build-cache and P-BRE.6 job-queue.)
+- [ ] Back `CheckpointManager` / `VersionStore` with Firestore (or a GCS bucket) so undo/restore survives restarts.
+- [ ] Keep local disk as a fast write-through cache; reconcile on boot.
+- **Files:** `src/server/AppMakerLab/checkpoint/CheckpointManager.ts`, `src/server/project/VersionStore.ts`.
+
+### P-DATA.3 — Durable Embedding / Vector Store  🟡 PARTIAL → full  [MED]
+- `EmbeddingSearch` keeps embeddings in an in-memory `Map` — lost on every cold start, so RAG re-embeds the whole
+  workspace each boot (latency + cost). (Complements P-AI.2's reranker/grounding, which is about *quality*, not persistence.)
+- [ ] Persist embeddings (Firestore vector index, or a lightweight on-disk+GCS store keyed by file hash); re-embed only changed files.
+- **Files:** `src/server/AgentV3/EmbeddingSearch.ts`, new `src/server/AgentV3/EmbeddingStore.ts`.
+
+### P-DATA.4 — Data Retention + Deletion (DPDP/GDPR right-to-be-forgotten)  ❌ MISSING  [MED — compliance]
+- The platform stores user profiles, conversations, build history, cost records, secrets — but has **no retention
+  policy and no user-data-deletion workflow**. `ComplianceAnalysis` only scans *generated apps*, not NavBharatAI itself.
+- [ ] Add a `DataRetentionManager`: configurable TTL per collection (e.g. logs 90d, conversations 1y) + scheduled purge.
+- [ ] Add an account-deletion endpoint that cascades across all user-scoped Firestore collections (right-to-be-forgotten).
+- **Files:** new `src/server/lib/DataRetentionManager.ts`, `src/server/routes/profile.ts`, `server.ts`.
+
+### P-DATA.5 — OpenAPI / Contract Spec for the REST API  ❌ MISSING  [LOW]
+- 32 routes have no machine-readable contract. No OpenAPI/Swagger → no generated client types, no contract tests, no docs.
+- [ ] Generate an `openapi.json` from zod schemas (P-DATA.1) via `zod-to-openapi`; serve at `/api/docs`.
+- **Files:** new `src/server/lib/openapi.ts`, `server.ts`.
+
+### P-DATA.6 — Hardened File Upload Pipeline  🟡 PARTIAL → full  [LOW]
+- Attachments are parsed for text (`attachmentText`) but there is no durable multipart upload, size/type enforcement,
+  or malware scan for user-supplied files.
+- [ ] Add multipart handling + strict size/MIME validation; store to Firebase Storage/GCS; optional ClamAV/VirusTotal scan.
+- **Files:** new `src/server/routes/upload.ts`, `src/server/lib/attachmentText.ts`.
+
+### P-DATA.7 — Data Export / Report Generation  ❌ MISSING  [LOW]
+- Users can import (ZIP/Excel/CSV/JSON) but cannot export their data (build history, cost/usage, project metadata) as CSV/Excel/PDF.
+- [ ] Add export endpoints (CSV/Excel via `xlsx`, PDF via a renderer) for build history, usage/cost, and project metadata.
+- **Files:** new `src/server/routes/export.ts`.
+
+---
+
 ## ✅ DEFINITION OF "ROCK-SOLID" (exit criteria for this roadmap)
 1. All **three universes** isolated and provably correct (FREE no-Claude, SDA Grok-first, PRO Claude-first).
 2. **Real test suite** green + CI gate blocks broken deploys.
@@ -1533,6 +1606,14 @@
   `AIRouter.routeRaced` + a `lastResort` provider flag; consumers (SDA text path, professionals engine)
   switched to `routeRaced`. Test grown to 8 cases (chain shape + race behavior). Gate green (tsc ×2,
   2702 tests, build, boot). **Zero core-law violations open. P0 complete (100%).**
+- 2026-06-28 (Data & Backend audit): Ran a 300-component **Data & Backend** audit (6 deep-scan agents,
+  cited files verified — 19/20 real). NavBharatAI's backend is a managed-serverless Express monolith
+  (Cloud Run + Firestore + E2B); the **vast majority of the 300 are already DONE or ⬜ N/A-by-design**
+  (Kafka/Redis/RabbitMQ/connection-pools/replicas/SQL-cluster/gRPC/Saga, etc.). After deduping against
+  existing phases (P7 queue/cache, P8 tracing, P9 backup/DR, P10 CDN/KMS, P1.1 versioning, P4.1 CQRS,
+  P-SEC.1 RBAC, P-BRE.5/6/7, P-CGE.6, P-PME.9), only **7 genuinely-new actionable gaps** remained →
+  added as **PHASE P-DATA** (schema validation; durable artifact/checkpoint store; durable embedding store;
+  data retention + GDPR/DPDP deletion; OpenAPI spec; hardened file upload; data export). Doc-only.
 - Deploy after each phase (permanent law). Maintain English-only UI (permanent law).
 - 2026-06-27 (UX + PE audits): Ran 300-component **UX Engine** audit → found 10 gaps (4 HIGH, 4 MED, 2 LOW).
   Already-strong: theme, PWA, Ctrl+K, onboarding modal, toast, AI Suggestions, LiveCollaboration. MISSING:

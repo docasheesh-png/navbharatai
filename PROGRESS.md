@@ -4902,6 +4902,28 @@ artificial-bloat run correctly exits non-zero. CI/tooling (no user surface) → 
 AppKnowledgeBase entry.
 Files: scripts/bundleBudget.mjs, tests/bundleBudget.test.ts, package.json, .github/workflows/ci.yml, UPGRADE_v3.0.md.
 
+## 2026-06-28 — ROOT CAUSE: v3.0 "infinite loading then stop" on even a simple app
+
+Forensic (parallel agent): two converging server-side causes.
+
+1) CRITICAL — Sandbox.create()/connect() in E2BActuator.getSandbox() were awaited with NO
+   request-level timeout and no abort. The e2b SDK's timeoutMs is the sandbox LIFETIME, not a
+   connect-request timeout. So a slow/throttled/misconfigured E2B made ensureWorkspace HANG
+   before any build event was emitted → the UI showed an endless spinner ("infinite loading")
+   until the SDK eventually errored far later → "stop". Fix: SANDBOX_CREATE_TIMEOUT_MS (default
+   45s, env AGENTV3_SANDBOX_CREATE_TIMEOUT_MS) + a withTimeout() wrapper around every
+   create/connect, so a slow sandbox THROWS and the route's ensureWorkspace try/catch surfaces
+   an honest "sandbox unavailable" instead of hanging. 3 unit tests for withTimeout.
+
+2) HIGH (regression from #511 Claude-first) — ClaudeClient retries a single overloaded turn up
+   to 5× with exponential backoff (≈30-60s). Since #511 made Claude LEAD every build turn, an
+   overloaded Anthropic account stalled each turn for tens of seconds = "stuck midway". Fix:
+   bound the build-path Claude runners to maxRetries 2 (env AGENTV3_BUILD_CLAUDE_RETRIES), so a
+   Claude-led turn falls through to Gemini/Vertex in a few seconds instead. Applied to the
+   build chain Claude + Haiku backstop + Claude-only path + the Grok-plan Claude fallback.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2867/2867 PASS, boot:check PASS.
+
 ## 2026-06-28 — P-BRE.3 Structured Logging (build-correlation core) DONE
 
 New src/server/logger.ts: dependency-free structured Logger (no Pino/Winston) emitting one

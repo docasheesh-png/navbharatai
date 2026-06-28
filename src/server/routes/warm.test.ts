@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { warmStep, runWarmup } from './warm';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { warmStep, runWarmup, getWarmReport, __resetWarmCache } from './warm';
 
 describe('warm (P3.3 keep-warm)', () => {
   describe('warmStep', () => {
@@ -16,16 +16,18 @@ describe('warm (P3.3 keep-warm)', () => {
       expect(s.ok).toBe(true);
     });
 
-    it('reports ok:false + the error for a step that throws (never propagates)', async () => {
-      const s = await warmStep('boom', () => { throw new Error('kaboom'); });
+    it('reports ok:false for a step that throws (never propagates; generic error, no raw detail)', async () => {
+      const s = await warmStep('boom', () => { throw new Error('kaboom-secret-path'); });
       expect(s.ok).toBe(false);
-      expect(s.error).toBe('kaboom');
+      // Public marker only — the raw message must NOT be disclosed (it goes to server logs).
+      expect(s.error).toBe('failed');
+      expect(s.error).not.toContain('secret');
     });
 
     it('reports ok:false for a rejected async step', async () => {
       const s = await warmStep('reject', async () => { throw new Error('nope'); });
       expect(s.ok).toBe(false);
-      expect(s.error).toBe('nope');
+      expect(s.error).toBe('failed');
     });
   });
 
@@ -50,6 +52,28 @@ describe('warm (P3.3 keep-warm)', () => {
       const report = await runWarmup();
       const names = report.steps.map((s) => s.step);
       expect(names).toEqual(expect.arrayContaining(['router:free', 'router:pro', 'router:professional']));
+    });
+  });
+
+  describe('getWarmReport throttle (anti cost-amplification)', () => {
+    beforeEach(() => { __resetWarmCache(); });
+
+    it('first call runs the warmup (cached:false), an immediate second call returns cached:true', async () => {
+      const first = await getWarmReport();
+      expect(first.cached).toBe(false);
+      expect(first.warm).toBe(true);
+      const second = await getWarmReport();
+      expect(second.cached).toBe(true);
+      // Same report content served from cache (no re-run within the throttle window).
+      expect(second.steps.length).toBe(first.steps.length);
+    });
+
+    it('re-runs once the throttle window has elapsed (simulated via the now param)', async () => {
+      await getWarmReport(1_000);            // first run at t=1s
+      const cached = await getWarmReport(5_000);   // within 30s → cached
+      expect(cached.cached).toBe(true);
+      const rerun = await getWarmReport(1_000 + 31_000); // >30s later → re-run
+      expect(rerun.cached).toBe(false);
     });
   });
 });

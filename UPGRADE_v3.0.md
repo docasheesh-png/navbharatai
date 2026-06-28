@@ -53,7 +53,7 @@
 | P0 | Core-Law Violations | Breaks your own permanent rules | ✅ Complete | 100% |
 | P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ✅ Complete | 100% |
 | P2 | Resilience & Observability | See + survive failures | ✅ Complete | 100% |
-| P3 | Scale & Frontend Health | Grow without rewrites | 🔄 In Progress | 25% |
+| P3 | Scale & Frontend Health | Grow without rewrites | 🔄 In Progress | 50% |
 | P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 25% |
 | P5 | Hygiene & Hardening | Remove rot, close small holes | ⏳ Pending | 0% |
 | **P6** | **IaC & Provisioning** | Reproducible, version-controlled infra | ⏳ Pending | 0% |
@@ -264,10 +264,23 @@
       production `vite build` ✅ · `node --check public/sw.js` ✅ (SW emitted to `dist/sw.js` with the new logic).
 - **Files:** `public/sw.js`, `src/lib/offlineQueue.ts` (+ `.test.ts`), `src/main.tsx`.
 
-### P3.3 — Scalability / HA  🟡 PARTIAL
-- [ ] Keep `min-instances=0` (budget), but add a lightweight keep-warm ping for PRO/SDA endpoints.
-- [ ] Evaluate multi-region readiness (config only; no spend until needed).
-- **Files:** `cloudbuild.yaml`.
+### P3.3 — Scalability / HA  ✅ DONE (2026-06-28)
+- [x] Keep-warm: new `GET /api/warm` (`src/server/routes/warm.ts`) pre-warms the heavy PRO/SDA lazy singletons —
+      the 3 AI router universes + env-only health, the SDA clinical KB + `sda_chat` app-context, the Gemini SDK
+      client, and the Firestore admin client (via light reads on UserCost/ProviderState/Log/Metrics stores).
+      **Billing-safe: constructs client objects ONLY — never a real billed model call** (verified by an adversarial
+      review: a warm-traffic Anthropic/Vertex/Gemini ping would spend NavBharatAI's own account — explicitly avoided).
+      Hit by an external Cloud Scheduler so `min-instances=0` stays (no idle billing); an in-app self-ping would be
+      wrong (keeps an instance alive 24/7 and still doesn't warm the truly-cold request).
+- [x] Hardened from the adversarial review: the unauthenticated endpoint **throttles** the real warmup to once per
+      30s (cached report served to a flood at ~zero cost — anti cost-amplification), returns **generic per-step
+      error markers** (no internal detail disclosed; full detail → server logs), and ALWAYS returns 200.
+- [x] Multi-region readiness assessed (config only, no spend): `docs/SCALABILITY.md` §2 — substantially ready
+      (stateless container, Firestore-backed state, cross-instance cooldown sync); documents what a 2nd region needs.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2813/2813 ✅ (8 new) ·
+      server boots + LIVE check: `/api/warm` → 200, 13/13 steps ok; 2nd call `cached:true` (throttle holds); no raw
+      error leakage. Discovery + adversarial-review run as multi-agent workflows.
+- **Files:** `src/server/routes/warm.ts` (+ `.test.ts`), `server.ts`, `docs/SCALABILITY.md`, `cloudbuild.yaml`.
 
 ### P3.4 — Real CDN / Edge Caching  ❌ MISSING
 - [ ] Front static assets with a CDN (Cloudflare / Cloud CDN) instead of browser cache only.

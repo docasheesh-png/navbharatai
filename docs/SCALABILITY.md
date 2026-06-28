@@ -18,6 +18,12 @@ lazy singletons — **constructing client objects only, never making a real bill
 and returns an honest per-step report (`{ warm, serverReady, steps:[{step,ok,ms}], okCount, failCount }`),
 always `200`.
 
+Because the endpoint is unauthenticated, the actual warmup is **throttled** to run at most
+once per 30s; a flood of requests is served the last cached report (`cached:true`) at ~zero
+cost (no Firestore reads, no re-build). The scheduler's 5-minute cadence always triggers a
+fresh run. Per-step failures are reported as a generic `failed` marker — full detail goes to
+the server logs, never the public response.
+
 What it warms:
 - All three AI router universes (`free` / `pro` / `professional`) + their env-only health checks.
 - The SDA clinical knowledge base + the `sda_chat` app-context index.

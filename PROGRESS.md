@@ -4658,3 +4658,32 @@ VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2805/2805 PASS (9 ne
 production vite build OK, node --check public/sw.js OK (dist/sw.js has new logic).
 Runtime resilience (no new navigable surface) → no AppKnowledgeBase entry.
 Files: public/sw.js, src/lib/offlineQueue.ts (+.test.ts), src/main.tsx, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P3.3 Scalability/HA DONE (keep-warm, ultracode workflows) (Phase P3 → 50%)
+
+New GET /api/warm (src/server/routes/warm.ts) pre-warms the heavy PRO/SDA lazy
+singletons: 3 AI router universes + env-only health, SDA clinical KB + sda_chat
+app-context, Gemini SDK client, Firestore admin client (light reads on UserCost/
+ProviderState/Log/Metrics). BILLING-SAFE: constructs client objects ONLY, never a real
+billed model call (a warm-traffic Anthropic/Vertex/Gemini ping would spend NavBharatAI's
+OWN account — explicitly avoided). External Cloud Scheduler hits it → min-instances=0
+stays. Self-ping rejected (keeps instance alive 24/7, doesn't warm the cold request).
+
+Built with ultracode multi-agent workflows:
+- Discovery workflow (6 agents): mapped every heavy lazy-init singleton + multi-region
+  readiness → exact billing-safe warm design.
+- Adversarial review workflow (38 agents, 4 lenses → verify): confirmed billing-safety
+  end-to-end AND surfaced 3 real issues, all fixed:
+  * CRITICAL unauthenticated endpoint had no throttle → cost-amplification. FIX: warmup
+    runs at most once/30s; a flood gets the cached report (cached:true) at ~zero cost;
+    in-flight run shared (a burst = one warmup). Scheduler's 5-min cadence always re-runs.
+  * HIGH raw error messages in public response → info disclosure. FIX: generic 'failed'
+    marker in the response; full detail → server logs (console.warn → Cloud Logging).
+  * MEDIUM Firestore cost undocumented → added cost-model comment (capped by throttle).
+Always returns 200. docs/SCALABILITY.md: keep-warm setup (Cloud Scheduler gcloud cmd) +
+multi-region readiness (config-only). cloudbuild.yaml: doc note.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2813/2813 PASS (8 new),
+server boots, LIVE: /api/warm 200 13/13 ok, 2nd call cached:true (throttle), no raw error
+leak. Admin/ops endpoint → no AppKnowledgeBase entry.
+Files: routes/warm.ts (+.test.ts), server.ts, docs/SCALABILITY.md, cloudbuild.yaml, UPGRADE_v3.0.md.

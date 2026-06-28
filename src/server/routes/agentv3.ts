@@ -73,6 +73,7 @@ import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/Op
 import { BuildDiagnostics, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { runOneShot, classifyForOneShot, oneShotEnabled } from '../AgentV3/OneShotBuilder';
 import { buildProjectContext, buildRunningSummary, formatPlanState } from '../AgentV3/ProjectContext';
+import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { billedAmountUsd } from '../AgentV3/pricing';
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
@@ -1516,8 +1517,19 @@ export function registerAgentV3Routes(app: Express): void {
       // save at build-end (below) is still the authoritative snapshot; this is the
       // mid-build safety net. GitHub push still happens only after 100% completion.
       let _progressPersistTimer: ReturnType<typeof setTimeout> | null = null;
+      // PLAN SYNC: drive the plan list's spinner + green ticks from REAL build activity, since the
+      // model (Haiku especially) does not reliably call update_todo to advance statuses. Each file
+      // written advances the progress; the build's final success marks every item done (below).
+      let planSteps = 0;
       const onFileWrite = (path: string, content: string) => {
         writtenFiles.set(path, content);
+        try {
+          const cur = state.snapshot().todos;
+          if (cur.length > 0) {
+            planSteps += 1;
+            state.setTodos(computePlanProgress(cur, planSteps, false));
+          }
+        } catch { /* plan progress is best-effort — never affects the build */ }
         if (_progressPersistTimer) clearTimeout(_progressPersistTimer);
         _progressPersistTimer = setTimeout(() => {
           if (writtenFiles.size > 0) {
@@ -1749,6 +1761,9 @@ export function registerAgentV3Routes(app: Express): void {
         const todos = state.snapshot().todos;
         if (todos.length > 0) {
           buildPrompt = `${prompt}\n\nApproved plan:\n${todos.map((t) => `- ${t.title}`).join('\n')}`;
+          // PLAN SYNC: put the spinner on the first item the moment the build starts (before the
+          // first file is written), so the plan is never frozen at all-pending.
+          state.setTodos(computePlanProgress(todos, 0, false));
         }
       }
 
@@ -1834,6 +1849,14 @@ export function registerAgentV3Routes(app: Express): void {
       }
       // result is always set here (OneShot, escalation, or the loop above).
       if (!result) result = await runner.run(buildPrompt);
+
+      // PLAN SYNC: reconcile the plan list with the real outcome — a successful build means the
+      // plan is accomplished, so mark every item done (green ticks); a failed/partial build keeps
+      // the progress reached. Best-effort — never affects the build result.
+      try {
+        const finalTodos = state.snapshot().todos;
+        if (finalTodos.length > 0) state.setTodos(computePlanProgress(finalTodos, planSteps, result.ok));
+      } catch { /* plan progress is best-effort */ }
 
       // SAFETY NET (the "fake build" fix): if a build/edit was expected to produce files but
       // produced ZERO — the cheap model replied ("I'm preparing a plan…") instead of building —

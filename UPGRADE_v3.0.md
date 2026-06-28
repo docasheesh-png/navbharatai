@@ -64,6 +64,7 @@
 | **P-PME** | **Project Management Engine Gaps** | Cross-session memory, release notes, debt tracker, AI estimator | ⏳ Pending | 0% |
 | **P-DEV** | **Dev Environment Gaps** | LSP navigation, real debugger, crash recovery, merge editor, pkg manager | ⏳ Pending | 0% |
 | **P-BRE** | **Build & Runtime Engine Gaps** | Tracing, incremental builds, structured logs, smoke tests, remote cache | ⏳ Pending | 0% |
+| **P-TQA** | **Testing & QA Engine Gaps** | Code coverage gate, visual regression, load tests, prompt regression, bundle budget | ⏳ Pending | 0% |
 
 ---
 
@@ -271,6 +272,157 @@
 - [ ] **Chaos + load testing:** k6/Locust load tests + a basic fault-injection check in CI.
 - **Acceptance:** static assets edge-cached; keys in KMS; a load test runs in CI.
 - **Files:** infra config, `server.ts`, `.github/workflows/`.
+
+---
+
+## 🟩 PHASE P-TQA — TESTING & QUALITY ASSURANCE ENGINE GAPS
+> From the 300-component Testing & QA Engine audit (2026-06-28). Already-strong items not listed.
+> Only PARTIAL → Full and MISSING items, priority-ordered.
+> Scope note: gRPC testing, SQL injection (Firestore), k8s/Helm/Terraform/CloudFormation validation,
+> device farm/browser farm, HIPAA/ISO, message queue testing, microservices testing — all ⬜ N/A by design.
+> Only gaps relevant to an AI app maker and its generated-app quality are captured.
+
+### ✅ Testing & QA Already Strong (do not redo)
+- **QualityEvaluationEngine**: 5 parallel evaluators — BuildEvaluator.ts (npm/pnpm/yarn build check),
+  LintEvaluator.ts (ESLint + package.json validation), RuntimeEvaluator.ts (preview HTTP health),
+  SecurityEvaluator.ts (secret patterns, XSS, auth checks), ArchitectureEvaluator.ts (DFS cycle detection,
+  unresolved imports, import violations); QualityScorer.ts (100-pt weighted: Build 25% + Runtime 25% +
+  Security 20% + Lint 15% + Architecture 15%).
+- **IDE Test Components**: TestPanel.tsx (UI test runner: pending/running/pass/fail/skip states, duration
+  measurement, iframe-based execution), AITestingSuite.tsx (AI code-aware test generation — 49 patterns
+  across unit/integration/edge case/security categories: form submission, input handling, API calls,
+  error handling, XSS check, auth check, localStorage, special characters).
+- **API Testing**: APITester.tsx (full REST client: GET/POST/PUT/DELETE/PATCH, request history, params, headers, auth).
+- **Health & Performance**: AppHealthMonitor.tsx (8 metrics: uptime/latency/CPU/memory/requests/errors,
+  incident tracking, 24h trend), PerformanceAnalyzer.tsx (HTML analysis, Core Web Vitals link, a11y hints).
+- **Security Scanning**: SecurityScan.tsx (SAST, 6-phase scanning, severity levels), AICodeReview.tsx
+  (bugs/perf/security/accessibility detection).
+- **Failure Analysis**: FailureClassifier.ts (14 error type classification), RootCauseAnalyzer.ts,
+  RepairPlanner.ts; DeploymentValidator.ts (release readiness checks), DeploymentAuditManager.ts.
+- **Sandbox**: SandboxManager.ts (process-based test isolation with memory limits, port manager).
+- **CI**: GitHub Actions CI (`npm ci` → typecheck frontend + server → tests → build → boot:check).
+- **Test Files**: `WorkspaceManager.test.ts` (unit), `e2e_test.ts` (E2E workflow), `validation_tests.ts`.
+
+### P-TQA.1 — Code Coverage with CI Gate  ❌ MISSING  [HIGH]
+- `QualityReport` interface mentions coverage but there is no actual coverage instrumentation.
+  `vitest.config.ts` does not exist at the repo root — tests run without coverage collection.
+  No CI step enforces a coverage threshold (e.g., "block merge if line coverage < 60%").
+- [ ] Add `vitest.config.ts` at project root with `coverage: { provider: 'v8', reporter: ['text', 'lcov'], thresholds: { lines: 60, functions: 60, branches: 50 } }`.
+- [ ] Add `npm run test:coverage` script in `package.json`.
+- [ ] Add a CI step in `.github/workflows/ci.yml` after "Test": `npm run test:coverage` — fail the step if thresholds not met.
+- [ ] Feed line/branch/function coverage numbers into `QualityScorer.ts` (currently hardcoded to 0).
+- **Files:** new `vitest.config.ts`, `package.json`, `.github/workflows/ci.yml`, `src/server/QualityEvaluationEngine/QualityScorer.ts`.
+
+### P-TQA.2 — Visual Regression Testing  ❌ MISSING  [HIGH]
+- Generated apps can have silent visual regressions (CSS change, layout shift, color contrast break) that
+  unit/integration tests don't catch. No screenshot comparison exists anywhere in the stack.
+- [ ] Add Playwright visual tests: `tests/visual/snapshot.spec.ts` — renders the preview iframe in a headless
+  browser and compares a screenshot against a stored golden image.
+- [ ] Run in CI as a separate job (`npm run test:visual`) with a pixel-diff threshold of 0.1%.
+- [ ] On diff failure: attach the diff image as a CI artifact so the developer can review.
+- [ ] Update screenshots via `npm run test:visual -- --update-snapshots`.
+- **Files:** new `tests/visual/snapshot.spec.ts`, `.github/workflows/ci.yml`, `playwright.config.ts`.
+
+### P-TQA.3 — Load / Stress Testing (k6 in CI)  ❌ MISSING  [HIGH]
+- `AppHealthMonitor.tsx` shows simulated latency metrics. `PerformanceAnalyzer.tsx` links to Lighthouse.
+  But no real load test runs against the actual server endpoints (`/api/chat`, `/api/build`, `/api/preview`).
+  Under concurrent users the app could silently degrade.
+- [ ] Add `tests/load/k6-load.js` — k6 script that sends 50 VUs × 30s of requests to `/api/chat` and
+  `/api/preview/status/:jobId`. Assert p95 latency < 2s and error rate < 1%.
+- [ ] Add a weekly/nightly CI job (not every PR — too slow) that runs k6 and posts results as a PR comment via `k6 run --out json`.
+- [ ] Feed k6 results into `AppAnalytics.tsx` "Performance" tab.
+- **Files:** new `tests/load/k6-load.js`, `.github/workflows/ci.yml` (new nightly job).
+
+### P-TQA.4 — AI Output / Prompt Regression Test Suite  ❌ MISSING  [HIGH]
+- When system prompts change (`AgentV3/systemPrompt.ts`), there is no test that verifies the AI still
+  produces correct output. A bad prompt change can silently break code generation quality for all users.
+- [ ] Add `tests/ai/prompt-regression.test.ts` — a Vitest suite of 10 "golden" build requests with expected output
+  patterns (e.g., "build a React todo app" → generated code must contain `useState`, `useEffect`, valid JSX).
+- [ ] Assert: no hallucinated imports, output parses as valid TypeScript, key components present.
+- [ ] Run in CI with a mock/stub AI provider (deterministic response — not real API call) so it's fast and free.
+- [ ] When a real prompt change is made, run against the live AI once and update golden snapshots.
+- **Files:** new `tests/ai/prompt-regression.test.ts`, new `tests/ai/mocks/aiProviderMock.ts`.
+
+### P-TQA.5 — Bundle Size Budget Enforcement  ❌ MISSING  [HIGH]
+- No CI check verifies that the frontend bundle stays within a size budget. Every new dependency silently
+  inflates the bundle. `vite build` outputs size but nothing enforces a limit.
+- [ ] Add `tests/bundle-budget.test.ts` — reads `dist/` after build, asserts: main JS chunk < 500KB gzipped,
+  total CSS < 50KB gzipped, no single chunk > 300KB.
+- [ ] Add a CI step after "Build" in `.github/workflows/ci.yml`: `npm run test:bundle`.
+- [ ] Use `bundlesize` or a custom script with `fs.statSync` + `zlib.gzipSync`.
+- **Files:** new `tests/bundle-budget.test.ts`, `package.json`, `.github/workflows/ci.yml`.
+
+### P-TQA.6 — Quality Gate (CI Merge Block on Score Threshold)  🟡 PARTIAL → full  [MED]
+- `QualityScorer.ts` computes a 0-100 quality score per build. But this score is only shown in the UI
+  (`AppHealthMonitor.tsx`) — it does NOT block a merge/deploy if quality is low.
+- [ ] Add a CI step that runs `QualityEvaluationEngine` against the built output and exits with code 1
+  if quality score < 70 (configurable via env `QUALITY_GATE_THRESHOLD`).
+- [ ] Surface the score in the PR check: "Quality Gate: 74/100 ✅" or "Quality Gate: 52/100 ❌".
+- [ ] Add `DeploymentValidator.ts` to reject deploys when score is below threshold.
+- **Files:** new `scripts/quality-gate.ts`, `.github/workflows/ci.yml`, `src/server/AppMakerLab/deployment/DeploymentValidator.ts`.
+
+### P-TQA.7 — Dependency Vulnerability Scan (Blocks, Not Warns)  🟡 PARTIAL → full  [MED]
+- `.github/workflows/ci.yml` runs `npm audit --audit-level=high` with `continue-on-error: true` — so a
+  HIGH severity CVE silently passes CI. `SecurityEvaluator.ts` does regex-based secret detection but no CVE check.
+- [ ] Remove `continue-on-error: true` from the npm audit step — HIGH severity vulnerabilities must block CI.
+- [ ] Add `npm audit --audit-level=critical` as a separate step that fails the build for CRITICAL CVEs.
+- [ ] Add `npx better-npm-audit audit` for better formatting and suppressible false-positives.
+- [ ] Integrate Dependabot (`.github/dependabot.yml`) for automated weekly PR-based dep upgrades.
+- **Files:** `.github/workflows/ci.yml`, new `.github/dependabot.yml`.
+
+### P-TQA.8 — Flaky Test Detection & Tracker  ❌ MISSING  [MED]
+- `TestPanel.tsx` tracks pass/fail per run but not flakiness across multiple runs. Tests that alternate
+  pass/fail on every run are indistinguishable from genuinely stable tests.
+- [ ] Add `FlakyTestTracker.ts`: persist test run results to Firestore `testRuns/{workspaceId}/{testId}[]`.
+  After 5+ runs, compute `flakiness_rate = failCount / totalRuns`. Flag tests with rate > 20% as flaky.
+- [ ] Show flaky badge (🟡) in `TestPanel.tsx` next to test name when `flakiness_rate > 0.2`.
+- [ ] Optionally auto-retry flaky tests up to 3 times before marking as failed.
+- **Files:** new `src/server/QualityEvaluationEngine/FlakyTestTracker.ts`, `src/components/ide/TestPanel.tsx`.
+
+### P-TQA.9 — Test Data Manager / Fixture System  🟡 PARTIAL → full  [MED]
+- `AITestingSuite.tsx` generates test data inline per test. No reusable fixture files, no faker.js-style
+  random data generator, no seeded test database. Tests are fragile because they use hardcoded strings.
+- [ ] Add `tests/fixtures/` directory with JSON fixture files per entity (user, workspace, buildJob, chatMessage).
+- [ ] Add `src/server/QualityEvaluationEngine/TestDataManager.ts` — loads fixtures, generates random-but-seeded
+  test data via `@faker-js/faker` with a fixed seed for determinism.
+- [ ] Wire `TestDataManager` into `AITestingSuite.tsx` as the data source for generated tests.
+- **Files:** new `tests/fixtures/`, new `src/server/QualityEvaluationEngine/TestDataManager.ts`,
+  `src/components/ide/AITestingSuite.tsx`.
+
+### P-TQA.10 — DAST / Runtime Security Scanning  ❌ MISSING  [MED]
+- `SecurityEvaluator.ts` performs static analysis (regex-based secrets + XSS pattern matching).
+  No dynamic security scanning of the running server — no OWASP ZAP, no nuclei scan, no header security check.
+- [ ] Add a CI step running `npx @zaproxy/zaproxy baseline scan` (or `nuclei -t http/`) against a
+  test-mode server instance, checking for missing security headers (CSP, HSTS, X-Frame-Options).
+- [ ] Add a Helmet.js configuration test: assert that all required security headers are present in the server's HTTP response in `tests/security/headers.test.ts`.
+- [ ] Surface DAST results in `SecurityScan.tsx` alongside SAST findings.
+- **Files:** new `tests/security/headers.test.ts`, `.github/workflows/ci.yml` (new security job),
+  `src/components/ide/SecurityScan.tsx`.
+
+### P-TQA.11 — WCAG Accessibility Automated Testing (axe-core)  ❌ MISSING  [LOW]
+- `PerformanceAnalyzer.tsx` shows manual accessibility hints. `AICodeReview.tsx` flags some a11y patterns.
+  But no automated WCAG 2.1 AA check runs against rendered app output in CI.
+- [ ] Add `tests/a11y/wcag.spec.ts` — Playwright test that renders the preview iframe and runs `axe-core`
+  via `@axe-core/playwright`. Assert zero critical violations.
+- [ ] Add to the visual testing CI job (shares Playwright setup with P-TQA.2).
+- **Files:** new `tests/a11y/wcag.spec.ts`, `playwright.config.ts`, `.github/workflows/ci.yml`.
+
+### P-TQA.12 — Mutation Testing Engine  ❌ MISSING  [LOW]
+- No mutation testing to verify that the test suite actually catches real bugs. A test suite can have
+  100% line coverage but miss all logical errors if assertions are weak.
+- [ ] Add `Stryker` (mutation testing for TypeScript): `stryker.config.json` targeting `src/server/QualityEvaluationEngine/`.
+- [ ] Run mutation testing monthly (not per-PR — expensive) and track mutation score over time.
+- [ ] Mutation score target: > 60% for `QualityEvaluationEngine/` core files.
+- **Files:** new `stryker.config.json`, `package.json`.
+
+### P-TQA.13 — MTTD / MTTR Tracking  ❌ MISSING  [LOW]
+- No tracking of Mean Time to Detect (how long from bug introduction to test failure detection) or
+  Mean Time to Repair (how long from failure detection to passing build).
+- [ ] Add `QAMetricsCollector.ts`: on build failure, record `failedAt` timestamp in Firestore. On next
+  passing build, record `resolvedAt`. Compute `mttr = resolvedAt - failedAt`.
+- [ ] Compute MTTD: compare `deployedAt` (when the bad commit deployed) to `failedAt` (when tests caught it).
+- [ ] Show MTTD/MTTR as KPI cards in `AppAnalytics.tsx`.
+- **Files:** new `src/server/QualityEvaluationEngine/QAMetricsCollector.ts`, `src/components/ide/AppAnalytics.tsx`.
 
 ---
 
@@ -1170,6 +1322,8 @@
     real debugger (breakpoints + call stack), merge conflict resolver, real package manager (P-DEV.1–5).
 19. **Build & Runtime hardened** — distributed tracing, incremental builds, structured logging,
     post-build smoke tests, remote build cache (P-BRE.1–5).
+20. **Testing & QA baseline** — code coverage CI gate (≥60%), visual regression tests, bundle size
+    budget, vulnerability scan blocks (not warns), quality gate on merge (P-TQA.1–2, P-TQA.5–7).
 
 ---
 
@@ -1221,6 +1375,24 @@
   MED gaps: PII detection (general), test generation, human-in-the-loop gate, decision trace, abuse detection.
   LOW gaps: log/stack trace parser, model evaluation engine, multimodal/vision (future scope).
   Added as **PHASE P-AI**.
+- 2026-06-28 (TQA audit): Ran 300-component **Testing & QA Engine** audit → found 13 gaps (5 HIGH, 5 MED, 3 LOW).
+  Scope note: gRPC, SQL injection (Firestore), k8s/Helm/Terraform, device farm/browser farm, HIPAA/ISO,
+  message queue testing, microservices testing — all ⬜ N/A by design.
+  Already-strong (~40%): QualityEvaluationEngine (5 evaluators: Build/Lint/Runtime/Security/Architecture),
+  QualityScorer.ts (100-pt weighted score), TestPanel.tsx (UI runner: pending/running/pass/fail/skip + duration),
+  AITestingSuite.tsx (AI test gen: 49 patterns in 4 categories), APITester.tsx (full REST client),
+  AppHealthMonitor.tsx (8 metrics, incident tracking), PerformanceAnalyzer.tsx (HTML analysis + a11y hints),
+  SecurityScan.tsx (SAST 6-phase), AICodeReview.tsx, FailureClassifier.ts (14 types), RootCauseAnalyzer.ts,
+  DeploymentValidator.ts, SandboxManager.ts (process isolation), GitHub Actions CI (typecheck+test+build+boot).
+  HIGH gaps: no code coverage instrumentation (vitest.config.ts missing, no CI threshold), no visual regression
+  tests (no Playwright screenshot comparison), no real load testing (AppHealthMonitor shows simulated metrics
+  only), no prompt regression test suite (system prompt changes can silently break code gen quality), no bundle
+  size budget enforcement in CI.
+  MED gaps: QualityScorer score not blocking CI (computed but not enforced), npm audit has continue-on-error=true
+  (HIGH CVEs pass silently), no flaky test tracker (pass/fail tracked per run, not across runs), no test fixture
+  system (test data hardcoded in AITestingSuite), no DAST/runtime security scan (only SAST regex).
+  LOW gaps: no axe-core WCAG automated testing, no mutation testing (Stryker), no MTTD/MTTR tracking.
+  Added as **PHASE P-TQA**.
 - 2026-06-28 (BRE audit): Ran 300-component **Build & Runtime Engine** audit → found 13 gaps (5 HIGH, 5 MED, 3 LOW).
   Scope note: native compilers (Java/Go/Rust/C/C++), LLVM, Webpack/Parcel/Rspack, K8s/Podman/Hypervisor/GPU,
   Deno/Bun/JVM/.NET/PHP — all ⬜ N/A by design (managed Node.js + Cloud Run + E2B stack).

@@ -1848,6 +1848,71 @@
 
 ---
 
+# 🗺️ REMAINING AUDIT BACKLOG — un-audited domains (self-identified, 2026-06-28)
+> The admin's category lists are exhausted. This backlog is **self-generated** by analyzing `UPGRADE_v3.0.md` +
+> the v3 codebase: the major product/platform pillars that have **real surfaces in the code but NO dedicated audit
+> phase yet**. Each is a candidate for the same loop used for every phase above (300-component deep-scan → dedup →
+> distilled phase). Listed by priority. "Already partial" = where existing phases already touch it (so a future
+> audit only adds the genuinely-new gaps, as before).
+>
+> **Coverage so far (24 phase-families, DONE-as-audit):** P0–P10 (architecture + infra), P-SEC, P-TQA, P-BRE,
+> P-DEV, P-PME, P-CGE, P-AI, P-UX, P-PE, P-DATA, P-DESIGN, P-DEPLOY, P-COLLAB, P-MON, P-ORCH.
+
+### 🔴 P-PAY — Billing, Payments & Monetization  [HIGH — revenue engine, NOT yet a phase]
+> Code: `routes/{payment,createOrder,wallet,products}.ts`, `lib/{payments,UserCostStore,OnboardingCreditStore,UsdInrRate}.ts`, `MonetizationWizard.tsx`, `CostEstimator.tsx`, `BillingPanel.tsx`, `CheckoutButton.tsx`. Cashfree + wallet + Vishwakarma pass exist; v3.0 markup billing exists. Never audited as a domain.
+- Sub-areas to audit: payment-provider abstraction (Cashfree-only → add Razorpay/Stripe), subscription/recurring billing, plan/tier manager, usage-based metering accuracy, invoice/receipt generation, refunds/chargebacks/disputes, dunning/failed-payment retry, tax/GST handling, multi-currency, coupons/promo/referral credits, wallet ledger integrity + reconciliation, revenue analytics, fraud/abuse on payments, free-trial/credit-grant logic, proration, billing webhooks idempotency, PCI-scope minimization, **monetization for end-users' generated apps** (let users charge for their apps).
+
+### 🔴 P-IDENT — Identity, Auth, Accounts & Onboarding  [HIGH — partial via P-SEC.1/P-SEC.3/P-COLLAB.6/P-UX.8]
+> Code: `routes/{auth,firebaseAuth,githubAuth,profile}.ts`, `lib/{authMiddleware,UserProfileStore}.ts`, `AuthComponent.tsx`, OTP. RBAC→P-SEC.1, MFA→P-SEC.3, SSO→P-COLLAB.6, forgot-password→P-UX.8 already cover slices.
+- Sub-areas: account lifecycle (create/verify/suspend/delete + GDPR), session management + device/session list + revoke, email verification, phone-OTP hardening, social-login expansion, account linking/merge, profile completeness, consent/ToS acceptance ledger, impersonation (admin support) with audit, account recovery flows, anomalous-login detection, bot/signup-abuse defense, onboarding funnel + activation, per-account data export/portability.
+
+### 🟠 P-SANDBOX — Sandbox, Code Execution & Runtime Isolation  [HIGH — core to a code-gen product]
+> Code: `EngineerAI/actuators/{E2BActuator,DockerActuator,LocalActuator,VfsActuator}.ts`, `PreviewRunner/*`, `runtime/ServerContainerRuntime.ts`, `infra/e2b/`. P-SEC.11 (seccomp) touches it.
+- Sub-areas: sandbox lifecycle (warm pool, reuse, TTL, cleanup), per-sandbox resource limits (CPU/mem/disk/time), network egress policy from sandboxes, sandbox cost tracking + budget caps, concurrency/queueing of sandboxes, multi-runtime support (more languages), snapshot/restore of sandbox state, file-size/output caps, secure secret injection into sandboxes, sandbox escape hardening, dev-server port management at scale, preview reliability (cold-start, 502s), E2B↔Docker↔Local parity tests.
+
+### 🟠 P-INTEG — Integrations, Connectors, Plugins & API Marketplace  [MED-HIGH]
+> Code (UI mostly): `APIMarketplace.tsx`, `ExtensionMarket.tsx`, `PluginSystem.tsx`, `APITester.tsx`, `BackendProvisioner.ts` (Supabase/Firebase/Neon scaffolds). Largely UI without backend wiring.
+- Sub-areas: third-party OAuth connector framework, secrets/credential vault per integration, connector registry + lifecycle, plugin/extension execution sandbox + permissions, webhook ingress framework, outbound API call governance/rate-limit, prebuilt connectors (Stripe/Slack/Sheets/Notion/email/SMS), BYO-backend (Supabase/Firebase/Neon) wiring depth, marketplace publish/install/version/review, plugin SDK + manifest, integration health monitoring, data-mapping/transform between systems.
+
+### 🟠 P-MOBILE — Mobile, Cross-Platform & App Distribution  [MED]
+> Code: `APKBuilder.tsx`, `AppStorePublisher.tsx`, `remote-keyboard/` (Android), `VirtualKeyboard.tsx`, PWA. P-DEPLOY.4 (store automation) + P-DESIGN (responsive) touch it.
+- Sub-areas: real APK/AAB build pipeline (Capacitor/TWA) + signing, iOS build path, Play/App-Store submission automation (P-DEPLOY.4), push notifications (FCM/APNs) for generated apps, deep-linking, native device APIs (camera/geo/biometrics) in generated apps, offline-first generated apps, app-update/OTA, mobile preview fidelity, responsive→native parity, remote-keyboard companion hardening, store-listing/ASO assets generation.
+
+### 🟡 P-GROWTH — Growth, SEO, Marketing & Retention  [MED]
+> Code: `SEOOptimizer.tsx`, `OnboardingCreditStore.ts`, `DonationPanel.tsx`; P-UX (tour/NPS/consent) touches it.
+- Sub-areas: referral/invite-reward program, credit-grant/promo engine, SEO for generated apps (meta/sitemap/OG/schema), SEO for the platform itself, email lifecycle/drip campaigns, in-app announcements/changelog, retention nudges + re-engagement, A/B experimentation framework (ties P-PE.5/P-MON), virality (share-your-app), landing/template gallery SEO, waitlist/launch tooling, attribution/UTM analytics (ties P-MON.1).
+
+### 🟡 P-VERTICAL — Vertical AI Products (Professionals, Doctor AI, etc.)  [MED — product breadth/quality]
+> Code: `professionals/` (70+ configs + engine + knowledge), `routes/sda.ts` (Doctor AI), `game/`, `repoAnalyst/`. The isolated `professional` router (P0.1) exists, but per-vertical *quality/coverage* never audited.
+- Sub-areas: knowledge-base depth + freshness per vertical, per-vertical eval/quality scoring, citation/grounding per vertical, safety/disclaimer correctness (esp. medical/legal/financial), clinical-tool/calculator correctness (SDA), vertical-specific UX, new-vertical onboarding framework, vertical analytics/usage, multilingual vertical content, regulatory compliance per vertical (medical=DPDP/clinical, finance=advisory disclaimers), vertical templates, evaluations against domain benchmarks.
+
+### 🟡 P-DEVPLAT — Public Developer Platform (API / SDK / CLI / Webhooks)  [MED — net-new]
+> No public API/SDK/CLI today; everything is internal. Net-new pillar for an "app maker" that wants an ecosystem.
+- Sub-areas: public REST/GraphQL API + versioning (ties P-DATA.5 OpenAPI), API keys/scopes/quotas for external devs, SDKs (JS/Python), CLI for build/deploy, public webhooks (outbound events), rate-limit + billing for API usage, developer docs portal, sandbox/test keys, usage dashboard for API consumers, terms/abuse for API, embeddable widgets/SDK for generated apps.
+
+### 🟢 P-SUPPORT — Support, Feedback & Customer Success  [LOW-MED]
+> Code: `ReportProblemComponent.tsx`, `ReportsListView.tsx`, admin tooling. Feedback collection also in P-COLLAB.3/P-UX.6.
+- Sub-areas: in-app support ticketing, bug-report capture w/ diagnostics + repro bundle, feedback triage + routing, status page / incident comms, help center / docs search, in-app contextual help, AI support assistant (over AppKnowledgeBase), SLA on support, CSAT/NPS pipeline (ties P-UX.6), admin support console + impersonation (ties P-IDENT), churn-risk + proactive outreach.
+
+### 🟢 P-CONTENT — Content, Knowledge, Docs & Education  [LOW-MED]
+> Code: `AppContext/AppKnowledgeBase.ts`, professionals knowledge, README/docs generators. Self-awareness KB exists.
+- Sub-areas: AppKnowledgeBase coverage gate (the CLAUDE.md sync rule — automate it), user-facing docs/tutorials, interactive learning/sample projects, in-product onboarding content, template-with-explanation, AI "explain this app", changelog/release-notes surface (ties P-PME.2), localized help content, knowledge freshness/version, community templates/showcase.
+
+### 🟢 P-TRUST — Trust, Safety, Abuse & Content Moderation  [MED — partial via P-SEC/P-AI]
+> Partial: P-AI (moderation/jailbreak — P-AI.10), P-SEC (abuse/bot), payment-fraud (P-PAY). No unified trust-&-safety domain.
+- Sub-areas: generated-content moderation (apps that violate policy), prompt/abuse pattern detection at scale, account/payment fraud scoring, takedown/report workflow for published apps, rate-abuse + quota-abuse defense, malicious-app/phishing detection in generated output, age/region policy gating, copyright/IP checks on generated assets, trust score per account, safety incident audit + appeals.
+
+### ⚪ P-PERF — Performance & Cost Efficiency (platform-wide)  [LOW — partial via P3/P10/P-BRE]
+> Partial: P3 (frontend health), P10 (edge/load), P-BRE (build speed), P-MON (FinOps). No unified perf/cost-efficiency pass.
+- Sub-areas: end-to-end latency budget (request→AI→preview), bundle-size budget enforcement (ties P-TQA), AI cost-per-build reduction, caching strategy across layers, cold-start reduction (Cloud Run min-instances=0 trade-off), DB read-cost optimization (Firestore), image/asset optimization (ties P-DESIGN.4), streaming/perceived-perf tuning, perf regression gate in CI, per-feature cost attribution.
+
+### 📋 Backlog summary
+- **12 un-audited domains** identified: P-PAY, P-IDENT, P-SANDBOX, P-INTEG, P-MOBILE, P-GROWTH, P-VERTICAL, P-DEVPLAT, P-SUPPORT, P-CONTENT, P-TRUST, P-PERF.
+- Highest-value net-new: **P-PAY** (revenue), **P-IDENT** (accounts/security), **P-SANDBOX** (core execution), **P-INTEG** (ecosystem).
+- Each can be processed with the same loop: deep-scan 300 components → dedup vs existing phases → distilled phase → PR → CI → merge.
+
+---
+
 ## ✅ DEFINITION OF "ROCK-SOLID" (exit criteria for this roadmap)
 1. All **three universes** isolated and provably correct (FREE no-Claude, SDA Grok-first, PRO Claude-first).
 2. **Real test suite** green + CI gate blocks broken deploys.
@@ -1951,6 +2016,16 @@
   cluster/multi-cloud/ERP/CRM/BPM) or already tracked (P-AI/P1.3/P1.4/P2.3/P7/P4.2/P-MON/P-BRE/P9). Only **3
   genuinely-new gaps** remained → added as **PHASE P-ORCH** (cron/scheduled/recurring jobs engine — also unblocks
   P-DATA.4 purge & P9 backup; user-defined automation/workflow builder; saga/compensation for multi-step pipelines).
+  Doc-only.
+- 2026-06-28 (Remaining Audit Backlog, self-generated): The admin's category lists are exhausted. Analyzed
+  the full `UPGRADE_v3.0.md` (24 audited phase-families) + the v3 codebase (routes/components/dirs) to identify
+  the major product/platform pillars that have **real code surfaces but no dedicated audit phase yet**. Added a
+  capstone **REMAINING AUDIT BACKLOG** section with **12 un-audited domains**: P-PAY (billing/monetization),
+  P-IDENT (identity/auth/accounts), P-SANDBOX (code execution/isolation), P-INTEG (integrations/plugins/marketplace),
+  P-MOBILE (mobile/distribution), P-GROWTH (SEO/retention/referrals), P-VERTICAL (professionals/Doctor-AI quality),
+  P-DEVPLAT (public API/SDK/CLI), P-SUPPORT (support/feedback), P-CONTENT (docs/knowledge/education), P-TRUST
+  (trust & safety/abuse/moderation), P-PERF (perf & cost efficiency). Each is a candidate for the standard loop
+  (300-component deep-scan → dedup → distilled phase). Highest-value net-new: P-PAY, P-IDENT, P-SANDBOX, P-INTEG.
   Doc-only.
 - Deploy after each phase (permanent law). Maintain English-only UI (permanent law).
 - 2026-06-27 (UX + PE audits): Ran 300-component **UX Engine** audit → found 10 gaps (4 HIGH, 4 MED, 2 LOW).

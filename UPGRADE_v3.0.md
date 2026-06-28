@@ -52,7 +52,7 @@
 |-------|------|-----|--------|---|
 | P0 | Core-Law Violations | Breaks your own permanent rules | ✅ Complete | 100% |
 | P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ✅ Complete | 100% |
-| P2 | Resilience & Observability | See + survive failures | ⏳ Pending | 0% |
+| P2 | Resilience & Observability | See + survive failures | 🔄 In Progress | 25% |
 | P3 | Scale & Frontend Health | Grow without rewrites | ⏳ Pending | 0% |
 | P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 25% |
 | P5 | Hygiene & Hardening | Remove rot, close small holes | ⏳ Pending | 0% |
@@ -172,11 +172,24 @@
 ## 🟡 PHASE P2 — RESILIENCE & OBSERVABILITY
 > "Agar break ho to dikhe, aur recover ho."
 
-### P2.1 — Distributed Tracing + Metrics  🟡 PARTIAL
-- **Now:** `ObservabilityManager.ts` + `console.log` only. No spans, no external sink.
-- [ ] Add OpenTelemetry tracing (request → provider → job spans) exported to Cloud Trace.
-- [ ] Emit metrics (latency, error rate, token spend) to Cloud Monitoring.
-- **Files:** `src/server/ObservabilityManager.ts`, `server.ts`, `AIRouter.ts`.
+### P2.1 — Distributed Tracing + Metrics  ✅ DONE (2026-06-28)
+- **Was:** `ObservabilityManager.ts` + `console.log` only. No spans, no trace tree, no sink.
+- [x] Added a real, dependency-free distributed tracer (`src/server/observability/Tracer.ts`): W3C trace/span ids,
+      parent→child span trees, a bounded ring buffer of recent traces, `AsyncLocalStorage` context propagation, and
+      `withSpan`/`recordChildSpan` helpers. Every tracing call is best-effort and never throws.
+- [x] **Real Cloud Trace export with no SDK / no creds:** each completed span is emitted as a Cloud Logging structured
+      line with `logging.googleapis.com/trace` (`projects/<PROJECT>/traces/<id>`) + `spanId`, which Cloud Run auto-correlates
+      into Cloud Trace. Incoming `X-Cloud-Trace-Context` is parsed so our spans join the platform's trace.
+- [x] Wired surgically (no hot-path control-flow change): a ROOT request span in `traceMiddleware` (started at entry,
+      ended on `res.finish` with status/method/path; context kept active via `runInSpan`), and an AI **provider** child
+      span emitted at the single `recordProviderLatency` chokepoint in `AIRouter.ts` (so every provider call across all
+      three universes is traced under its request).
+- [x] Metrics: new admin-gated endpoints `GET /api/observability/traces` (recent span trees) + `GET /api/observability/metrics`
+      (per-span count/error-rate/avg/p95 + per-provider circuit/latency stats). `ObservabilityManager.trackLatency` now also emits a span.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2775/2775 ✅ (16 new) ·
+      server boots + LIVE check: `/api/health` produced a real `HTTP GET /api/health` span tree readable via
+      `/api/observability/traces?admin=…`; unauthenticated → 403 ✅.
+- **Files:** `src/server/observability/Tracer.ts` (+ `.test.ts`), `src/server/routes/observability.ts`, `server.ts`, `AIRouter.ts`, `ObservabilityManager.ts`.
 
 ### P2.2 — Error Tracking (external)  ❌ MISSING
 - [ ] Wire Sentry (or Cloud Error Reporting) on both backend (`server.ts`) and frontend (`main.tsx`).

@@ -47,6 +47,8 @@ import { registerAdminRoutes } from './src/server/routes/admin';
 import { registerSyncRoutes } from './src/server/routes/sync';
 import { registerProfileRoutes } from './src/server/routes/profile';
 import { apiVersionMiddleware } from './src/server/routes/apiVersion';
+import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
+import { registerObservabilityRoutes } from './src/server/routes/observability';
 
 
 // Traceability Infrastructure
@@ -54,6 +56,8 @@ export interface TraceContext {
   requestId: string;
   sessionId: string;
   conversationId: string;
+  /** P2.1 — the distributed-trace id for this request (W3C 32-hex). */
+  traceId?: string;
 }
 
 declare global {
@@ -68,11 +72,28 @@ const traceMiddleware = (req: any, res: any, next: any) => {
   const requestId = crypto.randomUUID();
   const sessionId = (req.headers['x-session-id'] as string) || crypto.randomUUID();
   const conversationId = (req.headers['x-conversation-id'] as string) || crypto.randomUUID();
-  
+
   req.traceContext = { requestId, sessionId, conversationId };
-  
-  console.log(`[TRACE][API ENTRY] RID:${requestId} SID:${sessionId} CID:${conversationId} Path:${req.path}`);
-  next();
+
+  // P2.1 — start a ROOT request span. Join the platform trace from Cloud Run's
+  // `X-Cloud-Trace-Context` header when present, so our spans correlate into Cloud Trace.
+  const cloudCtx = parseCloudTraceContext(req.headers['x-cloud-trace-context'] as string | undefined);
+  const span = tracer.startSpan(`HTTP ${req.method} ${req.path}`, {
+    traceId: cloudCtx?.traceId,
+    parentSpanId: cloudCtx?.parentSpanId,
+    attributes: { 'http.method': req.method, 'http.path': req.path, requestId },
+  });
+  req.traceContext.traceId = span.data.traceId;
+  res.on('finish', () => {
+    span.setAttribute('http.status_code', res.statusCode);
+    span.setStatus(res.statusCode >= 500 ? 'error' : 'ok');
+    span.end();
+  });
+
+  console.log(`[TRACE][API ENTRY] RID:${requestId} SID:${sessionId} CID:${conversationId} TID:${span.data.traceId} Path:${req.path}`);
+  // Keep the span's context active for everything awaited downstream (so the AI provider
+  // call attaches a child span to THIS request's trace).
+  tracer.runInSpan(span, () => next());
 };
 
 import { Cashfree } from 'cashfree-pg';
@@ -463,6 +484,8 @@ setInterval(() => {
   registerSyncRoutes(app);
   registerPaymentRoutes(app, paymentLimiter);
   registerAdminRoutes(app, adminLimiter);
+  // P2.1 — observability: recent distributed traces + live metrics (admin-gated).
+  registerObservabilityRoutes(app);
   registerSecretsRoutes(app);
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).

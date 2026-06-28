@@ -22,17 +22,23 @@ import * as fs from 'fs/promises';
 import { BuildJobManager, JobStatus } from './jobs/BuildJobManager';
 
 export class AppMakerOrchestrator {
-    static async execute(prompt: string, namespace: string = 'default'): Promise<AppMakerExecutionResult> {
+    static async execute(prompt: string, namespace: string = 'default', idempotencyKey?: string): Promise<AppMakerExecutionResult> {
         console.log("TRACE: AppMakerOrchestrator.execute START (Async Job Triggered)", { prompt });
-        const jobId = await BuildJobManager.createJob(prompt);
-        
-        // Trigger background worker
-        this.runBuildJob(jobId, prompt, namespace);
+        // P1.4 — when an idempotency key is supplied, a retried/duplicate request reuses the
+        // same job instead of double-running. createJob returns the existing job id in that case.
+        const existing = idempotencyKey ? await BuildJobManager.findExisting(idempotencyKey) : null;
+        const jobId = await BuildJobManager.createJob(prompt, idempotencyKey);
 
-        return { 
-            success: true, 
+        // Only spawn the background worker for a genuinely NEW job — never re-run a build
+        // that the idempotency key already started.
+        if (!existing || existing.id !== jobId) {
+            this.runBuildJob(jobId, prompt, namespace);
+        }
+
+        return {
+            success: true,
             files: [],
-            message: `Build job ${jobId} started.` 
+            message: `Build job ${jobId} ${existing && existing.id === jobId ? 'reused (idempotent)' : 'started'}.`
         };
     }
 

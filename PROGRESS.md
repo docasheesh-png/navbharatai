@@ -4517,3 +4517,25 @@ VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2750/2750 PASS
 (29 new: CircuitBreaker 24 + existing AIRouter 5 still green), server boots,
 /api/health 200. Backend infra (no user surface) → no AppKnowledgeBase entry needed.
 Files: src/server/AI/Router/CircuitBreaker.ts (+ .test.ts), AIRouter.ts, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P1.4 Idempotency & Deterministic Jobs DONE → PHASE P1 COMPLETE (100%)
+
+Idempotency keys on build-job creation so retries never double-run:
+- BuildJob gains idempotencyKey; BuildJobManager.createJob(prompt, key?) reuses the
+  SAME job for a duplicate key (returns existing id) unless the prior attempt terminally
+  FAILED (then a fresh retry is allowed). New findExisting() +
+  JobStore.findJobByIdempotencyKey() implemented for BOTH stores (Firestore indexed
+  where+orderBy query; LocalFile dir scan). Job ids now `job-<ms>-<seq>` (monotonic
+  suffix → no same-ms collisions). AppMakerOrchestrator.execute(prompt, ns, key?) only
+  spawns the worker for a genuinely-new job. Added a useStore() test seam.
+- Replay-safety confirmed already present: ExecutionOrchestrator.restoreFromCheckpoint()
+  + resumeExecution() rebuild the scheduler from checkpointed task statuses + patches →
+  resume re-runs ONLY incomplete tasks (completed tasks never re-execute).
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2759/2759 PASS (9 new),
+server bundles. Backend infra (no user surface) → no AppKnowledgeBase entry needed.
+
+Phase P1 (Break-Proof Foundation) is now 100%: P1.1 API versioning, P1.2 migrations
+(pre-existing), P1.3 circuit breaker, P1.4 idempotency — all DONE.
+Files: BuildJobManager.ts (+.test.ts), JobStore.ts, LocalFileJobStore.ts,
+FirestoreJobStore.ts, AppMakerOrchestrator.ts, UPGRADE_v3.0.md.

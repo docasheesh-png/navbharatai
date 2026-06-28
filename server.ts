@@ -52,6 +52,7 @@ import { registerObservabilityRoutes } from './src/server/routes/observability';
 import { errorTracker, installGlobalErrorHandlers } from './src/server/observability/ErrorTracker';
 import { registerHealthRoutes, markServerReady } from './src/server/routes/health';
 import { registerWarmRoute } from './src/server/routes/warm';
+import { cacheControlFor } from './src/server/lib/staticCache';
 
 
 // Traceability Infrastructure
@@ -384,15 +385,12 @@ setInterval(() => {
         maxAge: '1y',          // JS/CSS hashed by Vite → safe to cache 1 year
         immutable: true,
         setHeaders: (res, filePath) => {
-          // HTML must always revalidate (never cache)
+          // P3.4 — CDN/edge cache policy (single source of truth in staticCache.ts).
+          const cc = cacheControlFor(filePath);
+          if (cc) res.setHeader('Cache-Control', cc);
           if (filePath.endsWith('.html')) {
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             res.setHeader('Pragma', 'no-cache');
             res.setHeader('Expires', '0');
-          } else if (/\.(js|css|woff2|woff|ttf|otf)$/.test(filePath)) {
-            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-          } else if (/\.(png|jpg|jpeg|svg|ico|webp)$/.test(filePath)) {
-            res.setHeader('Cache-Control', 'public, max-age=604800'); // 1 week for images
           }
         }
       }));

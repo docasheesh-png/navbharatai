@@ -52,7 +52,7 @@
 |-------|------|-----|--------|---|
 | P0 | Core-Law Violations | Breaks your own permanent rules | ✅ Complete | 100% |
 | P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ✅ Complete | 100% |
-| P2 | Resilience & Observability | See + survive failures | 🔄 In Progress | 75% |
+| P2 | Resilience & Observability | See + survive failures | ✅ Complete | 100% |
 | P3 | Scale & Frontend Health | Grow without rewrites | ⏳ Pending | 0% |
 | P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 25% |
 | P5 | Hygiene & Hardening | Remove rot, close small holes | ⏳ Pending | 0% |
@@ -222,10 +222,22 @@
       prove a saturated FREE pool doesn't block PRO; existing 16 router tests still green) · server bundles ✅.
 - **Files:** `src/server/AI/Router/AIRouter.ts` (+ new `AIRouterBulkhead.test.ts`), `src/server/AI/AIRouterManager.ts`.
 
-### P2.4 — Disaster Recovery / Backup  ❌ MISSING
-- [ ] Scheduled Firestore export (backup) + a documented restore runbook.
-- [ ] Health/readiness probe wired into Cloud Run spec.
-- **Files:** `cloudbuild.yaml`, new `docs/DR_RUNBOOK.md`.
+### P2.4 — Disaster Recovery / Backup  ✅ DONE (2026-06-28)
+- [x] Real Firestore export (backup): `src/server/lib/FirestoreBackup.ts` calls the Firestore Admin
+      `exportDocuments` REST API (auth'd via the Cloud Run service account / ADC) into a GCS bucket, with a
+      timestamped prefix so backups never overwrite. Admin-triggered via `POST /api/admin/backup/firestore`.
+      Honest "not configured" result when `FIRESTORE_BACKUP_BUCKET` is unset — never fakes success, never throws.
+- [x] Documented restore runbook: `docs/DR_RUNBOOK.md` (§1 scheduled export via Cloud Scheduler + bucket/IAM setup,
+      §2 restore via `gcloud firestore import`, §3 probe wiring, §4 incident checklist) — all copy-pasteable commands.
+- [x] Health/readiness probes: `GET /api/live` (liveness, always 200 while alive) + `GET /api/ready` (readiness:
+      503 until init, then 200 with a dependency report) wired in `src/server/routes/health.ts`; `markServerReady()`
+      flips ready true once the server is listening. The Cloud Run probe-flag wiring is documented in DR_RUNBOOK §3
+      and referenced from `cloudbuild.yaml` — applied as a one-time manual `gcloud run services update` (operator
+      watches the deploy succeed) rather than baked into the unattended deploy step, per safeguard #3.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2796/2796 ✅ (9 new) · server
+      boots + LIVE check: `/api/live` 200, `/api/ready` 200 (`initialized:true`), backup trigger → honest 400
+      "not configured" (no fake), no-admin → 403 ✅.
+- **Files:** `src/server/lib/FirestoreBackup.ts` (+ `.test.ts`), `src/server/routes/health.ts` (+ `.test.ts`), `server.ts`, `docs/DR_RUNBOOK.md`, `cloudbuild.yaml`.
 
 ---
 

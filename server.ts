@@ -50,6 +50,7 @@ import { apiVersionMiddleware } from './src/server/routes/apiVersion';
 import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
 import { registerObservabilityRoutes } from './src/server/routes/observability';
 import { errorTracker, installGlobalErrorHandlers } from './src/server/observability/ErrorTracker';
+import { registerHealthRoutes, markServerReady } from './src/server/routes/health';
 
 
 // Traceability Infrastructure
@@ -425,6 +426,10 @@ setInterval(() => {
     res.json({ status: 'ok', uptime: process.uptime(), port: PORT });
   });
 
+  // P2.4 — DR: liveness (/api/live), readiness (/api/ready), and the admin Firestore
+  // backup trigger (/api/admin/backup/firestore).
+  registerHealthRoutes(app);
+
   // RETIRED — AppMaker telemetry/job routes (old engine). Unregistered in the v3.0 cutover.
   // registerAppmakerRoutes(app);
 
@@ -529,6 +534,8 @@ setInterval(() => {
   try {
     const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
+      // P2.4 — the server is initialized and listening → readiness probe goes green.
+      markServerReady();
     });
 
     // WebSocket / HMR reverse proxy for live previews. The HTTP side is handled

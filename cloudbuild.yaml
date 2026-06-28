@@ -60,6 +60,13 @@ steps:
       - '--execution-environment'
       - 'gen2'
       - '--quiet'
+  # P2.4 — Disaster Recovery. The app exposes liveness (/api/live) and readiness
+  # (/api/ready) probes. Wire them into the Cloud Run service with the documented
+  # one-time command in docs/DR_RUNBOOK.md §3 (gcloud run services update --startup-probe
+  # / --liveness-probe). They are applied manually (operator watches the deploy succeed)
+  # rather than on this unattended deploy step — a wrong probe flag here would fail the
+  # auto-deploy. Once applied, the probe config persists across image-only deploys.
+  # Scheduled Firestore backups + restore are documented in docs/DR_RUNBOOK.md §1–§2.
 
 options:
   logging: CLOUD_LOGGING_ONLY

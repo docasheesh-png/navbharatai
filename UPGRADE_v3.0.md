@@ -52,7 +52,7 @@
 |-------|------|-----|--------|---|
 | P0 | Core-Law Violations | Breaks your own permanent rules | ✅ Complete | 100% |
 | P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ✅ Complete | 100% |
-| P2 | Resilience & Observability | See + survive failures | 🔄 In Progress | 50% |
+| P2 | Resilience & Observability | See + survive failures | 🔄 In Progress | 75% |
 | P3 | Scale & Frontend Health | Grow without rewrites | ⏳ Pending | 0% |
 | P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 25% |
 | P5 | Hygiene & Hardening | Remove rot, close small holes | ⏳ Pending | 0% |
@@ -207,9 +207,20 @@
       server boots + LIVE check: a POSTed client error was captured and read back via `/api/observability/errors?admin=…`; no-admin → 403 ✅.
 - **Files:** `src/server/observability/ErrorTracker.ts` (+ `.test.ts`), `server.ts`, `src/server/routes/telemetry.ts`, `src/server/routes/observability.ts`, `src/components/ErrorBoundary.tsx`.
 
-### P2.3 — Bulkhead Isolation  🟡 PARTIAL
-- [ ] Separate in-flight pools per universe so a FREE-tier spike can't starve PRO/SDA.
-- **Files:** `AIRouter.ts`.
+### P2.3 — Bulkhead Isolation  ✅ DONE (2026-06-28)
+- **Was:** the in-flight concurrency pool in `AIRouter.ts` was a module-level map keyed by provider NAME only, shared
+  across every `AIRouter` instance — so a FREE-tier spike saturating a shared provider (e.g. Grok) starved PRO/SDA.
+- [x] Each universe now has its OWN in-flight pool, keyed `${universe}:${provider}`. `AIRouter` takes a `universe`
+      label (`new AIRouter('free'|'pro'|'professional')`, wired in `AIRouterManager`); all slot acquire/release/capacity
+      checks go through per-universe helpers. A FREE spike can no longer starve PRO/SDA of slots.
+- [x] The **circuit breaker stays keyed by provider name (shared)** — a 429/quota is a provider-wide health signal that
+      SHOULD back every universe off; only the concurrency pool (local capacity/fairness) is isolated. Precise bulkhead,
+      no loss of the shared health signal.
+- [x] `getProviderStats()` aggregates in-flight back per provider (total + new `inFlightByUniverse` breakdown), so the
+      Admin dashboard shape is preserved and the bulkhead pools are observable.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2787/2787 ✅ (3 new bulkhead tests
+      prove a saturated FREE pool doesn't block PRO; existing 16 router tests still green) · server bundles ✅.
+- **Files:** `src/server/AI/Router/AIRouter.ts` (+ new `AIRouterBulkhead.test.ts`), `src/server/AI/AIRouterManager.ts`.
 
 ### P2.4 — Disaster Recovery / Backup  ❌ MISSING
 - [ ] Scheduled Firestore export (backup) + a documented restore runbook.

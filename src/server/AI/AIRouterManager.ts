@@ -40,7 +40,7 @@ export class AIRouterManager {
 
   // FREE: Vertex (5 models) → Gemini (3 models) → Grok. Claude NEVER used in free.
   private static buildFree(): AIRouter {
-    const router = new AIRouter();
+    const router = new AIRouter("free");
     console.log('[ROUTER_MGR] Building FREE chain: Vertex×5 → Gemini×3 → Grok');
 
     const vertex = new VertexProvider();
@@ -75,7 +75,7 @@ export class AIRouterManager {
 
   // PRO: Claude Opus 4.8 (primary) → Sonnet 3.5 → Grok → Vertex → Gemini
   private static buildPro(): AIRouter {
-    const router = new AIRouter();
+    const router = new AIRouter("pro");
     console.log('[ROUTER_MGR] Building PRO chain: Opus4.8(p1) → Sonnet3.5(p2) → Grok×2 → Vertex×5 → Gemini×3');
 
     try {
@@ -116,7 +116,7 @@ export class AIRouterManager {
   // concurrently — first non-empty success wins; ONLY if all three fail, fall back
   // to Claude Haiku (last resort). Honors the "Grok primary, Claude last" core law.
   private static buildProfessional(): AIRouter {
-    const router = new AIRouter();
+    const router = new AIRouter("professional");
     console.log('[ROUTER_MGR] Building PROFESSIONAL chain: RACE(Grok × Gemini × Vertex) → Claude Haiku(last resort)');
 
     // ── Race participants (fired concurrently) ──

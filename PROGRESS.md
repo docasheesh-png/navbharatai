@@ -4587,3 +4587,24 @@ server boots, LIVE: POST /api/logs/error captured + read back via
 /api/observability/errors?admin=…; no-admin → 403. Backend/admin observability →
 no AppKnowledgeBase entry. Files: observability/ErrorTracker.ts (+.test.ts), server.ts,
 routes/telemetry.ts, routes/observability.ts, components/ErrorBoundary.tsx, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P2.3 Bulkhead Isolation DONE (Phase P2 → 75%)
+
+Was: AIRouter's in-flight concurrency pool was a module-level map keyed by provider
+NAME only, shared across all AIRouter instances → a FREE spike saturating a shared
+provider (Grok) starved PRO/professional of slots.
+
+Fix: each universe gets its OWN in-flight pool keyed `${universe}:${provider}`.
+AIRouter now takes a `universe` label (new AIRouter('free'|'pro'|'professional'),
+wired in AIRouterManager.buildFree/buildPro/buildProfessional); all slot
+acquire/release/capacity checks go through per-universe helpers (slotKey/acquire/
+release/inFlightCount). The circuit breaker STAYS keyed by provider name (shared) —
+a 429/quota is provider-wide health that should back every universe off; only the
+concurrency pool (local fairness) is isolated. getProviderStats() aggregates in-flight
+back per provider (total + new inFlightByUniverse breakdown) so the Admin dashboard
+shape is preserved and the bulkhead pools are observable.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2787/2787 PASS (3 new
+bulkhead tests prove a saturated FREE pool doesn't block PRO; existing 16 router tests
+still green), server bundles. Backend infra → no AppKnowledgeBase entry.
+Files: AI/Router/AIRouter.ts (+ AIRouterBulkhead.test.ts), AI/AIRouterManager.ts, UPGRADE_v3.0.md.

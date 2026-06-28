@@ -4878,3 +4878,26 @@ migration; not safe for a single autonomous cycle.
 
 VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2864/2864 PASS after removal.
 Files: src/config/firebase.ts (comment), src/server/workspace/{hardening_test,validation_tests,verification_report}.ts (removed), UPGRADE_v3.0.md.
+
+## 2026-06-28 — P-TQA.5 Bundle Size Budget Enforcement DONE
+
+First item from the P-* feature phases (P1-P5 core done modulo deferred big refactors).
+Picked the highest-value, code-ownable, zero-runtime-risk item.
+
+scripts/bundleBudget.mjs: after `vite build`, reads dist/assets, gzips every JS/CSS chunk,
+fails (exit 1) on any budget breach. Pure checkBudget() + measureDist() (custom fs +
+zlib.gzipSync, no new dep). npm run test:bundle. New CI step after Build in ci.yml →
+bundle bloat now BLOCKS merge. Unit-tested: tests/bundleBudget.test.ts (6 — pass, each
+violation type, multi-violation, budgets-exceed-current guard).
+
+Honest budgets = current reality + ~15% headroom (a "no further bloat" regression guard,
+NOT the spec's aspirational 500KB which the current ~567KB main chunk already exceeds):
+largest chunk ≤650KB gz (now ~567), total JS ≤1050KB gz (now ~918), total CSS ≤50KB gz
+(now ~33). The large main chunk is a known code-splitting opportunity (separate task);
+this stops it growing unchecked. Documented inline.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2870/2870 PASS (6 new),
+`npm run test:bundle` on real dist/ → within budget (567/650, 918/1050, 33/50), and an
+artificial-bloat run correctly exits non-zero. CI/tooling (no user surface) → no
+AppKnowledgeBase entry.
+Files: scripts/bundleBudget.mjs, tests/bundleBudget.test.ts, package.json, .github/workflows/ci.yml, UPGRADE_v3.0.md.

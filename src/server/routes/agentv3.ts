@@ -1579,6 +1579,11 @@ export function registerAgentV3Routes(app: Express): void {
       // accurate even on a fresh Cloud Run instance. Best-effort — never blocks the build.
       try {
         const ctxMem = getWorkspaceMemory(workspaceId);
+        // MEMORY FIX 3 (cross-instance): hydrate the in-process memory from the DURABLE Firestore
+        // snapshot first — episodes (the user's prior requests) + the project graph survive a Cloud
+        // Run restart / a different instance. Previously this restore ran ONLY in edit mode, so a
+        // "continue" that landed on a fresh instance lost the memory. Now it runs for every build.
+        await restoreWorkspaceMemory(workspaceId, ctxMem).catch(() => {});
         const tree = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
         await warmIndexFiles(ctxMem, tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''), { maxFiles: 200 });
         const recentRequests = ctxMem.snapshot().episodes.filter((e) => e.kind === 'request').map((e) => e.text);

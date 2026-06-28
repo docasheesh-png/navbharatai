@@ -5149,3 +5149,15 @@ Best-effort, never blocks. Together with Fix 1 (file/project context) the agent 
 the project state AND the conversation memory.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2902/2902 PASS, boot:check PASS.
+
+## 2026-06-28 — Claude-level memory, Fix 3: hydrate memory from Firestore for EVERY build (cross-instance)
+
+Gap #3: restoreWorkspaceMemory (which loads the durable Firestore memory snapshot — episodes +
+project graph — into the in-process WorkspaceMemory) ran ONLY in edit mode. So a new-build / "continue"
+that landed on a fresh Cloud Run instance had cold memory (Fix 1's recentRequests were empty). Fix:
+call restoreWorkspaceMemory in the Fix-1 project-context block, which runs for EVERY build — so the
+persisted episodes + graph are hydrated before building the project context, even across a restart or
+a different instance. Best-effort, never blocks. Now Fix 1 (file/project context) + Fix 2 (conversation
+recap) + Fix 3 (durable memory hydration) all work cross-instance.
+
+Gate: server tsc 0, vitest 2902/2902 PASS, boot:check PASS.

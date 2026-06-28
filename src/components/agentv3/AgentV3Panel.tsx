@@ -539,6 +539,23 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.workspaceId]);
 
+  // Load the file contents when the Files tab is opened (and not already loaded), so each file
+  // row can show its line count — without the user having to click into a file first.
+  useEffect(() => {
+    if (showWorkspace && tab === 'files' && workspaceFiles === null && state.files.length > 0 && state.workspaceId) {
+      void loadWorkspaceFiles();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showWorkspace, tab, workspaceFiles, state.files.length, state.workspaceId]);
+
+  // Refresh the cached contents when a build finishes so line counts reflect the latest files.
+  useEffect(() => {
+    if (state.done && tab === 'files' && showWorkspace && state.workspaceId && state.files.length > 0) {
+      void loadWorkspaceFiles();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.done]);
+
   // Plan (todo list) collapse toggle (Task 3) — keeps the chat area readable.
   const [planCollapsed, setPlanCollapsed] = useState(false);
 
@@ -944,6 +961,10 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
                   {state.files.filter((f) => f.kind !== 'delete').map((f) => {
                     const ext = f.path.split('.').pop() ?? '';
                     const color = V3_EXT_COLOR[ext] ?? 'text-white/50';
+                    // Line count of the file (from the fetched contents) — shown next to the dot
+                    // so the user sees how much was actually written inside each file.
+                    const fileContent = workspaceFiles?.[f.path];
+                    const lineCount = typeof fileContent === 'string' ? fileContent.split('\n').length : null;
                     return (
                       <div key={f.path} className="group flex items-center gap-1 rounded-xl hover:bg-white/5 transition-colors">
                         <button
@@ -953,6 +974,11 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
                         >
                           <FileCode className={`w-4 h-4 flex-shrink-0 ${color}`} />
                           <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{f.path}</span>
+                          {lineCount !== null && (
+                            <span className="text-[10px] tabular-nums text-zinc-500 flex-shrink-0" title={`${lineCount} line${lineCount === 1 ? '' : 's'}`}>
+                              {lineCount} {lineCount === 1 ? 'line' : 'lines'}
+                            </span>
+                          )}
                           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${fileDot(f.kind).split(' ').slice(2).join(' ')}`} />
                         </button>
                         <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover:opacity-100 transition-opacity">

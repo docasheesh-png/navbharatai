@@ -1,6 +1,7 @@
 import { AIProvider, AIProviderResponse, ProviderTelemetry } from './ProviderTypes';
 import { providerCooldownStore } from '../../lib/ProviderCooldownStore';
 import { getBreaker, allBreakerNames } from './CircuitBreaker';
+import { tracer } from '../../observability/Tracer';
 
 // P1.3 — per-provider state is now backed by a real CircuitBreaker (CLOSED / OPEN /
 // HALF_OPEN) instead of a flat cooldown map. The three router chokepoints below
@@ -368,6 +369,9 @@ export function recordProviderLatency(name: string, latencyMs: number, failed: b
   // P1.3 — success is the single chokepoint that closes the breaker (every router
   // success path funnels through here with failed=false). Failures open it via setCooldown.
   if (!failed) markProviderSuccess(name);
+  // P2.1 — emit a child tracing span for this AI provider call under the active request
+  // trace (no-op outside a request). Best-effort, never throws.
+  tracer.recordChildSpan(`ai.provider.${name}`, latencyMs, failed ? 'error' : 'ok', { provider: name, success: !failed });
 }
 
 export function getProviderStats(): Record<string, { cooldownUntil: number; circuitState: string; consecutiveFailures: number; inFlight: number; avgLatencyMs: number; errorCount: number; requestCount: number }> {

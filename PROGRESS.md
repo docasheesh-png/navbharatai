@@ -4539,3 +4539,29 @@ Phase P1 (Break-Proof Foundation) is now 100%: P1.1 API versioning, P1.2 migrati
 (pre-existing), P1.3 circuit breaker, P1.4 idempotency — all DONE.
 Files: BuildJobManager.ts (+.test.ts), JobStore.ts, LocalFileJobStore.ts,
 FirestoreJobStore.ts, AppMakerOrchestrator.ts, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P2.1 Distributed Tracing + Metrics DONE (Phase P2 begins, 25%)
+
+Real, dependency-free distributed tracer (src/server/observability/Tracer.ts):
+W3C trace/span ids, parent→child span trees, bounded ring buffer, AsyncLocalStorage
+context propagation, withSpan/recordChildSpan helpers — all best-effort, never throws.
+Cloud Trace export with NO SDK + NO creds: each completed span emits a Cloud Logging
+structured line with logging.googleapis.com/trace + spanId → Cloud Run auto-correlates
+into Cloud Trace. Incoming X-Cloud-Trace-Context is parsed so spans join the platform trace.
+
+Wired surgically (no hot-path control-flow change):
+- ROOT request span in server.ts traceMiddleware (start at entry, end on res.finish with
+  status/method/path; context kept active via tracer.runInSpan(span, next)).
+- AI provider child span at the single recordProviderLatency chokepoint in AIRouter.ts
+  (every provider call, all 3 universes, traced under its request).
+New admin-gated endpoints: GET /api/observability/traces (recent span trees) +
+/api/observability/metrics (per-span count/error/avg/p95 + per-provider stats).
+ObservabilityManager.trackLatency now also emits a span (compat facade kept).
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2775/2775 PASS (16 new),
+server boots, and a LIVE curl proved it end-to-end: GET /api/health produced a real
+"HTTP GET /api/health" span (status ok, 5ms, http attributes) readable via
+/api/observability/traces?admin=…; no-admin → 403. Backend/admin observability (no
+end-user surface) → no AppKnowledgeBase entry.
+Files: observability/Tracer.ts (+.test.ts), routes/observability.ts, server.ts,
+AIRouter.ts, ObservabilityManager.ts, UPGRADE_v3.0.md.

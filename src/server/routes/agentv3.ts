@@ -72,6 +72,12 @@ import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
+/** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
+ *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
+function sessionCostCapUsd(): number {
+  const v = parseFloat(process.env.SESSION_COST_CAP_USD ?? '');
+  return Number.isFinite(v) && v > 0 ? v : 5.0;
+}
 import { deploymentStore, withDeploymentPersistence } from '../AgentV3/DeploymentStore';
 import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
 // Side-effect imports: each provider self-registers into the DeployProviders registry on load.
@@ -930,6 +936,13 @@ export function registerAgentV3Routes(app: Express): void {
     const send = (obj: unknown): void => {
       if (!res.writableEnded) res.write(JSON.stringify(obj) + '\n');
     };
+    // SSE keepalive: send a ping every 15 s so Chrome never throttles/drops the
+    // connection when the tab is backgrounded or minimised. Cleared on response end.
+    const heartbeatTimer = setInterval(() => {
+      if (!res.writableEnded) res.write(JSON.stringify({ type: 'ping' }) + '\n');
+      else clearInterval(heartbeatTimer);
+    }, 15_000);
+    res.on('close', () => clearInterval(heartbeatTimer));
 
     // Intelligent cost routing (additive): a plain conversational turn — a
     // greeting, thanks, "who are you", small-talk — does NOT need the premium
@@ -1265,7 +1278,21 @@ export function registerAgentV3Routes(app: Express): void {
       // straight from the write op, not a later listFiles that can come back empty). Persisted to
       // Firestore at build end so the source survives a sandbox loss and restores next session.
       const writtenFiles = new Map<string, string>();
-      const onFileWrite = (path: string, content: string) => { writtenFiles.set(path, content); };
+      // Fix 2 — PROGRESSIVE SERVER PERSISTENCE: save every written file to Firestore
+      // within 3 s of each write. If the client connection drops mid-build (tab close,
+      // network hiccup), the files already written are safely on the server. The final
+      // save at build-end (below) is still the authoritative snapshot; this is the
+      // mid-build safety net. GitHub push still happens only after 100% completion.
+      let _progressPersistTimer: ReturnType<typeof setTimeout> | null = null;
+      const onFileWrite = (path: string, content: string) => {
+        writtenFiles.set(path, content);
+        if (_progressPersistTimer) clearTimeout(_progressPersistTimer);
+        _progressPersistTimer = setTimeout(() => {
+          if (writtenFiles.size > 0) {
+            saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)).catch(() => {});
+          }
+        }, 3_000);
+      };
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework);
 
       // Surgical edit mode (gold standard): when the user is editing an existing
@@ -1488,7 +1515,18 @@ export function registerAgentV3Routes(app: Express): void {
       // retry ONCE with a Claude-first runner. Claude reliably uses the build tools, so this
       // turns a fake "done" into a real app. Always on for this hard failure, independent of the
       // P3 quality-escalation flag. Skipped if the user already stopped the build.
-      if (expectsArtifacts && writtenFiles.size === 0 && !abort.signal.aborted) {
+      // COST CAP: if the first attempt already exceeded the per-session cap, skip the retry
+      // so a failed todo app never silently spirals to $26. An honest error is emitted instead.
+      const costAfterFirstAttempt = result.billedUsd;
+      const capUsd = sessionCostCapUsd();
+      if (expectsArtifacts && writtenFiles.size === 0 && costAfterFirstAttempt > capUsd) {
+        events.emit({
+          type: 'narration', agent: 'architect',
+          text: `⚠️ Build stopped: session cost ($${costAfterFirstAttempt.toFixed(2)}) reached the $${capUsd.toFixed(0)} cap. No files were produced — you will not be charged. Try again with a simpler prompt or contact support.`,
+          ts: Date.now(),
+        });
+      }
+      if (expectsArtifacts && writtenFiles.size === 0 && !abort.signal.aborted && costAfterFirstAttempt <= capUsd) {
         events.emit({ type: 'narration', agent: 'architect', text: 'The first attempt produced no files — rebuilding with a stronger model…', ts: Date.now() });
         // The "stronger model" is the power-OFF ceiling: Opus at its LOWEST effort
         // (admin rule 2026-06-27 — "power off me Opus ka sabse lower version"). In a

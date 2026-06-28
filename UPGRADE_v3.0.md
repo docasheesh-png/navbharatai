@@ -29,9 +29,10 @@
 ---
 
 ## 📊 STATUS SNAPSHOT (audit baseline)
-- ✅ HAVE (strong, real): ~62% (architecture) · ~30% (infrastructure)
+- ✅ HAVE (strong, real): ~62% (architecture) · ~30% (infrastructure) · **~55% (AI intelligence)**
 - 🟡 PARTIAL (works but incomplete): ~23%
 - ❌ MISSING (not present): ~15% (architecture) · ~25% (infrastructure)
+- **AI Intelligence audit (2026-06-28, 300 components):** 164 ✅ DONE · 69 🟡 PARTIAL · 67 ❌ MISSING → 136 gaps tracked in **P11**.
 - **0 core-law violations open** — the last one (professional isolated router, P0.1) was
   closed on 2026-06-28.
 
@@ -61,6 +62,7 @@
 | **P8** | **Observability Infra** | Tracing + alerting + SLO | ⏳ Pending | 0% |
 | **P9** | **Zero-Downtime & DR** | Canary/blue-green + cross-region | ⏳ Pending | 0% |
 | **P10** | **Edge & Hardening Infra** | CDN, KMS, chaos/load testing | ⏳ Pending | 0% |
+| **P11** | **AI Intelligence Layer** | Reasoning, RAG, vision, safety, eval depth | ⏳ Pending | 55% have |
 
 ---
 
@@ -279,6 +281,132 @@
 
 ---
 
+---
+
+# 🧠 AI INTELLIGENCE LAYER (P11)
+> From a 300-component AI-Intelligence audit (2026-06-28). Each item was scanned against the real
+> codebase and classified ✅ DONE (rock-solid — not listed here) / 🟡 PARTIAL (exists but shallow,
+> upgrade it) / ❌ MISSING (build it). **Result: 164 DONE · 69 PARTIAL · 67 MISSING.** Only the 136
+> PARTIAL + MISSING gaps are tracked below, grouped by sub-pillar. Legend: 🟡 = upgrade · ❌ = build.
+
+### ✅ AI Intelligence ALREADY DONE (do not rebuild — 164 components)
+The agent/intelligence base is far stronger than first assumed. Already real & wired, e.g.:
+- **Agent runtime & multi-agent:** `AgentV3/AgentRunner`, `AgentRegistry` (8+ roles, 6 layers), `SubAgent`,
+  `ToolDispatcher`, `AgentLifecycle`, `ReviewerAgent`, delegation via task tool.
+- **Reflection / confidence / learning:** `Reflection`, `KnowledgeEvolution`, `BuildConfidence`
+  (calibrated 0–100), `Consensus` (expert panel), `EscalationOrchestrator` (cheap→expensive).
+- **Memory & RAG:** `WorkspaceMemory` (episodic + semantic ProjectGraph), `EmbeddingSearch`,
+  `ContextRetriever`, `Memory/ProjectMemoryManager`, `AppContext/AppKnowledgeBase`.
+- **Code intelligence:** `ASTAnalyzer` (ts-morph), `ArchitectureAnalysis`, `AppMakerLab/intelligence/*`
+  (RepositoryIntelligenceEngine, GraphGenerator, ImpactAnalyzer), `autorepair/*` (RootCauseAnalyzer,
+  RepairPlanner), `AutoFix`, framework/language/runtime detection.
+- **Tool / automation / model routing:** Gemini/OpenAI tool runners, Git/Deploy/Browser/Terminal tools,
+  `AIRouterManager` (3 isolated universes) + `AIRouter.routeRaced`, `HealthRegistry`.
+- **Safety / governance / eval:** `SecretRedactor`, `SecurityAnalysis`, `ComplianceAnalysis`,
+  `UntrustedContent` (prompt-injection fencing), `CommandGovernance`, `Approvals` (human-in-the-loop),
+  `QualityEvaluationEngine/*` (8 evaluators), `Readiness`, cost/token budgeting, `lib/audit`, `lib/metrics`.
+
+---
+
+## 🧩 P11.1 — Reasoning Engine  (10 🟡 · 11 ❌)
+> Reasoning today is implicit inside LLM prompts. No explicit, testable reasoning modules.
+- 🟡 #5 AI Decision Engine · #6 AI Reasoning Engine · #9 Logical Inference Engine · #10 Knowledge Reasoning Engine — only signal/heuristic patterns (`IntentClassifier`, `Reflection`); make them explicit, composable engines.
+- 🟡 #22 Decision Tree Engine · #23 Policy Decision Engine · #24 Rule-Based Decision Engine — `CommandGovernance`/`PatternMatcher` are narrow; generalize into a reusable rules/policy layer.
+- 🟡 #26 Optimization Engine · #30 State Machine Engine · #31 Finite State Machine — only lifecycle phase-tracking; add a real FSM/optimizer abstraction.
+- ❌ #7 Symbolic Reasoning Engine · #8 Probabilistic Reasoning Engine · #25 Constraint Solver · #27 Multi-Objective Optimizer · #32 Behavior Tree Engine.
+- ❌ #105 Temporal · #106 Causal · #107 Spatial · #108 Numerical · #110 Mathematical · #111 Scientific Reasoning.
+- **Files:** new `src/server/AI/reasoning/`.
+
+## 🧩 P11.2 — Planning & Multi-Agent  (7 🟡 · 2 ❌)
+- 🟡 #13 Goal Planning · #14 HTN Planner · #21 Action Prioritization — `TaskScheduler`/`PlanningAgent` do dependency ordering, not true hierarchical/goal decomposition.
+- 🟡 #39 Agent Communication Bus — `AgentEventStream` is one-way; add bidirectional agent messaging.
+- 🟡 #46 Supervisor Agent · #50 Executor Agent · #51 Verifier Agent — roles exist but not as dedicated, isolated agents.
+- ❌ #44 Capability Negotiation · #52 Critic Agent.
+- **Files:** `src/server/AgentV3/AgentRegistry.ts`, new `src/server/AgentV3/planning/`.
+
+## 🧩 P11.3 — Self-Reflection & Confidence  (2 🟡 · 1 ❌)
+- 🟡 #56 Self-Consistency Engine — limited to lesson-level; extend to multi-sample output consistency.
+- 🟡 #60 Uncertainty Estimator — confidence is a point estimate; add interval/distribution.
+- ❌ #57 Hypothesis Generator.
+- **Files:** `src/server/AgentV3/BuildConfidence.ts`, new `Hypothesis.ts`.
+
+## 🧩 P11.4 — NLU / Dialogue / Conversation  (3 🟡 · 3 ❌)
+- 🟡 #71 Dialogue Manager · #73 Conversation Planner — persistence exists, no turn-by-turn policy/forward planning.
+- 🟡 #87 Ontology Manager — predefined enums only; build a real taxonomy/ontology.
+- ❌ #67 Entity Recognition · #68 Slot Filling · #72 Dialogue Policy Engine.
+- **Files:** new `src/server/AI/nlu/`.
+
+## 🧩 P11.5 — Memory  (3 🟡)
+- 🟡 #79 Procedural Memory — lessons stored, no reusable procedures/macros.
+- 🟡 #83 Memory Compression — recent-N + truncation only; add summarization-based compaction.
+- 🟡 #88 Fact Store — code-derived facts only; add a real fact/triple store.
+- **Files:** `src/server/AgentV3/WorkspaceMemory.ts`.
+
+## 🧩 P11.6 — RAG / Knowledge / Grounding / Fact-checking  (6 🟡 · 7 ❌)
+- 🟡 #99 Fact Verification · #100 Truthfulness Evaluator · #102 Consistency Checker · #103 Conflict Resolver — shallow stubs (`verify_manager`, `ConflictDetector`); make real.
+- 🟡 #117 Code Semantics Engine · #125 API Understanding — symbol extraction only; add semantic/API-signature reasoning.
+- ❌ #92 Reranker · #93 Retriever Fusion · #96 Evidence Aggregator · #97 Evidence Ranking · #98 Citation Manager.
+- ❌ #101 Hallucination Detection · #104 Knowledge Conflict Detection.
+- **Files:** new `src/server/AI/rag/`, `src/server/AI/verify_manager.ts`.
+
+## 🧩 P11.7 — Code & Program Intelligence  (1 🟡 · 3 ❌)
+- 🟡 #114 Control Flow Analyzer — only import-cycle detection; add real CFG.
+- ❌ #115 Data Flow Analyzer · #129 Code Completion Intelligence · #130 Refactoring Intelligence.
+- **Files:** `src/server/AgentV3/ASTAnalyzer.ts`, new `codeintel/`.
+
+## 🧩 P11.8 — Analysis & Diagnostics  (4 🟡 · 3 ❌)
+- 🟡 #139 Dynamic Analysis · #151 Log Analysis · #152 Stack Trace Intelligence · #153 Terminal Output Interpreter — basic capture/pattern-match; add structured parsing + interpretation.
+- ❌ #141 Performance Analysis Intelligence · #144 Regression Analysis · #146 Change Prediction.
+- **Files:** `src/server/AgentV3/AutoFix.ts`, `src/server/project/ErrorPatternMatcher.ts`, new `diagnostics/`.
+
+## 🧩 P11.9 — Vision / Multimodal  (4 🟡 · 10 ❌)
+- 🟡 #154 Visual Intelligence Coordinator · #158 UI Understanding · #159 DOM Understanding · #169 Image Captioning — `visionDescribe`/`attachmentText` cover images/PDF text only.
+- ❌ #160 Layout · #161 Design · #162 Diagram · #163 Flowchart · #164 Chart Understanding.
+- ❌ #170 Multimodal Fusion · #171 Cross-Modal Alignment · #172 Speech · #173 Audio · #174 Video Understanding.
+- **Files:** `src/server/lib/visionDescribe.ts`, new `src/server/AI/vision/`.
+
+## 🧩 P11.10 — Tool & Database/Infra Intelligence  (5 🟡 · 8 ❌)
+- 🟡 #179 Tool Scheduling · #183 API Invocation Planner — dispatch exists, no scheduling/planning layer.
+- 🟡 #191 Infrastructure Intelligence · #192 Database Intelligence · #199 Cost Optimization Intelligence — scaffolding/templates only.
+- ❌ #176 Tool Discovery · #178 Tool Invocation Planner.
+- ❌ #193 Query Planner · #194 Schema Reasoner · #195 SQL Generation · #196 NoSQL Query · #197 Caching Intelligence · #198 Optimization Recommendation Engine.
+- **Files:** `src/server/AgentV3/ToolDispatcher.ts`, new `src/server/AI/db/`.
+
+## 🧩 P11.11 — Model Ensemble / Fusion  (2 🟡 · 3 ❌)
+- 🟡 #205 Ensemble Coordinator · #210 Output Ranking — `Consensus` is panel-only; generalize ensemble + ranking.
+- ❌ #206 Response Fusion Engine · #208 Voting Engine · #209 Arbitration Engine.
+- **Files:** `src/server/AgentV3/Consensus.ts`, new `ensemble/`.
+
+## 🧩 P11.12 — Safety / Moderation / Policy / Governance  (5 🟡 · 5 ❌)
+- 🟡 #214 Policy Evaluator · #223 Policy Enforcement Coordinator — risk classification only; add enforcement.
+- 🟡 #226 PII Detection · #230 Decision Trace Manager · #298 AI Reliability Manager — partial coverage; harden.
+- ❌ #219 Jailbreak Detection · #220 Adversarial Input Detection · #221 Abuse Detection · #222 Content Moderation Intelligence · #297 AI Compliance Manager.
+- **Files:** `src/server/AgentV3/{CommandGovernance,UntrustedContent}.ts`, new `src/server/AI/safety/`.
+
+## 🧩 P11.13 — Personalization & Learning  (3 🟡 · 3 ❌)
+- 🟡 #233 Recommendation Engine · #234 Ranking Engine · #237 Behavior Modeling — narrow/internal only.
+- ❌ #235 Personalization Intelligence · #236 Preference Learning · #238 User Modeling.
+- **Files:** new `src/server/AI/personalization/`.
+
+## 🧩 P11.14 — Resilience / Scheduling / Estimation  (7 🟡 · 3 ❌)
+- 🟡 #248 Retry Planner · #252 Scalability Intelligence · #256 Queue Intelligence · #257 Priority Management — basic caps/status, no smart scheduling.
+- 🟡 #259 Progress Estimation · #261 Time Estimation · #266 Reliability Predictor — tracking only, no prediction.
+- ❌ #255 Scheduling Intelligence · #260 Deadline Prediction · #265 Latency Predictor.
+- **Files:** `src/server/AppMakerLab/jobs/BuildJobManager.ts`, new `scheduling/`.
+
+## 🧩 P11.15 — Observability / Analytics / Evaluation  (5 🟡 · 2 ❌)
+- 🟡 #268 Observability Intelligence · #269 Analytics Intelligence — `ObservabilityManager` is a stub; daily aggregates only.
+- 🟡 #273 Regression Intelligence · #275 Capability Benchmarking · #277 Prompt Optimization Intelligence — partial.
+- ❌ #270 Experimentation Intelligence · #271 A/B Evaluation Coordinator.
+- **Files:** `src/server/ObservabilityManager.ts`, new `src/server/AI/eval/`.
+
+## 🧩 P11.16 — Validation & Output Integrity  (2 🟡 · 3 ❌)
+- 🟡 #285 Goal Tracking Engine · #289 Structured Output Validator — feature-match/architecture checks only.
+- ❌ #286 Milestone Tracker · #290 Schema Validator · #291 Response Normalizer.
+- **Files:** `src/server/project/ProjectVerifier.ts`, new `src/server/AI/validation/`.
+
+---
+
 ## ✅ DEFINITION OF "ROCK-SOLID" (exit criteria for this roadmap)
 1. All **three universes** isolated and provably correct (FREE no-Claude, SDA Grok-first, PRO Claude-first).
 2. **Real test suite** green + CI gate blocks broken deploys.
@@ -313,4 +441,13 @@
   `AIRouter.routeRaced` + a `lastResort` provider flag; consumers (SDA text path, professionals engine)
   switched to `routeRaced`. Test grown to 8 cases (chain shape + race behavior). Gate green (tsc ×2,
   2702 tests, build, boot). **Zero core-law violations open. P0 complete (100%).**
+- 2026-06-28: **AI Intelligence audit (300 components)** added as **P11**. Each component was scanned
+  against the real codebase by parallel deep-scan agents and classified DONE/PARTIAL/MISSING (verified
+  cited files exist). Result: **164 DONE · 69 PARTIAL · 67 MISSING**. The 136 PARTIAL+MISSING gaps are
+  tracked under P11.1–P11.16 (reasoning, planning/multi-agent, reflection, NLU/dialogue, memory, RAG,
+  code-intel, diagnostics, vision/multimodal, tool/db, ensemble, safety/governance, personalization,
+  resilience/scheduling, observability/eval, validation). The 164 DONE are listed (not re-tracked) so
+  they are never rebuilt. AgentV3's agent/reflection/memory/confidence/governance stack is the strong base.
+  (This is the 1st of the admin's category lists; remaining categories — Code Generation, Project
+  Management, Dev Environment, etc. — will be added as P12+ as their lists arrive.)
 - Deploy after each phase (permanent law). Maintain English-only UI (permanent law).

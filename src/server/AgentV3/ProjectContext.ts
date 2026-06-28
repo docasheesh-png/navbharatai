@@ -60,14 +60,15 @@ export function buildProjectContext(input: ProjectContextInput): string {
   return lines.join('\n');
 }
 
+interface Turn { role: 'user' | 'you'; text: string }
+
 /**
- * Summarize a prior build transcript (raw Anthropic messages) into a short, readable
- * "User: … / You: …" recap of the last `maxTurns` turns — so the model REMEMBERS the
- * conversation (what was asked, what it did) on a follow-up. Tool calls are noted compactly;
- * tool results are skipped (noisy). Pure + exported for testing.
+ * Flatten raw Anthropic messages into compact { role, text } turns. Tool calls are noted
+ * (`[called X]`); tool_result blocks are skipped (noisy); empty turns are dropped; each text
+ * is capped. Shared by extractConversationSummary and buildRunningSummary. Pure.
  */
-export function extractConversationSummary(messages: unknown[], maxTurns = 8): string {
-  const turns: string[] = [];
+function messagesToTurns(messages: unknown[]): Turn[] {
+  const turns: Turn[] = [];
   for (const m of messages ?? []) {
     if (!m || typeof m !== 'object') continue;
     const role = (m as { role?: unknown }).role;
@@ -89,9 +90,56 @@ export function extractConversationSummary(messages: unknown[], maxTurns = 8): s
     }
     text = text.replace(/\s+/g, ' ').trim();
     if (!text) continue;
-    turns.push(`${role === 'user' ? 'User' : 'You'}: ${text.slice(0, 280)}`);
+    turns.push({ role: role === 'user' ? 'user' : 'you', text: text.slice(0, 280) });
   }
-  return turns.slice(-maxTurns).join('\n');
+  return turns;
+}
+
+const renderTurns = (turns: Turn[]): string =>
+  turns.map((t) => `${t.role === 'user' ? 'User' : 'You'}: ${t.text}`).join('\n');
+
+/**
+ * Summarize a prior build transcript (raw Anthropic messages) into a short, readable
+ * "User: … / You: …" recap of the last `maxTurns` turns — so the model REMEMBERS the
+ * conversation (what was asked, what it did) on a follow-up. Tool calls are noted compactly;
+ * tool results are skipped (noisy). Pure + exported for testing.
+ */
+export function extractConversationSummary(messages: unknown[], maxTurns = 8): string {
+  return renderTurns(messagesToTurns(messages).slice(-maxTurns));
+}
+
+/**
+ * A ROLLING conversation summary for LONG sessions. extractConversationSummary keeps only the
+ * last N turns verbatim — so in a long session the early context (what the app even is, the
+ * original ask) silently falls off the window and the model "forgets" it. buildRunningSummary
+ * keeps the recent turns verbatim AND condenses everything before them into a compact digest:
+ * the distinct things the user asked for + the actions taken. Short sessions (≤ recentTurns)
+ * return the same recap as before. Pure + deterministic + exported for testing.
+ */
+export function buildRunningSummary(messages: unknown[], opts: { recentTurns?: number } = {}): string {
+  const recentTurns = opts.recentTurns ?? 8;
+  const turns = messagesToTurns(messages);
+  if (turns.length <= recentTurns) return renderTurns(turns);
+
+  const earlier = turns.slice(0, turns.length - recentTurns);
+  const recent = turns.slice(turns.length - recentTurns);
+
+  const userAsks = [...new Set(earlier.filter((t) => t.role === 'user').map((t) => t.text.slice(0, 120)))].slice(0, 10);
+  const actions = [...new Set(
+    earlier.filter((t) => t.role === 'you').flatMap((t) => t.text.match(/\[called \w+\]/g) ?? []).map((a) => a.replace(/^\[called /, '').replace(/\]$/, '')),
+  )].slice(0, 15);
+
+  const lines: string[] = [];
+  lines.push(`[Earlier in this session — ${earlier.length} turn(s) condensed so nothing is forgotten]`);
+  if (userAsks.length) {
+    lines.push('Things the user asked for earlier:');
+    lines.push(userAsks.map((a) => `  - ${a}`).join('\n'));
+  }
+  if (actions.length) lines.push(`Actions taken earlier: ${actions.join(', ')}`);
+  lines.push('');
+  lines.push('[Most recent turns — verbatim]');
+  lines.push(renderTurns(recent));
+  return lines.join('\n');
 }
 
 const PLAN_MARK: Record<string, string> = {

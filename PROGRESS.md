@@ -5189,3 +5189,17 @@ of episode timestamps, NOT Date.now(), so tests stay stable) that only breaks ti
 overtake a real token/phrase match, and a zero-relevance note is never surfaced by recency alone.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2911/2911 PASS (+3 new), boot:check PASS.
+
+## 2026-06-28 — Claude-level memory, Fix 6: rolling summary for LONG sessions
+
+Gap #6: Fix 2's conversation recap kept only the last 8 turns verbatim, so in a long session the
+EARLY context (the original ask, what the app even is) silently fell off the window — the model
+"forgot" it. Fix: new pure buildRunningSummary(messages, {recentTurns}) keeps the recent turns
+verbatim AND condenses everything before them into a compact digest — the distinct things the user
+asked for + the actions taken ([called X] → X). Short sessions (≤ recentTurns) return exactly the
+old recap. extractConversationSummary + buildRunningSummary now share one messagesToTurns() parser
+(no drift). Wired into routes/agentv3.ts Fix-2 block (replaces extractConversationSummary). With this
+the memory gap-list (1 project context, 2 conversation, 3 cross-instance hydration, 4 plan carry-over,
+5 smarter recall, 6 rolling summary) is COMPLETE — v3.0 memory now resumes a session like Claude does.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2914/2914 PASS (+3 new), boot:check PASS.

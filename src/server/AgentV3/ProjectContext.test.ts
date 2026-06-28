@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildProjectContext, extractConversationSummary, formatPlanState } from './ProjectContext';
+import { buildProjectContext, extractConversationSummary, buildRunningSummary, formatPlanState } from './ProjectContext';
 
 describe('extractConversationSummary — recap prior turns so the model remembers', () => {
   it('summarizes user + assistant turns, notes tool calls, skips tool results', () => {
@@ -29,6 +29,39 @@ describe('extractConversationSummary — recap prior turns so the model remember
   it('returns "" for empty / malformed input', () => {
     expect(extractConversationSummary([], 5)).toBe('');
     expect(extractConversationSummary([{ role: 'assistant', content: [] }, null as unknown], 5)).toBe('');
+  });
+});
+
+describe('buildRunningSummary — rolling memory so long sessions never drop early context', () => {
+  it('returns a plain recap when the session is short (≤ recentTurns)', () => {
+    const messages = [
+      { role: 'user', content: 'build a calculator' },
+      { role: 'assistant', content: 'Done.' },
+    ];
+    const s = buildRunningSummary(messages, { recentTurns: 8 });
+    expect(s).toBe(extractConversationSummary(messages, 8));
+    expect(s).not.toContain('Earlier in this session'); // no digest needed
+  });
+
+  it('condenses everything before the recent window AND keeps recent turns verbatim', () => {
+    const messages = [
+      { role: 'user', content: 'build a fitness tracker app' },           // earliest ask — must survive
+      { role: 'assistant', content: [{ type: 'text', text: 'Scaffolding.' }, { type: 'tool_use', name: 'write_file', input: {} }] },
+      ...Array.from({ length: 10 }, (_, i) => ({ role: i % 2 === 0 ? 'user' : 'assistant', content: `chatter ${i}` })),
+      { role: 'user', content: 'now add a dark mode toggle' },            // recent — verbatim
+      { role: 'assistant', content: 'Added dark mode.' },
+    ];
+    const s = buildRunningSummary(messages, { recentTurns: 4 });
+    expect(s).toContain('Earlier in this session');
+    expect(s).toContain('build a fitness tracker app');   // early ask preserved in the digest
+    expect(s).toContain('Actions taken earlier: write_file');
+    expect(s).toContain('Most recent turns');
+    expect(s).toContain('now add a dark mode toggle');    // recent kept verbatim
+    expect(s).toContain('Added dark mode.');
+  });
+
+  it('returns "" for an empty transcript', () => {
+    expect(buildRunningSummary([], { recentTurns: 8 })).toBe('');
   });
 });
 

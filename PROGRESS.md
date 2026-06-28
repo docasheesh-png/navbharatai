@@ -5332,3 +5332,16 @@ failure keeps the progress reached. A real 'blocked' status is preserved. Best-e
 build. No AppKnowledgeBase entry (bug fix to an existing surface, not a new feature).
 
 Gate: frontend tsc 0, server tsc 0, vitest 2933/2933 PASS (+7), boot:check PASS.
+
+## 2026-06-28 — Audit P0-A: bound the request-setup calls that hang BEFORE the build deadline is armed
+
+The exhaustive pipeline audit (30 agents, 22 confirmed findings) identified the worst category: four
+calls run during request setup, BEFORE #541's 12-min deadline timer is created — so if any stalls, the
+whole HTTP request hangs TRULY forever (the deadline never starts). Fix: new raceTimeout(p, ms, label)
+helper (pure, 4 tests) wraps each, all fail-safe: (1) checkMonthlyCap (5s, fails OPEN like its error
+path); (2) describeVisionAttachments (8s → ''); (3) classifyIntentSmart (6s → keyword fallback already
+computed); (4) chatRouter.route plain-chat reply (30s → the existing catch falls through to the build
+path). This closes the "stuck at 'setting up workspace…' forever" hole for slow providers / degraded
+Firestore. (First of the audit's P0 fixes; readiness-gate parallelize + E2B file-op timeouts next.)
+
+Gate: frontend tsc 0, server tsc 0, vitest 2937/2937 PASS (+4), boot:check PASS.

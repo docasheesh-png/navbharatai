@@ -1,8 +1,26 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
+
+describe('raceTimeout — bounds request-setup calls that run before the build deadline is armed', () => {
+  it('resolves with the value when the promise settles in time', async () => {
+    await expect(raceTimeout(Promise.resolve('ok'), 1000, 'x')).resolves.toBe('ok');
+  });
+  it('rejects with a labelled timeout when the promise hangs', async () => {
+    const hangs = new Promise<string>(() => { /* never settles */ });
+    await expect(raceTimeout(hangs, 20, 'classifyIntentSmart')).rejects.toThrow(/classifyIntentSmart timed out after 20ms/);
+  });
+  it('propagates a rejection from the wrapped promise unchanged', async () => {
+    await expect(raceTimeout(Promise.reject(new Error('boom')), 1000, 'x')).rejects.toThrow('boom');
+  });
+  it('supports the fail-open .catch pattern used at the call sites', async () => {
+    const hangs = new Promise<{ allowed: boolean }>(() => {});
+    const r = await raceTimeout(hangs, 20, 'checkMonthlyCap').catch(() => ({ allowed: true }));
+    expect(r.allowed).toBe(true);
+  });
+});
 
 describe('conversationAccess (D7 ownership gate)', () => {
   it('allows the owner, forbids others, and reports not-found', () => {

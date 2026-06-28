@@ -5390,7 +5390,12 @@ ${buildLanguageRule(preferredLanguage)}`;
             /* NavBharatAI Pro v3.0 — replaces the retired Pro v2.0 builder. ProV3Surface shows the
                real v3.0 builder when it's enabled for this account, else an honest "rolling out"
                message (never a broken builder). The old ProChatPanel (v2.0) is retired. */
-            <ProV3Surface userId={user?.uid} email={user?.email} resume={v3Resume} />
+            <ProV3Surface
+              userId={user?.uid}
+              email={user?.email}
+              resume={v3Resume}
+              onFilesSync={(synced) => setFiles((prev) => ({ ...prev, ...synced }))}
+            />
           )}
 
           {/* ── Senior Doctor Assistant ── */}

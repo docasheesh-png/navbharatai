@@ -51,6 +51,7 @@ import { tracer, parseCloudTraceContext } from './src/server/observability/Trace
 import { registerObservabilityRoutes } from './src/server/routes/observability';
 import { errorTracker, installGlobalErrorHandlers } from './src/server/observability/ErrorTracker';
 import { registerHealthRoutes, markServerReady } from './src/server/routes/health';
+import { registerWarmRoute } from './src/server/routes/warm';
 
 
 // Traceability Infrastructure
@@ -429,6 +430,10 @@ setInterval(() => {
   // P2.4 — DR: liveness (/api/live), readiness (/api/ready), and the admin Firestore
   // backup trigger (/api/admin/backup/firestore).
   registerHealthRoutes(app);
+
+  // P3.3 — keep-warm: GET /api/warm pre-warms the heavy PRO/SDA singletons. Hit by an
+  // external Cloud Scheduler so min-instances=0 stays (see docs/SCALABILITY.md).
+  registerWarmRoute(app);
 
   // RETIRED — AppMaker telemetry/job routes (old engine). Unregistered in the v3.0 cutover.
   // registerAppmakerRoutes(app);

@@ -4711,3 +4711,36 @@ Phase P3 at 75%: P3.2 offline-first, P3.3 keep-warm, P3.4 CDN all DONE. P3.1 (sp
 6,252-line App.tsx into <1,500) intentionally DEFERRED — large multi-PR refactor, high
 regression risk on the live app, not safe for a single autonomous cycle (safeguard #3).
 Files: lib/staticCache.ts (+.test.ts), server.ts, firebase.json, docs/CDN.md, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P4.2 Event Sourcing + Replay DONE (ultracode workflows) (Phase P4 → 50%)
+
+Made EventHistoryStore replayable. New WorkspaceProjection.ts: PURE replayWorkspaceState
+reducer folds a workspace's event log into a lifecycle / mutation-ledger / VCS-ref /
+checkpoint projection; exposed as EventHistoryStore.replayWorkspace(workspaceId) +
+replayByCorrelationId(correlationId).
+
+HONEST by construction: discovery (5-agent workflow) proved AppMakerLab event payloads
+carry NO file paths/content (mutation events hardcode workspaceId:'default' + payload
+{id}). So the projection rebuilds ONLY what events prove (lifecycle, mutation ledger by
+tx id, VCS hashes/branch, checkpoint ids, build/gen errors) and is explicit it CANNOT
+rebuild bytes: reconstructable:false + notes[], deliberately NO fake filesPresent[].
+Byte-level restore stays the Journal/Checkpoint path. Two entry points handle the
+workspaceId-vs-correlationId gap honestly.
+
+Adversarial review (30-agent workflow) caught real bugs, all fixed:
+- COUNT-DRIFT (findings 6/8/11/12, root cause): counts were incremented per-event →
+  drifted from the ledger (STARTED→FAILED→ROLLED_BACK double-counted; duplicates
+  double-counted). FIX: counts are now DERIVED from the final ledger state after the fold
+  — each distinct batch counts once as its final state; replays never double-count.
+- GENERATION_FAILED + REPAIR_COMPLETED were unhandled → lifecycle stuck (GENERATING/
+  REPAIRING). FIX: added cases (+ GENERATION_FAILED/REPAIRED lifecycle states,
+  lastGenerationError field).
+- Dual VCS event types (VCS_COMMITTED/commitHash vs VCS_COMMIT_COMPLETED/commitId; LKG
+  pair) + REPAIR_STARTED-no-payload are PRE-EXISTING publisher smells — documented in
+  code, OUT of P4.2 scope (refactoring publishers risks VCS/build flow).
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2838/2838 PASS (17 new),
+reducer pure (deep-equal output, input untouched). Backend module (no live endpoint —
+the per-build store is ephemeral + AppMakerLab is dormant; an endpoint would need risky
+shared-store plumbing, deferred) → no AppKnowledgeBase entry. Files: eventbus/
+WorkspaceProjection.ts (+.test.ts), EventHistoryStore.ts, IEventHistoryStore.ts, UPGRADE_v3.0.md.

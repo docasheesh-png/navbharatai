@@ -15,16 +15,18 @@ import { EventType } from './EventTypes';
 
 /** Lifecycle phase derived purely from the event stream. */
 export type WorkspaceLifecycle =
-  | 'UNKNOWN'         // no WORKSPACE_CREATED seen
-  | 'CREATED'         // WORKSPACE_CREATED, nothing generated yet
-  | 'GENERATING'      // GENERATION_STARTED / TASK_STARTED in flight
-  | 'FILES_GENERATED' // FILES_GENERATED / GENERATION_COMPLETED
-  | 'BUILDING'        // BUILD_STARTED
-  | 'BUILT'           // BUILD_COMPLETED
-  | 'BUILD_FAILED'    // BUILD_FAILED
-  | 'REPAIRING'       // REPAIR_STARTED
-  | 'CORRUPTED'       // WORKSPACE_MUTATION_CORRUPTED (manual recovery required)
-  | 'DELETED';        // WORKSPACE_DELETED
+  | 'UNKNOWN'           // no WORKSPACE_CREATED seen
+  | 'CREATED'           // WORKSPACE_CREATED, nothing generated yet
+  | 'GENERATING'        // GENERATION_STARTED / TASK_STARTED in flight
+  | 'GENERATION_FAILED' // GENERATION_FAILED (the whole generation threw)
+  | 'FILES_GENERATED'   // FILES_GENERATED / GENERATION_COMPLETED
+  | 'BUILDING'          // BUILD_STARTED
+  | 'BUILT'             // BUILD_COMPLETED
+  | 'BUILD_FAILED'      // BUILD_FAILED
+  | 'REPAIRING'         // REPAIR_STARTED
+  | 'REPAIRED'          // REPAIR_COMPLETED (fixed; awaiting rebuild)
+  | 'CORRUPTED'         // WORKSPACE_MUTATION_CORRUPTED (manual recovery required)
+  | 'DELETED';          // WORKSPACE_DELETED
 
 /** One mutation transaction as seen ONLY through events (id + outcome — no paths/bytes). */
 export interface MutationRecord {
@@ -57,9 +59,10 @@ export interface WorkspaceProjection {
   knownCheckpointIds: string[];
   lastRestoredCheckpointId: string | null;
 
-  // Build/repair signal.
+  // Build/repair/generation signal.
   lastBuildOutcome: 'NONE' | 'SUCCESS' | 'FAILED';
   lastBuildError: string | null;
+  lastGenerationError: string | null;
 
   // Bookkeeping / audit.
   totalEventsApplied: number;
@@ -80,7 +83,7 @@ function initial(workspaceId: string): WorkspaceProjection {
     failedMutationCount: 0, corruptedMutationIds: [],
     vcsInitialized: false, lastCommitId: null, lastKnownGoodCommitId: null, currentBranch: null,
     knownCheckpointIds: [], lastRestoredCheckpointId: null,
-    lastBuildOutcome: 'NONE', lastBuildError: null,
+    lastBuildOutcome: 'NONE', lastBuildError: null, lastGenerationError: null,
     totalEventsApplied: 0, unappliedEventTypes: {},
     firstEventAt: null, lastEventAt: null, lastEventType: null,
     reconstructable: false,
@@ -132,22 +135,32 @@ export function replayWorkspaceState(events: IEvent[], workspaceId: string): Wor
       case EventType.GENERATION_STARTED:
       case EventType.TASK_STARTED:
         if (p.lifecycle === 'CREATED' || p.lifecycle === 'UNKNOWN') p.lifecycle = 'GENERATING'; break;
+      case EventType.GENERATION_FAILED: // ExecutionOrchestrator publishes { planId, error } when execute() throws
+        p.lastGenerationError = str(pay.error) ?? p.lastGenerationError;
+        if (p.lifecycle !== 'DELETED' && p.lifecycle !== 'CORRUPTED') p.lifecycle = 'GENERATION_FAILED'; break;
 
-      // ---- Mutation ledger: id only ----
+      // ---- Mutation ledger: id only. Counts are DERIVED from the final ledger after the
+      //      fold (see below) — NOT incremented per-event — so a batch that goes
+      //      STARTED→FAILED→ROLLED_BACK counts once (as its FINAL state), and duplicate /
+      //      replayed events never double-count. ----
       case EventType.WORKSPACE_MUTATION_STARTED:
         upsertMutation(p, pay.id, 'STARTED', undefined, e.timestamp); break;
       case EventType.WORKSPACE_MUTATION_COMMITTED:
-        upsertMutation(p, pay.id, 'COMMITTED', undefined, e.timestamp); p.committedMutationCount++; break;
+        upsertMutation(p, pay.id, 'COMMITTED', undefined, e.timestamp); break;
       case EventType.WORKSPACE_MUTATION_FAILED:
-        upsertMutation(p, pay.id, 'FAILED', str(pay.error), e.timestamp); p.failedMutationCount++; break;
+        upsertMutation(p, pay.id, 'FAILED', str(pay.error), e.timestamp); break;
       case EventType.WORKSPACE_MUTATION_ROLLED_BACK:
-        upsertMutation(p, pay.id, 'ROLLED_BACK', undefined, e.timestamp); p.rolledBackMutationCount++; break;
+        upsertMutation(p, pay.id, 'ROLLED_BACK', undefined, e.timestamp); break;
       case EventType.WORKSPACE_MUTATION_CORRUPTED:
         upsertMutation(p, pay.id, 'CORRUPTED', str(pay.error), e.timestamp);
-        if (typeof pay.id === 'string' && !p.corruptedMutationIds.includes(pay.id)) p.corruptedMutationIds.push(pay.id);
         p.lifecycle = 'CORRUPTED'; break;
 
-      // ---- VCS: hashes/refs only ----
+      // ---- VCS: hashes/refs only. NOTE: two provider implementations emit parallel event
+      //      pairs with DIFFERENT payload field names — LocalGitProvider emits
+      //      VCS_COMMITTED.{commitHash} / VCS_LAST_KNOWN_GOOD_SET.{commitHash}, while
+      //      VCSProvider emits VCS_COMMIT_COMPLETED.{commitId} / VCS_LKG_UPDATED.{commitId}.
+      //      Each case reads the field that event actually carries; last-write-wins. (The
+      //      underlying dual-event-type smell lives in the publishers, out of P4.2 scope.) ----
       case EventType.VCS_INITIALIZED: p.vcsInitialized = true; break;
       case EventType.VCS_COMMITTED: p.lastCommitId = str(pay.commitHash) ?? p.lastCommitId; break;
       case EventType.VCS_COMMIT_COMPLETED: p.lastCommitId = str(pay.commitId) ?? p.lastCommitId; break;
@@ -178,16 +191,28 @@ export function replayWorkspaceState(events: IEvent[], workspaceId: string): Wor
         p.lastBuildOutcome = 'FAILED'; p.lastBuildError = str(pay.error) ?? null;
         if (p.lifecycle !== 'DELETED') p.lifecycle = 'BUILD_FAILED'; break;
       case EventType.REPAIR_STARTED:
-        if (p.lifecycle !== 'DELETED') p.lifecycle = 'REPAIRING'; break;
+        if (p.lifecycle !== 'DELETED' && p.lifecycle !== 'CORRUPTED') p.lifecycle = 'REPAIRING'; break;
+      case EventType.REPAIR_COMPLETED: // repaired; awaiting a rebuild (don't leave it stuck in REPAIRING)
+        if (p.lifecycle === 'REPAIRING') p.lifecycle = 'REPAIRED'; break;
 
       default:
-        applied = false; // FILE_READ, FILE_LISTED, TASK_RETRYING, ERROR_OCCURRED, *_STARTED markers, …
+        applied = false; // FILE_READ, FILE_LISTED, TASK_RETRYING, TASK_FAILED, ERROR_OCCURRED, markers, …
     }
 
     if (!applied) {
       p.totalEventsApplied--; // it didn't move state — back out the count and record it as audit
       p.unappliedEventTypes[e.type] = (p.unappliedEventTypes[e.type] ?? 0) + 1;
     }
+  }
+
+  // P4.2 — DERIVE the mutation aggregates from the FINAL ledger state (last-write-wins per
+  // id), so counts always equal the number of distinct batches in each terminal state and
+  // can never drift or double-count on duplicate/replayed events (review fix).
+  for (const m of Object.values(p.mutations)) {
+    if (m.state === 'COMMITTED') p.committedMutationCount++;
+    else if (m.state === 'FAILED') p.failedMutationCount++;
+    else if (m.state === 'ROLLED_BACK') p.rolledBackMutationCount++;
+    else if (m.state === 'CORRUPTED') p.corruptedMutationIds.push(m.id);
   }
 
   return p;

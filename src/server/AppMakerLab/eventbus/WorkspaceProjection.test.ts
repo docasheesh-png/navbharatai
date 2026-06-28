@@ -50,6 +50,27 @@ describe('replayWorkspaceState (P4.2 event replay)', () => {
       expect(p.lastBuildError).toBe('tsc exploded');
     });
 
+    it('GENERATION_FAILED transitions lifecycle + records the error (not left stuck in GENERATING)', () => {
+      const p = replayWorkspaceState([
+        ev(EventType.WORKSPACE_CREATED),
+        ev(EventType.GENERATION_STARTED, { payload: { planId: 'pl1' } }),
+        ev(EventType.GENERATION_FAILED, { payload: { planId: 'pl1', error: 'planner crashed' } }),
+      ], 'ws-1');
+      expect(p.lifecycle).toBe('GENERATION_FAILED');
+      expect(p.lastGenerationError).toBe('planner crashed');
+    });
+
+    it('REPAIR_STARTED → REPAIR_COMPLETED ends REPAIRED (not stuck in REPAIRING)', () => {
+      const p = replayWorkspaceState([
+        ev(EventType.WORKSPACE_CREATED),
+        ev(EventType.BUILD_STARTED),
+        ev(EventType.BUILD_FAILED, { payload: { error: 'x' } }),
+        ev(EventType.REPAIR_STARTED),
+        ev(EventType.REPAIR_COMPLETED),
+      ], 'ws-1');
+      expect(p.lifecycle).toBe('REPAIRED');
+    });
+
     it('DELETED is terminal — later events never resurrect the workspace', () => {
       const p = replayWorkspaceState([
         ev(EventType.WORKSPACE_CREATED),
@@ -74,7 +95,7 @@ describe('replayWorkspaceState (P4.2 event replay)', () => {
   });
 
   describe('mutation ledger (last-write-wins by id)', () => {
-    it('STARTED → FAILED → ROLLED_BACK ends as ROLLED_BACK with correct counts', () => {
+    it('STARTED → FAILED → ROLLED_BACK ends as ROLLED_BACK; counts reflect FINAL state only', () => {
       const p = replayWorkspaceState([
         ev(EventType.WORKSPACE_MUTATION_STARTED, { payload: { id: 'b1' } }),
         ev(EventType.WORKSPACE_MUTATION_FAILED, { payload: { id: 'b1', error: 'boom' } }),
@@ -83,9 +104,20 @@ describe('replayWorkspaceState (P4.2 event replay)', () => {
       ], 'ws-1');
       expect(p.mutations['b1'].state).toBe('ROLLED_BACK');
       expect(p.mutations['b2'].state).toBe('COMMITTED');
+      // counts are DERIVED from the final ledger — b1 is ROLLED_BACK (not also counted FAILED).
       expect(p.committedMutationCount).toBe(1);
-      expect(p.failedMutationCount).toBe(1);
+      expect(p.failedMutationCount).toBe(0);
       expect(p.rolledBackMutationCount).toBe(1);
+    });
+
+    it('duplicate/replayed COMMITTED events for the same batch do NOT double-count', () => {
+      const p = replayWorkspaceState([
+        ev(EventType.WORKSPACE_MUTATION_COMMITTED, { payload: { id: 'b7' } }),
+        ev(EventType.WORKSPACE_MUTATION_COMMITTED, { payload: { id: 'b7' } }),
+        ev(EventType.WORKSPACE_MUTATION_COMMITTED, { payload: { id: 'b7' } }),
+      ], 'ws-1');
+      expect(Object.keys(p.mutations)).toEqual(['b7']);
+      expect(p.committedMutationCount).toBe(1); // one distinct batch, not three
     });
 
     it('a STARTED with no terminal event is honestly reported as STARTED (not assumed committed)', () => {

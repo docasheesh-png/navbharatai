@@ -53,7 +53,7 @@
 | P0 | Core-Law Violations | Breaks your own permanent rules | ✅ Complete | 100% |
 | P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ✅ Complete | 100% |
 | P2 | Resilience & Observability | See + survive failures | ✅ Complete | 100% |
-| P3 | Scale & Frontend Health | Grow without rewrites | 🔄 In Progress | 50% |
+| P3 | Scale & Frontend Health | Grow without rewrites | 🔄 In Progress | 75% (P3.1 App.tsx split deferred) |
 | P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 25% |
 | P5 | Hygiene & Hardening | Remove rot, close small holes | ⏳ Pending | 0% |
 | **P6** | **IaC & Provisioning** | Reproducible, version-controlled infra | ⏳ Pending | 0% |
@@ -282,9 +282,21 @@
       error leakage. Discovery + adversarial-review run as multi-agent workflows.
 - **Files:** `src/server/routes/warm.ts` (+ `.test.ts`), `server.ts`, `docs/SCALABILITY.md`, `cloudbuild.yaml`.
 
-### P3.4 — Real CDN / Edge Caching  ❌ MISSING
-- [ ] Front static assets with a CDN (Cloudflare / Cloud CDN) instead of browser cache only.
-- **Files:** infra config, `server.ts` cache headers.
+### P3.4 — Real CDN / Edge Caching  ✅ DONE (2026-06-28)
+- [x] Made all static assets CDN-ready and FIXED a real live bug: `sw.js` matched the `.js` rule and was served
+      `Cache-Control: immutable, max-age=1y` — pinning the service worker for a year (fights SW/PWA updates, and a
+      CDN would cache it too). Now `sw.js` + `manifest.json` are `no-cache, no-store, must-revalidate`.
+- [x] Single source of truth `src/server/lib/staticCache.ts` (`cacheControlFor`): hashed JS/CSS/fonts/wasm →
+      `public, max-age=31536000, immutable` (edge-cacheable by ANY CDN), images → 1 week, HTML/sw.js/manifest →
+      revalidate. Applied by the Cloud Run static handler (`server.ts`) and mirrored in `firebase.json`'s
+      `hosting.headers` so the Firebase Hosting global CDN serves identically.
+- [x] `docs/CDN.md` — honest CDN provisioning guide (Firebase Hosting CDN — config already complete, one
+      `firebase deploy --only hosting`; OR Cloud CDN via HTTPS LB + Serverless NEG; OR Cloudflare proxy). The
+      app code/config is complete; actual CDN provisioning is the documented admin infra/DNS step.
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2821/2821 ✅ (8 new, incl. the
+      sw.js-not-immutable regression guard + a firebase.json-mirrors-policy check) · `vite build` ✅ · server boots +
+      LIVE `curl -I`: `sw.js` → `no-cache`, hashed asset → `immutable, max-age=1y`, `manifest.json` → `no-cache` ✅.
+- **Files:** `src/server/lib/staticCache.ts` (+ `.test.ts`), `server.ts`, `firebase.json`, `docs/CDN.md`.
 
 ---
 

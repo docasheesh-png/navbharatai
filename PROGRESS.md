@@ -4687,3 +4687,27 @@ VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2813/2813 PASS (8 ne
 server boots, LIVE: /api/warm 200 13/13 ok, 2nd call cached:true (throttle), no raw error
 leak. Admin/ops endpoint → no AppKnowledgeBase entry.
 Files: routes/warm.ts (+.test.ts), server.ts, docs/SCALABILITY.md, cloudbuild.yaml, UPGRADE_v3.0.md.
+
+## 2026-06-28 — P3.4 Real CDN / Edge Caching DONE (Phase P3 → 75%; P3.1 deferred)
+
+Made static assets CDN-ready AND fixed a real live bug found while scoping: sw.js matched
+the .js rule and was served Cache-Control: immutable, max-age=1y — pinning the service
+worker for a year (fights SW/PWA updates; a CDN would cache it too). Now sw.js +
+manifest.json are no-cache, no-store, must-revalidate.
+
+- New src/server/lib/staticCache.ts (cacheControlFor) = single source of truth: hashed
+  JS/CSS/fonts/wasm → public, max-age=31536000, immutable (edge-cacheable by ANY CDN);
+  images → 1 week; HTML/sw.js/manifest → revalidate. server.ts static handler uses it.
+- firebase.json hosting.headers mirrors the policy → Firebase Hosting's global CDN serves
+  identically (config complete; `firebase deploy --only hosting` fronts assets with a real CDN).
+- docs/CDN.md: honest provisioning guide (Firebase Hosting CDN / Cloud CDN via LB+NEG /
+  Cloudflare). App config complete; actual CDN provisioning is the documented admin infra step.
+
+VERIFIED (gate green): frontend tsc 0, server tsc 0, vitest 2821/2821 PASS (8 new incl.
+sw.js-not-immutable regression guard + firebase.json-mirrors-policy check), vite build OK,
+server boots, LIVE curl -I: sw.js → no-cache, hashed asset → immutable 1y, manifest → no-cache.
+
+Phase P3 at 75%: P3.2 offline-first, P3.3 keep-warm, P3.4 CDN all DONE. P3.1 (split the
+6,252-line App.tsx into <1,500) intentionally DEFERRED — large multi-PR refactor, high
+regression risk on the live app, not safe for a single autonomous cycle (safeguard #3).
+Files: lib/staticCache.ts (+.test.ts), server.ts, firebase.json, docs/CDN.md, UPGRADE_v3.0.md.

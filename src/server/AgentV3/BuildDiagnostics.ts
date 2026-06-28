@@ -66,6 +66,9 @@ export interface BuildDiagnosticsMeta {
   onUpdate?: (report: BuildDiagnosticsReport) => void;
 }
 
+/** Hard cap on timeline entries so a runaway loop can't grow the report without bound. */
+const MAX_ISSUES = 2000;
+
 export class BuildDiagnostics {
   private readonly issues: BuildIssue[] = [];
   private readonly meta: BuildDiagnosticsMeta;
@@ -74,6 +77,11 @@ export class BuildDiagnostics {
   private endedAt?: number;
   private ok?: boolean;
   private summary?: string;
+  /** Tool calls that have STARTED but not yet returned — used to name what a hang is stuck on. */
+  private readonly pending = new Map<string, { tool: string; ts: number }>();
+  /** Last thing the agent was doing — surfaced in the minute-by-minute heartbeat. */
+  private lastActivity = 'starting';
+  private truncated = false;
 
   constructor(meta: BuildDiagnosticsMeta = {}) {
     this.meta = meta;
@@ -86,10 +94,29 @@ export class BuildDiagnostics {
     try { this.meta.onUpdate?.(this.report()); } catch { /* persistence is best-effort */ }
   }
 
-  /** Record an issue explicitly (provider fallback, sandbox timeout, …). */
+  /** Record an issue/timeline entry. Capped so a runaway build can't grow it without bound. */
   record(issue: Omit<BuildIssue, 'ts'> & { ts?: number }): void {
+    if (this.issues.length >= MAX_ISSUES) {
+      if (!this.truncated) {
+        this.truncated = true;
+        this.issues.push({ ts: this.now(), phase: 'build', severity: 'warning', code: 'TIMELINE_TRUNCATED', message: `Timeline capped at ${MAX_ISSUES} entries — earlier detail retained, later activity omitted.`, autoResolved: false });
+      }
+      return;
+    }
     this.issues.push({ ts: issue.ts ?? this.now(), ...issue });
     this.notify();
+  }
+
+  /**
+   * Record a periodic "still working" marker so even a long quiet stretch (a slow or hung step)
+   * shows minute-by-minute progress in the report instead of a blank gap. Called on a timer by the
+   * route. If a tool call is in-flight, it names it — so a hang is visible as "minute N — stuck on X".
+   */
+  heartbeat(): void {
+    const mins = Math.max(1, Math.round((this.now() - this.startedAt) / 60_000));
+    const inFlight = [...this.pending.values()].map((p) => p.tool);
+    const status = inFlight.length ? `in-flight: ${inFlight.join(', ')}` : `last: ${this.lastActivity}`;
+    this.record({ phase: 'build', severity: 'info', code: 'HEARTBEAT', message: `⏱ minute ${mins} — still working (${status})`, autoResolved: true });
   }
 
   /**
@@ -99,17 +126,35 @@ export class BuildDiagnostics {
    */
   ingestEvent(e: AgentEvent): void {
     switch (e.type) {
-      case 'tool_result':
+      case 'tool_call': {
+        // Record EVERY tool call (the full activity timeline) and remember it as in-flight, so a
+        // hang can be named ("stuck on X") instead of leaving an 11-minute blank in the report.
+        const tc = e as unknown as { tool?: unknown; callId?: unknown; ts?: number; agent?: unknown };
+        const tool = String(tc.tool ?? 'tool');
+        const callId = typeof tc.callId === 'string' ? tc.callId : undefined;
+        if (callId) this.pending.set(callId, { tool, ts: tc.ts ?? this.now() });
+        this.lastActivity = tool;
+        this.record({ phase: 'tool', severity: 'info', code: 'TOOL_CALL', message: `▶ ${tool}`, autoResolved: true, detail: tc.agent ? `agent=${String(tc.agent)}` : undefined });
+        break;
+      }
+      case 'tool_result': {
+        const started = e.callId ? this.pending.get(e.callId) : undefined;
+        if (e.callId) this.pending.delete(e.callId);
+        const durS = started ? Math.round(((e.ts ?? this.now()) - started.ts) / 1000) : undefined;
         if (!e.ok) {
           // A failed tool call. Whether it was fatal is decided at finish() from the
           // final build outcome (the agent usually retries and recovers).
           this.record({
             phase: 'tool', severity: 'warning', code: 'TOOL_ERROR',
             message: `Tool call failed: ${e.summary}`.slice(0, 500),
-            autoResolved: false, detail: `agent=${e.agent} callId=${e.callId}`,
+            autoResolved: false, detail: `agent=${e.agent} callId=${e.callId}${durS != null ? ` ${durS}s` : ''}`,
           });
+        } else {
+          // Successful tool call — part of the activity timeline (with how long it took).
+          this.record({ phase: 'tool', severity: 'info', code: 'TOOL_DONE', message: `✓ ${started?.tool ?? 'tool'}${durS != null ? ` (${durS}s)` : ''}`, autoResolved: true });
         }
         break;
+      }
       case 'error':
         this.record({
           phase: 'build', severity: 'error', code: 'BUILD_ERROR',
@@ -133,19 +178,33 @@ export class BuildDiagnostics {
         this.record({ phase: 'preview', severity: 'info', code: 'PREVIEW_PUBLISHED', message: `Preview published at ${e.url}`, autoResolved: true });
         break;
       case 'narration': {
-        // Capture narration lines that signal a problem the agent hit and is talking about
-        // (sandbox unavailable, port/preview not responding, errors remaining, retries) — these
-        // are the "struggles" that otherwise never reach the report.
         const t = (e.text || '').trim();
+        if (!t) break;
+        this.lastActivity = t.slice(0, 80);
+        // A problem the agent is talking about (sandbox unavailable, port/preview not responding,
+        // errors remaining, retries) is flagged warning/error; everything else is recorded as a
+        // normal AGENT_STEP so the report shows WHAT the agent was doing minute-to-minute, not only
+        // its struggles.
         if (/\b(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying|stuck|timed out|blocked request|closed port|won'?t come up|no files|warning)\b/i.test(t)) {
           this.record({ phase: 'build', severity: /\b(error|failed|cannot|could not|unavailable|timed out)\b/i.test(t) ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });
+        } else {
+          this.record({ phase: 'build', severity: 'info', code: 'AGENT_STEP', message: t.slice(0, 400), autoResolved: true });
         }
         break;
       }
-      default:
-        // Other events (todo, agent_spawned, etc.) are not diagnostics.
-        this.notify();
+      default: {
+        // Other notable milestones (delegation, plan, todo updates) go on the timeline as info.
+        const t = e.type as string;
+        const milestone = ['agent_spawned', 'agent_done', 'plan', 'plan_step_start', 'plan_updated', 'todo_updated', 'checkpoint', 'repo'].includes(t);
+        if (milestone) {
+          const a = e as unknown as { agent?: unknown };
+          this.lastActivity = t;
+          this.record({ phase: 'build', severity: 'info', code: 'EVENT', message: `• ${t}${a.agent ? ` (${String(a.agent)})` : ''}`, autoResolved: true });
+        } else {
+          this.notify();
+        }
         break;
+      }
     }
   }
 
@@ -158,6 +217,14 @@ export class BuildDiagnostics {
     this.endedAt = this.now();
     this.ok = ok;
     if (summary !== undefined) this.summary = summary;
+    // If the build ended NOT-ok with tool calls still in-flight, those are EXACTLY what it hung on
+    // — name them so a timeout report points at the real culprit instead of a blank gap.
+    if (!ok) {
+      for (const { tool, ts } of this.pending.values()) {
+        this.record({ phase: 'tool', severity: 'error', code: 'STUCK_TOOL', message: `Stuck on '${tool}' — in-flight ${Math.round((this.endedAt - ts) / 1000)}s, never completed.`, autoResolved: false });
+      }
+    }
+    this.pending.clear();
     for (const issue of this.issues) {
       if ((issue.code === 'TOOL_ERROR' || issue.code === 'NO_BUILD_NUDGE' || issue.code === 'EMPTY_BUILD_RETRY') && ok) {
         issue.autoResolved = true;

@@ -5300,3 +5300,18 @@ ever edits real source, never these dirs. Edit context drops from 5115 → the ~
 cheaper, less-confused turns.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2922/2922 PASS (+2 isIgnoredListPath tests), boot:check PASS.
+
+## 2026-06-28 — Build report upgrade: full minute-by-minute timeline + names the exact hang
+
+User insight from a real report: 12-minute build, only 2 lines recorded — because BuildDiagnostics only
+captured PROBLEMS (errors/struggle-narration), never normal activity. So an 11-minute hang was a blank gap;
+we couldn't see what it was doing. Upgrade (BuildDiagnostics): (1) record EVERY tool call (TOOL_CALL) and
+its completion+duration (TOOL_DONE), not only failures; (2) record ALL narration as AGENT_STEP (timeline),
+not just problem lines; (3) record milestone events (delegation/plan/todo) as EVENT; (4) track IN-FLIGHT
+tool calls and, on finish(false), record STUCK_TOOL naming exactly what the build hung on (in-flight Ns,
+never completed); (5) new heartbeat() that the route calls every 60 s (diagHeartbeatTimer, cleared in
+finally) → minute-by-minute "⏱ minute N — still working (in-flight: X / last: Y)" markers so a long quiet
+stretch is no longer a blank gap. Timeline capped at 2000 entries (TIMELINE_TRUNCATED) so a runaway loop
+can't grow the report unbounded. Now a timeout report shows the full activity log AND points at the culprit.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2926/2926 PASS (+4 timeline/heartbeat/stuck tests), boot:check PASS.

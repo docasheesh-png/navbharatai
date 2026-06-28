@@ -94,3 +94,41 @@ describe('BuildDiagnostics', () => {
     expect(renderDiagnosticsText(r)).toContain('No issues recorded');
   });
 });
+
+describe('BuildDiagnostics — full activity timeline (minute-by-minute, names the hang)', () => {
+  it('records every tool call and its completion (with duration) — not only failures', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_call', agent: 'frontend', tool: 'write_file', input: {}, callId: 'c1', ts: 1000 } as AgentEvent);
+    d.ingestEvent({ type: 'tool_result', agent: 'frontend', callId: 'c1', ok: true, summary: 'wrote', ts: 3000 } as AgentEvent);
+    const r = d.report();
+    expect(r.issues.find((i) => i.code === 'TOOL_CALL')?.message).toContain('write_file');
+    const done = r.issues.find((i) => i.code === 'TOOL_DONE');
+    expect(done?.message).toContain('write_file');
+    expect(done?.message).toContain('2s'); // 3000 − 1000 ms
+  });
+
+  it('records NORMAL narration as an AGENT_STEP (the timeline), not only problems', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: 'Building the calculator UI', ts: 1 } as AgentEvent);
+    expect(d.report().issues.find((i) => i.code === 'AGENT_STEP')?.message).toContain('Building the calculator UI');
+  });
+
+  it('heartbeat() adds a minute marker that NAMES the in-flight tool (so a hang is visible)', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_call', agent: 'frontend', tool: 'bash', input: {}, callId: 'c1', ts: 1000 } as AgentEvent);
+    d.heartbeat();
+    const hb = d.report().issues.find((i) => i.code === 'HEARTBEAT');
+    expect(hb?.message).toContain('still working');
+    expect(hb?.message).toContain('bash'); // names what is in-flight
+  });
+
+  it('finish(false) names the tool the build was STUCK on (in-flight, never completed)', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_call', agent: 'frontend', tool: 'npm run dev', input: {}, callId: 'c1', ts: 1000 } as AgentEvent);
+    // No tool_result → the call is still in-flight when the build is stopped at the deadline.
+    d.finish(false, 'timed out');
+    const stuck = d.report().issues.find((i) => i.code === 'STUCK_TOOL');
+    expect(stuck?.message).toContain('npm run dev');
+    expect(stuck?.severity).toBe('error');
+  });
+});

@@ -62,6 +62,7 @@
 | **P-AI** | **AI Intelligence Gaps** | Deeper reasoning, RAG, safety, personalization | ⏳ Pending | 0% |
 | **P-CGE** | **Code Generation Engine Gaps** | Incremental gen, test gen, docs, contracts, lint-fix | ⏳ Pending | 0% |
 | **P-PME** | **Project Management Engine Gaps** | Cross-session memory, release notes, debt tracker, AI estimator | ⏳ Pending | 0% |
+| **P-DEV** | **Dev Environment Gaps** | LSP navigation, real debugger, crash recovery, merge editor, pkg manager | ⏳ Pending | 0% |
 
 ---
 
@@ -269,6 +270,126 @@
 - [ ] **Chaos + load testing:** k6/Locust load tests + a basic fault-injection check in CI.
 - **Acceptance:** static assets edge-cached; keys in KMS; a load test runs in CI.
 - **Files:** infra config, `server.ts`, `.github/workflows/`.
+
+---
+
+## 🟢 PHASE P-DEV — DEVELOPMENT ENVIRONMENT GAPS
+> From the 300-component Dev Environment audit (2026-06-28). Already-strong items not listed.
+> Only PARTIAL → Full and MISSING items, priority-ordered.
+> Scope note: remote DevContainers, k8s-native dev, Codespaces, WSL, bare-metal GPU runtimes are ⬜ N/A
+> by design — navBharatAI runs on Cloud Run + E2B sandbox. Only IDE/DevEx gaps relevant to app-maker captured.
+
+### ✅ Dev Environment Already Strong (do not redo)
+- Monaco Editor (multi-tab, minimap, bracket colorization, auto-format, code folding, multi-cursor),
+  DiffViewer.tsx (LCS-based unified diff), VisualEditor.tsx (WYSIWYG iframe editor with element selection),
+  FileExplorer.tsx (tree view, file ops, search filter), TerminalPanel.tsx (xterm.js, multi-terminal,
+  shell simulation, command history, 3 tabs: Terminal/Output/Debug Console),
+  CommandPalette.tsx (Ctrl+K, 8 command categories), StatusBar.tsx (git branch, problem count, AI status),
+  ActivityBar.tsx (6 sections: Files/Search/Git/Shortcuts/Cursor/Security),
+  PreviewPanel.tsx (iframe, device modes laptop/mobile/fullscreen, hot reload, NBTag overlay),
+  LiveCollaboration.tsx (Firebase real-time, presence, chat, room-based, QR codes),
+  TeamCollaboration.tsx (role-based Admin/Editor/Viewer, activity feed),
+  GitPanel.tsx (2500+ lines, 16 deploy platforms, GitHub OAuth),
+  CICDPipeline.tsx (step-based pipeline: GitHub Actions / Cloud Build / GitLab CI),
+  TestPanel.tsx (sandbox iframe runner, pass/fail/pending), SecurityScan.tsx (SAST, 6-phase, severity),
+  AICodeReview.tsx (bugs/perf/security/accessibility), AIDebugger.tsx (5 error types, root cause + AI fix),
+  AISuggestions.tsx (Copilot-style, 8 templates + dynamic analysis), AIChat.tsx (full history, model selection),
+  AppHealthMonitor.tsx (8 metrics, health score, incident tracking),
+  AppAnalytics.tsx (build counts, AI model breakdown), PerformanceAnalyzer.tsx,
+  ExtensionMarket.tsx (ESLint/Prettier/Tailwind/Python), ComponentLibrary.tsx, APITester.tsx, SecretManager.tsx.
+
+### P-DEV.1 — LSP / Code Navigation (Go to Definition, Find References, Rename)  ❌ MISSING  [HIGH]
+- Go to Definition (F12), Find All References (Shift+F12), Peek Definition, Rename Symbol (F2) — not wired.
+  Monaco's TypeScript worker runs in isolation; it doesn't see the full workspace file set.
+- ts-morph is already used in `ASTAnalyzer.ts` — it can power these without a full Language Server process.
+- [ ] Add `NavigationEngine.ts` wrapping ts-morph: `getDefinition(file, pos)`, `findReferences(symbol)`, `renameSymbol(oldName, newName, files[])`.
+- [ ] Wire to Monaco `editor.addAction()` on right-click context menu + keybindings F12 / Shift+F12 / F2.
+- [ ] Return results as Monaco `Location[]` and open in a references panel.
+- **Files:** new `src/server/AI/NavigationEngine.ts`, `src/components/ide/Editor.tsx`.
+
+### P-DEV.2 — Cross-Session Workspace Persistence (Firestore)  🟡 PARTIAL → full  [HIGH]
+- `WorkspaceContext.tsx` stores files, open tabs, and chat history in localStorage only.
+  On browser close or cross-device access, the workspace is gone.
+- `WorkspaceManager.ts` has `saveWorkspace()` / `loadWorkspace()` methods but they are not wired to the context on every mutation.
+- [ ] Subscribe to workspace mutations in `WorkspaceContext.tsx` (debounced 2s) → call `WorkspaceManager.saveWorkspace()` → Firestore `workspaces/{userId}/{workspaceId}/state`.
+- [ ] On app load: fetch latest workspace from Firestore first, fall back to localStorage.
+- [ ] Show a "Saving…" / "Saved" indicator in StatusBar.tsx.
+- **Files:** `src/contexts/WorkspaceContext.tsx`, `src/server/AppMakerLab/WorkspaceManager.ts`, `src/components/ide/StatusBar.tsx`.
+
+### P-DEV.3 — Real Debugger Panel (Breakpoints + Call Stack + Variable Watch)  ❌ MISSING  [HIGH]
+- `AIDebugger.tsx` does AI analysis of error text — it is NOT a runtime debugger. No breakpoints, no call stack, no variable inspection.
+- [ ] Add breakpoint markers in Monaco gutter (click to toggle, persist to `WorkspaceContext`).
+- [ ] Wire E2B sandbox (already in `infra/e2b/`) to pause execution at breakpoints and stream call stack + local variables via WebSocket.
+- [ ] Render a DebugPanel: call stack list, variable watch (add/remove expressions), continue/step-over/step-into buttons.
+- **Files:** new `src/components/ide/DebugPanel.tsx`, `src/components/ide/Editor.tsx`, `infra/e2b/`, `server.ts`.
+
+### P-DEV.4 — Merge Conflict Resolver (3-way Merge Editor)  ❌ MISSING  [HIGH]
+- `DiffViewer.tsx` shows 2-way LCS diffs. No 3-way merge editor for conflict resolution when LiveCollaboration produces concurrent edits or GitPanel pulls conflicting branches.
+- [ ] Add a 3-pane MergeEditor: left (ours) | center (base) | right (theirs) with Accept/Reject/Both buttons per hunk.
+- [ ] Integrate with GitPanel.tsx: detect `<<<<<<< HEAD` conflict markers in files → open MergeEditor automatically.
+- [ ] After all conflicts resolved, auto-close MergeEditor and mark file as staged.
+- **Files:** new `src/components/ide/MergeEditor.tsx`, `src/components/ide/GitPanel.tsx`, `src/components/ide/DiffViewer.tsx`.
+
+### P-DEV.5 — Real Package Manager Integration  🟡 PARTIAL → full  [HIGH]
+- Terminal mock in `TerminalPanel.tsx` intercepts `npm install <pkg>` and returns fake output.
+  Generated apps therefore have no way to actually add/remove packages from within the IDE.
+- [ ] Add a `/api/workspace/npm` endpoint in `server.ts` that runs `npm install` inside the E2B sandbox for the active workspace, streams output via SSE.
+- [ ] TerminalPanel.tsx detects `npm|pnpm|yarn install/uninstall` commands → redirects to the real endpoint instead of mock.
+- [ ] Update `package.json` of the generated app in the workspace file tree on success.
+- **Files:** `src/components/ide/TerminalPanel.tsx`, `server.ts` (new endpoint), `infra/e2b/`.
+
+### P-DEV.6 — Code Refactoring Tools (Extract / Move / Rename cross-file)  ❌ MISSING  [MED]
+- Monaco F2 renames only within single file (client-side). No Extract Method/Variable/Interface, no Move Symbol across files.
+- ts-morph `LanguageService` (already imported in `ASTAnalyzer.ts`) supports cross-file refactors.
+- [ ] Add context-menu actions in Editor: "Extract to function", "Extract to variable", "Move to file".
+- [ ] Call `NavigationEngine.ts` (P-DEV.1) refactor API; apply resulting `TextChange[]` to workspace files.
+- **Files:** `src/components/ide/Editor.tsx`, `src/server/AI/NavigationEngine.ts`.
+
+### P-DEV.7 — Offline Development Mode (Service Worker)  ❌ MISSING  [MED]
+- No service worker — every keystroke and file read requires internet. Pure UI edits can't proceed offline.
+- [ ] Add a Workbox service worker: cache Monaco editor worker bundle, app shell JS/CSS, and last-loaded workspace snapshot.
+- [ ] When `navigator.onLine = false`: serve cached app shell, store workspace mutations in IndexedDB, sync to Firestore on reconnect.
+- [ ] Show "Offline — syncing on reconnect" banner in StatusBar.tsx.
+- **Files:** `src/main.tsx` (register SW), new `public/service-worker.js`, `src/components/ide/StatusBar.tsx`.
+
+### P-DEV.8 — Git Advanced Tools (Blame / Stash / Tag Manager)  ❌ MISSING  [MED]
+- GitPanel.tsx handles branch/PR/deploy/16 platforms but missing: Blame Viewer (who changed this line), Stash Manager (save/pop/drop), Tag Manager (create/push semver tags for release).
+- [ ] Blame: call GitHub API `/repos/{owner}/{repo}/blame/{ref}/{path}`, overlay author+date in Monaco gutter as decorations.
+- [ ] Stash: add "Stash" tab in GitPanel.tsx — `git stash list/push/pop/drop` via the Git endpoint.
+- [ ] Tags: add "Tags" tab — create `vX.Y.Z` tag, push to remote; wire to SemVer Manager (P-PME.13).
+- **Files:** `src/components/ide/GitPanel.tsx`.
+
+### P-DEV.9 — Runtime Theme Switcher (Monaco + App Shell)  🟡 PARTIAL → full  [MED]
+- Monaco theme is hardcoded to `vs-dark` in `Editor.tsx`. App dark/light toggle changes shell colors but not the editor itself.
+- [ ] Add a Theme selector in Settings or StatusBar dropdown: VS Dark | VS Light | Monokai | Dracula | Solarized Dark.
+- [ ] On change: call `monaco.editor.setTheme(selected)` and persist to `localStorage('editorTheme')`.
+- [ ] Define custom Monokai/Dracula themes via `monaco.editor.defineTheme()`.
+- **Files:** `src/components/ide/Editor.tsx`, `src/App.tsx` (Settings panel).
+
+### P-DEV.10 — Dedicated Code Explanation Panel  ❌ MISSING  [MED]
+- `AIDebugger.tsx` is error-focused. `AISuggestions.tsx` shows templates. No "explain this selection" panel.
+- [ ] Add "Explain Code" to Monaco right-click context menu → send selected text to AgentV3 with `intent: explain`.
+- [ ] Render response in a dedicated `CodeExplainPanel.tsx` side panel: plain-language description, complexity label, pattern name, suggested refactors.
+- **Files:** `src/components/ide/Editor.tsx`, new `src/components/ide/CodeExplainPanel.tsx`, `src/components/ide/ActivityBar.tsx`.
+
+### P-DEV.11 — Inline Code Comments / Review Mode  ❌ MISSING  [LOW]
+- LiveCollaboration.tsx has chat but no GitHub PR-style inline code comments tied to specific line ranges.
+- [ ] Add comment anchors in Monaco gutter (click to add a thread, stored in Firestore `comments/{workspaceId}/{file}/{line}`).
+- [ ] Show unresolved comment count in StatusBar.tsx; allow resolve/reply.
+- **Files:** `src/components/ide/Editor.tsx`, `src/components/ide/LiveCollaboration.tsx`, new `src/lib/commentStore.ts`.
+
+### P-DEV.12 — Performance Profiler / Flame Graph  ❌ MISSING  [LOW]
+- `AppHealthMonitor.tsx` tracks runtime health metrics. `PerformanceAnalyzer.tsx` audits static HTML.
+  No CPU/memory profiler or flame graph for identifying hot paths in generated app code.
+- [ ] Integrate `clinic.js` or `v8-profiler-next` via E2B sandbox — generate CPU profile JSON.
+- [ ] Render flame graph (using `d3-flame-graph`) in a "Profile" tab inside TerminalPanel.tsx.
+- **Files:** new `src/components/ide/ProfilerPanel.tsx`, `src/components/ide/TerminalPanel.tsx`, `server.ts`.
+
+### P-DEV.13 — Voice Collaboration  ❌ MISSING  [LOW — future scope]
+- LiveCollaboration.tsx supports real-time text chat + cursor presence. No voice channel for pair/mob programming.
+- [ ] Integrate Daily.co or LiveKit (WebRTC, self-hostable) for voice-only rooms keyed to workspace room ID.
+- [ ] Mute/unmute + speaker indicators in LiveCollaboration.tsx toolbar.
+- **Files:** `src/components/ide/LiveCollaboration.tsx`, new `src/lib/voiceRoom.ts`.
 
 ---
 
@@ -890,6 +1011,8 @@
     convention engine, OpenAPI contract, lint-fix pass (P-CGE.1–5, P-CGE.7).
 17. **PME baseline** — cross-session memory, release notes, debt tracker, AI estimator,
     lessons learned, scope change control (P-PME.1–5, P-PME.6).
+18. **Dev Environment baseline** — LSP code navigation, Firestore workspace persistence,
+    real debugger (breakpoints + call stack), merge conflict resolver, real package manager (P-DEV.1–5).
 
 ---
 
@@ -941,6 +1064,20 @@
   MED gaps: PII detection (general), test generation, human-in-the-loop gate, decision trace, abuse detection.
   LOW gaps: log/stack trace parser, model evaluation engine, multimodal/vision (future scope).
   Added as **PHASE P-AI**.
+- 2026-06-28 (DEV audit): Ran 300-component **Development Environment** audit → found 13 gaps (5 HIGH, 5 MED, 3 LOW).
+  Scope note: remote DevContainers, k8s-native dev, Codespaces, WSL, bare-metal GPU are ⬜ N/A by design (managed-serverless + E2B sandbox).
+  Already-strong (~60%): Monaco Editor (multi-tab, minimap, folding, multi-cursor, bracket colorization), DiffViewer (LCS), VisualEditor (WYSIWYG),
+  FileExplorer (tree, ops, search filter), TerminalPanel (xterm.js, multi-terminal, 3 tabs), CommandPalette (Ctrl+K), StatusBar, ActivityBar (6 sections),
+  PreviewPanel (iframe, device modes, hot reload), LiveCollaboration (Firebase real-time), TeamCollaboration (role-based), GitPanel (2500+ lines, 16 platforms),
+  CICDPipeline, TestPanel, SecurityScan (SAST), AICodeReview, AIDebugger (5 error types), AISuggestions (Copilot-style), AIChat, AppHealthMonitor, AppAnalytics,
+  PerformanceAnalyzer, ExtensionMarket, ComponentLibrary, APITester, SecretManager.
+  HIGH gaps: no LSP/code navigation (Go to Definition / Find References / cross-file Rename — ts-morph already present, just not wired),
+  cross-session workspace not Firestore-persisted (localStorage only), no real debugger (AIDebugger.tsx is AI error analysis, not a runtime debugger),
+  no merge conflict resolver (3-way merge), package manager mocked (npm install fakes output).
+  MED gaps: no cross-file refactoring tools, no offline service worker, no Git Blame/Stash/Tag manager, Monaco theme hardcoded (no switcher),
+  no dedicated code explanation panel.
+  LOW gaps: no inline code comments/review mode, no flame graph/profiler, no voice collaboration.
+  Added as **PHASE P-DEV**.
 - 2026-06-27 (PE audit): Ran 300-component **Prompt Engine** audit → found 8 gaps (3 HIGH, 3 MED, 2 LOW).
   Already-strong: IntentClassifier, RequirementIntelligenceEngine, FilePlanningEngine, Context Building,
   KnowledgeEvolution, ConversationStore, EmbeddingSearch, AIRouter 2-pass, ToolDispatcher 30+ tools,

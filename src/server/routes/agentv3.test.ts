@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { userCostStore } from '../lib/UserCostStore';
 
@@ -122,6 +122,24 @@ describe('agentV3KeyDiag (provider diagnosis)', () => {
         else process.env[k] = saved[k];
       }
     }
+  });
+});
+
+describe('resolveClaudeFirst — v3.0 builds lead with Claude by default', () => {
+  it('defaults to Claude-first when no opt and no env override', () => {
+    expect(resolveClaudeFirst(undefined, undefined)).toBe(true);
+  });
+  it('reverts to cheap-first only when AGENTV3_BUILD_CLAUDE_FIRST=0 / off', () => {
+    expect(resolveClaudeFirst(undefined, '0')).toBe(false);
+    expect(resolveClaudeFirst(undefined, 'off')).toBe(false);
+  });
+  it('still Claude-first for any other env value', () => {
+    expect(resolveClaudeFirst(undefined, '1')).toBe(true);
+    expect(resolveClaudeFirst(undefined, 'true')).toBe(true);
+  });
+  it('explicit opts win (escalation forces Claude-first; explicit false honoured)', () => {
+    expect(resolveClaudeFirst(true, '0')).toBe(true);
+    expect(resolveClaudeFirst(false, undefined)).toBe(false);
   });
 });
 

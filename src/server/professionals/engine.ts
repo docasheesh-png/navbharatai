@@ -1,4 +1,4 @@
-import { callGemini, callClaude, callGroq } from '../lib/aiCalls';
+import { AIRouterManager } from '../AI/AIRouterManager';
 import { retrieveKnowledge, formatKnowledge } from './knowledge';
 import { CREATOR_IDENTITY } from '../lib/prompts';
 import type { ProfessionalConfig } from './types';
@@ -17,12 +17,17 @@ export function buildProfessionalSystemPrompt(config: ProfessionalConfig, kbBloc
     .join('\n\n');
 }
 
-/** Resilient model call: Gemini → Claude → Grok. System prompt is honoured by
- * Gemini/Claude; for the Grok fallback it is prepended to the message. */
+/**
+ * Resilient model call through the ISOLATED 'professional' universe router
+ * (defined once in AIRouterManager). Every professional — Doctor AI, Teacher,
+ * Lawyer, CA, Astrologer, Kisan, … — shares this one isolated universe, so it
+ * never mixes routing state with FREE or PRO. routeRaced fires Grok × Gemini ×
+ * Vertex concurrently and uses Claude Haiku ONLY if all three fail.
+ */
 async function resilientCall(systemPrompt: string, prompt: string): Promise<string> {
-  try { const t = await callGemini(prompt, undefined, [], systemPrompt); if (t && t.trim()) return t; } catch { /* fall through */ }
-  try { const t = await callClaude(prompt, undefined, [], systemPrompt); if (t && t.trim()) return t; } catch { /* fall through */ }
-  try { const t = await callGroq(`${systemPrompt}\n\n${prompt}`, undefined, []); if (t && t.trim()) return t; } catch { /* fall through */ }
+  const router = AIRouterManager.getRouter('professional');
+  const { response, telemetry } = await router.routeRaced(prompt, systemPrompt);
+  if (telemetry.success && response.content?.trim()) return response.content;
   throw new Error('All AI providers failed for this professional.');
 }
 

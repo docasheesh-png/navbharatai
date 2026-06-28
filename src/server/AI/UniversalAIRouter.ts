@@ -7,11 +7,11 @@ export class UniversalAIRouter {
   async route(
     message: string,
     history: any[] = [],
-    tier: 'navbharat' | 'vishwakarma-basic' | 'vishwakarma-pro' | 'vip' = 'navbharat',
+    tier: 'navbharat' | 'vishwakarma-basic' | 'vishwakarma-pro' | 'vip' | 'sda' | 'doctor' | 'professional' = 'navbharat',
     traceContext?: TraceContext,
     systemPrompt?: string,
   ): Promise<string> {
-    const ns = (tier === 'vishwakarma-pro' || tier === 'vip') ? 'pro' : 'free';
+    const ns = this.namespaceFor(tier);
     const router = AIRouterManager.getRouter(ns);
     const fullPrompt = this.buildPrompt(message, history);
     console.log(`[UNIVERSAL_ROUTER] tier=${tier} ns=${ns} promptLen=${fullPrompt.length}`);
@@ -35,10 +35,21 @@ export class UniversalAIRouter {
     onChunk: (text: string) => void,
     signal?: AbortSignal,
   ): Promise<void> {
-    const ns = (tier === 'vishwakarma-pro' || tier === 'vip') ? 'pro' : 'free';
+    const ns = this.namespaceFor(tier);
     const router = AIRouterManager.getRouter(ns);
     const fullPrompt = this.buildPrompt(message, history);
     await router.routeStream(fullPrompt, systemPrompt, onChunk, signal);
+  }
+
+  // Map a request tier to its ISOLATED router universe. Every professional AI —
+  // Doctor AI (SDA), Teacher, Lawyer, CA, Astrologer, Kisan, … — shares the
+  // 'professional' namespace (Grok→Gemini→Vertex→Claude-last) so the whole
+  // professional universe is isolated from FREE and PRO and never shares routing
+  // state with them. FREE must never reach Claude.
+  private namespaceFor(tier: string): 'free' | 'pro' | 'professional' {
+    if (tier === 'sda' || tier === 'doctor' || tier === 'professional') return 'professional';
+    if (tier === 'vishwakarma-pro' || tier === 'vip') return 'pro';
+    return 'free';
   }
 
   // Rolling context: last 15 turns at full detail, older ones as a compact summary line.

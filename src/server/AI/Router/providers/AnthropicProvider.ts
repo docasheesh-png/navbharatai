@@ -4,6 +4,8 @@ import Anthropic from '@anthropic-ai/sdk';
 export class AnthropicProvider implements AIProvider {
   name: 'ANTHROPIC' = 'ANTHROPIC';
   priority = 4;
+  /** Set true in the PROFESSIONAL universe so Claude is tried only after the race fails. */
+  lastResort = false;
 
   private client: Anthropic;
   private readonly modelId: string;

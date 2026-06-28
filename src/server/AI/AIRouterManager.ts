@@ -21,17 +21,22 @@ function slot(base: AIProvider, priority: number, model: string): AIProvider {
 export class AIRouterManager {
   private static instanceFree: AIRouter | null = null;
   private static instancePro: AIRouter | null = null;
+  private static instanceProfessional: AIRouter | null = null;
 
-  static getRouter(namespace: 'free' | 'pro'): AIRouter {
+  static getRouter(namespace: 'free' | 'pro' | 'professional'): AIRouter {
     if (namespace === 'pro') {
       if (!this.instancePro) this.instancePro = this.buildPro();
       return this.instancePro;
+    }
+    if (namespace === 'professional') {
+      if (!this.instanceProfessional) this.instanceProfessional = this.buildProfessional();
+      return this.instanceProfessional;
     }
     if (!this.instanceFree) this.instanceFree = this.buildFree();
     return this.instanceFree;
   }
 
-  static reset() { this.instanceFree = null; this.instancePro = null; }
+  static reset() { this.instanceFree = null; this.instancePro = null; this.instanceProfessional = null; }
 
   // FREE: Vertex (5 models) → Gemini (3 models) → Grok. Claude NEVER used in free.
   private static buildFree(): AIRouter {
@@ -101,6 +106,42 @@ export class AIRouterManager {
     [['gemini-2.5-flash',10],['gemini-2.0-flash',11],['gemini-1.5-pro',12]].forEach(([m,p]) => {
       try { router.registerProvider(slot(gemini, p as number, m as string)); } catch {}
     });
+
+    return router;
+  }
+
+  // PROFESSIONAL universe (Doctor AI / SDA + every config-driven professional:
+  // Teacher, Lawyer, CA, Astrologer, Kisan, …). Fully isolated from FREE and PRO.
+  // Routing shape (via AIRouter.routeRaced): RACE Grok × Gemini × Vertex
+  // concurrently — first non-empty success wins; ONLY if all three fail, fall back
+  // to Claude Haiku (last resort). Honors the "Grok primary, Claude last" core law.
+  private static buildProfessional(): AIRouter {
+    const router = new AIRouter();
+    console.log('[ROUTER_MGR] Building PROFESSIONAL chain: RACE(Grok × Gemini × Vertex) → Claude Haiku(last resort)');
+
+    // ── Race participants (fired concurrently) ──
+    try {
+      const grok = new GrokProvider();
+      router.registerProvider(slot(grok, 1, 'grok-3'));
+    } catch {}
+
+    try {
+      const gemini = new GeminiProvider();
+      router.registerProvider(slot(gemini, 2, 'gemini-2.0-flash'));
+    } catch {}
+
+    try {
+      const vertex = new VertexProvider();
+      router.registerProvider(slot(vertex, 3, 'gemini-2.5-flash'));
+    } catch {}
+
+    // ── Last resort ONLY: Claude Haiku (cheap, reached only if the race fails) ──
+    try {
+      const claude = new AnthropicProvider('claude-haiku-4-5-20251001');
+      claude.priority = 99;
+      claude.lastResort = true;
+      router.registerProvider(claude);
+    } catch {}
 
     return router;
   }

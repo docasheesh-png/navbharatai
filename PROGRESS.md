@@ -4987,3 +4987,26 @@ never breaks boot. Combined with #518 (session id persisted → same workspace o
 already-durable WorkspaceFileStore, a reload now restores the chat AND re-seeds the files.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.
+
+## 2026-06-28 — "reload pe data gayab" (part 2): Firestore DB was a free-tier-capped AI-Studio database
+
+Admin upgraded the project (gen-lang-client-0866594388) to Blaze, but persistence STILL failed with
+"Quota exceeded for 'Free daily write units per project (free tier database)' … This database cannot
+exceed free quota limits even when a billing instrument is enabled." Root cause: the configured
+Firestore database id is `ai-studio-cc9cd998-…` — a database Google AI Studio created in a FREE tier
+that stays hard-capped to the free daily write quota EVEN on Blaze. So chat/files/memory writes were
+rejected once the daily free writes ran out → nothing persisted → data gone on reload.
+
+FIX (code): new src/server/lib/firestoreDb.ts → firestoreDatabaseId() returns
+FIRESTORE_DATABASE_ID (env) || firebase-applet-config.json value || '(default)'. Wired it into every
+server-side Firestore store (WorkspaceFileStore, FirestoreConversationStore, FirestoreWorkspaceMemory
+Store, EngineerAI WorkspaceMemoryStore, AppMakerLab FirestoreJobStore, eventStore, FirestoreBackup),
+so ALL stores read the same database id and the admin can point them at a FULL-QUOTA database
+(the project's `(default)` Native DB, or a freshly created one) via the FIRESTORE_DATABASE_ID env var
+— no code change needed.
+
+ADMIN ACTION: create/confirm a full-quota Firestore database in gen-lang-client-0866594388 (Native
+mode; the `(default)` DB on Blaze has full quota), then set Cloud Run env
+FIRESTORE_DATABASE_ID=<that-database-id>. Then chat + files + memory persist across reloads.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.

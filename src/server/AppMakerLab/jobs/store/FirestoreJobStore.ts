@@ -1,7 +1,7 @@
 import * as admin from 'firebase-admin';
 import { BuildJob, JobStatus } from '../BuildJobManager';
 import { JobStore } from './JobStore';
-import firebaseConfig from '../../../../firebase-applet-config.json';
+import { firestoreDatabaseId } from '../../../lib/firestoreDb';
 
 export class FirestoreJobStore implements JobStore {
     private db: admin.firestore.Firestore;
@@ -12,7 +12,7 @@ export class FirestoreJobStore implements JobStore {
             admin.initializeApp({});
         }
         this.db = admin.firestore();
-        this.db.settings({ databaseId: firebaseConfig.firestoreDatabaseId });
+        this.db.settings({ databaseId: firestoreDatabaseId() });
     }
 
     async saveJob(job: BuildJob): Promise<void> {

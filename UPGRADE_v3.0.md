@@ -72,6 +72,7 @@
 | **P-SEC** | **Security Engine Gaps** | RBAC, DAST, MFA, container scanning, key rotation, SIEM, supply chain | ⏳ Pending | 0% |
 | **P-DATA** | **Data & Backend Engine Gaps** | Schema validation, durable artifact/embedding store, data retention/GDPR, OpenAPI, uploads, export | ⏳ Pending | 0% |
 | **P-DESIGN** | **UI/UX & Design Platform Gaps** | UI primitive library, overlay primitives, a11y engine, charts, AI design-gen, prototyping, design governance | ⏳ Pending | 0% |
+| **P-DEPLOY** | **DevOps & Deployment Gaps** | DORA metrics, staging/promotion, AI deploy-ops, app-store automation, approval gate, more targets | ⏳ Pending | 0% |
 
 ---
 
@@ -1632,6 +1633,64 @@
 
 ---
 
+## 🚀 PHASE P-DEPLOY — DEVOPS & DEPLOYMENT GAPS
+> From a 300-component **DevOps & Deployment** audit (2026-06-28, 3 deep-scan agents, cited files verified).
+> NavBharatAI is **managed-serverless** (Cloud Build → Cloud Run, Firestore, E2B) and ships a real deployment
+> engine + multi-cloud providers. The **vast majority** of the 300 are already DONE, ⬜ N/A-by-design, or
+> already tracked in other phases. Only the genuinely-new actionable gaps are listed.
+
+### ✅ DevOps Already Strong (do not redo)
+- CI/CD: `.github/workflows/ci.yml` (typecheck→test→build→boot) + `cloudbuild.yaml` (docker→GCR→Cloud Run on push to main) + `deploy.yml`.
+- Deployment engine: `src/server/AppMakerLab/deployment/*` (DeploymentEngine state machine, DeploymentPlanner, ArtifactBuilder, Validator, RollbackManager, AuditManager, StateManager) + `EngineerAI/DeploymentService.ts` + `pro/ProDeploy.ts`.
+- Multi-cloud user-app deploy: Firebase Hosting (preview channels), `VercelProvider`, `NetlifyProvider`, `DeployProviders.ts`; GCR artifact registry; Cloud Run autoscale (min 0 / max 10, concurrency 100).
+- Git/GitHub: `AgentV3/{GitManager,GitHubPrFlow}.ts`, `routes/{github,githubAuth}.ts` (OAuth, PR flow, CI verdict polling); custom domains + TLS/DNS via Cloudflare (`routes/domains.ts`).
+- Security/compliance in CI: `npm audit` gate, secret/security scanning, ComplianceAnalysis, DeploymentAuditManager; cost telemetry (`AgentV3CostTelemetry`), metrics + alert rules (`lib/{metrics,metricsAlerts}`).
+
+### ⬜ N/A-by-design / already tracked elsewhere (NOT added here)
+- **⬜ N/A-by-design (managed-serverless):** all Kubernetes/Helm/Argo/Flux/Kustomize/GitOps, cluster/pod/namespace/ingress/network-policy/PV/ConfigMap/StatefulSet/DaemonSet, Lambda/Cloud-Functions/edge-functions (Cloud Run is used), Terraform/Pulumi/CloudFormation/Bicep/Ansible/Chef/Puppet/SaltStack, traffic-mirroring/shadow/service-mesh, self-hosted-runner/on-premise.
+- **Already tracked:** canary/blue-green/rolling/rollback/deployment-strategy/probes → **P9**; tracing/observability/metrics/alerting/error-monitoring/dashboards → **P8/P2**; IaC + artifact registry → **P6**; CDN/edge/KMS/WAF/chaos/load → **P10**; container-scan/SBOM/secret-scan/key-rotation/supply-chain/DAST/incident-runbook → **P-SEC**; build-cache/durable-jobs/smoke-test/build-analytics → **P-BRE**; release-notes/changelog/semver/feature-flags/webhook/SLA-SLO → **P-PME**; build/deploy + email notifications → **P-BRE.7**; DB/schema migration → **P-CGE.6 / P1.2**.
+
+### P-DEPLOY.1 — DORA Metrics Engine  ❌ MISSING  [MED]
+- `metricsAlerts.ts` tracks build success/failure rate, but there is no **DORA** measurement: deployment
+  frequency (time-series), change lead time, and **MTTR**. (Change-failure-rate is partially present as an alert.)
+- [ ] Add a `DoraMetrics` collector: record deploy events + recovery times; compute the 4 DORA metrics per window.
+- [ ] Surface in the admin dashboard (and optionally per-user for their app's pipeline).
+- **Files:** new `src/server/lib/DoraMetrics.ts`, `src/server/lib/metrics.ts`, `src/server/routes/admin.ts`.
+
+### P-DEPLOY.2 — Staging Environment + Promotion Pipeline  ❌ MISSING  [MED]
+- The platform deploys **straight to prod on merge to `main`** — there is no staging/QA environment and no
+  `dev → staging → prod` promotion gate. (P9 covers canary on the single prod service, not multi-env promotion.)
+- [ ] Add a staging Cloud Run service + a promotion step (deploy to staging → smoke-check → promote to prod).
+- [ ] For user apps: a "preview → production" promotion flow on top of Firebase preview channels.
+- **Files:** `cloudbuild.yaml`, `.github/workflows/deploy.yml`, `src/server/AppMakerLab/deployment/DeploymentEngine.ts`.
+
+### P-DEPLOY.3 — AI Deployment Ops (AIOps)  🟡 PARTIAL → full  [LOW-MED]
+- `DeploymentPlanner` (AI deploy planning) and `AgentV3CostTelemetry` (cost optimization) exist, but there is no
+  **AI release planner, capacity planner, incident analyzer, deployment-risk predictor, or environment optimizer**.
+- [ ] Add an AI pre-deploy risk assessment (diff size, touched-criticality, test coverage → risk score + advice).
+- [ ] Add an AI incident/RCA analyzer that ingests deploy + error events and proposes a likely cause + rollback advice.
+- **Files:** `src/server/AppMakerLab/deployment/DeploymentPlanner.ts`, new `src/server/AppMakerLab/deployment/DeployRiskAdvisor.ts`.
+
+### P-DEPLOY.4 — App Store / Mobile Distribution Automation  🟡 PARTIAL → full  [LOW]
+- `ide/APKBuilder.tsx` (Android APK/TWA) and `ide/AppStorePublisher.tsx` exist but are **UI/checklist only** —
+  no automated Play Store / App Store submission, signing, or release-track management.
+- [ ] Wire real store connectors (Play Developer API / App Store Connect API) for signed upload + track promotion.
+- **Files:** `src/components/ide/APKBuilder.tsx`, `src/components/ide/AppStorePublisher.tsx`, new backend route.
+
+### P-DEPLOY.5 — Release Approval / Freeze Gate  ❌ MISSING  [LOW]
+- Deploy is fully automatic on merge (by design). There is no optional **manual approval gate** or **freeze window**
+  for high-risk releases (e.g. during incidents). This is a safety add-on, not a replacement for auto-deploy.
+- [ ] Add an opt-in approval gate + a freeze flag (Firestore config) the deploy pipeline checks before promoting.
+- **Files:** `.github/workflows/deploy.yml`, `cloudbuild.yaml`, `src/server/routes/admin.ts`.
+
+### P-DEPLOY.6 — Expanded Deploy Targets + Wire MultiCloudDeploy UI  🟡 PARTIAL → full  [LOW]
+- `ide/MultiCloudDeploy.tsx` lists Railway/Render/Fly.io/Cloudflare but only Firebase/Vercel/Netlify have real
+  backend providers. Repo integration is GitHub-only (no GitLab/Bitbucket).
+- [ ] Implement real providers for the listed targets (or hide unsupported ones); optionally add GitLab/Bitbucket import.
+- **Files:** `src/server/AgentV3/DeployProviders.ts`, `src/components/ide/MultiCloudDeploy.tsx`.
+
+---
+
 ## ✅ DEFINITION OF "ROCK-SOLID" (exit criteria for this roadmap)
 1. All **three universes** isolated and provably correct (FREE no-Claude, SDA Grok-first, PRO Claude-first).
 2. **Real test suite** green + CI gate blocks broken deploys.
@@ -1700,6 +1759,14 @@
   gaps** remained → added as **PHASE P-DESIGN** (UI primitive library wired to tokens; overlay/interaction
   primitives; platform a11y engine; chart/viz library; AI design generation + critique; prototyping engine;
   realtime collab hardening; design governance/visual-lint). Doc-only.
+- 2026-06-28 (DevOps & Deployment audit): Ran a 300-component **DevOps & Deployment** audit (3 deep-scan
+  agents, cited files verified — incl. a full `AppMakerLab/deployment/` engine). NavBharatAI is managed-serverless
+  (Cloud Build → Cloud Run) with a real deployment engine + multi-cloud providers; the **vast majority** of the
+  300 are already DONE, ⬜ N/A-by-design (entire K8s/Helm/Argo/Terraform/Lambda stack), or already tracked
+  (canary/DR→P9, tracing→P8, IaC→P6, CDN/chaos→P10, container-scan/SBOM→P-SEC, build-cache/jobs→P-BRE,
+  release-notes/changelog/semver→P-PME). Only **6 genuinely-new gaps** remained → added as **PHASE P-DEPLOY**
+  (DORA metrics; staging + promotion pipeline; AI deploy-ops/risk advisor; app-store distribution automation;
+  release approval/freeze gate; expanded deploy targets + wire MultiCloudDeploy UI). Doc-only.
 - Deploy after each phase (permanent law). Maintain English-only UI (permanent law).
 - 2026-06-27 (UX + PE audits): Ran 300-component **UX Engine** audit → found 10 gaps (4 HIGH, 4 MED, 2 LOW).
   Already-strong: theme, PWA, Ctrl+K, onboarding modal, toast, AI Suggestions, LiveCollaboration. MISSING:

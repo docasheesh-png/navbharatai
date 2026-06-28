@@ -5359,3 +5359,16 @@ bounded-concurrency batches (12 at a time) with a 5s per-file timeout; the initi
 expiry (the gate is best-effort and must never fail a real build on its own slowness). ~80s → ~3s.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2944/2944 PASS (+7), boot:check PASS.
+
+## 2026-06-28 — Audit P0-B/P1: every E2B file op is now timeout-bounded (+ dead-sandbox eviction)
+
+The e2b SDK's files.* methods (unlike commands.run) take no timeoutMs, so a stalled SDK call or a sandbox
+E2B reaped server-side (the 60-min lifetime cap) hung the build forever — the 12-min wall-clock can't
+cancel an in-flight promise. Fix (E2BActuator): new private fileOp() wrapper bounds every file op (30s)
+AND, on a timeout, EVICTS the cached sandbox so the next call creates a fresh one instead of repeatedly
+hanging against a dead reference (covers the "cached dead sandbox" P1 finding too). Refactored readFile,
+writeFile, writeBinaryFile, listFiles through it. Also bounded: ensureWorkspace's exists/makeDir/writeFiles
+(15-30s — runs at "setting up workspace…"), getConsoleErrors' console read (15s), and the idle-sweep's
+Sandbox.pause (10s, like create/connect).
+
+Gate: frontend tsc 0, server tsc 0, vitest 2944/2944 PASS, boot:check PASS.

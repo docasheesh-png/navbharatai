@@ -332,14 +332,16 @@ export class E2BActuator implements IEngineerActuator {
 
   async ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
     const sandbox = await this.getSandbox(workspaceId, resumeSandboxId);
-    const exists = await sandbox.files.exists(WORKSPACE_ROOT);
+    // Bound each setup file op (15-30s) so a stalled E2B can't hang workspace setup — this runs at
+    // the very START of a build and a hang here means "stuck at 'setting up workspace…'" forever.
+    const exists = await withTimeout(sandbox.files.exists(WORKSPACE_ROOT), 15_000, 'files.exists');
     if (exists) {
       // Resumed sandbox already has the workspace — just ensure browser tooling is warming up.
       this._kickoffPlaywright(sandbox, workspaceId);
       return;
     }
 
-    await sandbox.files.makeDir(WORKSPACE_ROOT);
+    await withTimeout(sandbox.files.makeDir(WORKSPACE_ROOT), 15_000, 'files.makeDir');
 
     // Resolve template: fall back to vite-react for unknown/auto types.
     // Note: this.templateRegistry keys are e.g. 'vite-react', 'nextjs', 'vue' — NOT 'react'.
@@ -351,16 +353,16 @@ export class E2BActuator implements IEngineerActuator {
       this.templateRegistry.listFrameworks().includes(key) ? key : 'vite-react';
     try {
       const files = this.templateRegistry.getProvider(resolveKey(templateKey)).getFiles([]);
-      await sandbox.files.writeFiles(
+      await withTimeout(sandbox.files.writeFiles(
         Object.entries(files).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${safeRelPath(p)}`, data: content }))
-      );
+      ), 30_000, 'files.writeFiles(template)');
     } catch {
       // Last-resort fallback: seed a minimal vite-react project so the workspace is never empty.
       try {
         const fallbackFiles = this.templateRegistry.getProvider('vite-react').getFiles([]);
-        await sandbox.files.writeFiles(
+        await withTimeout(sandbox.files.writeFiles(
           Object.entries(fallbackFiles).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${safeRelPath(p)}`, data: content }))
-        );
+        ), 30_000, 'files.writeFiles(fallback)');
       } catch { /* if this also fails, agent will scaffold manually */ }
     }
 
@@ -406,25 +408,40 @@ export class E2BActuator implements IEngineerActuator {
     this._playwrightReady.set(workspaceId, promise);
   }
 
-  async writeFile(workspaceId: string, filePath: string, content: string): Promise<void> {
+  /**
+   * Run a single E2B file operation, BOUNDED by a timeout. The e2b SDK's `files.*` methods (unlike
+   * `commands.run`) take no timeoutMs, so without this a stalled SDK call or a sandbox E2B reaped
+   * server-side hangs the build forever (no per-op deadline; the 12-min wall-clock can't cancel an
+   * in-flight promise). On timeout we ALSO evict the cached sandbox so the next call gets a fresh one
+   * instead of repeatedly hanging against a dead reference. (audit P0-B / P1)
+   */
+  private async fileOp<T>(workspaceId: string, label: string, op: (sandbox: Sandbox) => Promise<T>, timeoutMs = 30_000): Promise<T> {
     const sandbox = await this.getSandbox(workspaceId);
-    await sandbox.files.write(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`, content);
+    try {
+      return await withTimeout(op(sandbox), timeoutMs, label);
+    } catch (e) {
+      if (e instanceof Error && / timed out after /.test(e.message) && this.sandboxes.get(workspaceId) === sandbox) {
+        this.sandboxes.delete(workspaceId); // dead/stalled sandbox — recreate on the next call
+      }
+      throw e;
+    }
+  }
+
+  async writeFile(workspaceId: string, filePath: string, content: string): Promise<void> {
+    await this.fileOp(workspaceId, 'files.write', (sb) => sb.files.write(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`, content));
   }
 
   async writeBinaryFile(workspaceId: string, filePath: string, base64: string): Promise<void> {
-    const sandbox = await this.getSandbox(workspaceId);
     const bytes = new Uint8Array(Buffer.from(base64, 'base64'));
-    await sandbox.files.write(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`, bytes);
+    await this.fileOp(workspaceId, 'files.write', (sb) => sb.files.write(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`, bytes));
   }
 
   async readFile(workspaceId: string, filePath: string): Promise<string> {
-    const sandbox = await this.getSandbox(workspaceId);
-    return sandbox.files.read(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`);
+    return this.fileOp(workspaceId, 'files.read', (sb) => sb.files.read(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`));
   }
 
   async listFiles(workspaceId: string): Promise<string[]> {
-    const sandbox = await this.getSandbox(workspaceId);
-    const entries = await sandbox.files.list(WORKSPACE_ROOT, { depth: 10 });
+    const entries = await this.fileOp(workspaceId, 'files.list', (sb) => sb.files.list(WORKSPACE_ROOT, { depth: 10 }));
     return entries
       .filter(e => e.type === 'file')
       .map(e => e.path.slice(WORKSPACE_ROOT.length + 1))
@@ -722,9 +739,9 @@ const {chromium}=require('playwright');
     const sandbox = await this.getSandbox(workspaceId);
     let raw = '';
     try {
-      raw = await sandbox.files.read(CONSOLE_LOG);
+      raw = await withTimeout(sandbox.files.read(CONSOLE_LOG), 15_000, 'files.read(console)');
     } catch {
-      return { errors: [] }; // no browser session yet / no errors logged
+      return { errors: [] }; // no browser session yet / no errors logged / read stalled
     }
     const errors: { t: number; kind: string; text: string }[] = [];
     for (const line of raw.split('\n')) {
@@ -770,7 +787,9 @@ const {chromium}=require('playwright');
     try {
       // Static pause works across server instances — operates on the cloud
       // resource directly, even if this instance never held the live object.
-      const ok = await Sandbox.pause(sandboxId);
+      // Bounded (10s, like create/connect) so a throttled E2B API can't leave the
+      // periodic idle-sweep's fire-and-forget pause promise hanging forever.
+      const ok = await withTimeout(Sandbox.pause(sandboxId), 10_000, 'Sandbox.pause');
       // Drop any live reference so the next run reconnects (and auto-resumes).
       for (const [wid, sb] of this.sandboxes) {
         if (sb.sandboxId === sandboxId) this.sandboxes.delete(wid);

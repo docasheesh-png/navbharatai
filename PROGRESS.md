@@ -5112,3 +5112,27 @@ Fixes:
   retry, one-shot success/fallback, preview) all now flush live.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2895/2895 PASS, boot:check PASS.
+
+## 2026-06-28 — Claude-level memory, Fix 1: inject project context into the build prompt
+
+Admin: files now persist (good) but MEMORY is still gone — after a build hung ("stopped
+responding"), saying "continue" made the AI reply "what would you like me to continue with?" —
+total amnesia about the calculator it was building.
+
+Gap list vs Claude-level memory (to fix one-by-one):
+1. No project context (files + map) injected into a new message → amnesia  ← FIX 1 (this PR)
+2. Prior conversation (user+agent turns) not fed to the model
+3. WorkspaceMemory is in-process (per-instance), not hydrated from Firestore across instances
+4. Plan/todos don't carry over (PLAN resets)
+5. recall is keyword-based; "continue" recalls nothing useful
+6. No running conversation summary for long sessions
+
+FIX 1: new ProjectContext.buildProjectContext({files, projectMap, recentRequests}) (pure, 4 tests)
+builds a compact "[PROJECT MEMORY — you are CONTINUING an existing project…]" block listing the real
+files + project map + recent requests, ending with an explicit "do NOT ask what to continue — read
+the files and resume". Wired into routes/agentv3.ts buildPrompt: hydrate the memory graph from the
+real (durable, re-seeded) file tree first (warmIndexFiles) so the map is accurate even on a fresh
+Cloud Run instance, then prepend the context. Best-effort, never blocks a build. The reliable signal
+(the durable file list) gives the model memory even when the in-process episodes were lost.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2899/2899 PASS, boot:check PASS.

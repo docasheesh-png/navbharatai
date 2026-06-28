@@ -20,6 +20,8 @@ import {
   toPowerLevel,
   powerSpec,
   haikuModel,
+  sonnetModel,
+  opusModel,
   architectSystemPrompt,
   planSystemPrompt,
   editModePrefix,
@@ -358,6 +360,23 @@ export function resolveClaudeFirst(optsClaudeFirst: boolean | undefined, env: st
  */
 export function tierToGeminiBuildModel(tier: StartTier): string {
   return tier === 'gemini' ? 'gemini-2.5-flash' : 'gemini-2.5-pro';
+}
+
+/**
+ * Admin build-routing policy (2026-06-28): choose the Claude model that LEADS the build
+ * by app complexity, so cost matches the work without compromising quality:
+ *   • POWER mode (Only-Opus / power level on) → Opus (premium).
+ *   • Complex app (analyser start tier 'sonnet'/'opus') → Sonnet.
+ *   • Small/simple app ('gemini'/'haiku'/none) → Haiku (cheap, reliable tool-use).
+ * Gemini/Vertex stay as the fallback in buildTurnRunner if the chosen Claude model
+ * throttles, so a build never breaks. Billing is unchanged (Opus-equivalent markup,
+ * D5/D6) regardless of which model runs — margin only widens on the cheaper tiers.
+ * Pure + exported for unit testing.
+ */
+export function selectBuildModel(tier: StartTier | undefined, powerOn: boolean): string {
+  if (powerOn) return opusModel();
+  if (tier === 'sonnet' || tier === 'opus') return sonnetModel();
+  return haikuModel();
 }
 
 function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean }): TurnRunner {
@@ -1147,7 +1166,9 @@ export function registerAgentV3Routes(app: Express): void {
       const client = buildTurnRunner(
         analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : undefined,
       );
-      const model = resolveModel(onlyOpus);
+      // Admin routing policy: small app → Haiku, complex app → Sonnet, power → Opus
+      // (was always Sonnet). Gemini/Vertex remain the fallback in buildTurnRunner.
+      const model = selectBuildModel(analysis?.startTier, onlyOpus);
       // Build start time — used for cost-ladder telemetry duration (P2 measurement).
       const buildStartedAt = Date.now();
       const budget = maxBuildBudgetUsd();

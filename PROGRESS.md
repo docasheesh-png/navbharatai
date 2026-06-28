@@ -4736,3 +4736,20 @@ This is the 3rd of three converging build fixes this cycle: #489 (readiness gate
 #490 (preview host-bind in correct actuator), and now provider order (Claude-first).
 
 Gate: frontend tsc 0, server tsc 0, vitest 2817/2817 PASS.
+
+## 2026-06-28 — cost routing step 1: build model by app complexity (admin policy)
+
+Admin's provider policy: small app → Haiku, complex app → Sonnet, power → Opus
+(planning → Grok and chat → Gemini are step 2). Step 1 implements the build-model
+half: new pure selectBuildModel(startTier, powerOn) replaces the always-Sonnet
+`resolveModel(onlyOpus)` at the build call site. Maps the analyser's start tier:
+gemini/haiku/none → Haiku (cheap, reliable tool-use); sonnet/opus → Sonnet; any
+power level → Opus. Gemini/Vertex stay as the buildTurnRunner fallback so a Claude
+throttle never breaks a build; billing unchanged (Opus-equivalent markup). 4 unit
+tests incl. real analyser verdicts (calculator → Haiku, auth+DB SaaS → Sonnet).
+
+This cuts cost on the common case (most apps are simple → Haiku, not Sonnet) with
+zero quality compromise (complex work still gets Sonnet; power gets Opus). Step 2
+(plan → Grok via OpenAiToolRunner at api.x.ai; chat → Gemini/Vertex confirm) next.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2829/2829 PASS.

@@ -5275,3 +5275,16 @@ deploy actually reaches production — Cloud Build posts no commit status to Git
 be verified separately (admin: Cloud Build history / trigger 75443609-...).
 
 Gate: frontend tsc 0, server tsc 0, vitest 2919/2919 PASS (+3), boot:check PASS.
+
+## 2026-06-28 — Fix (combined plan, step 1/B): OneShot "sticky success" — a slow preview no longer discards a built app
+
+User saw: OneShot generated 8 files (app built), preview was slow ("Preview is still starting"), then the
+HEAVY agentic loop re-ran on top (App.css, type-check, dev server…) and hit the 12-min timeout — double
+work. Root: runOneShot wrapped the WHOLE attempt (generate + write + preview) in one overall timeout, so a
+successful build whose preview merely ran slow was declared ok:false → caller fell through to the full
+agentic loop. Fix: restructure runOneShot so the overall cap bounds ONLY the generate+write phase; once the
+files are written, success is LOCKED IN — the best-effort preview (separately bounded) can never downgrade
+it to a fallback. A simple new app now finishes right after generation instead of re-running the heavy loop
+and timing out. (Combined-plan step A = per-request LLM timeout #542; this is step B.)
+
+Gate: frontend tsc 0, server tsc 0, vitest 2920/2920 PASS (+1 sticky-success test), boot:check PASS.

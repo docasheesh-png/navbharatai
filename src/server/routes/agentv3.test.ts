@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
+import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
 
 describe('conversationAccess (D7 ownership gate)', () => {
@@ -122,6 +123,28 @@ describe('agentV3KeyDiag (provider diagnosis)', () => {
         else process.env[k] = saved[k];
       }
     }
+  });
+});
+
+describe('selectBuildModel — admin cost-routing (small=Haiku, complex=Sonnet, power=Opus)', () => {
+  it('small/simple app (gemini/haiku tier) builds on Haiku', () => {
+    expect(selectBuildModel('gemini', false)).toBe(haikuModel());
+    expect(selectBuildModel('haiku', false)).toBe(haikuModel());
+    expect(selectBuildModel(undefined, false)).toBe(haikuModel());
+  });
+  it('complex app (sonnet/opus tier) builds on Sonnet', () => {
+    expect(selectBuildModel('sonnet', false)).toBe(sonnetModel());
+    expect(selectBuildModel('opus', false)).toBe(sonnetModel());
+  });
+  it('power mode always wins → Opus, regardless of tier', () => {
+    expect(selectBuildModel('gemini', true)).toBe(opusModel());
+    expect(selectBuildModel('sonnet', true)).toBe(opusModel());
+  });
+  it('maps real analyser verdicts: a calculator stays cheap (Haiku), an auth+DB app uses Sonnet', () => {
+    const calc = analyzeRequest({ prompt: 'build me a calculator' });
+    expect(selectBuildModel(calc.startTier, false)).toBe(haikuModel());
+    const complex = analyzeRequest({ prompt: 'build a multi-tenant SaaS with auth, postgres database, billing and an admin dashboard' });
+    expect(selectBuildModel(complex.startTier, false)).toBe(sonnetModel());
   });
 });
 

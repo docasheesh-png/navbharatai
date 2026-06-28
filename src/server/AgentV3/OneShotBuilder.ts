@@ -136,45 +136,44 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 /**
  * Run the OneShot lane. Best-effort: returns ok:false (never throws) when it could not produce a
  * usable app, so the caller falls through to the agentic loop. On success the build is DONE — the
- * files are written, the preview is starting, and no loop/escalation runs.
+ * files are written and no loop/escalation runs.
  *
- * The whole attempt is bounded by overallTimeoutMs so a hung step (a stalled model call, a sandbox
- * write that never returns) can NEVER keep the build spinning — on timeout it returns ok:false and
- * the caller falls back to the agentic loop.
+ * STICKY SUCCESS: the generate+write phase is time-bounded (a stalled model call falls back fast),
+ * but ONCE THE FILES ARE WRITTEN the success is LOCKED IN — a slow/hanging preview can never
+ * downgrade it to a fallback. (Previously a successful one-shot whose preview was merely slow got
+ * discarded, which re-ran the heavy agentic loop on top and blew the whole time budget → 12-min
+ * timeout. The app was already built; the preview is just a bonus.)
  */
 export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
-  try {
-    return await withTimeout(runOneShotInner(deps), deps.overallTimeoutMs ?? 180_000);
-  } catch (e) {
-    // The inner never throws (its own try/catch returns ok:false), so reaching here means the
-    // overall timeout fired — abandon the one-shot and let the caller use the full builder.
-    return { ok: false, filesWritten: 0, summary: 'One-shot took too long — switching to the full builder.', reason: e instanceof Error ? e.message : String(e) };
-  }
-}
-
-async function runOneShotInner(deps: OneShotDeps): Promise<OneShotResult> {
   const minFiles = deps.minFiles ?? 1;
+  let files: OneShotFile[];
   try {
     deps.log?.('Trying a fast one-shot build…');
-    const text = await deps.generate(oneShotSystemPrompt(deps.framework), oneShotUserPrompt(deps.prompt, deps.scaffoldPaths));
-    const files = parseFileBlocks(text);
+    // Bound ONLY the generate+write phase: a stalled model call / sandbox write falls back fast.
+    const text = await withTimeout(
+      deps.generate(oneShotSystemPrompt(deps.framework), oneShotUserPrompt(deps.prompt, deps.scaffoldPaths)),
+      deps.overallTimeoutMs ?? 150_000,
+    );
+    files = parseFileBlocks(text);
     if (files.length < minFiles) {
       return { ok: false, filesWritten: 0, summary: 'One-shot produced no usable files — switching to the full builder.', reason: 'no_files_parsed' };
     }
     await deps.writeFiles(files);
-    deps.log?.(`Generated ${files.length} file(s) in one shot.`);
-    if (deps.startPreview) {
-      // Best-effort AND time-bounded: a hung dev-server start (a command that never resolves)
-      // must NOT keep the build spinning forever — the files are already written, so on a
-      // timeout OR a thrown error we simply finish and let the preview come up on its own.
-      try {
-        await withTimeout(deps.startPreview(), deps.previewTimeoutMs ?? 90_000);
-      } catch {
-        deps.log?.('Preview is still starting — your files are ready; opening the preview will reconnect it.');
-      }
-    }
-    return { ok: true, filesWritten: files.length, summary: `Built your app in one shot — ${files.length} file(s).` };
   } catch (e) {
-    return { ok: false, filesWritten: 0, summary: 'One-shot attempt failed — switching to the full builder.', reason: e instanceof Error ? e.message : String(e) };
+    // Generation or write failed / timed out → no app produced, fall back to the full builder.
+    return { ok: false, filesWritten: 0, summary: 'One-shot could not generate the app — switching to the full builder.', reason: e instanceof Error ? e.message : String(e) };
   }
+
+  // ── FILES ARE WRITTEN → the app is BUILT. Success is LOCKED IN from here. ──
+  // The preview is a best-effort BONUS, separately bounded: if it is slow or hangs we STILL return
+  // ok:true, so the caller never discards a finished build to re-run the heavy loop.
+  deps.log?.(`Generated ${files.length} file(s) in one shot.`);
+  if (deps.startPreview) {
+    try {
+      await withTimeout(deps.startPreview(), deps.previewTimeoutMs ?? 90_000);
+    } catch {
+      deps.log?.('Preview is still starting — your files are ready; opening the preview will reconnect it.');
+    }
+  }
+  return { ok: true, filesWritten: files.length, summary: `Built your app in one shot — ${files.length} file(s).` };
 }

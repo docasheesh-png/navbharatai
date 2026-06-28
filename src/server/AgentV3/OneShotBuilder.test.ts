@@ -97,6 +97,22 @@ describe('runOneShot', () => {
     expect(r.reason).toContain('did not finish');
   });
 
+  it('STICKY SUCCESS: once files are written, a slow/hung preview never discards the build', async () => {
+    // The exact production failure: OneShot wrote the files (app built), but the preview was slow,
+    // so the attempt was discarded (ok:false) and the heavy agentic loop re-ran on top → 12-min
+    // timeout. The generate/write phase is fast here; only the preview hangs → must stay ok:true.
+    let written = 0;
+    const r = await runOneShot(baseDeps({
+      writeFiles: async (f) => { written = f.length; },
+      startPreview: () => new Promise<void>(() => { /* preview never comes up */ }),
+      overallTimeoutMs: 50,   // tight generate/write cap — must NOT apply to the preview
+      previewTimeoutMs: 30,
+    }));
+    expect(r.ok).toBe(true);          // success is LOCKED IN once files are written
+    expect(written).toBe(1);
+    expect(r.filesWritten).toBe(1);
+  });
+
   it('a HUNG preview (never resolves) does NOT hang the build — it completes within the timeout', async () => {
     // Reproduces the real bug: `npm run dev` never returns, so startPreview never settles. The
     // build must still finish (files are written) instead of spinning at "working…" forever.

@@ -149,19 +149,23 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
   let files: OneShotFile[];
   try {
     deps.log?.('Trying a fast one-shot build…');
-    // Bound ONLY the generate+write phase: a stalled model call / sandbox write falls back fast.
-    const text = await withTimeout(
-      deps.generate(oneShotSystemPrompt(deps.framework), oneShotUserPrompt(deps.prompt, deps.scaffoldPaths)),
-      deps.overallTimeoutMs ?? 150_000,
-    );
-    files = parseFileBlocks(text);
-    if (files.length < minFiles) {
-      return { ok: false, filesWritten: 0, summary: 'One-shot produced no usable files — switching to the full builder.', reason: 'no_files_parsed' };
-    }
-    await deps.writeFiles(files);
+    // Bound the ENTIRE generate+parse+write phase together (audit P0-B): writeFiles was previously
+    // outside the timeout, so a stalled sandbox write hung the lane indefinitely. Now a stall in any
+    // of generate / write falls back fast to the agentic loop.
+    files = await withTimeout((async () => {
+      const text = await deps.generate(oneShotSystemPrompt(deps.framework), oneShotUserPrompt(deps.prompt, deps.scaffoldPaths));
+      const parsed = parseFileBlocks(text);
+      if (parsed.length < minFiles) throw new Error('no_files_parsed');
+      await deps.writeFiles(parsed);
+      return parsed;
+    })(), deps.overallTimeoutMs ?? 150_000);
   } catch (e) {
-    // Generation or write failed / timed out → no app produced, fall back to the full builder.
-    return { ok: false, filesWritten: 0, summary: 'One-shot could not generate the app — switching to the full builder.', reason: e instanceof Error ? e.message : String(e) };
+    // Generation / write failed or timed out → no app produced, fall back to the full builder.
+    const reason = e instanceof Error ? e.message : String(e);
+    const summary = reason === 'no_files_parsed'
+      ? 'One-shot produced no usable files — switching to the full builder.'
+      : 'One-shot could not generate the app — switching to the full builder.';
+    return { ok: false, filesWritten: 0, summary, reason };
   }
 
   // ── FILES ARE WRITTEN → the app is BUILT. Success is LOCKED IN from here. ──

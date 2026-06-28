@@ -86,6 +86,15 @@ describe('runOneShot', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('a HUNG writeFiles (sandbox write never returns) does NOT hang — bails to fallback within the timeout', async () => {
+    const r = await runOneShot(baseDeps({
+      writeFiles: () => new Promise<void>(() => { /* never resolves */ }),
+      overallTimeoutMs: 30,
+    }));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('did not finish');
+  });
+
   it('a HUNG generate (model call never returns) does NOT hang — bails to fallback within the overall timeout', async () => {
     // The exact production hang: the OneShot model call stalls and never resolves, so without an
     // overall cap the build would spin at "working…" forever. It must bail to ok:false (fallback).

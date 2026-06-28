@@ -1100,10 +1100,12 @@ export class ToolDispatcher {
         // (mitrify.xyz) instead of the raw *.e2b.app host. Idempotent + scoped to v3.0.
         const rawUrl = await this.actuator.getPortUrl(this.workspaceId, port);
         const url = applyPreviewDomain(rawUrl);
-        this.events?.emit({ type: 'preview', url, ts: Date.now() });
         if (!portReady) {
-          return `WARNING: port ${port} did not respond after 15 s. Check that the dev server started correctly — if the preview shows a connection error, run the dev server then call update_preview again.`;
+          // Audit P2: do NOT emit a preview URL the user would click into a blank/502 page — the
+          // "preview is EARNED" rule. Tell the agent to bring the dev server up and re-publish.
+          return `WARNING: port ${port} did not respond after 15 s — preview NOT published. Check that the dev server started correctly, then call update_preview again.`;
         }
+        this.events?.emit({ type: 'preview', url, ts: Date.now() });
         return `Live preview published at ${url} (port ${port} verified UP)`;
       }
 

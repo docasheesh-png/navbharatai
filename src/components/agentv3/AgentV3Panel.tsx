@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
@@ -1380,27 +1380,31 @@ function PreviewSurface({ url, workspaceId, userId, email }: { url?: string; wor
   // the Live server tab explain itself instead of silently vanishing: when the cloud
   // sandbox isn't configured on this deployment, we say so plainly rather than hiding.
   const [sandbox, setSandbox] = useState<{ livePreviewAvailable: boolean; actuator: string; previewDomainWarning: string | null } | null>(null);
+  // Bumping this remounts the live <iframe>, forcing a fresh load. Remounting via a
+  // changing key is the only cross-origin-safe way to reload a sandbox URL —
+  // iframe.contentWindow.location.reload() throws a SecurityError on a different origin.
+  // The live-preview reload button uses it so the user can reconnect once the E2B
+  // sandbox finishes its cold start (the "Preview is still starting…" case).
+  const [liveReloadKey, setLiveReloadKey] = useState(0);
 
   // Follow the live URL: when one arrives and the user hasn't deliberately chosen in-browser,
   // prefer the higher-fidelity live server.
   useEffect(() => { if (url) setMode('live'); }, [url]);
 
-  // Fetch the sandbox/preview capability once, so the Live server tab can give a real reason
+  // Fetch the sandbox/preview capability so the Live server tab can give a real reason
   // when no preview URL exists (E2B not configured, or a custom preview domain needing DNS).
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/agentv3/preview-status');
-        if (!res.ok) return;
-        const data = await res.json().catch(() => null);
-        if (!cancelled && data && typeof data.livePreviewAvailable === 'boolean') {
-          setSandbox({ livePreviewAvailable: data.livePreviewAvailable, actuator: String(data.actuator || ''), previewDomainWarning: data.previewDomainWarning ?? null });
-        }
-      } catch { /* non-fatal — the tab just falls back to a generic message */ }
-    })();
-    return () => { cancelled = true; };
+  // Exposed as a callable so the reload button can re-check after a cold start.
+  const refreshSandbox = useCallback(async () => {
+    try {
+      const res = await fetch('/api/agentv3/preview-status');
+      if (!res.ok) return;
+      const data = await res.json().catch(() => null);
+      if (data && typeof data.livePreviewAvailable === 'boolean') {
+        setSandbox({ livePreviewAvailable: data.livePreviewAvailable, actuator: String(data.actuator || ''), previewDomainWarning: data.previewDomainWarning ?? null });
+      }
+    } catch { /* non-fatal — the tab just falls back to a generic message */ }
   }, []);
+  useEffect(() => { void refreshSandbox(); }, [refreshSandbox]);
 
   const loadInBrowser = async () => {
     if (!workspaceId) { setErr('Build something first — there are no files to preview yet.'); return; }
@@ -1445,9 +1449,10 @@ function PreviewSurface({ url, workspaceId, userId, email }: { url?: string; wor
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
           {switcher}
           <span className="truncate flex-1">{url}</span>
+          <button onClick={() => setLiveReloadKey((k) => k + 1)} className="flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
           <a href={url} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
         </div>
-        <iframe title="Live preview" src={url} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+        <iframe key={liveReloadKey} title="Live preview" src={url} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
       </div>
     );
   }
@@ -1460,6 +1465,7 @@ function PreviewSurface({ url, workspaceId, userId, email }: { url?: string; wor
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
           {switcher}
           <span className="flex-1 truncate">Live server</span>
+          <button onClick={() => void refreshSandbox()} className="flex items-center gap-1 hover:text-zinc-200" title="Re-check for the live preview (after the sandbox finishes starting)"><RotateCcw className="w-3.5 h-3.5" /></button>
         </div>
         <div className="flex-1 flex items-center justify-center p-6 text-center">
           <div className="max-w-md text-sm text-zinc-400 space-y-2">

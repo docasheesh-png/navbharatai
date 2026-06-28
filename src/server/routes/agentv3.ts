@@ -70,6 +70,11 @@ import { GoogleGenAI } from '@google/genai';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
 import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
+import { BuildDiagnostics, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
+import { runOneShot, classifyForOneShot, oneShotEnabled } from '../AgentV3/OneShotBuilder';
+import { buildProjectContext, buildRunningSummary, formatPlanState } from '../AgentV3/ProjectContext';
+import { computePlanProgress } from '../AgentV3/PlanProgress';
+import { billedAmountUsd } from '../AgentV3/pricing';
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
@@ -152,7 +157,14 @@ let sharedConversationStore: ConversationStore | null = null;
  */
 function getConversationStore(): ConversationStore {
   if (sharedConversationStore) return sharedConversationStore;
-  if (process.env.AGENTV3_PERSIST_FIRESTORE === 'true') {
+  // Durable chat history by DEFAULT — it survives a process restart, a redeploy, and
+  // horizontal scaling across Cloud Run instances. Previously this was OFF unless
+  // AGENTV3_PERSIST_FIRESTORE='true' was set, so the store fell back to IN-MEMORY: a
+  // reload that landed on a different instance — or any redeploy — lost the whole
+  // conversation ("reload pe data gayab"). Now Firestore is the default; opt out with
+  // AGENTV3_PERSIST_FIRESTORE=false. Unit tests (VITEST) always use the in-memory store.
+  const useFirestore = process.env.AGENTV3_PERSIST_FIRESTORE !== 'false' && !process.env.VITEST;
+  if (useFirestore) {
     try {
       sharedConversationStore = new FirestoreConversationStore();
     } catch {
@@ -310,6 +322,8 @@ interface RunningBuild {
 }
 const runningBuilds = new Map<string, RunningBuild>();
 const MAX_BUILD_BUFFER = 4000;
+/** The most recent build's diagnostics report per build key (userId) — for download/endpoint. */
+const lastDiagnostics = new Map<string, BuildDiagnosticsReport>();
 
 /** Push an event into a build's replay buffer and fan it out to every subscriber. */
 function broadcastBuild(rb: RunningBuild, e: unknown): void {
@@ -329,19 +343,19 @@ function isBuildRunning(buildKey: string): boolean {
 }
 
 /**
- * The v3.0 BUILD turn-runner. Per the v3.0 constitution, v3.0 runs on NavBharatAI's own
- * Claude/Anthropic account (NavBharatAI pays the Claude cost; the user is billed the
- * Opus-equivalent markup). So CLAUDE LEADS each turn by default — builds use the reliable,
- * strong tool-use model and actually COMPLETE — with Vertex → Gemini → Claude-Haiku as the
- * fallback chain so a Claude throttle never breaks a build.
+ * The v3.0 BUILD turn-runner. Builds run on CLAUDE ONLY (Haiku → Sonnet → Opus) because only
+ * Claude reliably does REAL tool-use (actually calls write_file). Gemini/Vertex HALLUCINATE in
+ * the tool loop — they describe creating files but never call the tools, so the build finishes
+ * with ZERO real files (and the model later says "I'm an AI, I have no file system"). That is
+ * exactly the "file banane ka hallucination" the admin observed, and why the Anthropic dashboard
+ * showed $0 spend: every build was silently running on Gemini/Vertex, never Claude.
  *
- * Why the default flipped (2026-06-28): the old cheap-first order (Gemini/Vertex lead) meant
- * Claude was never reached on a normal build, AND Gemini's quota/rate/output limits broke
- * builds mid-run (the multi-provider runner returns the first NON-THROWING result, so a
- * truncated Gemini turn is accepted and the loop stalls instead of falling through to Claude).
- * Set AGENTV3_BUILD_CLAUDE_FIRST=0 to revert to the old cheap-first ladder if ever needed.
- * If no Gemini/Vertex provider is configured, falls back to the Claude-only resilient runner.
- * Build models are env-overridable (AGENTV3_{VERTEX,GEMINI}_BUILD_MODEL).
+ * So the build chain is Claude(selected model) → Claude-Haiku backstop. Gemini/Vertex are kept
+ * for cheap CHAT only, NOT builds. If Claude genuinely fails, the build errors HONESTLY with the
+ * real Claude error (bad key / wrong model id / overload) instead of faking files on Gemini.
+ * AGENTV3_BUILD_ALLOW_GEMINI=1 re-adds Vertex/Gemini as a last-resort build fallback.
+ * Per the v3.0 constitution NavBharatAI pays the Claude cost; the user is billed the
+ * Opus-equivalent markup. Models are env-overridable (AGENTV3_{HAIKU,SONNET,OPUS}_MODEL).
  */
 /**
  * Decide whether the v3.0 build chain leads with Claude. Pure + exported for unit testing.
@@ -381,7 +395,18 @@ export function selectBuildModel(tier: StartTier | undefined, powerOn: boolean):
   return haikuModel();
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean }): TurnRunner {
+/** The dev-server port a framework's `npm run dev` listens on — used by the OneShot lane to
+ *  publish the preview after a one-shot build. Pure + exported for testing. */
+export function oneShotDevPort(framework: string): number {
+  if (/next|nuxt|nest|express|fastify|node/i.test(framework)) return 3000;
+  if (/angular/i.test(framework)) return 4200;
+  if (/astro/i.test(framework)) return 4321;
+  if (/static|vanilla/i.test(framework)) return 3000;
+  if (/fastapi|flask|django|python/i.test(framework)) return 8000;
+  return 5173; // vite-react / vue / svelte and the default
+}
+
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; onProviderError?: (name: string, err: unknown) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -418,13 +443,22 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean })
   // model actually answers. AGENTV3_DISABLE_HAIKU_BACKSTOP=1 removes it if ever needed.
   const haikuBackstop: NamedRunner = { name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), haikuModel()) };
   const withBackstop = process.env.AGENTV3_DISABLE_HAIKU_BACKSTOP === '1' ? [] : [haikuBackstop];
-  // Claude-first by default (v3.0 runs on Claude — see the doc comment above); Vertex/Gemini
-  // remain as fallback. Escalation passes claudeFirst:true; AGENTV3_BUILD_CLAUDE_FIRST=0 reverts.
+  // Builds run on CLAUDE ONLY (Haiku/Sonnet/Opus do REAL tool-use → real files). Gemini/Vertex
+  // HALLUCINATE in the tool-use loop — they reply describing files ("creating index.html…") but
+  // never actually call write_file, so the build "succeeds" with ZERO real files and the model
+  // later claims "I'm an AI, I have no file system". So they are EXCLUDED from the build chain
+  // (they remain the cheap CHAT providers only). If Claude genuinely fails, the build errors
+  // HONESTLY with the real Claude error (e.g. a bad key or model id) instead of silently making
+  // fake files on Gemini. AGENTV3_BUILD_ALLOW_GEMINI=1 re-adds Vertex/Gemini as a last resort.
+  const fallback = process.env.AGENTV3_BUILD_ALLOW_GEMINI === '1' ? cheap : [];
   const claudeFirst = resolveClaudeFirst(opts?.claudeFirst, process.env.AGENTV3_BUILD_CLAUDE_FIRST);
-  const chain = claudeFirst ? [claude, ...cheap, ...withBackstop] : [...cheap, claude, ...withBackstop];
+  const chain = claudeFirst ? [claude, ...fallback, ...withBackstop] : [...fallback, claude, ...withBackstop];
   return makeMultiProviderTurnRunner(chain, {
     onProviderUsed: (used, from) => { if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`); },
-    onProviderError: (name, err) => console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
+    onProviderError: (name, err) => {
+      console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`);
+      opts?.onProviderError?.(name, err);
+    },
   });
 }
 
@@ -709,6 +743,22 @@ export function registerAgentV3Routes(app: Express): void {
     res.json({ ...diag, live, freeProviders });
   });
 
+  // Build diagnostics — the structured issue report from the user's LAST build (every struggle
+  // v3.0 hit: provider fallbacks, tool errors, "replied without building" nudges, readiness
+  // blockers, sandbox problems). Owner-scoped (keyed by the caller's userId). The v3.0 panel's
+  // "Download report" button reads this so the admin can hand the JSON to Claude for fixes.
+  app.get('/api/agentv3/diagnostics', (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      return;
+    }
+    const report = lastDiagnostics.get(userId ?? 'anon');
+    if (!report) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
+    res.json({ diagnostics: report });
+  });
+
   // Public, lightweight preview-capability probe — ONLY the sandbox diagnosis (no
   // provider-key info). The preview surface calls this to explain, honestly, WHY the
   // "Live server" tab has no URL: either the cloud sandbox isn't configured on this
@@ -775,7 +825,14 @@ export function registerAgentV3Routes(app: Express): void {
     };
     for (const e of rb.buffer) sub.write(e);                   // replay so the UI catches up to "now"
     rb.subscribers.add(sub);
-    req.on('close', () => { rb.subscribers.delete(sub); });
+    // Keepalive: like the /chat stream, ping every 15 s so a RESUMED stream is never seen as
+    // silent during a quiet build phase (a long model/one-shot call emits no events). Without
+    // this the client watchdog would mis-detect a stall and reconnect in a loop ("restart from 0").
+    const heartbeatTimer = setInterval(() => {
+      if (!res.writableEnded) res.write(JSON.stringify({ type: 'ping' }) + '\n');
+      else clearInterval(heartbeatTimer);
+    }, 15_000);
+    req.on('close', () => { clearInterval(heartbeatTimer); rb.subscribers.delete(sub); });
   });
 
   // History → restore: roll the workspace back to a checkpoint commit (P-git).
@@ -1183,6 +1240,40 @@ export function registerAgentV3Routes(app: Express): void {
     const workspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
     const framework = typeof req.body?.framework === 'string' && req.body.framework ? req.body.framework : 'vite-react';
     const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
+    // Held outside the try so a build CRASH (caught below) is still captured in the diagnostics report.
+    let buildDiagRef: BuildDiagnostics | undefined;
+
+    // HARD WALL-CLOCK DEADLINE — guarantees the build can NEVER spin at "working…" forever.
+    // If the build body hangs on an UN-abortable await (a stalled model HTTP call, a sandbox
+    // command that never returns), the normal result/error/finally path is never reached, so no
+    // terminal event is emitted and the client spinner runs indefinitely (the heartbeat keeps the
+    // stream "alive", so the client stall-watchdog never trips either). This timer force-emits a
+    // terminal result, aborts the run, frees the per-account slot, and ends the stream after the
+    // cap. It is cleared in `finally` on normal completion — and because JS is single-threaded it
+    // cannot interleave with the synchronous success/finally path, so it ONLY fires on a real overrun.
+    const deadlineMs = maxBuildSeconds() * 1000;
+    const deadlineTimer: ReturnType<typeof setTimeout> | undefined = deadlineMs > 0 ? setTimeout(() => {
+      if (rb.ended) return;
+      try { abort.abort(); } catch { /* best-effort */ }
+      try {
+        buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_TIMEOUT', message: `Build exceeded the ${Math.round(deadlineMs / 1000)}s wall-clock cap and was stopped.`, autoResolved: false });
+        buildDiagRef?.finish(false);
+      } catch { /* diagnostics are best-effort */ }
+      emit({ type: 'narration', agent: 'architect', text: 'This build hit the time limit and was stopped automatically. Any files already generated are saved — please try again or send a follow-up.', ts: Date.now() });
+      emit({ type: 'result', ok: false, summary: 'Build timed out and was stopped — your files (if any) are saved.', steps: 0, billedUsd: 0, billedInr: 0 });
+      activeBuilds.delete(buildKey);
+      if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
+      endBuild(rb);
+    }, deadlineMs) : undefined;
+
+    // MINUTE-BY-MINUTE TIMELINE — record a "still working" heartbeat every 60 s so the build report
+    // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
+    // blank gap during a long/slow step. Best-effort; cleared in `finally`.
+    const diagHeartbeatTimer: ReturnType<typeof setInterval> = setInterval(() => {
+      if (rb.ended) return;
+      try { buildDiagRef?.heartbeat(); } catch { /* diagnostics are best-effort */ }
+    }, 60_000);
+
     try {
       // Native Claude for real tool-use, with a multi-provider text fallback
       // (Vertex → Gemini → Grok) so chat never dies if Claude is down/misconfigured.
@@ -1203,12 +1294,29 @@ export function registerAgentV3Routes(app: Express): void {
           `[AGENTV3] cost-ladder: ${analysis.reasoning} → build model ${tierToGeminiBuildModel(analysis.startTier)}`,
         );
       }
-      const client = buildTurnRunner(
-        analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : undefined,
-      );
       // Admin routing policy: small app → Haiku, complex app → Sonnet, power → Opus
       // (was always Sonnet). Gemini/Vertex remain the fallback in buildTurnRunner.
       const model = selectBuildModel(analysis?.startTier, onlyOpus);
+      // BUILD DIAGNOSTICS — capture every struggle (provider fallback, tool error, "replied
+      // without building" nudge, readiness blocker, sandbox issue) into a downloadable report,
+      // so the admin can hand it to Claude and the rough edges get fixed in code.
+      const buildDiag = new BuildDiagnostics({
+        sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined,
+        workspaceId, prompt, model, framework,
+        // REAL-TIME: persist the report after every recorded issue, so "Build report" is never
+        // empty mid-build and survives a crash/hang (the user can download it any time).
+        onUpdate: (r) => { lastDiagnostics.set(buildKey, r); },
+      });
+      buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
+      events.subscribe((e) => buildDiag.ingestEvent(e), false);
+      const client = buildTurnRunner({
+        ...(analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : {}),
+        onProviderError: (name, err) => buildDiag.record({
+          phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
+          message: `Provider ${name} failed — falling back to the next provider`,
+          autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+        }),
+      });
       // Build start time — used for cost-ladder telemetry duration (P2 measurement).
       const buildStartedAt = Date.now();
       const budget = maxBuildBudgetUsd();
@@ -1348,6 +1456,11 @@ export function registerAgentV3Routes(app: Express): void {
       } catch (setupErr) {
         const m = setupErr instanceof Error ? setupErr.message : String(setupErr);
         git = undefined;
+        buildDiag.record({
+          phase: 'sandbox', severity: 'error', code: 'SANDBOX_UNAVAILABLE',
+          message: 'The build sandbox could not be set up — the build cannot create files.',
+          autoResolved: false, detail: m.slice(0, 300),
+        });
         events.emit({
           type: 'narration',
           agent: 'architect',
@@ -1404,8 +1517,19 @@ export function registerAgentV3Routes(app: Express): void {
       // save at build-end (below) is still the authoritative snapshot; this is the
       // mid-build safety net. GitHub push still happens only after 100% completion.
       let _progressPersistTimer: ReturnType<typeof setTimeout> | null = null;
+      // PLAN SYNC: drive the plan list's spinner + green ticks from REAL build activity, since the
+      // model (Haiku especially) does not reliably call update_todo to advance statuses. Each file
+      // written advances the progress; the build's final success marks every item done (below).
+      let planSteps = 0;
       const onFileWrite = (path: string, content: string) => {
         writtenFiles.set(path, content);
+        try {
+          const cur = state.snapshot().todos;
+          if (cur.length > 0) {
+            planSteps += 1;
+            state.setTodos(computePlanProgress(cur, planSteps, false));
+          }
+        } catch { /* plan progress is best-effort — never affects the build */ }
         if (_progressPersistTimer) clearTimeout(_progressPersistTimer);
         _progressPersistTimer = setTimeout(() => {
           if (writtenFiles.size > 0) {
@@ -1498,6 +1622,51 @@ export function registerAgentV3Routes(app: Express): void {
       });
 
       let buildPrompt = prompt;
+
+      // MEMORY FIX 1 (Claude-level continuity): inject the current PROJECT CONTEXT — the real
+      // file list + the project map + recent requests — so a follow-up like "continue" KNOWS what
+      // it is building and resumes, instead of the amnesiac "what would you like me to continue
+      // with?". The graph is hydrated from the real (durable, re-seeded) files first so the map is
+      // accurate even on a fresh Cloud Run instance. Best-effort — never blocks the build.
+      try {
+        const ctxMem = getWorkspaceMemory(workspaceId);
+        // MEMORY FIX 3 (cross-instance): hydrate the in-process memory from the DURABLE Firestore
+        // snapshot first — episodes (the user's prior requests) + the project graph survive a Cloud
+        // Run restart / a different instance. Previously this restore ran ONLY in edit mode, so a
+        // "continue" that landed on a fresh instance lost the memory. Now it runs for every build.
+        await restoreWorkspaceMemory(workspaceId, ctxMem).catch(() => {});
+        const tree = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
+        await warmIndexFiles(ctxMem, tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''), { maxFiles: 200 });
+        const ctxEpisodes = ctxMem.snapshot().episodes;
+        const recentRequests = ctxEpisodes.filter((e) => e.kind === 'request').map((e) => e.text);
+        // MEMORY FIX 4 (plan carry-over): surface the plan (todo statuses) the LAST build was
+        // working through, persisted as a PLAN_STATE note. Without this a follow-up like "continue"
+        // reset the plan to 0/N and re-scaffolded; now it resumes the unfinished items.
+        const lastPlan = [...ctxEpisodes]
+          .reverse()
+          .find((e) => e.kind === 'note' && e.text.startsWith('PLAN_STATE'))
+          ?.text.replace(/^PLAN_STATE\n?/, '');
+        const projectCtx = buildProjectContext({ files: tree, projectMap: ctxMem.projectMap(), recentRequests, lastPlan });
+        if (projectCtx) buildPrompt = `${projectCtx}\n\n---\n\n${buildPrompt}`;
+      } catch { /* project context is best-effort — never blocks a build */ }
+
+      // MEMORY FIX 2 (Claude-level conversation memory): load the most recent PRIOR build transcript
+      // for THIS workspace from the durable conversation store and prepend a short "User: … / You: …"
+      // recap, so the model remembers what was discussed/done (not just the files). This is what
+      // turns "continue" from amnesia into a real resume. Best-effort — never blocks the build.
+      try {
+        const store = getConversationStore();
+        const recent = await store.listByUser(userId ?? 'anon', 10);
+        const prior = recent.find((r) => r.workspaceId === workspaceId);
+        if (prior) {
+          const full = await store.get(prior.id);
+          // MEMORY FIX 6 (long sessions): a ROLLING summary — recent turns verbatim PLUS a condensed
+          // digest of everything before them — so the early context (the original ask, what the app
+          // is) is not silently dropped once the session grows past the recap window.
+          const recap = buildRunningSummary(full?.messages ?? [], { recentTurns: 8 });
+          if (recap) buildPrompt = `[CONVERSATION SO FAR — your memory of this session]\n${recap}\n\n---\n\n${buildPrompt}`;
+        }
+      } catch { /* conversation recall is best-effort — never blocks a build */ }
 
       // Continual learning (Layer 79): recall the relevant lessons recorded by
       // the Layer 57 reflection of earlier builds in this session (and any past
@@ -1592,6 +1761,9 @@ export function registerAgentV3Routes(app: Express): void {
         const todos = state.snapshot().todos;
         if (todos.length > 0) {
           buildPrompt = `${prompt}\n\nApproved plan:\n${todos.map((t) => `- ${t.title}`).join('\n')}`;
+          // PLAN SYNC: put the spinner on the first item the moment the build starts (before the
+          // first file is written), so the plan is never frozen at all-pending.
+          state.setTodos(computePlanProgress(todos, 0, false));
         }
       }
 
@@ -1600,9 +1772,47 @@ export function registerAgentV3Routes(app: Express): void {
       // on, the build runs cheap-first and climbs the analyser's escalation path ONLY when
       // the objective gate (build completed?) fails — the last tier is always delivered as a
       // best-effort backstop, so the build never "breaks". `deliveredTier` feeds telemetry.
-      let result: Awaited<ReturnType<typeof runner.run>>;
+      let result: Awaited<ReturnType<typeof runner.run>> | undefined;
       let deliveredTier: StartTier = analysis?.startTier ?? (onlyOpus ? 'opus' : 'gemini');
-      if (analysis && shouldEscalateBuild(analysis, onlyOpus)) {
+
+      // ── ONE-SHOT FAST LANE (additive, flag-gated; the agentic loop is untouched) ──
+      // For a SIMPLE new-build app, try ONE cheap generation call first (no Architect, no
+      // sub-agents, no per-file round-trips, no Opus, no rebuild loop). On success the build is
+      // done. On ANY failure (no usable files / model error) it falls through to the agentic loop
+      // below — the safety net — so behavior is NEVER worse than today. AGENTV3_ONESHOT=off disables.
+      if (oneShotEnabled() && intent === 'new_build' && classifyForOneShot(analysis?.startTier)) {
+        let osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
+        const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
+          .filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
+        const os = await runOneShot({
+          prompt, framework, scaffoldPaths: scaffold,
+          generate: async (system, user) => {
+            const t = await new ClaudeClient(undefined, { maxRetries: 2 }).runTurn({
+              model: haikuModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
+            });
+            osUsage = t.usage;
+            return t.text;
+          },
+          writeFiles: async (files) => {
+            for (let i = 0; i < files.length; i++) {
+              await dispatcher.dispatch({ id: `oneshot-w${i}`, name: 'write_file', input: { path: files[i].path, content: files[i].content } }, 'frontend');
+            }
+          },
+          startPreview: async () => {
+            await dispatcher.dispatch({ id: 'oneshot-install', name: 'bash', input: { command: 'npm install' } }, 'frontend');
+            await dispatcher.dispatch({ id: 'oneshot-dev', name: 'bash', input: { command: 'npm run dev' } }, 'frontend');
+            await dispatcher.dispatch({ id: 'oneshot-preview', name: 'update_preview', input: { port: oneShotDevPort(framework) } }, 'frontend');
+          },
+          log: (msg) => events.emit({ type: 'narration', agent: 'architect', text: msg, ts: Date.now() }),
+        });
+        buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
+        if (os.ok) {
+          result = { ok: true, summary: os.summary, steps: 1, usage: osUsage, billedUsd: billedAmountUsd({ inputTokens: osUsage.inputTokens, outputTokens: osUsage.outputTokens }, powerLevelReq) };
+          deliveredTier = analysis?.startTier ?? 'haiku';
+        }
+      }
+
+      if (!result && analysis && shouldEscalateBuild(analysis, onlyOpus)) {
         const esc = await runWithEscalation(analysis.escalationPath, {
           buildOnTier: async (tier, attempt) => {
             if (attempt === 1) return runner.run(buildPrompt); // reuse the start-tier runner
@@ -1611,7 +1821,9 @@ export function registerAgentV3Routes(app: Express): void {
             const escRunner = new AgentRunner({
               ...baseRunnerOpts,
               client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true }),
-              model: resolveModel(tier === 'opus'),
+              // Opus ONLY in power mode — a power-off escalation caps at Sonnet, never Opus
+              // (admin rule 2026-06-28). Escalation only runs in normal mode anyway.
+              model: resolveModel(tier === 'opus' && onlyOpus),
               persistence: {
                 store: getConversationStore(),
                 conversationId: randomUUID(),
@@ -1631,9 +1843,20 @@ export function registerAgentV3Routes(app: Express): void {
         if (esc.escalations > 0) {
           console.log(`[AGENTV3] delivered tier=${esc.tier} after ${esc.escalations} escalation(s), gatePassed=${esc.gatePassed}`);
         }
-      } else {
+      } else if (!result) {
+        // OneShot did not run or fell back → the full agentic loop (today's behavior).
         result = await runner.run(buildPrompt);
       }
+      // result is always set here (OneShot, escalation, or the loop above).
+      if (!result) result = await runner.run(buildPrompt);
+
+      // PLAN SYNC: reconcile the plan list with the real outcome — a successful build means the
+      // plan is accomplished, so mark every item done (green ticks); a failed/partial build keeps
+      // the progress reached. Best-effort — never affects the build result.
+      try {
+        const finalTodos = state.snapshot().todos;
+        if (finalTodos.length > 0) state.setTodos(computePlanProgress(finalTodos, planSteps, result.ok));
+      } catch { /* plan progress is best-effort */ }
 
       // SAFETY NET (the "fake build" fix): if a build/edit was expected to produce files but
       // produced ZERO — the cheap model replied ("I'm preparing a plan…") instead of building —
@@ -1652,17 +1875,22 @@ export function registerAgentV3Routes(app: Express): void {
         });
       }
       if (expectsArtifacts && writtenFiles.size === 0 && !abort.signal.aborted && costAfterFirstAttempt <= capUsd) {
+        buildDiag.record({
+          phase: 'build', severity: 'warning', code: 'EMPTY_BUILD_RETRY',
+          message: 'First attempt produced no files — retried the whole build on a stronger model (Sonnet in normal mode; Opus only in power mode).',
+          autoResolved: false, // back-filled to true by finish() if the retry then succeeded
+        });
         events.emit({ type: 'narration', agent: 'architect', text: 'The first attempt produced no files — rebuilding with a stronger model…', ts: Date.now() });
-        // The "stronger model" is the power-OFF ceiling: Opus at its LOWEST effort
-        // (admin rule 2026-06-27 — "power off me Opus ka sabse lower version"). In a
-        // power-ON build it's already Opus at the selected effort; here we force Opus
-        // for the retry even in normal mode, at the ceiling effort. Billing is unchanged
-        // (normal mode still bills Sonnet×3.5 via baseRunnerOpts.powerLevel) — no surprise.
+        // The "stronger model" for the retry: in POWER mode it's Opus; in NORMAL (power-off)
+        // mode it is SONNET — Opus is NEVER used when power is off (admin rule 2026-06-28,
+        // supersedes the 2026-06-27 "power-off Opus" rule). Since a simple app's first attempt
+        // ran on Haiku, retrying on Sonnet is already a real step up, and it keeps a failed
+        // build from ever burning the most-expensive model (the "$26 failed todo" driver).
         const retryRunner = new AgentRunner({
           ...baseRunnerOpts,
           client: buildTurnRunner({ claudeFirst: true }),
-          model: resolveModel(true), // Opus
-          effort: powerSpecResolved.effort ?? powerSpecResolved.ceilingEffort,
+          model: resolveModel(onlyOpus), // Opus only in power mode; Sonnet in normal mode
+          effort: onlyOpus ? (powerSpecResolved.effort ?? powerSpecResolved.ceilingEffort) : undefined,
           persistence: {
             store: getConversationStore(),
             conversationId: randomUUID(),
@@ -1782,6 +2010,13 @@ export function registerAgentV3Routes(app: Express): void {
       // can restore file-list hints and episode history without re-reading all files.
       // Best-effort: Firestore unavailability must never affect the build outcome.
       try {
+        // MEMORY FIX 4 (plan carry-over): record the final plan (todo statuses) as a durable
+        // PLAN_STATE note BEFORE the snapshot is persisted, so the NEXT build / a "continue" can
+        // resume the unfinished items instead of resetting the plan to 0/N. Best-effort.
+        try {
+          const planText = formatPlanState(state.snapshot().todos);
+          if (planText) getWorkspaceMemory(workspaceId).recordNote(`PLAN_STATE\n${planText}`);
+        } catch { /* plan-state capture is best-effort */ }
         saveWorkspaceMemory(workspaceId, getWorkspaceMemory(workspaceId).snapshot()).catch(() => {});
       } catch { /* memory persist is best-effort */ }
 
@@ -1884,10 +2119,28 @@ export function registerAgentV3Routes(app: Express): void {
       // resilient runner already self-labels in the text if it fell back to a free provider).
       const buildTag = providerDebugTag(`Claude (${model})`);
       if (buildTag) events.emit({ type: 'narration', agent: 'architect', text: buildTag.trim(), ts: Date.now() });
-      emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100 });
+      // Finalize the build diagnostics and ship the report with the result so the client
+      // can download it (JSON/text) and hand it to Claude. Also cached per session for the
+      // GET /api/agentv3/diagnostics endpoint. Best-effort — never affects the build result.
+      let diagnostics: BuildDiagnosticsReport | undefined;
+      try {
+        buildDiag.finish(result.ok, result.summary);
+        diagnostics = buildDiag.report();
+        lastDiagnostics.set(buildKey, diagnostics);
+      } catch { /* diagnostics are best-effort */ }
+      emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(diagnostics ? { diagnostics } : {}) });
     } catch (err) {
+      // Capture the crash in the diagnostics report too (real-time onUpdate already persisted it).
+      try {
+        buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_EXCEPTION', message: err instanceof Error ? err.message : String(err), autoResolved: false });
+        buildDiagRef?.finish(false);
+      } catch { /* diagnostics are best-effort */ }
       emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {
+      // Normal completion reached the finally synchronously → cancel the wall-clock deadline so it
+      // can't fire after a clean finish (no double terminal event), and stop the heartbeat timer.
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+      clearInterval(diagHeartbeatTimer);
       activeBuilds.delete(buildKey);
       // Only clear the registry slot if it is STILL this build — a Stop may have already
       // replaced it with a newer run. End every attached stream.

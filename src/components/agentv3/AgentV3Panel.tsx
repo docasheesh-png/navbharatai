@@ -398,6 +398,38 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
     }
   };
 
+  // Download the LAST build's diagnostics report (every issue v3.0 hit — provider fallbacks,
+  // tool errors, "replied without building" nudges, readiness blockers, sandbox problems) as
+  // JSON, so the admin can hand it to Claude and the rough edges get fixed in code.
+  const [downloadingDiag, setDownloadingDiag] = useState(false);
+  const downloadDiagnostics = async () => {
+    if (downloadingDiag) return;
+    setDownloadingDiag(true);
+    try {
+      const params = new URLSearchParams();
+      if (userId) params.set('userId', userId);
+      if (email) params.set('email', email);
+      const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
+      if (res.status === 404) { alert('No build report yet — build an app first, then download the report.'); return; }
+      if (!res.ok) throw new Error(`server returned ${res.status}`);
+      const data = await res.json() as { diagnostics?: unknown };
+      if (!data.diagnostics) { alert('No build report available yet.'); return; }
+      const blob = new Blob([JSON.stringify(data.diagnostics, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `navbharatai-v3-build-diagnostics-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) {
+      alert(`Could not download the report: ${e instanceof Error ? e.message : String(e)}.`);
+    } finally {
+      setDownloadingDiag(false);
+    }
+  };
+
   // R5 §5.1 — the app's permanent LIVE deployment URL (Firebase Hosting). Restored durably from the
   // server so it survives a reconnect/new session, not just the current build stream.
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
@@ -539,6 +571,23 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.workspaceId]);
 
+  // Load the file contents when the Files tab is opened (and not already loaded), so each file
+  // row can show its line count — without the user having to click into a file first.
+  useEffect(() => {
+    if (showWorkspace && tab === 'files' && workspaceFiles === null && state.files.length > 0 && state.workspaceId) {
+      void loadWorkspaceFiles();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showWorkspace, tab, workspaceFiles, state.files.length, state.workspaceId]);
+
+  // Refresh the cached contents when a build finishes so line counts reflect the latest files.
+  useEffect(() => {
+    if (state.done && tab === 'files' && showWorkspace && state.workspaceId && state.files.length > 0) {
+      void loadWorkspaceFiles();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.done]);
+
   // Plan (todo list) collapse toggle (Task 3) — keeps the chat area readable.
   const [planCollapsed, setPlanCollapsed] = useState(false);
 
@@ -617,6 +666,15 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
           >
             {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
             {exporting ? 'Exporting…' : 'Export .zip'}
+          </button>
+          <button
+            onClick={downloadDiagnostics}
+            disabled={downloadingDiag}
+            title="Download the diagnostics report from your last build — every issue v3.0 hit (provider fallbacks, tool errors, readiness blockers, sandbox problems). Send it to support to get the build engine improved."
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {downloadingDiag ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+            {downloadingDiag ? 'Preparing…' : 'Build report'}
           </button>
           {state.repoUrl && (
             <a
@@ -944,6 +1002,10 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
                   {state.files.filter((f) => f.kind !== 'delete').map((f) => {
                     const ext = f.path.split('.').pop() ?? '';
                     const color = V3_EXT_COLOR[ext] ?? 'text-white/50';
+                    // Line count of the file (from the fetched contents) — shown next to the dot
+                    // so the user sees how much was actually written inside each file.
+                    const fileContent = workspaceFiles?.[f.path];
+                    const lineCount = typeof fileContent === 'string' ? fileContent.split('\n').length : null;
                     return (
                       <div key={f.path} className="group flex items-center gap-1 rounded-xl hover:bg-white/5 transition-colors">
                         <button
@@ -953,6 +1015,11 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
                         >
                           <FileCode className={`w-4 h-4 flex-shrink-0 ${color}`} />
                           <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{f.path}</span>
+                          {lineCount !== null && (
+                            <span className="text-[10px] tabular-nums text-zinc-500 flex-shrink-0" title={`${lineCount} line${lineCount === 1 ? '' : 's'}`}>
+                              {lineCount} {lineCount === 1 ? 'line' : 'lines'}
+                            </span>
+                          )}
                           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${fileDot(f.kind).split(' ').slice(2).join(' ')}`} />
                         </button>
                         <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover:opacity-100 transition-opacity">

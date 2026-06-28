@@ -15,7 +15,7 @@
 // throws — a persistence failure must never break or block a build.
 
 import * as admin from 'firebase-admin';
-import firebaseConfig from '../../../firebase-applet-config.json';
+import { firestoreDatabaseId } from '../lib/firestoreDb';
 
 const COLLECTION = 'workspace_files_v3';
 /** Firestore's hard per-document limit is 1 MB; skip a single file larger than this. */
@@ -31,7 +31,7 @@ function getDb(): admin.firestore.Firestore | null {
   try {
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
     _db = admin.firestore();
-    _db.settings({ databaseId: firebaseConfig.firestoreDatabaseId });
+    _db.settings({ databaseId: firestoreDatabaseId() });
     return _db;
   } catch {
     return null;

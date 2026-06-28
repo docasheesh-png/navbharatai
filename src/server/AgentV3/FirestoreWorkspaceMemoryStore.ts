@@ -13,7 +13,7 @@
 
 import * as admin from 'firebase-admin';
 import type { MemorySnapshot, ProjectGraph, Episode } from './WorkspaceMemory';
-import firebaseConfig from '../../../firebase-applet-config.json';
+import { firestoreDatabaseId } from '../lib/firestoreDb';
 
 const COLLECTION = 'workspace_memory_v3';
 /** Keep snapshots for up to 30 days — after that they are stale and ignored. */
@@ -30,7 +30,7 @@ function getDb(): admin.firestore.Firestore | null {
   try {
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
     _db = admin.firestore();
-    _db.settings({ databaseId: firebaseConfig.firestoreDatabaseId });
+    _db.settings({ databaseId: firestoreDatabaseId() });
     return _db;
   } catch {
     return null;

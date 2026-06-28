@@ -4924,6 +4924,415 @@ Forensic (parallel agent): two converging server-side causes.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2867/2867 PASS, boot:check PASS.
 
+## 2026-06-28 — ROOT CAUSE: "model replied without building" (narrates a plan, writes 0 files)
+
+Admin screenshots: prompt "ek simple search engine page banao", the model narrates a full plan in
+Hindi ("…अब मैं frontend विशेषज्ञ को index.html बनाने का काम सौंप रहा हूँ"), then a yellow banner:
+"The build did not produce any files — the model replied without building", PLAN 0/4. It failed on
+BOTH the first attempt AND the Opus "stronger model" retry — so NOT a model-weakness issue.
+
+ROOT CAUSE (AgentRunner.ts:294): the loop treats ANY no-tool turn as "the model finished its turn"
+and exits. The architect's first turn is usually a plan/delegation narration ("here's my plan, now
+I'll assign the frontend expert…") with NO tool call — and the runner terminated right there →
+builtNothing → "model replied without building". The model intended to ACT on the next turn but
+never got one. Even Opus does this plan-out-loud-first behaviour, which is why the retry also failed.
+
+FIX: when expectsArtifacts && totalToolUses === 0 && a no-tool turn arrives, NUDGE the model to act
+(push a user message: "do NOT just describe/delegate in prose — ACT NOW: use write_file/… to create
+the files this turn; output tool calls, not a description") and give it another turn, up to
+MAX_BUILD_NUDGES (2). Only after the nudges are exhausted with still zero tools do we report
+builtNothing. New test: turn 1 narrates → nudge → turn 2 writes the file → ok:true. The existing
+empty-build test still ends ok:false after nudges (fallback keeps replying text).
+
+Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.
+
+## 2026-06-28 — ROOT CAUSE: file-creation "hallucination" → builds were silently on Gemini/Vertex
+
+Admin's Anthropic dashboard: $0.00 spend, "No activity in the last 7 days" — PROOF that Claude was
+never being called. Symptom: v3.0 reports creating files but writes ZERO real files (only file
+NAMES), and when asked says "I'm an AI, I have no file system"; on a tab switch the "files" vanish
+(they were never real). Cause: although #511 made builds Claude-FIRST, MultiProviderTurnRunner
+returns the first NON-THROWING provider — so when Claude throws in prod (bad key / wrong model id /
+base-url), the build silently fell through to Vertex/Gemini, which HALLUCINATE in the tool-use loop
+(they describe creating files but never call write_file). Real tool-use (real files) only happens on
+Claude.
+
+FIX: builds now run on CLAUDE ONLY (Haiku → Sonnet → Opus + Claude-Haiku backstop). Gemini/Vertex
+are removed from the BUILD chain (they remain the cheap CHAT providers only). If Claude genuinely
+fails, the build errors HONESTLY with the real Claude error instead of faking files on Gemini.
+AGENTV3_BUILD_ALLOW_GEMINI=1 re-adds Vertex/Gemini as a last-resort build fallback.
+
+To diagnose the $0-Claude prod issue: GET /api/agentv3/diag?test=1&admin=<ADMIN_PASSWORD> makes one
+live Claude call and returns live:{ok,status,error} — e.g. 401 (bad ANTHROPIC_API_KEY) or 404 (wrong
+AGENTV3_{HAIKU,SONNET,OPUS}_MODEL id). That tells the admin exactly which Cloud Run env to fix.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.
+
+## 2026-06-28 — "reload pe data gayab": chat history was in-memory by default
+
+Admin: app data disappears on reload. Audit of the persistence system:
+- FILES: WorkspaceFileStore persists file CONTENT to Firestore (collection workspace_files_v3),
+  NOT gated on any flag — saved after a build, re-seeded into a fresh sandbox at the next build.
+  Durable (once REAL files exist; the earlier Gemini hallucination wrote none — #523 fixes that).
+- CHAT/conversation: getConversationStore() used FirestoreConversationStore ONLY when
+  AGENTV3_PERSIST_FIRESTORE === 'true'; otherwise InMemoryConversationStore. So unless that env
+  var was set in Cloud Run, the whole transcript lived in process memory and was LOST on any
+  redeploy, cold start, or — because Cloud Run runs multiple instances — a reload that landed on
+  a different instance. That is the "reload pe data gayab".
+
+FIX: default the conversation store to Firestore (durable across restarts + horizontal scaling).
+Opt out with AGENTV3_PERSIST_FIRESTORE=false; VITEST always uses in-memory. FirestoreConversation
+Store construction is try/caught → falls back to in-memory if Firestore is unreachable, so it
+never breaks boot. Combined with #518 (session id persisted → same workspace on reload) and the
+already-durable WorkspaceFileStore, a reload now restores the chat AND re-seeds the files.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.
+
+## 2026-06-28 — "reload pe data gayab" (part 2): Firestore DB was a free-tier-capped AI-Studio database
+
+Admin upgraded the project (gen-lang-client-0866594388) to Blaze, but persistence STILL failed with
+"Quota exceeded for 'Free daily write units per project (free tier database)' … This database cannot
+exceed free quota limits even when a billing instrument is enabled." Root cause: the configured
+Firestore database id is `ai-studio-cc9cd998-…` — a database Google AI Studio created in a FREE tier
+that stays hard-capped to the free daily write quota EVEN on Blaze. So chat/files/memory writes were
+rejected once the daily free writes ran out → nothing persisted → data gone on reload.
+
+FIX (code): new src/server/lib/firestoreDb.ts → firestoreDatabaseId() returns
+FIRESTORE_DATABASE_ID (env) || firebase-applet-config.json value || '(default)'. Wired it into every
+server-side Firestore store (WorkspaceFileStore, FirestoreConversationStore, FirestoreWorkspaceMemory
+Store, EngineerAI WorkspaceMemoryStore, AppMakerLab FirestoreJobStore, eventStore, FirestoreBackup),
+so ALL stores read the same database id and the admin can point them at a FULL-QUOTA database
+(the project's `(default)` Native DB, or a freshly created one) via the FIRESTORE_DATABASE_ID env var
+— no code change needed.
+
+ADMIN ACTION: create/confirm a full-quota Firestore database in gen-lang-client-0866594388 (Native
+mode; the `(default)` DB on Blaze has full quota), then set Cloud Run env
+FIRESTORE_DATABASE_ID=<that-database-id>. Then chat + files + memory persist across reloads.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.
+
+## 2026-06-28 — Build Diagnostics: self-diagnosing report of every issue v3.0 hits
+
+Admin asked for a self-diagnostics tool: when v3.0 builds an app, capture EVERY issue it hit
+(whether auto-solved or not) into a downloadable technical report, so it can be handed to Claude
+and the rough edges fixed in code — goal: v3.0 never struggles to build an app.
+
+New BuildDiagnostics (src/server/AgentV3/BuildDiagnostics.ts, pure + 7 unit tests): collects
+structured BuildIssue records { ts, phase, severity, code, message, autoResolved, detail }. It both
+DERIVES issues from the live AgentEvent stream (failed tool_result → TOOL_ERROR, done.readiness
+blockers → READINESS_BLOCKER, warnings → READINESS_WARNING, error → BUILD_ERROR, preview info) and
+accepts explicitly-RECORDED issues (provider fallback, sandbox-unavailable, empty-build retry).
+finish(ok) back-fills ambiguous issues (tool errors / nudges / empty-build retry) as auto-resolved
+when the build ultimately succeeded. report() returns counts + the issue list; renderDiagnosticsText
+makes a readable .txt.
+
+Wired into routes/agentv3.ts: a BuildDiagnostics per build, subscribed to the event stream; provider
+fallbacks captured via buildTurnRunner's new onProviderError hook; sandbox-setup failure + empty-build
+retry recorded; finalized at build end and shipped on the `result` event + cached per session. New
+GET /api/agentv3/diagnostics (owner-scoped) returns the last build's report. Client: a "Build report"
+button in the v3.0 header downloads it as JSON. AppKnowledgeBase agentv3_build_report entry added.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2881/2881 PASS, boot:check PASS.
+
+## 2026-06-28 — Opus ONLY in power mode (admin rule, supersedes 2026-06-27)
+
+Admin: power-off builds must NEVER use Opus, no matter what — ladder is Haiku → Sonnet (max) in
+normal mode; Opus only when the Power toggle is on. selectBuildModel already obeyed this; the two
+violators were the escalation paths:
+- Empty-build retry forced model = resolveModel(true) (Opus) "even in normal mode" (the 2026-06-27
+  rule). Now resolveModel(onlyOpus) → Sonnet in normal mode, Opus only in power. Effort no longer
+  forces the Opus ceiling in normal mode. Retrying a simple app's Haiku attempt on Sonnet is still
+  a real step up, and it stops a failed build from ever burning the most-expensive model (the
+  "$26 failed todo" driver).
+- Cost-ladder escalation (P3, dormant by default) used resolveModel(tier === 'opus'); now
+  resolveModel(tier === 'opus' && onlyOpus) → caps at Sonnet in normal mode.
+
+Gate: server tsc 0, vitest 2881/2881 PASS, boot:check PASS.
+
+## 2026-06-28 — files vanish to 0 the instant a follow-up/retry message is sent
+
+Admin: "3D rotating watch" build made 7 files but the app failed; on pressing Send for a retry,
+the 7 files instantly became 0. Root cause: the client start() called setState(initialAgentV3State())
+on EVERY new message, wiping the whole client state — including state.files → [] — immediately, before
+the server even responds. So the user's project visibly disappeared the moment Send was pressed.
+
+FIX (client, useAgentV3Build.start): reset only the TRANSIENT build state for the new turn
+(narration, todos, plan, agents, done/health) and PRESERVE the durable project view — files, diffs,
+workspaceId, previewUrl, repoUrl. The build's file_changed events upsert by path (applyFileChange),
+so keeping the existing list shows no duplicates and the project stays visible while the retry runs.
+Combined with the now-working Firestore persistence (saveWorkspaceFiles during build + the build-start
+re-seed that writes durable files back into the sandbox), a retry continues editing the same 7 files
+instead of starting from a blank 0.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2881/2881 PASS.
+
+## 2026-06-28 — OneShot fast lane (Item 1): cheap one-call build for simple apps (additive)
+
+Admin spec (merged understanding): add a fast+cheap OneShot lane INSIDE v3.0 — a complexity router at
+the entry sends simple apps to OneShot, complex apps to the current multi-agent loop (untouched).
+Additive, flag-gated, with the loop as the safety net → "v3.0 toot jayega" risk ~zero.
+
+New OneShotBuilder.ts (pure helpers + injected side-effects → 11 unit tests):
+- classifyForOneShot(startTier): gemini/haiku tier → one-shot; sonnet/opus → loop.
+- oneShotEnabled(): on by default; AGENTV3_ONESHOT=off instantly disables (rollback).
+- parseFileBlocks(): parses <<<FILE path>>> … <<<ENDFILE>>> blocks (survives ``` / JSON in code),
+  rejects absolute/traversal paths, de-dupes (last wins).
+- oneShotSystemPrompt/oneShotUserPrompt: one structured generation, no tools, no prose.
+- runOneShot(deps): generate → parse → writeFiles (batch) → startPreview (best-effort). Returns
+  ok:false (never throws) on no-files / model error → caller FALLS THROUGH to the agentic loop.
+
+Wired into routes/agentv3.ts BEFORE the escalation/loop block: for a SIMPLE new_build, try OneShot
+(one Haiku text call → write files via the same dispatcher so file_changed/onFileWrite/Firestore
+all fire → install + dev + update_preview). On success result is set (steps:1, billed via
+billedAmountUsd on the real Haiku usage, NEVER Opus) and the loop is skipped; on any failure it
+falls through to the existing loop unchanged. New oneShotDevPort(framework) for the preview port.
+BuildDiagnostics records ONESHOT_SUCCESS / ONESHOT_FALLBACK.
+
+Net: simple apps build in ONE cheap call (no Architect, sub-agents, Opus, or rebuild spiral —
+kills the "$26 failed todo"); complex apps keep the full loop; worst case = today's behavior.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2892/2892 PASS, boot:check PASS.
+
+## 2026-06-28 — Build report: real-time + comprehensive (was empty / only saved at build end)
+
+Admin: app still not building, files created but "Build report" shows nothing; wants EVERY issue
+captured in real time. Causes: (1) lastDiagnostics was set only at the END of a build, so a still-
+running / crashed / hung build left the report empty; (2) too few signals were captured.
+
+Fixes:
+- BuildDiagnostics: new onUpdate callback fired after EVERY record / ingestEvent / finish. The route
+  wires it to lastDiagnostics.set(buildKey, report) → the report is persisted in REAL TIME and is
+  downloadable any time, even mid-build or after a crash/hang.
+- Widened capture: ingestEvent now also records problem NARRATION lines (AGENT_NOTE) — sandbox
+  unavailable, port/preview not responding, errors/retries/stuck/closed-port/no-files/warnings — the
+  struggles the agent talks about that never reached the report before.
+- Crash capture: buildDiagRef held outside the build try; the outer catch records BUILD_EXCEPTION and
+  finish(false), so a thrown build is in the report too.
+- Existing capture (tool errors, provider fallbacks, readiness blockers/warnings, sandbox, empty-build
+  retry, one-shot success/fallback, preview) all now flush live.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2895/2895 PASS, boot:check PASS.
+
+## 2026-06-28 — Claude-level memory, Fix 1: inject project context into the build prompt
+
+Admin: files now persist (good) but MEMORY is still gone — after a build hung ("stopped
+responding"), saying "continue" made the AI reply "what would you like me to continue with?" —
+total amnesia about the calculator it was building.
+
+Gap list vs Claude-level memory (to fix one-by-one):
+1. No project context (files + map) injected into a new message → amnesia  ← FIX 1 (this PR)
+2. Prior conversation (user+agent turns) not fed to the model
+3. WorkspaceMemory is in-process (per-instance), not hydrated from Firestore across instances
+4. Plan/todos don't carry over (PLAN resets)
+5. recall is keyword-based; "continue" recalls nothing useful
+6. No running conversation summary for long sessions
+
+FIX 1: new ProjectContext.buildProjectContext({files, projectMap, recentRequests}) (pure, 4 tests)
+builds a compact "[PROJECT MEMORY — you are CONTINUING an existing project…]" block listing the real
+files + project map + recent requests, ending with an explicit "do NOT ask what to continue — read
+the files and resume". Wired into routes/agentv3.ts buildPrompt: hydrate the memory graph from the
+real (durable, re-seeded) file tree first (warmIndexFiles) so the map is accurate even on a fresh
+Cloud Run instance, then prepend the context. Best-effort, never blocks a build. The reliable signal
+(the durable file list) gives the model memory even when the in-process episodes were lost.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2899/2899 PASS, boot:check PASS.
+
+## 2026-06-28 — Claude-level memory, Fix 2: prior conversation recap into the model
+
+Gap #2: the model never saw the prior conversation (only the new prompt), so it forgot what was
+discussed/decided. Fix: new extractConversationSummary(messages, maxTurns) (pure, 3 tests) recaps a
+prior transcript into "User: … / You: …" lines (notes tool calls, skips tool_result noise, caps to
+last N turns). Wired into routes/agentv3.ts: load the most recent PRIOR conversation for THIS
+workspace from the durable ConversationStore (listByUser → match workspaceId → get full transcript),
+recap it, and prepend "[CONVERSATION SO FAR — your memory of this session]" before the build prompt.
+Best-effort, never blocks. Together with Fix 1 (file/project context) the agent now resumes with both
+the project state AND the conversation memory.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2902/2902 PASS, boot:check PASS.
+
+## 2026-06-28 — Claude-level memory, Fix 3: hydrate memory from Firestore for EVERY build (cross-instance)
+
+Gap #3: restoreWorkspaceMemory (which loads the durable Firestore memory snapshot — episodes +
+project graph — into the in-process WorkspaceMemory) ran ONLY in edit mode. So a new-build / "continue"
+that landed on a fresh Cloud Run instance had cold memory (Fix 1's recentRequests were empty). Fix:
+call restoreWorkspaceMemory in the Fix-1 project-context block, which runs for EVERY build — so the
+persisted episodes + graph are hydrated before building the project context, even across a restart or
+a different instance. Best-effort, never blocks. Now Fix 1 (file/project context) + Fix 2 (conversation
+recap) + Fix 3 (durable memory hydration) all work cross-instance.
+
+Gate: server tsc 0, vitest 2902/2902 PASS, boot:check PASS.
+
+## 2026-06-28 — Claude-level memory, Fix 4: plan/todos carry-over (no more PLAN 0/N reset)
+
+Gap #4: the approved build plan (todo statuses) was used only inside the build that created it. On a
+follow-up like "continue" the plan was gone — the model reset the plan to 0/N and re-scaffolded work
+that was already done. Fix: new pure formatPlanState(todos) (renders each todo as "✓/⋯/✗/○ title
+[status]", caps at 20, 4 tests) + a lastPlan field on buildProjectContext that renders a "plan you were
+working through last time … CONTINUE the unfinished items, do NOT reset to 0" block. Wired into
+routes/agentv3.ts: at build end (before saveWorkspaceMemory) the final plan is persisted as a durable
+PLAN_STATE note; in the Fix-1 context block the latest PLAN_STATE note is found and passed as lastPlan
+so the next build resumes the unfinished items. Best-effort, never blocks. Internal AI-memory behavior
+(no user-facing surface) → no AppKnowledgeBase entry needed.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2908/2908 PASS (+6 new), boot:check PASS.
+
+## 2026-06-28 — Claude-level memory, Fix 5: smarter recall (multi-word tokens + recency)
+
+Gap #5: WorkspaceMemory.recall() only matched a contiguous substring of the WHOLE query, so a
+multi-word recall like "countdown timer logic" missed an episode "fixed the countdown timer", and a
+long user prompt (recall(prompt, 8)) rarely matched anything. It also ignored recency — a stale hit
+ranked equal to a fresh one. Fix: relevance now combines whole-phrase match (exact > prefix >
+substring, so "UserCard" → the UserCard symbol still ranks first — backward-compatible) with per-token
+overlap (≥3-char tokens, stopwords dropped, capped at 30) so partial multi-word matches surface; and
+episodes get a small DETERMINISTIC recency boost (newest ≈ 0.9 … oldest ≈ 0, computed from the spread
+of episode timestamps, NOT Date.now(), so tests stay stable) that only breaks ties — it can never
+overtake a real token/phrase match, and a zero-relevance note is never surfaced by recency alone.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2911/2911 PASS (+3 new), boot:check PASS.
+
+## 2026-06-28 — Claude-level memory, Fix 6: rolling summary for LONG sessions
+
+Gap #6: Fix 2's conversation recap kept only the last 8 turns verbatim, so in a long session the
+EARLY context (the original ask, what the app even is) silently fell off the window — the model
+"forgot" it. Fix: new pure buildRunningSummary(messages, {recentTurns}) keeps the recent turns
+verbatim AND condenses everything before them into a compact digest — the distinct things the user
+asked for + the actions taken ([called X] → X). Short sessions (≤ recentTurns) return exactly the
+old recap. extractConversationSummary + buildRunningSummary now share one messagesToTurns() parser
+(no drift). Wired into routes/agentv3.ts Fix-2 block (replaces extractConversationSummary). With this
+the memory gap-list (1 project context, 2 conversation, 3 cross-instance hydration, 4 plan carry-over,
+5 smarter recall, 6 rolling summary) is COMPLETE — v3.0 memory now resumes a session like Claude does.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2914/2914 PASS (+3 new), boot:check PASS.
+
+## 2026-06-28 — Fix: v3.0 build "restart from 0" loop (watchdog false-positive + missing heartbeat)
+
+User report: a simple to-do app "restarts" ~10 times — works/loads for ~2 min, then the UI goes back to
+"Setting up your workspace…" and starts over (History showed 6+ runs). Root cause (two real bugs in the
+client stall-watchdog path):
+1. useAgentV3Build.start()'s inline NDJSON reader updated the UI but NEVER refreshed lastEventTsRef
+   (pumpStream did, at line 122). So even though the /chat stream sends an event/ping every 15s, the
+   watchdog saw the timestamp frozen at mount time and fired at its 100s "silence" threshold (~the 2 min
+   the user saw). With the server build still running, it aborted + resume()d → resume() does
+   setState(initialAgentV3State()) → the UI blanks → "Setting up your workspace…" reappears = "0 se start".
+2. The /api/agentv3/attach (resume) endpoint had NO heartbeat (unlike /chat), so the reconnected stream
+   went silent again during the next quiet build phase (a long model/one-shot call) → watchdog re-fired →
+   reconnect loop, repeating indefinitely.
+Fix A (client): start() now resets lastEventTsRef at build start AND updates it on every event (incl. the
+15s pings), so the watchdog only fires on a GENUINELY dead stream. Fix B (server): /attach sends the same
+15s ping keepalive and clears it on close. Now a healthy long build streams uninterrupted; the watchdog
+remains as the real safety net for a truly dead stream.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2914/2914 PASS, boot:check PASS.
+
+## 2026-06-28 — Fix: OneShot build hangs forever at "working…" after generating files
+
+User report: "make a calculator" → "Generated 9 file(s) in one shot." → then "working… 16m 58s" and it
+never finishes (would spin for hours). Restart-loop (#539) was already fixed, so this is a DIFFERENT hang.
+Root cause: OneShot's startPreview() runs `npm install` → `npm run dev` → update_preview, each awaited. On
+LocalActuator (used when E2B_API_KEY is unset — the 16-min duration rules out E2B, whose commands cap at
+5 min) `npm run dev` is run as a FOREGROUND exec; Node's exec timeout does not reliably kill a dev server
+(vite keeps the stdout pipe open), so the command promise NEVER resolves → `await startPreview()` hangs →
+the whole build spins at "working…" forever even though the files are already written. runOneShot's
+try/catch only catches a THROW, not an infinite wait. Fix: wrap startPreview() in a hard timeout
+(withTimeout, default 90 s, configurable via previewTimeoutMs) — preview is best-effort, so on a hang OR a
+throw the build finishes (files are already written) and tells the user the preview is still starting.
+Now the build ALWAYS completes within ~90 s of file generation regardless of sandbox/actuator behavior.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2915/2915 PASS (+1 hang-repro test), boot:check PASS.
+
+## 2026-06-28 — Fix: build can NEVER hang at "working…" again (server hard deadline + OneShot overall cap)
+
+User report: another build stuck at "working… 9m 44s", this time WITHOUT a "Generated files" message —
+so the hang was EARLIER than #540's startPreview fix: in OneShot's generate() (the Haiku model call) or
+file-write. Root cause: NO build step had a real deadline. The Anthropic SDK's default request timeout is
+~10 min, so a single stalled model HTTP call hangs for minutes; and crucially, if the build body hangs on
+an un-abortable await, the route's normal result/error/finally path is NEVER reached → no terminal event →
+the client spinner runs forever (the 15s heartbeat keeps the stream "alive", so the client stall-watchdog
+never trips either). The existing maxBuildSeconds() cap was only passed into the agentic runner; it was
+never enforced as a hard wall.
+Two fixes:
+1. Server hard wall-clock deadline (routes/agentv3.ts): a timer that, after maxBuildSeconds() (12 min
+   default, AGENTV3_MAX_BUILD_SECONDS), force-emits a terminal result, aborts the run, frees the
+   per-account slot, and ends the stream — GUARANTEEING the client always gets a terminal event and the
+   spinner stops, no matter where the build hangs. Cleared in finally on normal completion; since JS is
+   single-threaded it can't interleave with the success path, so it only fires on a genuine overrun.
+2. OneShot overall cap (OneShotBuilder.ts): runOneShot now wraps the whole attempt (generate + writeFiles
+   + preview) in overallTimeoutMs (default 180 s) — a hung model call bails to the agentic-loop fallback
+   in ~3 min instead of spinning, complementing #540's startPreview cap.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2916/2916 PASS (+1 hung-generate test), boot:check PASS.
+
+## 2026-06-28 — Fix: per-request LLM timeout so a stalled model call fails fast (not ~10 min)
+
+Repeated builds hung in OneShot's generate() (the model call) for 9+ min. Root: the Anthropic SDK's
+DEFAULT per-request timeout scales with max_tokens and can be ~10 minutes, so a single stalled request
+(connection opens, no response) silently hangs the build. Fix (ClaudeClient.getClient): pin an explicit
+per-request timeout (llmRequestTimeoutMs, env AGENTV3_LLM_TIMEOUT_MS, default 120 s) AND set the SDK's own
+maxRetries:0 so a stall isn't multiplied by the SDK's internal retries on top of our createWithRetry. Now
+a stalled call fails in ~2 min and our retry/fallback + the OneShot 180s cap + the 12-min server deadline
+take over — the build recovers/terminates fast instead of appearing to hang. NOTE: this only helps if the
+deploy actually reaches production — Cloud Build posts no commit status to GitHub, so deploy landing must
+be verified separately (admin: Cloud Build history / trigger 75443609-...).
+
+Gate: frontend tsc 0, server tsc 0, vitest 2919/2919 PASS (+3), boot:check PASS.
+
+## 2026-06-28 — Fix (combined plan, step 1/B): OneShot "sticky success" — a slow preview no longer discards a built app
+
+User saw: OneShot generated 8 files (app built), preview was slow ("Preview is still starting"), then the
+HEAVY agentic loop re-ran on top (App.css, type-check, dev server…) and hit the 12-min timeout — double
+work. Root: runOneShot wrapped the WHOLE attempt (generate + write + preview) in one overall timeout, so a
+successful build whose preview merely ran slow was declared ok:false → caller fell through to the full
+agentic loop. Fix: restructure runOneShot so the overall cap bounds ONLY the generate+write phase; once the
+files are written, success is LOCKED IN — the best-effort preview (separately bounded) can never downgrade
+it to a fallback. A simple new app now finishes right after generation instead of re-running the heavy loop
+and timing out. (Combined-plan step A = per-request LLM timeout #542; this is step B.)
+
+Gate: frontend tsc 0, server tsc 0, vitest 2920/2920 PASS (+1 sticky-success test), boot:check PASS.
+
+## 2026-06-28 — Fix (combined plan, step C): E2B listFiles excludes node_modules — kills the "5115 files" edit-prompt bloat
+
+User screenshot showed "Editing your existing app (5115 files)". A simple Vite+React app has ~10 source
+files — the 5115 were node_modules (thousands of library files after npm install). E2BActuator.listFiles
+did NOT exclude node_modules/.git/dist/etc (LocalActuator already did via IGNORED_DIRS), so the edit-mode
+prompt (editModePrefix(fileTree)) was fed 5000+ paths → huge, slow, expensive context on every turn. Fix:
+add isIgnoredListPath() (mirrors LocalActuator's IGNORED_DIRS) and filter listFiles output. The agent only
+ever edits real source, never these dirs. Edit context drops from 5115 → the ~10 real files → faster,
+cheaper, less-confused turns.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2922/2922 PASS (+2 isIgnoredListPath tests), boot:check PASS.
+
+## 2026-06-28 — Build report upgrade: full minute-by-minute timeline + names the exact hang
+
+User insight from a real report: 12-minute build, only 2 lines recorded — because BuildDiagnostics only
+captured PROBLEMS (errors/struggle-narration), never normal activity. So an 11-minute hang was a blank gap;
+we couldn't see what it was doing. Upgrade (BuildDiagnostics): (1) record EVERY tool call (TOOL_CALL) and
+its completion+duration (TOOL_DONE), not only failures; (2) record ALL narration as AGENT_STEP (timeline),
+not just problem lines; (3) record milestone events (delegation/plan/todo) as EVENT; (4) track IN-FLIGHT
+tool calls and, on finish(false), record STUCK_TOOL naming exactly what the build hung on (in-flight Ns,
+never completed); (5) new heartbeat() that the route calls every 60 s (diagHeartbeatTimer, cleared in
+finally) → minute-by-minute "⏱ minute N — still working (in-flight: X / last: Y)" markers so a long quiet
+stretch is no longer a blank gap. Timeline capped at 2000 entries (TIMELINE_TRUNCATED) so a runaway loop
+can't grow the report unbounded. Now a timeout report shows the full activity log AND points at the culprit.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2926/2926 PASS (+4 timeline/heartbeat/stuck tests), boot:check PASS.
+
+## 2026-06-28 — Fix: v3.0 plan list now syncs (live spinner + green ticks), no longer frozen at 0/N
+
+User: the plan list (above the input box) doesn't sync — no spinner while working, no green tick on
+completion (it sits at "PLAN 0/N", all items pending). Root: the plan is driven by todo_updated events;
+the model is INSTRUCTED to keep todos updated (mark in_progress/done) but does not do so reliably — Haiku
+especially creates the plan once and never advances the statuses. The client renders status correctly
+(Loader2 spinner for in_progress, CheckCircle2 for done) — the statuses just never change server-side.
+Fix: new pure computePlanProgress(todos, completedSteps, finished) (7 tests) + wiring in routes/agentv3.ts
+so the route drives plan progress from REAL build activity regardless of model compliance: (a) on plan
+approval, the first item → in_progress (spinner appears immediately); (b) each file written advances the
+progress (done → in_progress → pending; the last item is never marked done until the build finishes, so
+no premature 100%); (c) on the build's final outcome, a SUCCESS marks every item done (green ticks), a
+failure keeps the progress reached. A real 'blocked' status is preserved. Best-effort — never affects the
+build. No AppKnowledgeBase entry (bug fix to an existing surface, not a new feature).
+
+Gate: frontend tsc 0, server tsc 0, vitest 2933/2933 PASS (+7), boot:check PASS.
+
 ## 2026-06-28 — P-BRE.3 Structured Logging (build-correlation core) DONE
 
 New src/server/logger.ts: dependency-free structured Logger (no Pino/Winston) emitting one

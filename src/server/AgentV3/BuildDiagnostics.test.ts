@@ -1,0 +1,134 @@
+import { describe, it, expect } from 'vitest';
+import { BuildDiagnostics, renderDiagnosticsText } from './BuildDiagnostics';
+import type { AgentEvent } from './types';
+
+let clock = 1000;
+const now = () => (clock += 10);
+
+function fresh() {
+  clock = 1000;
+  return new BuildDiagnostics({ sessionId: 's1', prompt: 'build a todo app', model: 'claude-sonnet-4-6', framework: 'vite-react', now });
+}
+
+describe('BuildDiagnostics', () => {
+  it('records an explicit issue (e.g. a provider fallback)', () => {
+    const d = fresh();
+    d.record({ phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK', message: 'CLAUDE failed, fell back to CLAUDE_HAIKU', autoResolved: true, detail: 'overloaded' });
+    const r = d.report();
+    expect(r.issues).toHaveLength(1);
+    expect(r.issues[0].code).toBe('PROVIDER_FALLBACK');
+    expect(r.counts.warnings).toBe(1);
+    expect(r.counts.autoResolved).toBe(1);
+  });
+
+  it('derives a TOOL_ERROR from a failed tool_result event', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_result', agent: 'architect', callId: 'c1', ok: false, summary: 'npm install failed: ERESOLVE', ts: 1 } as AgentEvent);
+    const r = d.report();
+    expect(r.issues[0].code).toBe('TOOL_ERROR');
+    expect(r.issues[0].message).toContain('npm install failed');
+  });
+
+  it('captures readiness blockers (unresolved) and warnings (auto-resolved) from the done event', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'done', ok: false, summary: 'NOT READY', ts: 1, readiness: { score: 40, ready: false, blockers: ['unresolved import ./Foo'], warnings: ['no error boundary'] } } as AgentEvent);
+    const r = d.report();
+    const blocker = r.issues.find((i) => i.code === 'READINESS_BLOCKER');
+    const warn = r.issues.find((i) => i.code === 'READINESS_WARNING');
+    expect(blocker?.autoResolved).toBe(false);
+    expect(warn?.autoResolved).toBe(true);
+  });
+
+  it('finish(ok=true) back-fills tool errors and nudges as auto-resolved', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_result', agent: 'frontend', callId: 'c1', ok: false, summary: 'tsc error', ts: 1 } as AgentEvent);
+    d.record({ phase: 'build', severity: 'warning', code: 'NO_BUILD_NUDGE', message: 'model narrated a plan without building', autoResolved: false });
+    d.finish(true, 'Build complete.');
+    const r = d.report();
+    expect(r.ok).toBe(true);
+    expect(r.issues.every((i) => i.autoResolved)).toBe(true);
+    expect(r.counts.unresolved).toBe(0);
+  });
+
+  it('finish(ok=false) keeps tool errors/nudges UNRESOLVED', () => {
+    const d = fresh();
+    d.record({ phase: 'build', severity: 'warning', code: 'NO_BUILD_NUDGE', message: 'no files', autoResolved: false });
+    d.finish(false, 'failed');
+    expect(d.report().counts.unresolved).toBe(1);
+  });
+
+  it('renders a readable text report', () => {
+    const d = fresh();
+    d.record({ phase: 'sandbox', severity: 'error', code: 'SANDBOX_TIMEOUT', message: 'Sandbox.create timed out after 45000ms', autoResolved: false });
+    d.finish(false);
+    const text = renderDiagnosticsText(d.report());
+    expect(text).toContain('Build Diagnostics Report');
+    expect(text).toContain('SANDBOX_TIMEOUT');
+    expect(text).toContain('UNRESOLVED');
+  });
+
+  it('fires onUpdate in REAL TIME after every record / ingest / finish', () => {
+    const reports: number[] = [];
+    const d = new BuildDiagnostics({ now, onUpdate: (r) => reports.push(r.counts.total) });
+    d.record({ phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK', message: 'x', autoResolved: true });
+    d.ingestEvent({ type: 'tool_result', agent: 'architect', callId: 'c', ok: false, summary: 'boom', ts: 1 } as AgentEvent);
+    d.finish(false);
+    // 1 after record, 2 after the failed tool_result, and a final emit on finish.
+    expect(reports).toEqual([1, 2, 2]);
+  });
+
+  it('captures problem narration lines (struggles the agent talks about)', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: 'port 5173 is not responding yet', ts: 1 } as AgentEvent);
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: 'Building the UI…', ts: 2 } as AgentEvent); // ignored (no problem keyword)
+    const r = d.report();
+    expect(r.issues.filter((i) => i.code === 'AGENT_NOTE')).toHaveLength(1);
+    expect(r.issues[0].message).toContain('not responding');
+  });
+
+  it('clean build → zero issues, friendly text', () => {
+    const d = fresh();
+    d.finish(true, 'done');
+    const r = d.report();
+    expect(r.counts.total).toBe(0);
+    expect(renderDiagnosticsText(r)).toContain('No issues recorded');
+  });
+});
+
+describe('BuildDiagnostics — full activity timeline (minute-by-minute, names the hang)', () => {
+  it('records every tool call and its completion (with duration) — not only failures', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_call', agent: 'frontend', tool: 'write_file', input: {}, callId: 'c1', ts: 1000 } as AgentEvent);
+    d.ingestEvent({ type: 'tool_result', agent: 'frontend', callId: 'c1', ok: true, summary: 'wrote', ts: 3000 } as AgentEvent);
+    const r = d.report();
+    expect(r.issues.find((i) => i.code === 'TOOL_CALL')?.message).toContain('write_file');
+    const done = r.issues.find((i) => i.code === 'TOOL_DONE');
+    expect(done?.message).toContain('write_file');
+    expect(done?.message).toContain('2s'); // 3000 − 1000 ms
+  });
+
+  it('records NORMAL narration as an AGENT_STEP (the timeline), not only problems', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: 'Building the calculator UI', ts: 1 } as AgentEvent);
+    expect(d.report().issues.find((i) => i.code === 'AGENT_STEP')?.message).toContain('Building the calculator UI');
+  });
+
+  it('heartbeat() adds a minute marker that NAMES the in-flight tool (so a hang is visible)', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_call', agent: 'frontend', tool: 'bash', input: {}, callId: 'c1', ts: 1000 } as AgentEvent);
+    d.heartbeat();
+    const hb = d.report().issues.find((i) => i.code === 'HEARTBEAT');
+    expect(hb?.message).toContain('still working');
+    expect(hb?.message).toContain('bash'); // names what is in-flight
+  });
+
+  it('finish(false) names the tool the build was STUCK on (in-flight, never completed)', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_call', agent: 'frontend', tool: 'npm run dev', input: {}, callId: 'c1', ts: 1000 } as AgentEvent);
+    // No tool_result → the call is still in-flight when the build is stopped at the deadline.
+    d.finish(false, 'timed out');
+    const stuck = d.report().issues.find((i) => i.code === 'STUCK_TOOL');
+    expect(stuck?.message).toContain('npm run dev');
+    expect(stuck?.severity).toBe('error');
+  });
+});

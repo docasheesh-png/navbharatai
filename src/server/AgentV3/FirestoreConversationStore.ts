@@ -25,7 +25,7 @@ import type {
   ConversationPatch,
 } from './ConversationStore';
 import type { TurnUsage } from './ClaudeClient';
-import firebaseConfig from '../../../firebase-applet-config.json';
+import { firestoreDatabaseId } from '../lib/firestoreDb';
 
 const COLLECTION = 'agentv3_conversations';
 const ZERO_USAGE: TurnUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
@@ -58,7 +58,7 @@ export class FirestoreConversationStore implements ConversationStore {
       admin.initializeApp({});
     }
     this.db = admin.firestore();
-    this.db.settings({ databaseId: firebaseConfig.firestoreDatabaseId });
+    this.db.settings({ databaseId: firestoreDatabaseId() });
   }
 
   private mainDoc(id: string) {

@@ -12,7 +12,7 @@
  * Fields:     content (string), updatedAt (number)
  */
 import * as admin from 'firebase-admin';
-import firebaseConfig from '../../../firebase-applet-config.json';
+import { firestoreDatabaseId } from '../lib/firestoreDb';
 
 class WorkspaceMemoryStore {
   private db: admin.firestore.Firestore | null = null;
@@ -28,7 +28,7 @@ class WorkspaceMemoryStore {
           admin.initializeApp({});
         }
         const db = admin.firestore();
-        db.settings({ databaseId: firebaseConfig.firestoreDatabaseId });
+        db.settings({ databaseId: firestoreDatabaseId() });
         this.db = db;
       }
       return this.db;

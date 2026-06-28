@@ -266,9 +266,24 @@ export function useAgentV3Build(): UseAgentV3Build {
       if (running) return;
       userIdRef.current = opts?.userId;
       emailRef.current = opts?.email;
-      setState(initialAgentV3State());
+      // Reset only the TRANSIENT build state for the new turn (narration, todos, plan,
+      // agents, done/health). PRESERVE the durable project view — files, workspace, live
+      // preview and repo — so a follow-up/retry message does NOT blank the user's files to
+      // 0 the instant Send is pressed. The build's file_changed events upsert by path, so
+      // keeping the existing list shows no duplicates and the project stays visible.
+      setState((prev) => ({
+        ...initialAgentV3State(),
+        files: prev.files,
+        diffs: prev.diffs,
+        workspaceId: prev.workspaceId,
+        previewUrl: prev.previewUrl,
+        repoUrl: prev.repoUrl,
+      }));
       setError(null);
       setRunning(true);
+      // WATCHDOG — begin the silence window at build start (not stale mount time), so the
+      // stall detector measures THIS build and never fires before the first event arrives.
+      lastEventTsRef.current = Date.now();
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -339,6 +354,7 @@ export function useAgentV3Build(): UseAgentV3Build {
               continue;
             }
             gotEvent = true;
+            lastEventTsRef.current = Date.now(); // WATCHDOG — mark stream activity (incl. 15s pings)
             setState((prev) => agentV3Reducer(prev, event));
           }
         }

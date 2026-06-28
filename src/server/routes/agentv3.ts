@@ -325,14 +325,29 @@ function isBuildRunning(buildKey: string): boolean {
 }
 
 /**
- * The v3.0 BUILD turn-runner. Multi-provider cost-routing: the cheap function-calling
- * builders (Vertex → Gemini, REAL tool-use) take each turn first, with Claude as the
- * guaranteed backstop — so builds keep WORKING (and NavBharatAI's Claude cost stays
- * minimal) even when Claude is throttled or out of credits. Set
- * AGENTV3_BUILD_CLAUDE_FIRST=1 to prefer Claude (with Vertex/Gemini as the fallback);
- * if no Gemini/Vertex provider is configured, falls back to the Claude-only resilient
- * runner. Build models are env-overridable (AGENTV3_{VERTEX,GEMINI}_BUILD_MODEL).
+ * The v3.0 BUILD turn-runner. Per the v3.0 constitution, v3.0 runs on NavBharatAI's own
+ * Claude/Anthropic account (NavBharatAI pays the Claude cost; the user is billed the
+ * Opus-equivalent markup). So CLAUDE LEADS each turn by default — builds use the reliable,
+ * strong tool-use model and actually COMPLETE — with Vertex → Gemini → Claude-Haiku as the
+ * fallback chain so a Claude throttle never breaks a build.
+ *
+ * Why the default flipped (2026-06-28): the old cheap-first order (Gemini/Vertex lead) meant
+ * Claude was never reached on a normal build, AND Gemini's quota/rate/output limits broke
+ * builds mid-run (the multi-provider runner returns the first NON-THROWING result, so a
+ * truncated Gemini turn is accepted and the loop stalls instead of falling through to Claude).
+ * Set AGENTV3_BUILD_CLAUDE_FIRST=0 to revert to the old cheap-first ladder if ever needed.
+ * If no Gemini/Vertex provider is configured, falls back to the Claude-only resilient runner.
+ * Build models are env-overridable (AGENTV3_{VERTEX,GEMINI}_BUILD_MODEL).
  */
+/**
+ * Decide whether the v3.0 build chain leads with Claude. Pure + exported for unit testing.
+ * Explicit opts (escalation passes `true`) win; otherwise Claude-first by default, with
+ * AGENTV3_BUILD_CLAUDE_FIRST=0 / "off" as the opt-out to the old cheap-first ladder.
+ */
+export function resolveClaudeFirst(optsClaudeFirst: boolean | undefined, env: string | undefined): boolean {
+  if (typeof optsClaudeFirst === 'boolean') return optsClaudeFirst;
+  return env !== '0' && env !== 'off';
+}
 /**
  * Cost-ladder (P2): map the analyser's start tier to the cheapest CAPABLE Gemini
  * build model. Trivial/simple work (greeting, calculator, todo) starts on Gemini
@@ -376,9 +391,9 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean })
   // model actually answers. AGENTV3_DISABLE_HAIKU_BACKSTOP=1 removes it if ever needed.
   const haikuBackstop: NamedRunner = { name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(), haikuModel()) };
   const withBackstop = process.env.AGENTV3_DISABLE_HAIKU_BACKSTOP === '1' ? [] : [haikuBackstop];
-  // claudeFirst (escalation): put the stronger Claude model at the head of the chain so an
-  // escalated tier actually leads with Claude, not Gemini. Else cheap-first (env override honoured).
-  const claudeFirst = opts?.claudeFirst || process.env.AGENTV3_BUILD_CLAUDE_FIRST === '1';
+  // Claude-first by default (v3.0 runs on Claude — see the doc comment above); Vertex/Gemini
+  // remain as fallback. Escalation passes claudeFirst:true; AGENTV3_BUILD_CLAUDE_FIRST=0 reverts.
+  const claudeFirst = resolveClaudeFirst(opts?.claudeFirst, process.env.AGENTV3_BUILD_CLAUDE_FIRST);
   const chain = claudeFirst ? [claude, ...cheap, ...withBackstop] : [...cheap, claude, ...withBackstop];
   return makeMultiProviderTurnRunner(chain, {
     onProviderUsed: (used, from) => { if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`); },

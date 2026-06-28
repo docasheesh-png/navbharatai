@@ -347,6 +347,23 @@ describe('AgentRunner — empty-build detection (fake-success fix)', () => {
     expect(done?.ok).toBe(false);
   });
 
+  it('NUDGES a build that only narrated a plan, then succeeds when it builds on the next turn', async () => {
+    // Turn 1: the model just describes its plan / delegation (NO tool call) — the exact
+    // "model replied without building" symptom. Turn 2 (after the nudge): it actually writes
+    // the file. Without the nudge the run would have terminated as builtNothing after turn 1.
+    const { runner, actuator } = buildRunner(
+      [
+        { content: [{ type: 'text', text: "Here's my plan. Now I'll assign the frontend expert to create index.html." }], stop_reason: 'end_turn', usage: { input_tokens: 100, output_tokens: 30 } },
+        { content: [{ type: 'tool_use', id: 'tu1', name: 'write_file', input: { path: 'index.html', content: '<h1>Search</h1>' } }], stop_reason: 'tool_use', usage: { input_tokens: 120, output_tokens: 40 } },
+        { content: [{ type: 'text', text: 'Done — the page is ready.' }], stop_reason: 'end_turn', usage: { input_tokens: 50, output_tokens: 15 } },
+      ],
+      { expectsArtifacts: true },
+    );
+    const result = await runner.run('ek simple search engine page banao');
+    expect(result.ok).toBe(true); // the nudge let it actually build
+    expect(actuator.files.get('index.html')).toBe('<h1>Search</h1>');
+  });
+
   it('still reports ok:true for a CHAT turn with no tool calls (chat unaffected)', async () => {
     const { runner } = buildRunner(
       [{ content: [{ type: 'text', text: 'Hello! How can I help you today?' }], stop_reason: 'end_turn', usage: { input_tokens: 20, output_tokens: 10 } }],

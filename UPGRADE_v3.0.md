@@ -60,6 +60,7 @@
 | **P-UX** | **UX Engine Gaps** | User-facing quality, trust, retention | ⏳ Pending | 0% |
 | **P-PE** | **Prompt Engine Gaps** | AI quality, cost, safety | ⏳ Pending | 0% |
 | **P-AI** | **AI Intelligence Gaps** | Deeper reasoning, RAG, safety, personalization | ⏳ Pending | 0% |
+| **P-CGE** | **Code Generation Engine Gaps** | Incremental gen, test gen, docs, contracts, lint-fix | ⏳ Pending | 0% |
 
 ---
 
@@ -267,6 +268,177 @@
 - [ ] **Chaos + load testing:** k6/Locust load tests + a basic fault-injection check in CI.
 - **Acceptance:** static assets edge-cached; keys in KMS; a load test runs in CI.
 - **Files:** infra config, `server.ts`, `.github/workflows/`.
+
+---
+
+## 🟠 PHASE P-CGE — CODE GENERATION ENGINE GAPS
+> From the 300-component Code Generation Engine audit (2026-06-28). Already-strong items not listed.
+> Only PARTIAL → Full and MISSING items, priority-ordered.
+> Note: Each sub-engine listed here can expand to 100–300 specialized components during implementation.
+
+### ✅ CGE Already Strong (do not redo)
+- **Full orchestration pipeline**: AppMakerOrchestrator → BlueprintPlanner (DAG + topo sort) →
+  TaskScheduler → ExecutionOrchestrator (retry×3, checkpoint, events) → EngineRegistry/Dispatcher →
+  [LLMGenerationEngine / FrontendGenerationEngine / BackendGenerationEngine / DatabaseGenerationEngine /
+  ScaffoldGenerator] → PatchAggregator → PatchToWorkspaceBridge → WorkspaceMutationEngine (ACID 3-phase).
+- **Intelligence layer**: RequirementIntelligenceEngine, BlueprintBuilder/Compiler/Validator (×2 each),
+  FilePlanningEngine, PatternLibrary (3 arch patterns) + PatternMatcher + PatternResolutionEngine,
+  RepositoryIntelligenceEngine, FileAnalyzer (TS compiler), GraphGenerator, ImpactAnalyzer,
+  BlueprintReconstructor, IntentExtractor, FeatureExtractor, ModuleClassifier, ArchitectureSelector.
+- **Scaffolding**: ScaffoldGenerator + TemplateRegistry + ViteReactProvider + ViteReactProviderContents
+  (complete Vite+React scaffold: package.json, tsconfig, vite.config, index.html, main.tsx, App.tsx).
+- **Repair system**: FailureClassifier → RootCauseAnalyzer → RepairPlanner → RepairExecutor →
+  RepairValidator + RepairKnowledgeBase + RepairBudgetManager + RepairConfidenceEngine (14 error classifications).
+- **Validation**: QualityEvaluationEngine (Build + Lint + Runtime + Security + Architecture evaluators,
+  weighted scoring), BuildVerifier, DeploymentValidator, BlueprintValidator.
+- **Resilience**: CheckpointManager + CheckpointStorage (ACID checkpoint/restore), LockManager,
+  JournalManager, TransactionCoordinator, ConflictDetector (interface present), EventHistoryStore.
+
+### P-CGE.1 — True Incremental / AST-Based Patch Generation  🟡 PARTIAL → full  [HIGH]
+- **Problem:** All generation engines produce full-file rewrites (`Patch = {path, content}`). There is
+  no way to update a single function/class/component without regenerating the entire file. This causes
+  data loss on user edits and makes partial regeneration impossible.
+- [ ] Implement AST-aware partial patch: given a file + target symbol (function name / class name),
+  replace only that node using ts-morph, leaving surrounding code untouched.
+- [ ] Extend `IGenerationEngine` interface with `generatePatch(filePath, targetSymbol, instruction)`.
+- [ ] Wire into repair flow: `RepairExecutor` should call partial-patch for `EDIT_FILE` actions instead
+  of full rewrite when the file already exists.
+- [ ] Implement real `ConflictDetector.detectConflicts()` — currently always returns `false` (stub).
+  Use last-write-wins + 3-way merge for parallel patch application.
+- **Files:** `src/server/AppMakerLab/generator/IGenerationEngine.ts`,
+  `src/server/AppMakerLab/mutation/ConflictDetector.ts`,
+  `src/server/AppMakerLab/autorepair/RepairExecutor.ts`,
+  new `src/server/AppMakerLab/generator/ASTPatching.ts`.
+
+### P-CGE.2 — Documentation Generators  ❌ MISSING  [HIGH]
+- Generated code has no documentation. No README, no JSDoc/TSDoc inline comments, no API docs.
+  When navBharatAI generates a full app, the user gets code but no explanation of what was built.
+- [ ] Add `DocumentationGenerationEngine.ts` as a post-generation step in `AppMakerOrchestrator.ts`.
+- [ ] **README Generator**: auto-generate `README.md` from blueprint (app name, stack, features, setup).
+- [ ] **Inline Documentation Generator**: inject TSDoc comment blocks above every generated function/class.
+- [ ] **API Documentation Generator**: auto-generate endpoint list from generated Express routes.
+- **Files:** new `src/server/AppMakerLab/generator/DocumentationGenerationEngine.ts`,
+  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+
+### P-CGE.3 — Convention & Naming Engine  ❌ MISSING  [HIGH]
+- Generated code has no enforced conventions. File names, function names, variable names, and import
+  orders can be inconsistent across LLM calls (camelCase vs snake_case, `index.ts` vs `Index.tsx`).
+- [ ] Add `ConventionEngine.ts` — a post-processing pass after generation that enforces:
+  - File naming: PascalCase for components (`.tsx`), camelCase for services/hooks (`.ts`).
+  - Function naming: camelCase; constant: SCREAMING_SNAKE.
+  - Import ordering: built-ins → external → internal → relative.
+- [ ] Apply `ConventionEngine` in `PatchAggregator.ts` before writing to workspace.
+- **Files:** new `src/server/AppMakerLab/generator/ConventionEngine.ts`,
+  `src/server/AppMakerLab/generator/PatchAggregator.ts`.
+
+### P-CGE.4 — Test Generation Suite  ❌ MISSING  [HIGH]
+- No test code is generated for any generated app. `QualityEvaluationEngine` evaluates tests but nothing
+  creates them. `test_generator_audit.ts` is an audit file only.
+  *(Note: P-AI.7 captures the AI agent role; this item is the concrete generation engine.)*
+- [ ] Add `TestGenerationEngine.ts` (specialised `IGenerationEngine` subtype) covering:
+  - **Unit tests**: Vitest `describe/it/expect` blocks for generated services/hooks.
+  - **Integration tests**: API route tests using `supertest` + express app.
+  - **Snapshot tests**: React component snapshot with `@testing-library/react`.
+  - **Mock Generator**: auto-generate `__mocks__/` for injected dependencies.
+- [ ] Register in `EngineRegistry` as `EngineType.TEST`; trigger after successful build.
+- **Files:** new `src/server/AppMakerLab/generator/TestGenerationEngine.ts`,
+  `src/server/AppMakerLab/generator/EngineRegistry.ts`,
+  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+
+### P-CGE.5 — OpenAPI / Contract-First API Generator  ❌ MISSING  [HIGH]
+- `BackendGenerationEngine.ts` generates Express route stubs but produces no API contract document.
+  No OpenAPI spec, no GraphQL schema. Contract-first generation (spec → server + client) is missing.
+- [ ] Add `OpenAPIGenerator.ts` — after backend generation, extract route definitions and emit
+  `openapi.yaml` into the generated workspace.
+- [ ] Add `GraphQLSchemaGenerator.ts` — when blueprint includes graphql feature, generate `.graphql`
+  schema file alongside resolvers.
+- [ ] Use the spec as source of truth for `APIDocumentationGenerator` (P-CGE.2).
+- **Files:** new `src/server/AppMakerLab/generator/OpenAPIGenerator.ts`,
+  new `src/server/AppMakerLab/generator/GraphQLSchemaGenerator.ts`,
+  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+
+### P-CGE.6 — Database Migration Generator  🟡 PARTIAL → full  [MED]
+- `DatabaseGenerationEngine.ts` generates TypeScript entity interfaces. No SQL DDL, no Prisma
+  migration files, no seed data. When blueprint specifies a database, only type stubs are created.
+- [ ] Add `MigrationGenerator.ts` — when blueprint specifies Prisma + entities, emit `prisma/schema.prisma`
+  + `prisma/migrations/` files from entity definitions.
+- [ ] Add `SeedDataGenerator.ts` — generate realistic fake seed rows (using `@faker-js/faker` patterns)
+  for each entity.
+- **Files:** new `src/server/AppMakerLab/generator/MigrationGenerator.ts`,
+  new `src/server/AppMakerLab/generator/SeedDataGenerator.ts`,
+  `src/server/AppMakerLab/generator/DatabaseGenerationEngine.ts`.
+
+### P-CGE.7 — Lint Fix Generator (auto-fix pass)  🟡 PARTIAL → full  [MED]
+- `LintEvaluator.ts` runs ESLint and reports errors but never fixes them. Lint failures then go
+  to `AutoRepairEngine.ts` which makes another LLM call — expensive and slow.
+- [ ] After lint evaluation, run `eslint --fix` on the generated workspace before triggering the
+  full repair pipeline. This resolves 80%+ of lint errors (unused imports, semicolons, quotes)
+  without an LLM call.
+- [ ] Add `LintFixGenerator.ts` as a lightweight repair step between `QualityEvaluationEngine`
+  and `AutoRepairEngine` in the orchestrator pipeline.
+- **Files:** new `src/server/AppMakerLab/generator/LintFixGenerator.ts`,
+  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+
+### P-CGE.8 — Auth Code Generators (JWT + OAuth)  🟡 PARTIAL → full  [MED]
+- `FilePlanningEngine.ts` plans an `authService.ts` file if `blueprint.auth.enabled`, but the
+  generated auth code is a stub. No JWT issuance/validation, no OAuth flow, no session management.
+- [ ] Add `AuthCodeGenerator.ts` — when `blueprint.auth.type === 'jwt'`, generate:
+  - `src/server/auth/jwt.ts` — `signToken(payload)` + `verifyToken(token)` using `jsonwebtoken`.
+  - `src/middleware/authMiddleware.ts` — Bearer token validation middleware.
+- [ ] When `blueprint.auth.type === 'firebase'`, generate Firebase Auth hooks (init, signIn, signOut).
+- **Files:** new `src/server/AppMakerLab/generator/AuthCodeGenerator.ts`,
+  `src/server/AppMakerLab/intelligence/FilePlanningEngine.ts`.
+
+### P-CGE.9 — Dockerfile + CI/CD Pipeline Generators (for generated apps)  ❌ MISSING  [MED]
+- Generated apps have no `Dockerfile`, no `.github/workflows/`, no `docker-compose.yml`.
+  Users cannot containerise or set up CI/CD for their generated app.
+- [ ] Add `DockerfileGenerator.ts` — emit a production `Dockerfile` (node:20-alpine, multi-stage
+  build, non-root user) into the generated workspace.
+- [ ] Add `CICDPipelineGenerator.ts` — emit a GitHub Actions `ci.yml` (install, lint, test, build)
+  for the generated app.
+- **Files:** new `src/server/AppMakerLab/generator/DockerfileGenerator.ts`,
+  new `src/server/AppMakerLab/generator/CICDPipelineGenerator.ts`,
+  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+
+### P-CGE.10 — Bundle Optimization Generators  ❌ MISSING  [MED]
+- Generated Vite+React apps use no bundle optimization. No code splitting, no lazy loading, no tree
+  shaking config. Production apps can have large initial bundles.
+- [ ] Add `BundleOptimizationGenerator.ts` — post-generation pass that:
+  - Injects `React.lazy()` + `Suspense` wrapping for all page-level components.
+  - Adds `vite.config.ts` `build.rollupOptions.output.manualChunks` for vendor splitting.
+  - Adds `import.meta.env.PROD` guards to remove dev-only code.
+- **Files:** new `src/server/AppMakerLab/generator/BundleOptimizationGenerator.ts`,
+  `src/server/AppMakerLab/generator/FrontendGenerationEngine.ts`.
+
+### P-CGE.11 — Observability Instrumentation Generator  ❌ MISSING  [MED]
+- Generated apps have no logging, no error tracking, no metrics. When users deploy a generated app
+  it is a black box with no observability.
+- [ ] Add `ObservabilityGenerator.ts` — inject into every generated backend:
+  - `morgan` HTTP request logger.
+  - `window.onerror` + `unhandledrejection` handlers in frontend entry.
+  - Health check endpoint (`GET /health → 200 OK`).
+- **Files:** new `src/server/AppMakerLab/generator/ObservabilityGenerator.ts`,
+  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+
+### P-CGE.12 — Additional Framework Generators (Next.js / React Native production-level)  🟡 PARTIAL → full  [LOW]
+- `PatternLibrary.ts` lists Next.js and React Native as supported. The actual generation engines
+  (FrontendGenerationEngine) produce generic React/Vite only, not Next.js pages/App Router or
+  React Native Expo components.
+- [ ] Add `NextJSGenerationEngine.ts` — generates `app/` directory structure (App Router), `page.tsx`,
+  `layout.tsx`, `loading.tsx`, `error.tsx` per route.
+- [ ] Add `ReactNativeGenerationEngine.ts` — generates Expo `app/(tabs)/` structure, React Native
+  components (View/Text/TouchableOpacity, not div/span/button).
+- **Files:** new `src/server/AppMakerLab/generator/NextJSGenerationEngine.ts`,
+  new `src/server/AppMakerLab/generator/ReactNativeGenerationEngine.ts`,
+  `src/server/AppMakerLab/generator/EngineRegistry.ts`.
+
+### P-CGE.13 — Seed / Mock / Fixture Data Generators  ❌ MISSING  [LOW]
+- No realistic test data is generated. Developers cannot test generated apps without manually
+  creating data.
+- [ ] Add `MockDataGenerator.ts` — when `blueprint.entities` present, use `@faker-js/faker`
+  patterns to generate 10 seed rows per entity as `fixtures/seed.json`.
+- [ ] Wire into `AppMakerOrchestrator.ts` post-database-generation step.
+- **Files:** new `src/server/AppMakerLab/generator/MockDataGenerator.ts`.
 
 ---
 
@@ -563,6 +735,8 @@
 14. **Prompt engine hardened** — response cache, prompt versioning, jailbreak detection (P-PE.1–3).
 15. **AI Intelligence hardened** — hallucination gated, RAG reranker+grounding, dialogue manager,
     preference learning, PII detection, human review gate (P-AI.1–5, P-AI.6, P-AI.8).
+16. **CGE production-grade** — AST incremental patches, test generation, documentation gen,
+    convention engine, OpenAPI contract, lint-fix pass (P-CGE.1–5, P-CGE.7).
 
 ---
 
@@ -580,6 +754,19 @@
   Already-strong: theme, PWA, Ctrl+K, onboarding modal, toast, AI Suggestions, LiveCollaboration. MISSING:
   privacy consent/GDPR, one-click AI fix, product tour, breadcrumbs, NPS/CSAT, token gauge, forgot-password,
   session replay, Storybook. Added as **PHASE P-UX**.
+- 2026-06-28 (CGE audit): Ran 300-component **Code Generation Engine** audit → found 13 gaps (5 HIGH, 6 MED, 2 LOW).
+  Already-strong (~40%): full orchestration pipeline (AppMakerOrchestrator→BlueprintPlanner→TaskScheduler→
+  ExecutionOrchestrator→EngineRegistry/Dispatcher→[LLM/Frontend/Backend/Database/Scaffold engines]→
+  PatchAggregator→WorkspaceMutationEngine ACID), intelligence layer (RequirementIntelligenceEngine,
+  BlueprintBuilder/Compiler/Validator, FilePlanningEngine, PatternLibrary/Matcher, RepositoryIntelligenceEngine),
+  repair system (14 error classifications), 5-evaluator QA, checkpoint ACID, deployment pipeline.
+  HIGH gaps: patches are full-file rewrites only (no AST incremental patching), ConflictDetector stub
+  (always false), no documentation gen (README/JSDoc/API docs), no convention/naming engine, no test gen
+  engines (unit/integration/E2E/mock), no OpenAPI/GraphQL contract-first generator.
+  MED gaps: no migration/seed gen, no lint auto-fix, auth code stubs only, no Dockerfile/CI-CD gen for
+  generated apps, no bundle optimization gen, no observability instrumentation gen.
+  LOW gaps: Next.js/React Native production-level gen, mock data gen. Added as **PHASE P-CGE**.
+  Note: Each CGE sub-engine can expand to 100-300 specialized components during implementation.
 - 2026-06-28 (AI Intelligence audit): Ran 300-component **AI Intelligence** audit → found 13 gaps (5 HIGH, 5 MED, 3 LOW).
   Already-strong (~45%): full orchestration layer, 13-role AgentV3 roster, real AST (ts-morph), code-gen engines
   (frontend/backend/database), quality evaluation (5 evaluators), ToolDispatcher 30+ tools, CommandGovernance,

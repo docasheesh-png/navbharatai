@@ -69,6 +69,8 @@ import { makeResilientTurnRunner } from './agentv3Resilient';
 import { GoogleGenAI } from '@google/genai';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
 import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
+import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
+import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
@@ -418,6 +420,38 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean })
     onProviderUsed: (used, from) => { if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`); },
     onProviderError: (name, err) => console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
   });
+}
+
+/**
+ * Admin routing policy: the PLAN phase runs on GROK (xAI) — strong, cheap reasoning for
+ * the short plan/todo step. Grok speaks the OpenAI function-calling API, so the existing
+ * OpenAiToolRunner drives it (the plan uses the update_todo tool). Returns a multi-provider
+ * runner [Grok → Claude] so a Grok outage/limit falls back to a cheap Claude (Haiku) and the
+ * plan never breaks; the Claude fallback model is the params.model passed by the caller
+ * (Grok ignores it and forces grok-3 via opts.model). Returns null when no Grok/xAI key is
+ * configured, so the caller keeps using the normal build client. AGENTV3_GROK_PLAN_MODEL
+ * overrides the model; AGENTV3_PLAN_GROK=0 disables Grok planning (revert to Claude).
+ */
+/** Whether the PLAN phase should run on Grok: a Grok/xAI key is set and not disabled.
+ *  Pure + exported for unit testing. */
+export function planGrokEnabled(apiKey: string | undefined, disableFlag: string | undefined): boolean {
+  return !!apiKey && disableFlag !== '0' && disableFlag !== 'off';
+}
+
+function grokPlanRunner(): TurnRunner | null {
+  const apiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
+  if (!planGrokEnabled(apiKey, process.env.AGENTV3_PLAN_GROK)) return null;
+  try {
+    const client = new OpenAI({ apiKey, baseURL: 'https://api.x.ai/v1', timeout: 60_000, maxRetries: 0 });
+    const model = process.env.AGENTV3_GROK_PLAN_MODEL || 'grok-3';
+    const grok: NamedRunner = { name: 'GROK', runner: new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }) };
+    const claudeFallback: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient() };
+    return makeMultiProviderTurnRunner([grok, claudeFallback], {
+      onProviderError: (name, err) => console.log(`[AGENTV3] plan ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
+    });
+  } catch {
+    return null; // misconfigured — caller falls back to the normal build client
+  }
 }
 
 /**
@@ -1494,12 +1528,17 @@ export function registerAgentV3Routes(app: Express): void {
       // Plan mode (P4): plan first, then block for the user's approval before
       // building. A real gate — the build does not start until the user answers.
       if (planFirst) {
+        // Admin policy: planning runs on GROK (cheap, strong reasoning) with a Claude
+        // fallback if Grok is down. When no Grok key is set, use the normal build client.
+        // The plan's Claude fallback model stays cheap (Haiku) — Grok ignores it (forces
+        // grok-3); only the fallback path uses it.
+        const planGrok = grokPlanRunner();
         const planRunner = new AgentRunner({
-          client,
+          client: planGrok ?? client,
           dispatcher: new ToolDispatcher(actuator, workspaceId, state, events),
           state,
           events,
-          model,
+          model: planGrok ? haikuModel() : model,
           system: planSystemPrompt(),
           tools: catalogForTools(['update_todo']),
           onlyOpus,

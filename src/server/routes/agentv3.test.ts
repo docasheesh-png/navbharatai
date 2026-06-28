@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -123,6 +123,21 @@ describe('agentV3KeyDiag (provider diagnosis)', () => {
         else process.env[k] = saved[k];
       }
     }
+  });
+});
+
+describe('planGrokEnabled — planning runs on Grok when a key is set', () => {
+  it('enabled when a Grok/xAI key is present and not disabled', () => {
+    expect(planGrokEnabled('xai-abc', undefined)).toBe(true);
+    expect(planGrokEnabled('grok-key', '1')).toBe(true);
+  });
+  it('disabled when no key', () => {
+    expect(planGrokEnabled(undefined, undefined)).toBe(false);
+    expect(planGrokEnabled('', undefined)).toBe(false);
+  });
+  it('opt-out with AGENTV3_PLAN_GROK=0 / off even when a key is set', () => {
+    expect(planGrokEnabled('xai-abc', '0')).toBe(false);
+    expect(planGrokEnabled('xai-abc', 'off')).toBe(false);
   });
 });
 

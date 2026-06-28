@@ -4470,3 +4470,26 @@ already binds a host (e.g. our vite-react template's host:true), so it's pure be
 for frameworks/configs that don't. 6 unit tests mirror the legacy helper's coverage.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2707/2707 PASS.
+
+## 2026-06-28 — P1.1 API Versioning DONE (UPGRADE v3.0 roadmap, phase-by-phase march begin)
+
+First implemented phase of the UPGRADE_v3.0.md roadmap (one phase at a time, fully
+shipped: complete → rock-solid → polish → PR → CI green → merge). Top incomplete
+priority phase was P1 (Break-Proof Foundation); its first ❌ MISSING item was P1.1.
+
+WHAT: introduced `/api/v1/...` API versioning, purely additively (no current request
+ever breaks). New `src/server/routes/apiVersion.ts` mounts ONE pre-route middleware:
+- `/api/v1/foo` is internally rewritten to the existing `/api/foo` handler (req.url
+  mutation, the documented Express way) → every route is instantly versioned, zero
+  per-route edits. Versioned responses stamp `X-API-Version: v1`.
+- bare `/api/foo` still works unchanged but is now a DEPRECATED shim: responses carry
+  `Deprecation: true`, `X-API-Version: unversioned`, and `Link: </api/v1/foo>;
+  rel="successor-version"`. Unversioned paths are a PERMANENT compat layer (never remove).
+Pure helpers `rewriteVersionedPath` / `successorVersionPath` are unit-tested (17 tests).
+Version contract documented in AGENTS.md (new "API VERSIONING CONTRACT" section).
+
+VERIFIED (gate, all green): frontend tsc 0, server tsc 0, vitest 2737/2737 PASS,
+server bundles + boots, and a LIVE curl proved it end-to-end:
+  /api/v1/health   → 200, X-API-Version: v1, real handler body
+  /api/health      → 200, X-API-Version: unversioned, Deprecation: true, successor Link
+Files: server.ts, src/server/routes/apiVersion.ts (+ .test.ts), AGENTS.md, UPGRADE_v3.0.md.

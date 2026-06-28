@@ -46,6 +46,7 @@ import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
 import { registerSyncRoutes } from './src/server/routes/sync';
 import { registerProfileRoutes } from './src/server/routes/profile';
+import { apiVersionMiddleware } from './src/server/routes/apiVersion';
 
 
 // Traceability Infrastructure
@@ -298,6 +299,11 @@ setInterval(() => {
     serverStats.dailyHits.set(today, (serverStats.dailyHits.get(today) || 0) + 1);
     next();
   });
+
+  // P1.1 — API Versioning. Mounted before route matching so `/api/v1/...` is
+  // internally rewritten to the existing `/api/...` handlers (canonical), while
+  // bare `/api/...` keeps working as a deprecated shim (Deprecation + Link headers).
+  app.use(apiVersionMiddleware);
 
   // Cashfree Configuration
   if (process.env.CASHFREE_APP_ID) (Cashfree as any).XClientId = process.env.CASHFREE_APP_ID;

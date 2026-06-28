@@ -51,7 +51,7 @@
 | Phase | Name | Why | Status | % |
 |-------|------|-----|--------|---|
 | P0 | Core-Law Violations | Breaks your own permanent rules | ✅ Complete | 100% |
-| P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | 🔄 In Progress | 50% |
+| P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | 🔄 In Progress | 75% |
 | P2 | Resilience & Observability | See + survive failures | ⏳ Pending | 0% |
 | P3 | Scale & Frontend Health | Grow without rewrites | ⏳ Pending | 0% |
 | P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 25% |
@@ -121,10 +121,18 @@
 ## 🟠 PHASE P1 — BREAK-PROOF FOUNDATION
 > Forward/backward safety + the safety nets that stop silent breakage.
 
-### P1.1 — API Versioning  ❌ MISSING
-- [ ] Introduce `/api/v1/...` prefix (alias current routes; keep old paths as deprecated shims).
-- [ ] Document the version contract in `AGENTS.md`.
-- **Files:** `server.ts`.
+### P1.1 — API Versioning  ✅ DONE (2026-06-28)
+- [x] Introduced `/api/v1/...` prefix via a single pre-route middleware (`src/server/routes/apiVersion.ts`)
+      that internally rewrites `/api/v1/foo` → `/api/foo` — every existing route is instantly available
+      versioned with zero per-route changes. Versioned responses carry `X-API-Version: v1`.
+- [x] Old unversioned `/api/...` paths kept as deprecated shims: each response now carries
+      `Deprecation: true`, `X-API-Version: unversioned`, and a `Link: </api/v1/...>; rel="successor-version"`
+      header. Behaviour unchanged — never breaks a current client.
+- [x] Documented the version contract in `AGENTS.md` (new "API VERSIONING CONTRACT" section).
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 2737/2737 ✅
+  (17 new tests) · boot smoke-check + live curl: `/api/v1/health` → 200 `X-API-Version: v1`;
+  `/api/health` → 200 `Deprecation: true` + successor `Link` ✅.
+- **Files:** `server.ts`, `src/server/routes/apiVersion.ts`, `src/server/routes/apiVersion.test.ts`, `AGENTS.md`.
 
 ### P1.2 — Data Migration System  ✅ DONE (2026-06-27)
 - **Reality:** `src/server/project/ProjectMigrator.ts` exists (+ `tests/projectMigrator.test.ts`).

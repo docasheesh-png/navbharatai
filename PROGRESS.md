@@ -4967,3 +4967,23 @@ live Claude call and returns live:{ok,status,error} — e.g. 401 (bad ANTHROPIC_
 AGENTV3_{HAIKU,SONNET,OPUS}_MODEL id). That tells the admin exactly which Cloud Run env to fix.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.
+
+## 2026-06-28 — "reload pe data gayab": chat history was in-memory by default
+
+Admin: app data disappears on reload. Audit of the persistence system:
+- FILES: WorkspaceFileStore persists file CONTENT to Firestore (collection workspace_files_v3),
+  NOT gated on any flag — saved after a build, re-seeded into a fresh sandbox at the next build.
+  Durable (once REAL files exist; the earlier Gemini hallucination wrote none — #523 fixes that).
+- CHAT/conversation: getConversationStore() used FirestoreConversationStore ONLY when
+  AGENTV3_PERSIST_FIRESTORE === 'true'; otherwise InMemoryConversationStore. So unless that env
+  var was set in Cloud Run, the whole transcript lived in process memory and was LOST on any
+  redeploy, cold start, or — because Cloud Run runs multiple instances — a reload that landed on
+  a different instance. That is the "reload pe data gayab".
+
+FIX: default the conversation store to Firestore (durable across restarts + horizontal scaling).
+Opt out with AGENTV3_PERSIST_FIRESTORE=false; VITEST always uses in-memory. FirestoreConversation
+Store construction is try/caught → falls back to in-memory if Firestore is unreachable, so it
+never breaks boot. Combined with #518 (session id persisted → same workspace on reload) and the
+already-durable WorkspaceFileStore, a reload now restores the chat AND re-seeds the files.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2874/2874 PASS, boot:check PASS.

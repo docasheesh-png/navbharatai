@@ -152,7 +152,14 @@ let sharedConversationStore: ConversationStore | null = null;
  */
 function getConversationStore(): ConversationStore {
   if (sharedConversationStore) return sharedConversationStore;
-  if (process.env.AGENTV3_PERSIST_FIRESTORE === 'true') {
+  // Durable chat history by DEFAULT — it survives a process restart, a redeploy, and
+  // horizontal scaling across Cloud Run instances. Previously this was OFF unless
+  // AGENTV3_PERSIST_FIRESTORE='true' was set, so the store fell back to IN-MEMORY: a
+  // reload that landed on a different instance — or any redeploy — lost the whole
+  // conversation ("reload pe data gayab"). Now Firestore is the default; opt out with
+  // AGENTV3_PERSIST_FIRESTORE=false. Unit tests (VITEST) always use the in-memory store.
+  const useFirestore = process.env.AGENTV3_PERSIST_FIRESTORE !== 'false' && !process.env.VITEST;
+  if (useFirestore) {
     try {
       sharedConversationStore = new FirestoreConversationStore();
     } catch {

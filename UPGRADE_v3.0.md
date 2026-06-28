@@ -676,14 +676,21 @@
 - [ ] Add `DeploymentValidator.ts` to reject deploys when score is below threshold.
 - **Files:** new `scripts/quality-gate.ts`, `.github/workflows/ci.yml`, `src/server/AppMakerLab/deployment/DeploymentValidator.ts`.
 
-### P-TQA.7 — Dependency Vulnerability Scan (Blocks, Not Warns)  🟡 PARTIAL → full  [MED]
-- `.github/workflows/ci.yml` runs `npm audit --audit-level=high` with `continue-on-error: true` — so a
-  HIGH severity CVE silently passes CI. `SecurityEvaluator.ts` does regex-based secret detection but no CVE check.
-- [ ] Remove `continue-on-error: true` from the npm audit step — HIGH severity vulnerabilities must block CI.
-- [ ] Add `npm audit --audit-level=critical` as a separate step that fails the build for CRITICAL CVEs.
-- [ ] Add `npx better-npm-audit audit` for better formatting and suppressible false-positives.
-- [ ] Integrate Dependabot (`.github/dependabot.yml`) for automated weekly PR-based dep upgrades.
-- **Files:** `.github/workflows/ci.yml`, new `.github/dependabot.yml`.
+### P-TQA.7 — Dependency Vulnerability Scan (Blocks, Not Warns)  ✅ DONE (2026-06-28)
+- [x] Replaced the toothless `npm audit … continue-on-error: true` CI step (which blocked NOTHING) with a real
+      gating step `npm run audit:gate` (`scripts/auditGate.mjs`): runs `npm audit --json` and FAILS CI (exit 1) on any
+      HIGH or CRITICAL vuln whose package is not allowlisted. Moderate/low are reported, never blocking.
+- [x] Suppressible false-positives via `.audit-allowlist.json` — the 8 pre-existing high/critical advisories
+      (vitest[crit], vite, axios, cashfree-pg, form-data, hono, undici, xlsx) are allowlisted WITH a triage reason
+      each (dev-only / vendor-pinned / no upstream fix / separate upgrade task), so CI passes today; a NEW high/critical
+      in any non-allowlisted package now blocks the merge.
+- [x] Dependabot (`.github/dependabot.yml`) — weekly npm + github-actions update PRs (dev-tooling grouped); pairs with
+      the gate (Dependabot proposes upgrades, the gate blocks new high/critical).
+- [x] Pure `evaluateAudit()` unit-tested (`tests/auditGate.test.ts`, 7): blocks new high/critical, allows allowlisted,
+      blocks a new one even alongside allowlisted, never blocks moderate/low, safe on empty output.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 2944/2944 ✅ (7 new) · `npm run audit:gate` on the real tree →
+      "No new high/critical vulnerabilities" (8 allowlisted), exit 0 ✅.
+- **Files:** `scripts/auditGate.mjs`, `.audit-allowlist.json`, `tests/auditGate.test.ts`, `.github/workflows/ci.yml`, `.github/dependabot.yml`, `package.json`.
 
 ### P-TQA.8 — Flaky Test Detection & Tracker  ❌ MISSING  [MED]
 - `TestPanel.tsx` tracks pass/fail per run but not flakiness across multiple runs. Tests that alternate

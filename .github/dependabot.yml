@@ -1,0 +1,30 @@
+# P-TQA.7 — automated weekly dependency-update PRs. Pairs with the CI audit gate
+# (scripts/auditGate.mjs): Dependabot proposes upgrades, the gate blocks NEW high/critical.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      # Batch low-risk dev/build tooling upgrades into one PR to reduce noise.
+      dev-tooling:
+        patterns:
+          - "vite"
+          - "vitest"
+          - "@vitejs/*"
+          - "esbuild"
+          - "typescript"
+          - "@types/*"
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"

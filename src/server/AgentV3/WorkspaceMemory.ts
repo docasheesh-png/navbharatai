@@ -7,9 +7,10 @@
 //    (cat 22 — Project/Codebase/Symbol/Dependency graph).
 //  - Episodic memory: build requests, errors hit and fixes applied — the raw
 //    material for learning across a build (cat 24 — error/fix/project memory).
-//  - Recall: substring/relevance search across symbols, files and episodes so
-//    the agent can answer "what components exist?", "where is X?", "what failed
-//    before?" instead of re-scanning the whole tree.
+//  - Recall: phrase + per-token (multi-word) relevance search across symbols,
+//    files and episodes, with a recency boost for episodes, so the agent can
+//    answer "what components exist?", "where is X?", "what failed before?"
+//    instead of re-scanning the whole tree.
 //
 // Per-workspace and in-process (registry mirrors WorkspaceRegistry). The legacy
 // global `Memory/ProjectMemoryManager` writes a single shared file in cwd, which
@@ -17,6 +18,14 @@
 // the v3.0 engine. A durable backend can swap the Map without changing callers.
 
 import { scanSecurity, type SecurityFinding } from './SecurityAnalysis';
+
+// Words too generic to carry recall signal — dropped from the query token set so a
+// multi-word query like "build the timer app" ranks on "timer"/"app", not on "the".
+const RECALL_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'your', 'you',
+  'are', 'was', 'has', 'have', 'will', 'would', 'should', 'can', 'use', 'using',
+  'add', 'added', 'make', 'made', 'please', 'need', 'want', 'how', 'what', 'when',
+]);
 
 export type SymbolKind = 'function' | 'class' | 'const' | 'interface' | 'type' | 'enum' | 'component';
 
@@ -205,29 +214,57 @@ export class WorkspaceMemory {
     return { graph: this.graph(), episodes: [...this.episodes] };
   }
 
-  /** Search symbols, files and episodes for a free-text query, best matches first. */
+  /**
+   * Search symbols, files and episodes for a free-text query, best matches first.
+   *
+   * Relevance combines (a) whole-phrase match — exact > prefix > substring, which keeps the
+   * old behaviour ("UserCard" → the UserCard symbol first) — with (b) per-token overlap so a
+   * MULTI-WORD query like "countdown timer logic" still finds an episode "fixed the countdown
+   * timer" that shares no single contiguous substring with the full query. Episodes additionally
+   * get a small RECENCY boost (newer ranks above stale at equal relevance) computed relative to
+   * the episodes in memory — fully deterministic, no wall-clock dependency. A hit with zero
+   * phrase- and token-relevance is never returned (recency alone can't surface an unrelated note).
+   */
   recall(query: string, limit = 10): RecallHit[] {
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    const hits: RecallHit[] = [];
-    const score = (text: string): number => {
+    // Meaningful query tokens (≥3 chars, de-duped, stopwords removed, capped for long prompts).
+    const tokens = [...new Set(q.split(/[^a-z0-9]+/i).filter((t) => t.length >= 3 && !RECALL_STOPWORDS.has(t)))].slice(0, 30);
+
+    const relevance = (text: string): number => {
       const t = text.toLowerCase();
-      if (t === q) return 3;
-      if (t.startsWith(q)) return 2;
-      return t.includes(q) ? 1 : 0;
+      let s = 0;
+      if (t === q) s += 10;
+      else if (t.startsWith(q)) s += 6;
+      else if (t.includes(q)) s += 4;
+      for (const tok of tokens) {
+        if (new RegExp(`\\b${tok}\\b`).test(t)) s += 2;      // whole-word token hit
+        else if (t.includes(tok)) s += 1;                    // in-word substring hit
+      }
+      return s;
     };
 
+    // Deterministic recency weight in [0, 0.9): newest episode ≈ 0.9, oldest ≈ 0. Computed from
+    // the spread of episode timestamps in memory so it never depends on Date.now() (test-stable),
+    // and is small enough to only break ties — it can't overtake a real token/phrase match.
+    const tsList = this.episodes.map((e) => e.ts);
+    const minTs = tsList.length ? Math.min(...tsList) : 0;
+    const maxTs = tsList.length ? Math.max(...tsList) : 0;
+    const span = maxTs - minTs;
+    const recency = (ts: number): number => (span > 0 ? ((ts - minTs) / span) * 0.9 : 0);
+
+    const hits: RecallHit[] = [];
     for (const { name, kind, file } of this.graph().symbols) {
-      const s = score(name);
+      const s = relevance(name);
       if (s > 0) hits.push({ type: 'symbol', ref: name, file, detail: kind, score: s });
     }
     for (const file of this.fileFacts.keys()) {
-      const s = score(file);
+      const s = relevance(file);
       if (s > 0) hits.push({ type: 'file', ref: file, file, score: s });
     }
     for (const e of this.episodes) {
-      const s = score(e.text);
-      if (s > 0) hits.push({ type: 'episode', ref: e.text.slice(0, 120), file: e.file, detail: e.kind, score: s, ts: e.ts });
+      const s = relevance(e.text);
+      if (s > 0) hits.push({ type: 'episode', ref: e.text.slice(0, 120), file: e.file, detail: e.kind, score: s + recency(e.ts), ts: e.ts });
     }
     return hits.sort((a, b) => b.score - a.score).slice(0, limit);
   }

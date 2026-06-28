@@ -5175,3 +5175,17 @@ so the next build resumes the unfinished items. Best-effort, never blocks. Inter
 (no user-facing surface) → no AppKnowledgeBase entry needed.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2908/2908 PASS (+6 new), boot:check PASS.
+
+## 2026-06-28 — Claude-level memory, Fix 5: smarter recall (multi-word tokens + recency)
+
+Gap #5: WorkspaceMemory.recall() only matched a contiguous substring of the WHOLE query, so a
+multi-word recall like "countdown timer logic" missed an episode "fixed the countdown timer", and a
+long user prompt (recall(prompt, 8)) rarely matched anything. It also ignored recency — a stale hit
+ranked equal to a fresh one. Fix: relevance now combines whole-phrase match (exact > prefix >
+substring, so "UserCard" → the UserCard symbol still ranks first — backward-compatible) with per-token
+overlap (≥3-char tokens, stopwords dropped, capped at 30) so partial multi-word matches surface; and
+episodes get a small DETERMINISTIC recency boost (newest ≈ 0.9 … oldest ≈ 0, computed from the spread
+of episode timestamps, NOT Date.now(), so tests stay stable) that only breaks ties — it can never
+overtake a real token/phrase match, and a zero-relevance note is never surfaced by recency alone.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2911/2911 PASS (+3 new), boot:check PASS.

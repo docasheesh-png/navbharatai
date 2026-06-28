@@ -71,6 +71,7 @@
 | **P-TQA** | **Testing & QA Engine Gaps** | Code coverage gate, visual regression, load tests, prompt regression, bundle budget | ⏳ Pending | 0% |
 | **P-SEC** | **Security Engine Gaps** | RBAC, DAST, MFA, container scanning, key rotation, SIEM, supply chain | ⏳ Pending | 0% |
 | **P-DATA** | **Data & Backend Engine Gaps** | Schema validation, durable artifact/embedding store, data retention/GDPR, OpenAPI, uploads, export | ⏳ Pending | 0% |
+| **P-DESIGN** | **UI/UX & Design Platform Gaps** | UI primitive library, overlay primitives, a11y engine, charts, AI design-gen, prototyping, design governance | ⏳ Pending | 0% |
 
 ---
 
@@ -1556,6 +1557,81 @@
 
 ---
 
+## 🎨 PHASE P-DESIGN — UI/UX & DESIGN PLATFORM GAPS
+> From a 300-component **UI/UX & Design** audit (2026-06-28, 6 deep-scan agents, cited files verified).
+> NavBharatAI's frontend (React + TS + **Tailwind v4** + **motion** + Monaco + xterm) is **rich** — most of the
+> 300 are already DONE. Only genuinely-actionable design-platform gaps that are **NOT already tracked elsewhere**
+> are listed. (This complements **P-UX**, which covers UX/product-feature gaps like consent, tours, NPS, skeletons.)
+
+### ✅ Design Already Strong (do not redo)
+- Theme system: `src/lib/theme.ts` (5 modes incl. high-contrast), token catalog/editor `ide/DesignSystem.tsx`.
+- Builder/editor: `ide/VisualEditor.tsx` (DOM inspector + style/color/border/typography panels), `ide/ComponentLibrary.tsx` (32+ components + playground), `ide/MultiPageBuilder.tsx`, `ide/Editor.tsx` (Monaco), `ide/TerminalPanel.tsx` (xterm), `MessageContent.tsx` (markdown).
+- Design→code: `ide/FigmaImporter.tsx`, `ide/ScreenshotToCode.tsx`, `ide/DarkModeGenerator.tsx`.
+- Preview/responsive: `ide/PreviewPanel.tsx` (device modes, orientation, viewport/ResizeObserver). Motion animations, `CommandPalette`, `DiffViewer`, `Toast` (aria-live), `useUndoRedo` + `versionSnapshot`/`CodeVersioning`.
+- i18n (user-app feature): `ide/LocalizationManager.tsx` (18 languages + RTL). Personalization: `lib/apnapanEngine.ts`.
+
+### ⬜ N/A-by-design / already tracked elsewhere (NOT added here)
+- Skeleton screens → **P-UX.2**; session-replay/heatmap → **P-UX.9**; Storybook/component-gallery → **P-UX.10**;
+  visual-regression / pixel-comparison → **P-TQA**. Platform UI is English-by-law so platform-i18n is N/A
+  (LocalizationManager serves *generated* apps). Material/Fluent/Cupertino/Carbon kits, WebGL/WebGPU, canvas-drawing,
+  node/flow & diagram editors, eye-tracking/cognitive-load/attention-mapping, SSR/hydration of the builder UI — **⬜ N/A-by-design**.
+
+### P-DESIGN.1 — Shared UI Primitive Library wired to Design Tokens  🟡 PARTIAL → full  [HIGH]
+- `DesignSystem.tsx` defines tokens but they are a **viewer/exporter**, not the live source — there is **no
+  `src/components/ui/` atom library** (Button/Input/Card/Badge/Modal/etc.). The 116 components re-implement
+  primitives ad-hoc (inline Tailwind), so there is no atomic→molecule→organism structure, no shared variants/states/slots.
+- [ ] Build `src/components/ui/` primitives (Button, Input, Select, Card, Badge, Tabs, Tooltip…) consuming theme tokens as the single source of truth.
+- [ ] Refactor high-traffic views to use them (incremental, no behavior change); enables consistency + theming everywhere.
+- **Files:** new `src/components/ui/*`, `src/lib/theme.ts`, `src/components/ide/DesignSystem.tsx`.
+
+### P-DESIGN.2 — Missing Overlay & Interaction Primitives  🟡 PARTIAL → full  [MED]
+- No reusable **Tooltip / Popover / Context-Menu / Drawer / Bottom-Sheet** primitives; drag-and-drop is motion-only
+  (no `DndContext`); no resize interaction. Modals are centralized (`AppModals.tsx`) but other overlays are absent.
+- [ ] Add accessible Tooltip, Popover, ContextMenu, Drawer, BottomSheet (part of P-DESIGN.1's `ui/`).
+- [ ] Add a real DnD layer (`@dnd-kit`) for the visual builder + file tree; add resize handles for panels.
+- **Files:** new `src/components/ui/*`, `src/components/ide/VisualEditor.tsx`, `FileExplorer.tsx`.
+
+### P-DESIGN.3 — Platform Accessibility Engine  🟡 PARTIAL → full  [MED]
+- A11y is scattered: ARIA used in ~16 files, `Toast` has `aria-live`, `PerformanceAnalyzer` audits *generated* apps —
+  but the platform's own UI has no centralized a11y, no `prefers-reduced-motion` wiring, no font-scaling/zoom, no
+  color-blind support, and only partial contrast validation.
+- [ ] Honor `prefers-reduced-motion` globally (gate motion animations); add font-scaling + zoom controls in settings.
+- [ ] Add a focus-trap/roving-tabindex util for overlays; run an internal WCAG checklist in CI on the builder UI.
+- **Files:** `src/main.tsx`, `src/lib/theme.ts`, new `src/lib/a11y.ts`, settings panel.
+
+### P-DESIGN.4 — Chart / Data-Visualization Component Library  🟡 PARTIAL → full  [MED]
+- No charting library (chart.js/recharts/d3). Analytics/health/billing dashboards (`AppAnalytics`, `AppHealthMonitor`,
+  `BillingPanel`) render text/metric displays only; generated apps also can't get charts.
+- [ ] Adopt a lightweight chart lib (e.g. `recharts`); add Line/Bar/Area/Pie wrappers in `ui/`; use them in the dashboards.
+- **Files:** new `src/components/ui/charts/*`, `src/components/ide/AppAnalytics.tsx`, `AppHealthMonitor.tsx`.
+
+### P-DESIGN.5 — AI Design Generation & Critique  🟡 PARTIAL → full  [MED-HIGH — differentiator]
+- AI design is shallow: `AISuggestions` is static/pattern-based and `DarkModeGenerator` is the only real AI design tool
+  (`ScreenshotToCode` exists). Missing: generative **wireframe/layout/component** generation, **AI design critic**,
+  and **AI color-palette/typography** suggestions from a brand or reference.
+- [ ] Add an AI "design pass": generate layout/wireframe options + a component from a prompt, and an AI design-critique on the current preview (uses the AgentV3 multi-model backend).
+- [ ] Add AI palette + type-scale suggestions feeding `DesignSystem` tokens.
+- **Files:** `src/components/ide/AISuggestions.tsx`, new `src/components/ide/AIDesignPass.tsx`, AgentV3 backend.
+
+### P-DESIGN.6 — Prototyping Engine (interactive preview)  ❌ MISSING  [LOW]
+- No interactive prototype / transition preview / click-through flow between generated pages (only live app preview).
+- [ ] Add a prototype mode: link pages, preview transitions, shareable read-only prototype link.
+- **Files:** new `src/components/ide/PrototypeMode.tsx`, `ide/MultiPageBuilder.tsx`.
+
+### P-DESIGN.7 — Real-Time Design Collaboration Hardening  🟡 PARTIAL → full  [LOW]
+- `LiveCollaboration.tsx` has room chat + presence + debounced code push, but **no cursor sharing, no element-level
+  comments/annotations, and no OT/CRDT** (last-write-wins). (Editor merge is separately tracked in P-DEV.)
+- [ ] Add live cursors + element-anchored comments/annotations; evaluate a CRDT (Yjs) for conflict-free co-editing.
+- **Files:** `src/components/ide/LiveCollaboration.tsx`, `TeamCollaboration.tsx`.
+
+### P-DESIGN.8 — Design Governance (consistency + brand compliance)  ❌ MISSING  [LOW]
+- `WhitelabelBranding.tsx` sets brand config but there is no **consistency checker**, **visual linter**, or
+  **design-policy/registry** enforcing token usage / brand rules across a generated app.
+- [ ] Add a visual-lint pass: flag off-token colors/spacing/fonts in generated code; report brand-compliance score.
+- **Files:** new `src/server/AppMakerLab/intelligence/DesignLinter.ts`, `src/components/ide/WhitelabelBranding.tsx`.
+
+---
+
 ## ✅ DEFINITION OF "ROCK-SOLID" (exit criteria for this roadmap)
 1. All **three universes** isolated and provably correct (FREE no-Claude, SDA Grok-first, PRO Claude-first).
 2. **Real test suite** green + CI gate blocks broken deploys.
@@ -1614,6 +1690,16 @@
   P-SEC.1 RBAC, P-BRE.5/6/7, P-CGE.6, P-PME.9), only **7 genuinely-new actionable gaps** remained →
   added as **PHASE P-DATA** (schema validation; durable artifact/checkpoint store; durable embedding store;
   data retention + GDPR/DPDP deletion; OpenAPI spec; hardened file upload; data export). Doc-only.
+- 2026-06-28 (UI/UX & Design audit): Ran a 300-component **UI/UX & Design** audit (6 deep-scan agents,
+  cited files verified — all real). The frontend (React + TS + Tailwind v4 + motion + Monaco + xterm) is
+  **rich** — most items already DONE (theme system w/ 5 modes, DesignSystem tokens, ComponentLibrary,
+  VisualEditor, FigmaImporter, ScreenshotToCode, MultiPageBuilder, PreviewPanel device modes, motion,
+  CommandPalette, undo/redo+versioning, LocalizationManager 18-lang, apnapanEngine personalization).
+  After deduping against P-UX (skeletons/storybook/session-replay), P-TQA (visual-regression), and
+  N/A-by-design (Material/Fluent kits, WebGL, flow/diagram editors, platform-i18n), **8 genuinely-new
+  gaps** remained → added as **PHASE P-DESIGN** (UI primitive library wired to tokens; overlay/interaction
+  primitives; platform a11y engine; chart/viz library; AI design generation + critique; prototyping engine;
+  realtime collab hardening; design governance/visual-lint). Doc-only.
 - Deploy after each phase (permanent law). Maintain English-only UI (permanent law).
 - 2026-06-27 (UX + PE audits): Ran 300-component **UX Engine** audit → found 10 gaps (4 HIGH, 4 MED, 2 LOW).
   Already-strong: theme, PWA, Ctrl+K, onboarding modal, toast, AI Suggestions, LiveCollaboration. MISSING:

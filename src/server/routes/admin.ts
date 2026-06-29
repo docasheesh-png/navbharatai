@@ -11,6 +11,7 @@ import { metricsStore } from '../lib/metricsStore';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore } from '../lib/HealthScore';
+import { analyzeFinOps } from '../lib/FinOpsAdvisor';
 import { logStore } from '../lib/logStore';
 import { eventStore } from '../lib/eventStore';
 
@@ -135,6 +136,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       },
       generatedAt: Date.now(),
     });
+  });
+
+  // P-MON.6 — FinOps recommendations derived from the REAL live metrics snapshot
+  // (spend on failed builds, low preview rate, repair-loop cost, provider concentration,
+  // per-request cost outliers). No hardcoded prices, no projections — observed waste only.
+  app.get('/api/admin/finops', verifyAdminToken, (_req: Request, res: Response) => {
+    res.json({ ...analyzeFinOps(getMetrics().snapshot()), generatedAt: Date.now() });
   });
 
   // G2 — daily metrics history (last N days of persisted MetricsSnapshots).

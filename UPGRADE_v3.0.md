@@ -2007,11 +2007,16 @@
 - [ ] Add an admin NL→query over the metric snapshots; an AI insights card; a weekly AI-generated ops summary.
 - **Files:** new `src/server/lib/AiInsights.ts`, `src/server/routes/admin.ts`.
 
-### P-MON.6 — Self-Service Dashboards + FinOps Recommendations  🟡 PARTIAL → full  [LOW]
-- Admin dashboards are hardcoded (no custom dashboard/widget builder — render layer tracked in P-DESIGN.4), and cost
-  is tracked but there are no **FinOps recommendations** ("switch to cheaper model", "X% spend on failed builds").
-- [ ] Add a lightweight custom-dashboard/widget config (on top of P-DESIGN.4 charts) + a FinOps recommendations card.
-- **Files:** `src/components/AdminDashboard.tsx`, new `src/server/lib/FinOpsAdvisor.ts`.
+### P-MON.6 — Self-Service Dashboards + FinOps Recommendations  🟡 FinOps DONE / dashboard-builder PENDING  [LOW]
+- Cost was tracked but there were no **FinOps recommendations**. Now there is a real, data-driven advisor.
+- [x] Added `src/server/lib/FinOpsAdvisor.ts` — a pure rules engine over the REAL `MetricsSnapshot`: spend wasted on
+  failed builds (observed USD), low preview rate, repair-loop cost, provider spend concentration, and per-request
+  cost outliers (cheapest vs most-expensive provider, data-driven — **no hardcoded prices, no projections**). With no
+  data it returns no recommendations rather than fabricating advice. 9 unit tests.
+- [x] Added `GET /api/admin/finops` (admin-gated) and a **FinOps Recommendations card** in the Admin dashboard's
+  Revenue tab (severity-coded, shows observed-waste USD, honest "no issues / no data" states).
+- [ ] **Still pending:** the lightweight custom-dashboard/widget builder (depends on P-DESIGN.4 charts) — separate sub-item.
+- **Files:** `src/components/AdminDashboard.tsx`, new `src/server/lib/FinOpsAdvisor.ts` + `.test.ts`, `src/server/routes/admin.ts`.
 
 ---
 

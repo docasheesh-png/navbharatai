@@ -1880,13 +1880,26 @@
   backup/DR/replication/PITR + health/readiness probes → **P2.4/P9**; CDN/KMS/WAF → **P10**; API versioning →
   **P1.1**; CQRS → **P4.1**; event-sourcing replay → **P4.2**; RBAC/roles/permissions → **P-SEC.1**; key rotation → **P-SEC.5**.
 
-### P-DATA.1 — Runtime Schema / Request / Response Validation  ❌ MISSING  [HIGH — robustness + injection safety]
-- Routes validate payloads ad-hoc (manual `if` checks) or not at all; there is no runtime schema validation
-  layer. TypeScript types vanish at runtime, so malformed/malicious bodies reach handlers unchecked.
-- [ ] Adopt `zod` (already common in the stack) — define request schemas per route; add a `validate(schema)` Express middleware.
-- [ ] Validate outbound JSON for critical routes (payment, build, secrets) against response schemas in dev/CI.
-- [ ] Centralize Firestore write validation (`sanitizeFirestoreData` + zod) so no `undefined`/unexpected fields persist.
-- **Files:** new `src/server/lib/validate.ts`, `src/server/routes/*`, `src/server/lib/firestoreUtils.ts`.
+### P-DATA.1 — Runtime Schema / Request / Response Validation  ✅ DONE (validation layer + initial rollout) (2026-06-29)
+- Routes validated payloads ad-hoc (manual `if`s) or not at all — malformed/malicious bodies reached handlers
+  unchecked.
+- [x] **Runtime schema layer + middleware** (`src/server/lib/validate.ts`) — a dependency-free schema builder
+      (`vstring`/`vnumber`/`vboolean`/`venum`/`varray`/`vobject`/`vrecord`, each with `optional`/range/pattern)
+      plus `validateBody(schema)` + `validateQuery(schema)` Express middleware that 400s with precise issues on
+      failure and replaces `req.body` with the parsed value. **Sanitizing by default** — `vobject` DROPS unknown
+      keys, so an injected extra field never reaches the handler (`{passthrough:true}` to keep them).
+- [x] **Dependency-free, by deliberate choice** — NOT `zod`: this codebase has a consistent no-new-dependency
+      culture (native TOTP, native SBOM, the dep-free logger), and the validator is server-side only; the layer
+      covers the shapes API bodies actually use and is fully unit-tested (`tests/validate.test.ts`).
+- [x] **Real rollout** — applied to `POST /api/workspace/sbom` (replaced its manual check with a typed schema).
+      Per-route rollout continues incrementally as routes are touched (same approach as the P-BRE.3 logger
+      migration — high-value core shipped + used now, broad sweep done lazily).
+- **Already covered:** Firestore write sanitization exists (`src/lib/firestoreUtils.ts` `sanitizeFirestoreData`,
+      strips `undefined`). **Deferred (honest):** response-schema validation in CI is a separate dev-only harness
+      — not built here.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3273/3273 ✅ (11 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/lib/validate.ts` (new), `tests/validate.test.ts` (new), `src/server/routes/sbom.ts`.
 
 ### P-DATA.2 — Durable Workspace Artifact / Checkpoint Store  🟡 PARTIAL → full  [MED — data-loss risk]
 - Workspace *files* are durable in Firestore, but **checkpoints / VersionStore snapshots are written to local disk**

@@ -159,6 +159,30 @@ each phase, you make the PR, you wait for green, you merge, you move on — over
 left, or you hit real doubt/ambiguity/breakage risk (safeguard #3 — then ask the admin).
 A transient CI failure is NOT a stop: diagnose, fix, re-push, wait for green, merge, continue.
 
+## Pull request naming convention (mandatory — same format for every account/session)
+
+So every PR is traceable to its number AND its original branch commit — consistently, no matter
+which account/session opened it — **every PR title MUST use this exact format:**
+
+```
+[#<PR-number>] <descriptive title> [<short-commit-sha>]
+```
+
+Example: `[#637] fix(agentv3): bound preview retry so it can't hang [a1b2c3d]`
+
+How to produce it (the PR number does not exist until the PR is created — handle it in two steps):
+1. After `git push`, capture the short SHA of the branch's HEAD commit (`git rev-parse --short HEAD`).
+   Create the PR with the title already ending in `[<short-sha>]` (the SHA is known at creation).
+2. Immediately after the PR is created you get its number — **edit the PR title** to prepend
+   `[#<PR-number>] `. Final title then carries both the number and the original commit hash.
+
+Notes:
+- The `<descriptive title>` stays a normal Conventional-Commits-style summary (e.g. `fix(agentv3): …`).
+- The `[<short-sha>]` points at the feature branch's original commit (visible in the PR's Commits tab).
+  Squash-merge creates a NEW commit on `main` and GitHub auto-appends `(#<PR-number>)` to it — that is
+  expected and separate; do not try to make the two SHAs match.
+- This is a naming rule only; it never changes the branch → PR → CI green → merge flow above.
+
 ## Language standard (mandatory for all sessions)
 
 All NavBharatAI source code, UI text, code comments, variable names, function

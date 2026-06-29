@@ -43,5 +43,7 @@ export enum EventType {
     BUILD_FAILED = 'BUILD_FAILED',
     DEPENDENCIES_INSTALLED = 'DEPENDENCIES_INSTALLED',
     REPAIR_STARTED = 'REPAIR_STARTED',
-    REPAIR_COMPLETED = 'REPAIR_COMPLETED'
+    REPAIR_COMPLETED = 'REPAIR_COMPLETED',
+    // P-BRE.9 — a per-engine build-step circuit breaker has tripped open (fast-fail).
+    STAGE_CIRCUIT_OPEN = 'STAGE_CIRCUIT_OPEN'
 }

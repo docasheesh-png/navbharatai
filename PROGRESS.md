@@ -5729,3 +5729,20 @@ Note: this makes preview failures DIAGNOSABLE; the deeper preview render fixes (
 beat the dev-server OOM, P2 fuller in-browser hardening) are the next PRs per the admin's go-ahead.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3512/3512 PASS (+1), boot:check PASS.
+
+## 2026-06-29 — FEATURE: preview failures are now captured into the Build report (100% real)
+
+Admin asked: can a preview failure also be added to the report? Yes. Live-server preview failures already
+appeared via the sandbox command logs (the "Killed"/"did not come up" lines). The GAP was the in-browser
+preview: its error happens entirely client-side in the sandboxed srcdoc iframe, so it was never in the
+(server-side) report — the user had to screenshot it separately. Now wired end-to-end:
+  • the in-browser srcdoc iframe postMessages its real error up to the host on failure (cross-origin
+    srcdoc → postMessage is the only channel);
+  • PreviewSurface listens and POSTs it to a new owner-scoped /api/agentv3/preview-error endpoint;
+  • the endpoint appends it to the DURABLE (workspace-keyed) diagnostics report + the in-memory copy, so
+    the next "Build report" download/copy includes the real preview error in a new `previewErrors` channel
+    (+ a PREVIEW_ERROR timeline line). De-duped against immediate repeats, capped.
+BuildDiagnostics gains PreviewErrorRecord + recordPreviewError() + channel + text render. So a build that
+"succeeds" but doesn't render now shows WHY, right in the downloadable report.
+
+Gate: frontend tsc 0, server tsc 0, vitest (BuildDiagnostics + reactPreview + DiagnosticsStore green), boot:check PASS.

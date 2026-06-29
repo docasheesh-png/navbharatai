@@ -85,6 +85,8 @@ describe('buildReactPreview', () => {
     expect(html).toContain('Missing dependency');
     // The error display surfaces the MESSAGE (iOS Safari's stack is frames-only) — message-first handling.
     expect(html).toContain('err.message');
+    // Preview failures are postMessage'd up to the host so they can be captured into the build report.
+    expect(html).toContain('__nbaiPreviewError');
   });
 });
 

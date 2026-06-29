@@ -806,11 +806,13 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
       return;
     }
-    // In-memory copy first (the instance that ran the build). On a MISS — a different Cloud Run
-    // instance, or the in-memory cache rotated away — fall back to the DURABLE Firestore copy keyed
-    // by workspaceId. This is what stops the "Build report is empty" bug after an instance rotation.
-    let report: BuildDiagnosticsReport | null | undefined = lastDiagnostics.get(userId ?? 'anon');
-    if (!report && workspaceId) report = await loadDiagnostics(workspaceId).catch(() => null);
+    // Prefer the DURABLE (Firestore) copy keyed by workspaceId: it is the freshest authoritative copy
+    // — it survives an instance rotation AND carries PREVIEW errors appended AFTER the build (the
+    // in-memory copy, keyed only by userId, can be a stale earlier build or miss the preview append).
+    // Fall back to the in-memory copy only when there is no workspaceId or no durable copy yet.
+    let report: BuildDiagnosticsReport | null | undefined;
+    if (workspaceId) report = await loadDiagnostics(workspaceId).catch(() => null);
+    if (!report) report = lastDiagnostics.get(userId ?? 'anon');
     if (!report) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
     res.json({ diagnostics: report });
   });

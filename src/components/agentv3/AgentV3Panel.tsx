@@ -412,29 +412,32 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
   // tool errors, "replied without building" nudges, readiness blockers, sandbox problems) as
   // JSON, so the admin can hand it to Claude and the rough edges get fixed in code.
   const [downloadingDiag, setDownloadingDiag] = useState(false);
+  // Resolve the freshest diagnostics report. Prefer the SERVER copy: it is durable (survives a Cloud
+  // Run instance rotation / reload, #657) AND fresher than the client's build-end copy — crucially it
+  // carries PREVIEW errors captured AFTER the build finished (#666), which the client copy never sees.
+  // Fall back to the client's local copy only if the server has nothing (e.g. a stream that dropped
+  // mid-build before the durable save).
+  const getLatestDiagnostics = useCallback(async (): Promise<unknown> => {
+    try {
+      const params = new URLSearchParams();
+      if (userId) params.set('userId', userId);
+      if (email) params.set('email', email);
+      if (state.workspaceId) params.set('workspaceId', state.workspaceId);
+      const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
+      if (res.ok) {
+        const data = await res.json() as { diagnostics?: unknown };
+        if (data.diagnostics) return data.diagnostics;
+      }
+    } catch { /* fall through to the local copy */ }
+    return state.diagnostics ?? null;
+  }, [userId, email, state.workspaceId, state.diagnostics]);
+
   const downloadDiagnostics = async () => {
     if (downloadingDiag) return;
     setDownloadingDiag(true);
     try {
-      // Prefer the report the client ALREADY received with the build's `result` event.
-      // This works even when the server-side copy is gone — a dropped stream that never
-      // finished, or a Cloud Run instance rotation that emptied the per-instance memory the
-      // GET endpoint reads. Only fall back to the server when we have no local copy.
-      let diagnostics: unknown = state.diagnostics;
-      if (!diagnostics) {
-        const params = new URLSearchParams();
-        if (userId) params.set('userId', userId);
-        if (email) params.set('email', email);
-        // Send workspaceId so the server can fall back to the DURABLE (Firestore) copy when its
-        // per-instance in-memory cache is empty (a different Cloud Run instance / a reload).
-        if (state.workspaceId) params.set('workspaceId', state.workspaceId);
-        const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
-        if (res.status === 404) { alert('No build report yet — build an app first, then download the report.'); return; }
-        if (!res.ok) throw new Error(`server returned ${res.status}`);
-        const data = await res.json() as { diagnostics?: unknown };
-        diagnostics = data.diagnostics;
-      }
-      if (!diagnostics) { alert('No build report available yet.'); return; }
+      const diagnostics = await getLatestDiagnostics();
+      if (!diagnostics) { alert('No build report yet — build an app first, then download the report.'); return; }
       const blob = new Blob([JSON.stringify(diagnostics, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -459,18 +462,8 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
     if (copyingDiag) return;
     setCopyingDiag(true);
     try {
-      let diagnostics: unknown = state.diagnostics;
-      if (!diagnostics) {
-        const params = new URLSearchParams();
-        if (userId) params.set('userId', userId);
-        if (email) params.set('email', email);
-        if (state.workspaceId) params.set('workspaceId', state.workspaceId);
-        const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
-        if (res.status === 404) { alert('No build report yet — build an app first.'); return; }
-        if (!res.ok) throw new Error(`server returned ${res.status}`);
-        diagnostics = (await res.json() as { diagnostics?: unknown }).diagnostics;
-      }
-      if (!diagnostics) { alert('No build report available yet.'); return; }
+      const diagnostics = await getLatestDiagnostics();
+      if (!diagnostics) { alert('No build report yet — build an app first.'); return; }
       await navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
       alert('Build report copied — paste it into the chat to share it.');
     } catch (e) {

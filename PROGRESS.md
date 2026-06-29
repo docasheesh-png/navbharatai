@@ -5636,3 +5636,21 @@ Wired in routes/agentv3.ts (fastVerify = install-guard + tsc; fastRepair = haiku
 non-blocking / no-verify unchanged).
 
 Gate: frontend tsc 0, server tsc 0, vitest 3456/3456 PASS (+6), boot:check PASS.
+
+## 2026-06-29 — FIX (C + D): fast-lane build reliability — durable persist + Sonnet for codegen
+
+Same calculator report exposed two more issues beyond A:
+• C — IN-BROWSER PREVIEW showed "No files to preview yet" even though Files(9) existed. The durable
+  file save (Firestore WorkspaceFileStore) only happened at the very END of the whole flow,
+  fire-and-forget — so when the reviewer was still running / the stream dropped / the instance rotated,
+  the save never completed and the preview's file source was empty. Fix: persist the produced files
+  SYNCHRONOUSLY (awaited, best-effort) the moment the fast lane (Simple Builder / OneShot) succeeds —
+  independent of the later debounce/end-of-flow save. The in-browser preview now reliably finds files.
+• D — the fast lane generated every file on HAIKU. Because each file is generated in its OWN isolated
+  call, the model must keep contracts consistent ACROSS files (a hook's return shape vs what its
+  consumer destructures); Haiku frequently disagreed → the app didn't compile. New env-overridable
+  fastBuildModel() defaults to SONNET (far more consistent across isolated calls). With A's verify+repair
+  as the safety net and D cutting mistakes at the source, simple apps build first-try. Billing unchanged
+  (token×markup), real-cost margin still positive (billed Opus-equiv ≥ Sonnet cost).
+
+Gate: frontend tsc 0, server tsc 0, vitest 3467/3467 PASS (+1), boot:check PASS.

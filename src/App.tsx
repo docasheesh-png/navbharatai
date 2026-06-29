@@ -1255,6 +1255,9 @@ export default function App() {
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [adminError, setAdminError] = useState('');
+  // P-SEC.3 — admin TOTP MFA second factor.
+  const [adminTotp, setAdminTotp] = useState('');
+  const [adminMfaRequired, setAdminMfaRequired] = useState(false);
 
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1263,7 +1266,7 @@ export default function App() {
       const res = await fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: adminEmail, password: adminPassword }),
+        body: JSON.stringify({ username: adminEmail, password: adminPassword, totp: adminTotp }),
       });
       const raw = await res.text();
       let data: any = {};
@@ -1271,12 +1274,22 @@ export default function App() {
       if (res.ok && data.ok) {
         sessionStorage.setItem('admin_token', data.token);
         setIsAdmin(true);
+        setAdminMfaRequired(false);
+        setAdminTotp('');
         toggleTab('home');
         addLog('Admin: Access Granted.', 'success');
       } else {
-        // Surface the REAL reason: server JSON error, or the raw status + body.
-        setAdminError(data.error || `HTTP ${res.status}: ${raw.slice(0, 200) || '(empty response)'}`);
-        addLog('Admin: Access Denied.', 'error');
+        // P-SEC.3 — the server asks for a second factor: reveal the code field, don't treat
+        // it as a hard failure on the first prompt.
+        if (data.mfaRequired) {
+          setAdminMfaRequired(true);
+          setAdminError(adminTotp ? (data.error || 'Invalid authenticator code.') : '');
+          addLog('Admin: Authenticator code required.', 'info');
+        } else {
+          // Surface the REAL reason: server JSON error, or the raw status + body.
+          setAdminError(data.error || `HTTP ${res.status}: ${raw.slice(0, 200) || '(empty response)'}`);
+          addLog('Admin: Access Denied.', 'error');
+        }
       }
     } catch (err: any) {
       setAdminError(`Network error: ${err?.message ?? String(err)}`);
@@ -5987,6 +6000,9 @@ ${buildLanguageRule(preferredLanguage)}`;
               onSubmit={handleAdminLogin}
               onLogout={() => setIsAdmin(false)}
               adminToken={sessionStorage.getItem('admin_token') || ''}
+              adminTotp={adminTotp}
+              onTotpChange={setAdminTotp}
+              mfaRequired={adminMfaRequired}
             />
          )}
 

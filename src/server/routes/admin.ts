@@ -17,7 +17,8 @@ import { tracer } from '../observability/Tracer';
 import { analyzeSeries, type Point } from '../lib/AnomalyDetector';
 import { logStore } from '../lib/logStore';
 import { eventStore } from '../lib/eventStore';
-import { rotateAllSecrets, getLatestKeyVersion } from '../lib/secrets';
+import { rotateAllSecrets, getLatestKeyVersion, encrypt, decrypt } from '../lib/secrets';
+import { generateTotpSecret, verifyTotp, totpAuthUri } from '../lib/totp';
 
 /**
  * Admin dashboard routes extracted from the server.ts monolith (Phase 1).
@@ -46,11 +47,43 @@ export function adminCredential(raw: string | undefined, fallback = ''): string 
 const adminUsername = (): string => adminCredential(process.env.ADMIN_USERNAME, 'aashishcpmt09');
 const adminPassword = (): string => adminCredential(process.env.ADMIN_PASSWORD, '');
 
+// ── P-SEC.3 — Admin TOTP MFA ───────────────────────────────────────────────
+// Second factor for admin-panel access. The active secret resolves from either an
+// env override (`ADMIN_TOTP_SECRET`, zero-config, always-on) OR a self-service
+// enrolment stored ENCRYPTED in Firestore `admin_mfa/config`. When a secret is
+// active, `/api/admin/login` requires a valid 6-digit code in addition to the
+// password. Backward-compatible: with no env var and no enrolment, MFA is simply
+// off and login behaves exactly as before.
+const ADMIN_MFA_DOC = 'admin_mfa';
+const ADMIN_MFA_ID = 'config';
+
+interface AdminMfaState { enabled: boolean; secret: string | null; envManaged: boolean }
+
+/** Resolve the ACTIVE admin TOTP state (env override wins; else Firestore enrolment). */
+async function getAdminMfa(): Promise<AdminMfaState> {
+  const env = (process.env.ADMIN_TOTP_SECRET || '').trim();
+  if (env) return { enabled: true, secret: env, envManaged: true };
+  const db = getDb() as any;
+  if (!db) return { enabled: false, secret: null, envManaged: false };
+  try {
+    const snap = await getDoc(doc(db, ADMIN_MFA_DOC, ADMIN_MFA_ID));
+    const data = snap.exists() ? snap.data() : null;
+    if (data?.enabled && data?.encrypted_secret) {
+      const secret = decrypt(data.encrypted_secret);
+      if (secret) return { enabled: true, secret, envManaged: false };
+    }
+  } catch (err) {
+    console.error('[ADMIN_MFA] state read failed:', err);
+  }
+  return { enabled: false, secret: null, envManaged: false };
+}
+
 export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequestHandler): void {
   // Admin server-side login — issues the daily HMAC token used by verifyAdminToken.
-  app.post('/api/admin/login', adminLimiter, (req: Request, res: Response) => {
+  app.post('/api/admin/login', adminLimiter, async (req: Request, res: Response) => {
     const username = String(req.body?.username || '').trim();
     const password = String(req.body?.password || '').trim();
+    const totpCode = String(req.body?.totp || '').trim();
     const validUser = adminUsername();
     const validPass = adminPassword();
 
@@ -66,11 +99,25 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     console.log('[ADMIN_LOGIN] login attempt received');
 
     if (username === validUser && safeStrEqual(passHash, expectedHash)) {
+      // P-SEC.3 — second factor: if MFA is active, require a valid TOTP code BEFORE the
+      // token is issued. A correct password alone is not enough once MFA is enrolled.
+      const mfa = await getAdminMfa();
+      if (mfa.enabled && mfa.secret) {
+        if (!totpCode) {
+          audit('ADMIN_LOGIN_MFA_REQUIRED', { username, ip: req.ip });
+          return res.status(401).json({ error: 'Authenticator code required.', mfaRequired: true });
+        }
+        if (!verifyTotp(mfa.secret, totpCode)) {
+          audit('ADMIN_LOGIN_MFA_FAILED', { username, ip: req.ip });
+          serverStats.failedLogins++;
+          return res.status(401).json({ error: 'Invalid authenticator code.', mfaRequired: true });
+        }
+      }
       // Static token — no daily rotation so sessions don't break at midnight UTC.
       const token = crypto.createHmac('sha256', validPass)
         .update(`admin:static:${username}`)
         .digest('hex');
-      audit('ADMIN_LOGIN_SUCCESS', { username, ip: req.ip });
+      audit('ADMIN_LOGIN_SUCCESS', { username, ip: req.ip, mfa: mfa.enabled });
       return res.json({ ok: true, token });
     }
 
@@ -95,6 +142,96 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
     next();
   };
+
+  // ── P-SEC.3 — Admin MFA management (TOTP enrol / verify / disable / status) ──
+  // All require a valid admin session (verifyAdminToken). Self-service enrolment
+  // stores the secret ENCRYPTED in Firestore; an env-managed secret is read-only here.
+
+  app.get('/api/admin/mfa/status', verifyAdminToken, async (_req: Request, res: Response) => {
+    const mfa = await getAdminMfa();
+    res.json({ enabled: mfa.enabled, envManaged: mfa.envManaged });
+  });
+
+  // Begin enrolment: generate a fresh secret, store it as PENDING (encrypted), return the
+  // otpauth URI + the base32 key (for the user to add to their authenticator app). Not yet
+  // active until /verify confirms the user can produce a valid code.
+  app.post('/api/admin/mfa/enroll', verifyAdminToken, async (_req: Request, res: Response) => {
+    const mfa = await getAdminMfa();
+    if (mfa.envManaged) {
+      return res.status(409).json({ error: 'MFA is managed by ADMIN_TOTP_SECRET on the server and cannot be re-enrolled here.' });
+    }
+    const db = getDb() as any;
+    if (!db) return res.status(503).json({ error: 'Database unavailable — cannot enrol MFA.' });
+    const secret = generateTotpSecret();
+    const label = `NavBharatAI:${adminUsername()}`;
+    try {
+      await setDoc(doc(db, ADMIN_MFA_DOC, ADMIN_MFA_ID), {
+        enabled: false,
+        encrypted_pending: encrypt(secret),
+        updated_at: new Date().toISOString(),
+      }, { merge: true });
+    } catch (err) {
+      console.error('[ADMIN_MFA] enrol write failed:', err);
+      return res.status(500).json({ error: 'Failed to start MFA enrolment.' });
+    }
+    res.json({ secret, otpauthUri: totpAuthUri(secret, label, 'NavBharatAI') });
+  });
+
+  // Confirm enrolment (or rotation): a valid code against the PENDING secret promotes it to
+  // the ACTIVE secret and turns MFA on.
+  app.post('/api/admin/mfa/verify', verifyAdminToken, async (req: Request, res: Response) => {
+    const code = String(req.body?.code || '').trim();
+    const db = getDb() as any;
+    if (!db) return res.status(503).json({ error: 'Database unavailable.' });
+    try {
+      const snap = await getDoc(doc(db, ADMIN_MFA_DOC, ADMIN_MFA_ID));
+      const data = snap.exists() ? snap.data() : null;
+      const pending = data?.encrypted_pending ? decrypt(data.encrypted_pending) : '';
+      if (!pending) return res.status(400).json({ error: 'No pending enrolment. Start enrolment first.' });
+      if (!verifyTotp(pending, code)) {
+        audit('ADMIN_MFA_VERIFY_FAILED', { ip: req.ip });
+        return res.status(401).json({ error: 'Invalid code. Try again.' });
+      }
+      await setDoc(doc(db, ADMIN_MFA_DOC, ADMIN_MFA_ID), {
+        enabled: true,
+        encrypted_secret: encrypt(pending),
+        encrypted_pending: '',
+        enrolled_at: new Date().toISOString(),
+      }, { merge: true });
+      audit('ADMIN_MFA_ENABLED', { ip: req.ip });
+      res.json({ ok: true, enabled: true });
+    } catch (err) {
+      console.error('[ADMIN_MFA] verify failed:', err);
+      res.status(500).json({ error: 'Failed to verify MFA.' });
+    }
+  });
+
+  // Disable MFA: requires a valid CURRENT code (so a hijacked session can't silently strip it).
+  app.post('/api/admin/mfa/disable', verifyAdminToken, async (req: Request, res: Response) => {
+    const code = String(req.body?.code || '').trim();
+    const mfa = await getAdminMfa();
+    if (mfa.envManaged) {
+      return res.status(409).json({ error: 'MFA is managed by ADMIN_TOTP_SECRET on the server and cannot be disabled here.' });
+    }
+    if (!mfa.enabled || !mfa.secret) return res.json({ ok: true, enabled: false });
+    if (!verifyTotp(mfa.secret, code)) {
+      audit('ADMIN_MFA_DISABLE_FAILED', { ip: req.ip });
+      return res.status(401).json({ error: 'Invalid code — cannot disable MFA.' });
+    }
+    const db = getDb() as any;
+    if (!db) return res.status(503).json({ error: 'Database unavailable.' });
+    try {
+      await setDoc(doc(db, ADMIN_MFA_DOC, ADMIN_MFA_ID), {
+        enabled: false, encrypted_secret: '', encrypted_pending: '',
+        disabled_at: new Date().toISOString(),
+      }, { merge: true });
+      audit('ADMIN_MFA_DISABLED', { ip: req.ip });
+      res.json({ ok: true, enabled: false });
+    } catch (err) {
+      console.error('[ADMIN_MFA] disable failed:', err);
+      res.status(500).json({ error: 'Failed to disable MFA.' });
+    }
+  });
 
   // Observability: live token-usage/cost + build-success metrics (Phase 5, item 28).
   // Phase 4.3 — include triggered alerts (error rate / preview rate / latency) so

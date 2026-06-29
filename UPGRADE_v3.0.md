@@ -499,14 +499,32 @@
 - **Verification:** YAML validated (`yaml.safe_load`), `/api/health` boot-probe confirmed; separate workflow → main PR CI unaffected.
 - **Files:** `.github/workflows/dast.yml`, `security/zap-baseline.conf`.
 
-### P-SEC.3 — TOTP / App-Based MFA  ❌ MISSING  [HIGH]
-- Phone OTP via Firebase exists but is susceptible to SIM swap. No TOTP (Google Authenticator / Authy) and no
-  WebAuthn/passkeys. High-value accounts (admin, pro billing) have no second factor stronger than SMS.
-- [ ] Add TOTP enrollment flow: `speakeasy` (TOTP library) + QR code in Settings → Security.
-- [ ] On login: if TOTP enabled for uid → prompt for 6-digit code before issuing session.
-- [ ] Store encrypted TOTP secret in Firestore `user_mfa/{uid}` (encrypted with `SECRET_ENCRYPTION_KEY`).
-- [ ] Gate admin panel access on MFA verification (no MFA → deny admin access, show enrollment prompt).
-- **Files:** new `src/server/routes/mfa.ts`, `src/server/lib/authMiddleware.ts`, `src/App.tsx` (settings modal).
+### P-SEC.3 — TOTP / App-Based MFA  ✅ DONE (2026-06-29, admin-panel slice)
+- Phone OTP via Firebase exists but is susceptible to SIM swap. No TOTP and no second factor stronger than
+  SMS for the highest-value surface — the **admin panel** (full platform control: users, billing, kill-switches).
+- [x] **Native RFC 6238 TOTP library** (`src/server/lib/totp.ts`) — base32 enc/dec, secret generation,
+      HOTP/TOTP, `verifyTotp` (±1 window drift, constant-time compare, never throws), `otpauth://` URI.
+      Implemented on Node `crypto` (NO new dependency → no added supply-chain surface) and **verified against
+      the official RFC 6238 Appendix-B test vectors** in `tests/totp.test.ts` (17 tests). Authenticator-app
+      compatible (Google Authenticator / Authy / 1Password / Microsoft Authenticator).
+- [x] **Gate admin panel access on MFA** — `/api/admin/login` now requires a valid 6-digit code IN ADDITION
+      to the password once MFA is active; password-alone is rejected with `mfaRequired`. The admin login screen
+      (`AdminLoginPanel`) reveals an Authenticator-Code field on demand.
+- [x] **Self-service enrolment** — Admin Dashboard → Security tab: Enable 2FA → shows the key + otpauth URI →
+      confirm a code to activate; Disable requires a current code (a hijacked session can't silently strip it).
+      Endpoints: `/api/admin/mfa/{status,enroll,verify,disable}` (all admin-token gated).
+- [x] **Encrypted secret at rest** — the TOTP secret is stored ENCRYPTED in Firestore `admin_mfa/config`
+      (reusing the P-SEC.5 versioned AES-256 scheme). An optional `ADMIN_TOTP_SECRET` env gives a zero-config,
+      server-managed alternative (read-only in the UI).
+- [ ] **End-user (Firebase-login) TOTP in user Settings → Security** is deliberately deferred: gating the
+      Firebase-client login/session path in the 6.3k-line `src/App.tsx` carries real breakage risk
+      (safeguard #3). The reusable `totp.ts` library is built and ready to power it; the admin slice — the
+      highest-value MFA target — ships fully now. WebAuthn/passkeys remain a future enhancement.
+- **AppKnowledgeBase:** new `admin-mfa` entry added (same PR).
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3171/3171 ✅ (17 new in `tests/totp.test.ts`, incl. RFC
+      vectors) · `npm run build` ✅ · `boot:check` PASS.
+- **Files:** `src/server/lib/totp.ts` (new), `src/server/routes/admin.ts`, `src/components/panels/AdminLoginPanel.tsx`,
+      `src/components/AdminDashboard.tsx`, `src/App.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`, `tests/totp.test.ts` (new).
 
 ### P-SEC.4 — Container Image Vulnerability Scanning  ✅ DONE (2026-06-28)
 - `cloudbuild.yaml` builds the Docker image and pushes to Artifact Registry with no vulnerability scan.

@@ -1543,6 +1543,20 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['metrics', 'stats', 'cost', 'admin', 'dashboard', 'builds', 'usage', 'ai cost', 'success rate', 'observability', 'logs', 'monitoring'],
   },
   {
+    id: 'admin-mfa',
+    name: 'Admin Two-Factor Authentication (2FA / TOTP)',
+    path: 'Admin Dashboard → Security tab → Two-Factor Authentication (admin only)',
+    description: `App-based second factor (TOTP, RFC 6238) for admin-panel access — protection against password leaks and SIM-swap attacks on SMS OTP:
+• Enable 2FA: generates a secret, shows it as an authenticator key + an otpauth:// URI to add to Google Authenticator / Authy / 1Password / Microsoft Authenticator
+• Confirm with a 6-digit code to activate; once enabled, admin login requires the code IN ADDITION to the password
+• Disable requires a current valid code (a hijacked session cannot silently strip 2FA)
+• The TOTP secret is stored ENCRYPTED in Firestore (AES-256, the same versioned key scheme as user secrets); an optional ADMIN_TOTP_SECRET env var provides a zero-config, server-managed alternative
+• Login flow: if 2FA is on, the admin login screen reveals an "Authenticator Code" field and the server rejects login without a valid code`,
+    howToUse: 'Admin login required. Open the Admin Dashboard → Security tab → Two-Factor Authentication → Enable 2FA → add the shown key to your authenticator app → enter the 6-digit code to confirm. After that, every admin login asks for the current code.',
+    relatedFeatures: ['admin', 'admin-metrics'],
+    keywords: ['2fa', 'mfa', 'two-factor', 'totp', 'authenticator', 'google authenticator', 'authy', 'otp', 'admin security', 'second factor', 'do factor', 'suraksha', 'login security'],
+  },
+  {
     id: 'admin-cost-ladder',
     name: 'v3.0 Cost-Ladder Dashboard',
     path: 'Admin Dashboard → Revenue tab → "v3.0 Cost-Ladder (last 30 days)" (admin only)',

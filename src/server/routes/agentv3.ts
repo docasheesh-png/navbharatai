@@ -122,6 +122,7 @@ import {
   restoreWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { saveWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { saveDiagnostics, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
@@ -796,14 +797,19 @@ export function registerAgentV3Routes(app: Express): void {
   // v3.0 hit: provider fallbacks, tool errors, "replied without building" nudges, readiness
   // blockers, sandbox problems). Owner-scoped (keyed by the caller's userId). The v3.0 panel's
   // "Download report" button reads this so the admin can hand the JSON to Claude for fixes.
-  app.get('/api/agentv3/diagnostics', (req: Request, res: Response) => {
+  app.get('/api/agentv3/diagnostics', async (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
       return;
     }
-    const report = lastDiagnostics.get(userId ?? 'anon');
+    // In-memory copy first (the instance that ran the build). On a MISS — a different Cloud Run
+    // instance, or the in-memory cache rotated away — fall back to the DURABLE Firestore copy keyed
+    // by workspaceId. This is what stops the "Build report is empty" bug after an instance rotation.
+    let report: BuildDiagnosticsReport | null | undefined = lastDiagnostics.get(userId ?? 'anon');
+    if (!report && workspaceId) report = await loadDiagnostics(workspaceId).catch(() => null);
     if (!report) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
     res.json({ diagnostics: report });
   });
@@ -1457,7 +1463,10 @@ export function registerAgentV3Routes(app: Express): void {
         buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_TIMEOUT', message: `Build exceeded the ${Math.round(deadlineMs / 1000)}s wall-clock cap and was stopped.`, autoResolved: false });
         buildDiagRef?.finish(false);
         timeoutDiagnostics = buildDiagRef?.report();
-        if (timeoutDiagnostics) lastDiagnostics.set(buildKey, timeoutDiagnostics);
+        if (timeoutDiagnostics) {
+          lastDiagnostics.set(buildKey, timeoutDiagnostics);
+          saveDiagnostics(workspaceId, timeoutDiagnostics).catch(() => {}); // durable (survives instance rotation)
+        }
       } catch { /* diagnostics are best-effort */ }
       emit({ type: 'narration', agent: 'architect', text: 'This build hit the time limit and was paused automatically — every file generated so far is saved. It was likely almost done. Just type **"continue"** and I will pick up exactly where I left off and finish it.', ts: Date.now() });
       emit({ type: 'result', ok: false, summary: 'Build paused at the time limit — your files are saved. Type "continue" to finish where it left off.', steps: 0, billedUsd: 0, billedInr: 0, ...(timeoutDiagnostics ? { diagnostics: timeoutDiagnostics } : {}) });
@@ -2499,6 +2508,10 @@ export function registerAgentV3Routes(app: Express): void {
         buildDiag.finish(result.ok, result.summary);
         diagnostics = buildDiag.report();
         lastDiagnostics.set(buildKey, diagnostics);
+        // DURABLE: persist the final report keyed by workspaceId so the "Build report" download
+        // survives a Cloud Run instance rotation / a page reload (the in-memory cache above is
+        // per-instance and was the reason reports came back EMPTY). Awaited, best-effort.
+        await saveDiagnostics(workspaceId, diagnostics).catch(() => {});
       } catch { /* diagnostics are best-effort */ }
       emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(diagnostics ? { diagnostics } : {}) });
     } catch (err) {

@@ -72,6 +72,7 @@ import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from 
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { runOneShot, classifyForOneShot, oneShotEnabled } from '../AgentV3/OneShotBuilder';
+import { runSimpleBuild } from '../AgentV3/SimpleBuilder';
 import { buildProjectContext, buildRunningSummary, formatPlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { withTimeout } from '../AgentV3/asyncUtils';
@@ -1886,34 +1887,49 @@ export function registerAgentV3Routes(app: Express): void {
       // done. On ANY failure (no usable files / model error) it falls through to the agentic loop
       // below — the safety net — so behavior is NEVER worse than today. AGENTV3_ONESHOT=off disables.
       if (oneShotEnabled() && intent === 'new_build' && classifyForOneShot(analysis?.startTier)) {
-        let osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
+        // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
+        const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
           .filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
-        const os = await runOneShot({
-          prompt, framework, scaffoldPaths: scaffold,
-          generate: async (system, user) => {
-            const t = await new ClaudeClient(undefined, { maxRetries: 2 }).runTurn({
-              model: haikuModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
-            });
-            osUsage = t.usage;
-            return t.text;
-          },
-          writeFiles: async (files) => {
-            for (let i = 0; i < files.length; i++) {
-              await dispatcher.dispatch({ id: `oneshot-w${i}`, name: 'write_file', input: { path: files[i].path, content: files[i].content } }, 'frontend');
-            }
-          },
-          startPreview: async () => {
-            await dispatcher.dispatch({ id: 'oneshot-install', name: 'bash', input: { command: 'npm install' } }, 'frontend');
-            await dispatcher.dispatch({ id: 'oneshot-dev', name: 'bash', input: { command: 'npm run dev' } }, 'frontend');
-            await dispatcher.dispatch({ id: 'oneshot-preview', name: 'update_preview', input: { port: oneShotDevPort(framework) } }, 'frontend');
-          },
-          log: (msg) => events.emit({ type: 'narration', agent: 'architect', text: msg, ts: Date.now() }),
-        });
-        buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
-        if (os.ok) {
-          result = { ok: true, summary: os.summary, steps: 1, usage: osUsage, billedUsd: billedAmountUsd({ inputTokens: osUsage.inputTokens, outputTokens: osUsage.outputTokens }, powerLevelReq) };
+        // Shared side-effects for both fast lanes (Simple Builder + OneShot).
+        const fastGenerate = async (system: string, user: string): Promise<string> => {
+          const t = await new ClaudeClient(undefined, { maxRetries: 2 }).runTurn({
+            model: haikuModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
+          });
+          osUsage.inputTokens += t.usage.inputTokens;
+          osUsage.outputTokens += t.usage.outputTokens;
+          osUsage.cacheCreationInputTokens += t.usage.cacheCreationInputTokens ?? 0;
+          osUsage.cacheReadInputTokens += t.usage.cacheReadInputTokens ?? 0;
+          return t.text;
+        };
+        const fastWrite = async (files: { path: string; content: string }[]): Promise<void> => {
+          for (let i = 0; i < files.length; i++) {
+            await dispatcher.dispatch({ id: `fast-w${i}`, name: 'write_file', input: { path: files[i].path, content: files[i].content } }, 'frontend');
+          }
+        };
+        const fastPreview = async (): Promise<void> => {
+          await dispatcher.dispatch({ id: 'fast-install', name: 'bash', input: { command: '[ -d node_modules ] && echo "deps present" || npm install' } }, 'frontend');
+          await dispatcher.dispatch({ id: 'fast-dev', name: 'bash', input: { command: 'npm run dev' } }, 'frontend');
+          await dispatcher.dispatch({ id: 'fast-preview', name: 'update_preview', input: { port: oneShotDevPort(framework) } }, 'frontend');
+        };
+        const fastLog = (msg: string) => events.emit({ type: 'narration', agent: 'architect', text: msg, ts: Date.now() });
+        const fastResult = (summary: string, steps: number) => {
+          result = { ok: true, summary, steps, usage: osUsage, billedUsd: billedAmountUsd({ inputTokens: osUsage.inputTokens, outputTokens: osUsage.outputTokens }, powerLevelReq) };
           deliveredTier = analysis?.startTier ?? 'haiku';
+        };
+
+        // 1) SIMPLE BUILDER (primary) — plan a file manifest, then generate EACH file in its own
+        //    focused call. This beats the single-call OneShot's ~8k-token truncation that made
+        //    multi-file apps produce "no files" and drop into the slow agentic loop.
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, log: fastLog });
+        buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
+        if (sb.ok) {
+          fastResult(sb.summary, sb.filesWritten);
+        } else {
+          // 2) ONE-SHOT (secondary) — a single call still suits a TRIVIAL one-file app the manifest skips.
+          const os = await runOneShot({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, log: fastLog });
+          buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
+          if (os.ok) fastResult(os.summary, os.filesWritten);
         }
       }
 

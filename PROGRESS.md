@@ -5515,3 +5515,23 @@ falls back to the prior <script src=…> (no regression). Skipped under VITEST s
 assert the <script src> markup. ("</script>" in the minified source is escaped so it can't break the tag.)
 
 Gate: frontend tsc 0, server tsc 0, vitest 3223/3223 PASS, boot:check PASS.
+
+## 2026-06-29 — FEATURE: Simple Builder — "plan the files → build each file in its own call" (the user's design)
+
+The recurring root cause behind the freezes/over-builds/"no files"/network-error screenshots: the
+single-call OneShot lane asks the model to emit an ENTIRE multi-file app in ONE ~8k-token response. A
+real multi-file app (todo/dashboard) TRUNCATES → "first attempt produced no files" → the build drops into
+the slow heavy/escalation agentic loop (12-min freezes, over-built 8-step plans, transient provider errors
+during mass parallel file creation). Fix = the user's own proposed architecture, built as a real,
+additive, tested lane: src/server/AgentV3/SimpleBuilder.ts —
+  1. PLAN a file manifest (ONE cheap call → "path :: purpose" per line; parsed safely, capped at 40).
+  2. GENERATE each file in its OWN focused call, in PARALLEL (bounded concurrency) — no single-call
+     token-limit truncation, higher per-file quality (each call has the full budget for one file). A
+     single file's failed call doesn't kill the build (others still ship).
+  3. WRITE all files + start the preview (sticky success: once written, a slow preview can't fail it).
+Bounded by an overall timeout; returns ok:false (never throws) on any failure → caller falls back to
+OneShot (trivial 1-file apps) → then the agentic loop. Wired as the PRIMARY fast lane in routes/agentv3.ts
+for simple new builds (shared generate/write/preview deps; usage ACCUMULATES across all calls for honest
+billing; skip-install when node_modules present). 10 unit tests.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3239/3239 PASS (+10), boot:check PASS.

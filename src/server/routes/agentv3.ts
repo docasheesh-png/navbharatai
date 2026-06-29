@@ -1372,12 +1372,18 @@ export function registerAgentV3Routes(app: Express): void {
     const deadlineTimer: ReturnType<typeof setTimeout> | undefined = deadlineMs > 0 ? setTimeout(() => {
       if (rb.ended) return;
       try { abort.abort(); } catch { /* best-effort */ }
+      // Finalize and capture the report so the timeout's result event carries it too — the
+      // client keeps it for the "Build report" button even though this build never reached
+      // the normal completion path (and the in-memory copy may be lost to an instance rotation).
+      let timeoutDiagnostics: BuildDiagnosticsReport | undefined;
       try {
         buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_TIMEOUT', message: `Build exceeded the ${Math.round(deadlineMs / 1000)}s wall-clock cap and was stopped.`, autoResolved: false });
         buildDiagRef?.finish(false);
+        timeoutDiagnostics = buildDiagRef?.report();
+        if (timeoutDiagnostics) lastDiagnostics.set(buildKey, timeoutDiagnostics);
       } catch { /* diagnostics are best-effort */ }
       emit({ type: 'narration', agent: 'architect', text: 'This build hit the time limit and was paused automatically — every file generated so far is saved. It was likely almost done. Just type **"continue"** and I will pick up exactly where I left off and finish it.', ts: Date.now() });
-      emit({ type: 'result', ok: false, summary: 'Build paused at the time limit — your files are saved. Type "continue" to finish where it left off.', steps: 0, billedUsd: 0, billedInr: 0 });
+      emit({ type: 'result', ok: false, summary: 'Build paused at the time limit — your files are saved. Type "continue" to finish where it left off.', steps: 0, billedUsd: 0, billedInr: 0, ...(timeoutDiagnostics ? { diagnostics: timeoutDiagnostics } : {}) });
       activeBuilds.delete(buildKey);
       if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
       endBuild(rb);

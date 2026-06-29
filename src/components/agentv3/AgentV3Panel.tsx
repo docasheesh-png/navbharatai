@@ -416,15 +416,23 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
     if (downloadingDiag) return;
     setDownloadingDiag(true);
     try {
-      const params = new URLSearchParams();
-      if (userId) params.set('userId', userId);
-      if (email) params.set('email', email);
-      const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
-      if (res.status === 404) { alert('No build report yet — build an app first, then download the report.'); return; }
-      if (!res.ok) throw new Error(`server returned ${res.status}`);
-      const data = await res.json() as { diagnostics?: unknown };
-      if (!data.diagnostics) { alert('No build report available yet.'); return; }
-      const blob = new Blob([JSON.stringify(data.diagnostics, null, 2)], { type: 'application/json' });
+      // Prefer the report the client ALREADY received with the build's `result` event.
+      // This works even when the server-side copy is gone — a dropped stream that never
+      // finished, or a Cloud Run instance rotation that emptied the per-instance memory the
+      // GET endpoint reads. Only fall back to the server when we have no local copy.
+      let diagnostics: unknown = state.diagnostics;
+      if (!diagnostics) {
+        const params = new URLSearchParams();
+        if (userId) params.set('userId', userId);
+        if (email) params.set('email', email);
+        const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
+        if (res.status === 404) { alert('No build report yet — build an app first, then download the report.'); return; }
+        if (!res.ok) throw new Error(`server returned ${res.status}`);
+        const data = await res.json() as { diagnostics?: unknown };
+        diagnostics = data.diagnostics;
+      }
+      if (!diagnostics) { alert('No build report available yet.'); return; }
+      const blob = new Blob([JSON.stringify(diagnostics, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

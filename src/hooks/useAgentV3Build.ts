@@ -377,7 +377,27 @@ export function useAgentV3Build(): UseAgentV3Build {
         }
       } catch (err) {
         if (!(err instanceof DOMException && err.name === 'AbortError')) {
-          setError(err instanceof Error ? err.message : String(err));
+          // A mid-stream network drop — iOS Safari surfaces this as "Load failed", and a
+          // flaky mobile link or a brief server blip looks the same — must NOT dead-end the
+          // build. The server keeps the build alive and BUFFERED (runningBuilds + /attach),
+          // so probe it and, if it is still running, transparently re-attach: the buffered
+          // events replay and the stream continues exactly where it dropped. Only surface the
+          // raw error when the build is genuinely gone. This is the same recovery the stall
+          // WATCHDOG performs, triggered immediately on the drop instead of waiting for a
+          // silence window that never comes (the drop flips `running` to false first).
+          let reconnected = false;
+          try {
+            const params = new URLSearchParams();
+            if (userIdRef.current) params.set('userId', userIdRef.current);
+            if (emailRef.current) params.set('email', emailRef.current);
+            const probe = await fetch(`/api/agentv3/status?${params.toString()}`);
+            const j = await probe.json().catch(() => ({}));
+            if (j?.buildRunning === true) {
+              reconnected = true;
+              await resume({ userId: userIdRef.current, email: emailRef.current });
+            }
+          } catch { /* probe/reconnect failed — fall through to showing the real error */ }
+          if (!reconnected) setError(err instanceof Error ? err.message : String(err));
         }
       } finally {
         setRunning(false);
@@ -385,7 +405,7 @@ export function useAgentV3Build(): UseAgentV3Build {
         abortRef.current = null;
       }
     },
-    [running],
+    [running, resume],
   );
 
   // WATCHDOG — while a build is "running", if the event stream goes silent for too long the user

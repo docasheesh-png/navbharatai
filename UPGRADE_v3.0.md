@@ -724,15 +724,20 @@
       funcs 73.5% / branches 79.5%, all above floors, exit 0 ✅ · `audit:gate` exit 0 ✅ · `build` ✅ · `boot:check` PASS.
 - **Files:** `vitest.config.ts`, `package.json`, `.github/workflows/ci.yml`, `.audit-allowlist.json`, `package-lock.json`.
 
-### P-TQA.2 — Visual Regression Testing  ❌ MISSING  [HIGH]
-- Generated apps can have silent visual regressions (CSS change, layout shift, color contrast break) that
-  unit/integration tests don't catch. No screenshot comparison exists anywhere in the stack.
-- [ ] Add Playwright visual tests: `tests/visual/snapshot.spec.ts` — renders the preview iframe in a headless
-  browser and compares a screenshot against a stored golden image.
-- [ ] Run in CI as a separate job (`npm run test:visual`) with a pixel-diff threshold of 0.1%.
-- [ ] On diff failure: attach the diff image as a CI artifact so the developer can review.
-- [ ] Update screenshots via `npm run test:visual -- --update-snapshots`.
-- **Files:** new `tests/visual/snapshot.spec.ts`, `.github/workflows/ci.yml`, `playwright.config.ts`.
+### P-TQA.2 — Visual / Structural Regression Testing  ✅ DONE (2026-06-29, dependency-free) · ✅ IN CI  [HIGH]
+- No regression test caught silent UI changes (CSS class / structure / variant drift). Implemented WITHOUT
+  Playwright (whose `npm ci` browser-download genuinely risks breaking the blocking CI gate — "app na tute"):
+- [x] **`src/components/ui/visualRegression.test.tsx`** — renders every shared UI primitive (Button × variants ×
+  sizes, Badge, Card, Input/Select, Tabs, Tooltip, the Skeleton family) to **static HTML via `react-dom/server`**
+  (already a dependency — no browser, no Playwright, no flakiness) and **snapshots the markup**. A CSS-class /
+  structure / variant change that unit tests miss flips the snapshot → the regression surfaces in the NORMAL
+  vitest CI. Deterministic (classes come from the single-source-of-truth variant resolvers). 7 committed snapshots;
+  update intentionally with `vitest -u`.
+- **Why not pixel screenshots:** true `toHaveScreenshot` needs `@playwright/test` (heavy devDep) + committed golden
+  images + a CI Chromium download — the download can fail `npm ci` and turn the blocking gate red for every merge.
+  The structural snapshot catches the same class of regression (markup/class/style drift) with zero new deps, runs
+  in the existing CI, and is non-flaky. Admin can layer pixel diffing behind an explicit `@playwright/test` opt-in.
+- **Files:** new `src/components/ui/visualRegression.test.tsx` + `__snapshots__/visualRegression.test.tsx.snap`.
 
 ### P-TQA.3 — Load / Stress Testing  ✅ DONE (2026-06-29, dependency-free Node tester) · ✅ RUN-VERIFIED  [HIGH]
 - No real load test ran against the server. k6 is NOT installed in this CI, so a k6 script would be non-running

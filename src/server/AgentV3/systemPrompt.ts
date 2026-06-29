@@ -61,6 +61,14 @@ export function planSystemPrompt(): string {
     'todo per major step, status "pending"). Briefly explain the approach in your',
     'message (in the user\'s language, per the rule above). Do NOT write any files or run',
     'any commands yet — only plan. End your turn after calling update_todo.',
+    '',
+    'PLAN RULES (keep the build fast and focused):',
+    '- LEAN: 2–4 concrete construction steps. The FINAL step is getting the app running/previewing.',
+    '- Do NOT add a "deploy" / "publish" / "go live" step UNLESS the user explicitly asked to deploy.',
+    '  Deploying an app the user did not ask to deploy wastes time and can stall on missing hosting',
+    '  credentials — a normal build\'s goal is to BUILD and PREVIEW, nothing more.',
+    '- Do NOT add vague "verify" / "test" steps: the system automatically opens and verifies the live',
+    '  preview after the build. Plan the real work (files/features), not meta-steps.',
   ].join('\n') + '\n\n' + CREATOR_IDENTITY;
 }
 

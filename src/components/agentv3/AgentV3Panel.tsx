@@ -985,7 +985,21 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
           </div>
 
           {tab === 'preview' ? (
-            <PreviewSurface url={state.previewUrl} workspaceId={state.workspaceId} userId={userId} email={email} />
+            <PreviewSurface
+              url={state.previewUrl}
+              workspaceId={state.workspaceId}
+              userId={userId}
+              email={email}
+              onFixError={(errText) => {
+                // P-UX.3 — prepopulate the chat with the preview error and bring the chat into view
+                // (collapse the workspace) so the user can review and send the fix request.
+                setPrompt(
+                  `The in-browser preview failed to build with this error:\n\n${errText}\n\n` +
+                    'Please find the cause in the project files and fix it so the app builds and runs.',
+                );
+                setShowWorkspace(false);
+              }}
+            />
           ) : tab === 'files' ? (
             // Unified Files — the SAME rich FilesPanel the sidebar "Files" menu uses, so both
             // entry points are ONE feature with two gates. It shows the union of the live v3.0

@@ -261,6 +261,36 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_openapi',
+      description:
+        'Generate a real OpenAPI 3.0.3 contract for the backend API you built and write it to the ' +
+        'workspace (default openapi.json). Pass the routes you actually created — paths are converted ' +
+        'from Express style (/users/:id → /users/{id}) and path params are auto-derived. Use this for ' +
+        'any app with an HTTP API so it ships with a real, machine-readable contract (nothing invented).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          routes: {
+            type: 'array',
+            description: 'The API routes you built.',
+            items: {
+              type: 'object',
+              properties: {
+                method: { type: 'string', description: 'HTTP method, e.g. GET/POST/PUT/DELETE.' },
+                path: { type: 'string', description: 'Route path, e.g. /users/:id.' },
+                summary: { type: 'string', description: 'Optional one-line description of the route.' },
+              },
+              required: ['method', 'path'],
+            },
+          },
+          title: { type: 'string', description: 'Optional API title (defaults to "Generated API").' },
+          version: { type: 'string', description: 'Optional API version (defaults to 1.0.0).' },
+          path: { type: 'string', description: 'Optional output path (defaults to openapi.json).' },
+        },
+        required: ['routes'],
+      },
+    },
+    {
       name: 'web_search',
       description:
         'Search the web for up-to-date information — package versions, framework/API docs, ' +
@@ -357,6 +387,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_readme',
   'generate_env_example',
   'generate_gitignore',
+  'generate_openapi',
   'web_search',
   'screenshot',
   'browser_action',

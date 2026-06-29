@@ -5672,3 +5672,25 @@ BuildDiagnostics gained GeneratedFileRecord + recordFile() + the generatedFiles 
 render ("Offending files"). +4 tests.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3469/3469 PASS (+2), boot:check PASS.
+
+## 2026-06-29 — FIX: "Build report khali/empty" — durable diagnostics persistence + one-tap Copy
+
+Admin's screenshot: the Build report came up EMPTY even though a full build ran (reviewer gave 25/100 on
+a CSS-class mismatch). Root cause: the diagnostics report lived ONLY in an in-memory Map (lastDiagnostics,
+keyed by userId) — per Cloud Run INSTANCE. The build runs on instance A; the "Build report" GET
+load-balances to instance B (or the page reloaded, losing the client `state.diagnostics` copy) → 404 →
+empty. Same durability gap as the file-persistence fix (C), but for the report.
+
+Fix: new DiagnosticsStore (Firestore, mirrors WorkspaceFileStore — VITEST-skip, best-effort, never
+throws), keyed by workspaceId. The final report is persisted durably at build end (awaited) + at the
+timeout path; trimReportForStorage() bounds it under Firestore's 1 MB doc limit (caps issues/commands/
+llm previews/errors to the newest+shrunk, keeps the offending generatedFiles evidence). The GET endpoint
+now falls back to the durable copy (by workspaceId) on an in-memory miss, and the client sends
+workspaceId. So the report survives instance rotation + reloads — never empty after a real build.
+
+Also (answers "can't you access it directly?"): added a one-tap "Copy report" button — copies the JSON to
+the clipboard to paste straight into chat, no download→find→upload. (Claude's coding session is sandboxed
+to the repo, NOT the live prod DB, so the user sharing the report IS the bridge — this makes it one tap.)
+AppKnowledgeBase updated. +3 DiagnosticsStore tests.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3492/3492 PASS (+3), boot:check PASS.

@@ -425,6 +425,9 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
         const params = new URLSearchParams();
         if (userId) params.set('userId', userId);
         if (email) params.set('email', email);
+        // Send workspaceId so the server can fall back to the DURABLE (Firestore) copy when its
+        // per-instance in-memory cache is empty (a different Cloud Run instance / a reload).
+        if (state.workspaceId) params.set('workspaceId', state.workspaceId);
         const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
         if (res.status === 404) { alert('No build report yet — build an app first, then download the report.'); return; }
         if (!res.ok) throw new Error(`server returned ${res.status}`);
@@ -445,6 +448,35 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
       alert(`Could not download the report: ${e instanceof Error ? e.message : String(e)}.`);
     } finally {
       setDownloadingDiag(false);
+    }
+  };
+
+  // One-tap COPY of the build report to the clipboard — so it can be pasted straight into a support
+  // chat without the download → find-file → upload dance. Uses the same client copy / durable
+  // server fallback as the download.
+  const [copyingDiag, setCopyingDiag] = useState(false);
+  const copyDiagnostics = async () => {
+    if (copyingDiag) return;
+    setCopyingDiag(true);
+    try {
+      let diagnostics: unknown = state.diagnostics;
+      if (!diagnostics) {
+        const params = new URLSearchParams();
+        if (userId) params.set('userId', userId);
+        if (email) params.set('email', email);
+        if (state.workspaceId) params.set('workspaceId', state.workspaceId);
+        const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
+        if (res.status === 404) { alert('No build report yet — build an app first.'); return; }
+        if (!res.ok) throw new Error(`server returned ${res.status}`);
+        diagnostics = (await res.json() as { diagnostics?: unknown }).diagnostics;
+      }
+      if (!diagnostics) { alert('No build report available yet.'); return; }
+      await navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
+      alert('Build report copied — paste it into the chat to share it.');
+    } catch (e) {
+      alert(`Could not copy the report: ${e instanceof Error ? e.message : String(e)}.`);
+    } finally {
+      setCopyingDiag(false);
     }
   };
 
@@ -700,6 +732,15 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
           >
             {downloadingDiag ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
             {downloadingDiag ? 'Preparing…' : 'Build report'}
+          </button>
+          <button
+            onClick={copyDiagnostics}
+            disabled={copyingDiag}
+            title="Copy the last build's diagnostics report to your clipboard — paste it straight into a support chat (no download/upload needed)."
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {copyingDiag ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Copy className="w-3.5 h-3.5" />}
+            {copyingDiag ? 'Copying…' : 'Copy report'}
           </button>
           {state.repoUrl && (
             <a

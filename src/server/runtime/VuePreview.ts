@@ -91,7 +91,7 @@ function buildDepUrls(vfs: VirtualFileSystem): Record<string, string> {
  * Build a self-contained, in-browser-compiled Vue preview document.
  * Returns an HTML string; if no entry module is found, falls back to a clear notice.
  */
-export function buildVuePreview(vfs: VirtualFileSystem): string {
+export function buildVuePreview(vfs: VirtualFileSystem, _origin?: string): string {
   const entry = findEntry(vfs);
 
   const modules: Record<string, string> = {};

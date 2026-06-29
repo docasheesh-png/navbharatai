@@ -61,7 +61,9 @@ export function PreviewSurface({ url, workspaceId, userId, email }: { url?: stri
       const res = await fetch('/api/agentv3/inbrowser-preview', {
         method: 'POST',
         headers: await authJsonHeaders(),
-        body: JSON.stringify({ workspaceId, userId, email }),
+        // Send our own origin so the server loads the self-hosted preview compiler via an absolute
+        // same-origin URL (a root-relative path doesn't resolve inside the sandboxed iframe srcDoc).
+        body: JSON.stringify({ workspaceId, userId, email, origin: window.location.origin }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);

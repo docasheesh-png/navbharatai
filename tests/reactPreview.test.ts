@@ -34,6 +34,17 @@ describe('buildReactPreview', () => {
     expect(html).toContain('src/App.jsx');
   });
 
+  it('loads the self-hosted compiler via an ABSOLUTE same-origin URL when an origin is given', () => {
+    // Inside a sandboxed <iframe srcDoc> a root-relative "/vendor/babel.min.js" does not resolve to
+    // the app origin → "Could not load the preview compiler". An absolute URL fixes it.
+    const rel = buildReactPreview(reactVfs());
+    expect(rel).toContain('src="/vendor/babel.min.js"'); // no origin → relative (back-compat)
+    const abs = buildReactPreview(reactVfs(), 'https://navbharatai.com');
+    expect(abs).toContain('src="https://navbharatai.com/vendor/babel.min.js"');
+    // a trailing slash on the origin is normalised (no double slash)
+    expect(buildReactPreview(reactVfs(), 'https://navbharatai.com/')).toContain('src="https://navbharatai.com/vendor/babel.min.js"');
+  });
+
   it('embeds the entry from index.html script src', () => {
     const html = buildReactPreview(reactVfs());
     expect(html).toContain('"entry":"src/main.jsx"');

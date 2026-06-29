@@ -8,6 +8,7 @@ import { tracer } from '../observability/Tracer';
 import { errorTracker } from '../observability/ErrorTracker';
 import { getProviderStats } from '../AI/Router/AIRouter';
 import { doraMetrics } from '../lib/DoraMetrics';
+import { analyzeSeries, type Point } from '../lib/AnomalyDetector';
 
 function adminOk(req: Request): boolean {
   return !!process.env.ADMIN_PASSWORD && req.query.admin === process.env.ADMIN_PASSWORD;
@@ -46,5 +47,35 @@ export function registerObservabilityRoutes(app: Express): void {
     if (!adminOk(req)) { res.status(403).json({ error: 'admin only' }); return; }
     const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
     res.json(doraMetrics.summary(days * 86_400_000));
+  });
+
+  // P-MON.2 — anomaly detection + trend/forecast over a metric series. Analyze a provided
+  // series: body { series: number[] }  OR  { points: {t,v}[] }. Returns z/EWMA anomalies,
+  // the linear trend, and an N-step forecast.
+  app.post('/api/observability/anomaly', (req: Request, res: Response) => {
+    if (!adminOk(req)) { res.status(403).json({ error: 'admin only' }); return; }
+    const body = req.body || {};
+    let points: Point[] = [];
+    if (Array.isArray(body.points)) {
+      points = body.points.filter((p: any) => p && typeof p.t === 'number' && typeof p.v === 'number');
+    } else if (Array.isArray(body.series)) {
+      points = body.series.filter((v: any) => typeof v === 'number').map((v: number, i: number) => ({ t: i, v }));
+    } else {
+      res.status(400).json({ error: 'provide { series: number[] } or { points: {t,v}[] }' });
+      return;
+    }
+    const opts = {
+      zThreshold: Number(body.zThreshold) || undefined,
+      forecastHorizon: Number(body.forecastHorizon) || undefined,
+    };
+    res.json(analyzeSeries(points, opts));
+  });
+
+  // P-MON.2 — anomaly/trend analysis of LIVE data: the recent per-trace total durations
+  // (a real latency series from the P2.1 tracer).
+  app.get('/api/observability/anomaly/latency', (req: Request, res: Response) => {
+    if (!adminOk(req)) { res.status(403).json({ error: 'admin only' }); return; }
+    const series: Point[] = tracer.recentTraces(200).map((tr) => ({ t: tr.startMs, v: tr.durationMs }));
+    res.json({ source: 'trace-latency', sampleCount: series.length, ...analyzeSeries(series) });
   });
 }

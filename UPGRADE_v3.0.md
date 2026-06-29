@@ -1962,12 +1962,19 @@
 - [ ] Surface activation, feature-adoption, and conversion (signup→build→deploy→pay) funnels in the admin dashboard.
 - **Files:** `src/lib/analytics.ts`, new `src/server/lib/AnalyticsPipeline.ts`, `src/server/routes/{telemetry,admin}.ts`.
 
-### P-MON.2 — Anomaly Detection + Trend Analysis + Forecasting  ❌ MISSING  [MED]
-- Alerting is **static thresholds only** (`metricsAlerts.ts`). No statistical **anomaly detection** (z-score/IQR), no
-  **trend analysis**, no **forecasting** (cost/usage/capacity/performance) — so regressions/spikes are caught late.
-- [ ] Add a rolling-baseline anomaly detector over the daily metric snapshots (cost, error rate, latency, build volume).
-- [ ] Add simple forecasting (moving-average/linear) for cost + usage with budget-burn projection.
-- **Files:** new `src/server/lib/AnomalyDetector.ts`, `src/server/lib/metricsAlerts.ts`, `metricsStore.ts`.
+### P-MON.2 — Anomaly Detection + Trend Analysis + Forecasting  ✅ DONE  [MED]
+- Alerting was **static thresholds only** (`metricsAlerts.ts`). Now there is a real statistical engine for **anomaly
+  detection** (z-score + EWMA-deviation), **trend analysis** (least-squares slope/direction), and **forecasting**.
+- [x] Added `src/server/lib/AnomalyDetector.ts` — a pure, dependency-free engine: `zScores`/`detectZAnomalies`,
+  `ewma`/`detectEwmaAnomalies` (catches level shifts a global z-score masks), `linearTrend` (least-squares),
+  `forecast` (project the trend N steps at the median sample spacing), and `analyzeSeries` → a full `AnomalyReport`
+  (z + EWMA anomalies, trend with rising/falling/flat direction, N-step forecast, summary stats). Short/flat series
+  honestly return no anomalies / a null trend — no fabricated signal.
+- [x] Wired into the admin observability surface: `POST /api/observability/anomaly` analyzes a supplied series
+  (`{ series:number[] }` or `{ points:{t,v}[] }`); `GET /api/observability/anomaly/latency` analyzes the LIVE
+  per-trace latency series from the P2.1 tracer. Both admin-gated (same scheme as the other observability routes).
+- [x] 13 unit tests (`AnomalyDetector.test.ts`); full gate green (tsc fe+server, 3010 vitest, boot:check, live route smoke).
+- **Files:** new `src/server/lib/AnomalyDetector.ts` + `.test.ts`, `src/server/routes/observability.ts`.
 
 ### P-MON.3 — LLM / AI Observability Dashboard  🟡 PARTIAL → full  [MED]
 - Token/cost are tracked, but there is no **LLM-ops view**: prompt performance, **inference-latency percentiles

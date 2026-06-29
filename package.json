@@ -24,7 +24,8 @@
     "test:load": "node scripts/loadTest.mjs",
     "audit:gate": "node scripts/auditGate.mjs",
     "license:gate": "node scripts/licenseGate.mjs",
-    "sbom": "node scripts/genSbom.mjs"
+    "sbom": "node scripts/genSbom.mjs",
+    "bakeoff": "tsx scripts/agentv3-bakeoff.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",

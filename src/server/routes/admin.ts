@@ -10,6 +10,7 @@ import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { evaluateAlerts } from '../lib/metricsAlerts';
+import { computeHealthScore } from '../lib/HealthScore';
 import { logStore } from '../lib/logStore';
 import { eventStore } from '../lib/eventStore';
 
@@ -96,6 +97,44 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.get('/api/admin/metrics', verifyAdminToken, (_req: Request, res: Response) => {
     const snapshot = getMetrics().snapshot();
     res.json({ ...snapshot, alerts: evaluateAlerts(snapshot) });
+  });
+
+  // P-MON.4 — composite Health / Reliability / Risk score (0–100) from REAL live signals:
+  // build success rate (metrics registry), aggregate provider error rate + latency
+  // (AIRouter circuit stats), and process uptime. Honest by construction — any signal
+  // with no real data drops out (reported in `missing`); none is fabricated.
+  app.get('/api/admin/health-score', verifyAdminToken, (_req: Request, res: Response) => {
+    const snap = getMetrics().snapshot();
+    const provider = getProviderStats();
+
+    // Aggregate provider error rate + request-weighted average latency from real counters.
+    let totalReq = 0;
+    let totalErr = 0;
+    let latencyWeighted = 0;
+    for (const s of Object.values(provider)) {
+      totalReq += s.requestCount || 0;
+      totalErr += s.errorCount || 0;
+      latencyWeighted += (s.avgLatencyMs || 0) * (s.requestCount || 0);
+    }
+    const inputs = {
+      // Build success rate is real only once at least one build has run.
+      successRatePct: snap.builds.total > 0 ? snap.builds.successRate * 100 : null,
+      // Provider error rate + latency are real only once at least one AI call has run.
+      errorRatePct: totalReq > 0 ? (totalErr / totalReq) * 100 : null,
+      avgLatencyMs: totalReq > 0 ? latencyWeighted / totalReq : null,
+      uptimeSeconds: process.uptime(),
+    };
+    res.json({
+      score: computeHealthScore(inputs),
+      inputs,
+      sources: {
+        successRatePct: 'metrics.builds (live build outcomes)',
+        errorRatePct: 'AIRouter provider circuit stats',
+        avgLatencyMs: 'AIRouter provider circuit stats (request-weighted)',
+        uptimeSeconds: 'process.uptime()',
+      },
+      generatedAt: Date.now(),
+    });
   });
 
   // G2 — daily metrics history (last N days of persisted MetricsSnapshots).

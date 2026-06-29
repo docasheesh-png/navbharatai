@@ -27,6 +27,7 @@ export type ToolName =
   | 'generate_api_docs'
   | 'generate_tests'
   | 'check_conventions'
+  | 'generate_release_notes'
   | 'task'
   | 'second_opinion'
   | 'consensus'

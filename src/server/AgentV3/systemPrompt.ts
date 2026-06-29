@@ -321,6 +321,8 @@ export function architectSystemPrompt(framework?: string): string {
     '  documents every variable the code needs — so it runs for other people too.',
     '- Call generate_gitignore to write a correct .gitignore so node_modules,',
     '  build output and .env secrets are never committed.',
+    '- When finishing a version (or before a deploy), call generate_release_notes with the app\'s',
+    '  current features (and previous ones if you have them) to write user-facing RELEASE_NOTES.md.',
     '- If the app exposes an HTTP API (Express/Fastify/Nest/FastAPI routes), call',
     '  generate_openapi with the routes you built to write a real OpenAPI 3.0.3 contract',
     '  (openapi.json), AND generate_api_docs with the same routes to write a readable',

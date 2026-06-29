@@ -377,6 +377,26 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_release_notes',
+      description:
+        'Generate user-facing RELEASE NOTES (Markdown) for the app and write them to the workspace ' +
+        '(default RELEASE_NOTES.md). Pass the current feature list (and the previous one, if you have it, ' +
+        'to produce a real added/removed diff). Honest: identical features → a "no user-visible changes" ' +
+        'note (nothing fabricated). Use when finishing a version or before a deploy.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'App name (defaults to "App").' },
+          features: { type: 'array', items: { type: 'string' }, description: 'Current user-visible features.' },
+          previous_features: { type: 'array', items: { type: 'string' }, description: 'Previous version features (for the diff).' },
+          tech_stack: { type: 'array', items: { type: 'string' }, description: 'Tech stack entries.' },
+          version: { type: 'string', description: 'Version label, e.g. v1.2.0.' },
+          path: { type: 'string', description: 'Optional output path (defaults to RELEASE_NOTES.md).' },
+        },
+        required: ['features'],
+      },
+    },
+    {
       name: 'web_search',
       description:
         'Search the web for up-to-date information — package versions, framework/API docs, ' +
@@ -477,6 +497,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_api_docs',
   'generate_tests',
   'check_conventions',
+  'generate_release_notes',
   'web_search',
   'screenshot',
   'browser_action',

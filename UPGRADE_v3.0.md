@@ -1281,7 +1281,7 @@
 - **Files:** `src/server/Memory/ProjectMemoryManager.ts`, new `src/server/Memory/CrossSessionContextLoader.ts`,
   `server.ts`, `src/App.tsx`.
 
-### P-PME.2 — Release Notes Generator  🟡 engine+API DONE / persistence+UI PENDING  [HIGH]
+### P-PME.2 — Release Notes Generator  ✅ DONE (2026-06-29) · 🔌 WIRED  [Firestore-history UI deferred]
 - When a user deploys their app, nothing documented what changed. Now there is a real generator.
 - [x] Added `src/server/lib/ReleaseNotesGenerator.ts` — a pure, dependency-free engine: `diffBlueprints`
   (features added/removed/kept, case-insensitive + deduped) and `generateReleaseNote` → a structured note
@@ -1290,10 +1290,14 @@
   reads the clock (date is caller-supplied). 8 unit tests.
 - [x] Added `POST /api/release-notes` (stateless): body `{ current, previous?, version?, date? }` → the note +
   Markdown, with input sanitisation/caps. Any caller (build flow, IDE button) can use it.
-- [ ] **Still pending:** persist to `projectMemory/.../releases[]` (Firestore), the post-deploy auto-generate
-  step in the build flow, and the "View Release Notes" UI button with copy/share.
-- **Files:** new `src/server/lib/ReleaseNotesGenerator.ts` + `.test.ts`, new `src/server/routes/releaseNotes.ts`, `server.ts`.
-  `src/server/AppMakerLab/AppMakerOrchestrator.ts`, `src/App.tsx`.
+- [x] **BUILD-PATH WIRING (live v3.0)** — new `generate_release_notes` AgentV3 tool (ToolName + ToolCatalog +
+  BUILD_TOOLS + ToolDispatcher handler): the agent passes the app's current features (+ previous, for a real
+  added/removed diff) and it writes `RELEASE_NOTES.md` into the workspace. systemPrompt nudges the agent to call it
+  when finishing a version / before deploy. So the built app ships with real, honest release notes. 2 dispatcher tests.
+- [ ] **Still deferred:** persisting a release HISTORY to Firestore + a "View Release Notes" history UI (the note is
+  written into the app workspace now; the cross-session history surface is the remaining smaller extra).
+- **Files:** `src/server/lib/ReleaseNotesGenerator.ts`, `src/server/AgentV3/{types,ToolCatalog,AgentRegistry,ToolDispatcher,systemPrompt}.ts`,
+  `src/server/AgentV3/ToolDispatcher.test.ts`, `src/server/routes/releaseNotes.ts`.
 
 ### P-PME.3 — Technical Debt Tracker  ✅ DONE (2026-06-29, engine + persistence + API)
 - Quality findings were auto-repaired or silently dropped — no accumulating debt register.

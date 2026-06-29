@@ -38,6 +38,7 @@ import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
+import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
@@ -1244,6 +1245,34 @@ export class ToolDispatcher {
         }
         lines.push('Apply these with edit_file to keep the code consistent.');
         return lines.join('\n');
+      }
+
+      case 'generate_release_notes': {
+        const rec = (input as Record<string, unknown>) || {};
+        const strArr = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+        const features = strArr(rec.features);
+        if (features.length === 0) {
+          return 'generate_release_notes: pass the current "features" array (the app\'s user-visible features).';
+        }
+        const previousFeatures = strArr(rec.previous_features);
+        const note = generateReleaseNote(
+          { name: optStr(input, 'name'), features, techStack: strArr(rec.tech_stack) },
+          previousFeatures.length > 0 ? { features: previousFeatures } : null,
+          { version: optStr(input, 'version'), date: new Date().toISOString().slice(0, 10) },
+        );
+        const path = optStr(input, 'path') || 'RELEASE_NOTES.md';
+        let kind: 'create' | 'modify' = 'create';
+        try {
+          await this.actuator.readFile(this.workspaceId, path);
+          kind = 'modify';
+        } catch {
+          kind = 'create';
+        }
+        await this.actuator.writeFile(this.workspaceId, path, note.markdown);
+        this.state?.recordFileChange({ path, kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, note.markdown);
+        this.scheduleCheckpoint(`${kind} ${path}`);
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — ${note.version}: ${note.summary}`;
       }
 
       case 'update_preview': {

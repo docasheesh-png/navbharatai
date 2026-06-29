@@ -2,6 +2,7 @@
   "_comment": "P-TQA.7 — accepted/pre-existing high+critical advisories. The audit gate (scripts/auditGate.mjs) BLOCKS any high/critical NOT listed here. Each entry is triaged: dev-only, no safe fix, or a separate upgrade task. Re-triage periodically and remove once fixed. A NEW high/critical in any other package fails CI.",
   "allow": [
     { "package": "vitest", "severity": "critical", "reason": "dev-only test runner (not shipped to users); fix requires a major-version bump tracked as a separate task." },
+    { "package": "@vitest/coverage-v8", "severity": "critical", "reason": "dev-only coverage tool (P-TQA.1); same advisory as vitest (via: vitest) — fix is a semver-major vitest 4 upgrade tracked with the vitest entry. Never shipped to users." },
     { "package": "vite", "severity": "high", "reason": "dev/build-only toolchain (not shipped at runtime); upgrade tracked separately to avoid a risky major bump." },
     { "package": "axios", "severity": "high", "reason": "pre-existing transitive; upgrade evaluated separately (used server-side; needs regression check before bumping)." },
     { "package": "cashfree-pg", "severity": "high", "reason": "payments SDK; vendor-pinned — upgrade requires payment-flow re-verification, tracked separately." },

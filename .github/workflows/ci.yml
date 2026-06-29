@@ -49,6 +49,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Coverage gate (P-TQA.1 — BLOCKS merge on a real coverage regression)
+        run: npm run test:coverage
+
       - name: Build (frontend bundle + server bundle — catches build-only breaks)
         run: npm run build
 

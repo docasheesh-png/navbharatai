@@ -1319,34 +1319,43 @@ export function registerAgentV3Routes(app: Express): void {
     // low, upgrade with a cheap LLM call via the free router (never blocks — any
     // LLM failure falls back to the keyword result). Best-effort, no await on the
     // hot path: we fire the upgrade async and fall through immediately.
+    // CONTEXT the gatekeeper needs to read INTENTION (not just wording): does a project already
+    // exist in this session, and what did the user recently ask? Computed ONCE here (bounded), then
+    // reused below for the deterministic safety-net so Firestore is read at most once. Best-effort.
+    const intentWorkspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
+    const projectExists = (await raceTimeout(
+      countWorkspaceFiles(intentWorkspaceId),
+      4_000,
+      'countWorkspaceFiles',
+    ).catch(() => 0)) > 0;
+    const recentRequests = (() => {
+      try { return getWorkspaceMemory(intentWorkspaceId).recentRequests(3); } catch { return [] as string[]; }
+    })();
+
     let intent = classifyIntent(prompt);
     try {
       const freeRouter = AIRouterManager.getRouter('free');
       // Bounded (6s) — this LLM upgrade runs before the deadline timer is armed; a stalled free
       // provider must not hang the request. On timeout the keyword classification (above) stands.
+      // The smart classifier now reads INTENTION with project/conversation context, and only the
+      // ambiguous (non-high-confidence) cases reach the LLM — clear greetings / explicit builds /
+      // continuations stay instant.
       intent = await raceTimeout(
         classifyIntentSmart(
           prompt,
           (p) => freeRouter.route(p, 'You are a classifier. Reply with one word only.').then((r) => r.response.content),
+          { projectExists, recentRequests },
         ),
         6_000,
         'classifyIntentSmart',
       );
     } catch { /* LLM upgrade is best-effort — keyword result stands */ }
-    // WORKSPACE-AWARE intent (the "don't rebuild an app that already exists" fix): the keyword and
-    // LLM classifiers above look ONLY at the prompt text, so a follow-up like "add a dashboard" on a
-    // project that already has files was classified new_build → the surgical-edit path was skipped →
-    // v3.0 rebuilt from scratch and ignored the existing files. A v3.0 session is ONE project, so if
-    // this workspace ALREADY has saved files, a build-intent turn is almost always an EDIT of that
-    // project — treat it as edit_existing UNLESS the user explicitly asked to start over. Bounded and
-    // fails OPEN (a check error keeps the original intent), so it can never wrongly downgrade or hang.
-    if (intent === 'new_build' && !wantsFreshStart(prompt)) {
-      const existingFileCount = await raceTimeout(
-        countWorkspaceFiles(deriveWorkspaceId(userId, req.body?.sessionId)),
-        4_000,
-        'countWorkspaceFiles',
-      ).catch(() => 0);
-      if (existingFileCount > 0) intent = 'edit_existing';
+    // DETERMINISTIC SAFETY-NET (kept from the workspace-aware fix): even if the LLM is down/slow and
+    // the keyword fallback returned new_build, a build-intent turn on a NON-empty project — with no
+    // explicit "start over" — is an EDIT, never a rebuild-from-scratch. The smart classifier usually
+    // already returns edit; this guarantees it when the LLM didn't run.
+    if (intent === 'new_build' && projectExists && !wantsFreshStart(prompt)) {
+      intent = 'edit_existing';
     }
     const isPlainChatTurn = intent === 'chat';
     // Surgical edit mode: the user is modifying an existing app (fix/change/update/

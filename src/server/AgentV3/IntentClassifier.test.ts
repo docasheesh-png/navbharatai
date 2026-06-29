@@ -66,6 +66,43 @@ describe('classifyIntent — continuation phrases resume the build (NOT the amne
   });
 });
 
+describe('classifyIntentSmart — intention-aware gatekeeper (not keyword-locked)', () => {
+  it('ambiguous tech-noun messages are NO LONGER hard-locked — they consult the LLM', async () => {
+    // "the notes app keeps crashing" contains the build noun 'app' but is a QUESTION. It used to be
+    // high-confidence new_build (LLM never consulted); now it is low-confidence so the LLM decides.
+    expect(classifyIntentWithConfidence('the notes app keeps crashing').confidence).toBe('low');
+    let asked = false;
+    const llm = async () => { asked = true; return 'chat'; };
+    expect(await classifyIntentSmart('the notes app keeps crashing', llm)).toBe('chat');
+    expect(asked).toBe(true);
+  });
+
+  it('feeds project + conversation context into the LLM so it reads intention', async () => {
+    let seenPrompt = '';
+    const llm = async (p: string) => { seenPrompt = p; return 'edit'; };
+    const res = await classifyIntentSmart('add a dark mode toggle', llm, {
+      projectExists: true,
+      recentRequests: ['build a notes app', 'add a search bar'],
+    });
+    expect(res).toBe('edit_existing');
+    expect(seenPrompt).toContain('ALREADY has a working project'); // project context fed in
+    expect(seenPrompt).toContain('build a notes app');             // conversation context fed in
+  });
+
+  it('still short-circuits CLEAR cases without calling the LLM (fast + cheap)', async () => {
+    let asked = false;
+    const llm = async () => { asked = true; return 'chat'; };
+    expect(await classifyIntentSmart('build me a calculator app', llm)).toBe('new_build'); // explicit build verb
+    expect(await classifyIntentSmart('fix the login bug', llm)).toBe('edit_existing');     // explicit edit verb
+    expect(asked).toBe(false);
+  });
+
+  it('falls back to the keyword result when the LLM fails (never blocks or breaks)', async () => {
+    const llm = async () => { throw new Error('llm down'); };
+    expect(await classifyIntentSmart('add a payment button', llm)).toBe('new_build');
+  });
+});
+
 describe('classifyIntent', () => {
   describe('social / conversational → chat', () => {
     it('classifies "hello" as chat', () => {

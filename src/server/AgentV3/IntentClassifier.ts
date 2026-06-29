@@ -254,7 +254,12 @@ export function classifyIntentWithConfidence(message: string): IntentWithConfide
     return { intent: 'new_build', confidence: 'high', signal: 'code-or-url' };
   }
   if (matchesSignal(lower, BUILD_SIGNALS)) {
-    return { intent: 'new_build', confidence: 'high', signal: 'build-signal' };
+    // AMBIGUOUS tech-noun / weak-verb signals ('app', 'react', 'button', 'add', 'install', …):
+    // keep new_build as the safe FALLBACK, but mark it LOW confidence so the smart classifier
+    // consults the LLM (with project + conversation context) instead of HARD-LOCKING on the
+    // wording. This is the "understand the user's intention, don't keyword-lock" fix — e.g.
+    // "why does my notes app crash?" is a question, not a request to build a new app.
+    return { intent: 'new_build', confidence: 'low', signal: 'build-signal' };
   }
   // Continuation of an interrupted/in-progress build → resume the existing project (with memory),
   // NOT the amnesiac chat path. High confidence so the LLM upgrade can't downgrade it to chat.
@@ -271,26 +276,53 @@ export function classifyIntentWithConfidence(message: string): IntentWithConfide
   return { intent: 'new_build', confidence: 'low', signal: 'default' };
 }
 
+/** Context that lets the smart classifier judge INTENTION instead of isolated wording. */
+export interface IntentContext {
+  /** True when the workspace already holds a built project → a request is far more likely an EDIT. */
+  projectExists?: boolean;
+  /** The user's most recent prior requests (oldest→newest) — conversational context. */
+  recentRequests?: string[];
+}
+
 /**
- * Upgrade a low-confidence classification by calling a lightweight LLM.
- * `llmCall` receives a short prompt and must return one of: 'chat', 'build', 'edit'.
- * If the LLM returns an unrecognised value or throws, the original intent is kept.
- * Best-effort — never throws to the caller.
+ * The gatekeeper: upgrade a NON-high-confidence keyword result by asking a lightweight LLM what the
+ * user actually WANTS — reading intention, not matching wording — with the conversation/project
+ * context the keyword pass can't see. Only ambiguous cases reach the LLM (clear greetings, explicit
+ * "build me X" / "fix the Y", continuations, code/URLs stay high-confidence and instant). If the LLM
+ * returns an unrecognised value or throws, the keyword result stands — so it never blocks or breaks.
  */
 export async function classifyIntentSmart(
   message: string,
   llmCall: (prompt: string) => Promise<string>,
+  context?: IntentContext,
 ): Promise<BuildIntent> {
   const { intent, confidence } = classifyIntentWithConfidence(message);
   if (confidence === 'high') return intent;
 
+  const ctxLines: string[] = [];
+  if (context?.projectExists !== undefined) {
+    ctxLines.push(
+      context.projectExists
+        ? 'Context: the user ALREADY has a working project in this session. A request to add, change, '
+          + 'or finish something is almost always an EDIT of that project — only a fresh BUILD if they '
+          + 'clearly ask to start over. A question about the app is "chat".'
+        : 'Context: there is NO project yet in this session, so creating something is a fresh BUILD.',
+    );
+  }
+  if (context?.recentRequests?.length) {
+    ctxLines.push('Recent user messages (oldest first):');
+    for (const r of context.recentRequests.slice(-3)) ctxLines.push(`  - "${r.slice(0, 160)}"`);
+  }
+
   const prompt = [
-    'Classify this user message into exactly one of three categories:',
-    '  chat    — plain conversation, greeting, question, thanks',
-    '  build   — create a new app / feature / component from scratch',
-    '  edit    — fix, modify, or update something that already exists',
+    'Decide what the user actually WANTS — read their intention, do NOT just match keywords.',
+    'Choose exactly one of three categories:',
+    '  chat    — plain conversation, a greeting, a question, thanks, or asking how something works',
+    '  build   — create a NEW app / feature / component from scratch',
+    '  edit    — fix, modify, add to, or finish something that ALREADY exists',
+    ...(ctxLines.length ? ['', ...ctxLines] : []),
     '',
-    `Message: "${message.slice(0, 300)}"`,
+    `User message: "${message.slice(0, 300)}"`,
     '',
     'Reply with ONLY one word: chat, build, or edit.',
   ].join('\n');

@@ -88,6 +88,7 @@ import { audit } from '../lib/audit';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
 import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
+import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -1763,6 +1764,13 @@ export function registerAgentV3Routes(app: Express): void {
         const entityContext = entityRequirementsContext(extractEntities(prompt));
         if (entityContext) architectSystem = `${entityContext}\n\n---\n\n${architectSystem}`;
       } catch { /* entity extraction is best-effort — a failure leaves the prompt unchanged */ }
+      // P-AI.3 — Dialogue phase: give the agent a posture for this turn's lifecycle stage (debugging /
+      // requirements / planning / deploy). hasExistingFiles ≈ isEditMode (an established project).
+      // Additive + best-effort: '' for the baseline build phase, so existing turns are unchanged.
+      try {
+        const { guidance } = dialoguePhaseContext({ intent, prompt, hasExistingFiles: isEditMode, planning: planFirst });
+        if (guidance) architectSystem = `${guidance}\n\n---\n\n${architectSystem}`;
+      } catch { /* dialogue phase is best-effort — a failure leaves the prompt unchanged */ }
       if (isEditMode) {
         let fileTree: string[] = [];
         try {

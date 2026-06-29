@@ -217,8 +217,13 @@ ${css ? `<style>\n${css}\n</style>` : ''}
   function specUrl(spec) {
     if (IMAP[spec]) return IMAP[spec];
     var root = spec.charAt(0) === '@' ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
+    // The importmap entry already carries the star external prefix for non-react packages;
+    // appending the sub-path keeps it (no query string to break), so a deep import like
+    // 'react-router-dom/server' stays externalized too.
     if (IMAP[root]) return IMAP[root] + spec.slice(root.length);
-    return ESM + spec;
+    // Unknown dep (not in package.json): star it too so it shares the single React.
+    var isReactPkg = root === 'react' || root === 'react-dom';
+    return ESM + (isReactPkg ? '' : '*') + spec;
   }
 
   window.addEventListener('error', function (e) { showError((e && e.message) || 'Script error'); });
@@ -270,8 +275,15 @@ function buildImportmap(vfs: VirtualFileSystem): Record<string, string> {
     'react/jsx-runtime': ESM + 'react' + reactVer + '/jsx-runtime',
     'react/jsx-dev-runtime': ESM + 'react' + reactVer + '/jsx-dev-runtime',
   };
+  // CRITICAL for any React library (react-router-dom, @mui, framer-motion, …): prefix the
+  // esm.sh path with `*` so esm.sh marks ALL of the package's dependencies — react and
+  // react-dom included — as EXTERNAL. Those bare `import "react"` specifiers then resolve
+  // through THIS importmap to the single React above, instead of esm.sh bundling a second
+  // private copy of React. Two React copies is the #1 cause of "Invalid hook call" → a blank
+  // or crashing preview for router/state/UI-library apps. React's own entries stay un-starred
+  // (they ARE the shared copy).
   for (const name of Object.keys(deps)) {
-    if (!imap[name]) imap[name] = ESM + name + ver(name);
+    if (!imap[name]) imap[name] = ESM + '*' + name + ver(name);
   }
   return imap;
 }

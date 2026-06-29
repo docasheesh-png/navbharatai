@@ -58,8 +58,13 @@ describe('buildReactPreview', () => {
     });
     const html = buildReactPreview(vfs);
     expect(html).toContain('<script type="importmap">');
-    expect(html).toContain('esm.sh/react-router-dom@6.26.0');
-    expect(html).toContain('esm.sh/zustand@4.5.0');
+    // Non-react deps are starred (`*`) so esm.sh externalizes react/react-dom and every
+    // package shares the ONE React from the importmap (no "Invalid hook call" second copy).
+    expect(html).toContain('esm.sh/*react-router-dom@6.26.0');
+    expect(html).toContain('esm.sh/*zustand@4.5.0');
+    // React itself stays UN-starred — it is the shared copy the others externalize to.
+    expect(html).toMatch(/esm\.sh\/react@18\.3\.1/);
+    expect(html).not.toContain('esm.sh/*react@');
   });
 
   it('uses the JSX automatic runtime (no React-in-scope requirement)', () => {

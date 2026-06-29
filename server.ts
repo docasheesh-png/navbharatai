@@ -14,6 +14,7 @@ import { securityHeadersConfig } from './src/server/lib/securityHeaders';
 import { setDb as setSharedDb } from './src/server/lib/db';
 import { registerWalletRoutes } from './src/server/routes/wallet';
 import { registerSecretsRoutes } from './src/server/routes/secrets';
+import { registerSbomRoutes } from './src/server/routes/sbom';
 import { getSecretValue } from './src/server/lib/secrets';
 import { verifyPaymentInternal } from './src/server/lib/payments';
 import { registerPaymentRoutes } from './src/server/routes/payment';
@@ -506,6 +507,7 @@ setInterval(() => {
   // P-CGE.9 — deploy artifact generator (stateless → Dockerfile / compose / CI workflow).
   registerDeployArtifactsRoutes(app);
   registerSecretsRoutes(app);
+  registerSbomRoutes(app);
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
   registerPreviewRoutes(app, chatLimiter);

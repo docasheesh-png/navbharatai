@@ -1002,13 +1002,27 @@
 - **Files:** `src/server/AppMakerLab/generator/EngineDispatcher.ts`, new `src/server/AppMakerLab/BuildStepBreaker.ts`,
   `src/server/AppMakerLab/autorepair/AutoRepairEngine.ts`.
 
-### P-BRE.10 — SBOM Generator + License Validator  ❌ MISSING  [MED — enterprise compliance]
-- No Software Bill of Materials generated for apps built by navBharatAI. Enterprise users need to know
-  what OSS dependencies are in generated apps (compliance, security audits, supply chain verification).
-- [ ] After each successful build, run `npm sbom --json` (Node 20+ built-in) or `syft` to generate a CycloneDX SBOM.
-- [ ] Store SBOM in Firestore `sboms/{workspaceId}/{buildId}` and expose via `/api/workspace/sbom`.
-- [ ] Add license checker: flag any GPL/AGPL packages in the SBOM — warn user if generated app inadvertently pulls a copyleft dep.
-- **Files:** new `src/server/AppMakerLab/SBOMGenerator.ts`, `server.ts`, `src/server/AppMakerLab/BuildManager.ts`.
+### P-BRE.10 — SBOM Generator + License Validator  ✅ DONE (2026-06-29)
+- No SBOM was generated for the apps users BUILD on the platform (P-SEC.6 covers NavBharatAI's OWN SBOM in
+  CI; this is the separate user-app feature). Enterprise users need to know the OSS deps in their generated apps.
+- [x] **`SBOMGenerator.ts`** — pure, unit-tested CycloneDX 1.5 SBOM builder from a parsed `package-lock.json`
+      (name/version/purl/license per component, root excluded, deduped). Logic ported to TypeScript from the
+      proven P-SEC.6 `genSbom.mjs` + `licenseGate.mjs` cores (the CLI .mjs aren't importable into the server).
+- [x] **License validator** — `classifyLicense()` + `detectCopyleft()` flag strong-copyleft (GPL/AGPL — the real
+      compliance risk) and weak-copyleft (LGPL/MPL/EPL — informational); a dual "MIT OR GPL-3.0" is correctly
+      permissive, and the `-or-later` suffix isn't mis-split. `analyzeAppDependencies()` returns
+      `{ sbom, copyleft, componentCount, hasCopyleftRisk }`.
+- [x] **API** — `POST /api/workspace/sbom` (`src/server/routes/sbom.ts`, workspace-rate-limited): takes the app's
+      lockfile (the IDE already has the workspace files — no sandbox access needed), returns the SBOM + copyleft
+      findings; best-effort persists to Firestore `sboms/{workspaceId}/builds/{buildId}` when ids are supplied.
+- [x] **AppKnowledgeBase** — new `app-sbom` entry (same PR).
+- **Note (honest scope):** wired as a backend capability + API rather than into `BuildManager.ts` — the live
+      builder is AgentV3, not the AppMakerLab `npm run build` step, and the lockfile is most reliably supplied by
+      the caller. A one-click IDE button is a thin follow-up on top of this working API.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3223/3223 ✅ (10 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/AppMakerLab/SBOMGenerator.ts` (new), `src/server/routes/sbom.ts` (new),
+      `tests/sbomGenerator.test.ts` (new), `server.ts`, `src/server/AppContext/AppKnowledgeBase.ts`.
 
 ### P-BRE.11 — AI Build Optimizer  ❌ MISSING  [LOW]
 - No AI agent analyzes build telemetry to suggest optimizations: "your BackendEngine step takes 12s — consider splitting it", "80% of failures are missing-import errors — adjust code gen prompt".

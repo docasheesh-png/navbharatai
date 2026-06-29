@@ -9,6 +9,7 @@ import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
 import { registerTeamRoutes } from './src/server/routes/team';
 import { audit } from './src/server/lib/audit';
+import { adaptiveGuard } from './src/server/lib/adaptiveRateLimit';
 import { setDb as setSharedDb } from './src/server/lib/db';
 import { registerWalletRoutes } from './src/server/routes/wallet';
 import { registerSecretsRoutes } from './src/server/routes/secrets';
@@ -314,6 +315,12 @@ setInterval(() => {
     }
     next();
   });
+
+  // ── P-SEC.8 — Adaptive bot detection + progressive backoff ───────────────
+  // Behavioural layer in FRONT of the static per-IP limiters below: bot-UA + burst
+  // fingerprinting with an escalating slow-down, then a short hard block for repeat
+  // offenders. Scoped to the /api/ surface (the expensive, abuse-prone endpoints).
+  app.use(adaptiveGuard());
 
   const PORT = Number(process.env.PORT || 8080);
   // aiRouter — shared singleton from src/server/lib/aiRouter.ts (Phase 1, AI-core).

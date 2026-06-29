@@ -558,13 +558,28 @@
 - [ ] (Optional Phase 2) Add a Datadog or Grafana Cloud integration for cross-service correlation.
 - **Files:** `src/server/lib/audit.ts`, `src/server/lib/logStore.ts`.
 
-### P-SEC.8 — Adaptive Rate Limiting + Bot Detection  🟡 PARTIAL → full  [MED]
-- Rate limits are static per-IP counts (20/min chat, 5/min payment). A distributed bot with rotating IPs
-  bypasses all limits. No bot fingerprinting, no CAPTCHA, no progressive backoff on suspicious patterns.
-- [ ] Add `express-slow-down` progressive delay after 10 requests: starts delaying at 10 req/min, refuses at 20.
-- [ ] Add `hCaptcha` (privacy-respecting, GDPR-safe) on the signup/login form for new accounts.
-- [ ] Consider IP reputation via `ipqualityscore` or `AbuseIPDB` API for the admin route.
-- **Files:** `server.ts`, `src/App.tsx` (auth form).
+### P-SEC.8 — Adaptive Rate Limiting + Bot Detection  ✅ DONE (2026-06-29, behavioural layer)
+- Rate limits were static per-IP counts (20/min chat, 5/min payment) — they catch raw VOLUME but not
+  BEHAVIOUR: a bot pacing just under the limit, or a machine-cadence scraper, slipped through. No bot
+  fingerprinting and no progressive backoff on suspicious patterns.
+- [x] **Behavioural guard in front of the static limiters** (`src/server/lib/adaptiveRateLimit.ts`,
+      `adaptiveGuard()` mounted in `server.ts` on the `/api/` surface): scores every request for bot-likeness
+      and bursts, applies an escalating slow-down, then a short hard block (429 + `Retry-After`) for repeat
+      offenders; good behaviour decays the penalty. Composes with — never replaces — the existing
+      `express-rate-limit` counters.
+- [x] **Bot fingerprinting** — `scoreUserAgent()`: missing/empty UA and known automated clients
+      (curl, python-requests, scrapy, go-http-client, headless browsers, …) score high; real browsers score
+      low; benign crawlers (Googlebot/Bingbot) are not penalised as malicious.
+- [x] **Burst detection** — `isBurst()`: flags too many requests inside a trailing time window (machine cadence).
+- [x] **Progressive backoff** — `computePenaltyMs()`: exponential delay (0 → 0.5s → 1s → 2s …, capped),
+      escalating to a 60s hard block after repeated offences.
+- [ ] **hCaptcha on signup/login** and [ ] **third-party IP reputation (AbuseIPDB / IPQualityScore)** are
+      deliberately deferred: both need external accounts/API keys (infrastructure that does not yet exist for
+      this project). Per the "real features only — never fake" rule they are NOT stubbed; they remain open
+      sub-items to wire when the credentials exist. The fully-buildable behavioural layer above ships now.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3146/3146 ✅ (`tests/adaptiveRateLimit.test.ts`, 11 new,
+      cover UA scoring / burst / penalty curve) · `npm run build` ✅ · `boot:check` PASS.
+- **Files:** `src/server/lib/adaptiveRateLimit.ts` (new), `server.ts`, `tests/adaptiveRateLimit.test.ts` (new).
 
 ### P-SEC.9 — WAF / Cloud Armor  ✅ DONE (2026-06-28, doc/runbook — apply needs gcloud)
 - Cloud Run sits directly on the internet. No Web Application Firewall in front of it. SQL injection,

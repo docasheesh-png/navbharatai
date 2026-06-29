@@ -349,6 +349,34 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'check_conventions',
+      description:
+        'Check naming + import-ordering conventions and get suggested fixes (analysis only — writes ' +
+        'nothing). Pass file paths (PascalCase for .tsx components, camelCase for .ts services/hooks), ' +
+        'identifiers with their kind (function/variable→camel, constant→SCREAMING_SNAKE, component/type→' +
+        'Pascal), and/or import lines (to get the correct built-in→external→internal→relative order). ' +
+        'Use it before finishing to keep the generated code consistent, then apply the suggestions with edit_file.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          files: { type: 'array', items: { type: 'string' }, description: 'File paths to check, e.g. src/components/myCard.tsx.' },
+          identifiers: {
+            type: 'array',
+            description: 'Identifiers to check.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                kind: { type: 'string', description: 'function | variable | constant | component | type' },
+              },
+              required: ['name', 'kind'],
+            },
+          },
+          imports: { type: 'array', items: { type: 'string' }, description: 'Import lines to re-order.' },
+        },
+      },
+    },
+    {
       name: 'web_search',
       description:
         'Search the web for up-to-date information — package versions, framework/API docs, ' +
@@ -448,6 +476,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_openapi',
   'generate_api_docs',
   'generate_tests',
+  'check_conventions',
   'web_search',
   'screenshot',
   'browser_action',

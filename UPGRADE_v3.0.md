@@ -1518,8 +1518,9 @@
 - **Files:** `src/server/lib/DocGenerator.ts`, `src/server/AgentV3/{types,ToolCatalog,AgentRegistry,ToolDispatcher,systemPrompt}.ts`,
   `src/server/AgentV3/ToolDispatcher.test.ts`, `src/server/routes/docs.ts`.
 
-### P-CGE.3 — Convention & Naming Engine  🟡 engine+API DONE / build-pass wiring PENDING  [HIGH]
-- Generated code had no enforced conventions. Now there is a real engine that checks + suggests fixes.
+### P-CGE.3 — Convention & Naming Engine  ✅ DONE (2026-06-29) · 🔌 WIRED  [auto-apply deferred]
+- Generated code had no enforced conventions. Now there is a real engine, wired into the live v3.0 build
+  as an agent tool that surfaces violations + fixes.
 - [x] Added `src/server/lib/ConventionEngine.ts` — pure, dependency-free: `detectCase`/`toCase` (Pascal,
   camel, snake, SCREAMING_SNAKE, kebab), `checkFileName` (PascalCase for `.tsx` components, camelCase for
   `.ts` services/hooks; index/dotted files left alone), `checkIdentifier` (function→camel, constant→SCREAMING_SNAKE,
@@ -1527,9 +1528,13 @@
   and `analyzeConventions` → a full report with a violation count. Honest: conforming input → zero violations. 10 tests.
 - [x] Added `POST /api/convention/check` (stateless): `{ files?, identifiers?, imports? }` → violations + suggested
   fixes + reordered imports, with input caps. Usable by the IDE / a post-generation pass.
-- [ ] **Still pending:** apply the engine inside the generator's `PatchAggregator` before writing to the workspace
-  (build-path wiring — deferred to avoid touching the live AppMakerLab/AgentV3 path unattended).
-- **Files:** new `src/server/lib/ConventionEngine.ts` + `.test.ts`, new `src/server/routes/convention.ts`, `server.ts`.
+- [x] **BUILD-PATH WIRING (live v3.0)** — new `check_conventions` AgentV3 tool (ToolName + ToolCatalog + BUILD_TOOLS
+  + ToolDispatcher handler): the agent passes file paths / identifiers / import lines and gets back violations +
+  suggested fixes + the corrected import order (analysis only — writes nothing; the agent applies fixes with edit_file).
+  systemPrompt nudges the agent to use it to keep generated code consistent. 2 dispatcher tests added.
+- [ ] **Still deferred:** auto-applying fixes inside the generator's PatchAggregator (the agent applies them itself).
+- **Files:** `src/server/lib/ConventionEngine.ts`, `src/server/AgentV3/{types,ToolCatalog,AgentRegistry,ToolDispatcher,systemPrompt}.ts`,
+  `src/server/AgentV3/ToolDispatcher.test.ts`, `src/server/routes/convention.ts`.
 
 ### P-CGE.4 — Test Generation Suite  ✅ DONE (2026-06-29) · 🔌 WIRED  [snapshot tests deferred]
 - No test code was generated for built apps. Now there is a real test-scaffold generator, wired into the

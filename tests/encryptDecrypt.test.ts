@@ -19,12 +19,19 @@ describe('encrypt / decrypt', () => {
     expect(decrypt(encrypt(original))).toBe(original);
   });
 
-  it('encrypted output contains two colon-separated hex parts', () => {
+  it('encrypted output is versioned: v<N>:<iv-hex>:<ct-hex> (P-SEC.5)', () => {
     const enc = encrypt('test');
     const parts = enc.split(':');
-    expect(parts).toHaveLength(2);
-    expect(parts[0]).toMatch(/^[0-9a-f]+$/);
-    expect(parts[1]).toMatch(/^[0-9a-f]+$/);
+    expect(parts).toHaveLength(3);
+    expect(parts[0]).toMatch(/^v\d+$/);     // key-version prefix
+    expect(parts[1]).toMatch(/^[0-9a-f]+$/); // iv
+    expect(parts[2]).toMatch(/^[0-9a-f]+$/); // ciphertext
+  });
+
+  it('still decrypts legacy two-part ciphertext (backward compatible)', () => {
+    const legacy = encrypt('legacy').replace(/^v\d+:/, '');
+    expect(legacy.split(':')).toHaveLength(2);
+    expect(decrypt(legacy)).toBe('legacy');
   });
 
   it('produces different ciphertext for the same plaintext (random IV)', () => {

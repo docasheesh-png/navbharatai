@@ -516,13 +516,25 @@
 - [ ] Also add to `.github/workflows/ci.yml` as a PR check using `aquasecurity/trivy-action`.
 - **Files:** `cloudbuild.yaml`, `.github/workflows/ci.yml`.
 
-### P-SEC.5 — Encryption Key Rotation  🟡 PARTIAL → full  [HIGH]
-- `SECRET_ENCRYPTION_KEY` is a single static env var in Cloud Run. All `user_secrets` in Firestore are
-  encrypted with this one key — if it leaks, all user credentials are exposed with no rotation possible.
-- [ ] Add key versioning: store `keyVersion` alongside each encrypted secret in Firestore.
-- [ ] Implement a rotation endpoint (`/api/admin/rotate-keys`): re-encrypt all secrets with new key, bump version.
-- [ ] Store multiple key versions in Cloud Run env (`SECRET_KEY_V1`, `SECRET_KEY_V2`), decrypt with correct version, always re-encrypt on write with latest.
-- **Files:** `src/server/lib/secrets.ts`, `src/server/routes/admin.ts`.
+### P-SEC.5 — Encryption Key Rotation  ✅ DONE (2026-06-29)
+- `SECRET_ENCRYPTION_KEY` was a single static env var in Cloud Run. All `user_secrets` in Firestore were
+  encrypted with this one key — if it leaked, all user credentials were exposed with no rotation possible.
+- [x] **Versioned ciphertext:** `encrypt()` now writes `v<N>:<iv>:<ct>`; the `<N>` prefix records which key
+      version produced the ciphertext, so multiple key generations can coexist in storage.
+- [x] **Multi-version key resolution:** `resolveKeys()` reads `SECRET_KEY_V1…V16` from env (falling back to the
+      legacy `SECRET_ENCRYPTION_KEY` for v1). `encrypt()` always writes with the highest available version;
+      `decrypt()` selects the key by the version prefix, so old secrets keep decrypting after a rotation.
+- [x] **Backward compatible:** legacy two-part ciphertext (`<iv>:<ct>`, pre-versioning) still decrypts byte-for-
+      byte under the v1 key — no migration required; secrets upgrade lazily on next write.
+- [x] **Bulk rotation endpoint:** `POST /api/admin/rotate-keys` (admin-token gated) re-encrypts every stored
+      `user_secrets` doc to the latest key version, stamping `key_version` + `rotated_at`. Best-effort:
+      a single-doc failure never aborts the run; returns `{rotated,skipped,failed,toVersion}`.
+      `GET /api/admin/key-version` reports the current latest version.
+- [x] **Hardened key buffer:** `keyBuf()` pads short keys and slices to exactly 32 bytes (AES-256 requires
+      exactly 32) — fixes the >32-char dev fallback that previously threw at encrypt time.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3135/3135 ✅ (`tests/secrets.test.ts` 5 new +
+      `tests/encryptDecrypt.test.ts` extended for versioned + legacy formats) · `npm run build` ✅ · `boot:check` PASS.
+- **Files:** `src/server/lib/secrets.ts`, `src/server/routes/admin.ts`, `tests/secrets.test.ts`, `tests/encryptDecrypt.test.ts`.
 
 ### P-SEC.6 — SBOM Generation + License Compliance  ✅ DONE (2026-06-28)
 - [x] **SBOM:** `scripts/genSbom.mjs` generates a CycloneDX 1.5 JSON SBOM (`sbom.cdx.json`, 1329 components) from

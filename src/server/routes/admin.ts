@@ -17,6 +17,7 @@ import { tracer } from '../observability/Tracer';
 import { analyzeSeries, type Point } from '../lib/AnomalyDetector';
 import { logStore } from '../lib/logStore';
 import { eventStore } from '../lib/eventStore';
+import { rotateAllSecrets, getLatestKeyVersion } from '../lib/secrets';
 
 /**
  * Admin dashboard routes extracted from the server.ts monolith (Phase 1).
@@ -473,6 +474,25 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     if (providerEnabled) Object.assign(serverStats.providerEnabled, providerEnabled);
     audit('ADMIN_SETTINGS_CHANGED', { changes: req.body, ip: req.ip });
     res.json({ ok: true, settings: { maintenanceMode: serverStats.maintenanceMode, featureFlags: serverStats.featureFlags, pricingConfig: serverStats.pricingConfig, providerEnabled: serverStats.providerEnabled } });
+  });
+
+  // ── P-SEC.5: Encryption key rotation ──────────────────────────────────────
+  // Re-encrypts ALL user_secrets under the latest key version (SECRET_KEY_V<N>).
+  // Set the new key in Cloud Run env, then call this once to migrate existing data.
+  app.post('/api/admin/rotate-keys', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const result = await rotateAllSecrets();
+      audit('ADMIN_KEY_ROTATION', { ...result, ip: req.ip }, 'notice');
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      audit('ADMIN_KEY_ROTATION_FAILED', { error: err?.message, ip: req.ip }, 'error');
+      res.status(500).json({ error: 'Key rotation failed', detail: err?.message });
+    }
+  });
+
+  // Report the current latest key version (for the admin Security tab).
+  app.get('/api/admin/key-version', verifyAdminToken, (_req: Request, res: Response) => {
+    res.json({ latestKeyVersion: getLatestKeyVersion() });
   });
 
   // ── Announcement broadcast ────────────────────────────────────────────────

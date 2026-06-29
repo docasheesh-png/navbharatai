@@ -1341,14 +1341,22 @@
 - **Files:** new `src/server/AppMakerLab/intelligence/ScopeChangeController.ts`,
   `src/server/AppMakerLab/jobs/BuildJobManager.ts`, `server.ts`.
 
-### P-PME.7 — Changelog Manager  🟡 PARTIAL → full  [MED]
-- `CodeVersioning.tsx` keeps named snapshots but no structured changelog (what changed, why, when).
-  No auto-generated `CHANGELOG.md` in the generated workspace.
-- [ ] Add `ChangelogManager.ts` — on every successful build, diff current vs. previous blueprint and
-  append a changelog entry to `CHANGELOG.md` in the generated workspace.
-- [ ] Format: Keep-a-Changelog standard (Added / Changed / Fixed / Removed sections).
-- **Files:** new `src/server/AppMakerLab/generator/ChangelogManager.ts`,
-  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+### P-PME.7 — Changelog Manager  ✅ DONE (2026-06-29)
+- No structured changelog of what changed between builds.
+- [x] **`ChangelogManager.ts`** (pure, unit-tested) — `diffFiles(prev, curr)` (added/changed/removed by path +
+      content), `renderChangelogEntry()` in **Keep-a-Changelog** format (Added/Changed/Fixed/Removed, empty
+      sections omitted), `prependChangelogEntry()` (inserts the new entry above the most recent one, creating the
+      file with a header when absent), and `generateChangelog()` one-shot (returns entry + updated `CHANGELOG.md`
+      + diff; a no-change build leaves the changelog untouched with `empty:true`).
+- [x] **`POST /api/workspace/changelog`** — takes `{ previousFiles, files, version?, date?, fixed?, existingChangelog? }`
+      (the IDE already has the file sets — no sandbox access) → `{ entry, changelog, diff, empty }`. Rate-limited +
+      request-validated (P-DATA.1).
+- **Note:** delivered as a pure engine + endpoint (caller supplies the two file sets), consistent with the SBOM /
+      navigate endpoints; auto-append-on-build is a thin wiring step on top once a build exposes prev+curr files.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3326/3326 ✅ (8 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/AppMakerLab/generator/ChangelogManager.ts` (new), `src/server/routes/changelog.ts` (new),
+      `tests/changelogManager.test.ts` (new), `server.ts`.
 
 ### P-PME.8 — Feature Flag Manager (replace hardcoded flags)  🟡 PARTIAL → full  [MED]
 - `server.ts` has `featureFlags: { doctorAI: true, navBharatPro: true, appBuilder: true }` hardcoded.

@@ -71,6 +71,22 @@ export function computePenaltyMs(violations: number, capMs = 30_000): number {
   return Math.min(capMs, 250 * 2 ** violations); // v1=500, v2=1000, v3=2000, …
 }
 
+/**
+ * Default path predicate for the behavioural guard: protect the abuse-prone /api/ surface, but
+ * EXEMPT the authenticated, credit-metered, interactive NavBharatAI Pro v3.0 endpoints. A single
+ * legitimate build fires a BURST of /api/agentv3/* calls (the SSE build stream + reconnects, plus
+ * status / preview-status / workspace-files / conversations / diagnostics polling) that easily
+ * exceeds a behavioural burst threshold — so the guard was hard-blocking real users mid-build with
+ * "Too many automated requests. Try again in Ns.". Those endpoints are already protected by auth,
+ * per-build credit/budget limits and the static per-IP limiters, so the bot-burst layer is both
+ * unnecessary and harmful there. Pure + exported so the exemption is unit-tested.
+ */
+export function isGuardedPath(path: string): boolean {
+  if (!path.startsWith('/api/')) return false;
+  if (path.startsWith('/api/agentv3/')) return false; // interactive v3.0 build surface — exempt
+  return true;
+}
+
 interface ClientState {
   /** Recent request timestamps (trimmed to the detection window). */
   history: number[];
@@ -117,11 +133,14 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  */
 export function adaptiveGuard(options: AdaptiveGuardOptions = {}) {
   const windowMs = options.windowMs ?? 10_000;
-  const maxInWindow = options.maxInWindow ?? 25;
+  // Burst ceiling per window. 25/10s was far too low for a logged-in user driving an interactive
+  // app (chat + polling legitimately bursts past it); a real scraper does hundreds/sec, so 120/10s
+  // still catches genuine hammering while never tripping on normal interactive use.
+  const maxInWindow = options.maxInWindow ?? 120;
   const botThreshold = options.botThreshold ?? 0.8;
   const blockAfter = options.blockAfter ?? 5;
   const blockMs = options.blockMs ?? 60_000;
-  const shouldGuard = options.shouldGuard ?? ((req: Request) => req.path.startsWith('/api/'));
+  const shouldGuard = options.shouldGuard ?? ((req: Request) => isGuardedPath(req.path));
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     if (process.env.VITEST) { next(); return; }

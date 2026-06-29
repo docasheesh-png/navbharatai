@@ -5576,3 +5576,20 @@ Regression test (ToolDispatcher.test.ts): a getPortUrl that never resolves now r
 the timeout (fake timers) and emits no preview event.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3384/3384 PASS, boot:check PASS.
+
+## 2026-06-29 — FIX: adaptive bot-guard was blocking real v3.0 builds ("Too many automated requests")
+
+A logged-in user typing "ek notes app banao" in v3.0 got an instant 429 "Too many automated requests.
+Try again in 36s." Root cause: the P-SEC.8 behavioural bot-guard (adaptiveRateLimit.ts, mounted on the
+whole /api/ surface) used a burst threshold of just 25 requests / 10s. A single legitimate v3.0 build
+session bursts well past that (SSE build stream + reconnects, plus status / preview-status /
+workspace-files / conversations / diagnostics polling), so it accrued 5 "violations" and hit the 60s
+hard block — locking the user out mid-build. The v3.0 endpoints are authenticated, credit-metered and
+already covered by the static per-IP limiters, so the behavioural bot layer is both unnecessary and
+harmful there. Fix: (1) new exported, unit-tested isGuardedPath() predicate = default shouldGuard —
+guards /api/ EXCEPT /api/agentv3/* (the interactive build surface is exempt); (2) raised the default
+burst ceiling 25 → 120 per 10s so other interactive endpoints (chat) tolerate normal bursts while a real
+scraper (hundreds/sec) is still caught. Bot-UA detection + static limiters unchanged. The in-memory block
+map also clears on the Cloud Run redeploy, so the deploy itself releases any currently-blocked users.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3399/3399 PASS (+3 isGuardedPath), boot:check PASS.

@@ -110,7 +110,7 @@ import {
   saveWorkspaceMemory,
   restoreWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
-import { saveWorkspaceFiles, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { saveWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
@@ -1043,6 +1043,40 @@ export function registerAgentV3Routes(app: Express): void {
       res.json({ imported: written.length, skipped: skipped.length });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to import the files.' });
+    }
+  });
+
+  // Delete files from the v3.0 workspace — keeps v3.0's known file set in sync when the user
+  // deletes files in the IDE. Removes the paths from the durable WorkspaceFileStore (the
+  // authoritative source for what files exist), so a fresh/restored session won't have them and
+  // the file-guardian won't resurrect them. Ownership-checked. Body { workspaceId, userId, email,
+  // paths: string[] }.
+  app.post('/api/agentv3/delete-files', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const paths = Array.isArray(req.body?.paths) ? req.body.paths.filter((p: any) => typeof p === 'string' && p) : null;
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!paths || paths.length === 0) {
+      res.status(400).json({ error: 'paths (a non-empty string[]) is required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    try {
+      const deleted = await removeWorkspaceFiles(workspaceId, paths.slice(0, 5000));
+      res.json({ deleted });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to delete the files.' });
     }
   });
 

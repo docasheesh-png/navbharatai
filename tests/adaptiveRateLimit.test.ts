@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scoreUserAgent, isBurst, computePenaltyMs } from '../src/server/lib/adaptiveRateLimit';
+import { scoreUserAgent, isBurst, computePenaltyMs, isGuardedPath } from '../src/server/lib/adaptiveRateLimit';
 
 /**
  * P-SEC.8 — Adaptive rate limiting + bot detection (pure scoring functions).
@@ -54,6 +54,27 @@ describe('adaptiveRateLimit — isBurst', () => {
     for (let i = 0; i < 30; i++) ts.push(now - 60_000 - i * 100); // all > 10s old
     ts.reverse();
     expect(isBurst(ts, now, 10_000, 25)).toBe(false);
+  });
+});
+
+describe('adaptiveRateLimit — isGuardedPath', () => {
+  it('guards the general /api/ surface', () => {
+    expect(isGuardedPath('/api/pro-chat')).toBe(true);
+    expect(isGuardedPath('/api/admin/users')).toBe(true);
+  });
+
+  it('does NOT guard non-/api/ paths (static assets, the SPA)', () => {
+    expect(isGuardedPath('/')).toBe(false);
+    expect(isGuardedPath('/assets/index.js')).toBe(false);
+  });
+
+  it('EXEMPTS the interactive v3.0 build surface (the real-user-blocked bug)', () => {
+    // A single build bursts these — they must never trip the behavioural bot block.
+    expect(isGuardedPath('/api/agentv3/chat')).toBe(false);
+    expect(isGuardedPath('/api/agentv3/status')).toBe(false);
+    expect(isGuardedPath('/api/agentv3/preview-status')).toBe(false);
+    expect(isGuardedPath('/api/agentv3/workspace-files')).toBe(false);
+    expect(isGuardedPath('/api/agentv3/conversations')).toBe(false);
   });
 });
 

@@ -1315,7 +1315,7 @@
 - **Files:** `src/server/AppMakerLab/intelligence/TechnicalDebtTracker.ts` (new), `src/server/routes/techDebt.ts` (new),
       `tests/technicalDebtTracker.test.ts` (new), `server.ts`.
 
-### P-PME.4 — AI Build Time Estimator / Deadline Predictor  🟡 engine+API DONE / UI+persistence PENDING  [HIGH]
+### P-PME.4 — AI Build Time Estimator / Deadline Predictor  ✅ DONE (2026-06-29) · 🔌 WIRED  [historical-blending persistence deferred]
 - Builds showed an open-ended spinner with no ETA. Now there is a real estimator.
 - [x] Added `src/server/lib/BuildTimeEstimator.ts` — pure, dependency-free: `heuristicEstimateMs` (from
   blueprint complexity: modules × features × avg tokens/module), `estimateBuildTime` (blends the heuristic with a
@@ -1324,9 +1324,13 @@
   confidence + basis (`heuristic`/`blended`/`historical`). Honest: no history → heuristic basis, lower confidence.
   8 unit tests.
 - [x] Added `POST /api/build-estimate` (stateless): `{ complexity, history?, startMs? }` → estimate + ETA (+ finish time).
-- [ ] **Still pending:** show "Estimated: ~2 min" in the build progress UI and record actual durations to
-  `buildHistory[]` (UI + Firestore persistence — deferred from the unattended run).
-- **Files:** new `src/server/lib/BuildTimeEstimator.ts` + `.test.ts`, new `src/server/routes/buildEstimate.ts`, `server.ts`.
+- [x] **BUILD-PATH WIRING (live v3.0)** — new pure `complexityFromPrompt` (unit-tested, clamped) + `routes/agentv3.ts`
+  emits an up-front **"⏱️ Estimated build time: ~N"** narration at the start of every build/edit turn (derived from the
+  prompt's complexity), so the user sees a real ETA instead of an open-ended spinner. Actual durations are already
+  recorded per build in `AgentV3CostTelemetry` (durationMs).
+- [ ] **Still deferred:** persisting a per-user historical build-duration set to feed the estimator's `historical`/
+  `blended` basis (the heuristic ETA is live now; the history-blended refinement is the smaller remaining extra).
+- **Files:** `src/server/lib/BuildTimeEstimator.ts` + `.test.ts`, `src/server/routes/agentv3.ts`, `src/server/routes/buildEstimate.ts`.
 
 ### P-PME.5 — Lessons Learned / Retrospective Engine  ✅ DONE (2026-06-29) · 🔌 WIRED  [Firestore-history deferred]
 - Failed builds weren't systematically learned from. Now there is a real retrospective engine.

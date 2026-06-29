@@ -1,10 +1,31 @@
 import { describe, it, expect } from 'vitest';
 import {
   complexityScore, heuristicEstimateMs, formatEta, estimateBuildTime, predictDeadline,
+  complexityFromPrompt,
   type HistoricalBuild,
 } from './BuildTimeEstimator';
 
 describe('BuildTimeEstimator (P-PME.4)', () => {
+  describe('complexityFromPrompt', () => {
+    it('scales with described pages + features, clamped to sane bounds', () => {
+      const simple = complexityFromPrompt('a todo app');
+      const rich = complexityFromPrompt('an app with a dashboard page, a profile screen, auth, search, charts and payment');
+      expect(rich.moduleCount).toBeGreaterThan(simple.moduleCount);
+      expect(rich.featureCount).toBeGreaterThan(simple.featureCount);
+      expect(simple.moduleCount).toBeGreaterThanOrEqual(1);
+      expect(simple.featureCount).toBeGreaterThanOrEqual(1);
+    });
+    it('clamps an absurdly long prompt', () => {
+      const c = complexityFromPrompt('page '.repeat(500) + 'and '.repeat(500));
+      expect(c.moduleCount).toBeLessThanOrEqual(20);
+      expect(c.featureCount).toBeLessThanOrEqual(30);
+    });
+    it('handles empty input', () => {
+      const c = complexityFromPrompt('');
+      expect(c.moduleCount).toBe(1);
+      expect(c.featureCount).toBe(1);
+    });
+  });
   describe('complexityScore + heuristic', () => {
     it('grows with modules and features', () => {
       expect(complexityScore({ moduleCount: 5, featureCount: 10 })).toBeGreaterThan(

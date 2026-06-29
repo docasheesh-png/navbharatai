@@ -1703,15 +1703,25 @@
 - **Files:** new `src/server/AgentV3/DialogueStateManager.ts`, `src/server/AgentV3/IntentClassifier.ts`,
   `src/server/AI/UniversalAIRouter.ts`.
 
-### P-AI.4 — NLU Completion (Entity Recognition + Slot Filling)  🟡 PARTIAL → full  [HIGH]
-- `IntentExtractor.ts` does keyword/heuristic domain detection. `RequirementIntelligenceEngine.ts` does
-  structured requirement parsing via LLM. No named entity extraction or slot filling (e.g. "build me a
-  shop with Razorpay" → entity: Razorpay, slot: payment_gateway).
-- [ ] Add entity recognition pass to `IntentClassifier.ts`: extract named technologies, frameworks, APIs
-  from user message and inject as structured slots into `FilePlanningEngine`.
-- [ ] Map extracted slots → `BlueprintInferenceEngine.ts` template selection for higher accuracy.
-- **Files:** `src/server/AgentV3/IntentClassifier.ts`, `src/server/AppMakerLab/intelligence/IntentExtractor.ts`,
-  `src/server/AppMakerLab/BlueprintInferenceEngine.ts`.
+### P-AI.4 — NLU Completion (Entity Recognition + Slot Filling)  ✅ DONE (2026-06-29) · 🔌 WIRED
+- `IntentExtractor`/`RequirementIntelligenceEngine` did keyword + LLM requirement parsing but no NAMED
+  ENTITY extraction or slot filling (e.g. "build me a shop with Razorpay" → entity: Razorpay, slot: payment).
+- [x] **`EntityExtractor.ts`** (new) — pure, high-precision recognizer over a curated catalog of ~80 named
+      services across 14 slots (payment, database, auth, hosting, email, sms, ai, storage, maps, analytics,
+      search, realtime, framework, styling). Word-boundary matching (handles dotted/multi-word brands like
+      Next.js, Socket.IO, Google Maps; rejects substrings like "stripey" and ambiguous common words). Returns
+      de-duplicated `{slot, name}` entities. `entityRequirementsContext()` renders them grouped-by-slot.
+- [x] **Wired into the LIVE v3.0 build path** — `routes/agentv3.ts` extracts entities from the actual prompt
+      and prepends a "DETECTED REQUIREMENTS — you MUST use these EXACT choices" block to the Architect system
+      prompt (additive; '' when nothing named, so plain prompts + prompt-regression tests are unaffected). So
+      naming "Razorpay + Supabase + Clerk" makes the agent wire those exact SDKs instead of its own defaults —
+      a felt accuracy win, not a headless parser. (This targets the live AgentV3 path per the wiring directive,
+      which supersedes the legacy AppMakerLab `BlueprintInferenceEngine` route the original spec named.)
+- [x] **AppKnowledgeBase** — added an "UNDERSTANDS NAMED TECH" capability bullet to the v3.0 entry.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3447/3447 ✅ (+14) · `test:coverage` exit 0 (stmts 64.22%) ·
+      `build` ✅ · `boot:check` PASS.
+- **Files:** new `src/server/AgentV3/EntityExtractor.ts`, `src/server/routes/agentv3.ts`,
+  `src/server/AppContext/AppKnowledgeBase.ts`, `tests/entityExtractor.test.ts` (new).
 
 ### P-AI.5 — Preference Learning / Personalization  ✅ DONE (2026-06-29) · 🔌 WIRED
 - The AI treated every user identically. Now v3.0 learns each user's revealed stack from their past

@@ -85,6 +85,7 @@ import { buildDocumentContext } from '../lib/attachmentText';
 import { redactPII } from '../AgentV3/SecretRedactor';
 import { audit } from '../lib/audit';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
+import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -1732,6 +1733,14 @@ export function registerAgentV3Routes(app: Express): void {
         const prefContext = await userPreferenceStore.contextFor(userId);
         if (prefContext) architectSystem = `${prefContext}\n\n---\n\n${architectSystem}`;
       } catch { /* preference context is best-effort — a failure leaves the prompt unchanged */ }
+      // P-AI.4 — NLU: recognize the concrete services the user named in THIS prompt (Razorpay,
+      // Supabase, Clerk, …) and inject them as explicit requirements so the agent wires those exact
+      // choices instead of substituting its own defaults. Additive + best-effort — '' when nothing
+      // was named, so plain prompts and the prompt-regression tests are unaffected.
+      try {
+        const entityContext = entityRequirementsContext(extractEntities(prompt));
+        if (entityContext) architectSystem = `${entityContext}\n\n---\n\n${architectSystem}`;
+      } catch { /* entity extraction is best-effort — a failure leaves the prompt unchanged */ }
       if (isEditMode) {
         let fileTree: string[] = [];
         try {

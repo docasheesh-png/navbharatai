@@ -717,15 +717,19 @@ export class ToolDispatcher {
         // Sort by import dependencies: files that import others go after their deps.
         const sorted = topoSortBatch(batchFiles);
         const written: string[] = [];
+        const batchMem = getWorkspaceMemory(this.workspaceId);
         for (const file of sorted) {
           await this.actuator.writeFile(this.workspaceId, file.path, file.content);
           this.state?.recordFileChange({ path: file.path, kind: 'create' }, agent);
-          const batchMem = getWorkspaceMemory(this.workspaceId);
           batchMem.indexFile(file.path, file.content);
           getEmbeddingStore(this.workspaceId).addFile(file.path, file.content).catch(() => {});
-          await this.maybeCheckpoint(`create ${file.path}`);
           written.push(file.path);
         }
+        // Checkpoint ONCE for the whole batch — NOT once per file. A git commit per file made an
+        // N-file batch cost N commits (with `git add -A` each ~45s pre-gitignore), which is exactly
+        // what pushed builds past the wall-clock cap. One commit per batch is both correct (the batch
+        // is one logical change) and fast.
+        await this.maybeCheckpoint(`create ${written.length} file(s): ${written.slice(0, 5).join(', ')}${written.length > 5 ? '…' : ''}`);
         return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.`;
       }
 

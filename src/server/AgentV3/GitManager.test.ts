@@ -33,6 +33,21 @@ describe('GitManager', () => {
     expect(shell.calls.some((c) => c.includes('git add -A') && c.includes('git commit'))).toBe(true);
   });
 
+  it('writes a .gitignore (node_modules etc.) at init so checkpoints never stage deps', async () => {
+    const shell = new FakeShell();
+    const git = new GitManager(shell, 'ws-1');
+    await git.ensureRepo();
+    // node_modules must be ignored BEFORE git init, so `git add -A` stays cheap.
+    const gitignoreCall = shell.calls.find((c) => c.includes('.gitignore'));
+    expect(gitignoreCall).toBeTruthy();
+    expect(gitignoreCall).toContain('node_modules/');
+    const ignoreIdx = shell.calls.findIndex((c) => c.includes('.gitignore'));
+    const initIdx = shell.calls.findIndex((c) => c.includes('git init'));
+    expect(ignoreIdx).toBeLessThan(initIdx); // gitignore first, then init
+    // It also untracks heavy dirs an older sandbox may have already committed.
+    expect(shell.calls.some((c) => c.includes('git rm -r --cached') && c.includes('node_modules'))).toBe(true);
+  });
+
   it('sanitises commit messages (no quotes/newlines/backticks)', async () => {
     const shell = new FakeShell();
     const git = new GitManager(shell, 'ws-1');

@@ -287,7 +287,16 @@ export function ViewPanels({
       {/* Phase 3 — Diff Viewer */}
       {activeView === 'diff' && (
         <div className="flex-1 h-full overflow-hidden">
-          <DiffViewer files={files} />
+          <DiffViewer
+            files={files}
+            onResolveConflicts={(fileName: string, resolved: string) => {
+              // P-DEV.4 — write the marker-free resolved content back to the workspace + refresh preview.
+              const next = { ...(files as Record<string, string>), [fileName]: resolved };
+              setFiles(next as any);
+              updatePreview(next as any);
+              addToast(`Resolved conflicts in ${fileName} ✓`, 'success');
+            }}
+          />
         </div>
       )}
 

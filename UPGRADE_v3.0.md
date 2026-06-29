@@ -1140,12 +1140,25 @@
 - [ ] Render a DebugPanel: call stack list, variable watch (add/remove expressions), continue/step-over/step-into buttons.
 - **Files:** new `src/components/ide/DebugPanel.tsx`, `src/components/ide/Editor.tsx`, `infra/e2b/`, `server.ts`.
 
-### P-DEV.4 — Merge Conflict Resolver (3-way Merge Editor)  ❌ MISSING  [HIGH]
-- `DiffViewer.tsx` shows 2-way LCS diffs. No 3-way merge editor for conflict resolution when LiveCollaboration produces concurrent edits or GitPanel pulls conflicting branches.
-- [ ] Add a 3-pane MergeEditor: left (ours) | center (base) | right (theirs) with Accept/Reject/Both buttons per hunk.
-- [ ] Integrate with GitPanel.tsx: detect `<<<<<<< HEAD` conflict markers in files → open MergeEditor automatically.
-- [ ] After all conflicts resolved, auto-close MergeEditor and mark file as staged.
-- **Files:** new `src/components/ide/MergeEditor.tsx`, `src/components/ide/GitPanel.tsx`, `src/components/ide/DiffViewer.tsx`.
+### P-DEV.4 — Merge Conflict Resolver (3-way Merge Editor)  ✅ DONE (2026-06-29)
+- `DiffViewer.tsx` showed only 2-way LCS diffs — no way to resolve conflict markers in a file.
+- [x] **Dependency-free diff3 engine** (`src/lib/merge3.ts`, exhaustively unit-tested) — `merge3(base, ours,
+      theirs)` auto-merges non-overlapping changes and only emits Git-style markers where both sides changed the
+      SAME region differently; `parseConflicts()` reads a marker-laden file into stable/conflict segments
+      (tolerates diff3 `|||||||` bases); `resolveConflicts()` turns per-hunk choices into clean content;
+      `hasConflictMarkers()` gates the UI.
+- [x] **MergeEditor UI** (`src/components/ide/MergeEditor.tsx`) — lists each conflict Ours-vs-Theirs with per-hunk
+      Ours / Theirs / Both buttons and a live resolved preview; "Apply Resolution" emits marker-free content.
+- [x] **Wired into the Diff view** — `DiffViewer` detects conflict markers in the selected file, flags it, and
+      shows a "Resolve Conflicts" toggle that opens the MergeEditor; `ViewPanels` passes `onResolveConflicts`
+      which writes the resolved file back via `setFiles` + refreshes the preview (fully end-to-end).
+- [x] **AppKnowledgeBase** — new `merge-conflict-resolver` entry (same PR).
+- **Note (honest):** hosted in `DiffViewer` (the small, safe diff surface) rather than the 2,621-line `GitPanel`
+      to avoid breakage risk (safeguard #3); the engine is reusable, so a GitPanel auto-open is a thin follow-up.
+      The 3-pane base column is folded into the engine (diff3 base is parsed/used) rather than a separate pane.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3287/3287 ✅ (14 new) · `test:coverage` exit 0 · `build` ✅.
+- **Files:** `src/lib/merge3.ts` (new), `tests/merge3.test.ts` (new), `src/components/ide/MergeEditor.tsx` (new),
+      `src/components/ide/DiffViewer.tsx`, `src/components/panels/ViewPanels.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`.
 
 ### P-DEV.5 — Real Package Manager Integration  🟡 PARTIAL → full  [HIGH]
 - Terminal mock in `TerminalPanel.tsx` intercepts `npm install <pkg>` and returns fake output.

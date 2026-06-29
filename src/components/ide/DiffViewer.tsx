@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlignLeft, Check, ChevronDown, Columns, Copy, GitBranch } from 'lucide-react';
+import { AlignLeft, Check, ChevronDown, Columns, Copy, GitBranch, GitMerge } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { hasConflictMarkers } from '../../lib/merge3';
+import { MergeEditor } from './MergeEditor';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -8,6 +10,12 @@ interface DiffViewerProps {
   files: Record<string, string>;
   previousFiles?: Record<string, string>;
   onClose?: () => void;
+  /**
+   * P-DEV.4 — called when the user resolves a file's merge conflicts in the built-in MergeEditor.
+   * When provided, conflicted files show a "Resolve Conflicts" action; the resolved (marker-free)
+   * content is handed back here to persist.
+   */
+  onResolveConflicts?: (fileName: string, resolvedContent: string) => void;
 }
 
 type DiffLineType = 'added' | 'removed' | 'unchanged';
@@ -202,12 +210,13 @@ const UnifiedDiffLine: React.FC<{ line: DiffLine }> = ({ line }) => {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, onClose }) => {
+export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, onClose, onResolveConflicts }) => {
   const fileNames = Object.keys(files);
   const [selectedFile, setSelectedFile] = useState<string>(fileNames[0] ?? '');
   const [unified, setUnified] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pastedOld, setPastedOld] = useState<Record<string, string>>({});
+  const [mergeMode, setMergeMode] = useState(false); // P-DEV.4 — conflict-resolution view
 
   const leftPanelRef = useRef<HTMLDivElement>(null);
   const rightPanelRef = useRef<HTMLDivElement>(null);
@@ -215,6 +224,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
 
   const newCode = files[selectedFile] ?? '';
   const resolvedOld = previousFiles?.[selectedFile] ?? pastedOld[selectedFile];
+  const fileHasConflicts = hasConflictMarkers(newCode); // P-DEV.4
+
+  // Leave merge mode whenever the selected file changes or no longer has conflicts.
+  useEffect(() => { if (!fileHasConflicts) setMergeMode(false); }, [selectedFile, fileHasConflicts]);
 
   const oldLines = resolvedOld !== undefined ? resolvedOld.split('\n') : [];
   const newLines = newCode.split('\n');
@@ -425,10 +438,34 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
           </div>
         )}
 
+        {/* P-DEV.4 — conflict indicator */}
+        {fileHasConflicts && (
+          <span className="flex items-center gap-1 text-xs ml-1 text-amber-400 font-semibold">
+            <GitMerge size={12} /> merge conflicts
+          </span>
+        )}
+
         <div className="flex-1" />
 
+        {/* P-DEV.4 — open the merge-conflict resolver */}
+        {fileHasConflicts && (
+          <button
+            onClick={() => setMergeMode((m) => !m)}
+            title="Resolve merge conflicts"
+            className={cn(
+              'flex items-center gap-1 px-2 py-1 text-xs border rounded transition-colors',
+              mergeMode
+                ? 'bg-amber-600 border-amber-500 text-white'
+                : 'bg-gray-900 border-amber-700/50 text-amber-400 hover:bg-gray-800',
+            )}
+          >
+            <GitMerge size={12} />
+            <span>{mergeMode ? 'Back to diff' : 'Resolve Conflicts'}</span>
+          </button>
+        )}
+
         {/* View toggle */}
-        {hasDiff && (
+        {hasDiff && !mergeMode && (
           <div className="flex items-center bg-gray-900 border border-gray-700 rounded overflow-hidden">
             <button
               onClick={() => setUnified(false)}
@@ -480,7 +517,14 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
       </div>
 
       {/* Body */}
-      {!hasDiff ? (
+      {mergeMode && fileHasConflicts ? (
+        <MergeEditor
+          fileName={selectedFile}
+          content={newCode}
+          onResolved={onResolveConflicts ? (resolved) => { onResolveConflicts(selectedFile, resolved); setMergeMode(false); } : undefined}
+          onCancel={() => setMergeMode(false)}
+        />
+      ) : !hasDiff ? (
         <PasteMode newCode={newCode} onCompare={handlePasteCompare} />
       ) : unified ? (
         renderUnified()

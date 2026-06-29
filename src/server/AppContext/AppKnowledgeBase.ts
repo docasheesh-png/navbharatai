@@ -1591,6 +1591,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['sbom', 'bill of materials', 'cyclonedx', 'license', 'gpl', 'agpl', 'copyleft', 'compliance', 'supply chain', 'dependencies', 'oss', 'open source license', 'license check', 'audit'],
   },
   {
+    id: 'merge-conflict-resolver',
+    name: 'Merge Conflict Resolver',
+    path: 'Diff view → open a file with merge conflicts → "Resolve Conflicts"',
+    description: `A 3-way merge conflict resolver built into the Diff viewer. When a file contains Git-style conflict markers (<<<<<<< / ======= / >>>>>>>), the Diff view flags it ("merge conflicts") and shows a "Resolve Conflicts" button. The resolver lists each conflict hunk side-by-side (Ours vs Theirs) with per-hunk Ours / Theirs / Both buttons and a live resolved preview; "Apply Resolution" writes the clean, marker-free content back to the workspace file and refreshes the preview. Powered by a dependency-free diff3 engine that also auto-merges non-overlapping changes and only marks a true conflict when both sides change the same region differently.`,
+    howToUse: 'Open the Diff view and select a file that has conflict markers. Click "Resolve Conflicts", pick Ours / Theirs / Both for each conflict, then "Apply Resolution" to save the resolved file.',
+    relatedFeatures: ['pro_chat'],
+    keywords: ['merge', 'conflict', 'merge conflict', 'resolve conflict', '3-way merge', 'diff3', 'git conflict', 'HEAD', 'ours', 'theirs', 'conflict markers', 'merge editor'],
+  },
+  {
     id: 'build-performance-analytics',
     name: 'Build Performance Analytics',
     path: 'Analytics view → Build Performance card',

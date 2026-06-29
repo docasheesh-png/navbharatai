@@ -649,13 +649,28 @@
 - [ ] Wire `metricsAlerts.ts` HIGH alerts to fire a Firestore notification that the admin UI surfaces as a red banner.
 - **Files:** new `docs/INCIDENT_RESPONSE.md`, `src/server/lib/metricsAlerts.ts`, `src/server/routes/admin.ts`.
 
-### P-SEC.13 — Device Fingerprinting + Session Binding  ❌ MISSING  [LOW]
-- Sessions are Firebase ID tokens validated per-request. No device fingerprinting, no impossible-travel detection
-  for regular users (only admin login IPs tracked). Token replay from a different device/IP is undetected.
-- [ ] On login: record device fingerprint (user-agent + IP hash) in Firestore `user_sessions/{uid}/{sessionId}`.
-- [ ] On each authenticated request: compare current IP/UA against recorded session — flag if mismatch.
-- [ ] Step-up auth (re-auth prompt) if device mismatch detected for sensitive operations (billing, secret access).
-- **Files:** `src/server/lib/authMiddleware.ts`, new `src/server/lib/sessionTracker.ts`.
+### P-SEC.13 — Device Fingerprinting + Session Binding  ✅ DONE (2026-06-29, detection layer)
+- Sessions are Firebase ID tokens validated per-request but carry no device identity, so a replayed token from a
+  different device/IP was invisible (only admin login IPs were tracked).
+- [x] **Device fingerprint binding** (`src/server/lib/sessionTracker.ts`) — `computeFingerprint()` hashes
+      UA + IP (we store HASHES, never raw IPs — privacy); `recordAndEvaluateDevice()` binds devices to the user
+      in Firestore `user_sessions/{uid}` (capped at 20, evict-oldest), best-effort (a Firestore outage / VITEST
+      never breaks a request).
+- [x] **Mismatch detection** — `evaluateDevice()` (pure, unit-tested) classifies risk: `none` (exact match or
+      first-ever baseline) · `low` (known UA, new IP — routine mobile handover) · `high` (brand-new UA = a
+      different device/browser, the strongest replay signal).
+- [x] **Sensitive-op guard** — `trackDevice()` middleware wired onto secret access (`GET /api/secrets/:userId`):
+      records the device, and on a `high`-risk first-seen device emits a `SENSITIVE_ACCESS_NEW_DEVICE` audit
+      event (severity warn) + an honest `X-Device-New: true` response header the client can surface.
+- [ ] **Hard step-up RE-AUTH prompt** is deliberately NON-blocking here, by design — a UA bump (every browser
+      update) or a mobile IP change must never lock a real user out (the "app must never break" rule). A blocking
+      step-up needs the user-login re-auth UI, whose login-path changes carry breakage risk (safeguard #3), so
+      it is deferred; the detection + audit + signal layer ships now. [ ] **Impossible-travel / geo-velocity** is
+      also deferred: it needs an external GeoIP service that doesn't exist for this project — not faked.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3188/3188 ✅ (10 new in `tests/sessionTracker.test.ts`) ·
+      `npm run build` ✅ · `boot:check` PASS.
+- **Files:** `src/server/lib/sessionTracker.ts` (new), `src/server/lib/authMiddleware.ts`,
+      `src/server/routes/secrets.ts`, `tests/sessionTracker.test.ts` (new).
 
 ---
 

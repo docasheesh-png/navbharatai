@@ -1970,12 +1970,23 @@
   Safety/Policy (CommandGovernance, SecretRedactor, UntrustedContent, fenceUntrusted),
   RequirementIntelligenceEngine, FilePlanningEngine, ASTAnalyzer (ts-morph), EmbeddingSearch (ada-002).
 
-### P-PE.1 — Prompt/Response Cache  ❌ MISSING  [HIGH — cost & latency]
-- Every AI call is a fresh API hit. Identical prompts (template generation, common questions) spend money.
-- [ ] Add a cache layer (Redis / in-memory LRU with TTL) in `AIRouter.ts` — cache key = hash(model + messages).
-- [ ] TTL: 5 min for builds, 1 hr for template/docs prompts. Skip cache for edit/fix intents.
-- [ ] Cache hit metric: fire `trackEvent('cache_hit', {promptHash})`.
-- **Files:** `src/server/AI/Router/AIRouter.ts`, new `src/server/AI/PromptCache.ts`.
+### P-PE.1 — Prompt/Response Cache  ✅ DONE (2026-06-29) · 🔌 WIRED
+- Every AI call was a fresh API hit; identical conversational prompts ("hi", "who are you", "what is
+  NavBharatAI") spent a model call each time.
+- [x] **`PromptCache.ts`** (new) — dependency-free `TTLCache` (TTL + LRU, get-refreshes-recency, expiry purge)
+      + `hashKey` (FNV-1a, pure) + `chatCacheEnabled()` toggle (`AGENTV3_CHAT_CACHE`). All unit-tested by passing
+      `now` explicitly. Shared `chatResponseCache` (500 entries, 15-min TTL).
+- [x] **Wired into the live plain-chat path** — `routes/agentv3.ts` serves identical plain-chat prompts from the
+      cache (instant + free, no behaviour change). Correct-by-construction: that reply is a pure function of the
+      current prompt (no transcript/user data injected on that path). Cached ONLY when there is no attachment, and
+      only a real non-empty reply is stored. Build/edit/fix turns never reach this path, so they are never cached.
+- [x] **Skip rule honored** — edit/fix intents go through the build loop (uncached); attachment turns skipped.
+- **Scope note:** implemented at the plain-chat call site (the safe, felt path) rather than wrapping the whole
+  AIRouter — a router-wide cache would risk returning stale results for classifier/build sub-calls. `trackEvent`
+  is a frontend fn; server-side the hit is simply a no-LLM fast return (no telemetry coupling added).
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3461/3461 ✅ (+10) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** new `src/server/AgentV3/PromptCache.ts`, `src/server/routes/agentv3.ts`, `tests/promptCache.test.ts` (new).
 
 ### P-PE.2 — Prompt Versioning / Registry  ❌ MISSING  [HIGH]
 - System prompts are hardcoded in `AgentV3/systemPrompt.ts`. No version history, no rollback.

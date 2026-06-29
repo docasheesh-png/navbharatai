@@ -118,6 +118,47 @@ export function containsSecret(input: unknown): boolean {
 }
 
 /**
+ * P-AI.6 — general PII patterns (India-focused), separate from secret/API-key shapes. Used to
+ * mask personal data in USER-UPLOADED content (documents, pasted code/data) before it enters the
+ * transcript/model context or logs. Ordered email → PAN → IFSC → Aadhaar → phone so longer/structured
+ * shapes match before the looser phone pattern.
+ */
+const PII_PATTERNS: Array<{ kind: string; re: RegExp }> = [
+  { kind: 'email', re: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g },
+  // PAN: 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F).
+  { kind: 'pan', re: /\b[A-Z]{5}\d{4}[A-Z]\b/g },
+  // IFSC: 4 letters, '0', 6 alphanumerics (e.g. HDFC0001234).
+  { kind: 'ifsc', re: /\b[A-Z]{4}0[A-Z0-9]{6}\b/g },
+  // Aadhaar: 12 digits (first 2-9), optionally space/hyphen-grouped 4-4-4.
+  { kind: 'aadhaar', re: /\b[2-9]\d{3}[\s-]?\d{4}[\s-]?\d{4}\b/g },
+  // Indian mobile: 10 digits starting 6-9, optional +91 / 0 prefix.
+  { kind: 'phone', re: /\b(?:\+?91[\s-]?|0)?[6-9]\d{9}\b/g },
+];
+
+/**
+ * Mask personal data (email / PAN / IFSC / Aadhaar / phone) in a block of text. Higher recall than
+ * `redactSecrets` (PII is worth masking even at some false-positive cost). Never throws; returns the
+ * input unchanged on error or non-string.
+ */
+export function redactPII(input: unknown): string {
+  if (typeof input !== 'string' || input.length === 0) {
+    return typeof input === 'string' ? input : String(input ?? '');
+  }
+  try {
+    let out = input;
+    for (const { kind, re } of PII_PATTERNS) out = out.replace(re, mask(kind));
+    return out;
+  } catch {
+    return input;
+  }
+}
+
+/** True if `input` contains detectable PII. */
+export function containsPII(input: unknown): boolean {
+  return typeof input === 'string' && redactPII(input) !== input;
+}
+
+/**
  * Recursively redact every string leaf in a value (object / array / string). Used to clean a
  * tool-call INPUT object (e.g. a bash command that inlines a key) before it is shown to the user.
  * Non-string leaves pass through unchanged. Never throws; returns the input as-is on error.

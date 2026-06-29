@@ -1723,13 +1723,18 @@
 - **Files:** new `src/server/AgentV3/UserPreferenceStore.ts`, `src/server/AgentV3/systemPrompt.ts`,
   `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
 
-### P-AI.6 — Dedicated PII Detection  🟡 PARTIAL → full  [MED]
-- `SecretRedactor.ts` masks API keys/tokens (12+ provider patterns). Does not detect general PII:
-  Aadhaar numbers, PAN, phone numbers, emails, Indian bank account numbers in user-submitted code/data.
-- [ ] Extend `SecretRedactor.ts` with Indian PII patterns: Aadhaar (12-digit), PAN (AAAAA0000A),
-  mobile (10-digit starting 6-9), email, IFSC.
-- [ ] Add `redactPII()` export alongside existing `redactSecrets()` — called on user-uploaded file content.
-- **Files:** `src/server/AgentV3/SecretRedactor.ts`.
+### P-AI.6 — Dedicated PII Detection  ✅ DONE (2026-06-29) · 🔌 WIRED
+- `SecretRedactor` masked API keys but not general PII.
+- [x] **Indian PII patterns** added to `SecretRedactor.ts`: email, PAN (`AAAAA0000A`), IFSC (`AAAA0######`),
+      Aadhaar (12-digit, 4-4-4 spaced/unspaced), Indian mobile (10-digit 6-9, optional +91/0). Unit-tested.
+- [x] **`redactPII()` + `containsPII()`** exports — independent of `redactSecrets()` (higher recall, since PII is
+      worth masking even at some false-positive cost); never throws.
+- [x] **Wired into the real path** — applied to user-uploaded **attachment content** in `routes/agentv3.ts`
+      BEFORE it enters the transcript/model context (and before the prompt-injection fence). So a pasted/uploaded
+      Aadhaar/PAN/phone/email is masked in the actual build flow — not a headless helper.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3376/3376 ✅ (9 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/AgentV3/SecretRedactor.ts`, `src/server/routes/agentv3.ts`, `tests/redactPII.test.ts` (new).
 
 ### P-AI.7 — Test Generation Intelligence  ❌ MISSING  [MED]
 - The system generates app code but never generates corresponding tests. `QualityEvaluationEngine`

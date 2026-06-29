@@ -82,6 +82,7 @@ import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
+import { redactPII } from '../AgentV3/SecretRedactor';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -1250,7 +1251,10 @@ export function registerAgentV3Routes(app: Express): void {
         // timer is armed; on timeout we proceed without the image description.
         const vis = await raceTimeout(describeVisionAttachments(rawAttachments, { useClaude: onlyOpus }), 8_000, 'describeVisionAttachments')
           .catch(() => '');
-        const extracted = [docs, vis].filter(Boolean).join('\n\n');
+        const extractedRaw = [docs, vis].filter(Boolean).join('\n\n');
+        // P-AI.6 — mask personal data (Aadhaar/PAN/phone/email/IFSC) in user-uploaded content
+        // BEFORE it enters the transcript/model context. Best-effort; never throws.
+        const extracted = redactPII(extractedRaw);
         // Prompt-injection defense (R1 §3.3): the user may have innocently uploaded a document
         // or repo that carries an injection payload. Fence the extracted content as untrusted
         // DATA so the agent reads it but never executes instructions hidden inside it.

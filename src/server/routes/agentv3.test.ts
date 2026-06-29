@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -193,6 +193,28 @@ describe('cheapBuildFloorRunners — optional GLM/Kimi cheap floor, DEFAULT OFF 
     process.env.AGENTV3_CHEAP_FLOOR = 'deepseek';
     process.env.GLM_API_KEY = 'x';
     expect(cheapBuildFloorRunners()).toEqual([]);
+  });
+});
+
+describe('cheapFloorAllowedForTier — cheap floor leads only simple/medium (complex → strong model)', () => {
+  const saved = process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS;
+  afterEach(() => { if (saved === undefined) delete process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS; else process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS = saved; });
+
+  it('allows the floor for simple/medium tiers (gemini, haiku) and unknown', () => {
+    delete process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS;
+    expect(cheapFloorAllowedForTier('gemini')).toBe(true);
+    expect(cheapFloorAllowedForTier('haiku')).toBe(true);
+    expect(cheapFloorAllowedForTier(undefined)).toBe(true); // cost-ladder off → allowed (Claude backstops)
+  });
+  it('SKIPS the floor for complex/power tiers (sonnet, opus)', () => {
+    delete process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS;
+    expect(cheapFloorAllowedForTier('sonnet')).toBe(false);
+    expect(cheapFloorAllowedForTier('opus')).toBe(false);
+  });
+  it('AGENTV3_CHEAP_FLOOR_ALL_TIERS=1 overrides → floor allowed on every tier', () => {
+    process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS = '1';
+    expect(cheapFloorAllowedForTier('sonnet')).toBe(true);
+    expect(cheapFloorAllowedForTier('opus')).toBe(true);
   });
 });
 

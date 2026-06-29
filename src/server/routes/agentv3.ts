@@ -498,7 +498,21 @@ export function cheapBuildFloorRunners(): NamedRunner[] {
   return runners;
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; onProviderError?: (name: string, err: unknown) => void }): TurnRunner {
+/**
+ * Whether the cheap build floor (GLM/Kimi) may LEAD a build for a given start tier. The floor is for
+ * SIMPLE/MEDIUM apps (gemini/haiku tiers); a COMPLEX app (sonnet) or POWER build (opus) starts
+ * directly on the strong model — "complex → seedha Sonnet" — so a likely-doomed cheap attempt is not
+ * wasted before escalation. An unknown tier (cost-ladder off) is allowed (the admin opted in and
+ * Claude still backstops). AGENTV3_CHEAP_FLOOR_ALL_TIERS=1 overrides → apply the floor to every tier.
+ * Pure + exported for testing.
+ */
+export function cheapFloorAllowedForTier(startTier?: string): boolean {
+  if (process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS === '1') return true;
+  const tier = (startTier || '').toLowerCase();
+  return tier === 'gemini' || tier === 'haiku' || tier === '';
+}
+
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; onProviderError?: (name: string, err: unknown) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -525,10 +539,12 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; o
   // loading". 2 retries falls through to Gemini/Vertex in a few seconds instead.
   // AGENTV3_BUILD_CLAUDE_RETRIES overrides.
   const buildRetry = { maxRetries: Math.max(0, parseInt(process.env.AGENTV3_BUILD_CLAUDE_RETRIES || '', 10) || 2) };
-  // Optional cheap floor (GLM/Kimi) that LEADS the build chain — [] unless AGENTV3_CHEAP_FLOOR
-  // names a provider with its key present. Computed before the Claude-only early-return so the
-  // floor still applies in a Claude-only env (no Vertex/Gemini configured).
-  const floorRunners = cheapBuildFloorRunners();
+  // Optional cheap floor (GLM/Kimi) that LEADS the build chain — [] unless the caller OPTS IN
+  // (allowCheapFloor: the FIRST build attempt for a non-complex app) AND AGENTV3_CHEAP_FLOOR names a
+  // provider with its key present. Escalation / claudeFirst retries never opt in, so they stay on
+  // Claude. Computed before the Claude-only early-return so the floor still applies in a Claude-only
+  // env (no Vertex/Gemini configured).
+  const floorRunners = opts?.allowCheapFloor ? cheapBuildFloorRunners() : [];
   if (cheap.length === 0 && floorRunners.length === 0) return makeResilientTurnRunner(new ClaudeClient(undefined, buildRetry)); // Claude-only env
   const claude: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient(undefined, buildRetry) };
   // P7 failover hardening: a final Claude-HAIKU backstop that FORCES the Haiku model
@@ -1643,6 +1659,9 @@ export function registerAgentV3Routes(app: Express): void {
       events.subscribe((e) => buildDiag.ingestEvent(e), false);
       const client = buildTurnRunner({
         ...(analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : {}),
+        // First attempt only opts the cheap floor in — and only for simple/medium apps (complex →
+        // straight to the strong model). Escalation builds below never pass this, so they stay Claude.
+        allowCheapFloor: cheapFloorAllowedForTier(analysis?.startTier),
         onProviderError: (name, err) => buildDiag.record({
           phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
           message: `Provider ${name} failed — falling back to the next provider`,

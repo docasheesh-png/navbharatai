@@ -95,6 +95,7 @@ import { estimateBuildTime, complexityFromPrompt } from '../lib/BuildTimeEstimat
 import { incrementalBuildCache, hashFiles, diffHashes } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
+import { planAutoTests } from '../AgentV3/TestGenerationAgent';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, tokenize as rerankTokenize } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
@@ -2772,6 +2773,30 @@ export function registerAgentV3Routes(app: Express): void {
           events.emit({ type: 'narration', agent: 'architect', text: `🧭 Decision trace:\n${decisionTrace.format()}`, ts: Date.now() });
         }
       } catch { /* decision trace is best-effort — never affects the build */ }
+      // P-AI.7 — automatic post-build test scaffolding. After a SUCCESSFUL build/edit, deterministically
+      // generate runnable Vitest skeletons for the top few built source files (ranked by how heavily their
+      // exports are used) that don't already have a test. No extra LLM call/cost; honest skeletons (TODO
+      // markers, no fake assertions); additive test files only, so it can never affect the app's runtime or
+      // the build result. Best-effort — any failure is swallowed.
+      try {
+        if (result.ok && expectsArtifacts && writtenFiles.size > 0) {
+          const sourceFiles = Array.from(writtenFiles.entries()).map(([path, content]) => ({ path, content }));
+          const plan = planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3 });
+          const scaffolded: string[] = [];
+          for (const item of plan) {
+            try {
+              await actuator.writeFile(workspaceId, item.testPath, item.content);
+              writtenFiles.set(item.testPath, item.content);
+              try { getWorkspaceMemory(workspaceId).indexFile(item.testPath, item.content); } catch { /* index is best-effort */ }
+              scaffolded.push(item.testPath);
+            } catch { /* one test file failing must not block the rest */ }
+          }
+          if (scaffolded.length > 0) {
+            await saveWorkspaceFiles(workspaceId, Object.fromEntries(scaffolded.map((p) => [p, writtenFiles.get(p) as string]))).catch(() => {});
+            events.emit({ type: 'narration', agent: 'architect', text: `🧪 Scaffolded ${scaffolded.length} starter test${scaffolded.length > 1 ? 's' : ''} (${scaffolded.join(', ')}) — runnable Vitest skeletons with TODO markers for you to fill in real assertions.`, ts: Date.now() });
+          }
+        }
+      } catch { /* auto-test scaffolding is best-effort — never affects the build result */ }
       emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(diagnostics ? { diagnostics } : {}) });
     } catch (err) {
       // Capture the crash in the diagnostics report too (real-time onUpdate already persisted it).

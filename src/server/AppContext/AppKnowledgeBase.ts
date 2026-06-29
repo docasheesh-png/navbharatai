@@ -1591,6 +1591,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['sbom', 'bill of materials', 'cyclonedx', 'license', 'gpl', 'agpl', 'copyleft', 'compliance', 'supply chain', 'dependencies', 'oss', 'open source license', 'license check', 'audit'],
   },
   {
+    id: 'code-confidence-check',
+    name: 'Code Confidence (AI Hallucination Check)',
+    path: 'Settings → Insights & Webhooks → Code Confidence',
+    description: `Scans the generated app's code for AI "hallucination" signals and gives a 0–100 confidence score: HALLUCINATED DEPENDENCIES (a package imported but not in package.json — the #1 reason a generated app won't install/run), UNRESOLVED LOCAL IMPORTS (importing a file that doesn't exist), and PLACEHOLDER/STUB code (TODO/FIXME, "not implemented" throws, lorem ipsum). Low confidence is flagged with a warning so you review before shipping, instead of silently trusting the AI. Real static analysis of your actual files — no guessing.`,
+    howToUse: 'Open Settings → Insights & Webhooks → "Code Confidence" → Check Code. Review the confidence score and the listed signals (each shows the file + the exact issue).',
+    relatedFeatures: ['insights-integrations-panel', 'app-sbom'],
+    keywords: ['hallucination', 'confidence', 'ai accuracy', 'code quality', 'missing dependency', 'undeclared package', 'unresolved import', 'placeholder', 'stub', 'not implemented', 'trust', 'verify ai'],
+  },
+  {
     id: 'insights-integrations-panel',
     name: 'Insights & Integrations',
     path: 'Settings → Insights & Webhooks',

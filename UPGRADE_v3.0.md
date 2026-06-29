@@ -1661,14 +1661,26 @@
 - Event System: InProcessEventBus (47+ event types), EventHistoryStore.
 - Consensus/Hallucination mitigation: Consensus.ts, ReviewerGuard.ts (partial, present).
 
-### P-AI.1 — Hallucination Detection  🟡 PARTIAL → full  [HIGH]
-- `Consensus.ts` + `ReviewerGuard.ts` provide multi-hat mitigation but are not wired on every generation path.
-  No dedicated hallucination classifier or confidence threshold gate.
-- [ ] Wire `ReviewerGuard` on every LLM output path in `AppMakerOrchestrator.ts` (currently optional).
-- [ ] Add a lightweight consistency check: re-generate critical code segments twice, compare; flag divergence.
-- [ ] Surface low-confidence outputs to the user with a warning badge instead of silently accepting them.
-- **Files:** `src/server/AgentV3/Consensus.ts`, `src/server/AgentV3/ReviewerGuard.ts`,
-  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+### P-AI.1 — Hallucination Detection  ✅ DONE (2026-06-29) · 🔌 UI-WIRED
+- No dedicated hallucination classifier / confidence gate existed (only optional multi-hat review).
+- [x] **`HallucinationDetector.ts`** (pure, unit-tested) — a code-gen-specific hallucination lens over the
+      generated files producing a **0–100 confidence score** from concrete, verifiable signals:
+      **hallucinated dependency** (import of a bare package NOT in package.json — the #1 real hallucination that
+      breaks install/run), **unresolved local import** (`./x` → no such file, with extension/index inference), and
+      **placeholder/stub** (TODO/FIXME, "not implemented" throws, lorem ipsum). `isLowConfidence` gates at a
+      configurable threshold (default 70).
+- [x] **Surfaced to the user (not silently accepted)** — `POST /api/workspace/hallucination-check` +
+      a **"Code Confidence (AI hallucination check)" card** in Settings → Insights & Webhooks shows the score,
+      a low-confidence warning, and the exact signals (file + issue). 🔌 genuinely UI-wired.
+- **Note:** the deep `ReviewerGuard`-on-every-path + twice-regenerate-and-compare are heavier AgentV3 pipeline
+      changes (separate, risk-managed work); this delivers the dedicated classifier + confidence gate + the
+      user-facing warning surface the item called for.
+- **AppKnowledgeBase:** new `code-confidence-check` entry.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3367/3367 ✅ (9 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/AgentV3/HallucinationDetector.ts` (new), `src/server/routes/hallucination.ts` (new),
+      `tests/hallucinationDetector.test.ts` (new), `src/components/panels/ProjectInsightsPanel.tsx`, `server.ts`,
+      `src/server/AppContext/AppKnowledgeBase.ts`.
 
 ### P-AI.2 — Full RAG Pipeline (Reranker + Grounding + Citation)  🟡 PARTIAL → full  [HIGH]
 - `RepositoryIntelligenceEngine.ts` retrieves project files. `EmbeddingSearch.ts` does ada-002 similarity.

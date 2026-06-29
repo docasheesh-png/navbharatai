@@ -51,6 +51,7 @@ import { tracer, parseCloudTraceContext } from './src/server/observability/Trace
 import { registerObservabilityRoutes } from './src/server/routes/observability';
 import { registerReleaseNotesRoutes } from './src/server/routes/releaseNotes';
 import { registerConventionRoutes } from './src/server/routes/convention';
+import { registerBuildEstimateRoutes } from './src/server/routes/buildEstimate';
 import { errorTracker, installGlobalErrorHandlers } from './src/server/observability/ErrorTracker';
 import { registerHealthRoutes, markServerReady } from './src/server/routes/health';
 import { registerWarmRoute } from './src/server/routes/warm';
@@ -505,6 +506,8 @@ setInterval(() => {
   registerReleaseNotesRoutes(app);
   // P-CGE.3 — convention & naming check (stateless file/identifier/import analysis).
   registerConventionRoutes(app);
+  // P-PME.4 — build-time estimate / deadline prediction (stateless complexity+history → ETA).
+  registerBuildEstimateRoutes(app);
   registerSecretsRoutes(app);
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).

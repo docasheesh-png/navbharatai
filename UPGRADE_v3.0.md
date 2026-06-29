@@ -1092,16 +1092,18 @@
 - **Files:** new `src/server/AppMakerLab/intelligence/TechnicalDebtTracker.ts`,
   `src/server/QualityEvaluationEngine/QualityEvaluationEngine.ts`, `src/App.tsx`.
 
-### P-PME.4 — AI Build Time Estimator / Deadline Predictor  ❌ MISSING  [HIGH]
-- When a user starts a build, there is no estimate of how long it will take. Users see a spinner
-  with no ETA. Build times vary from 15s (simple app) to 5min+ (complex multi-module).
-- [ ] Add `BuildTimeEstimator.ts` — before generation starts, estimate duration from:
-  - Blueprint complexity (module count × avg tokens per module).
-  - Historical average from `buildHistory[]` in `ProjectMemoryManager` for this project type.
-- [ ] Show "Estimated: ~2 min" in the build progress UI alongside the progress bar.
-- [ ] After completion, record actual duration → used to improve future estimates.
-- **Files:** new `src/server/AppMakerLab/intelligence/BuildTimeEstimator.ts`,
-  `src/server/AppMakerLab/jobs/BuildJobManager.ts`, `src/App.tsx`.
+### P-PME.4 — AI Build Time Estimator / Deadline Predictor  🟡 engine+API DONE / UI+persistence PENDING  [HIGH]
+- Builds showed an open-ended spinner with no ETA. Now there is a real estimator.
+- [x] Added `src/server/lib/BuildTimeEstimator.ts` — pure, dependency-free: `heuristicEstimateMs` (from
+  blueprint complexity: modules × features × avg tokens/module), `estimateBuildTime` (blends the heuristic with a
+  weighted average of past builds of similar complexity — closer matches weighted more), `formatEta`, and
+  `predictDeadline` (start time is an input — never reads the clock). Returns estimate + low/high range +
+  confidence + basis (`heuristic`/`blended`/`historical`). Honest: no history → heuristic basis, lower confidence.
+  8 unit tests.
+- [x] Added `POST /api/build-estimate` (stateless): `{ complexity, history?, startMs? }` → estimate + ETA (+ finish time).
+- [ ] **Still pending:** show "Estimated: ~2 min" in the build progress UI and record actual durations to
+  `buildHistory[]` (UI + Firestore persistence — deferred from the unattended run).
+- **Files:** new `src/server/lib/BuildTimeEstimator.ts` + `.test.ts`, new `src/server/routes/buildEstimate.ts`, `server.ts`.
 
 ### P-PME.5 — Lessons Learned / Retrospective Engine  ❌ MISSING  [HIGH]
 - `KnowledgeEvolution.ts` (AgentV3) stores per-session lessons in memory. Failed builds beyond the

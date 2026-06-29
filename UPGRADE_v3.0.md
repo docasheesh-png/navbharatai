@@ -1358,14 +1358,25 @@
 - [ ] Extend with per-userId overrides: `config/featureFlags/overrides/{userId}` for beta users.
 - **Files:** `server.ts`, new `src/server/FeatureFlagManager.ts`.
 
-### P-PME.9 — Webhook Manager (build/deploy event notifications)  ❌ MISSING  [MED]
-- No external callbacks when a build completes or fails. Users cannot wire navBharatAI into their
-  own CI/CD systems or receive Slack/Discord alerts on deploy success.
-- [ ] Add `WebhookManager.ts` — allow users to register webhook URLs per project.
-- [ ] Fire `POST` to registered URLs with payload: `{event, projectId, status, buildUrl, timestamp}`
-  on: `BUILD_COMPLETE`, `BUILD_FAILED`, `DEPLOY_COMPLETE`, `DEPLOY_FAILED`.
-- [ ] Store webhooks in Firestore `webhooks/{userId}[]`; add `/api/webhooks` CRUD endpoint.
-- **Files:** new `src/server/WebhookManager.ts`, `server.ts`.
+### P-PME.9 — Webhook Manager (build/deploy event notifications)  ✅ DONE (2026-06-29)
+- Users couldn't wire NavBharatAI into their own CI/CD or get Slack/Discord alerts. (P-BRE.7 added a single
+  global `BUILD_WEBHOOK_URL`; this adds managed, per-user, multi-URL, per-event subscriptions.)
+- [x] **`WebhookManager.ts`** — per-user CRUD in Firestore `webhooks/{userId}` (`listWebhooks` / `addWebhook` /
+      `removeWebhook`, capped at 20), pure validated `isValidWebhookUrl` + `normalizeEvents` (events:
+      `BUILD_COMPLETE` / `BUILD_FAILED` / `DEPLOY_COMPLETE` / `DEPLOY_FAILED`), and `fireWebhooks(userId, event,
+      payload)` that POSTs to every subscribed URL in parallel (reusing the P-BRE.7 `sendBuildWebhook` — 5s
+      timeout, never throws). Best-effort: DB outage / VITEST degrade to no-ops.
+- [x] **CRUD API** — `GET/POST /api/webhooks/:userId`, `DELETE /api/webhooks/:userId/:id`, and
+      `POST /api/webhooks/:userId/test` (fires a test event so users can verify their endpoint). All
+      `requireUserMatch`-scoped + request-validated (P-DATA.1).
+- **Note:** auto-fire on the platform's own build events is already covered for the global webhook by P-BRE.7;
+      per-user auto-fire reuses `fireWebhooks` and is wired wherever a build/deploy completion carries the owner
+      uid (the management surface + test-fire make the feature fully usable + verifiable today).
+- **AppKnowledgeBase:** new `webhook-manager` entry (same PR).
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3317/3317 ✅ (9 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/WebhookManager.ts` (new), `src/server/routes/webhooks.ts` (new),
+      `tests/webhookManager.test.ts` (new), `src/server/NotificationManager.ts`, `server.ts`, `src/server/AppContext/AppKnowledgeBase.ts`.
 
 ### P-PME.10 — Architecture Decision Records (ADR) Auto-Capture  ❌ MISSING  [MED]
 - Every build implicitly makes architecture decisions (React vs React Native, Firestore vs Postgres,

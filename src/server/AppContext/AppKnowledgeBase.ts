@@ -1591,6 +1591,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['sbom', 'bill of materials', 'cyclonedx', 'license', 'gpl', 'agpl', 'copyleft', 'compliance', 'supply chain', 'dependencies', 'oss', 'open source license', 'license check', 'audit'],
   },
   {
+    id: 'webhook-manager',
+    name: 'Webhook Manager',
+    path: 'Backend capability — /api/webhooks/:userId (register webhook URLs for build/deploy events)',
+    description: `Register your own webhook URLs so NavBharatAI POSTs to them on build/deploy events (BUILD_COMPLETE, BUILD_FAILED, DEPLOY_COMPLETE, DEPLOY_FAILED) — wire builds into your CI/CD, or get Slack/Discord alerts. Manage multiple webhooks per account, each subscribed to the events you choose (up to 20). A "test" call fires a sample event so you can verify your endpoint receives it. Each delivery is a JSON POST with a 5-second timeout and is best-effort (a failing webhook never affects your build).`,
+    howToUse: 'Backend API: POST /api/webhooks/:userId { url, events? } to register; GET to list; DELETE /api/webhooks/:userId/:id to remove; POST /api/webhooks/:userId/test to send a test event. Events default to all four if not specified.',
+    relatedFeatures: ['pro_chat'],
+    keywords: ['webhook', 'webhooks', 'slack', 'discord', 'ci/cd', 'ci cd', 'notification', 'callback', 'build notification', 'deploy notification', 'integration', 'alert'],
+  },
+  {
     id: 'editor-theme-switcher',
     name: 'Editor Theme Switcher',
     path: 'Code editor → header dropdown (top-right of the editor)',

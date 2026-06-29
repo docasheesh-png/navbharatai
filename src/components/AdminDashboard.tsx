@@ -84,6 +84,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // P-MON.4 — composite platform health score (real, from /api/admin/health-score).
   const [healthScore, setHealthScore] = useState<any>(null);
 
+  // P-MON.2 — latency anomaly/trend watch (real, from /api/admin/anomaly/latency).
+  const [latencyAnomaly, setLatencyAnomaly] = useState<any>(null);
+  const [anomalyLoading, setAnomalyLoading] = useState(false);
+
   const headers = { 'x-admin-token': adminToken, 'Content-Type': 'application/json' };
 
   const toast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3000); };
@@ -178,7 +182,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => { if (activeTab === 'users') fetchUsers(); }, [activeTab, fetchUsers]);
   useEffect(() => { if (activeTab === 'settings') fetchPromos(); }, [activeTab, fetchPromos]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
-  useEffect(() => { if (activeTab === 'engines') fetchLlmLatency(); }, [activeTab, fetchLlmLatency]);
+  const fetchLatencyAnomaly = useCallback(async () => {
+    setAnomalyLoading(true);
+    try {
+      const r = await fetch('/api/admin/anomaly/latency', { headers });
+      const d = await r.json();
+      setLatencyAnomaly(d && typeof d === 'object' ? d : null);
+    } catch (e) {
+      console.error(e);
+      setLatencyAnomaly(null);
+    } finally {
+      setAnomalyLoading(false);
+    }
+  }, [adminToken]);
+
+  useEffect(() => { if (activeTab === 'engines') { fetchLlmLatency(); fetchLatencyAnomaly(); } }, [activeTab, fetchLlmLatency, fetchLatencyAnomaly]);
 
   const adminPost = async (url: string, body: any) => {
     const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
@@ -650,6 +668,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       Percentiles from real `ai.provider.*` trace spans — tail latency (p95/p99) that the average hides.
                     </p>
                   </div>
+                )}
+              </div>
+
+              {/* ── P-MON.2 Latency anomaly / trend watch (real, from trace durations) ── */}
+              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-violet-400" />
+                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Latency Anomaly Watch</h3>
+                  </div>
+                  <button
+                    onClick={fetchLatencyAnomaly}
+                    disabled={anomalyLoading}
+                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-40"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${anomalyLoading ? 'animate-spin' : ''}`} /> Refresh
+                  </button>
+                </div>
+                {!latencyAnomaly || typeof latencyAnomaly.count !== 'number' || latencyAnomaly.count === 0 ? (
+                  <p className="text-[10px] text-[#8b949e] uppercase font-bold py-4">
+                    {anomalyLoading ? 'Analyzing…' : 'Not enough request-latency samples yet — appears after traffic flows.'}
+                  </p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {statCard('Samples', latencyAnomaly.count, 'recent traces', 'bg-sky-500', Activity)}
+                      {statCard('Anomalies', (latencyAnomaly.zAnomalies?.length || 0) + (latencyAnomaly.ewmaAnomalies?.length || 0), 'z-score + EWMA', (latencyAnomaly.zAnomalies?.length || 0) + (latencyAnomaly.ewmaAnomalies?.length || 0) > 0 ? 'bg-amber-500' : 'bg-emerald-500', AlertTriangle)}
+                      {statCard('Trend', latencyAnomaly.trend?.direction || 'n/a', latencyAnomaly.trend ? `slope ${Number(latencyAnomaly.trend.slope).toFixed(3)}` : 'unknown', latencyAnomaly.trend?.direction === 'rising' ? 'bg-red-500' : latencyAnomaly.trend?.direction === 'falling' ? 'bg-emerald-500' : 'bg-[#30363d]', TrendingUp)}
+                      {statCard('Avg Latency', `${latencyAnomaly.stats?.mean ?? '—'}ms`, `max ${latencyAnomaly.stats?.max ?? '—'}ms`, 'bg-indigo-500', Cpu)}
+                    </div>
+                    {(latencyAnomaly.zAnomalies?.length || 0) > 0 && (
+                      <div className="text-[10px] text-amber-400/90 font-mono">
+                        Spikes: {latencyAnomaly.zAnomalies.slice(0, 6).map((a: any) => `${Math.round(a.v)}ms`).join(', ')}
+                      </div>
+                    )}
+                    <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest">
+                      z-score + EWMA anomaly detection over real per-trace durations. No data → no anomalies (never faked).
+                    </p>
+                  </>
                 )}
               </div>
             </div>

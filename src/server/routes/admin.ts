@@ -610,7 +610,36 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     if (pricingConfig) Object.assign(serverStats.pricingConfig, pricingConfig);
     if (providerEnabled) Object.assign(serverStats.providerEnabled, providerEnabled);
     audit('ADMIN_SETTINGS_CHANGED', { changes: req.body, ip: req.ip });
+    // P-PME.8 — persist feature flags to Firestore so they survive Cloud Run restarts (in-memory
+    // serverStats alone reset on every deploy). Best-effort: a persistence failure never fails the toggle.
+    if (featureFlags) {
+      import('../FeatureFlagManager')
+        .then(({ saveFlagConfig }) => saveFlagConfig({ flags: { ...serverStats.featureFlags } }))
+        .catch(() => { /* persistence is best-effort */ });
+    }
     res.json({ ok: true, settings: { maintenanceMode: serverStats.maintenanceMode, featureFlags: serverStats.featureFlags, pricingConfig: serverStats.pricingConfig, providerEnabled: serverStats.providerEnabled } });
+  });
+
+  // P-PME.8 — runtime feature-flag config (incl. percentage rollout + per-user overrides), persisted
+  // in Firestore. GET returns the full persisted config; POST replaces it. Admin-only.
+  app.get('/api/admin/feature-flags', verifyAdminToken, async (_req: Request, res: Response) => {
+    const { loadFlagConfig } = await import('../FeatureFlagManager');
+    const config = (await loadFlagConfig()) || { flags: { ...serverStats.featureFlags } };
+    res.json(config);
+  });
+
+  app.post('/api/admin/feature-flags', verifyAdminToken, async (req: Request, res: Response) => {
+    const { saveFlagConfig } = await import('../FeatureFlagManager');
+    const body = req.body || {};
+    const config = {
+      flags: body.flags && typeof body.flags === 'object' ? body.flags : { ...serverStats.featureFlags },
+      ...(body.rollout && typeof body.rollout === 'object' ? { rollout: body.rollout } : {}),
+      ...(body.overrides && typeof body.overrides === 'object' ? { overrides: body.overrides } : {}),
+    };
+    const saved = await saveFlagConfig(config);
+    if (config.flags) Object.assign(serverStats.featureFlags, config.flags); // keep in-memory cache in sync
+    audit('ADMIN_FEATURE_FLAGS_CHANGED', { ip: req.ip, persisted: saved });
+    res.json({ ok: true, persisted: saved, config });
   });
 
   // ── P-SEC.5: Encryption key rotation ──────────────────────────────────────

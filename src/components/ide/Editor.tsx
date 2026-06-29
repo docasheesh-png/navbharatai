@@ -22,6 +22,10 @@ function iconForFile(path: string): IconComponent {
   }
 }
 import { Tab } from '../../types/ide';
+import {
+  EDITOR_THEMES, registerEditorThemes, loadSavedTheme, saveTheme,
+  type EditorThemeId,
+} from './monacoThemes';
 
 // Load Monaco from our OWN origin, not a CDN. `scripts/copyMonaco.mjs` copies the installed
 // monaco-editor `min/vs` into `public/monaco/vs` at build time, so `/monaco/vs` is served as a
@@ -84,6 +88,9 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   // the plain textarea editor so files ALWAYS open. The happy path (CDN reachable) is unchanged.
   const [monacoFailed, setMonacoFailed] = useState(false);
   const useTextarea = isMobile || monacoFailed;
+  // P-DEV.9 — runtime-selectable editor theme (persisted), defaulting to the saved choice or the prop.
+  const [theme, setThemeState] = useState<EditorThemeId>(() => loadSavedTheme(editorTheme as EditorThemeId));
+  const changeTheme = (id: EditorThemeId) => { setThemeState(id); saveTheme(id); };
 
   useEffect(() => {
     if (isMobile || monacoFailed) return;
@@ -113,6 +120,11 @@ export const Editor: React.FC<EditorProps> = React.memo(({
       if (onMount) onMount(null);
     };
   }, [onMount]);
+
+  // P-DEV.9 — register the custom themes before the editor mounts so they're available to set.
+  const handleEditorWillMount = (monaco: any) => {
+    try { registerEditorThemes(monaco); } catch { /* non-fatal */ }
+  };
 
   const handleEditorDidMount = (editor: any) => {
     editorRef.current = editor;
@@ -198,6 +210,20 @@ export const Editor: React.FC<EditorProps> = React.memo(({
            )}
         </div>
         <div className="flex items-center gap-3">
+            {/* P-DEV.9 — editor theme selector */}
+            {!useTextarea && (
+              <select
+                value={theme}
+                onChange={(e) => changeTheme(e.target.value as EditorThemeId)}
+                title="Editor theme"
+                aria-label="Editor theme"
+                className="bg-[#1e1e1e] border border-white/10 rounded text-[10px] text-[#858585] hover:text-white outline-none focus:border-indigo-500 px-1 py-0.5 cursor-pointer"
+              >
+                {EDITOR_THEMES.map((t) => (
+                  <option key={t.id} value={t.id}>{t.label}</option>
+                ))}
+              </select>
+            )}
             {onDebug && (
                <button
                  onClick={onDebug}
@@ -251,8 +277,9 @@ export const Editor: React.FC<EditorProps> = React.memo(({
           path={fileName}
           language={getLanguage(fileName)}
           value={content}
-          theme={editorTheme}
+          theme={theme}
           loading={<div className="w-full h-full flex items-center justify-center bg-[#1e1e1e] text-[#8b949e] text-xs font-mono">Loading editor…</div>}
+          beforeMount={handleEditorWillMount}
           onMount={handleEditorDidMount}
           onChange={(val) => onChange(val || '')}
           options={{

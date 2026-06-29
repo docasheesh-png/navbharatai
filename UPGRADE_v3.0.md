@@ -1189,12 +1189,19 @@
 - [ ] Tags: add "Tags" tab — create `vX.Y.Z` tag, push to remote; wire to SemVer Manager (P-PME.13).
 - **Files:** `src/components/ide/GitPanel.tsx`.
 
-### P-DEV.9 — Runtime Theme Switcher (Monaco + App Shell)  🟡 PARTIAL → full  [MED]
-- Monaco theme is hardcoded to `vs-dark` in `Editor.tsx`. App dark/light toggle changes shell colors but not the editor itself.
-- [ ] Add a Theme selector in Settings or StatusBar dropdown: VS Dark | VS Light | Monokai | Dracula | Solarized Dark.
-- [ ] On change: call `monaco.editor.setTheme(selected)` and persist to `localStorage('editorTheme')`.
-- [ ] Define custom Monokai/Dracula themes via `monaco.editor.defineTheme()`.
-- **Files:** `src/components/ide/Editor.tsx`, `src/App.tsx` (Settings panel).
+### P-DEV.9 — Runtime Theme Switcher (Monaco + App Shell)  ✅ DONE (2026-06-29)
+- The Monaco theme was effectively fixed; no way to switch the editor's color scheme at runtime.
+- [x] **Theme catalog + custom definitions** (`src/components/ide/monacoThemes.ts`, unit-tested) — VS Dark | VS
+      Light | Monokai | Dracula | Solarized Dark; the three custom themes are real `defineTheme` data (base,
+      token rules, background) registered via `registerEditorThemes(monaco)`.
+- [x] **Selector in the editor header** — a dropdown in `Editor.tsx` (self-contained, no risky App.tsx surgery)
+      switches the live theme; the custom themes are registered in `beforeMount` so they're available immediately.
+- [x] **Persisted** — `loadSavedTheme()` / `saveTheme()` to `localStorage('editorTheme')`, validated (an invalid
+      stored value falls back to the default; an invalid theme is never persisted).
+- [x] **AppKnowledgeBase** — new `editor-theme-switcher` entry (same PR).
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3294/3294 ✅ (7 new) · `test:coverage` exit 0 · `build` ✅.
+- **Files:** `src/components/ide/monacoThemes.ts` (new), `tests/monacoThemes.test.ts` (new),
+      `src/components/ide/Editor.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`.
 
 ### P-DEV.10 — Dedicated Code Explanation Panel  ❌ MISSING  [MED]
 - `AIDebugger.tsx` is error-focused. `AISuggestions.tsx` shows templates. No "explain this selection" panel.

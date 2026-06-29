@@ -1591,6 +1591,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['sbom', 'bill of materials', 'cyclonedx', 'license', 'gpl', 'agpl', 'copyleft', 'compliance', 'supply chain', 'dependencies', 'oss', 'open source license', 'license check', 'audit'],
   },
   {
+    id: 'editor-theme-switcher',
+    name: 'Editor Theme Switcher',
+    path: 'Code editor → header dropdown (top-right of the editor)',
+    description: `Switch the code editor's color theme at runtime. Choose from VS Dark, VS Light, Monokai, Dracula, or Solarized Dark via the small dropdown in the editor header. The choice applies instantly and is remembered (saved in your browser) so it persists across sessions. The three custom themes (Monokai/Dracula/Solarized Dark) are real syntax-highlighting themes, not just background swaps.`,
+    howToUse: 'Open any file in the code editor. Use the theme dropdown at the top-right of the editor header to pick VS Dark / VS Light / Monokai / Dracula / Solarized Dark. Your choice is saved automatically.',
+    relatedFeatures: ['pro_chat'],
+    keywords: ['theme', 'editor theme', 'dark mode', 'light mode', 'monokai', 'dracula', 'solarized', 'color scheme', 'syntax highlight', 'monaco theme', 'appearance'],
+  },
+  {
     id: 'merge-conflict-resolver',
     name: 'Merge Conflict Resolver',
     path: 'Diff view → open a file with merge conflicts → "Resolve Conflicts"',

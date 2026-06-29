@@ -5385,3 +5385,17 @@ did NOT come up within 15s — the user never clicks into a blank/502 page ("pre
 gets a clear "NOT published, bring the dev server up and retry" message (P2).
 
 Gate: frontend tsc 0, server tsc 0, vitest 2957/2957 PASS (+1 hung-writeFiles test), boot:check PASS.
+
+## 2026-06-28 — Fix: v3.0 in-browser preview no longer fails when the sandbox is gone
+
+User: the v3.0 Preview panel's "In-browser" tab showed "Couldn't build the in-browser preview: [not_found]
+path not found: lstat /home/user/workspace: no such file or directory". Root: both /api/agentv3/workspace-files
+and /api/agentv3/inbrowser-preview read the LIVE E2B sandbox via collectWorkspaceFiles — but the in-browser
+preview is EXPLICITLY meant to work WITHOUT a live sandbox (its whole point). When the sandbox was paused/
+reaped, collectWorkspaceFiles threw the E2B "[not_found] /home/user/workspace" error and the endpoint 500'd.
+Fix: new collectFilesWithSavedFallback() tries the live sandbox first (freshest) but falls back to the
+DURABLE saved files (Firestore WorkspaceFileStore) when the sandbox is gone/empty/errored — never throws.
+Wired into both endpoints. The in-browser preview now builds from the user's saved app even with no live
+sandbox.
+
+Gate: frontend tsc 0, server tsc 0, vitest 2964/2964 PASS, boot:check PASS.

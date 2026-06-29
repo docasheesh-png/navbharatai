@@ -283,6 +283,25 @@ export function raceTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
 }
 
 /**
+ * Read a workspace's files for the file explorer + in-browser preview. Tries the LIVE sandbox first
+ * (freshest), but falls back to the DURABLE saved files (Firestore) when the sandbox is gone, empty,
+ * or errors — e.g. "[not_found] lstat /home/user/workspace: no such file or directory" after the
+ * sandbox was paused/reaped. The in-browser preview is meant to work WITHOUT a live sandbox, so it
+ * must never fail just because one isn't running. Never throws.
+ */
+async function collectFilesWithSavedFallback(
+  actuator: IEngineerActuator,
+  workspaceId: string,
+): Promise<{ files: Record<string, string>; skipped: string[]; source: 'live' | 'saved' }> {
+  try {
+    const live = await collectWorkspaceFiles(actuator, workspaceId);
+    if (Object.keys(live.files).length > 0) return { files: live.files, skipped: live.skipped, source: 'live' };
+  } catch { /* live sandbox gone/empty/errored — fall through to the durable saved files */ }
+  const saved = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+  return { files: saved, skipped: [], source: 'saved' };
+}
+
+/**
  * Check whether a user is at or over their monthly spend ceiling. Returns the cap and
  * the current monthly total so the caller can return an honest, specific message.
  * Best-effort: a Firestore read failure (or no userId) NEVER blocks a build — we fail
@@ -937,7 +956,7 @@ export function registerAgentV3Routes(app: Express): void {
     }
     try {
       const actuator = buildActuator();
-      const { files, skipped } = await collectWorkspaceFiles(actuator, workspaceId);
+      const { files, skipped } = await collectFilesWithSavedFallback(actuator, workspaceId);
       res.json({ files, count: Object.keys(files).length, skipped: skipped.length });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to read the workspace files.' });
@@ -967,7 +986,7 @@ export function registerAgentV3Routes(app: Express): void {
     }
     try {
       const actuator = buildActuator();
-      const { files } = await collectWorkspaceFiles(actuator, workspaceId);
+      const { files } = await collectFilesWithSavedFallback(actuator, workspaceId);
       if (Object.keys(files).length === 0) {
         res.status(404).json({ error: 'No files to preview yet — build something first.' });
         return;

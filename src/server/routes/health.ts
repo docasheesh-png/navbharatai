@@ -10,10 +10,20 @@
 
 import type { Express, Request, Response } from 'express';
 import { firestoreBackup } from '../lib/FirestoreBackup';
+import { doraMetrics } from '../lib/DoraMetrics';
 
 // Set true once the server has finished initialization (wired from server.ts).
 let serverReady = false;
-export function markServerReady(): void { serverReady = true; }
+export function markServerReady(): void {
+  const wasReady = serverReady;
+  serverReady = true;
+  // P-DEPLOY.1 — a production server reaching ready = a new Cloud Run revision going live
+  // = a deployment. Record it (once per boot) so DORA deployment-frequency reflects real
+  // revisions. Best-effort; skipped under tests / non-production.
+  if (!wasReady && process.env.NODE_ENV === 'production') {
+    try { doraMetrics.recordDeploy({ success: true }); } catch { /* never block readiness */ }
+  }
+}
 export function isServerReady(): boolean { return serverReady; }
 
 export interface ReadinessReport {

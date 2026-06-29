@@ -1836,12 +1836,18 @@
 - **⬜ N/A-by-design (managed-serverless):** all Kubernetes/Helm/Argo/Flux/Kustomize/GitOps, cluster/pod/namespace/ingress/network-policy/PV/ConfigMap/StatefulSet/DaemonSet, Lambda/Cloud-Functions/edge-functions (Cloud Run is used), Terraform/Pulumi/CloudFormation/Bicep/Ansible/Chef/Puppet/SaltStack, traffic-mirroring/shadow/service-mesh, self-hosted-runner/on-premise.
 - **Already tracked:** canary/blue-green/rolling/rollback/deployment-strategy/probes → **P9**; tracing/observability/metrics/alerting/error-monitoring/dashboards → **P8/P2**; IaC + artifact registry → **P6**; CDN/edge/KMS/WAF/chaos/load → **P10**; container-scan/SBOM/secret-scan/key-rotation/supply-chain/DAST/incident-runbook → **P-SEC**; build-cache/durable-jobs/smoke-test/build-analytics → **P-BRE**; release-notes/changelog/semver/feature-flags/webhook/SLA-SLO → **P-PME**; build/deploy + email notifications → **P-BRE.7**; DB/schema migration → **P-CGE.6 / P1.2**.
 
-### P-DEPLOY.1 — DORA Metrics Engine  ❌ MISSING  [MED]
-- `metricsAlerts.ts` tracks build success/failure rate, but there is no **DORA** measurement: deployment
-  frequency (time-series), change lead time, and **MTTR**. (Change-failure-rate is partially present as an alert.)
-- [ ] Add a `DoraMetrics` collector: record deploy events + recovery times; compute the 4 DORA metrics per window.
-- [ ] Surface in the admin dashboard (and optionally per-user for their app's pipeline).
-- **Files:** new `src/server/lib/DoraMetrics.ts`, `src/server/lib/metrics.ts`, `src/server/routes/admin.ts`.
+### P-DEPLOY.1 — DORA Metrics Engine  ✅ DONE (2026-06-29)
+- [x] New `src/server/lib/DoraMetrics.ts` — computes all 4 DORA metrics from recorded deploy + incident events:
+      deployment frequency (per day), change lead time (median, when known), change failure rate (%), MTTR (mean
+      restore time), plus the overall DORA tier (elite/high/medium/low) via the standard 2022 bands. All calculators
+      are PURE + unit-tested; an in-memory bounded collector records deploys/incidents.
+- [x] Wired to a REAL signal (no fake data): each production server-ready (`markServerReady`, a new Cloud Run
+      revision going live) records a successful deploy, so deployment frequency reflects actual revisions. Incidents
+      can be recorded/resolved to feed MTTR. Metrics with no data are reported as `null` honestly — never faked.
+- [x] Surfaced via admin-gated `GET /api/observability/dora?days=N` (in the existing observability route).
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 2997/2997 ✅ (17 new) · server boots + LIVE check: a prod boot
+      recorded `deploymentCount:1`, lead/mttr honestly `null`, tier computed; no-admin → 403 ✅.
+- **Files:** `src/server/lib/DoraMetrics.ts` (+ `.test.ts`), `src/server/routes/health.ts`, `src/server/routes/observability.ts`.
 
 ### P-DEPLOY.2 — Staging Environment + Promotion Pipeline  ❌ MISSING  [MED]
 - The platform deploys **straight to prod on merge to `main`** — there is no staging/QA environment and no

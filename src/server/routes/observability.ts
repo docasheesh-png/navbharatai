@@ -7,6 +7,7 @@ import type { Express, Request, Response } from 'express';
 import { tracer } from '../observability/Tracer';
 import { errorTracker } from '../observability/ErrorTracker';
 import { getProviderStats } from '../AI/Router/AIRouter';
+import { doraMetrics } from '../lib/DoraMetrics';
 
 function adminOk(req: Request): boolean {
   return !!process.env.ADMIN_PASSWORD && req.query.admin === process.env.ADMIN_PASSWORD;
@@ -37,5 +38,13 @@ export function registerObservabilityRoutes(app: Express): void {
     if (!adminOk(req)) { res.status(403).json({ error: 'admin only' }); return; }
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
     res.json({ errors: errorTracker.recent(limit), summary: errorTracker.summary() });
+  });
+
+  // P-DEPLOY.1 — DORA metrics (deployment frequency, change lead time, change failure rate,
+  // MTTR + overall tier) over a window. ?days=N (default 30, max 365).
+  app.get('/api/observability/dora', (req: Request, res: Response) => {
+    if (!adminOk(req)) { res.status(403).json({ error: 'admin only' }); return; }
+    const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+    res.json(doraMetrics.summary(days * 86_400_000));
   });
 }

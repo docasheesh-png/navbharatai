@@ -9,6 +9,7 @@ import { errorTracker } from '../observability/ErrorTracker';
 import { getProviderStats } from '../AI/Router/AIRouter';
 import { doraMetrics } from '../lib/DoraMetrics';
 import { analyzeSeries, type Point } from '../lib/AnomalyDetector';
+import { aggregateProviderLatency, type SpanLike } from '../lib/Percentiles';
 
 function adminOk(req: Request): boolean {
   return !!process.env.ADMIN_PASSWORD && req.query.admin === process.env.ADMIN_PASSWORD;
@@ -77,5 +78,28 @@ export function registerObservabilityRoutes(app: Express): void {
     if (!adminOk(req)) { res.status(403).json({ error: 'admin only' }); return; }
     const series: Point[] = tracer.recentTraces(200).map((tr) => ({ t: tr.startMs, v: tr.durationMs }));
     res.json({ source: 'trace-latency', sampleCount: series.length, ...analyzeSeries(series) });
+  });
+
+  // P-MON.3 — LLM-ops: per-provider inference-latency percentiles (p50/p90/p95/p99) and
+  // error rate, aggregated from the REAL `ai.provider.*` spans the AI router records.
+  // ?limit=N traces (default 200, max 500).
+  app.get('/api/observability/llm', (req: Request, res: Response) => {
+    if (!adminOk(req)) { res.status(403).json({ error: 'admin only' }); return; }
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+    const traces = tracer.recentTraces(limit);
+    const spans: SpanLike[] = [];
+    for (const tr of traces) {
+      for (const s of tr.spans) {
+        spans.push({ name: s.name, durationMs: s.durationMs, status: s.status, attributes: s.attributes });
+      }
+    }
+    const providers = aggregateProviderLatency(spans);
+    res.json({
+      source: 'trace-spans',
+      tracesScanned: traces.length,
+      providerSampleCount: providers.reduce((a, p) => a + p.latency.count, 0),
+      providers,
+      generatedAt: Date.now(),
+    });
   });
 }

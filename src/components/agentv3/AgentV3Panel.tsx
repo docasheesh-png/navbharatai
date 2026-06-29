@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { FilesPanel, type FilesPanelProps } from '../panels/FilesPanel';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
@@ -49,7 +50,7 @@ const V3_EXT_COLOR: Record<string, string> = {
   svg: 'text-pink-400', png: 'text-pink-400', jpg: 'text-pink-400',
 };
 
-export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, onPreviewState }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; onFilesSync?: (files: Record<string, string>) => void; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string }) => void }) {
+export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, onPreviewState, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; onFilesSync?: (files: Record<string, string>) => void; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string }) => void; filesPanel?: FilesPanelProps }) {
   const { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
@@ -967,83 +968,40 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
 
           {tab === 'preview' ? (
             <PreviewSurface url={state.previewUrl} workspaceId={state.workspaceId} userId={userId} email={email} />
+          ) : tab === 'files' ? (
+            // Unified Files — the SAME rich FilesPanel the sidebar "Files" menu uses, so both
+            // entry points are ONE feature with two gates. It shows the union of the live v3.0
+            // sandbox files (workspaceFiles) and the main-app files (user uploads + already-synced
+            // builds via onFilesSync) — i.e. exactly "the files v3.0 built OR the user uploaded".
+            // Empty state keeps v3.0's own restore-all safety net (the sandbox-level restore the
+            // sidebar's History tab does not provide).
+            (() => {
+              const unified: Record<string, string> = { ...(filesPanel?.files || {}), ...(workspaceFiles || {}) };
+              const hasAny = Object.keys(unified).length > 0;
+              if (filesPanel && hasAny) {
+                return <FilesPanel {...filesPanel} files={unified} hasGeneratedCode={hasAny} />;
+              }
+              return (
+                <div className="flex-1 overflow-auto p-3 font-mono text-xs">
+                  <div className="flex flex-col items-start gap-2">
+                    <Empty>No files shown.</Empty>
+                    {state.workspaceId && (
+                      <button
+                        onClick={handleRestoreAll}
+                        disabled={restoring}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-700/60 text-indigo-300 hover:text-white hover:border-indigo-500 disabled:opacity-40"
+                      >
+                        {restoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                        {restoring ? 'Restoring…' : 'Restore all files'}
+                      </button>
+                    )}
+                    {restoreMsg && <span className="text-[11px] text-zinc-400">{restoreMsg}</span>}
+                  </div>
+                </div>
+              );
+            })()
           ) : (
             <div className="flex-1 overflow-auto p-3 font-mono text-xs">
-              {tab === 'files' && (state.files.length === 0 ? (
-                <div className="flex flex-col items-start gap-2">
-                  <Empty>No files shown.</Empty>
-                  {state.workspaceId && (
-                    <button
-                      onClick={handleRestoreAll}
-                      disabled={restoring}
-                      className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-700/60 text-indigo-300 hover:text-white hover:border-indigo-500 disabled:opacity-40"
-                    >
-                      {restoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-                      {restoring ? 'Restoring…' : 'Restore all files'}
-                    </button>
-                  )}
-                  {restoreMsg && <span className="text-[11px] text-zinc-400">{restoreMsg}</span>}
-                </div>
-              ) : selectedFile ? (
-                /* File-content viewer (Task 1): show what's inside the clicked file. */
-                <div className="flex flex-col min-h-0">
-                  <div className="shrink-0 flex items-center gap-2 mb-2">
-                    <button
-                      onClick={() => setSelectedFile(null)}
-                      className="flex items-center gap-1 text-zinc-400 hover:text-white shrink-0"
-                      title="Back to file list"
-                    >
-                      <ChevronLeft className="w-3.5 h-3.5" /> Files
-                    </button>
-                    <span className="text-zinc-300 truncate" title={selectedFile}>{selectedFile}</span>
-                  </div>
-                  {fileLoading ? (
-                    <div className="flex items-center gap-2 text-zinc-500"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading file…</div>
-                  ) : fileError ? (
-                    <Empty>{fileError}</Empty>
-                  ) : (
-                    <pre className="whitespace-pre-wrap break-words text-zinc-200 leading-relaxed">{workspaceFiles?.[selectedFile] ?? '(empty file)'}</pre>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-0.5">
-                  {state.files.filter((f) => f.kind !== 'delete').map((f) => {
-                    const ext = f.path.split('.').pop() ?? '';
-                    const color = V3_EXT_COLOR[ext] ?? 'text-white/50';
-                    // Line count of the file (from the fetched contents) — shown next to the dot
-                    // so the user sees how much was actually written inside each file.
-                    const fileContent = workspaceFiles?.[f.path];
-                    const lineCount = typeof fileContent === 'string' ? fileContent.split('\n').length : null;
-                    return (
-                      <div key={f.path} className="group flex items-center gap-1 rounded-xl hover:bg-white/5 transition-colors">
-                        <button
-                          onClick={() => onOpenInIDE ? onOpenInIDE(f.path) : openFile(f.path)}
-                          title={onOpenInIDE ? `Open ${f.path} in Code Studio` : `View ${f.path}`}
-                          className="flex-1 flex items-center gap-3 px-3 py-2.5 text-left min-w-0"
-                        >
-                          <FileCode className={`w-4 h-4 flex-shrink-0 ${color}`} />
-                          <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{f.path}</span>
-                          {lineCount !== null && (
-                            <span className="text-[10px] tabular-nums text-zinc-500 flex-shrink-0" title={`${lineCount} line${lineCount === 1 ? '' : 's'}`}>
-                              {lineCount} {lineCount === 1 ? 'line' : 'lines'}
-                            </span>
-                          )}
-                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${fileDot(f.kind).split(' ').slice(2).join(' ')}`} />
-                        </button>
-                        <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            onClick={() => navigator.clipboard.writeText(f.path)}
-                            title="Copy file path"
-                            className="p-1 rounded hover:bg-white/10 text-zinc-500 hover:text-zinc-300"
-                          >
-                            <Copy className="w-2.5 h-2.5" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
               {tab === 'diff' && (diffPaths.length === 0 ? <Empty>No diffs yet.</Empty> : (
                 <div className="space-y-3">
                   {diffPaths.map((p) => <div key={p}><div className="text-zinc-400 mb-1">{p}</div><pre className="whitespace-pre-wrap">{colorizeDiff(state.diffs[p])}</pre></div>)}

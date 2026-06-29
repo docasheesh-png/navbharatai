@@ -5396,6 +5396,47 @@ ${buildLanguageRule(preferredLanguage)}`;
               resume={v3Resume}
               onFilesSync={(synced) => setFiles((prev) => ({ ...prev, ...synced }))}
               onOpenInIDE={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
+              /* Same FilesPanel bundle the sidebar "Files" menu uses (see ViewPanels), so the v3.0
+                 "Files" tab and the sidebar "Files" are ONE feature with two gates — same component,
+                 same data (uploads + v3.0 builds), same actions. */
+              filesPanel={{
+                files,
+                hasGeneratedCode,
+                fileUploadConflict,
+                onResolveConflict: resolveFileConflict,
+                onUpload: handleFilesUpload,
+                onDownloadZip: () => downloadAppZip(files as any, 'NavBharatApp'),
+                onOpenFile: (path: string) => { setActiveFile(path); toggleTab('studio'); },
+                onAddFile: (path: string) => {
+                  const next = { ...(files as Record<string, string>), [path]: '' };
+                  setFiles(next as any);
+                  setActiveFile(path);
+                  toggleTab('studio');
+                },
+                onDeleteFile: (path: string) => {
+                  const next = { ...(files as Record<string, string>) };
+                  delete next[path];
+                  setFiles(next as any);
+                },
+                onRenameFile: (oldPath: string, newPath: string) => {
+                  const prev = files as Record<string, string>;
+                  if (prev[newPath] !== undefined) return;
+                  const next = { ...prev, [newPath]: prev[oldPath] };
+                  delete next[oldPath];
+                  setFiles(next as any);
+                },
+                onDuplicateFile: (sourcePath: string, targetPath: string) => {
+                  const prev = files as Record<string, string>;
+                  if (prev[targetPath] !== undefined) return;
+                  setFiles({ ...prev, [targetPath]: prev[sourcePath] } as any);
+                },
+                sessionId: currentProSessionId,
+                onRestoreVersion: (restoredFiles: any, commitMsg: string) => {
+                  setFiles(restoredFiles);
+                  addLog(`Restored to: ${commitMsg}`, 'success');
+                  toggleTab('studio');
+                },
+              }}
             />
           )}
 

@@ -98,4 +98,31 @@ describe('foldCostTelemetry (pure cost-ladder aggregation)', () => {
     foldCostTelemetry(first, DATE, entry({ billedUsd: 1 }), 2);
     expect(JSON.stringify(first)).toBe(snapshot); // unchanged
   });
+
+  // PR4 — deliveredVia split (cheap-floor-vs-Claude rollback tripwire).
+  it('breaks down by deliveredVia provider — the cheap-floor-vs-Claude split', () => {
+    let doc: DailyCostTelemetryDoc | null = null;
+    doc = foldCostTelemetry(doc, DATE, entry({ deliveredVia: 'GLM' }), 1);
+    doc = foldCostTelemetry(doc, DATE, entry({ deliveredVia: 'GLM' }), 2);
+    doc = foldCostTelemetry(doc, DATE, entry({ deliveredVia: 'CLAUDE', ok: false }), 3);
+    expect(Object.keys(doc.byDeliveredVia).sort()).toEqual(['CLAUDE', 'GLM']);
+    expect(doc.byDeliveredVia.GLM.builds).toBe(2);
+    expect(doc.byDeliveredVia.GLM.okBuilds).toBe(2);
+    expect(doc.byDeliveredVia.CLAUDE.builds).toBe(1);
+    expect(doc.byDeliveredVia.CLAUDE.okBuilds).toBe(0); // a fallback that failed
+  });
+
+  it('folds a missing deliveredVia under "unknown" (non-agentic SimpleBuild/OneShot lanes)', () => {
+    const doc = foldCostTelemetry(null, DATE, entry(), 1); // no deliveredVia
+    expect(doc.byDeliveredVia.unknown.builds).toBe(1);
+  });
+
+  it('tolerates an older day doc that predates byDeliveredVia (no throw, self-extends)', () => {
+    // Simulate a doc written before PR4 — byDeliveredVia absent entirely.
+    const legacy = foldCostTelemetry(null, DATE, entry({ deliveredVia: 'GLM' }), 1);
+    delete (legacy as Partial<DailyCostTelemetryDoc>).byDeliveredVia;
+    const next = foldCostTelemetry(legacy, DATE, entry({ deliveredVia: 'CLAUDE' }), 2);
+    expect(next.byDeliveredVia.CLAUDE.builds).toBe(1);
+    expect(next.totalBuilds).toBe(2);
+  });
 });

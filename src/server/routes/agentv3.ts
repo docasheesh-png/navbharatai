@@ -512,7 +512,24 @@ export function cheapFloorAllowedForTier(startTier?: string): boolean {
   return tier === 'gemini' || tier === 'haiku' || tier === '';
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; onProviderError?: (name: string, err: unknown) => void }): TurnRunner {
+/**
+ * PR4 delivery telemetry — given per-provider turn counts gathered over a build (via the
+ * `onProviderUsed` callback), return the provider that drove the MOST turns: the build's
+ * dominant builder. AgentV3CostTelemetry records this as `deliveredVia`, so an admin can see
+ * whether the cheap floor (GLM/KIMI) or Claude actually delivered — the rollback tripwire.
+ * Ties keep the first-seen (leading) provider; an empty map → undefined (nothing recorded,
+ * e.g. the non-agentic SimpleBuild/OneShot lanes). Pure + exported for testing.
+ */
+export function dominantProvider(turns: Map<string, number>): string | undefined {
+  let best: string | undefined;
+  let bestN = -1;
+  for (const [name, n] of turns) {
+    if (n > bestN) { best = name; bestN = n; }
+  }
+  return best;
+}
+
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -569,7 +586,12 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   // Claude + Haiku backstop remain inside baseChain, so failures always fall back safely.
   const chain = [...floorRunners, ...baseChain];
   return makeMultiProviderTurnRunner(chain, {
-    onProviderUsed: (used, from) => { if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`); },
+    onProviderUsed: (used, from) => {
+      if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`);
+      // PR4 — surface EVERY delivered turn's provider (even with no fallback) so the caller can
+      // measure which model actually drove the build (the cheap-floor-vs-Claude tripwire).
+      opts?.onProviderUsed?.(used, from);
+    },
     onProviderError: (name, err) => {
       console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`);
       opts?.onProviderError?.(name, err);
@@ -1657,11 +1679,17 @@ export function registerAgentV3Routes(app: Express): void {
       });
       buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
       events.subscribe((e) => buildDiag.ingestEvent(e), false);
+      // PR4 — delivery telemetry: count which provider drove each build turn across the WHOLE
+      // build (first attempt + any escalation), so `deliveredVia` records the dominant builder
+      // (GLM/KIMI/CLAUDE). This is the cheap-floor-vs-Claude rollback tripwire. Best-effort.
+      const providerTurns = new Map<string, number>();
+      const captureProvider = (used: string): void => { providerTurns.set(used, (providerTurns.get(used) ?? 0) + 1); };
       const client = buildTurnRunner({
         ...(analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : {}),
         // First attempt only opts the cheap floor in — and only for simple/medium apps (complex →
         // straight to the strong model). Escalation builds below never pass this, so they stay Claude.
         allowCheapFloor: cheapFloorAllowedForTier(analysis?.startTier),
+        onProviderUsed: captureProvider,
         onProviderError: (name, err) => buildDiag.record({
           phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
           message: `Provider ${name} failed — falling back to the next provider`,
@@ -2345,7 +2373,7 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: `Escalating to a stronger model to finish the build…`, ts: Date.now() });
             const escRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true }),
+              client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true, onProviderUsed: captureProvider }),
               // Opus ONLY in power mode — a power-off escalation caps at Sonnet, never Opus
               // (admin rule 2026-06-28). Escalation only runs in normal mode anyway.
               model: resolveModel(tier === 'opus' && onlyOpus),
@@ -2743,6 +2771,8 @@ export function registerAgentV3Routes(app: Express): void {
           durationMs: Math.max(0, Date.now() - buildStartedAt),
           // P-PE.2 — record which architect prompt version produced this build.
           promptVersion: architectPromptVersion || undefined,
+          // PR4 — the provider that drove most build turns (cheap-floor-vs-Claude tripwire).
+          deliveredVia: dominantProvider(providerTurns),
         })
         .catch(() => {});
 

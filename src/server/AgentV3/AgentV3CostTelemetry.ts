@@ -36,6 +36,14 @@ export interface CostTelemetryEntry {
   durationMs: number;
   /** P-PE.2 — the architect prompt version id active for this build (traceability). */
   promptVersion?: string;
+  /**
+   * PR4 cost-down tripwire — the provider that actually DROVE most of this build's tool-loop
+   * turns (e.g. 'GLM' | 'KIMI' | 'CLAUDE' | 'CLAUDE_HAIKU'). Lets an admin measure the
+   * cheap-floor-vs-Claude delivery split: if cheap-floor delivery falls / Claude fallback
+   * spikes after enabling AGENTV3_CHEAP_FLOOR, roll the floor back (flag off). Absent on lanes
+   * that don't drive the agentic loop (SimpleBuild/OneShot) → folded under 'unknown'.
+   */
+  deliveredVia?: string;
 }
 
 /** Rolled-up counters for one slice (a task type or a start tier). */
@@ -59,6 +67,8 @@ export interface DailyCostTelemetryDoc {
   totalDurationMs: number;
   byTaskType: Record<string, TelemetryBreakdown>;
   byStartTier: Record<string, TelemetryBreakdown>;
+  /** PR4 — per delivering provider (GLM/KIMI/CLAUDE/…): the cheap-floor-vs-Claude split. */
+  byDeliveredVia: Record<string, TelemetryBreakdown>;
   /** P-PE.2 — the most recent architect prompt version id recorded today (traceability). */
   lastPromptVersion?: string;
   updatedAt: number;
@@ -80,6 +90,7 @@ function emptyDoc(date: string): DailyCostTelemetryDoc {
     totalDurationMs: 0,
     byTaskType: {},
     byStartTier: {},
+    byDeliveredVia: {},
     updatedAt: 0,
   };
 }
@@ -121,6 +132,11 @@ export function foldCostTelemetry(
   const byStartTier = { ...doc.byStartTier };
   byStartTier[tierKey] = addToBreakdown(byStartTier[tierKey] ?? emptyBreakdown(), entry);
 
+  // PR4 — fold the delivering provider. `?? {}` tolerates docs written before this field existed.
+  const viaKey = entry.deliveredVia || 'unknown';
+  const byDeliveredVia = { ...(doc.byDeliveredVia ?? {}) };
+  byDeliveredVia[viaKey] = addToBreakdown(byDeliveredVia[viaKey] ?? emptyBreakdown(), entry);
+
   return {
     date,
     totalBuilds: doc.totalBuilds + 1,
@@ -132,6 +148,7 @@ export function foldCostTelemetry(
     totalDurationMs: doc.totalDurationMs + entry.durationMs,
     byTaskType,
     byStartTier,
+    byDeliveredVia,
     // Carry the latest prompt version when present; otherwise keep the prior value.
     lastPromptVersion: entry.promptVersion ?? doc.lastPromptVersion,
     updatedAt: now,

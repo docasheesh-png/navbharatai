@@ -87,23 +87,98 @@ export function assessPrompt(prompt: string | null | undefined, opts: AbuseOptio
 }
 
 /**
- * Record an abuse event to Firestore `abuseLedger/{userId}` (best-effort, append-capped) + return
- * whether it was written. Never throws.
+ * P-PE.3 — Jailbreak hard-block. The UNAMBIGUOUS abuse kinds: a deliberate attempt to override the
+ * agent or extract its system prompt. (Length/repetition are excluded — they can be legitimate, so
+ * they never contribute to a hard block, only to the advisory score.)
  */
-export async function recordAbuse(userId: string, assessment: AbuseAssessment, nowIso: string): Promise<boolean> {
-  if (process.env.VITEST) return false;
+export const JAILBREAK_KINDS: ReadonlySet<AbuseKind> = new Set<AbuseKind>(['jailbreak', 'prompt-extraction']);
+
+/** A persisted ledger event. `signals` holds the abuse-kind strings recorded for that attempt. */
+export interface AbuseLedgerEvent { at: string; score: number; signals: string[] }
+
+/** True if this ledger event records an unambiguous jailbreak/extraction attempt. Pure. */
+export function isJailbreakEvent(event: { signals?: string[] } | null | undefined): boolean {
+  const signals = event?.signals;
+  if (!Array.isArray(signals)) return false;
+  return signals.some((s) => JAILBREAK_KINDS.has(s as AbuseKind));
+}
+
+/** Count jailbreak/extraction events within `windowMs` of `nowMs`. Pure; tolerates bad timestamps. */
+export function countJailbreakViolations(
+  events: ReadonlyArray<{ at?: string; signals?: string[] }> | null | undefined,
+  nowMs: number,
+  windowMs: number,
+): number {
+  if (!Array.isArray(events)) return 0;
+  const cutoff = nowMs - windowMs;
+  let n = 0;
+  for (const e of events) {
+    if (!isJailbreakEvent(e)) continue;
+    const t = e?.at ? Date.parse(e.at) : NaN;
+    // A missing/unparseable timestamp is counted as in-window (conservative — never under-counts abuse).
+    if (Number.isNaN(t) || t >= cutoff) n += 1;
+  }
+  return n;
+}
+
+/** Number of jailbreak attempts (within the window) that triggers a hard block. */
+export const HARD_BLOCK_THRESHOLD = 3;
+/** Rolling window for the hard-block count. */
+export const HARD_BLOCK_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+export interface AbuseEvaluation {
+  /** Whether the event was written to the ledger. */
+  recorded: boolean;
+  /** Whether THIS request should be hard-blocked (≥ threshold jailbreak attempts in the window). */
+  blocked: boolean;
+  /** Total jailbreak/extraction attempts in the window, including this one. */
+  violations: number;
+}
+
+const FAIL_OPEN: AbuseEvaluation = { recorded: false, blocked: false, violations: 0 };
+
+/**
+ * Record an abuse event to `abuseLedger/{userId}` AND decide whether the user has crossed the
+ * jailbreak hard-block threshold (P-PE.3). Reuses the same ledger as P-AI.10 — no parallel store.
+ *
+ * FAIL-OPEN by design: a degraded Firestore (or VITEST) returns {blocked:false}, so the safety
+ * gate can NEVER lock out a legitimate user because of an infra hiccup. Hard-block counts ONLY the
+ * unambiguous jailbreak/extraction kinds — never length/repetition. Never throws.
+ */
+export async function evaluateAbuse(
+  userId: string,
+  assessment: AbuseAssessment,
+  nowIso: string,
+): Promise<AbuseEvaluation> {
+  if (process.env.VITEST) return FAIL_OPEN;
   try {
     const admin = await import('firebase-admin');
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
     const db = admin.firestore();
     const ref = db.collection('abuseLedger').doc(userId);
     const snap = await ref.get();
-    const events = (snap.exists ? snap.data()?.events : null) || [];
-    const next = [...events, { at: nowIso, score: assessment.score, signals: assessment.signals.map((s) => s.kind) }].slice(-50);
+    const events: AbuseLedgerEvent[] = (snap.exists ? snap.data()?.events : null) || [];
+
+    const currentKinds = assessment.signals.map((s) => s.kind);
+    const currentIsJailbreak = currentKinds.some((k) => JAILBREAK_KINDS.has(k));
+    const nowMs = Date.parse(nowIso);
+    const priorViolations = countJailbreakViolations(events, Number.isNaN(nowMs) ? Date.now() : nowMs, HARD_BLOCK_WINDOW_MS);
+    const violations = priorViolations + (currentIsJailbreak ? 1 : 0);
+    const blocked = currentIsJailbreak && violations >= HARD_BLOCK_THRESHOLD;
+
+    const next = [...events, { at: nowIso, score: assessment.score, signals: currentKinds }].slice(-50);
     await ref.set({ events: next, lastScore: assessment.score, updatedAt: nowIso }, { merge: true });
-    return true;
+    return { recorded: true, blocked, violations };
   } catch (err) {
-    console.error('[ABUSE] ledger write failed:', err);
-    return false;
+    console.error('[ABUSE] ledger evaluate failed:', err);
+    return FAIL_OPEN;
   }
+}
+
+/**
+ * Record an abuse event to Firestore `abuseLedger/{userId}` (best-effort, append-capped) + return
+ * whether it was written. Never throws. (Kept for callers that only need to record, not block.)
+ */
+export async function recordAbuse(userId: string, assessment: AbuseAssessment, nowIso: string): Promise<boolean> {
+  return (await evaluateAbuse(userId, assessment, nowIso)).recorded;
 }

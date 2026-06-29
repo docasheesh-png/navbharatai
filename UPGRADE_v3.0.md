@@ -1944,13 +1944,23 @@
 - [ ] Log which prompt version was active in `AgentV3CostTelemetry.ts` records.
 - **Files:** `src/server/AgentV3/systemPrompt.ts`, new `src/server/AgentV3/PromptRegistry.ts`.
 
-### P-PE.3 — Jailbreak Detection  ❌ MISSING  [HIGH — safety]
-- `CommandGovernance.ts` blocks dangerous shell commands. `UntrustedContent.ts` fences injection.
-  But there is no classifier for prompt-level jailbreak attempts ("ignore your instructions", DAN, etc.).
-- [ ] Add a `JailbreakDetector.ts` — regex + embedding similarity check against known patterns.
-- [ ] On detection: reject + log to audit trail (same `audit()` function as Phase 4) + increment abuse counter.
-- [ ] Hard-block if 3+ violations from same userId in 1 hour.
-- **Files:** new `src/server/AgentV3/JailbreakDetector.ts`, `server.ts` (inject before AI call).
+### P-PE.3 — Jailbreak Detection  ✅ DONE (2026-06-29) · 🔌 WIRED
+- `CommandGovernance` blocks dangerous shell, `UntrustedContent` fences injection, and P-AI.10's
+  `AbuseDetector` already classifies prompt-level jailbreak/extraction phrasing — but it only DETECTED
+  (recorded), never blocked. P-PE.3 adds the missing hard-block layer. **No parallel `JailbreakDetector`**
+  was created (would duplicate P-AI.10, safeguard #6) — the existing detector + `abuseLedger` were extended.
+- [x] **Hard-block on repeat** — `evaluateAbuse()` (new, in `AbuseDetector.ts`) reads the same
+      `abuseLedger/{userId}`, counts UNAMBIGUOUS jailbreak/extraction attempts (`JAILBREAK_KINDS` — never
+      length/repetition) within a rolling 1-hour window, appends the current attempt, and returns a
+      `{ recorded, blocked, violations }` decision. Hard-block fires at `HARD_BLOCK_THRESHOLD` (3) attempts/hour.
+- [x] **Reject + audit** — `routes/agentv3.ts` awaits the decision for jailbreak prompts (timeout-bounded,
+      FAIL-OPEN so a degraded Firestore can never wrongly lock out a legitimate user), and on a hard block
+      returns HTTP 429 with an honest message and emits an `ABUSE_HARD_BLOCK` audit event. Non-jailbreak
+      abuse is recorded only, never blocked (no false-positive blocking of long/edgy prompts).
+- [x] Pure ledger logic (`isJailbreakEvent`, `countJailbreakViolations`) unit-tested.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3433/3433 ✅ (+9) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/AgentV3/AbuseDetector.ts`, `src/server/routes/agentv3.ts`, `tests/abuseDetector.test.ts`.
 
 ### P-PE.4 — Token Estimator (pre-call)  ❌ MISSING  [MED — cost control]
 - Token spend tracked post-hoc in `AgentV3CostTelemetry.ts` but no pre-call estimate.

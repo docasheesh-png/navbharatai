@@ -1,5 +1,30 @@
 import { describe, it, expect } from 'vitest';
-import { classifyIntent } from './IntentClassifier';
+import { classifyIntent, classifyIntentWithConfidence, classifyIntentSmart } from './IntentClassifier';
+
+describe('classifyIntent — continuation phrases resume the build (NOT the amnesiac chat path)', () => {
+  it('routes "please continue" / "continue" to edit_existing, not chat', () => {
+    expect(classifyIntent('please continue')).toBe('edit_existing');
+    expect(classifyIntent('continue')).toBe('edit_existing');
+    expect(classifyIntent('go on')).toBe('edit_existing');
+    expect(classifyIntent('keep going')).toBe('edit_existing');
+    expect(classifyIntent('finish it')).toBe('edit_existing');
+  });
+  it('handles Hinglish continuation phrases', () => {
+    expect(classifyIntent('aage badho')).toBe('edit_existing');
+    expect(classifyIntent('continue karo')).toBe('edit_existing');
+    expect(classifyIntent('poora karo')).toBe('edit_existing');
+  });
+  it('marks continuation HIGH-confidence so the LLM upgrade cannot downgrade it to chat', async () => {
+    expect(classifyIntentWithConfidence('please continue')).toEqual({ intent: 'edit_existing', confidence: 'high', signal: 'continuation' });
+    // Even if the LLM (wrongly) says "chat", high confidence short-circuits before the LLM is called.
+    const llm = async () => 'chat';
+    expect(await classifyIntentSmart('please continue', llm)).toBe('edit_existing');
+  });
+  it('does not hijack a real build that merely contains a build verb', () => {
+    expect(classifyIntent('build a todo app')).toBe('new_build');
+    expect(classifyIntent('continue building the dashboard and add a chart')).toBe('new_build');
+  });
+});
 
 describe('classifyIntent', () => {
   describe('social / conversational → chat', () => {

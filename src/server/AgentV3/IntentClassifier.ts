@@ -81,6 +81,25 @@ const BUILD_SIGNALS: readonly string[] = [
 ];
 
 /**
+ * Continuation phrases: the user is asking to CONTINUE / FINISH an in-progress or interrupted build
+ * (e.g. after a timeout). These are short and carry no build/edit verb, so without an explicit check
+ * they fall through to the "short message → 'chat'" default — which routes them to the cheap chat
+ * path that has NO project context/memory, producing the "please continue" → "remind me what we were
+ * doing?" AMNESIA. Treat them as continuing the existing project (the build/edit path injects the
+ * file tree + conversation recall + memory). Erring toward 'edit_existing' is safe: the worst case
+ * is running the memory-aware build path on a fresh workspace, never answering a build as chit-chat.
+ */
+const CONTINUATION_SIGNALS: readonly string[] = [
+  'continue', 'go on', 'keep going', 'keep building', 'carry on', 'resume',
+  'proceed', 'go ahead', 'finish it', 'finish the', 'complete it', 'complete the',
+  'do the rest', 'rest of it', 'next step', 'carry it on',
+  // Hindi / Hinglish
+  'aage badho', 'aage badhao', 'aage karo', 'aage chalo', 'jaari rakho',
+  'continue karo', 'continue kardo', 'poora karo', 'pura karo', 'puura karo',
+  'baaki karo', 'baki karo', 'finish karo', 'khatam karo', 'complete karo',
+];
+
+/**
  * Clear social/conversational patterns. A message matches 'chat' only if it has
  * NO build signal AND hits one of these (or is a very short, signal-free message).
  */
@@ -199,6 +218,11 @@ export function classifyIntentWithConfidence(message: string): IntentWithConfide
   if (matchesSignal(lower, BUILD_SIGNALS)) {
     return { intent: 'new_build', confidence: 'high', signal: 'build-signal' };
   }
+  // Continuation of an interrupted/in-progress build → resume the existing project (with memory),
+  // NOT the amnesiac chat path. High confidence so the LLM upgrade can't downgrade it to chat.
+  if (matchesSignal(lower, CONTINUATION_SIGNALS)) {
+    return { intent: 'edit_existing', confidence: 'high', signal: 'continuation' };
+  }
 
   // Steps 5–7 → low confidence (social pattern, short message, or default)
   for (const pattern of SOCIAL_PATTERNS) {
@@ -273,6 +297,12 @@ export function classifyIntent(message: string): BuildIntent {
   // 4) Remaining build signals (tech nouns: 'app', 'react', 'button', etc., and
   //    ambiguous verbs like 'add', 'install') → conservative 'new_build'.
   if (matchesSignal(lower, BUILD_SIGNALS)) return 'new_build';
+
+  // 4.5) Continuation of an interrupted/in-progress build ("continue", "go on", "finish it",
+  //      "aage badho", …): short + signal-free, so without this they fall to the short-message →
+  //      'chat' default and lose ALL build context/memory (the "please continue" → amnesia bug).
+  //      Route them to the memory-aware edit/continuation path instead.
+  if (matchesSignal(lower, CONTINUATION_SIGNALS)) return 'edit_existing';
 
   // 5) Clear social patterns (no build signal present) → 'chat'.
   for (const pattern of SOCIAL_PATTERNS) {

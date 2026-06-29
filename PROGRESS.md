@@ -5399,3 +5399,21 @@ Wired into both endpoints. The in-browser preview now builds from the user's sav
 sandbox.
 
 Gate: frontend tsc 0, server tsc 0, vitest 2964/2964 PASS, boot:check PASS.
+
+## 2026-06-29 — Fix: "please continue" no longer triggers amnesia (routes to the memory-aware build path)
+
+User: after a build timed out, "please continue" → AI replied "could you remind me what we were
+discussing?" and "what was you done?" → generic "Hello there! As an AI assistant…". Total amnesia. Root:
+the intent classifier sends SHORT, signal-free messages to 'chat' (the cheap chatRouter path), which has
+NO project context/memory — and "please continue" is 2 words with no build verb, so it hit the
+short-message → 'chat' default. The Claude-level memory (#533-538) is only injected on the BUILD/EDIT
+path, never the chat path. Fix: new CONTINUATION_SIGNALS (continue / go on / keep going / finish it /
+aage badho / continue karo / poora karo …) checked in BOTH classifyIntent and classifyIntentWithConfidence
+BEFORE the social/short fallbacks → returns 'edit_existing' (HIGH confidence, so the LLM upgrade can't
+downgrade it to chat). Continuations now route to the memory-aware edit/continuation path that injects the
+file tree + conversation recap + workspace memory → the build actually resumes instead of going amnesiac.
+Erring toward edit_existing is safe (worst case: run the build path on a fresh workspace; never answer a
+build as chit-chat). NOTE: the build still timed out at 12 min for a todo app — that's the separate SPEED
+issue (deferred at user's request).
+
+Gate: frontend tsc 0, server tsc 0, vitest 3089/3089 PASS (+4), boot:check PASS.

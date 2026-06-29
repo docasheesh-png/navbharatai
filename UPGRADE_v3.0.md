@@ -1115,14 +1115,25 @@
   AppAnalytics.tsx (build counts, AI model breakdown), PerformanceAnalyzer.tsx,
   ExtensionMarket.tsx (ESLint/Prettier/Tailwind/Python), ComponentLibrary.tsx, APITester.tsx, SecretManager.tsx.
 
-### P-DEV.1 — LSP / Code Navigation (Go to Definition, Find References, Rename)  ❌ MISSING  [HIGH]
-- Go to Definition (F12), Find All References (Shift+F12), Peek Definition, Rename Symbol (F2) — not wired.
-  Monaco's TypeScript worker runs in isolation; it doesn't see the full workspace file set.
-- ts-morph is already used in `ASTAnalyzer.ts` — it can power these without a full Language Server process.
-- [ ] Add `NavigationEngine.ts` wrapping ts-morph: `getDefinition(file, pos)`, `findReferences(symbol)`, `renameSymbol(oldName, newName, files[])`.
-- [ ] Wire to Monaco `editor.addAction()` on right-click context menu + keybindings F12 / Shift+F12 / F2.
-- [ ] Return results as Monaco `Location[]` and open in a references panel.
-- **Files:** new `src/server/AI/NavigationEngine.ts`, `src/components/ide/Editor.tsx`.
+### P-DEV.1 — LSP / Code Navigation  🟡 engine + API DONE / Monaco editor-action wiring PENDING (2026-06-29)  [HIGH]
+- Monaco's TS worker runs per-file and can't see the whole workspace, so cross-file Go-to-Definition /
+  Find-References weren't possible.
+- [x] **`NavigationEngine.ts`** (ts-morph, dynamic-import + graceful) — SEMANTIC, scope-aware
+      `getDefinition(files, file, offset)` + `findReferences(...)` over an in-memory project built from the
+      whole workspace file set; `lineColToOffset()` bridges Monaco's 1-based coords. Robust: a parse error
+      returns `{ok:false}` and never throws. **Unit-tested with the real engine** (`tests/navigationEngine.test.ts`)
+      — proves cross-file definition + reference resolution (not text-match).
+- [x] **API** — `POST /api/workspace/navigate` (`routes/navigate.ts`, rate-limited + request-validated via
+      P-DATA.1): `{ files, file, line, column, action: 'definition'|'references' }` → `{ ok, locations[] }`.
+- [x] **Rename** is already covered semantically-enough by `CodemodeExecutor.renameSymbol` (cross-file).
+- [ ] **Monaco editor-action wiring (F12 / Shift+F12 + references panel) — tracked follow-up:** it needs the
+      full workspace file set + cross-file tab-navigation threaded into the single-file `Editor.tsx` (an invasive
+      change); deferred to keep this PR low-risk (safeguard #3). The engine + endpoint are live and callable now,
+      and this also unblocks P-DEV.6 (refactoring uses the same engine).
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3299/3299 ✅ (5 new, real ts-morph) · `test:coverage` exit 0 ·
+      `build` ✅ · `boot:check` PASS.
+- **Files:** `src/server/AI/NavigationEngine.ts` (new), `src/server/routes/navigate.ts` (new),
+      `tests/navigationEngine.test.ts` (new), `server.ts`.
 
 ### P-DEV.2 — Cross-Session Workspace Persistence (Firestore)  🟡 PARTIAL → full  [HIGH]
 - `WorkspaceContext.tsx` stores files, open tabs, and chat history in localStorage only.

@@ -220,10 +220,16 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
   // under All/Apps and never collides with other sources) when a turn completes
   // and the user is signed in; it never touches the shared history code paths.
   useEffect(() => {
-    if (!state.done || !userId) return;
+    // Persist into the main History as soon as the build has a workspace + a first user message —
+    // NOT only on completion. A timed-out / interrupted v3.0 build used to be saved ONLY on
+    // state.done, so reopening it from History showed "Session not found". Now the same doc (keyed
+    // by the stable sessionId) is written on build start AND updated on finish / stop / timeout, so
+    // every v3.0 session is always in History and restorable. Best-effort; merge so partial writes
+    // never clobber a later, fuller one.
+    if (!userId || !sessionIdRef.current) return;
     const thread = convo;
-    if (thread.length === 0) return;
-    const firstUser = thread.find((m) => m.role === 'user')?.text ?? 'v3.0 build';
+    const firstUser = thread.find((m) => m.role === 'user')?.text;
+    if (!firstUser) return; // nothing meaningful to save yet
     const title = firstUser.slice(0, 40) + (firstUser.length > 40 ? '…' : '');
     const docId = `v3_${sessionIdRef.current}`;
     setDoc(
@@ -250,10 +256,12 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
         isPinned: false,
         mode: 'build',
       }),
+      { merge: true },
     ).catch(() => { /* history save is best-effort — never blocks the UI */ });
-    // Intentionally keyed on turn completion; `convo` is read at that moment.
+    // Fires on build start (workspaceId), completion (done), and stop/timeout (running). `convo` is
+    // read at that moment — recent enough for the title + thread.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.done, userId]);
+  }, [state.workspaceId, state.done, running, userId]);
 
   // Read a File as base64 (no data: prefix); downscale large images to keep the
   // payload small and vision-optimal, exactly like the other chat surfaces.

@@ -5451,3 +5451,20 @@ NOTE: after Babel loads, React deps still load from esm.sh — if that CDN is al
 preview is the full-fidelity path.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3111/3111 PASS (+1), boot:check PASS.
+
+## 2026-06-29 — Fix: v3.0 sessions reliably saved to main History (no more "Session not found")
+
+User: restoring a v3.0 session from the main sidebar History showed "Session not found. It may have been
+deleted or is from a different account." Root: AgentV3Panel persisted the v3.0 session to the main History
+(Firestore chat_sessions) ONLY on state.done — so a timed-out / interrupted / not-yet-finished build (very
+common, given the 12-min cap) was NEVER written, and reopening it from History found nothing. The main
+History also never queries the v3.0 ConversationStore, so chat_sessions was the only source. Fix: the
+persist effect now writes the session as soon as the build has a workspace + a first user message, and
+UPDATES the same doc (keyed by the stable sessionId, merge:true) on build start, completion, AND stop/
+timeout (deps: state.workspaceId, state.done, running, userId). Every v3.0 session is therefore always in
+History and restorable. The restore already adopts the saved sessionId, so the backend continues with the
+SAME workspace + memory (#533-538 hydration) on the next message. (Immediate client-side file/preview
+rehydration on restore — showing the app before the next message — is a deeper follow-up, deliberately not
+bundled here to avoid touching the panel's multi-source chat/file state under "never break".)
+
+Gate: frontend tsc 0, server tsc 0, vitest 3115/3115 PASS, boot:check PASS.

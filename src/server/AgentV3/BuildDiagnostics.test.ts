@@ -239,6 +239,17 @@ describe('BuildDiagnostics — AI Diagnosis Bundle (raw logs, LLM I/O, full erro
     expect(d.report().previewErrors).toHaveLength(1);
   });
 
+  it('captures the FULL reviewer findings (not the truncated timeline line) + renders them', () => {
+    const d = fresh();
+    const longReview = '## Code Review\n' + Array.from({ length: 40 }, (_, i) => `[WARNING ${i}] small problem number ${i}`).join('\n');
+    d.recordReview(longReview);
+    const r = d.report();
+    expect(r.review).toContain('small problem number 39'); // full list kept, not 400-char snippet
+    const text = renderDiagnosticsText(r);
+    expect(text).toContain('Quality review (all flagged problems)');
+    expect(text).toContain('small problem number 39');
+  });
+
   it('renders commands, LLM calls and full errors in the text report', () => {
     const d = fresh();
     d.recordCommand({ command: 'npm install', exitCode: 1, stdout: '', stderr: 'ERESOLVE' });

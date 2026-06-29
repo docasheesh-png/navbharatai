@@ -2501,6 +2501,9 @@ export function registerAgentV3Routes(app: Express): void {
           const reviewText = formatReview(review);
           if (reviewText) {
             events.emit({ type: 'narration', agent: 'architect', text: reviewText, ts: Date.now() });
+            // Capture the FULL review (every small problem it listed) into the report — the narration
+            // above is truncated to a 400-char timeline line, this keeps the complete findings.
+            try { buildDiag.recordReview(reviewText); } catch { /* best-effort */ }
           }
         } catch { /* reviewer is best-effort (incl. its 90s cap) — never affects the build result */ }
       }

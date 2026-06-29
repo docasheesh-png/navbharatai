@@ -5842,3 +5842,20 @@ Also confirmed from the same report: the live-server port-check fix (#668) WORKS
 port 5173".
 
 Gate: frontend tsc 0, server tsc 0, vitest 3561/3561 PASS, boot:check PASS.
+
+## 2026-06-29 — FIX: recurring CSS-Modules compile error + capture FULL review findings in report
+
+From a "note app" report: the 2 auto-repair attempts were fixing (a) a default-vs-named import mismatch
+(App imported useNotes as default; it's named — TS2613, auto-fixed) and (b) FOUR `TS2307: Cannot find
+module '*.module.css'` errors — the generator uses CSS Modules but nothing declared their types, so the
+verify gate tripped every time and burned repair attempts. Two improvements:
+• CSS-MODULES TYPES: the vite-react + vite-react-ts scaffolds now ship `src/vite-env.d.ts` with
+  `/// <reference types="vite/client" />` + explicit `*.module.css` / `*.module.scss` / `*.css`
+  declarations, so CSS-Module imports type-check under `tsc --noEmit` — this whole error class (and the
+  avoidable repair loop) is gone.
+• FULL REVIEW IN REPORT: the post-build quality reviewer's findings were only emitted as narration and
+  truncated to a 400-char timeline line, so the report couldn't list all the small problems it flagged.
+  Added BuildDiagnostics.recordReview() + a `review` field (capped 12k) + text render; the route now
+  records the complete review. The downloadable report now lists every problem the reviewer found.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3586/3586 PASS, boot:check PASS.

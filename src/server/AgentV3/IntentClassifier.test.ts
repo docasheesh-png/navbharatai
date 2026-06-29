@@ -14,6 +14,23 @@ describe('classifyIntent — continuation phrases resume the build (NOT the amne
     expect(classifyIntent('continue karo')).toBe('edit_existing');
     expect(classifyIntent('poora karo')).toBe('edit_existing');
   });
+  it('routes retry/redo (the "retry" button) to edit_existing, not the amnesiac chat path', () => {
+    // The timeout "retry" button + common retry phrasings must resume the SAME project with memory.
+    expect(classifyIntent('retry')).toBe('edit_existing');
+    expect(classifyIntent('try again')).toBe('edit_existing');
+    expect(classifyIntent('please try again')).toBe('edit_existing');
+    expect(classifyIntent('do it again')).toBe('edit_existing');
+    expect(classifyIntent('one more time')).toBe('edit_existing');
+    // Hinglish retry
+    expect(classifyIntent('dobara')).toBe('edit_existing');
+    expect(classifyIntent('phir se')).toBe('edit_existing');
+    expect(classifyIntent('retry karo')).toBe('edit_existing');
+  });
+  it('word-boundary: a retry signal embedded in a larger word does not trigger continuation', () => {
+    // "retrying" contains "retry" but must NOT be matched (matchesSignal is word-boundary aware).
+    // A real build request that happens to contain it still classifies on its own merits.
+    expect(classifyIntent('build a network monitor that shows retrying connections')).toBe('new_build');
+  });
   it('marks continuation HIGH-confidence so the LLM upgrade cannot downgrade it to chat', async () => {
     expect(classifyIntentWithConfidence('please continue')).toEqual({ intent: 'edit_existing', confidence: 'high', signal: 'continuation' });
     // Even if the LLM (wrongly) says "chat", high confidence short-circuits before the LLM is called.

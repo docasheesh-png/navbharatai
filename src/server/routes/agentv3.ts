@@ -94,6 +94,7 @@ import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
 import { estimateBuildTime, complexityFromPrompt } from '../lib/BuildTimeEstimator';
 import { incrementalBuildCache, hashFiles, diffHashes } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
+import { buildGroundedContext, tokenize as rerankTokenize } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -1866,6 +1867,25 @@ export function registerAgentV3Routes(app: Express): void {
             ts: Date.now(),
           });
           architectSystem = editModePrefix(fileTree) + '\n\n---\n\n' + architectSystem;
+          // P-AI.2 — RAG grounding (dependency-free, BM25): rank the existing files against THIS request
+          // and inject the most-relevant ones as a cited grounding block, so the agent reads/edits the
+          // right files first. Bounded (≤14 candidate reads, selected by path-token overlap) + best-effort.
+          try {
+            const qTokens = new Set(rerankTokenize(prompt));
+            const candidates = fileTree
+              .filter((p) => /\.(t|j)sx?$|\.vue$|\.css$|\.html$/.test(p))
+              .map((p) => ({ p, overlap: rerankTokenize(p).filter((t) => qTokens.has(t)).length }))
+              .sort((a, b) => b.overlap - a.overlap)
+              .slice(0, 14)
+              .map((x) => x.p);
+            const filesMap: Record<string, string> = {};
+            for (const p of candidates) {
+              const c = await actuator.readFile(workspaceId, p).catch(() => '');
+              if (c) filesMap[p] = c;
+            }
+            const grounded = buildGroundedContext(filesMap, prompt, 3);
+            if (grounded) architectSystem = `${grounded}\n\n---\n\n${architectSystem}`;
+          } catch { /* grounding is best-effort — never blocks the build */ }
           // Warm the project graph from the PERSISTED sandbox files when memory is
           // cold (process restarted but the sandbox survived). This makes the agent's
           // recall / evaluate tools see the existing codebase immediately on a resumed

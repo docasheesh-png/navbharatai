@@ -1745,15 +1745,19 @@
       `tests/hallucinationDetector.test.ts` (new), `src/components/panels/ProjectInsightsPanel.tsx`, `server.ts`,
       `src/server/AppContext/AppKnowledgeBase.ts`.
 
-### P-AI.2 — Full RAG Pipeline (Reranker + Grounding + Citation)  🟡 PARTIAL → full  [HIGH]
-- `RepositoryIntelligenceEngine.ts` retrieves project files. `EmbeddingSearch.ts` does ada-002 similarity.
-  Missing: reranker (sort retrieved chunks by relevance), grounding engine (attach evidence to claims),
-  citation manager (trace which file/line supported which generated snippet).
-- [ ] Add a `ContextReranker.ts` — BM25 or cross-encoder score on retrieved chunks before injection.
-- [ ] Add a `GroundingEngine.ts` — wrap each generated code block with its source file references.
-- [ ] Citation metadata injected into `AgentV3CostTelemetry.ts` records (which file context was used).
-- **Files:** new `src/server/AgentV3/ContextReranker.ts`, new `src/server/AgentV3/GroundingEngine.ts`,
-  `src/server/AgentV3/EmbeddingSearch.ts`.
+### P-AI.2 — Full RAG Pipeline (Reranker + Grounding + Citation)  ✅ DONE (2026-06-29, dependency-free) · 🔌 WIRED  [embedding rerank stays optional]
+- `EmbeddingSearch` (ada-002) needs `OPENAI_API_KEY` → dormant in prod. Implemented a LEXICAL RAG that needs
+  zero infra and is always on, instead of leaving RAG dormant.
+- [x] **`ContextReranker.ts`** (new, dependency-free) — Okapi **BM25** reranker (`rankByBM25`) over the workspace's
+  own files for the current request, plus GROUNDING + CITATION: `buildGroundedContext` emits the top-K most-relevant
+  files as a block citing each source as `path:line` with a snippet around the first relevant line
+  (`firstRelevantLine`/`snippetAround`). Pure (`tokenize`/`rankByBM25`/…), 10 unit tests.
+- [x] **Wired into the live edit build (felt)** — `routes/agentv3.ts` edit-mode ranks the existing files against the
+  request (bounded: ≤14 path-overlap candidates read) and injects the cited "RELEVANT EXISTING FILES" grounding
+  block, so the agent reads/edits the right files first — real grounding, traceable to source, no embeddings needed.
+- **Note:** chose dependency-free BM25 over the embedding/cross-encoder path (no `OPENAI_API_KEY` dependency); the
+  optional embedding rerank can layer on top of `EmbeddingSearch` if a key is ever configured.
+- **Files:** new `src/server/AgentV3/ContextReranker.ts` + `tests/contextReranker.test.ts`, `src/server/routes/agentv3.ts`.
 
 ### P-AI.3 — Dialogue Manager / Multi-Turn Context Manager  ✅ DONE (2026-06-29) · 🔌 WIRED
 - `ConversationStore` persisted the transcript but each turn was treated independently — no sense of

@@ -13,6 +13,7 @@ import type { User as FirebaseUser } from 'firebase/auth';
 const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
   lazy(() => fn().then(m => ({ default: m[k] as React.ComponentType<any> })));
 
+const ProjectInsightsPanel = _lz(() => import('./ProjectInsightsPanel'), 'ProjectInsightsPanel');
 const CodeStudio        = _lz(() => import('../ide/CodeStudio'),         'CodeStudio');
 const TestPanel         = _lz(() => import('../ide/TestPanel'),          'TestPanel');
 const DiffViewer        = _lz(() => import('../ide/DiffViewer'),         'DiffViewer');
@@ -358,6 +359,13 @@ export function ViewPanels({
       {activeView === 'analytics' && (
         <div className="flex-1 h-full overflow-hidden">
           <AppAnalytics userId={user?.uid} />
+        </div>
+      )}
+
+      {/* Insights & Integrations — surfaces SLO / SBOM / Webhooks (wiring sweep) */}
+      {activeView === 'insights' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <ProjectInsightsPanel user={user} files={files as Record<string, string>} />
         </div>
       )}
 

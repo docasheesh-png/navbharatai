@@ -86,6 +86,7 @@ import { redactPII } from '../AgentV3/SecretRedactor';
 import { audit } from '../lib/audit';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
+import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -1344,25 +1345,41 @@ export function registerAgentV3Routes(app: Express): void {
     const isEditMode = intent === 'edit_existing';
     if (isPlainChatTurn) {
       try {
-        const chatRouter = AIRouterManager.getRouter('free');
         const chatPrompt = attachmentContext
           ? `${prompt}\n\nThe user attached file(s); here is the extracted content:\n\n${attachmentContext}`
           : prompt;
-        // Bounded (30s) — the plain-chat reply runs on an early-exit path BEFORE the deadline timer
-        // is armed; without this a stalled provider hangs the whole request forever. On timeout the
-        // catch below falls through to the normal build path so the user still gets an answer.
-        const { response } = await raceTimeout(
-          chatRouter.route(
-            chatPrompt,
-            LANGUAGE_RULE + '\n\n' +
-              "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
-              "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
-              "mention which model you are.\n\n" + CREATOR_IDENTITY,
-          ),
-          30_000,
-          'chatRouter.route',
-        );
-        const reply = response.content + providerDebugTag(response.provider);
+        // P-PE.1 — plain-chat response cache. This reply is a pure function of the current prompt (no
+        // transcript/user data injected here), so identical prompts WITHOUT an attachment can be served
+        // from an in-memory TTL+LRU cache: instant and free, no behaviour change. Build/edit turns never
+        // reach this path, and attachment turns are skipped (their prompt is unique).
+        const cacheable = !attachmentContext && chatCacheEnabled();
+        const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
+        let reply: string;
+        const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
+        if (cachedReply !== undefined) {
+          reply = cachedReply;
+        } else {
+          const chatRouter = AIRouterManager.getRouter('free');
+          // Bounded (30s) — the plain-chat reply runs on an early-exit path BEFORE the deadline timer
+          // is armed; without this a stalled provider hangs the whole request forever. On timeout the
+          // catch below falls through to the normal build path so the user still gets an answer.
+          const { response } = await raceTimeout(
+            chatRouter.route(
+              chatPrompt,
+              LANGUAGE_RULE + '\n\n' +
+                "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
+                "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
+                "mention which model you are.\n\n" + CREATOR_IDENTITY,
+            ),
+            30_000,
+            'chatRouter.route',
+          );
+          reply = response.content + providerDebugTag(response.provider);
+          // Cache only a real, non-empty reply (never cache an empty/failed generation).
+          if (cacheable && response.content && response.content.trim()) {
+            chatResponseCache.set(cacheKey, reply);
+          }
+        }
         // Record the turn in project memory so iterative context is preserved
         // (mirrors the build path's recordRequest). Best-effort.
         try {

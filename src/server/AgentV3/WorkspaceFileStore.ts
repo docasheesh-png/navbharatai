@@ -97,3 +97,46 @@ export async function loadWorkspaceFiles(workspaceId: string): Promise<Record<st
     return {};
   }
 }
+
+/** Pure: split a current path list into what remains after removing `toRemove`, + the removed paths. */
+export function diffRemovedPaths(current: string[], toRemove: string[]): { remaining: string[]; removed: string[] } {
+  const removeSet = new Set((toRemove || []).filter((p) => typeof p === 'string' && p));
+  const remaining: string[] = [];
+  const removed: string[] = [];
+  for (const p of current || []) (removeSet.has(p) ? removed : remaining).push(p);
+  return { remaining, removed };
+}
+
+/**
+ * Remove specific files from the durable workspace set. The authoritative `paths` metadata is
+ * updated so loadWorkspaceFiles no longer returns them — i.e. v3.0 genuinely "forgets" the deleted
+ * files (a fresh / restored session won't have them, and the file-guardian won't resurrect them).
+ * Handles delete-all (paths → []). Best-effort: also deletes the orphaned content docs. Returns the
+ * number of paths removed from the authoritative list. No-op without Firestore; never throws.
+ */
+export async function removeWorkspaceFiles(workspaceId: string, pathsToRemove: string[]): Promise<number> {
+  const db = getDb();
+  if (!db) return 0;
+  const targets = (pathsToRemove || []).filter((p) => typeof p === 'string' && p);
+  if (targets.length === 0) return 0;
+  try {
+    const root = db.collection(COLLECTION).doc(workspaceId);
+    const meta = await root.get();
+    if (!meta.exists) return 0;
+    const current: string[] = Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
+    const { remaining, removed } = diffRemovedPaths(current, targets);
+    if (removed.length === 0) return 0;
+    // Update the authoritative path list FIRST — this is what makes the files "gone" for restore.
+    await root.set({ paths: remaining, count: remaining.length, savedAt: Date.now() }, { merge: true });
+    // Best-effort: delete the now-orphaned content docs (batched).
+    const filesCol = root.collection('files');
+    for (let i = 0; i < removed.length; i += BATCH) {
+      const batch = db.batch();
+      for (const p of removed.slice(i, i + BATCH)) batch.delete(filesCol.doc(fileDocId(p)));
+      await batch.commit();
+    }
+    return removed.length;
+  } catch {
+    return 0;
+  }
+}

@@ -2440,9 +2440,28 @@ ${buildLanguageRule(preferredLanguage)}`;
   // Batch removal side-effect from the IDE file explorer (multi-select / delete-all). The React
   // `files` state is updated by the caller via onFilesChange; here we clear the deleted paths from
   // durable storage (IndexedDB/Cache) so they don't reappear after a reload.
-  const handleFilesRemoved = useCallback((paths: string[]) => {
+  const handleFilesRemoved = useCallback(async (paths: string[]) => {
+    if (!paths.length) return;
+    // 1) Clear from durable IDE storage so they don't resurrect on reload.
     for (const p of paths) storageDeleteFile(p).catch(() => {});
-  }, []);
+    // 2) Propagate the delete to the v3.0 workspace so v3.0 also forgets the files (best-effort;
+    //    needs a signed-in user, and the server gates on v3.0 being enabled → no-op otherwise).
+    const uid = user?.uid;
+    if (!uid) return;
+    try {
+      const workspaceId = getAgentV3WorkspaceId(uid);
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      try {
+        const tok = await auth.currentUser?.getIdToken();
+        if (tok) headers.Authorization = `Bearer ${tok}`;
+      } catch { /* token optional — server falls back to claimed userId */ }
+      await fetch('/api/agentv3/delete-files', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ workspaceId, userId: uid, email: user?.email || '', paths }),
+      });
+    } catch { /* best-effort — never block the IDE delete */ }
+  }, [user]);
 
   // Push the IDE workspace files into the NavBharatAI Pro v3.0 (AgentV3) workspace so v3.0 KNOWS
   // which files exist (e.g. after a ZIP upload). Best-effort: needs a signed-in user; the server

@@ -125,5 +125,11 @@ export function detectDevPort(output: string, fallback: number): number {
  */
 export function buildPortWaitCommand(port: number, maxSeconds: number): string {
   const iterations = Math.max(1, Math.floor(maxSeconds));
-  return `for i in $(seq 1 ${iterations}); do nc -z localhost ${port} 2>/dev/null && { echo PORT_UP; exit 0; }; sleep 1; done; echo PORT_DOWN`;
+  // Tool-agnostic, IPv4-forced liveness check. The old `nc -z localhost` check read a HEALTHY dev
+  // server as DOWN in two real cases: (1) the sandbox image has no `nc` (netcat) → every poll fails;
+  // (2) `localhost` resolves to IPv6 ::1 while Vite binds IPv4 0.0.0.0 → connection refused. Either
+  // made the live preview "never come up" even though the server was ready. Now try nc, then curl,
+  // then bash's /dev/tcp — all against 127.0.0.1 — so ANY one succeeding marks the port UP.
+  const check = `nc -z 127.0.0.1 ${port} 2>/dev/null || curl -s -o /dev/null --max-time 2 http://127.0.0.1:${port} 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null`;
+  return `for i in $(seq 1 ${iterations}); do if ${check}; then echo PORT_UP; exit 0; fi; sleep 1; done; echo PORT_DOWN`;
 }

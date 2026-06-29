@@ -5746,3 +5746,20 @@ BuildDiagnostics gains PreviewErrorRecord + recordPreviewError() + channel + tex
 "succeeds" but doesn't render now shows WHY, right in the downloadable report.
 
 Gate: frontend tsc 0, server tsc 0, vitest (BuildDiagnostics + reactPreview + DiagnosticsStore green), boot:check PASS.
+
+## 2026-06-29 — FIX (P1 root cause): live preview "never comes up" — the nc-only port check was the bug
+
+A "build a note app" report (NO "Killed" this time → NOT OOM) showed vite "ready in 163ms" bound to
+0.0.0.0:5173, yet "[health-check] port 5173 not responding" every time → live preview never published.
+Root cause: buildPortWaitCommand polled ONLY `nc -z localhost <port>`. Two real failure modes made a
+HEALTHY server read as DOWN: (1) the sandbox image may have no `nc` (netcat) → every poll fails → PORT_DOWN;
+(2) `localhost` can resolve to IPv6 ::1 while Vite binds IPv4 0.0.0.0 → connection refused. Either one =
+"dev server did not come up" forever. Fix: tool-agnostic, IPv4-forced liveness check — try
+`nc -z 127.0.0.1` → `curl http://127.0.0.1:<port>` → bash `/dev/tcp/127.0.0.1/<port>`; ANY hit = PORT_UP.
+Strictly additive (only ever reports UP in MORE cases, never fewer). Test updated.
+
+Honest scope: this is the strongest, code-reasoned fix for the live preview not coming up; final proof
+needs a real E2B run. The in-browser ("dono preview") exact error is now captured (previewErrors, #666) —
+that build predated the #666 deploy so its report had none; the next run will carry it.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3534/3534 PASS, boot:check PASS.

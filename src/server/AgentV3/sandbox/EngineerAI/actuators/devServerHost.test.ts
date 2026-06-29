@@ -103,9 +103,15 @@ describe('detectDevPort', () => {
 });
 
 describe('buildPortWaitCommand', () => {
-  it('polls the given port and exits early on PORT_UP', () => {
+  it('polls the given port with a tool-agnostic, IPv4-forced check and exits early on PORT_UP', () => {
     const cmd = buildPortWaitCommand(5173, 25);
-    expect(cmd).toContain('nc -z localhost 5173');
+    // Forces IPv4 (127.0.0.1, not localhost) and tries nc → curl → /dev/tcp so a missing tool or an
+    // IPv6 `localhost` mismatch can no longer read a healthy dev server as DOWN.
+    expect(cmd).toContain('127.0.0.1');
+    expect(cmd).not.toContain('nc -z localhost');
+    expect(cmd).toContain('nc -z 127.0.0.1 5173');
+    expect(cmd).toContain('curl -s -o /dev/null');
+    expect(cmd).toContain('/dev/tcp/127.0.0.1/5173');
     expect(cmd).toContain('echo PORT_UP; exit 0');
     expect(cmd).toContain('echo PORT_DOWN');
   });

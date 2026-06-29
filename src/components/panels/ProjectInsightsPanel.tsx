@@ -11,6 +11,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Activity, ShieldCheck, Webhook as WebhookIcon, Plus, Trash2, RefreshCcw, Send, Brain } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
+import { cn } from '../../lib/utils';
+import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
+import { cardClasses } from '../ui/variants';
 
 interface ProjectInsightsPanelProps {
   user: FirebaseUser | null;
@@ -29,7 +33,7 @@ async function authedHeaders(): Promise<Record<string, string>> {
 }
 
 const Card: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode; action?: React.ReactNode }> = ({ icon, title, children, action }) => (
-  <div className="bg-[#161b22] border border-white/10 rounded-2xl p-5 space-y-4">
+  <div className={cn(cardClasses(), 'p-5 space-y-4')}>
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">{icon}<h3 className="text-sm font-black text-white uppercase tracking-tight">{title}</h3></div>
       {action}
@@ -125,7 +129,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
 
       {/* Build SLO */}
       <Card icon={<Activity className="w-4 h-4 text-emerald-400" />} title="Build SLO Compliance"
-        action={<button onClick={fetchSlo} className="text-[10px] font-bold uppercase tracking-widest text-[#8b949e] hover:text-white flex items-center gap-1"><RefreshCcw className="w-3 h-3" />Refresh</button>}>
+        action={<Button variant="ghost" size="sm" onClick={fetchSlo} className="uppercase tracking-widest"><RefreshCcw className="w-3 h-3" />Refresh</Button>}>
         {!slo || slo.totalBuilds === 0 ? (
           <p className="text-[11px] text-[#8b949e]">No builds yet — SLO compliance appears once builds have run.</p>
         ) : (
@@ -143,7 +147,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
 
       {/* Code Confidence (P-AI.1 hallucination check) */}
       <Card icon={<Brain className="w-4 h-4 text-fuchsia-400" />} title="Code Confidence (AI hallucination check)"
-        action={<button onClick={runConf} disabled={confBusy} className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest bg-fuchsia-600 hover:bg-fuchsia-700 disabled:opacity-50 text-white rounded-lg">{confBusy ? 'Checking…' : 'Check Code'}</button>}>
+        action={<Button size="sm" onClick={runConf} disabled={confBusy} className="uppercase tracking-widest bg-fuchsia-600 hover:bg-fuchsia-700">{confBusy ? 'Checking…' : 'Check Code'}</Button>}>
         {!conf ? (
           <p className="text-[11px] text-[#8b949e]">Scan the generated code for hallucination signals — undeclared (hallucinated) dependencies, imports to files that don't exist, and placeholder/"not implemented" stubs — and get a confidence score.</p>
         ) : (
@@ -168,7 +172,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
 
       {/* SBOM */}
       <Card icon={<ShieldCheck className="w-4 h-4 text-indigo-400" />} title="App SBOM + License Check"
-        action={<button onClick={runSbom} disabled={sbomBusy} className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg">{sbomBusy ? 'Scanning…' : 'Generate SBOM'}</button>}>
+        action={<Button size="sm" onClick={runSbom} disabled={sbomBusy} className="uppercase tracking-widest">{sbomBusy ? 'Scanning…' : 'Generate SBOM'}</Button>}>
         {sbomMsg && <p className="text-[11px] text-amber-400">{sbomMsg}</p>}
         {sbom && (
           <div className="space-y-2 text-[11px]">
@@ -188,15 +192,15 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
 
       {/* Webhooks */}
       <Card icon={<WebhookIcon className="w-4 h-4 text-cyan-400" />} title="Webhooks"
-        action={hooks.length > 0 ? <button onClick={testHooks} className="text-[10px] font-bold uppercase tracking-widest text-cyan-400 hover:text-white flex items-center gap-1"><Send className="w-3 h-3" />Send test</button> : undefined}>
+        action={hooks.length > 0 ? <Button variant="ghost" size="sm" onClick={testHooks} className="uppercase tracking-widest text-cyan-400"><Send className="w-3 h-3" />Send test</Button> : undefined}>
         {!uid ? (
           <p className="text-[11px] text-[#8b949e]">Sign in to manage webhooks for build/deploy events.</p>
         ) : (
           <div className="space-y-3">
             <p className="text-[11px] text-[#8b949e]">Get a POST on BUILD_COMPLETE / FAILED / DEPLOY_COMPLETE / FAILED — wire builds into Slack/Discord/your CI.</p>
             <div className="flex gap-2">
-              <input value={newUrl} onChange={e => setNewUrl(e.target.value)} placeholder="https://hooks.slack.com/…" className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-white text-xs outline-none focus:border-cyan-500" />
-              <button onClick={addHook} disabled={whBusy || !newUrl.trim()} className="px-3 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white rounded-lg flex items-center gap-1 text-[11px] font-bold"><Plus className="w-3.5 h-3.5" />Add</button>
+              <Input value={newUrl} onChange={e => setNewUrl(e.target.value)} placeholder="https://hooks.slack.com/…" className="flex-1 bg-black/40 focus:border-cyan-500" />
+              <Button onClick={addHook} disabled={whBusy || !newUrl.trim()} className="bg-cyan-600 hover:bg-cyan-700"><Plus className="w-3.5 h-3.5" />Add</Button>
             </div>
             {whMsg && <p className="text-[11px] text-amber-400">{whMsg}</p>}
             <div className="space-y-1.5">

@@ -2189,13 +2189,21 @@
   (LocalizationManager serves *generated* apps). Material/Fluent/Cupertino/Carbon kits, WebGL/WebGPU, canvas-drawing,
   node/flow & diagram editors, eye-tracking/cognitive-load/attention-mapping, SSR/hydration of the builder UI — **⬜ N/A-by-design**.
 
-### P-DESIGN.1 — Shared UI Primitive Library wired to Design Tokens  🟡 PARTIAL → full  [HIGH]
-- `DesignSystem.tsx` defines tokens but they are a **viewer/exporter**, not the live source — there is **no
-  `src/components/ui/` atom library** (Button/Input/Card/Badge/Modal/etc.). The 116 components re-implement
-  primitives ad-hoc (inline Tailwind), so there is no atomic→molecule→organism structure, no shared variants/states/slots.
-- [ ] Build `src/components/ui/` primitives (Button, Input, Select, Card, Badge, Tabs, Tooltip…) consuming theme tokens as the single source of truth.
-- [ ] Refactor high-traffic views to use them (incremental, no behavior change); enables consistency + theming everywhere.
-- **Files:** new `src/components/ui/*`, `src/lib/theme.ts`, `src/components/ide/DesignSystem.tsx`.
+### P-DESIGN.1 — Shared UI Primitive Library wired to Design Tokens  ✅ DONE (2026-06-29) · 🔌 UI-WIRED
+- There was no `src/components/ui/` atom library; 116 components re-implemented primitives ad-hoc (inline Tailwind).
+- [x] **Built `src/components/ui/` primitives** — `Button`, `Input`+`Select`, `Card`, `Badge`, `Tabs`, `Tooltip`
+  (plus the existing `Skeleton*` from P-UX.2), exported via an `index.ts` barrel. All variant/size/state vocabulary
+  lives in a single pure resolver module `src/components/ui/variants.ts` (`buttonClasses`/`badgeClasses`/`cardClasses`/
+  `inputClasses`) — the single source of truth — consumed by every primitive. `cn` (clsx + tailwind-merge) lets a
+  caller override the accent while keeping the shared base. Accessible (focus-visible rings, role=tablist/tab, role=tooltip).
+  Pure resolvers are unit-tested (6 tests).
+- [x] **Adopted in a real view (no behavior change)** — refactored `ProjectInsightsPanel` (the Insights & Webhooks
+  panel) to use `Card` surface token + `Button`/`Input` primitives, overriding per-card accents (fuchsia/cyan) via
+  `cn` so the look is preserved. Demonstrates the library live; broad incremental adoption of other high-traffic
+  views can follow safely now that the atoms exist.
+- **Verification:** `tsc` (fe) ✅ · `build` ✅ · `vitest run` (via coverage exit 0) ✅ · `boot:check` PASS.
+- **Files:** new `src/components/ui/{variants.ts,Button,Badge,Card,Input,Tabs,Tooltip,index}.tsx`,
+  `src/components/panels/ProjectInsightsPanel.tsx`, `tests/uiVariants.test.ts` (new).
 
 ### P-DESIGN.2 — Missing Overlay & Interaction Primitives  🟡 PARTIAL → full  [MED]
 - No reusable **Tooltip / Popover / Context-Menu / Drawer / Bottom-Sheet** primitives; drag-and-drop is motion-only

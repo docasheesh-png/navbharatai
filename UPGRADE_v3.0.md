@@ -1068,15 +1068,18 @@
 - **Files:** `src/server/Memory/ProjectMemoryManager.ts`, new `src/server/Memory/CrossSessionContextLoader.ts`,
   `server.ts`, `src/App.tsx`.
 
-### P-PME.2 — Release Notes Generator  ❌ MISSING  [HIGH]
-- When a user deploys their app, nothing is generated to document what was built. No release notes,
-  no changelog, no build summary. Users can't share what changed between builds.
-- [ ] Add `ReleaseNotesGenerator.ts` — post-deploy step in `AppMakerOrchestrator.ts` that:
-  - Diffs the current blueprint vs. previous blueprint (features added/removed/changed).
-  - Generates a structured release note: version, date, new features, bug fixes, tech stack.
-  - Emits to `projectMemory/{userId}/{projectId}/releases[]` in Firestore.
-- [ ] Surface in the UI: "View Release Notes" button after deploy, with copy/share to clipboard.
-- **Files:** new `src/server/AppMakerLab/generator/ReleaseNotesGenerator.ts`,
+### P-PME.2 — Release Notes Generator  🟡 engine+API DONE / persistence+UI PENDING  [HIGH]
+- When a user deploys their app, nothing documented what changed. Now there is a real generator.
+- [x] Added `src/server/lib/ReleaseNotesGenerator.ts` — a pure, dependency-free engine: `diffBlueprints`
+  (features added/removed/kept, case-insensitive + deduped) and `generateReleaseNote` → a structured note
+  (app name, version, date, summary, added/removed sections, tech stack) + a formatted Markdown body. Honest:
+  an identical blueprint yields a "no user-visible changes" note (no fabricated highlights); the engine never
+  reads the clock (date is caller-supplied). 8 unit tests.
+- [x] Added `POST /api/release-notes` (stateless): body `{ current, previous?, version?, date? }` → the note +
+  Markdown, with input sanitisation/caps. Any caller (build flow, IDE button) can use it.
+- [ ] **Still pending:** persist to `projectMemory/.../releases[]` (Firestore), the post-deploy auto-generate
+  step in the build flow, and the "View Release Notes" UI button with copy/share.
+- **Files:** new `src/server/lib/ReleaseNotesGenerator.ts` + `.test.ts`, new `src/server/routes/releaseNotes.ts`, `server.ts`.
   `src/server/AppMakerLab/AppMakerOrchestrator.ts`, `src/App.tsx`.
 
 ### P-PME.3 — Technical Debt Tracker  🟡 PARTIAL → full  [HIGH]

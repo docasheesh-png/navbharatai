@@ -49,6 +49,7 @@ import { registerProfileRoutes } from './src/server/routes/profile';
 import { apiVersionMiddleware } from './src/server/routes/apiVersion';
 import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
 import { registerObservabilityRoutes } from './src/server/routes/observability';
+import { registerReleaseNotesRoutes } from './src/server/routes/releaseNotes';
 import { errorTracker, installGlobalErrorHandlers } from './src/server/observability/ErrorTracker';
 import { registerHealthRoutes, markServerReady } from './src/server/routes/health';
 import { registerWarmRoute } from './src/server/routes/warm';
@@ -499,6 +500,8 @@ setInterval(() => {
   registerAdminRoutes(app, adminLimiter);
   // P2.1 — observability: recent distributed traces + live metrics (admin-gated).
   registerObservabilityRoutes(app);
+  // P-PME.2 — release-notes generator (stateless blueprint-diff → structured notes).
+  registerReleaseNotesRoutes(app);
   registerSecretsRoutes(app);
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).

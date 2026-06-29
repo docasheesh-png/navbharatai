@@ -2226,13 +2226,23 @@
 - [ ] Adopt a lightweight chart lib (e.g. `recharts`); add Line/Bar/Area/Pie wrappers in `ui/`; use them in the dashboards.
 - **Files:** new `src/components/ui/charts/*`, `src/components/ide/AppAnalytics.tsx`, `AppHealthMonitor.tsx`.
 
-### P-DESIGN.5 — AI Design Generation & Critique  🟡 PARTIAL → full  [MED-HIGH — differentiator]
-- AI design is shallow: `AISuggestions` is static/pattern-based and `DarkModeGenerator` is the only real AI design tool
-  (`ScreenshotToCode` exists). Missing: generative **wireframe/layout/component** generation, **AI design critic**,
-  and **AI color-palette/typography** suggestions from a brand or reference.
-- [ ] Add an AI "design pass": generate layout/wireframe options + a component from a prompt, and an AI design-critique on the current preview (uses the AgentV3 multi-model backend).
-- [ ] Add AI palette + type-scale suggestions feeding `DesignSystem` tokens.
-- **Files:** `src/components/ide/AISuggestions.tsx`, new `src/components/ide/AIDesignPass.tsx`, AgentV3 backend.
+### P-DESIGN.5 — AI Design Generation & Critique  ✅ DONE (2026-06-29) · 🔌 UI-WIRED  [palette→tokens UI deferred]
+- AI design was shallow: `AISuggestions` was static/pattern-based. Now there is a REAL AI design pass on the
+  multi-model FREE router (never Claude → no build-grade cost).
+- [x] **`DesignAdvisor.ts`** (new, AgentV3) — pure, unit-tested builders + parsers: `buildSuggestionPrompt`/
+  `parseSuggestions` (context-aware critique → validated improve/add/fix/style suggestions, capped/sanitised),
+  `buildPalettePrompt`/`parsePalette` (brand → validated hex palette + type scale), `extractJson` (robust
+  fenced-JSON extraction), and `aiSuggestions`/`aiPalette` async wrappers (honest [] / null on failure, never throw).
+- [x] **Endpoints** — new `src/server/routes/design.ts` registered in `server.ts`: `POST /api/design/suggest`
+  ({code}→suggestions) and `POST /api/design/palette` ({brand}→palette).
+- [x] **UI-WIRED (felt)** — `AISuggestions` (the floating "AI Copilot") now fetches REAL AI suggestions from
+  `/api/design/suggest`, shows a "Thinking…/AI suggestions" state, and **falls back to the heuristic list** if the
+  AI is briefly unavailable — so the copilot is genuinely AI-powered, not static patterns. AppKnowledgeBase entry added.
+- [ ] **Deferred:** feeding the generated palette directly into `DesignSystem` tokens via UI (endpoint + validated
+  logic are shipped and callable; the DesignSystem token-editor wiring is left for a focused pass to avoid risk).
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` (via coverage exit 0; +14 DesignAdvisor) ✅ · `build` ✅ · `boot:check` PASS.
+- **Files:** new `src/server/AgentV3/DesignAdvisor.ts`, new `src/server/routes/design.ts`, `server.ts`,
+  `src/components/ide/AISuggestions.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`, `tests/designAdvisor.test.ts` (new).
 
 ### P-DESIGN.6 — Prototyping Engine (interactive preview)  ❌ MISSING  [LOW]
 - No interactive prototype / transition preview / click-through flow between generated pages (only live app preview).

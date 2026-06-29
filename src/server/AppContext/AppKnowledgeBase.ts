@@ -197,6 +197,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['privacy', 'consent', 'cookie', 'cookies', 'gdpr', 'dpdp', 'analytics', 'tracking', 'data', 'opt out', 'opt in', 'decline', 'accept', 'privacy policy', 'do not track', 'data privacy', 'meri privacy', 'data collection'],
     aiSurface: 'nbi_chat',
   },
+  {
+    id: 'ai_design_copilot',
+    name: 'AI Copilot — AI design suggestions',
+    path: 'The floating "AI Copilot" button (bottom-right) in the chat/builder',
+    description: 'A floating "AI Copilot" that suggests the most impactful improvements for your current app — now powered by REAL AI (P-DESIGN.5), not just static tips. It reads your app\'s code and returns concrete, context-aware suggestions (improve / add / fix / style); tap one to send it straight to the builder. If the AI is briefly unavailable it falls back to smart heuristic suggestions, so you always get useful ideas. A backend AI "design pass" also generates a colour palette + type scale from a brand description (POST /api/design/palette).',
+    howToUse: 'Open the chat/builder and tap the "AI Copilot" button at the bottom-right. It shows AI suggestions tailored to your app — tap any one to send that instruction to the builder, or tap the refresh icon to regenerate.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['ai copilot', 'copilot', 'suggestions', 'ai suggestions', 'design suggestions', 'improve my app', 'design pass', 'palette', 'color palette', 'ideas', 'what next', 'sujhav', 'design critique'],
+    aiSurface: 'nbi_chat',
+  },
   // ─── ENGINEER AI ─────────────────────────────────────────────────────────
   {
     id: 'connect_domain',

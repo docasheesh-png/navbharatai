@@ -69,19 +69,60 @@ function deriveSuggestions(code: string): Suggestion[] {
 export const AISuggestions: React.FC<AISuggestionsProps> = ({ generatedCode, onSendSuggestion }) => {
   const [open, setOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>(STATIC_SUGGESTIONS.slice(0, 4));
+  const [loading, setLoading] = useState(false);
+  const [aiPowered, setAiPowered] = useState(false);
   const prevCodeRef = useRef<string | undefined>(undefined);
+
+  // P-DESIGN.5 — pull REAL AI suggestions from the design pass; fall back to the static/heuristic
+  // list on any failure so the panel always shows something useful. Never throws.
+  const fetchAISuggestions = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/design/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: generatedCode || '' }),
+      });
+      const data = res.ok ? await res.json() : null;
+      const list: any[] = Array.isArray(data?.suggestions) ? data.suggestions : [];
+      const mapped: Suggestion[] = list
+        .filter((s) => s && typeof s.label === 'string' && typeof s.prompt === 'string')
+        .map((s, i) => ({
+          id: `ai${i}`,
+          label: s.label,
+          prompt: s.prompt,
+          category: (['improve', 'add', 'fix', 'style'].includes(s.category) ? s.category : 'improve') as Suggestion['category'],
+        }));
+      if (mapped.length > 0) {
+        setSuggestions(mapped);
+        setAiPowered(true);
+        return;
+      }
+    } catch { /* fall through to heuristic suggestions */ }
+    finally { setLoading(false); }
+    // Fallback: heuristic/static suggestions.
+    setAiPowered(false);
+    setSuggestions(generatedCode ? deriveSuggestions(generatedCode) : STATIC_SUGGESTIONS.slice(0, 4));
+  };
 
   useEffect(() => {
     if (generatedCode && generatedCode !== prevCodeRef.current) {
       prevCodeRef.current = generatedCode;
+      // Show heuristic suggestions instantly, then upgrade to AI ones in the background.
       setSuggestions(deriveSuggestions(generatedCode));
+      void fetchAISuggestions();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [generatedCode]);
 
+  // When the panel is first opened with no AI suggestions yet, fetch them.
+  useEffect(() => {
+    if (open && !aiPowered && !loading) void fetchAISuggestions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   const refresh = () => {
-    const shuffled = [...(generatedCode ? deriveSuggestions(generatedCode) : STATIC_SUGGESTIONS)];
-    shuffled.sort(() => Math.random() - 0.5);
-    setSuggestions(shuffled.slice(0, 5));
+    void fetchAISuggestions();
   };
 
   return (
@@ -95,8 +136,8 @@ export const AISuggestions: React.FC<AISuggestionsProps> = ({ generatedCode, onS
               <span className="text-xs font-black text-white uppercase tracking-widest">AI Copilot</span>
             </div>
             <div className="flex items-center gap-1">
-              <button onClick={refresh} className="p-1 hover:bg-white/10 rounded-lg text-[#484f58] hover:text-white transition-colors" title="Refresh suggestions">
-                <RefreshCw className="w-3 h-3" />
+              <button onClick={refresh} disabled={loading} className="p-1 hover:bg-white/10 rounded-lg text-[#484f58] hover:text-white transition-colors disabled:opacity-50" title="Refresh AI suggestions">
+                <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
               </button>
               <button onClick={() => setOpen(false)} className="p-1 hover:bg-white/10 rounded-lg text-[#484f58] hover:text-white transition-colors">
                 <X className="w-3 h-3" />
@@ -106,7 +147,7 @@ export const AISuggestions: React.FC<AISuggestionsProps> = ({ generatedCode, onS
 
           <div className="p-2 space-y-1">
             <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest px-2 pb-1">
-              {generatedCode ? 'App-specific suggestions' : 'Quick prompts'}
+              {loading ? 'Thinking…' : aiPowered ? 'AI suggestions' : generatedCode ? 'App-specific suggestions' : 'Quick prompts'}
             </p>
             {suggestions.map(s => (
               <button

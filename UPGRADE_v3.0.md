@@ -1115,7 +1115,7 @@
   AppAnalytics.tsx (build counts, AI model breakdown), PerformanceAnalyzer.tsx,
   ExtensionMarket.tsx (ESLint/Prettier/Tailwind/Python), ComponentLibrary.tsx, APITester.tsx, SecretManager.tsx.
 
-### P-DEV.1 — LSP / Code Navigation  🟡 engine + API DONE / Monaco editor-action wiring PENDING (2026-06-29)  [HIGH]
+### P-DEV.1 — LSP / Code Navigation  ✅ DONE (2026-06-29) · 🔌 UI-WIRED
 - Monaco's TS worker runs per-file and can't see the whole workspace, so cross-file Go-to-Definition /
   Find-References weren't possible.
 - [x] **`NavigationEngine.ts`** (ts-morph, dynamic-import + graceful) — SEMANTIC, scope-aware
@@ -1126,13 +1126,16 @@
 - [x] **API** — `POST /api/workspace/navigate` (`routes/navigate.ts`, rate-limited + request-validated via
       P-DATA.1): `{ files, file, line, column, action: 'definition'|'references' }` → `{ ok, locations[] }`.
 - [x] **Rename** is already covered semantically-enough by `CodemodeExecutor.renameSymbol` (cross-file).
-- [ ] **Monaco editor-action wiring (F12 / Shift+F12 + references panel) — tracked follow-up:** it needs the
-      full workspace file set + cross-file tab-navigation threaded into the single-file `Editor.tsx` (an invasive
-      change); deferred to keep this PR low-risk (safeguard #3). The engine + endpoint are live and callable now,
-      and this also unblocks P-DEV.6 (refactoring uses the same engine).
+- [x] **Monaco editor-action wiring (F12 / Shift+F12) — DONE** — `Editor.tsx` registers workspace-wide
+      "Go to Definition" (F12) and "Find References" (Shift+F12) actions that POST the WHOLE file set to
+      `/api/workspace/navigate`; same-file hits move the cursor + reveal the line, cross-file hits open the target
+      file. ADDITIVE via two optional props (`allFiles`, `onNavigateOpen`) — single-file usage is unchanged when
+      they aren't supplied. Wired in `CodeStudio.tsx` (which holds the full `files` map + `setActiveFile`); the
+      activeFile→tab effect auto-opens the navigated file. Best-effort (never disrupts editing). This also unblocks
+      P-DEV.6 (refactoring uses the same engine).
 - **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3299/3299 ✅ (5 new, real ts-morph) · `test:coverage` exit 0 ·
       `build` ✅ · `boot:check` PASS.
-- **Files:** `src/server/AI/NavigationEngine.ts` (new), `src/server/routes/navigate.ts` (new),
+- **Files:** `src/server/AI/NavigationEngine.ts`, `src/server/routes/navigate.ts`, `src/components/ide/Editor.tsx`, `src/components/ide/CodeStudio.tsx`,
       `tests/navigationEngine.test.ts` (new), `server.ts`.
 
 ### P-DEV.2 — Cross-Session Workspace Persistence (Firestore)  ✅ DONE (substance pre-existing — STALE AUDIT; verified 2026-06-29)  [HIGH]

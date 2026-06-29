@@ -985,6 +985,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 onTabChange={setActiveFile}
                 onTabClose={handleTabClose}
                 onMount={setEditorInstance}
+                allFiles={files}
+                onNavigateOpen={(path) => { if (files[path] !== undefined) setActiveFile(path); }}
                 onRun={() => onRun(files)}
                 onDebug={() => setIsPanelOpen(true)}
                 dirtyTabs={dirtyTabs}

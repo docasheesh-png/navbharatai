@@ -59,6 +59,10 @@ interface EditorProps {
   editorOptions?: Record<string, unknown>;
   /** C23: Reveal active file in the file explorer sidebar */
   onRevealInExplorer?: (path: string) => void;
+  /** P-DEV.1: full workspace file set — enables cross-file Go-to-Definition / Find-References (F12 / Shift+F12). */
+  allFiles?: Record<string, string>;
+  /** P-DEV.1: open a (possibly different) file at a location when navigating cross-file. */
+  onNavigateOpen?: (path: string, line?: number, column?: number) => void;
 }
 
 export const Editor: React.FC<EditorProps> = React.memo(({
@@ -77,9 +81,15 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   editorTheme = 'vs-dark',
   editorOptions = {},
   onRevealInExplorer,
+  allFiles,
+  onNavigateOpen,
 }) => {
   const isBinaryFile = BINARY_EXTENSIONS.has(fileName.split('.').pop()?.toLowerCase() ?? '');
   const editorRef = useRef<any>(null);
+  // P-DEV.1 — keep the latest workspace file set / active file / open-callback in refs so the
+  // once-registered F12/Shift+F12 actions always read fresh values.
+  const navRef = useRef<{ allFiles?: Record<string, string>; fileName: string; onOpen?: (p: string, l?: number, c?: number) => void }>({ fileName });
+  navRef.current = { allFiles, fileName, onOpen: onNavigateOpen };
   // 8.2 — lightweight textarea fallback on mobile to avoid Monaco memory issues
   const [isMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
   // Monaco loads its core from a CDN (see loader.config above). If that CDN is unreachable
@@ -126,9 +136,46 @@ export const Editor: React.FC<EditorProps> = React.memo(({
     try { registerEditorThemes(monaco); } catch { /* non-fatal */ }
   };
 
-  const handleEditorDidMount = (editor: any) => {
+  const handleEditorDidMount = (editor: any, monaco?: any) => {
     editorRef.current = editor;
     if (onMount) onMount(editor);
+    // P-DEV.1 — register workspace-wide Go-to-Definition (F12) + Find-References (Shift+F12) that call
+    // the semantic /api/workspace/navigate engine over the WHOLE file set (Monaco's per-file worker
+    // can't). Same-file hits move the cursor; cross-file hits open the target file. Additive: only
+    // registered when the full file set is supplied, so existing single-file usage is unchanged.
+    if (monaco && navRef.current.allFiles) {
+      const navigate = async (action: 'definition' | 'references') => {
+        try {
+          const ctx = navRef.current;
+          if (!ctx.allFiles) return;
+          const pos = editor.getPosition();
+          if (!pos) return;
+          const res = await fetch('/api/workspace/navigate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ files: ctx.allFiles, file: ctx.fileName, line: pos.lineNumber, column: pos.column, action }),
+          });
+          const data = res.ok ? await res.json() : null;
+          // For references, prefer the first location that isn't the symbol under the cursor.
+          const locs: Array<{ file: string; line: number; column: number }> = Array.isArray(data?.locations) ? data.locations : [];
+          const loc = action === 'references'
+            ? (locs.find((l) => !(l.file === ctx.fileName && l.line === pos.lineNumber)) ?? locs[0])
+            : locs[0];
+          if (!loc) return;
+          if (loc.file === ctx.fileName) {
+            editor.setPosition({ lineNumber: loc.line, column: loc.column });
+            editor.revealLineInCenter(loc.line);
+            editor.focus();
+          } else {
+            ctx.onOpen?.(loc.file, loc.line, loc.column);
+          }
+        } catch { /* navigation is best-effort — never disrupts editing */ }
+      };
+      try {
+        editor.addAction({ id: 'nbai-go-to-definition', label: 'Go to Definition (workspace)', keybindings: [monaco.KeyCode.F12], contextMenuGroupId: 'navigation', run: () => void navigate('definition') });
+        editor.addAction({ id: 'nbai-find-references', label: 'Find References (workspace)', keybindings: [monaco.KeyMod.Shift | monaco.KeyCode.F12], contextMenuGroupId: 'navigation', run: () => void navigate('references') });
+      } catch { /* action registration is best-effort */ }
+    }
   };
 
   const getLanguage = (name: string) => {

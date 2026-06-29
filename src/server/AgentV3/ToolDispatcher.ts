@@ -37,6 +37,7 @@ import { generateGitignore } from './GitignoreGenerator';
 import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
+import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
@@ -1207,6 +1208,42 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — Vitest skeleton for ${functions.length} function(s). Fill in the TODO assertions to verify real behaviour.`;
+      }
+
+      case 'check_conventions': {
+        const rec = (input as Record<string, unknown>) || {};
+        const files = Array.isArray(rec.files) ? rec.files.filter((f): f is string => typeof f === 'string') : [];
+        const imports = Array.isArray(rec.imports) ? rec.imports.filter((i): i is string => typeof i === 'string') : [];
+        const VALID_KINDS = new Set<IdentifierKind>(['function', 'variable', 'constant', 'component', 'type']);
+        const identifiers = (Array.isArray(rec.identifiers) ? rec.identifiers : [])
+          .map((x: unknown) => {
+            if (typeof x !== 'object' || x === null) return null;
+            const o = x as Record<string, unknown>;
+            const name = typeof o.name === 'string' ? o.name : '';
+            const kind = o.kind as IdentifierKind;
+            return name && VALID_KINDS.has(kind) ? { name, kind } : null;
+          })
+          .filter((x): x is { name: string; kind: IdentifierKind } => x !== null);
+        if (files.length === 0 && imports.length === 0 && identifiers.length === 0) {
+          return 'check_conventions: pass at least one of files[], identifiers[], or imports[] to check.';
+        }
+        const report = analyzeConventions({ files, identifiers, imports });
+        if (report.violationCount === 0) {
+          return '✓ No naming/convention violations found — files, identifiers and import order are consistent.';
+        }
+        const lines: string[] = [`Found ${report.violationCount} convention violation(s):`];
+        for (const f of report.files) {
+          if (!f.ok) lines.push(`• file ${f.path}: expected ${f.expectedCase}${f.suggestion ? ` → ${f.suggestion}` : ''} (${f.reason})`);
+        }
+        for (const i of report.identifiers) {
+          if (!i.ok) lines.push(`• ${i.kind} "${i.name}": expected ${i.expectedCase}${i.suggestion ? ` → ${i.suggestion}` : ''}`);
+        }
+        if (report.importOrder?.changed) {
+          lines.push('• imports are not in the conventional order. Suggested order:');
+          for (const l of report.importOrder.ordered) if (l) lines.push(`    ${l}`);
+        }
+        lines.push('Apply these with edit_file to keep the code consistent.');
+        return lines.join('\n');
       }
 
       case 'update_preview': {

@@ -140,6 +140,28 @@ describe('ToolDispatcher', () => {
     expect((await d.dispatch(call('generate_tests', { path: 'a.test.ts', module_path: './a', functions: [] }), 'qa')).content).toContain('empty or missing');
   });
 
+  it('check_conventions reports violations with suggestions (analysis only, no write)', async () => {
+    const res = await d.dispatch(
+      call('check_conventions', {
+        files: ['src/components/myCard.tsx'], // should be PascalCase
+        identifiers: [{ name: 'MyFunc', kind: 'function' }], // should be camelCase
+      }),
+      'frontend',
+    );
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('violation');
+    expect(res.content).toContain('myCard.tsx');
+    expect(res.content).toContain('MyFunc');
+    expect(act.files.size).toBe(0); // analysis only — writes nothing
+  });
+
+  it('check_conventions confirms clean input and needs at least one input list', async () => {
+    const ok = await d.dispatch(call('check_conventions', { files: ['src/components/MyCard.tsx'], identifiers: [{ name: 'myFunc', kind: 'function' }] }), 'frontend');
+    expect(ok.content).toContain('No naming/convention violations');
+    const empty = await d.dispatch(call('check_conventions', {}), 'frontend');
+    expect(empty.content).toContain('at least one');
+  });
+
   it('write_file on an existing path records a modify and nudges toward edit_file', async () => {
     act.files.set('a.ts', 'old');
     const res = await d.dispatch(call('write_file', { path: 'a.ts', content: 'new' }));

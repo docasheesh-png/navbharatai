@@ -1983,12 +1983,23 @@
 - [ ] Add an admin "AI Observability" view (provider/model latency, drift, tool usage, agent coordination).
 - **Files:** `src/server/lib/metrics.ts`, `src/server/AgentV3/{AgentV3CostTelemetry,ToolDispatcher}.ts`, `src/server/routes/admin.ts`.
 
-### P-MON.4 — Wire Health Monitor to REAL Metrics + Composite Scores  🟡 PARTIAL → full  [MED — honesty]
-- `AppHealthMonitor.tsx` currently renders **simulated/demo data** (fake uptime/latency/CPU) — a violation of the
-  "honest state, no fake success" core law. There is also no composite **health / reliability / risk score**.
-- [ ] Wire `AppHealthMonitor` to the real `/api/admin/metrics` + provider stats (or show an honest "no data" state).
-- [ ] Compute a composite Health/Reliability score (0–100) from real error-rate, latency, success-rate, uptime.
-- **Files:** `src/components/ide/AppHealthMonitor.tsx`, `src/server/routes/admin.ts`, new `src/server/lib/HealthScore.ts`.
+### P-MON.4 — Wire Health Monitor to REAL Metrics + Composite Scores  ✅ DONE  [MED — honesty]
+- `AppHealthMonitor.tsx` previously rendered **fully simulated/demo data** (Math.random metrics, hardcoded
+  "operational" services, fake Core Web Vitals, `SIMULATED_INCIDENTS`, fake streaming logs) — a direct violation of
+  the "honest state, no fake success" core law. Now: composite scoring engine + honest, real-data-only panel.
+- [x] Added `src/server/lib/HealthScore.ts` — a pure composite **Health / Reliability / Risk** (0–100) engine with an
+  honest grade (excellent→critical, or `unknown`). Per-component scorers (errors, latency, success, uptime); any signal
+  with no real data **drops out** of the weighted average and is reported in `missing` — none is fabricated, and with
+  no signal at all the score is `null` (honest "no data"), never a fake number. 10 unit tests.
+- [x] Added `GET /api/admin/health-score` (admin-gated) computing the composite from REAL live signals: build
+  success rate (`metrics`), aggregate provider error rate + request-weighted latency (`AIRouter` circuit stats),
+  and `process.uptime()`. Returns the score, the raw inputs, and a `sources` map for transparency.
+- [x] Rewrote `AppHealthMonitor.tsx` to be honest: it shows ONLY real, measured signals from the public
+  `/api/health` + `/api/ready` (platform status, real uptime, readiness) and an explicit "live per-app telemetry is
+  not connected yet" state instead of fabricated metrics/incidents/logs. All `Math.random`/simulated data removed.
+- [x] Gate green: tsc (fe+server), 3007 vitest, `npm run build`, boot:check, live admin-endpoint smoke (200 honest
+  score / 401 no-token).
+- **Files:** new `src/server/lib/HealthScore.ts` + `.test.ts`, `src/server/routes/admin.ts`, `src/components/ide/AppHealthMonitor.tsx`.
 
 ### P-MON.5 — AI Insights / NL Query / AI Report Generator  ❌ MISSING  [LOW — AIOps]
 - No way to ask telemetry questions in natural language, get AI-generated insights ("cheap tier success up to 94%"),

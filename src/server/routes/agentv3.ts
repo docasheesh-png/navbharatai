@@ -93,6 +93,7 @@ import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
 import { estimateBuildTime, complexityFromPrompt } from '../lib/BuildTimeEstimator';
 import { incrementalBuildCache, hashFiles, diffHashes } from '../AppMakerLab/IncrementalBuildCache';
+import { startBuildTrace } from '../telemetry/TracingManager';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -1578,6 +1579,11 @@ export function registerAgentV3Routes(app: Express): void {
       });
       // Build start time — used for cost-ladder telemetry duration (P2 measurement).
       const buildStartedAt = Date.now();
+      // P-BRE.1 — open a distributed trace for this build (root span). Continues an inbound W3C
+      // traceparent if the client sent one, so the build links into the caller's trace. Exported to
+      // OTLP/Cloud Trace at the end when configured; otherwise the traceId is still surfaced for logs.
+      const buildTrace = startBuildTrace('agentv3.build', { intent: String(intent), framework }, typeof req.headers?.traceparent === 'string' ? req.headers.traceparent : undefined);
+      buildTrace.begin(buildStartedAt);
       // P-PME.4 — show an up-front ETA for build/edit turns so the user sees a real estimate instead
       // of an open-ended spinner. Derived from the prompt's complexity (no blueprint yet). Best-effort
       // and additive — a failure just skips the ETA; chat turns already returned above.
@@ -2609,6 +2615,23 @@ export function registerAgentV3Routes(app: Express): void {
         // per-instance and was the reason reports came back EMPTY). Awaited, best-effort.
         await saveDiagnostics(workspaceId, diagnostics).catch(() => {});
       } catch { /* diagnostics are best-effort */ }
+      // P-BRE.1 — finalize the build trace: record the generate span + rich attributes, export to the
+      // OTLP endpoint when one is configured (Cloud Trace), and surface the traceId for log↔trace
+      // correlation. Best-effort — never affects the build result.
+      try {
+        const traceEnd = Date.now();
+        buildTrace.addSpan('build.generate', buildStartedAt, traceEnd, {
+          ok: result.ok,
+          intent: String(intent),
+          framework,
+          tier: deliveredTier,
+          files: writtenFiles.size,
+          durationMs: Math.max(0, traceEnd - buildStartedAt),
+        });
+        await buildTrace.end(traceEnd);
+        const traceTag = providerDebugTag(`trace ${buildTrace.traceId}`);
+        if (traceTag) events.emit({ type: 'narration', agent: 'architect', text: traceTag.trim(), ts: Date.now() });
+      } catch { /* tracing is best-effort — never affects the build */ }
       emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(diagnostics ? { diagnostics } : {}) });
     } catch (err) {
       // Capture the crash in the diagnostics report too (real-time onUpdate already persisted it).

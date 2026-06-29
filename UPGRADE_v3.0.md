@@ -907,16 +907,20 @@
 - **CI/CD**: cloudbuild.yaml (Cloud Build → Cloud Run, Docker layer caching), Dockerfile (Node.js 22),
   Package manager detection (npm/pnpm/yarn in BuildEvaluator.ts).
 
-### P-BRE.1 — Distributed Tracing / OpenTelemetry  ❌ MISSING  [HIGH — observability]
-- `ObservabilityManager.ts` captures basic latency + crashes, but there is no distributed trace spanning
-  the full build pipeline (AppMakerOrchestrator → TaskScheduler → EngineDispatcher → FrontendEngine → PatchAggregator).
-  When a 30-second build fails, it's impossible to know which stage was slow or blocked.
-- [ ] Add `TracingManager.ts` wrapping `@opentelemetry/sdk-node` — create a span per build stage, link them with `traceId` = `jobId`.
-- [ ] Instrument AppMakerOrchestrator, ExecutionOrchestrator, EngineDispatcher, DeploymentEngine with `span.start()` / `span.end()`.
-- [ ] Export traces to Cloud Trace (GCP) via OTLP exporter — already available in Cloud Run environment.
-- [ ] Attach `traceId` to every log line (enables log↔trace correlation).
-- **Files:** new `src/server/telemetry/TracingManager.ts`, `src/server/AppMakerLab/AppMakerOrchestrator.ts`,
-  `src/server/AppMakerLab/generator/ExecutionOrchestrator.ts`, `src/server/AppMakerLab/generator/EngineDispatcher.ts`.
+### P-BRE.1 — Distributed Tracing  ✅ DONE (2026-06-29, dependency-free) · 🔌 WIRED  [legacy-stage spans share the manager]
+- There was no distributed trace of a build. Implemented WITHOUT `@opentelemetry/*` (dependency-free policy):
+- [x] **`TracingManager.ts`** (new) — dep-free (node built-in `crypto`): W3C trace context
+  (`generateTraceId`/`generateSpanId`/`formatTraceparent`/`parseTraceparent`), a `BuildTrace` (root + child spans
+  with timing + typed attributes), and an **OTLP/HTTP JSON exporter via `fetch`** gated on
+  `OTEL_EXPORTER_OTLP_ENDPOINT` (Cloud Run's OTLP collector) — honest no-op when unset. 6 unit tests
+  (id/traceparent round-trip, all-zero rejection, OTLP serialization, lifecycle, inbound-parent continuation).
+- [x] **Wired into the live build** — `routes/agentv3.ts` opens a `agentv3.build` trace at build start (continuing an
+  inbound `traceparent` header if present → links into the caller's trace), records a `build.generate` span with
+  rich attributes (ok / intent / framework / tier / files / durationMs), exports to OTLP at the end when configured,
+  and surfaces the `traceId` for log↔trace correlation.
+- **Note:** the legacy AppMakerLab per-stage spans (Orchestrator/Dispatcher/…) can use the SAME `TracingManager`
+  (`trace.addSpan` per stage); the live v3.0 build trace is delivered now. No new dependency added.
+- **Files:** new `src/server/telemetry/TracingManager.ts` + `tests/tracingManager.test.ts`, `src/server/routes/agentv3.ts`.
 
 ### P-BRE.2 — Incremental Build Engine (Skip-Unchanged Files)  ✅ DONE (2026-06-29) · 🔌 WIRED
 - There was no persistent content-hash cache to tell which files actually changed between builds.

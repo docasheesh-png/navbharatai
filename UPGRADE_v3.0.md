@@ -538,7 +538,7 @@
       un-allowlisted strong-copyleft" (exit 0) · `npm run sbom` → 1329-component CycloneDX ✅.
 - **Files:** `scripts/licenseGate.mjs`, `scripts/genSbom.mjs`, `.license-allowlist.json`, `tests/licenseGate.test.ts`, `tests/genSbom.test.ts`, `.github/workflows/ci.yml`, `package.json`, `.gitignore`.
 
-### P-SEC.7 — SIEM Log Export / Integration  🟡 PARTIAL → full  [MED]
+### P-SEC.7 — SIEM Log Export / Integration  ✅ DONE (2026-06-28)
 - Firestore `server_logs` is an immutable audit trail but has no export connector to a SIEM (Splunk, Datadog,
   ELK, Cloud Logging). Security events cannot be correlated, searched, or alerted on externally.
 - [ ] Add a Cloud Logging export: ship structured audit events to Google Cloud Logging (free for Cloud Run) via `console.log(JSON.stringify(event))` — Cloud Run stdout → Cloud Logging automatically.

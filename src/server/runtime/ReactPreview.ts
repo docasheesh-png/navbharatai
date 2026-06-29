@@ -181,6 +181,7 @@ ${babelTag}
   var ESM = '${ESM}';
   var cache = {};
   var bareCache = {};
+  var bareLoadErrors = {}; // spec → the REAL reason its CDN import failed (surfaced in the error)
   var SRC_EXT = ['.jsx', '.js', '.tsx', '.ts', '.mjs'];
 
   function showError(msg) {
@@ -235,6 +236,9 @@ ${babelTag}
     function localRequire(spec) {
       if (spec.charAt(0) !== '.' && spec.charAt(0) !== '/') {
         if (bareCache[spec]) return bareCache[spec];
+        // Surface the REAL reason the CDN import failed (CSP block, network/fetch error, 404, CORS)
+        // instead of a bare "not in package.json" — this is what pinpoints why React won't load.
+        if (bareLoadErrors[spec]) throw new Error('Could not load "' + spec + '" (imported by ' + path + ') from the CDN: ' + bareLoadErrors[spec]);
         throw new Error('Missing dependency "' + spec + '" (imported by ' + path + '). It is not in package.json.');
       }
       var resolved = resolve(path, spec);
@@ -284,7 +288,12 @@ ${babelTag}
       forced.forEach(function (s) { if (bare.indexOf(s) < 0) bare.push(s); });
       await Promise.all(bare.map(async function (spec) {
         try { bareCache[spec] = interop(await import(specUrl(spec))); }
-        catch (e) { console.warn('[preview] failed to load', spec, e && e.message); }
+        catch (e) {
+          // Record the EXACT failure so a later "Could not load react" names the real cause
+          // (e.g. "Failed to fetch dynamically imported module: https://esm.sh/react@18.3.1").
+          bareLoadErrors[spec] = (e && e.message) ? e.message : String(e);
+          console.warn('[preview] failed to load', spec, 'from', specUrl(spec), '—', bareLoadErrors[spec]);
+        }
       }));
       requireModule(ENTRY);
     } catch (err) {

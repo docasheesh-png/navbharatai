@@ -5826,3 +5826,19 @@ Fix: add allow-same-origin to the in-browser iframe (one attribute) so module im
 preview renders the user's OWN generated code.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3571/3571 PASS, boot:check PASS.
+## 2026-06-29 — DIAGNOSTIC: surface the REAL reason a CDN dep import fails in the in-browser preview
+
+The in-browser preview kept failing with `Missing dependency "react"` even AFTER the CSP fix (#676) was
+deployed — and firebase.json sets no CSP — so CSP is NOT the cause; the `import('https://esm.sh/react@18')`
+itself is failing in the sandboxed srcdoc iframe for a reason we couldn't see (the underlying console.warn
+reason was never surfaced). Rather than guess at a big risky fix (self-host React / sandbox origin), this
+captures the EXACT failure: the bare-dep loader now records each CDN import's real error
+(`bareLoadErrors[spec]`), and a later "could not load" surfaces it — e.g. "Could not load 'react' … from the
+CDN: Failed to fetch dynamically imported module: https://esm.sh/react@18.3.1". The next run's preview
+error (now also captured into the Build report via #666) will name the precise cause (sandbox opaque-origin
+vs network vs CORS vs 404), so the real fix is exact, not a guess.
+
+Also confirmed from the same report: the live-server port-check fix (#668) WORKS — "dev server is UP on
+port 5173".
+
+Gate: frontend tsc 0, server tsc 0, vitest 3561/3561 PASS, boot:check PASS.

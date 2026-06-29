@@ -1505,25 +1505,36 @@ export function registerAgentV3Routes(app: Express): void {
     const deadlineTimer: ReturnType<typeof setTimeout> | undefined = deadlineMs > 0 ? setTimeout(() => {
       if (rb.ended) return;
       try { abort.abort(); } catch { /* best-effort */ }
-      // Finalize and capture the report so the timeout's result event carries it too — the
-      // client keeps it for the "Build report" button even though this build never reached
-      // the normal completion path (and the in-memory copy may be lost to an instance rotation).
-      let timeoutDiagnostics: BuildDiagnosticsReport | undefined;
+      // SUCCESS-AWARE DEADLINE: if the build ALREADY produced a successful result (the app is built,
+      // compiled and durably saved) and the deadline only fired during ADVISORY post-build work
+      // (the quality review / preview-heal / console-autofix / memory persist), finalize as SUCCESS —
+      // NOT a misleading "paused, type continue". The user's app is done; the advisory extras are
+      // optional. This is the #1 cause of "Build paused at the time limit" appearing on a finished app.
+      const ok = !!buildResultRef && buildResultRef.ok === true;
+      let dl: BuildDiagnosticsReport | undefined;
       try {
-        buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_TIMEOUT', message: `Build exceeded the ${Math.round(deadlineMs / 1000)}s wall-clock cap and was stopped.`, autoResolved: false });
-        buildDiagRef?.finish(false);
-        timeoutDiagnostics = buildDiagRef?.report();
-        if (timeoutDiagnostics) {
-          lastDiagnostics.set(buildKey, timeoutDiagnostics);
-          saveDiagnostics(workspaceId, timeoutDiagnostics).catch(() => {}); // durable (survives instance rotation)
+        if (!ok) buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_TIMEOUT', message: `Build exceeded the ${Math.round(deadlineMs / 1000)}s wall-clock cap and was stopped.`, autoResolved: false });
+        buildDiagRef?.finish(ok, ok ? buildResultRef?.summary : undefined);
+        dl = buildDiagRef?.report();
+        if (dl) {
+          lastDiagnostics.set(buildKey, dl);
+          saveDiagnostics(workspaceId, dl).catch(() => {}); // durable (survives instance rotation)
         }
       } catch { /* diagnostics are best-effort */ }
-      emit({ type: 'narration', agent: 'architect', text: 'This build hit the time limit and was paused automatically — every file generated so far is saved. It was likely almost done. Just type **"continue"** and I will pick up exactly where I left off and finish it.', ts: Date.now() });
-      emit({ type: 'result', ok: false, summary: 'Build paused at the time limit — your files are saved. Type "continue" to finish where it left off.', steps: 0, billedUsd: 0, billedInr: 0, ...(timeoutDiagnostics ? { diagnostics: timeoutDiagnostics } : {}) });
+      if (ok && buildResultRef) {
+        const billedUsd = typeof buildResultRef.billedUsd === 'number' ? buildResultRef.billedUsd : 0;
+        emit({ type: 'result', ok: true, summary: buildResultRef.summary || 'Built your app — your files are saved.', steps: buildResultRef.steps ?? 0, billedUsd, billedInr: Math.round(billedUsd * usdInrRate() * 100) / 100, ...(dl ? { diagnostics: dl } : {}) });
+      } else {
+        emit({ type: 'narration', agent: 'architect', text: 'This build hit the time limit and was paused automatically — every file generated so far is saved. It was likely almost done. Just type **"continue"** and I will pick up exactly where I left off and finish it.', ts: Date.now() });
+        emit({ type: 'result', ok: false, summary: 'Build paused at the time limit — your files are saved. Type "continue" to finish where it left off.', steps: 0, billedUsd: 0, billedInr: 0, ...(dl ? { diagnostics: dl } : {}) });
+      }
       activeBuilds.delete(buildKey);
       if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
       endBuild(rb);
     }, deadlineMs) : undefined;
+    // Visible to the deadline timer above so it can finalize a finished build as SUCCESS instead of
+    // "paused". Set the moment a build lane produces a successful result (before advisory post-work).
+    let buildResultRef: { ok: boolean; summary: string; steps?: number; billedUsd?: number } | null = null;
 
     // MINUTE-BY-MINUTE TIMELINE — record a "still working" heartbeat every 60 s so the build report
     // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
@@ -2385,6 +2396,12 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* best-effort */ }
       }
 
+      // The core build is now SETTLED (generation + verify/repair + heal + autofix). Everything below
+      // — quality review, reflection, memory persist, git push — is ADVISORY. Expose the result to the
+      // deadline timer NOW so that if the wall-clock cap fires during that advisory work, the build is
+      // finalized as SUCCESS (the app is built + already durably saved), not "paused — type continue".
+      if (result.ok) buildResultRef = { ok: true, summary: result.summary, steps: result.steps, billedUsd: result.billedUsd };
+
       // Build Reflection (Layer 57, seed): derive a short reflection from what
       // happened this build (errors hit, fixes applied, outcome) and store it
       // back into project memory so the NEXT build in this session can recall
@@ -2426,7 +2443,13 @@ export function registerAgentV3Routes(app: Express): void {
       // Level 8: Post-build multi-agent quality review — independent agent checks the
       // produced code for real defects, anti-patterns and missed requirements.
       // Only fires on successful builds; result is advisory narration, never blocks.
-      if (result.ok) {
+      // BOUNDED: the reviewer spawns a sub-agent that makes several model calls (read → evaluate →
+      // second_opinion) and historically ran for MINUTES — long enough to push a finished build into
+      // the wall-clock deadline ("paused at time limit"). It is purely advisory, so (a) skip it when
+      // little deadline headroom remains, and (b) cap it with a hard timeout so it can never be the
+      // reason a built app times out.
+      const reviewHeadroomOk = maxBuildSeconds() === 0 || (Date.now() - buildStartedAt) < (maxBuildSeconds() * 1000 - 120_000);
+      if (result.ok && reviewHeadroomOk) {
         try {
           let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
           // If sandbox listFiles came back empty but the build wrote real files, use the
@@ -2443,17 +2466,17 @@ export function registerAgentV3Routes(app: Express): void {
                 : await actuator.readFile(workspaceId, p).catch(() => ''),
             })),
           );
-          const review = await reviewBuild({
+          const review = await raceTimeout(reviewBuild({
             userRequest: prompt,
             fileTree: rFiles,
             fileSample: rSample,
             spawn: spawnSubAgent,
-          });
+          }), 90_000, 'post-build-review');
           const reviewText = formatReview(review);
           if (reviewText) {
             events.emit({ type: 'narration', agent: 'architect', text: reviewText, ts: Date.now() });
           }
-        } catch { /* reviewer is best-effort — never affects the build result */ }
+        } catch { /* reviewer is best-effort (incl. its 90s cap) — never affects the build result */ }
       }
 
       // P-AI.5 — Personalization: learn this user's revealed stack from the SUCCESSFUL build.

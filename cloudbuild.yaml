@@ -2,12 +2,29 @@
 # Orchestrated by navBharat AI for enterprise-scale Docker integration.
 
 steps:
-  # Step 1: Build the optimized container image with caching context
+  # P-BRE.5 — Remote build cache. Warm the BuildKit layer cache from the previous `:latest` image in
+  # the registry (the registry IS the remote cache — no extra GCS bucket needed). Non-fatal: on the
+  # very first build (no `:latest` yet) or a registry hiccup this exits 0 so the deploy never breaks.
   - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - 'docker pull gcr.io/$PROJECT_ID/navbharat-cloud-run:latest || exit 0'
+
+  # Step 1: Build the optimized container image, reusing cached layers (esp. the `npm ci` layer when
+  # package*.json is unchanged → cold build drops from ~5 min toward ~2 min). BUILDKIT_INLINE_CACHE
+  # bakes cache metadata into the pushed image so the NEXT build can `--cache-from` it.
+  - name: 'gcr.io/cloud-builders/docker'
+    env:
+      - 'DOCKER_BUILDKIT=1'
     args:
       - 'build'
       - '-f'
       - 'Dockerfile'
+      - '--cache-from'
+      - 'gcr.io/$PROJECT_ID/navbharat-cloud-run:latest'
+      - '--build-arg'
+      - 'BUILDKIT_INLINE_CACHE=1'
       - '--tag'
       - 'gcr.io/$PROJECT_ID/navbharat-cloud-run:$COMMIT_SHA'
       - '-t'

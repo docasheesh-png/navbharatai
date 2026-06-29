@@ -39,6 +39,7 @@ import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
 import { generateObservability, type ObservabilityTarget } from '../AppMakerLab/generator/ObservabilityGenerator';
 import { generateBundleOptimization } from '../AppMakerLab/generator/BundleOptimizationGenerator';
+import { generateSeedData, type EntitySpec } from '../AppMakerLab/generator/MockDataGenerator';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
@@ -1271,6 +1272,43 @@ export class ToolDispatcher {
           ? `\nMerge this into your vite.config.ts (inside defineConfig({ ... })):\n${manualChunksSnippet}`
           : '';
         return `${summary}\n${written.join('\n')}${mergeNote}`;
+      }
+
+      case 'generate_seed_data': {
+        const rawEntities = (input as Record<string, unknown>)?.entities;
+        if (!Array.isArray(rawEntities) || rawEntities.length === 0) {
+          return 'generate_seed_data: entities array is empty or missing. Pass [{ name, fields: [{ name, type? }] }].';
+        }
+        const entities: EntitySpec[] = rawEntities.map((e: unknown) => {
+          if (typeof e !== 'object' || e === null) throw new Error('Each entity must be an object with name + fields.');
+          const obj = e as Record<string, unknown>;
+          const rawFields = Array.isArray(obj.fields) ? obj.fields : [];
+          const fields = rawFields
+            .map((f: unknown) => {
+              if (typeof f !== 'object' || f === null) return null;
+              const fo = f as Record<string, unknown>;
+              const name = typeof fo.name === 'string' ? fo.name : '';
+              return name ? { name, type: typeof fo.type === 'string' ? fo.type : undefined } : null;
+            })
+            .filter((f): f is { name: string; type: string | undefined } => f !== null);
+          return { name: reqStr(obj, 'name'), fields };
+        });
+        const countRaw = (input as Record<string, unknown>)?.count;
+        const count = typeof countRaw === 'number' && countRaw > 0 ? Math.floor(countRaw) : 10;
+        const path = optStr(input, 'path') || 'fixtures/seed.json';
+        const { json, summary } = generateSeedData(entities, count);
+        let kind: 'create' | 'modify' = 'create';
+        try {
+          await this.actuator.readFile(this.workspaceId, path);
+          kind = 'modify';
+        } catch {
+          kind = 'create';
+        }
+        await this.actuator.writeFile(this.workspaceId, path, json);
+        this.state?.recordFileChange({ path, kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, json);
+        this.scheduleCheckpoint(`${kind} ${path}`);
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — ${summary}`;
       }
 
       case 'check_conventions': {

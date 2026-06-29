@@ -183,6 +183,25 @@ describe('ToolDispatcher', () => {
     expect(act.files.has('src/lib/lazyWithRetry.tsx')).toBe(true);
   });
 
+  it('generate_seed_data writes realistic fixtures/seed.json for the given entities', async () => {
+    const res = await d.dispatch(
+      call('generate_seed_data', {
+        entities: [{ name: 'User', fields: [{ name: 'id' }, { name: 'email' }, { name: 'name' }] }],
+        count: 5,
+      }),
+      'backend',
+    );
+    expect(res.is_error).toBe(false);
+    const seed = JSON.parse(act.files.get('fixtures/seed.json')!);
+    expect(seed.User).toHaveLength(5);
+    expect(String(seed.User[0].email)).toContain('@example.com');
+  });
+
+  it('generate_seed_data reports an honest error on an empty entities array', async () => {
+    const res = await d.dispatch(call('generate_seed_data', { entities: [] }), 'backend');
+    expect(res.content).toContain('empty or missing');
+  });
+
   it('check_conventions reports violations with suggestions (analysis only, no write)', async () => {
     const res = await d.dispatch(
       call('check_conventions', {

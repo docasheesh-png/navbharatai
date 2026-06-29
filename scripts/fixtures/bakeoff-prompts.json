@@ -1,0 +1,13 @@
+{
+  "_comment": "Representative v3.0 build prompts for the cheap-model bake-off. Mix of simple → complex so a candidate model is tested across the range it would actually face. Edit freely; keep them buildable web apps.",
+  "prompts": [
+    { "id": "todo", "complexity": "simple", "prompt": "Build a todo app: add, complete and delete tasks, persisted in localStorage. Clean React + Tailwind UI." },
+    { "id": "calculator", "complexity": "simple", "prompt": "Build a calculator app with a keypad, +-*/, clear, and a running result. React + Tailwind." },
+    { "id": "notes", "complexity": "simple", "prompt": "Build a notes app: create, edit, search and delete notes, saved in localStorage. Sidebar list + editor." },
+    { "id": "weather-ui", "complexity": "medium", "prompt": "Build a weather dashboard UI: a search bar, a current-weather card, and a 5-day forecast row. Use mock data (no real API). Responsive React + Tailwind." },
+    { "id": "expense", "complexity": "medium", "prompt": "Build an expense tracker: add income/expense entries with category and amount, show a running balance and a category breakdown. localStorage. React + Tailwind." },
+    { "id": "kanban", "complexity": "medium", "prompt": "Build a kanban board with three columns (To Do / Doing / Done), add cards, and move cards between columns with buttons. localStorage. React + Tailwind." },
+    { "id": "auth-crud", "complexity": "complex", "prompt": "Build a contacts manager with a mock login screen (any email/password), then a protected page to list, add, edit and delete contacts (name, email, phone), persisted in localStorage. Use react-router-dom. React + Tailwind." },
+    { "id": "dashboard", "complexity": "complex", "prompt": "Build an admin dashboard: a sidebar nav, a top bar, KPI stat cards, a simple bar chart and a recent-activity table — all from mock data. Responsive. react-router-dom for two pages (Overview, Reports). React + Tailwind." }
+  ]
+}

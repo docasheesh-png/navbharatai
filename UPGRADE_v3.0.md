@@ -946,16 +946,19 @@
       mapping, JSON shape, ALS context propagation/merge/no-leak, never-throws) · server bundles ✅.
 - **Files:** new `src/server/logger.ts` (+ `.test.ts`), `src/server/AppMakerLab/AppMakerOrchestrator.ts`, `BuildManager.ts`, `generator/ExecutionOrchestrator.ts`.
 
-### P-BRE.4 — Smoke Test Runner (Post-Build Validation)  ❌ MISSING  [HIGH]
-- When a build completes successfully (QualityEvaluationEngine passes), there is no automated smoke test
-  that verifies the generated app actually *starts* and *responds to HTTP*. Silent runtime failures ship to users.
-- `PreviewHealthChecker.ts` exists (HTTP health check) but is NOT invoked at the end of the build pipeline.
-- [ ] After `AutoRepairEngine` marks a build stable, call `PreviewHealthChecker.check(session)` and gate
-  `BUILD_COMPLETED` event on a passing health check. On fail → trigger `AutoRepairEngine` repair loop.
-- [ ] Add a smoke test step to `BuildManager.ts`: verify `/` returns 200, CSS loads, no `<script>` errors in preview.
-- [ ] Surface smoke test result in the build status shown to the user.
-- **Files:** `src/server/AppMakerLab/BuildManager.ts`, `src/server/PreviewRunner/PreviewHealthChecker.ts`,
-  `src/server/AppMakerLab/eventbus/EventTypes.ts`.
+### P-BRE.4 — Smoke Test Runner (Post-Build Validation)  ✅ DONE (verified 2026-06-29 — STALE AUDIT)  [HIGH]
+- The spec named the legacy `BuildManager`/`PreviewHealthChecker`, but the LIVE v3.0 build already runs a real
+  post-build smoke test with a user-surfaced verdict + auto-heal. Verified in `routes/agentv3.ts` (Preview-Verify block):
+- [x] **Opens the running app + validates render** — on a successful build it browses the live preview URL
+  (`actuator.browseUrl`), runs `analyzePreviewHtml(html)` (did it actually render? what's broken?), and captures
+  browser `console_errors` (filtered to actionable). Passing = rendered AND zero console errors.
+- [x] **Gates the completion message + surfaces the result** — emits ✅ "Preview verified — I opened the running app
+  and it renders correctly" on pass, or ⚠️ an honest "did not fully render: <problems>" on fail (the user sees it).
+- [x] **Heals on failure** — on a non-rendering preview it runs a bounded Claude-first repair loop
+  (`buildPreviewRepairPrompt`) and re-verifies; a separate runtime-error auto-fix loop feeds captured console errors
+  back into a repair pass. Budget-/wall-clock-capped; never hangs the build (disable via `AGENTV3_PREVIEW_VERIFY=off`).
+- **Note:** no legacy `BuildManager` wiring done (safeguard #6/#7 — the live v3.0 path already delivers this, and it
+  is the path users actually run). Doc correction of a stale audit.
 
 ### P-BRE.5 — Remote Build Cache (GCS)  ❌ MISSING  [HIGH — CI speed]
 - `cloudbuild.yaml` uses Docker layer caching (`--cache-from`) but there is no application-level remote cache.

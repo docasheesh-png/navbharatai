@@ -94,6 +94,7 @@ import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
 import { estimateBuildTime, complexityFromPrompt } from '../lib/BuildTimeEstimator';
 import { incrementalBuildCache, hashFiles, diffHashes } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
+import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, tokenize as rerankTokenize } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
@@ -2039,6 +2040,17 @@ export function registerAgentV3Routes(app: Express): void {
       if (attachmentContext) {
         buildPrompt = `The user attached file(s); here is the extracted content:\n\n${attachmentContext}\n\n---\n\n${buildPrompt}`;
       }
+
+      // P-PE.4 — pre-call token estimate: warn the user when the assembled prompt (system + context +
+      // request) is near the model's context window, so a near-overflow is visible instead of silently
+      // truncating mid-build. Dependency-free heuristic; best-effort — never blocks the build.
+      try {
+        const estTokens = estimateTokens(architectSystem) + estimateTokens(buildPrompt);
+        const usage = contextUsage(estTokens, model);
+        if (usage.nearLimit) {
+          events.emit({ type: 'narration', agent: 'architect', text: `⚠️ Large context: ~${estTokens.toLocaleString()} tokens (~${Math.round(usage.ratio * 100)}% of the model window). I'll keep responses focused; consider splitting very large requests.`, ts: Date.now() });
+        }
+      } catch { /* token estimate is best-effort — never blocks a build */ }
 
       // Plan mode (P4): plan first, then block for the user's approval before
       // building. A real gate — the build does not start until the user answers.

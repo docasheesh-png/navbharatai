@@ -2110,12 +2110,18 @@
       `boot:check` PASS.
 - **Files:** `src/server/AgentV3/AbuseDetector.ts`, `src/server/routes/agentv3.ts`, `tests/abuseDetector.test.ts`.
 
-### P-PE.4 — Token Estimator (pre-call)  ❌ MISSING  [MED — cost control]
-- Token spend tracked post-hoc in `AgentV3CostTelemetry.ts` but no pre-call estimate.
-- [ ] Add `estimateTokens(messages, model)` using `tiktoken` (or `gpt-3-encoder`) — runs in < 1ms.
-- [ ] Use estimate to: (a) warn user when context is near limit, (b) decide to compress before calling.
-- [ ] Integrate with `powerLevel.ts` — if estimate > 80% of model limit, force context compression.
-- **Files:** new `src/server/AgentV3/TokenEstimator.ts`, `AgentV3/powerLevel.ts`, `AIRouter.ts`.
+### P-PE.4 — Token Estimator (pre-call)  ✅ DONE (2026-06-29, dependency-free) · 🔌 WIRED  [MED — cost control]
+- Token spend was only tracked post-hoc; no pre-call estimate. Implemented WITHOUT `tiktoken` (heavy native dep):
+- [x] **`TokenEstimator.ts`** (new, dependency-free) — `estimateTokens` (calibrated char/word blend, <1ms),
+  `estimateMessagesTokens` (string + structured content + per-message overhead), `modelContextLimit` (Claude≈200k,
+  GPT-4o 128k, Gemini-1.5 1M, Grok 131k), and `contextUsage` → `{tokens, limit, ratio, nearLimit, overLimit}`
+  (default warn at 80%). Pure, 7 unit tests.
+- [x] **Wired into the live build (felt)** — `routes/agentv3.ts` estimates the assembled prompt (system + context +
+  request) against the resolved model BEFORE the call and emits a "⚠️ Large context: ~N tokens (~X% of the window)"
+  warning when near the limit, so a near-overflow is visible instead of silently truncating mid-build. Best-effort.
+- **Note:** dep-free heuristic instead of `tiktoken`; the same `contextUsage` signal is the hook a future
+  force-compress step (powerLevel) can read.
+- **Files:** new `src/server/AgentV3/TokenEstimator.ts` + `tests/tokenEstimator.test.ts`, `src/server/routes/agentv3.ts`.
 
 ### P-PE.5 — Prompt Evaluation / A-B Testing  🟡 PARTIAL → full  [MED]
 - A/B feature flags (`featureFlags.ts`) exist for UI. No prompt-level A/B: variant A vs B system prompts.

@@ -1156,16 +1156,36 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(400).json({ error: `Prompt is too long (max ${MAX_PROMPT_LEN} chars).` });
       return;
     }
-    // P-AI.10 — adversarial/abuse detection. Non-blocking: detect + record (audit + ledger) so
-    // abuse is visible without false-positive-blocking legitimate (long/edgy) prompts. The real
-    // safety enforcement is UntrustedContent fencing + CommandGovernance downstream.
+    // P-AI.10 + P-PE.3 — adversarial/abuse detection. Every abusive prompt is recorded (audit +
+    // ledger). Length/repetition NEVER block (they can be legitimate). The UNAMBIGUOUS jailbreak/
+    // extraction kinds DO hard-block, but only after repeated attempts (≥3 within 1h) — the ledger
+    // read is timeout-bounded and FAIL-OPEN, so a slow/degraded Firestore can never stall the build
+    // or wrongly lock out a legitimate user. The downstream UntrustedContent fence + CommandGovernance
+    // remain the always-on safety layers regardless of this gate.
     try {
-      const { assessPrompt, recordAbuse } = await import('../AgentV3/AbuseDetector');
+      const { assessPrompt, evaluateAbuse, JAILBREAK_KINDS } = await import('../AgentV3/AbuseDetector');
       const abuse = assessPrompt(prompt);
       if (abuse.isAbusive) {
         const abuserUid = (req.body?.userId as string) || 'anon';
+        const nowIso = new Date().toISOString();
         audit('ABUSE_DETECTED', { uid: abuserUid, score: abuse.score, signals: abuse.signals.map((s) => s.kind) }, 'warn');
-        recordAbuse(abuserUid, abuse, new Date().toISOString()).catch(() => {});
+        const isJailbreak = abuse.signals.some((s) => JAILBREAK_KINDS.has(s.kind));
+        if (isJailbreak) {
+          const evalResult = await raceTimeout(evaluateAbuse(abuserUid, abuse, nowIso), 3_000, 'evaluateAbuse').catch(() => null);
+          if (evalResult?.blocked) {
+            audit('ABUSE_HARD_BLOCK', { uid: abuserUid, violations: evalResult.violations }, 'warn');
+            res.status(429).json({
+              error:
+                "This request was blocked. Repeated attempts to override or extract the assistant's " +
+                'instructions were detected on your account. Use NavBharatAI Pro to build real apps — ' +
+                'this block lifts automatically after a short period.',
+            });
+            return;
+          }
+        } else {
+          // Non-jailbreak abuse (length/repetition): record for visibility, never block.
+          evaluateAbuse(abuserUid, abuse, nowIso).catch(() => {});
+        }
       }
     } catch { /* abuse detection is best-effort — never blocks the turn */ }
     // Per-user monthly spend ceiling (R1 §3.1). When the admin has set a cap and this user

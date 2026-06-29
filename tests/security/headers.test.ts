@@ -41,6 +41,13 @@ describe('P-TQA.10 — production security headers', () => {
     expect(csp).toContain("object-src 'none'");
     // OAuth/Firebase-required allowances must remain (regression guard both ways).
     expect(csp).toContain('https://apis.google.com');
+    // The in-browser preview's srcdoc iframe inherits this CSP and imports React + npm deps from
+    // esm.sh (and the Babel-standalone fallback from jsdelivr/cdnjs). Without these in script-src the
+    // preview dies with `Missing dependency "react"`. Guard them so a CSP tighten can't silently
+    // re-break the in-browser preview.
+    expect(csp).toContain('https://esm.sh');
+    expect(csp).toContain('https://cdn.jsdelivr.net');
+    expect(csp).toContain('https://cdnjs.cloudflare.com');
   });
 
   it('sets X-Content-Type-Options: nosniff (blocks MIME sniffing)', async () => {

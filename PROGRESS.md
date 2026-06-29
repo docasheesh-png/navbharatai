@@ -5777,3 +5777,21 @@ carries the appended previewErrors) and only falls back to the local copy if the
 getLatestDiagnostics() helper used by both download + copy.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3534/3534 PASS, boot:check PASS.
+
+## 2026-06-29 — FIX (in-browser preview root cause): CSP blocked esm.sh → "Missing dependency react"
+
+With the precise-error fix (#665) live, a real report gave the EXACT in-browser failure:
+`Run src/main.tsx: Missing dependency "react" (imported by src/main.tsx). It is not in package.json.`
+Root cause: the in-browser preview's <iframe srcDoc> loads React + npm deps via `import('https://esm.sh/…')`,
+and a module import is governed by CSP **script-src**. The app's script-src had 'self'/unsafe-inline/
+unsafe-eval + Google hosts but NOT esm.sh — and the srcdoc iframe inherits THIS page's CSP — so the React
+import was blocked → bareCache['react'] empty → require threw "Missing dependency react". (Babel worked
+because it's now self-hosted from /vendor.) Fix: add the preview CDNs to script-src — `https://esm.sh`
+(React + npm deps) and `https://cdn.jsdelivr.net` + `https://cdnjs.cloudflare.com` (Babel-standalone
+fallback). Headers test guards all three so a future CSP tighten can't silently re-break the preview.
+
+Also confirmed from the same report: the LIVE-server port-check fix (#668) WORKS in production —
+"[health-check] dev server is UP on port 5173" (was "did not come up" every time before). And build
+quality jumped to 82/100 (Sonnet + verify/CSS gates + auto-repair).
+
+Gate: frontend tsc 0, server tsc 0, vitest 3539/3539 PASS, boot:check PASS.

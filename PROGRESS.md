@@ -5762,4 +5762,18 @@ Honest scope: this is the strongest, code-reasoned fix for the live preview not 
 needs a real E2B run. The in-browser ("dono preview") exact error is now captured (previewErrors, #666) —
 that build predated the #666 deploy so its report had none; the next run will carry it.
 
+Gate: frontend tsc 0, server tsc 0, vitest PASS, boot:check PASS.
+
+## 2026-06-29 — FIX: preview errors didn't show in the DOWNLOADED report (stale client copy)
+
+Admin: a report taken AFTER the #666 deploy still had previewErrors empty even though both previews
+failed. Root cause: the capture chain worked (preview error WAS appended server-side), but the
+download/Copy-report path PREFERRED the client's `state.diagnostics` — the copy delivered with the build's
+`result` event at build-END, which never sees a preview error appended AFTER the build. So the user always
+got the stale copy. Fix (two parts): (1) the client now fetches the SERVER copy first (durable, fresher,
+carries the appended previewErrors) and only falls back to the local copy if the server has nothing;
+(2) the GET /diagnostics endpoint now prefers the DURABLE workspace-keyed copy over the in-memory
+(userId-keyed) one, which could be a stale earlier build or miss the post-build preview append. Shared
+getLatestDiagnostics() helper used by both download + copy.
+
 Gate: frontend tsc 0, server tsc 0, vitest 3534/3534 PASS, boot:check PASS.

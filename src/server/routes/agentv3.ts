@@ -92,6 +92,7 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
 import { estimateBuildTime, complexityFromPrompt } from '../lib/BuildTimeEstimator';
+import { incrementalBuildCache, hashFiles, diffHashes } from '../AppMakerLab/IncrementalBuildCache';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -2492,6 +2493,21 @@ export function registerAgentV3Routes(app: Express): void {
         for (const [p, c] of writtenFiles) toSave[p] = c; // captured writes win (freshest, reliable)
         if (Object.keys(toSave).length > 0) {
           saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
+          // P-BRE.2 — incremental signal: compare this build's file hashes to the previous build's
+          // (Firestore-cached per workspace), report how many files were UNCHANGED, and store the new
+          // hashes for next time. Best-effort — never affects the build or the save above.
+          try {
+            const prevHashes = await incrementalBuildCache.getHashes(workspaceId);
+            const currHashes = hashFiles(toSave);
+            if (prevHashes) {
+              const diff = diffHashes(prevHashes, currHashes);
+              if (diff.unchanged.length > 0) {
+                const total = Object.keys(currHashes).length;
+                events.emit({ type: 'narration', agent: 'architect', text: `♻️ Incremental: ${diff.unchanged.length}/${total} file(s) unchanged since the last build (${diff.changed.length} changed, ${diff.added.length} new).`, ts: Date.now() });
+              }
+            }
+            incrementalBuildCache.setHashes(workspaceId, currHashes, new Date().toISOString()).catch(() => {});
+          } catch { /* incremental signal is best-effort */ }
         }
       } catch { /* file persist is best-effort */ }
 

@@ -918,15 +918,20 @@
 - **Files:** new `src/server/telemetry/TracingManager.ts`, `src/server/AppMakerLab/AppMakerOrchestrator.ts`,
   `src/server/AppMakerLab/generator/ExecutionOrchestrator.ts`, `src/server/AppMakerLab/generator/EngineDispatcher.ts`.
 
-### P-BRE.2 — Incremental Build Engine (Skip-Unchanged Files)  🟡 PARTIAL → full  [HIGH]
-- Every AI generation triggers a full rebuild of all files — even when only one component changed.
-  `FileAnalyzer.ts` scans files but there is no persistent content-hash cache that skips unchanged modules.
-- [ ] Add `IncrementalBuildCache.ts`: on build start, hash each source file (SHA256). On rebuild, compare hashes
-  — only re-generate + re-patch files whose hash changed or whose dependents changed (use `ModuleGraph.ts` for impact).
-- [ ] Store hash cache in Firestore per `workspaceId` (survives server restarts).
-- [ ] Emit `INCREMENTAL_SKIP` events for skipped files to EventHistoryStore.
-- **Files:** new `src/server/AppMakerLab/IncrementalBuildCache.ts`, `src/server/AppMakerLab/BuildManager.ts`,
-  `src/server/AppMakerLab/generator/ModuleGraph.ts`.
+### P-BRE.2 — Incremental Build Engine (Skip-Unchanged Files)  ✅ DONE (2026-06-29) · 🔌 WIRED
+- There was no persistent content-hash cache to tell which files actually changed between builds.
+- [x] **`IncrementalBuildCache.ts`** (new) — pure, dependency-free core (node built-in `crypto` SHA-256, NOT a new
+  dep): `hashFiles` (SHA-256 per file), `diffHashes` (added/changed/removed/unchanged), `buildImportGraph` (reverse
+  dependents graph from relative imports, resolves extensions/index files), `impactedFiles` (a changed file + all
+  transitive dependents — for impact-aware rebuilds). 7 unit tests. Firestore-backed per-workspace hash store
+  (`incrementalCache/{workspaceId}`, VITEST-skip, best-effort).
+- [x] **Store survives restarts** — hashes persisted to Firestore per `workspaceId` after each build.
+- [x] **Wired + surfaced (felt)** — `routes/agentv3.ts` compares this build's file hashes to the previous build's
+  and emits a "♻️ Incremental: N/M file(s) unchanged (X changed, Y new)" narration, then stores the new hashes.
+  (The v3.0 agent already does surgical edits — it doesn't regenerate unchanged files — so this adds the missing
+  persistent signal + impact graph that P-DEV.6 refactoring / future selective re-processing can build on.)
+- **Files:** new `src/server/AppMakerLab/IncrementalBuildCache.ts` + `tests/incrementalBuildCache.test.ts`,
+  `src/server/routes/agentv3.ts`.
 
 ### P-BRE.3 — Structured Logging with Build Correlation IDs  ✅ DONE (build-correlation core) (2026-06-28)
 - [x] New `src/server/logger.ts` — a dependency-free structured `Logger` singleton (no Pino/Winston dep) emitting one

@@ -162,6 +162,29 @@ describe('ToolDispatcher', () => {
     expect(empty.content).toContain('at least one');
   });
 
+  it('generate_release_notes writes RELEASE_NOTES.md with an added/removed diff', async () => {
+    const res = await d.dispatch(
+      call('generate_release_notes', {
+        name: 'My App',
+        features: ['login', 'dashboard', 'export'],
+        previous_features: ['login', 'dashboard'],
+        version: 'v1.1.0',
+      }),
+      'architect',
+    );
+    expect(res.is_error).toBe(false);
+    const md = act.files.get('RELEASE_NOTES.md')!;
+    expect(md).toContain('export'); // the newly added feature
+    expect(md.toLowerCase()).toContain('my app');
+    expect(res.content).toContain('v1.1.0');
+  });
+
+  it('generate_release_notes requires a features array', async () => {
+    const res = await d.dispatch(call('generate_release_notes', { name: 'X' }), 'architect');
+    expect(res.content).toContain('features');
+    expect(act.files.has('RELEASE_NOTES.md')).toBe(false);
+  });
+
   it('write_file on an existing path records a modify and nudges toward edit_file', async () => {
     act.files.set('a.ts', 'old');
     const res = await d.dispatch(call('write_file', { path: 'a.ts', content: 'new' }));

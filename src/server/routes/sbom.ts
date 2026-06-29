@@ -1,6 +1,14 @@
 import type { Express, Request, Response } from 'express';
 import { analyzeAppDependencies } from '../AppMakerLab/SBOMGenerator';
 import { workspaceRateLimiter } from '../lib/authMiddleware';
+import { validateBody, vobject, vrecord, vstring } from '../lib/validate';
+
+// P-DATA.1 — runtime schema for the SBOM request body (replaces the manual `if` check).
+const sbomBodySchema = vobject({
+  packageLock: vrecord(),
+  workspaceId: vstring({ optional: true, max: 256 }),
+  buildId: vstring({ optional: true, max: 256 }),
+});
 
 /**
  * P-BRE.10 — SBOM + license validation for the user's GENERATED apps.
@@ -14,12 +22,8 @@ import { workspaceRateLimiter } from '../lib/authMiddleware';
  * DB + ids are provided — never blocks the response.
  */
 export function registerSbomRoutes(app: Express): void {
-  app.post('/api/workspace/sbom', workspaceRateLimiter(), async (req: Request, res: Response) => {
-    const { packageLock, workspaceId, buildId } = req.body || {};
-    if (!packageLock || typeof packageLock !== 'object') {
-      res.status(400).json({ error: 'packageLock (parsed package-lock.json object) is required.' });
-      return;
-    }
+  app.post('/api/workspace/sbom', workspaceRateLimiter(), validateBody(sbomBodySchema), async (req: Request, res: Response) => {
+    const { packageLock, workspaceId, buildId } = req.body;
     let result;
     try {
       result = analyzeAppDependencies(packageLock, new Date().toISOString());

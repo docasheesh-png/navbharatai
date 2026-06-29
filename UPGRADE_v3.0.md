@@ -1328,7 +1328,7 @@
   `buildHistory[]` (UI + Firestore persistence — deferred from the unattended run).
 - **Files:** new `src/server/lib/BuildTimeEstimator.ts` + `.test.ts`, new `src/server/routes/buildEstimate.ts`, `server.ts`.
 
-### P-PME.5 — Lessons Learned / Retrospective Engine  🟡 engine+API DONE / persistence+wiring PENDING  [HIGH]
+### P-PME.5 — Lessons Learned / Retrospective Engine  ✅ DONE (2026-06-29) · 🔌 WIRED  [Firestore-history deferred]
 - Failed builds weren't systematically learned from. Now there is a real retrospective engine.
 - [x] Added `src/server/lib/BuildRetrospectiveEngine.ts` — pure, dependency-free: `classifyFailure` (error text →
   category: dependency/syntax/type/timeout/network/runtime/test/build/unknown + a root-cause hint),
@@ -1337,9 +1337,15 @@
   framework + overlapping intent words). Honest: unrecognised errors → `unknown` (no confident wrong label). 7 tests.
 - [x] Added `POST /api/retrospective` (failed build → retrospective) and `POST /api/retrospective/warnings`
   (history + query → top-N relevant warnings).
-- [ ] **Still pending:** persist to `buildRetrospectives/...` (Firestore), capture on maxAttempts in the build
-  flow, and promote lessons into AgentV3 `KnowledgeEvolution` (Firestore + AgentV3/build-path — deferred).
-- **Files:** new `src/server/lib/BuildRetrospectiveEngine.ts` + `.test.ts`, new `src/server/routes/retrospective.ts`, `server.ts`.
+- [x] **BUILD-PATH WIRING (live v3.0)** — `routes/agentv3.ts` now calls `buildRetrospective` on every FAILED build
+  (in the existing reflection block) and records the classified failure + root-cause hint + reusable warning as a
+  `BUILD_RETROSPECTIVE` note in the SAME project memory the next build recalls — so repeated failure patterns are
+  learned and surfaced (promoted into the recall/KnowledgeEvolution lessons), not re-hit. Best-effort, never affects
+  the build outcome.
+- [ ] **Still deferred:** a dedicated `buildRetrospectives/...` Firestore history collection (the lesson already
+  flows into the recalled-lessons memory; a separate queryable history store is the smaller remaining extra).
+- **Files:** new `src/server/lib/BuildRetrospectiveEngine.ts` + `.test.ts`, `src/server/routes/agentv3.ts`,
+  `src/server/routes/retrospective.ts`.
 
 ### P-PME.6 — Scope Change Control (mid-build requirement change)  ❌ MISSING  [MED]
 - If a user sends a new prompt while a build is in progress (changing scope mid-flight), the system

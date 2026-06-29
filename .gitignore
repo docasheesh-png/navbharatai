@@ -16,3 +16,4 @@ whereami.txt
 test_environment_debug.json
 
 .boot-check.cjs
+sbom.cdx.json

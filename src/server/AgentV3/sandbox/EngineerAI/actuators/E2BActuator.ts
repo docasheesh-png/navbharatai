@@ -3,7 +3,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand } from './devServerHost';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
@@ -536,36 +536,48 @@ export class E2BActuator implements IEngineerActuator {
       // preview — the #1 "built but the preview is blank" cause. No-op if the
       // command already binds a host (e.g. our vite-react template's host:true).
       const devCommand = ensureHostBinding(command);
+      const port = extractDevPort(command);
+
+      // Pre-kill any stale dev server still holding this port from a previous
+      // attempt. Without this, Vite/Next auto-increments to the next free port
+      // (5173 → 5174) and the preview URL — built from the expected port — points
+      // at a dead port. Killing first guarantees the new server binds the port we
+      // actually preview, and removes the port-conflict restart churn that pushed
+      // long builds into the watchdog cap.
+      await sandbox.commands.run(buildPreKillPortCommand(port), { timeoutMs: 5000 })
+        .catch(() => {});
+
+      // Start the dev server, then POLL the port and return the moment it is up
+      // instead of sleeping a fixed budget. A server that boots in 3 s no longer
+      // costs the full wait — the single biggest wall-clock saving in a build.
       const handle = await sandbox.commands.run(devCommand, {
         cwd: WORKSPACE_ROOT,
         background: true,
         onStdout: s => { stdout += s; },
         onStderr: s => { stderr += s; },
       });
-      await new Promise(resolve => setTimeout(resolve, 20_000));
+      const wait = await sandbox.commands.run(buildPortWaitCommand(port, 25), { timeoutMs: 30_000 })
+        .catch(() => ({ stdout: 'PORT_DOWN' } as any));
       await handle.disconnect().catch(() => {});
 
-      // Health check: confirm the dev server port is actually listening.
-      // If not, attempt one automatic restart so transient startup crashes self-heal.
-      const port = extractDevPort(command);
-      const portCheck = await sandbox.commands.run(
-        `nc -z localhost ${port} 2>/dev/null && echo PORT_UP || echo PORT_DOWN`,
-        { timeoutMs: 5000 },
-      ).catch(() => ({ stdout: 'PORT_DOWN' } as any));
-      if (portCheck.stdout.includes('PORT_DOWN')) {
+      // If the port never came up, attempt one automatic restart so transient
+      // startup crashes self-heal — again polling (not a fixed sleep) for the port.
+      if (wait.stdout.includes('PORT_DOWN')) {
         stdout += `\n[health-check] port ${port} not responding — restarting…`;
-        await sandbox.commands.run(
-          `fuser -k ${port}/tcp 2>/dev/null; pkill -f "node.*${port}" 2>/dev/null || true`,
-          { timeoutMs: 5000 },
-        ).catch(() => {});
+        await sandbox.commands.run(buildPreKillPortCommand(port), { timeoutMs: 5000 })
+          .catch(() => {});
         const retry = await sandbox.commands.run(devCommand, {
           cwd: WORKSPACE_ROOT,
           background: true,
           onStdout: s => { stdout += s; },
           onStderr: s => { stderr += s; },
         });
-        await new Promise(r => setTimeout(r, 15_000));
+        const retryWait = await sandbox.commands.run(buildPortWaitCommand(port, 20), { timeoutMs: 25_000 })
+          .catch(() => ({ stdout: 'PORT_DOWN' } as any));
         await retry.disconnect().catch(() => {});
+        stdout += retryWait.stdout.includes('PORT_UP')
+          ? `\n[health-check] port ${port} is UP after restart`
+          : `\n[health-check] port ${port} still not responding after restart`;
       } else {
         stdout += `\n[health-check] port ${port} is UP`;
       }

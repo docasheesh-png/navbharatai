@@ -5557,3 +5557,22 @@ build can't grow the report without bound. All capture is best-effort (never thr
 AppKnowledgeBase `agentv3_build_report` entry updated (same PR) to describe the bundle.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3374+9=3383 (BuildDiagnostics 21/21) PASS, boot:check PASS.
+
+## 2026-06-29 — FIX: update_preview can no longer hang the whole build (the real 15-min freeze)
+
+A production Build report (the new diagnosis report in action) pinpointed the recurring freeze: a build
+sat in-flight on the `update_preview` tool for 907s (≈15 min) until the 1080s wall-clock cap, then died
+with BUILD_TIMEOUT + STUCK_TOOL "Stuck on 'update_preview'". Root cause: `update_preview`'s port-readiness
+poll was documented as "30 × 500ms = 15s max" but each `nc -z` runCommand had NO timeout, and `getPortUrl`
+had none either — so when the sandbox SDK / a single command stalled, the await never settled and the
+30-iteration cap was meaningless. The tool hung forever and took the whole build down with it.
+
+Fix (src/server/AgentV3/ToolDispatcher.ts, update_preview): bounded TWO ways so the tool can NEVER hang —
+(1) each port check is wrapped in withTimeout(3s) so one stalled `nc` can't block; (2) the poll has a hard
+15s wall-clock budget that always exits regardless of actuator behaviour; (3) getPortUrl is wrapped in
+withTimeout(10s) and, on timeout, returns an honest "could not resolve the preview URL … call again"
+WARNING instead of hanging (no fake-success preview emitted). Worst case ~25s, then the build moves on.
+Regression test (ToolDispatcher.test.ts): a getPortUrl that never resolves now returns the WARNING within
+the timeout (fake timers) and emits no preview event.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3384/3384 PASS, boot:check PASS.

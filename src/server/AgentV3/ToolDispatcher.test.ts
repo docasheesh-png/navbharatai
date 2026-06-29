@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ToolDispatcher, applyEdit, type ActuatorPort } from './ToolDispatcher';
 import { defaultToolCatalog, CATALOG_TOOL_NAMES } from './ToolCatalog';
 import { WorkspaceState } from './WorkspaceState';
@@ -177,6 +177,29 @@ describe('ToolDispatcher', () => {
     expect(res.content).toContain('https://sandbox-5173.example.dev');
     const ev = events.find((e) => e.type === 'preview');
     expect(ev && ev.type === 'preview' && ev.url).toBe('https://sandbox-5173.example.dev');
+  });
+
+  it('update_preview NEVER hangs the build when the sandbox stalls — it times out and warns', async () => {
+    // Regression: a production build sat in-flight on update_preview for 907s (15 min) until the
+    // wall-clock cap because getPortUrl never returned. The handler must be hard-bounded.
+    vi.useFakeTimers();
+    try {
+      const stalling = {
+        readFile: act.readFile.bind(act), writeFile: act.writeFile.bind(act),
+        listFiles: act.listFiles.bind(act), runCommand: act.runCommand.bind(act),
+        // The sandbox SDK hangs forever — withTimeout must rescue the build.
+        getPortUrl: () => new Promise<string>(() => { /* never resolves */ }),
+      };
+      const dd = new ToolDispatcher(stalling, 'ws-1', state, stream);
+      const p = dd.dispatch(call('update_preview', { port: 5173 }));
+      // Fast-forward past the 10s getPortUrl budget (port check resolves PORT_UP immediately).
+      await vi.advanceTimersByTimeAsync(11_000);
+      const res = await p;
+      expect(res.content).toContain('could not resolve the preview URL');
+      expect(events.find((e) => e.type === 'preview')).toBeUndefined(); // no fake-success preview
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('update_preview maps an *.e2b.app sandbox host to a configured custom preview domain (§12)', async () => {

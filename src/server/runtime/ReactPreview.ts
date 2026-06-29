@@ -182,6 +182,7 @@ ${babelTag}
   var cache = {};
   var bareCache = {};
   var bareLoadErrors = {}; // spec → the REAL reason its CDN import failed (surfaced in the error)
+  var missingLocal = {};   // resolved path → importer, for local files referenced but never created
   var SRC_EXT = ['.jsx', '.js', '.tsx', '.ts', '.mjs'];
 
   function showError(msg) {
@@ -242,9 +243,18 @@ ${babelTag}
         throw new Error('Missing dependency "' + spec + '" (imported by ' + path + '). It is not in package.json.');
       }
       var resolved = resolve(path, spec);
-      // Precise, actionable error — names BOTH the missing import and who imported it — instead of a
-      // bare "Module not found" that doesn't say where the broken import lives.
-      if (!SOURCES.hasOwnProperty(resolved)) throw new Error('Cannot resolve "' + spec + '" imported by ' + path + ' (looked for ' + resolved + ').');
+      // RESILIENCE: a single local file the generator referenced but never created (a "dangling
+      // import", e.g. NoteCard importing ../utils/formatDate) should NOT blank the ENTIRE preview.
+      // Instead of throwing, substitute a forgiving stub so the rest of the app renders, and record
+      // the gap so a banner can tell the user exactly which file is missing (honest, not hidden).
+      if (!SOURCES.hasOwnProperty(resolved)) {
+        missingLocal[resolved] = path;
+        var stub = new Proxy(function () { return ''; }, {
+          get: function (_t, k) { if (k === '__esModule') return true; if (k === 'default') return stub; return function () { return ''; }; },
+        });
+        cache[resolved] = { exports: stub };
+        return stub;
+      }
       return requireModule(resolved);
     }
     try { (new Function('require', 'module', 'exports', transformed))(localRequire, module, module.exports); }
@@ -296,6 +306,19 @@ ${babelTag}
         }
       }));
       requireModule(ENTRY);
+      // If any local file was missing, the app still rendered (stubbed) — show an honest, non-blocking
+      // banner naming the missing files and report them to the host so the build report captures them.
+      var miss = Object.keys(missingLocal);
+      if (miss.length) {
+        var note = 'Missing file' + (miss.length > 1 ? 's' : '') + ' (stubbed so the preview still renders): '
+          + miss.map(function (m) { return m + ' (imported by ' + missingLocal[m] + ')'; }).join('; ');
+        var bar = document.createElement('div');
+        bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#7c2d12;color:#fed7aa;font:12px/1.4 system-ui;padding:6px 10px';
+        bar.textContent = '⚠️ ' + note;
+        document.body.appendChild(bar);
+        try { (window.parent || window.top).postMessage({ __nbaiPreviewError: true, source: 'in-browser', message: note }, '*'); } catch (e) {}
+        console.warn('[preview]', note);
+      }
     } catch (err) {
       // Show the actual MESSAGE first — some browsers (notably iOS Safari) put only stack FRAMES in
       // err.stack with no message line, which is why a real reason like "Cannot resolve './x' imported

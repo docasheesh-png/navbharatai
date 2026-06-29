@@ -5872,3 +5872,17 @@ the same tool-agnostic, IPv4-forced check (nc → curl → bash /dev/tcp on 127.
 UP, getPortUrl runs and the preview event fires → the live tab shows the app.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3586/3586 PASS, boot:check PASS.
+
+## 2026-06-29 — FIX: a missing local file no longer blanks the WHOLE in-browser preview
+
+Recurring pain: NoteCard imported `../utils/formatDate`, a file the generator referenced but never
+created. Even after "Fix with AI" edits the file stayed missing, so the in-browser preview HARD-CRASHED
+every time with "Cannot resolve '../utils/formatDate'" → blank. Fix: the in-browser module loader is now
+RESILIENT — a missing LOCAL relative import is substituted with a forgiving stub (a Proxy whose every
+access is a no-op returning '') so the REST of the app renders, and a non-blocking orange banner names the
+missing file(s) ("Missing file (stubbed so the preview still renders): src/utils/formatDate (imported by
+src/components/NoteCard.tsx)") + postMessages it to the host so the Build report still captures it. Honest
+(the gap is shown, not hidden) and resilient (one dangling import ≠ blank screen). A missing bare npm dep
+(e.g. React) still hard-errors — that genuinely can't be stubbed.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3586/3586 PASS, boot:check PASS.

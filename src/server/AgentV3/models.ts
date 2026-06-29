@@ -30,6 +30,17 @@ export function opusNormalModel(): string {
   return process.env.AGENTV3_OPUS_NORMAL_MODEL || DEFAULT_OPUS_NORMAL;
 }
 
+/**
+ * Model for the FAST lane (Simple Builder + OneShot) per-file generation. Defaults to SONNET, not
+ * Haiku: each file is generated in its own isolated call, so the model must keep contracts
+ * consistent ACROSS files (a hook's return shape must match what its consumer destructures). Haiku
+ * frequently disagreed across those isolated calls → the app didn't compile. Sonnet is far more
+ * consistent, which (with the verify+repair gate) makes simple apps build first-try. Env-overridable.
+ */
+export function fastBuildModel(): string {
+  return process.env.AGENTV3_FAST_BUILD_MODEL || DEFAULT_SONNET;
+}
+
 /** POWER mode / "Only Opus" model — the premium Opus 4.8. */
 export function opusModel(): string {
   return process.env.AGENTV3_OPUS_MODEL || DEFAULT_OPUS;

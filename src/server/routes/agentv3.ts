@@ -21,6 +21,7 @@ import {
   powerSpec,
   haikuModel,
   sonnetModel,
+  fastBuildModel,
   opusModel,
   architectSystemPrompt,
   planSystemPrompt,
@@ -2009,7 +2010,9 @@ export function registerAgentV3Routes(app: Express): void {
         // Shared side-effects for both fast lanes (Simple Builder + OneShot).
         const fastGenerate = async (system: string, user: string): Promise<string> => {
           const t = await new ClaudeClient(undefined, { maxRetries: 2 }).runTurn({
-            model: haikuModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
+            // D — Sonnet (not Haiku) for the fast lane: per-file isolated generation needs cross-file
+            // contract consistency; Haiku disagreed across calls → code didn't compile. Env-overridable.
+            model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
           });
           osUsage.inputTokens += t.usage.inputTokens;
           osUsage.outputTokens += t.usage.outputTokens;
@@ -2063,6 +2066,14 @@ export function registerAgentV3Routes(app: Express): void {
           const os = await runOneShot({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, log: fastLog });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
           if (os.ok) fastResult(os.summary, os.filesWritten);
+        }
+        // C — BULLETPROOF PREVIEW: persist the produced files to the durable store SYNCHRONOUSLY the
+        // moment the fast lane succeeds — not via the 3s debounce or the fire-and-forget end-of-flow
+        // save, both of which can be cut off (the reviewer still running, a dropped stream, an
+        // instance rotation), leaving the in-browser preview with "No files to preview yet" even
+        // though files were written. Awaited + best-effort: a save error never blocks the build.
+        if (result && writtenFiles.size > 0) {
+          try { await saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* durable save is best-effort */ }
         }
       }
 

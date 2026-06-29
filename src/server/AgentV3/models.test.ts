@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { resolveModel, sonnetModel, opusModel, haikuModel, opusNormalModel, ladderModel } from './models';
+import { resolveModel, sonnetModel, opusModel, haikuModel, fastBuildModel, opusNormalModel, ladderModel } from './models';
 import { architectSystemPrompt } from './systemPrompt';
 
 describe('model resolution (D5/D6)', () => {
@@ -32,6 +32,14 @@ describe('model resolution (D5/D6)', () => {
     expect(ladderModel('haiku')).toBe(haikuModel());
     expect(ladderModel('sonnet')).toBe(sonnetModel());
     expect(ladderModel('opus')).toBe(opusNormalModel());
+  });
+
+  it('the fast-lane build model defaults to Sonnet (consistency across per-file calls), env-overridable', () => {
+    expect(fastBuildModel()).toBe(sonnetModel());
+    const prevF = process.env.AGENTV3_FAST_BUILD_MODEL;
+    process.env.AGENTV3_FAST_BUILD_MODEL = 'fast-x';
+    expect(fastBuildModel()).toBe('fast-x');
+    if (prevF === undefined) delete process.env.AGENTV3_FAST_BUILD_MODEL; else process.env.AGENTV3_FAST_BUILD_MODEL = prevF;
   });
 
   it('the ladder honours env overrides for haiku and normal-opus', () => {

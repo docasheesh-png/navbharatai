@@ -90,6 +90,7 @@ import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExt
 import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
 import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
+import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -2386,7 +2387,19 @@ export function registerAgentV3Routes(app: Express): void {
           episodes: reflectMem.snapshot().episodes,
         });
         reflectMem.recordNote(reflectionNote(reflection));
-      } catch { /* reflection is best-effort — never affects the build result */ }
+        // P-PME.5 — on a FAILED build, capture a structured retrospective (classified failure +
+        // root-cause hint + reusable warning) and promote it into the SAME project memory the next
+        // build recalls — so repeated failure patterns are learned, not re-hit. Best-effort.
+        if (!result.ok) {
+          const retro = buildRetrospective({
+            framework,
+            intent: prompt.slice(0, 120),
+            finalError: result.summary,
+            timeSpentMs: Math.max(0, Date.now() - buildStartedAt),
+          });
+          reflectMem.recordNote(`BUILD_RETROSPECTIVE\n${retro.warning}\n${retro.summary}`);
+        }
+      } catch { /* reflection/retrospective is best-effort — never affects the build result */ }
 
       // Project Summary (Layer 27, "What I built"): on a SUCCESSFUL build, emit a
       // short, friendly recap of what was created (stack, files/components/routes,

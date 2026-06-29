@@ -1400,14 +1400,21 @@
 - **Files:** `src/server/WebhookManager.ts` (new), `src/server/routes/webhooks.ts` (new),
       `tests/webhookManager.test.ts` (new), `src/server/NotificationManager.ts`, `server.ts`, `src/server/AppContext/AppKnowledgeBase.ts`.
 
-### P-PME.10 — Architecture Decision Records (ADR) Auto-Capture  ❌ MISSING  [MED]
-- Every build implicitly makes architecture decisions (React vs React Native, Firestore vs Postgres,
-  REST vs GraphQL). None are recorded. Users cannot understand why a tech choice was made.
-- [ ] Add `ADRManager.ts` — when `ArchitectureSelector.ts` picks a pattern, auto-generate an ADR entry:
-  - Title, chosen pattern, alternatives considered, reason (from PatternMatcher scores), date.
-  - Emit `ADR-001.md` into the generated workspace under `docs/decisions/`.
-- **Files:** new `src/server/AppMakerLab/intelligence/ADRManager.ts`,
-  `src/server/AppMakerLab/intelligence/ArchitectureSelector.ts`.
+### P-PME.10 — Architecture Decision Records (ADR) Auto-Capture  ✅ DONE (2026-06-29)
+- Architecture decisions (pattern/stack choices) were never recorded — no "why".
+- [x] **`ADRManager.ts`** (pure, unit-tested) — `generateADR({ number, date, ranked })` renders a standard ADR
+      markdown (status, date, context, decision = chosen pattern + score + stack + matched constraints,
+      alternatives considered with their scores, consequences) → `{ path: 'docs/decisions/ADR-NNN.md', content }`.
+      `adrId()` zero-pads (ADR-001).
+- [x] **Auto-capture wired** — `PatternResolutionEngine.resolveWithADR(blueprint)` resolves the architecture AND
+      returns the ADR file from the ranked pattern selection (chosen + alternatives + scores), ready to write into
+      the generated workspace. **Additive**: the original `resolve()` is unchanged, so existing callers are
+      unaffected (safeguard #3).
+- **Note:** the engine produces the ADR file; the orchestrator writing it into the workspace is the caller's
+      one-line `writeFile(adr.path, adr.content)` step (consistent with the rest of the generation flow).
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3346/3346 ✅ (6 new) · `test:coverage` exit 0 · `build` ✅.
+- **Files:** `src/server/AppMakerLab/intelligence/ADRManager.ts` (new), `tests/adrManager.test.ts` (new),
+      `src/server/AppMakerLab/intelligence/PatternResolutionEngine.ts`.
 
 ### P-PME.11 — SLA / Build-Time SLO Tracker  ✅ DONE (2026-06-29)
 - Nothing detected when a build ran slow (a degraded experience).

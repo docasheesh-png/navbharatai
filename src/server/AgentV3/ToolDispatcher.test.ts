@@ -235,15 +235,41 @@ describe('ToolDispatcher', () => {
     expect(res.content).toContain('not available');
   });
 
-  it('creates a real git checkpoint after a write when a checkpointer is wired', async () => {
+  it('creates a real git checkpoint after a write (scheduled in the background, flushed at build end)', async () => {
+    let calls = 0;
     const checkpointer = {
-      checkpoint: async (message: string) => ({ id: 'c1', sha: 'deadbeef', message, ts: 1 }),
+      checkpoint: async (message: string) => { calls++; return { id: 'c1', sha: 'deadbeef', message, ts: 1 }; },
     };
     const dWithGit = new ToolDispatcher(act, 'ws-1', state, stream, undefined, checkpointer);
     await dWithGit.dispatch(call('write_file', { path: 'a.ts', content: 'x' }));
+    // The write does NOT block on git — the checkpoint is scheduled off the critical path and
+    // lands once the background chain drains (flushed here, as the route does at build end).
+    await dWithGit.flushCheckpoints();
     const checkpoints = state.snapshot().checkpoints;
     expect(checkpoints).toHaveLength(1);
     expect(checkpoints[0].sha).toBe('deadbeef');
+  });
+
+  it('coalesces many rapid writes into a SINGLE serialized checkpoint (no per-file git, no index.lock races)', async () => {
+    let concurrent = 0, maxConcurrent = 0, total = 0;
+    const checkpointer = {
+      checkpoint: async (message: string) => {
+        concurrent++; maxConcurrent = Math.max(maxConcurrent, concurrent); total++;
+        await new Promise((r) => setTimeout(r, 5));
+        concurrent--;
+        return { id: 'c', sha: 'beef', message, ts: 1 };
+      },
+    };
+    const d = new ToolDispatcher(act, 'ws-1', state, stream, undefined, checkpointer);
+    // Fire several writes back-to-back, as concurrent agents would.
+    await Promise.all([
+      d.dispatch(call('write_file', { path: 'a.ts', content: '1' })),
+      d.dispatch(call('write_file', { path: 'b.ts', content: '2' })),
+      d.dispatch(call('write_file', { path: 'c.ts', content: '3' })),
+    ]);
+    await d.flushCheckpoints();
+    expect(maxConcurrent).toBe(1);       // never two git ops at once → no index.lock race
+    expect(total).toBeLessThanOrEqual(3); // coalesced — far fewer commits than naive per-file
   });
 
   it('unknown tool returns an honest error', async () => {

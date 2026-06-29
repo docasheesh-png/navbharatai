@@ -267,15 +267,43 @@ export class ToolDispatcher {
     }
   }
 
-  /** Create a real git checkpoint after a change (best-effort; emits on success). */
-  private async maybeCheckpoint(message: string): Promise<void> {
+  // --- Background, serialized git checkpoints (OFF the build's critical path) ---------------------
+  // A checkpoint is a History/restore convenience, NOT required for build correctness or the preview,
+  // so it must never make the agent wait. Earlier each file write AWAITED `git add -A && git commit`;
+  // that put git on the hot path and (pre-gitignore) cost ~45s/file → 18-min timeouts. Now writes
+  // only SCHEDULE a checkpoint and return immediately. The scheduler is:
+  //   • single-flight — at most ONE git op runs at a time (concurrent architect/frontend writes would
+  //     otherwise race on git's index.lock and corrupt/fail the commit), and
+  //   • coalescing — N rapid writes collapse into the next single commit (git add -A captures the
+  //     whole tree anyway, so one commit still snapshots every file).
+  // A flushCheckpoints() at build end awaits the last commit so the final state is captured before
+  // the sandbox can be reaped.
+  private _cpChain: Promise<void> = Promise.resolve();
+  private _cpPending: string | null = null;
+
+  /** Fire-and-forget: request a checkpoint with the latest message. NEVER blocks the caller. */
+  private scheduleCheckpoint(message: string): void {
     if (!this.checkpointer) return;
+    this._cpPending = message;
+    this._cpChain = this._cpChain.then(() => this._runOneCheckpoint());
+  }
+
+  /** Runs one coalesced checkpoint: commits the LATEST pending message, then clears it. */
+  private async _runOneCheckpoint(): Promise<void> {
+    const message = this._cpPending;
+    if (message === null) return; // already captured by an earlier link in the chain (coalesced)
+    this._cpPending = null;
     try {
-      const cp = await this.checkpointer.checkpoint(message);
+      const cp = await this.checkpointer!.checkpoint(message);
       if (cp) this.state?.addCheckpoint(cp);
     } catch {
-      /* checkpointing never blocks a build */
+      /* checkpointing never blocks or breaks a build */
     }
+  }
+
+  /** Await any in-flight/pending checkpoint — call once at build end so the final state is committed. */
+  async flushCheckpoints(): Promise<void> {
+    try { await this._cpChain; } catch { /* best-effort */ }
   }
 
   /**
@@ -677,7 +705,7 @@ export class ToolDispatcher {
         mem.indexFile(path, content);
         // Level 3: update embedding index for semantic search (best-effort, async, non-blocking).
         getEmbeddingStore(this.workspaceId).addFile(path, content).catch(() => {});
-        await this.maybeCheckpoint(`${kind} ${path}`);
+        this.scheduleCheckpoint(`${kind} ${path}`);
         // Level 4: post-write static review — flag missing imports, typos, stub files.
         const review = reviewEdit(path, content);
         const reviewNote = formatReviewResult(review, path);
@@ -736,7 +764,7 @@ export class ToolDispatcher {
         // N-file batch cost N commits (with `git add -A` each ~45s pre-gitignore), which is exactly
         // what pushed builds past the wall-clock cap. One commit per batch is both correct (the batch
         // is one logical change) and fast.
-        await this.maybeCheckpoint(`create ${written.length} file(s): ${written.slice(0, 5).join(', ')}${written.length > 5 ? '…' : ''}`);
+        this.scheduleCheckpoint(`create ${written.length} file(s): ${written.slice(0, 5).join(', ')}${written.length > 5 ? '…' : ''}`);
         return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.`;
       }
 
@@ -764,7 +792,7 @@ export class ToolDispatcher {
           diff: { path, patch: miniDiff(matchedOld, newStr) },
           ts: Date.now(),
         });
-        await this.maybeCheckpoint(`edit ${path}`);
+        this.scheduleCheckpoint(`edit ${path}`);
         // Level 4: post-edit static review — catch missing imports, typos, stub content.
         const editReview = reviewEdit(path, updated);
         const editReviewNote = formatReviewResult(editReview, path);
@@ -1049,7 +1077,7 @@ export class ToolDispatcher {
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.state?.recordFileChange({ path, kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-        await this.maybeCheckpoint(`${kind} ${path}`);
+        this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} from the project graph (${content.length} bytes).`;
       }
 
@@ -1073,7 +1101,7 @@ export class ToolDispatcher {
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.state?.recordFileChange({ path, kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-        await this.maybeCheckpoint(`${kind} ${path}`);
+        this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} with ${refs.length} referenced variable(s).`;
       }
 
@@ -1090,7 +1118,7 @@ export class ToolDispatcher {
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.state?.recordFileChange({ path, kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-        await this.maybeCheckpoint(`${kind} ${path}`);
+        this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} (stack-aware).`;
       }
 
@@ -1242,7 +1270,7 @@ export class ToolDispatcher {
             getWorkspaceMemory(this.workspaceId).indexFile(path, after);
           } catch { /* best-effort */ }
         }
-        await this.maybeCheckpoint(`codemod rename ${oldName} → ${newName}`);
+        this.scheduleCheckpoint(`codemod rename ${oldName} → ${newName}`);
         return result.summary || `Renamed "${oldName}" → "${newName}" in ${result.changes.length} file(s).`;
       }
 
@@ -1274,7 +1302,7 @@ export class ToolDispatcher {
             getWorkspaceMemory(this.workspaceId).indexFile(path, after);
           } catch { /* best-effort */ }
         }
-        await this.maybeCheckpoint(`codemod add prop ${propName} to ${componentName}`);
+        this.scheduleCheckpoint(`codemod add prop ${propName} to ${componentName}`);
         return result.summary || `Added prop "${propName}" to ${componentName} in ${result.changes.length} file(s).`;
       }
 

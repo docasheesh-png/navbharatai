@@ -26,6 +26,7 @@ export type ToolName =
   | 'generate_openapi'
   | 'generate_api_docs'
   | 'generate_tests'
+  | 'generate_observability'
   | 'check_conventions'
   | 'generate_release_notes'
   | 'task'

@@ -1678,15 +1678,24 @@
 - **Files:** new `src/server/AppMakerLab/generator/BundleOptimizationGenerator.ts`,
   `src/server/AppMakerLab/generator/FrontendGenerationEngine.ts`.
 
-### P-CGE.11 — Observability Instrumentation Generator  ❌ MISSING  [MED]
-- Generated apps have no logging, no error tracking, no metrics. When users deploy a generated app
-  it is a black box with no observability.
-- [ ] Add `ObservabilityGenerator.ts` — inject into every generated backend:
-  - `morgan` HTTP request logger.
-  - `window.onerror` + `unhandledrejection` handlers in frontend entry.
-  - Health check endpoint (`GET /health → 200 OK`).
+### P-CGE.11 — Observability Instrumentation Generator  ✅ DONE (2026-06-29) · 🔌 WIRED
+- Generated apps shipped as black boxes — no request logging, no client error capture, no health probe.
+- [x] **`ObservabilityGenerator.ts`** (pure, unit-tested) — `generateObservability({ target })` produces
+  real, runnable instrumentation files: a client-side error handler (`window` error +
+  `unhandledrejection` → structured logs), an Express request-logger middleware (method/path/status/
+  duration), and a `GET /health` endpoint (200 + uptime). Each file carries a one-line wiring note.
+- [x] **Wired as the `generate_observability` AgentV3 tool** (types.ts + ToolCatalog +
+  `CATALOG_TOOL_NAMES` + AgentRegistry `BUILD_TOOLS` + ToolDispatcher case + systemPrompt nudge): the
+  build agent writes the files, records/indexes/checkpoints them, and the tool result lists the exact
+  import/mount to wire each in with `edit_file`.
+- **Dependency-free deviation (honest):** the spec named `morgan`; we generate a tiny custom Express
+  logger instead so it never forces a new install into the user's app (which could break `npm ci`) —
+  same value, zero new dependency. The console-structured logger is a baseline to point at Sentry/Datadog.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3626 passing (10 new) ✅ · `test:coverage` exit 0 ·
+  `build` ✅ · `boot:check` PASS. AppKnowledgeBase updated (AUTO OBSERVABILITY).
 - **Files:** new `src/server/AppMakerLab/generator/ObservabilityGenerator.ts`,
-  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+  `tests/observabilityGenerator.test.ts`; wired in `types.ts`, `ToolCatalog.ts`, `AgentRegistry.ts`,
+  `ToolDispatcher.ts`, `systemPrompt.ts`, `ToolDispatcher.test.ts`, `AppKnowledgeBase.ts`.
 
 ### P-CGE.12 — Additional Framework Generators (Next.js / React Native production-level)  🟡 PARTIAL → full  [LOW]
 - `PatternLibrary.ts` lists Next.js and React Native as supported. The actual generation engines

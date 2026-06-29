@@ -75,6 +75,35 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   const editorRef = useRef<any>(null);
   // 8.2 — lightweight textarea fallback on mobile to avoid Monaco memory issues
   const [isMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+  // Monaco loads its core from a CDN (see loader.config above). If that CDN is unreachable
+  // (offline, firewall/CSP, region block, CDN hiccup) the loader hangs and the editor shows
+  // "Loading editor…" forever. Detect that — on init failure OR a timeout — and fall back to
+  // the plain textarea editor so files ALWAYS open. The happy path (CDN reachable) is unchanged.
+  const [monacoFailed, setMonacoFailed] = useState(false);
+  const useTextarea = isMobile || monacoFailed;
+
+  useEffect(() => {
+    if (isMobile || monacoFailed) return;
+    let active = true;
+    const timer = setTimeout(() => {
+      if (active) {
+        // eslint-disable-next-line no-console
+        console.warn('[Editor] Monaco did not load in time — falling back to the plain text editor.');
+        setMonacoFailed(true);
+      }
+    }, 12_000);
+    loader.init()
+      .then(() => { if (active) clearTimeout(timer); })
+      .catch(() => {
+        if (active) {
+          clearTimeout(timer);
+          // eslint-disable-next-line no-console
+          console.warn('[Editor] Monaco failed to load — falling back to the plain text editor.');
+          setMonacoFailed(true);
+        }
+      });
+    return () => { active = false; clearTimeout(timer); };
+  }, [isMobile, monacoFailed]);
 
   useEffect(() => {
     return () => {
@@ -201,9 +230,9 @@ export const Editor: React.FC<EditorProps> = React.memo(({
         </div>
       )}
 
-      {/* Editor — Monaco on desktop, textarea on mobile */}
+      {/* Editor — Monaco when available; plain textarea on mobile or if Monaco can't load */}
       {!isBinaryFile && <div className="flex-1 overflow-hidden relative">
-        {isMobile ? (
+        {useTextarea ? (
           <textarea
             value={content}
             onChange={(e) => onChange(e.target.value)}

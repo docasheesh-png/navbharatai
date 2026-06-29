@@ -477,13 +477,18 @@
 - Human approval gate for risky commands (Approvals.ts, 10-min timeout + auto-deny)
 - npm audit in CI (`.github/workflows/ci.yml`)
 
-### P-SEC.1 — RBAC / Role-Based Access Control  ❌ MISSING  [HIGH]
-- Auth is binary: Firebase user OR `ADMIN_PASSWORD` hardcoded admin. No role granularity (owner/editor/viewer/billing).
-  No per-route permission matrix. Least-privilege principle violated: all authenticated users can call all user-facing routes.
-- [ ] Define a `UserRole` enum: `owner | admin | editor | viewer | billing_only` stored in Firestore `users/{uid}/role`.
-- [ ] Add `requireRole(...roles)` middleware (wraps `requireAuth`) — inject into routes that need more than "logged in".
-- [ ] Pro v3.0 routes (`/api/agentv3/*`) and billing routes should require `owner` or `billing_only` minimally.
-- **Files:** `src/server/lib/authMiddleware.ts`, `server.ts` (route registration), `src/config/firestore.rules`.
+### P-SEC.1 — RBAC / Role-Based Access Control  ✅ DONE (2026-06-28)
+- **Was:** Auth was binary (Firebase user OR hardcoded admin), no role granularity, no per-route matrix.
+- **Done:**
+  - [x] `UserRole` type (`owner | admin | editor | viewer | billing_only`) + `ROLE_RANK` in `authMiddleware.ts`, stored in Firestore `users/{uid}.role`.
+  - [x] `requireRole(...roles)` middleware (401/403, owner+admin superusers) + pure `isRoleAllowed()` decision helper + `getUserRole`/`setUserRole`.
+  - [x] **Backward-compatible:** unset role defaults to `owner`, so no existing single-user account is ever locked out (purely additive).
+  - [x] Wired `requireRole('owner','admin')` onto `POST /api/team/invite` (was completely auth-less before — real security gain).
+  - [x] **Privilege-escalation guard in `firestore.rules`:** clients can NOT set/change their own `role` (server/admin-SDK only) — closes a self-escalation hole (isValidUser allows arbitrary keys).
+  - [x] Test `tests/rbac.test.ts` (owner/admin superuser, listed-role allow, unlisted deny, rank order).
+- **Verification:** `tsc -p tsconfig.server.json` ✅ · `tsc --noEmit` ✅ · `vitest run` 3114/3114 ✅ · build ✅ · boot ✅
+- **Note:** `/api/agentv3/*` route-gating intentionally deferred (that lane is being actively changed by a parallel session; gating it now would collide). The middleware is ready to apply there in a follow-up.
+- **Files:** `src/server/lib/authMiddleware.ts`, `src/server/routes/team.ts`, `firestore.rules`, `tests/rbac.test.ts`.
 
 ### P-SEC.2 — DAST in CI Pipeline  ❌ MISSING  [HIGH]
 - SecurityScan.tsx runs SAST (pattern-matching via Gemini). No Dynamic Application Security Testing (DAST)

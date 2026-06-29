@@ -1,15 +1,17 @@
 import crypto from 'crypto';
 import type { Express, Request, Response } from 'express';
 import { audit } from '../lib/audit';
+import { requireRole } from '../lib/authMiddleware';
 
 /**
  * Team collaboration routes extracted from the server.ts monolith (Phase 1).
- * Behavior unchanged.
  *
- * - POST /api/team/invite — issue a project invite for an email address
+ * - POST /api/team/invite — issue a project invite for an email address.
+ *   P-SEC.1: gated by RBAC — only `owner`/`admin` may invite team members.
+ *   (Role defaults to `owner` when unset, so existing single-user accounts are unaffected.)
  */
 export function registerTeamRoutes(app: Express): void {
-  app.post('/api/team/invite', async (req: Request, res: Response) => {
+  app.post('/api/team/invite', requireRole('owner', 'admin'), async (req: Request, res: Response) => {
     const { email, projectId, userId, role = 'viewer' } = req.body || {};
     if (!email || !userId) return res.status(400).json({ error: 'email and userId required' });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {

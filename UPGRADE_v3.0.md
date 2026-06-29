@@ -2002,6 +2002,8 @@
 - [x] Added `GET /api/admin/health-score` (admin-gated) computing the composite from REAL live signals: build
   success rate (`metrics`), aggregate provider error rate + request-weighted latency (`AIRouter` circuit stats),
   and `process.uptime()`. Returns the score, the raw inputs, and a `sources` map for transparency.
+- [x] Surfaced it in the Admin dashboard Overview tab — a "Platform Health Score" card (Health / Reliability / Risk
+  + grade), with an honest "no data yet for: …" note for any signal not yet measured (excluded, not faked).
 - [x] Rewrote `AppHealthMonitor.tsx` to be honest: it shows ONLY real, measured signals from the public
   `/api/health` + `/api/ready` (platform status, real uptime, readiness) and an explicit "live per-app telemetry is
   not connected yet" state instead of fabricated metrics/incidents/logs. All `Math.random`/simulated data removed.

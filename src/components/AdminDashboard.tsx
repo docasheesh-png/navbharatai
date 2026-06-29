@@ -81,6 +81,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [llmLatency, setLlmLatency] = useState<any>(null);
   const [llmLoading, setLlmLoading] = useState(false);
 
+  // P-MON.4 — composite platform health score (real, from /api/admin/health-score).
+  const [healthScore, setHealthScore] = useState<any>(null);
+
   const headers = { 'x-admin-token': adminToken, 'Content-Type': 'application/json' };
 
   const toast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3000); };
@@ -159,7 +162,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     }
   }, [adminToken]);
 
+  const fetchHealthScore = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/health-score', { headers });
+      const d = await r.json();
+      setHealthScore(d && typeof d === 'object' ? d : null);
+    } catch (e) {
+      console.error(e);
+      setHealthScore(null);
+    }
+  }, [adminToken]);
+
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
+  useEffect(() => { if (activeTab === 'overview') fetchHealthScore(); }, [activeTab, fetchHealthScore]);
   useEffect(() => { if (activeTab === 'users') fetchUsers(); }, [activeTab, fetchUsers]);
   useEffect(() => { if (activeTab === 'settings') fetchPromos(); }, [activeTab, fetchPromos]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
@@ -294,6 +309,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Paid transactions', 'bg-pink-500', Tag)}
                 {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Direct provider cost', 'bg-orange-500', Cpu)}
               </div>
+
+              {/* ── P-MON.4 Composite platform health (real, from /api/admin/health-score) ── */}
+              {healthScore?.score && (
+                <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Platform Health Score</h3>
+                    <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
+                      healthScore.score.grade === 'excellent' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : healthScore.score.grade === 'good' ? 'bg-sky-500/10 border-sky-500/30 text-sky-400'
+                      : healthScore.score.grade === 'fair' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                      : healthScore.score.grade === 'unknown' ? 'bg-white/5 border-white/10 text-[#8b949e]'
+                      : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>
+                      {healthScore.score.grade}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    {([
+                      { label: 'Health', value: healthScore.score.health, good: (v: number) => v >= 75 },
+                      { label: 'Reliability', value: healthScore.score.reliability, good: (v: number) => v >= 75 },
+                      { label: 'Risk', value: healthScore.score.risk, good: (v: number) => v <= 25 },
+                    ] as const).map(m => (
+                      <div key={m.label} className="bg-black/30 rounded-xl p-4 text-center">
+                        <div className="text-[9px] text-[#8b949e] uppercase font-bold tracking-widest">{m.label}</div>
+                        <div className={`text-2xl font-black font-mono mt-1 ${
+                          m.value == null ? 'text-[#8b949e]' : m.good(m.value) ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          {m.value == null ? '—' : m.value}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {Array.isArray(healthScore.score.missing) && healthScore.score.missing.length > 0 && (
+                    <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest mt-3">
+                      No data yet for: {healthScore.score.missing.join(', ')} — excluded from the score (not faked).
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Provider Usage Ranking */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

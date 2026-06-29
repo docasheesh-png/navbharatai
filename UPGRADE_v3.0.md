@@ -975,12 +975,23 @@
 - **Files:** `src/server/AppMakerLab/jobs/BuildJobManager.ts`, new `src/server/AppMakerLab/jobs/BuildWorker.ts`,
   new `src/server/AppMakerLab/jobs/BuildQueue.ts`.
 
-### P-BRE.7 — Build & Deploy Notifications  ❌ MISSING  [MED]
-- When a user's app build completes or fails, they get no push notification. They must stay on the page and watch the status indicator. Background builds (triggered by AI agent) are silent.
-- [ ] Add `NotificationManager.ts`: on `BUILD_COMPLETED` / `BUILD_FAILED` events, send a toast to the frontend via SSE push (`/api/notifications` stream already exists as a pattern in server.ts).
-- [ ] Add email notification option (via Firebase email or SendGrid) for builds > 30s.
-- [ ] Add webhook option (per-project URL) — fire a POST with `{jobId, status, previewUrl}` on completion.
-- **Files:** new `src/server/NotificationManager.ts`, `server.ts`, `src/server/AppMakerLab/jobs/BuildJobManager.ts`.
+### P-BRE.7 — Build & Deploy Notifications  ✅ DONE (2026-06-29, webhook channel)
+- Background/agent-triggered builds were silent — no signal on completion/failure.
+- [x] **`NotificationManager.ts`** — `buildNotificationPayload(job)` (pure) builds `{ event, jobId, status,
+      success, previewUrl, workspaceId, timestamp }`; `sendBuildWebhook(url, payload)` POSTs with a 5s
+      AbortController timeout, returns 2xx→true and NEVER throws (a flaky webhook can't break a build);
+      `notifyBuildResult(job)` fires only on a terminal status when a webhook URL is configured (no-op otherwise).
+- [x] **Wired** into `BuildJobManager.updateStatus()` — on a `PREVIEW_READY`/`FAILED` transition it fires the
+      webhook best-effort + non-blocking (the build never waits on or fails from it).
+- [x] **Config-gated webhook URL** — explicit arg → `BUILD_WEBHOOK_URL` env → none. Real when configured.
+- [ ] **SSE-toast + email channels deferred (honest):** there is no standalone notifications SSE stream yet
+      (the existing SSE is the build/engineer chat stream), and email needs an external provider key
+      (SendGrid/Firebase) that doesn't exist for this project — per "real features only" they are NOT stubbed.
+      The webhook channel (no external dep) ships now; a per-project webhook-URL setting UI is a thin follow-up.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3252/3252 ✅ (10 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/NotificationManager.ts` (new), `tests/notificationManager.test.ts` (new),
+      `src/server/AppMakerLab/jobs/BuildJobManager.ts`.
 
 ### P-BRE.8 — Build Analytics Dashboard  ✅ DONE (2026-06-29)
 - There was no view of build-pipeline health (duration, failure rate, common failure type).

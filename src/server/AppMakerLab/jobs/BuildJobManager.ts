@@ -79,6 +79,17 @@ export class BuildJobManager {
 
     static async updateStatus(jobId: string, status: JobStatus, progress: number, log?: string) {
         await this.store.updateJobStatus(jobId, status, progress, log);
+        // P-BRE.7 — on a terminal status, fire a build notification (webhook). Best-effort +
+        // non-blocking: a missing webhook URL or a webhook failure never affects the build.
+        if (status === JobStatus.PREVIEW_READY || status === JobStatus.FAILED) {
+            this.getJob(jobId)
+                .then(async (job) => {
+                    if (!job) return;
+                    const { notifyBuildResult } = await import('../../NotificationManager');
+                    await notifyBuildResult(job);
+                })
+                .catch(() => { /* notifications are best-effort */ });
+        }
     }
 
     static async getJob(jobId: string): Promise<BuildJob | null> {

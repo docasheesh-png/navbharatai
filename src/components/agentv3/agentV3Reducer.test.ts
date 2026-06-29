@@ -123,6 +123,19 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(errored.error).toBe('boom');
   });
 
+  it('keeps the diagnostics report delivered with the result event (for the "Build report" button)', () => {
+    const report = { schema: 'navbharatai.v3.build-diagnostics/1', issues: [{ code: 'TOOL_CALL' }] };
+    const withDiag = agentV3Reducer(initialAgentV3State(), {
+      type: 'result', ok: true, summary: 'built', steps: 2, billedUsd: 0.5, diagnostics: report,
+    });
+    expect(withDiag.diagnostics).toEqual(report);
+
+    // A result without diagnostics must not blow away an existing report.
+    const prior = { ...initialAgentV3State(), diagnostics: report };
+    const next = agentV3Reducer(prior, { type: 'result', ok: true, summary: 'again', steps: 1, billedUsd: 0.1 });
+    expect(next.diagnostics).toEqual(report);
+  });
+
   it('routes bash command + result to the terminal surface', () => {
     let s = initialAgentV3State();
     s = agentV3Reducer(s, {

@@ -187,6 +187,9 @@ ${babelTag}
     var el = document.getElementById('root');
     el.innerHTML = '<pre style="white-space:pre-wrap;color:#b00;padding:16px;font:13px/1.5 monospace">Preview error:\\n' +
       String(msg).replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</pre>';
+    // Report the REAL preview error up to the host so it can be captured into the build report
+    // (cross-origin srcdoc → postMessage is the only channel). Best-effort; the iframe still shows it.
+    try { (window.parent || window.top).postMessage({ __nbaiPreviewError: true, source: 'in-browser', message: String(msg) }, '*'); } catch (e) {}
   }
   function dirname(p) { var i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); }
   function normalize(p) {

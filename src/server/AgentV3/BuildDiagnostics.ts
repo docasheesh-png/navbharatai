@@ -101,6 +101,20 @@ export interface GeneratedFileRecord {
   note?: string;
 }
 
+/**
+ * A PREVIEW failure captured from the running preview (the in-browser srcdoc iframe, or a live-server
+ * runtime). The build can "succeed" yet the preview not render — capturing the real preview error
+ * into the report makes that a 100%-real, downloadable signal instead of a screenshot the user must
+ * send separately. ('live' server failures already appear in the sandbox command logs.)
+ */
+export interface PreviewErrorRecord {
+  ts: number;
+  /** Which preview surface failed. */
+  source: 'in-browser' | 'live';
+  /** The real error message/stack the preview reported (capped). */
+  message: string;
+}
+
 export interface BuildDiagnosticsReport {
   schema: 'navbharatai.v3.build-diagnostics/1';
   sessionId?: string;
@@ -126,6 +140,8 @@ export interface BuildDiagnosticsReport {
   errors?: CapturedError[];
   /** Offending generated files captured on a compile failure — so the exact bug is visible. */
   generatedFiles?: GeneratedFileRecord[];
+  /** Preview failures (in-browser / live runtime) captured after the build — a build can pass yet not render. */
+  previewErrors?: PreviewErrorRecord[];
 }
 
 export interface BuildDiagnosticsMeta {
@@ -149,6 +165,8 @@ const MAX_LLM_CALLS = 300;
 const MAX_ERRORS = 200;
 const MAX_GEN_FILES = 20;
 const GEN_FILE_CAP = 6000;
+const MAX_PREVIEW_ERRORS = 30;
+const PREVIEW_ERROR_CAP = 4000;
 /** Per-stream output cap — large enough to hold a real npm/tsc/vite failure, bounded for storage. */
 const CMD_OUTPUT_CAP = 4000;
 const LLM_PREVIEW_CAP = 2000;
@@ -184,6 +202,7 @@ export class BuildDiagnostics {
   private readonly llmCalls: LlmCallRecord[] = [];
   private readonly errors: CapturedError[] = [];
   private readonly generatedFiles: GeneratedFileRecord[] = [];
+  private readonly previewErrors: PreviewErrorRecord[] = [];
 
   constructor(meta: BuildDiagnosticsMeta = {}) {
     this.meta = meta;
@@ -320,6 +339,21 @@ export class BuildDiagnostics {
     if (this.generatedFiles.length >= MAX_GEN_FILES) return;
     this.generatedFiles.push(rec);
     this.notify();
+  }
+
+  /**
+   * Record a PREVIEW failure (in-browser srcdoc, or live runtime). Captured AFTER the build so a
+   * "successful" build that doesn't actually render is still a real, downloadable signal. Also adds
+   * a timeline error line. Capped + deduped against the immediately-previous identical message.
+   */
+  recordPreviewError(rec: { source: 'in-browser' | 'live'; message: string }): void {
+    const message = capTail(rec.message, PREVIEW_ERROR_CAP);
+    const last = this.previewErrors[this.previewErrors.length - 1];
+    if (last && last.source === rec.source && last.message === message) return; // ignore immediate repeats
+    if (this.previewErrors.length < MAX_PREVIEW_ERRORS) {
+      this.previewErrors.push({ ts: this.now(), source: rec.source, message });
+    }
+    this.record({ phase: 'preview', severity: 'error', code: 'PREVIEW_ERROR', message: `${rec.source} preview failed: ${message}`.slice(0, 400), autoResolved: false });
   }
 
   /**
@@ -466,6 +500,7 @@ export class BuildDiagnostics {
       llmCalls: this.llmCalls.length ? [...this.llmCalls] : undefined,
       errors: this.errors.length ? [...this.errors] : undefined,
       generatedFiles: this.generatedFiles.length ? [...this.generatedFiles] : undefined,
+      previewErrors: this.previewErrors.length ? [...this.previewErrors] : undefined,
     };
   }
 }
@@ -522,6 +557,13 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
       lines.push(`${n + 1}. ${c.provider ?? '?'}/${c.model ?? '?'} finish=${c.finishReason ?? '?'}${tok}${lat} ${c.ok ? 'ok' : 'FAILED'}`);
       if (c.error) lines.push(`   error: ${c.error}`);
       if (c.responsePreview) lines.push(`   response[${c.responseChars ?? c.responsePreview.length}c]: ${c.responsePreview}`);
+    });
+  }
+  if (r.previewErrors?.length) {
+    lines.push('');
+    lines.push(`Preview errors (${r.previewErrors.length}):`);
+    r.previewErrors.forEach((p, n) => {
+      lines.push(`${n + 1}. [${p.source}] ${p.message}`);
     });
   }
   if (r.generatedFiles?.length) {

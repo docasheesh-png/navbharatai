@@ -82,6 +82,24 @@ export function PreviewSurface({ url, workspaceId, userId, email, onFixError }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, workspaceId]);
 
+  // Capture in-browser preview failures (postMessage'd up from the sandboxed srcdoc iframe) into the
+  // build's diagnostics report, so a build that "succeeded" but doesn't render shows the REAL preview
+  // error in the downloadable report — no separate screenshot needed. Best-effort, fire-and-forget.
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const d = e.data as { __nbaiPreviewError?: boolean; source?: string; message?: string } | null;
+      if (!d || d.__nbaiPreviewError !== true || !workspaceId || typeof d.message !== 'string') return;
+      fetch('/api/agentv3/preview-error', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId, userId, email, source: d.source === 'live' ? 'live' : 'in-browser', message: d.message.slice(0, 4000) }),
+        keepalive: true,
+      }).catch(() => { /* best-effort — capturing the error must never disrupt the preview */ });
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [workspaceId, userId, email]);
+
   const switcher = (
     <div className="flex items-center gap-1">
       <button onClick={() => setMode('live')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app in the cloud sandbox (full fidelity)">Live server</button>

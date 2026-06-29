@@ -221,12 +221,31 @@ describe('BuildDiagnostics — AI Diagnosis Bundle (raw logs, LLM I/O, full erro
     expect(d.report().generatedFiles![0].content).toContain('truncated');
   });
 
+  it('captures a PREVIEW failure (in-browser/live) into a previewErrors channel + timeline', () => {
+    const d = fresh();
+    d.recordPreviewError({ source: 'in-browser', message: "Cannot resolve './x' imported by src/App.tsx" });
+    const r = d.report();
+    expect(r.previewErrors).toHaveLength(1);
+    expect(r.previewErrors![0].source).toBe('in-browser');
+    expect(r.previewErrors![0].message).toContain('Cannot resolve');
+    const marker = r.issues.find((i) => i.code === 'PREVIEW_ERROR');
+    expect(marker?.severity).toBe('error');
+  });
+
+  it('ignores an immediate duplicate preview error (same source+message)', () => {
+    const d = fresh();
+    d.recordPreviewError({ source: 'in-browser', message: 'boom' });
+    d.recordPreviewError({ source: 'in-browser', message: 'boom' });
+    expect(d.report().previewErrors).toHaveLength(1);
+  });
+
   it('renders commands, LLM calls and full errors in the text report', () => {
     const d = fresh();
     d.recordCommand({ command: 'npm install', exitCode: 1, stdout: '', stderr: 'ERESOLVE' });
     d.recordLlmCall({ model: 'claude-opus-4', finishReason: 'max_tokens', toolCalls: 0, inputTokens: 1, outputTokens: 8000, latencyMs: 5000, ok: true, responsePreview: 'partial code' });
     d.recordFullError({ message: 'TypeError: x is not a function', stack: 'at App (src/App.tsx:10)', phase: 'build' });
     d.recordFile({ path: 'src/Calculator.tsx', content: 'const { input } = useCalculator();', note: 'referenced by a compile error' });
+    d.recordPreviewError({ source: 'in-browser', message: 'Run src/App.tsx: x is not defined' });
     const text = renderDiagnosticsText(d.report());
     expect(text).toContain('Sandbox commands');
     expect(text).toContain('ERESOLVE');
@@ -235,5 +254,7 @@ describe('BuildDiagnostics — AI Diagnosis Bundle (raw logs, LLM I/O, full erro
     expect(text).toContain('src/App.tsx:10');
     expect(text).toContain('Offending files');
     expect(text).toContain('useCalculator');
+    expect(text).toContain('Preview errors');
+    expect(text).toContain('x is not defined');
   });
 });

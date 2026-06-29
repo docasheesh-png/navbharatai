@@ -815,6 +815,41 @@ export function registerAgentV3Routes(app: Express): void {
     res.json({ diagnostics: report });
   });
 
+  // Capture a PREVIEW failure (in-browser srcdoc / live runtime) reported by the client into the
+  // build's diagnostics report — so a build that "succeeded" but doesn't actually render shows the
+  // REAL preview error in the downloadable report (no separate screenshot needed). The build is
+  // already finished, so we append to the durable (workspace-keyed) report and the in-memory copy.
+  // Best-effort + owner-scoped; never throws.
+  app.post('/api/agentv3/preview-error', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const source: 'in-browser' | 'live' = req.body?.source === 'live' ? 'live' : 'in-browser';
+    const message = typeof req.body?.message === 'string' ? req.body.message.slice(0, 4000) : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' }); return; }
+    if (!workspaceId || !message) { res.status(400).json({ error: 'workspaceId and message are required.' }); return; }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    try {
+      const append = (report: BuildDiagnosticsReport): BuildDiagnosticsReport => {
+        const rec = { ts: Date.now(), source, message };
+        const last = report.previewErrors?.[report.previewErrors.length - 1];
+        if (last && last.source === source && last.message === message) return report; // ignore immediate repeats
+        const previewErrors = [...(report.previewErrors ?? []), rec].slice(-30);
+        const issues = [...report.issues, { ts: rec.ts, phase: 'preview' as const, severity: 'error' as const, code: 'PREVIEW_ERROR', message: `${source} preview failed: ${message}`.slice(0, 400), autoResolved: false }];
+        return { ...report, previewErrors, issues, counts: { ...report.counts, total: issues.length, errors: report.counts.errors + 1, unresolved: report.counts.unresolved + 1 } };
+      };
+      // Update the in-memory copy (same instance) if present.
+      const mem = lastDiagnostics.get(userId ?? 'anon');
+      if (mem) lastDiagnostics.set(userId ?? 'anon', append(mem));
+      // Update the durable copy so the download/copy reflects it even after an instance rotation.
+      const durable = await loadDiagnostics(workspaceId).catch(() => null);
+      if (durable) await saveDiagnostics(workspaceId, append(durable)).catch(() => {});
+      res.json({ ok: true });
+    } catch {
+      res.json({ ok: false }); // best-effort — never break the client over a diagnostics append
+    }
+  });
+
   // Public, lightweight preview-capability probe — ONLY the sandbox diagnosis (no
   // provider-key info). The preview surface calls this to explain, honestly, WHY the
   // "Live server" tab has no URL: either the cloud sandbox isn't configured on this

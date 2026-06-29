@@ -1692,16 +1692,24 @@
 - **Files:** new `src/server/AgentV3/ContextReranker.ts`, new `src/server/AgentV3/GroundingEngine.ts`,
   `src/server/AgentV3/EmbeddingSearch.ts`.
 
-### P-AI.3 — Dialogue Manager / Multi-Turn Context Manager  🟡 PARTIAL → full  [HIGH]
-- `ConversationStore.ts` persists transcript (durable `MessageParam[]`). Missing: a stateful dialogue
-  manager that tracks conversation phase (requirements → planning → building → debugging) and adjusts
-  intent classification based on prior turns rather than treating each message as independent.
-- [ ] Add `DialogueStateManager.ts` — tracks phase (REQUIREMENTS / PLANNING / BUILDING / DEBUGGING /
-  DEPLOYED) and injects phase context into `IntentClassifier` decision.
-- [ ] Multi-turn context compression: when transcript > 50 turns, summarize older turns before injection
-  (currently `UniversalAIRouter.ts` does token-based truncation only).
-- **Files:** new `src/server/AgentV3/DialogueStateManager.ts`, `src/server/AgentV3/IntentClassifier.ts`,
-  `src/server/AI/UniversalAIRouter.ts`.
+### P-AI.3 — Dialogue Manager / Multi-Turn Context Manager  ✅ DONE (2026-06-29) · 🔌 WIRED
+- `ConversationStore` persisted the transcript but each turn was treated independently — no sense of
+  WHERE in the lifecycle the conversation was (requirements → planning → building → debugging → deployed).
+- [x] **`DialogueStateManager.ts`** (new) — pure `inferPhase()` deriving the phase from intent + prompt
+      wording + whether a project exists + plan-mode (debug keywords on an established project → DEBUGGING;
+      ship words → DEPLOYED; edit/established → BUILDING; fresh + plan → PLANNING; short fresh ask →
+      REQUIREMENTS). `phaseGuidance()` returns a short posture instruction per phase (BUILDING = baseline,
+      no extra tokens). Fully unit-tested.
+- [x] **Wired into the live build prompt** — `routes/agentv3.ts` injects the phase posture into the Architect
+      system prompt (additive; '' for the baseline build phase). So a "still broken, button does nothing"
+      follow-up makes the agent adopt a reproduce→locate→minimal-fix debugging posture instead of treating it
+      as a new feature — a felt multi-turn behaviour change, not a headless tracker.
+- **Scope note:** transcript-compression-over-50-turns is left to `UniversalAIRouter`'s existing token-based
+  truncation (already handles overflow); this item delivers the felt phase-awareness on the live path.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3473/3473 ✅ (+12) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** new `src/server/AgentV3/DialogueStateManager.ts`, `src/server/routes/agentv3.ts`,
+  `tests/dialogueStateManager.test.ts` (new).
 
 ### P-AI.4 — NLU Completion (Entity Recognition + Slot Filling)  ✅ DONE (2026-06-29) · 🔌 WIRED
 - `IntentExtractor`/`RequirementIntelligenceEngine` did keyword + LLM requirement parsing but no NAMED

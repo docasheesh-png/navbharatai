@@ -28,6 +28,8 @@ import {
 interface CodeStudioProps {
   files: Record<string, string>;
   onFilesChange: (files: Record<string, string>) => void;
+  /** Side-effect when files are deleted (clear durable storage; sync deletion to v3.0). */
+  onFilesRemoved?: (paths: string[]) => void;
   onRun: (files: Record<string, string>) => void;
   /** The built preview HTML (same best-engine output the Pro preview uses). */
   generatedCode?: string;
@@ -78,6 +80,7 @@ interface CodeStudioProps {
 export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   files,
   onFilesChange,
+  onFilesRemoved,
   onRun,
   generatedCode,
   messages,
@@ -298,6 +301,17 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     delete newFiles[path];
     onFilesChange(newFiles);
     handleTabClose(path);
+    onFilesRemoved?.([path]);
+  };
+
+  // Batch delete (multi-select / delete-all): remove all paths in one state update + close tabs.
+  const handleDeleteFiles = (paths: string[]) => {
+    if (!paths.length) return;
+    const newFiles = { ...files };
+    for (const p of paths) delete newFiles[p];
+    onFilesChange(newFiles);
+    for (const p of paths) handleTabClose(p);
+    onFilesRemoved?.(paths);
   };
 
   // N10-N12: Send a project-level AI action (no selection needed — whole project context)
@@ -518,6 +532,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
             }}
             onFileCreate={handleCreateFile}
             onFileDelete={handleDeleteFile}
+            onFilesDelete={handleDeleteFiles}
             onFileRename={handleRenameFile}
             dirtyTabs={dirtyTabs}
             githubRepoUrl={githubRepoContext?.html_url}

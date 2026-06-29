@@ -111,7 +111,7 @@ import { MessageContent } from './components/MessageContent';
 import { HomeView } from './components/home/HomeView';
 import { GitHubService } from './lib/githubService';
 import { trackEvent } from './lib/analytics';
-import { saveFile, saveAllFiles, loadAllFiles, clearWorkspace } from './lib/storage';
+import { saveFile, saveAllFiles, loadAllFiles, clearWorkspace, deleteFile as storageDeleteFile } from './lib/storage';
 import {
   type ApnapanProfile,
   APNAPAN_DEFAULT_PROFILE,
@@ -2433,7 +2433,15 @@ ${buildLanguageRule(preferredLanguage)}`;
       if (activeFile === path) setActiveFile(Object.keys(next)[0] || '');
       return next;
     });
+    storageDeleteFile(path).catch(() => {}); // also remove from IndexedDB so it doesn't resurrect on reload
   };
+
+  // Batch removal side-effect from the IDE file explorer (multi-select / delete-all). The React
+  // `files` state is updated by the caller via onFilesChange; here we clear the deleted paths from
+  // durable storage (IndexedDB/Cache) so they don't reappear after a reload.
+  const handleFilesRemoved = useCallback((paths: string[]) => {
+    for (const p of paths) storageDeleteFile(p).catch(() => {});
+  }, []);
 
   const handleModelSelect = (id: string) => {
     if (id === 'auto') {
@@ -6060,6 +6068,7 @@ ${buildLanguageRule(preferredLanguage)}`;
             setGeneratedCode={setGeneratedCode}
             files={files}
             setFiles={setFiles as any}
+            onFilesRemoved={handleFilesRemoved}
             hasGeneratedCode={hasGeneratedCode}
             setIsAppBuilt={setIsAppBuilt}
             setHasGeneratedCode={setHasGeneratedCode}

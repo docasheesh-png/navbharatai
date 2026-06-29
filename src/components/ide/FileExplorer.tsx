@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import {
   FolderOpen, FileCode, Plus, FilePlus, FolderPlus,
   ChevronRight, ChevronDown, MoreVertical, Trash2,
-  Edit2, HardDrive, Search, ArrowUpDown, SortAsc, Github, Lock, Image
+  Edit2, HardDrive, Search, ArrowUpDown, SortAsc, Github, Lock, Image,
+  CheckSquare, Square, X, AlertTriangle
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -12,6 +13,8 @@ interface FileExplorerProps {
   activeFile: string;
   onFileSelect: (path: string) => void;
   onFileDelete: (path: string) => void;
+  /** Batch delete (multi-select / delete-all). Falls back to per-file onFileDelete if absent. */
+  onFilesDelete?: (paths: string[]) => void;
   onFileCreate: (name: string) => void;
   onFileRename: (oldPath: string, newName: string) => void;
   /** C22: Tabs with unsaved changes — shows amber dot on affected files */
@@ -47,6 +50,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
   activeFile,
   onFileSelect,
   onFileDelete,
+  onFilesDelete,
   onFileCreate,
   onFileRename,
   dirtyTabs,
@@ -57,6 +61,38 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
   const [isAddingFile, setIsAddingFile] = useState(false);
   const [newFileName, setNewFileName] = useState('');
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']));
+  // Multi-select delete: a select mode with per-file checkboxes + select-all + delete-all,
+  // confirmed through a real modal (never the native confirm()).
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Paths queued for the confirmation dialog (null = closed). Empty array never opens.
+  const [confirmPaths, setConfirmPaths] = useState<string[] | null>(null);
+
+  const allFilePaths = Object.keys(files);
+
+  const toggleSelected = (path: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
+  };
+
+  const exitSelectMode = () => { setSelectMode(false); setSelected(new Set()); };
+
+  // Perform the delete once confirmed — batch when possible, else per-file.
+  const performDelete = (paths: string[]) => {
+    if (paths.length === 0) return;
+    if (onFilesDelete) onFilesDelete(paths);
+    else paths.forEach(p => onFileDelete(p));
+    setSelected(prev => {
+      const next = new Set(prev);
+      paths.forEach(p => next.delete(p));
+      return next;
+    });
+    setConfirmPaths(null);
+    if (selectMode && paths.length > 1) exitSelectMode();
+  };
   // C5: Sort mode (dirs-first by name is default)
   const [sortMode, setSortMode] = useState<'name' | 'type'>('name');
   // C13: Recently-opened files (last 5, persisted to localStorage)
@@ -166,19 +202,27 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
         );
       }
 
+      const isSelected = selected.has(item.path);
+
       return (
         <div
           key={item.path}
-          onClick={() => handleFileSelectWithRecent(item.path)}
+          onClick={() => selectMode ? toggleSelected(item.path) : handleFileSelectWithRecent(item.path)}
           onMouseEnter={() => isImageFile(item.name) ? setImagePreviewPath(item.path) : undefined}
           onMouseLeave={() => setImagePreviewPath(null)}
           className={cn(
             "group relative flex items-center justify-between px-4 py-1.5 cursor-pointer transition-all",
-            isActive ? "bg-indigo-600/10 text-white border-r-2 border-indigo-500" : "hover:bg-white/5 text-[#8b949e]"
+            isSelected ? "bg-red-500/10" : isActive ? "bg-indigo-600/10 text-white border-r-2 border-indigo-500" : "hover:bg-white/5 text-[#8b949e]"
           )}
           style={{ paddingLeft: `${(level + 1) * 12}px` }}
         >
           <div className="flex items-center gap-3 min-w-0">
+            {/* Multi-select checkbox */}
+            {selectMode && (
+              isSelected
+                ? <CheckSquare className="w-3.5 h-3.5 shrink-0 text-red-400" />
+                : <Square className="w-3.5 h-3.5 shrink-0 text-[#484f58]" />
+            )}
             {/* C10: image icon for image files */}
             {isImageFile(item.name)
               ? <Image className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-indigo-400" : "text-[#484f58]")} />
@@ -211,7 +255,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                if (confirm(`Delete ${item.path}?`)) onFileDelete(item.path);
+                setConfirmPaths([item.path]);
               }}
               aria-label={`Delete ${item.path}`}
               className="p-1 hover:bg-red-500/10 rounded text-red-500/40 hover:text-red-500"
@@ -304,8 +348,44 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
           >
             <FilePlus className="w-3.5 h-3.5" />
           </button>
+          {/* Multi-select delete mode */}
+          {allFilePaths.length > 0 && (
+            <button
+              onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+              aria-label={selectMode ? 'Exit select mode' : 'Select files to delete'}
+              className={`p-1.5 rounded-md transition-all ${selectMode ? 'text-red-400 bg-red-900/20' : 'text-[#8b949e] hover:text-white hover:bg-white/5'}`}
+              title={selectMode ? 'Exit selection' : 'Select files to delete'}
+            >
+              <CheckSquare className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Multi-select action bar */}
+      {selectMode && (
+        <div className="px-4 py-2 border-b border-[var(--theme-border)] bg-red-950/10 flex items-center justify-between gap-2">
+          <button
+            onClick={() => setSelected(prev => prev.size === allFilePaths.length ? new Set() : new Set(allFilePaths))}
+            className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-[#8b949e] hover:text-white transition-colors"
+          >
+            {selected.size === allFilePaths.length && allFilePaths.length > 0
+              ? <CheckSquare className="w-3.5 h-3.5 text-red-400" />
+              : <Square className="w-3.5 h-3.5" />}
+            {selected.size === allFilePaths.length && allFilePaths.length > 0 ? 'Deselect All' : 'Select All'}
+          </button>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-[#8b949e]">{selected.size} selected</span>
+            <button
+              onClick={() => selected.size > 0 && setConfirmPaths([...selected])}
+              disabled={selected.size === 0}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-red-600 text-white hover:bg-red-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            >
+              <Trash2 className="w-3 h-3" /> Delete
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="px-4 py-3 bg-[#0d1117]/20">
         <div className="relative group">
@@ -368,6 +448,63 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
           {renderTree(tree)}
         </div>
       </div>
+
+      {/* Delete confirmation modal — replaces the native confirm(); used for single + multi delete. */}
+      <AnimatePresence>
+        {confirmPaths && confirmPaths.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            onClick={() => setConfirmPaths(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm bg-[#161b22] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-9 h-9 rounded-xl bg-red-500/10 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="w-5 h-5 text-red-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-white">
+                      Delete {confirmPaths.length === 1 ? 'file' : `${confirmPaths.length} files`}?
+                    </h3>
+                    <p className="text-[11px] text-[#8b949e]">This cannot be undone.</p>
+                  </div>
+                </div>
+                <div className="max-h-32 overflow-y-auto no-scrollbar rounded-lg bg-black/30 border border-white/5 p-2 mb-4">
+                  {confirmPaths.slice(0, 50).map(p => (
+                    <div key={p} className="text-[10px] font-mono text-[#c9d1d9] truncate py-0.5">{p}</div>
+                  ))}
+                  {confirmPaths.length > 50 && (
+                    <div className="text-[10px] text-[#484f58] py-0.5">…and {confirmPaths.length - 50} more</div>
+                  )}
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => setConfirmPaths(null)}
+                    className="px-4 py-2 rounded-lg text-[11px] font-black uppercase tracking-wider text-[#8b949e] hover:text-white hover:bg-white/5 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => performDelete(confirmPaths)}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[11px] font-black uppercase tracking-wider bg-red-600 text-white hover:bg-red-700 transition-all active:scale-95"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

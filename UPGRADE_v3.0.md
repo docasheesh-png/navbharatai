@@ -1376,15 +1376,24 @@
 - **Files:** new `src/server/AppMakerLab/intelligence/ADRManager.ts`,
   `src/server/AppMakerLab/intelligence/ArchitectureSelector.ts`.
 
-### P-PME.11 — SLA / Build-Time SLO Tracker  ❌ MISSING  [MED]
-- No tracking of whether builds complete within an acceptable time. A build that takes 10+ minutes
-  is a degraded experience, but nothing detects or alerts on it.
-- [ ] Add `BuildSLATracker.ts` — record build start/end timestamps. Flag builds exceeding SLO:
-  - Simple app: SLO = 60s. Complex app: SLO = 300s.
-- [ ] Persist SLO violations to `sloViolations/{userId}[]` in Firestore.
-- [ ] Admin dashboard: show p95 build time per app type.
-- **Files:** new `src/server/AppMakerLab/intelligence/BuildSLATracker.ts`,
-  `src/server/AppMakerLab/jobs/BuildJobManager.ts`.
+### P-PME.11 — SLA / Build-Time SLO Tracker  ✅ DONE (2026-06-29)
+- Nothing detected when a build ran slow (a degraded experience).
+- [x] **`BuildSLATracker.ts`** (pure, unit-tested) — `classifyComplexity(prompt)` (simple vs complex by
+      feature-signal keywords / length), `evaluateSlo(job)` against the SLO targets (**simple = 60s, complex =
+      300s**) → `{ withinSlo, overByMs }`, and `summarizeSlo(jobs)` → per-tier violation rate + p95 (reuses the
+      P-BRE.8 `percentile`).
+- [x] **SLO violation capture** — `BuildJobManager.updateStatus` records a `BUILD_SLO_VIOLATION` audit event
+      (severity warn, with complexity/duration/overBy) on a terminal build that breached its SLO — best-effort +
+      non-blocking (never affects the build).
+- [x] **`GET /api/analytics/slo`** — p95 build time + violation rate per complexity tier, from the real job
+      store (honest zeros until builds run).
+- **Note:** violations are surfaced as structured audit events (Cloud Logging-queryable, per P-SEC.7) rather than
+      a separate `sloViolations/{userId}` collection — same honest signal, no extra store; the admin p95-per-type
+      view is the `/api/analytics/slo` endpoint (a card can consume it, like the P-BRE.8 build-performance card).
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3308/3308 ✅ (9 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/AppMakerLab/intelligence/BuildSLATracker.ts` (new), `tests/buildSLATracker.test.ts` (new),
+      `src/server/routes/buildAnalytics.ts`, `src/server/AppMakerLab/jobs/BuildJobManager.ts`.
 
 ### P-PME.12 — Requirement Traceability (requirement → file → test)  🟡 PARTIAL → full  [LOW]
 - `RequirementIntelligenceEngine.ts` parses requirements. `FilePlanningEngine.ts` maps them to files.

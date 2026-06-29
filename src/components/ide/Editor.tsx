@@ -23,9 +23,12 @@ function iconForFile(path: string): IconComponent {
 }
 import { Tab } from '../../types/ide';
 
-// Configure Monaco to load from a faster CDN or local if possible, 
-// using the default which is usually CDN.
-loader.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs' } });
+// Load Monaco from our OWN origin, not a CDN. `scripts/copyMonaco.mjs` copies the installed
+// monaco-editor `min/vs` into `public/monaco/vs` at build time, so `/monaco/vs` is served as a
+// static asset by our server. This removes the external CDN dependency that left the editor
+// stuck on "Loading editor…" behind firewalls / CSP / region blocks. The load-failure fallback
+// below (textarea) remains as a final safety net.
+loader.config({ paths: { vs: '/monaco/vs' } });
 
 const BINARY_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp', 'pdf', 'zip', 'tar', 'gz',

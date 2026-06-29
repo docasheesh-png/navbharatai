@@ -106,6 +106,14 @@ const VITE_REACT_FILES: Record<string, string> = {
   'src/index.css':
     `:root { font-family: system-ui, sans-serif; }\n` +
     `body { margin: 0; }\n`,
+  // The generator often writes .tsx + CSS-Module imports even in this JS scaffold, and the verify
+  // gate runs `tsc --noEmit`. These ambient types stop the recurring `TS2307: Cannot find module
+  // '*.module.css'` from tripping the auto-repair loop.
+  'src/vite-env.d.ts':
+    `/// <reference types="vite/client" />\n` +
+    `declare module '*.module.css' { const classes: { readonly [key: string]: string }; export default classes; }\n` +
+    `declare module '*.module.scss' { const classes: { readonly [key: string]: string }; export default classes; }\n` +
+    `declare module '*.css';\n`,
 };
 
 const VITE_REACT_TS_FILES: Record<string, string> = {
@@ -164,6 +172,14 @@ const VITE_REACT_TS_FILES: Record<string, string> = {
   'src/index.css':
     `:root { font-family: system-ui, sans-serif; }\n` +
     `body { margin: 0; }\n`,
+  // Ambient types so `import styles from './X.module.css'` (CSS Modules) and asset imports type-check
+  // under `tsc --noEmit`. Without this the verify gate hits `TS2307: Cannot find module '*.module.css'`
+  // for every CSS-Module import the generator writes — a recurring, avoidable repair-loop trigger.
+  'src/vite-env.d.ts':
+    `/// <reference types="vite/client" />\n` +
+    `declare module '*.module.css' { const classes: { readonly [key: string]: string }; export default classes; }\n` +
+    `declare module '*.module.scss' { const classes: { readonly [key: string]: string }; export default classes; }\n` +
+    `declare module '*.css';\n`,
 };
 
 const VITE_VUE_FILES: Record<string, string> = {

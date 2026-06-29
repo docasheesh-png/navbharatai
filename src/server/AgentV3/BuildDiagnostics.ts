@@ -142,6 +142,9 @@ export interface BuildDiagnosticsReport {
   generatedFiles?: GeneratedFileRecord[];
   /** Preview failures (in-browser / live runtime) captured after the build — a build can pass yet not render. */
   previewErrors?: PreviewErrorRecord[];
+  /** The post-build quality reviewer's FULL findings (every small problem it listed) — not the
+   *  400-char timeline snippet. This is what makes the report's "all problems" list complete. */
+  review?: string;
 }
 
 export interface BuildDiagnosticsMeta {
@@ -203,6 +206,7 @@ export class BuildDiagnostics {
   private readonly errors: CapturedError[] = [];
   private readonly generatedFiles: GeneratedFileRecord[] = [];
   private readonly previewErrors: PreviewErrorRecord[] = [];
+  private reviewText?: string;
 
   constructor(meta: BuildDiagnosticsMeta = {}) {
     this.meta = meta;
@@ -356,6 +360,14 @@ export class BuildDiagnostics {
     this.record({ phase: 'preview', severity: 'error', code: 'PREVIEW_ERROR', message: `${rec.source} preview failed: ${message}`.slice(0, 400), autoResolved: false });
   }
 
+  /** Store the post-build reviewer's FULL findings (capped) so the report lists every small problem
+   *  it flagged — not just the 400-char timeline snippet. */
+  recordReview(text: string): void {
+    if (!text) return;
+    this.reviewText = capHead(text, 12_000);
+    this.notify();
+  }
+
   /**
    * Derive issues from a live AgentEvent. Safe to call on EVERY event — it only
    * captures the ones that signal a struggle (a failed tool, a not-ready verdict,
@@ -501,6 +513,7 @@ export class BuildDiagnostics {
       errors: this.errors.length ? [...this.errors] : undefined,
       generatedFiles: this.generatedFiles.length ? [...this.generatedFiles] : undefined,
       previewErrors: this.previewErrors.length ? [...this.previewErrors] : undefined,
+      review: this.reviewText,
     };
   }
 }
@@ -565,6 +578,11 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
     r.previewErrors.forEach((p, n) => {
       lines.push(`${n + 1}. [${p.source}] ${p.message}`);
     });
+  }
+  if (r.review) {
+    lines.push('');
+    lines.push('Quality review (all flagged problems):');
+    lines.push(r.review);
   }
   if (r.generatedFiles?.length) {
     lines.push('');

@@ -1,5 +1,28 @@
 import { describe, it, expect } from 'vitest';
-import { classifyIntent, classifyIntentWithConfidence, classifyIntentSmart } from './IntentClassifier';
+import { classifyIntent, classifyIntentWithConfidence, classifyIntentSmart, wantsFreshStart } from './IntentClassifier';
+
+describe('wantsFreshStart — only an EXPLICIT reset overrides "edit the existing project"', () => {
+  it('detects clear start-over phrases (English)', () => {
+    expect(wantsFreshStart('scrap this and start over')).toBe(true);
+    expect(wantsFreshStart('build it again from scratch')).toBe(true);
+    expect(wantsFreshStart('delete everything and rebuild')).toBe(true);
+    expect(wantsFreshStart('I want a brand new app')).toBe(true);
+    expect(wantsFreshStart('start fresh please')).toBe(true);
+  });
+  it('detects Hinglish start-over phrases', () => {
+    expect(wantsFreshStart('naye sire se banao')).toBe(true);
+    expect(wantsFreshStart('sab kuch delete karke naya project banao')).toBe(true);
+    expect(wantsFreshStart('phir se shuru karo bilkul')).toBe(true);
+  });
+  it('does NOT treat a normal feature request as a fresh start (the whole point of the fix)', () => {
+    expect(wantsFreshStart('add a dashboard page')).toBe(false);
+    expect(wantsFreshStart('make the header bigger')).toBe(false);
+    expect(wantsFreshStart('ek login page banao')).toBe(false);
+    expect(wantsFreshStart('create a settings screen')).toBe(false);
+    expect(wantsFreshStart('build a profile component')).toBe(false);
+    expect(wantsFreshStart('')).toBe(false);
+  });
+});
 
 describe('classifyIntent — continuation phrases resume the build (NOT the amnesiac chat path)', () => {
   it('routes "please continue" / "continue" to edit_existing, not chat', () => {

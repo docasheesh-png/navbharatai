@@ -98,6 +98,27 @@ export async function loadWorkspaceFiles(workspaceId: string): Promise<Record<st
   }
 }
 
+/**
+ * Cheap, metadata-only count of a workspace's persisted files — reads ONLY the metadata doc,
+ * NOT every file's content (so it is safe on the hot path before a build). Used to make intent
+ * classification workspace-aware: a non-empty workspace means a follow-up instruction should be
+ * treated as an EDIT of the existing project, not a fresh rebuild. Returns 0 when absent / no
+ * Firestore. Never throws.
+ */
+export async function countWorkspaceFiles(workspaceId: string): Promise<number> {
+  const db = getDb();
+  if (!db) return 0;
+  try {
+    const meta = await db.collection(COLLECTION).doc(workspaceId).get();
+    if (!meta.exists) return 0;
+    const data = meta.data();
+    if (typeof data?.count === 'number' && data.count >= 0) return data.count;
+    return Array.isArray(data?.paths) ? data!.paths.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 /** Pure: split a current path list into what remains after removing `toRemove`, + the removed paths. */
 export function diffRemovedPaths(current: string[], toRemove: string[]): { remaining: string[]; removed: string[] } {
   const removeSet = new Set((toRemove || []).filter((p) => typeof p === 'string' && p));

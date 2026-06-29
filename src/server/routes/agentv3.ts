@@ -83,6 +83,7 @@ import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { redactPII } from '../AgentV3/SecretRedactor';
+import { audit } from '../lib/audit';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -1154,6 +1155,18 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(400).json({ error: `Prompt is too long (max ${MAX_PROMPT_LEN} chars).` });
       return;
     }
+    // P-AI.10 — adversarial/abuse detection. Non-blocking: detect + record (audit + ledger) so
+    // abuse is visible without false-positive-blocking legitimate (long/edgy) prompts. The real
+    // safety enforcement is UntrustedContent fencing + CommandGovernance downstream.
+    try {
+      const { assessPrompt, recordAbuse } = await import('../AgentV3/AbuseDetector');
+      const abuse = assessPrompt(prompt);
+      if (abuse.isAbusive) {
+        const abuserUid = (req.body?.userId as string) || 'anon';
+        audit('ABUSE_DETECTED', { uid: abuserUid, score: abuse.score, signals: abuse.signals.map((s) => s.kind) }, 'warn');
+        recordAbuse(abuserUid, abuse, new Date().toISOString()).catch(() => {});
+      }
+    } catch { /* abuse detection is best-effort — never blocks the turn */ }
     // Per-user monthly spend ceiling (R1 §3.1). When the admin has set a cap and this user
     // has reached it this month, deny new builds with an honest, specific message (HTTP 402).
     // Disabled by default and fails open on a store error, so it never locks users out wrongly.

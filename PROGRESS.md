@@ -5535,3 +5535,25 @@ for simple new builds (shared generate/write/preview deps; usage ACCUMULATES acr
 billing; skip-install when node_modules present). 10 unit tests.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3239/3239 PASS (+10), boot:check PASS.
+
+## 2026-06-29 — FEATURE: AI Diagnosis Bundle — capture the raw signals behind build failures
+
+The Build report timeline named WHAT struggled but not WHY: it truncated errors to ~800 chars (losing
+the real throwing frame), never kept the raw sandbox command output, and never recorded the model I/O.
+A 2nd session ranked the top-3 missing signals (~80% of root causes). All three are now captured into the
+same downloadable Build report (additive — JSON download + .txt both surface them automatically):
+  • #3 Sandbox raw logs — every `bash` command's full stdout/stderr/exit code + duration is captured via
+    a new ToolDispatcher `onCommand` callback (mirrors the existing `onFileWrite` pattern). A non-zero
+    npm install / tsc / vite build / dev-server now shows its actual error, not just "tool failed".
+  • #4 LLM I/O — every model turn's model, prompt/response sizes + head preview, finish reason, token
+    counts and latency, captured via a new AgentRunner `onLlmCall` callback (fires on success AND on a
+    thrown/failed turn). A `finishReason: 'max_tokens'` here is the smoking gun for a truncated multi-file
+    generation. Shared by the default build AND every escalation/retry/heal/fix runner (baseRunnerOpts).
+  • #1 Full errors — the complete, un-truncated error message + stack is kept in a dedicated channel
+    alongside the short timeline line, so the root cause is never lost to a slice.
+BuildDiagnostics gained recordCommand()/recordLlmCall()/recordFullError() with per-channel caps
+(300/300/200) and per-output caps (4000-char tails for logs/stacks, 2000-char heads for prompts) so a long
+build can't grow the report without bound. All capture is best-effort (never throws, never blocks a build).
+AppKnowledgeBase `agentv3_build_report` entry updated (same PR) to describe the bundle.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3374+9=3383 (BuildDiagnostics 21/21) PASS, boot:check PASS.

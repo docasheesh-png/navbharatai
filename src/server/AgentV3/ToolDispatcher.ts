@@ -148,6 +148,13 @@ export class ToolDispatcher {
     private readonly onFileWrite?: (path: string, content: string) => void,
     /** Framework id from FrameworkRegistry (e.g. 'nextjs', 'vue'). Defaults to 'vite-react'. */
     private readonly framework?: string,
+    /**
+     * AI Diagnosis Bundle #3 — called with the RAW result of every sandbox `bash` command
+     * (full stdout/stderr/exit code + duration). The composition root forwards it to
+     * BuildDiagnostics.recordCommand so a failing npm install / tsc / vite build is captured in
+     * full — the single highest-value "why won't the app run" signal. Best-effort; never blocks.
+     */
+    private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number }) => void,
   ) {}
 
   /**
@@ -790,7 +797,12 @@ export class ToolDispatcher {
         // Governance (Layer 58): classify the command's risk before it runs so the
         // result carries an honest warning and a decision-audit episode is recorded.
         const risk = classifyCommandRisk(command);
+        const cmdStartedAt = Date.now();
         const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, command);
+        // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).
+        try {
+          this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt });
+        } catch { /* diagnostics capture is best-effort */ }
         let out =
           `exit=${exitCode}\n${stdout}` + (stderr ? `\n[stderr]\n${stderr}` : '');
         if (risk.level !== 'none') {

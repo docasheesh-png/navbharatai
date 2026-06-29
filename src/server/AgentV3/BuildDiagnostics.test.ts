@@ -132,3 +132,87 @@ describe('BuildDiagnostics — full activity timeline (minute-by-minute, names t
     expect(stuck?.severity).toBe('error');
   });
 });
+
+describe('BuildDiagnostics — AI Diagnosis Bundle (raw logs, LLM I/O, full errors)', () => {
+  it('#3 records a sandbox command\'s raw stdout/stderr/exit code', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npm install', exitCode: 1, stdout: 'added 0 packages', stderr: 'npm ERR! ERESOLVE could not resolve react@19', durationMs: 4200 });
+    const r = d.report();
+    expect(r.commands).toHaveLength(1);
+    expect(r.commands![0].exitCode).toBe(1);
+    expect(r.commands![0].stderr).toContain('ERESOLVE');
+    // a failed command also lands on the timeline as an error marker
+    const marker = r.issues.find((i) => i.code === 'SANDBOX_CMD_FAILED');
+    expect(marker?.severity).toBe('error');
+    expect(marker?.message).toContain('exit 1');
+  });
+
+  it('#3 a successful command is info (not an error) on the timeline', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npm run build', exitCode: 0, stdout: 'built in 3s', stderr: '' });
+    const r = d.report();
+    expect(r.issues.find((i) => i.code === 'SANDBOX_CMD')?.severity).toBe('info');
+    expect(r.issues.find((i) => i.code === 'SANDBOX_CMD_FAILED')).toBeUndefined();
+  });
+
+  it('#3 caps very large command output (keeps the tail where the error lives)', () => {
+    const d = fresh();
+    const huge = 'x'.repeat(50_000) + 'THE_REAL_ERROR_AT_THE_END';
+    d.recordCommand({ command: 'tsc', exitCode: 2, stdout: '', stderr: huge });
+    const cap = d.report().commands![0].stderr;
+    expect(cap.length).toBeLessThan(5000);
+    expect(cap).toContain('THE_REAL_ERROR_AT_THE_END'); // tail preserved
+    expect(cap).toContain('truncated');
+  });
+
+  it('#4 records an LLM call and flags a max_tokens (truncated) finish', () => {
+    const d = fresh();
+    d.recordLlmCall({ model: 'claude-opus-4', promptPreview: 'build a todo', promptChars: 12, responsePreview: 'import React', responseChars: 12, finishReason: 'max_tokens', toolCalls: 0, inputTokens: 100, outputTokens: 8000, latencyMs: 9000, ok: true });
+    const r = d.report();
+    expect(r.llmCalls).toHaveLength(1);
+    expect(r.llmCalls![0].finishReason).toBe('max_tokens');
+    const trunc = r.issues.find((i) => i.code === 'LLM_TRUNCATED');
+    expect(trunc?.severity).toBe('warning');
+  });
+
+  it('#4 a failed model call is captured as an error on the timeline', () => {
+    const d = fresh();
+    d.recordLlmCall({ model: 'grok-3', finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: 200, ok: false, error: 'provider overloaded' });
+    const r = d.report();
+    expect(r.llmCalls![0].ok).toBe(false);
+    expect(r.issues.find((i) => i.code === 'LLM_CALL_FAILED')?.message).toContain('overloaded');
+  });
+
+  it('#4 a normal (end_turn) call adds NO timeline noise, only the channel record', () => {
+    const d = fresh();
+    d.recordLlmCall({ model: 'claude-opus-4', finishReason: 'end_turn', toolCalls: 1, inputTokens: 50, outputTokens: 200, latencyMs: 1500, ok: true });
+    const r = d.report();
+    expect(r.llmCalls).toHaveLength(1);
+    expect(r.issues).toHaveLength(0); // success + not truncated → no struggle marker
+  });
+
+  it('#1 keeps the FULL error message (un-truncated) alongside the short timeline line', () => {
+    const d = fresh();
+    const long = 'Error: ' + 'detail '.repeat(300) + 'ROOT_CAUSE_FRAME';
+    d.ingestEvent({ type: 'error', message: long, ts: 1 } as AgentEvent);
+    const r = d.report();
+    // timeline line is short (sliced)
+    expect(r.issues.find((i) => i.code === 'BUILD_ERROR')?.message.length).toBeLessThanOrEqual(800);
+    // full-error channel keeps the whole thing (incl. the tail root cause)
+    expect(r.errors).toHaveLength(1);
+    expect(r.errors![0].message).toContain('ROOT_CAUSE_FRAME');
+  });
+
+  it('renders commands, LLM calls and full errors in the text report', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npm install', exitCode: 1, stdout: '', stderr: 'ERESOLVE' });
+    d.recordLlmCall({ model: 'claude-opus-4', finishReason: 'max_tokens', toolCalls: 0, inputTokens: 1, outputTokens: 8000, latencyMs: 5000, ok: true, responsePreview: 'partial code' });
+    d.recordFullError({ message: 'TypeError: x is not a function', stack: 'at App (src/App.tsx:10)', phase: 'build' });
+    const text = renderDiagnosticsText(d.report());
+    expect(text).toContain('Sandbox commands');
+    expect(text).toContain('ERESOLVE');
+    expect(text).toContain('LLM calls');
+    expect(text).toContain('Full errors');
+    expect(text).toContain('src/App.tsx:10');
+  });
+});

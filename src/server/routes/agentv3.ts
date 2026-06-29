@@ -1660,7 +1660,9 @@ export function registerAgentV3Routes(app: Express): void {
           }
         }, 3_000);
       };
-      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework);
+      const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
+        // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
+        (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
 
       // Surgical edit mode (gold standard): when the user is editing an existing
       // app rather than building fresh, inject the CURRENT file tree and the
@@ -1727,6 +1729,11 @@ export function registerAgentV3Routes(app: Express): void {
         readinessGate: readinessGateEnabled(),
         // WATCHDOG — hard wall-clock cap so a build can never hang for 20-30 min (0 = disabled).
         maxBuildMs: maxBuildSeconds() * 1000,
+        // AI Diagnosis Bundle #4 — capture every model turn's I/O (truncation, failures, latency)
+        // into the build report. Shared by the default build AND every escalated/retry/heal runner.
+        onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
+          try { buildDiag.recordLlmCall(c); } catch { /* diagnostics are best-effort */ }
+        },
       };
       const runner = new AgentRunner({
         ...baseRunnerOpts,

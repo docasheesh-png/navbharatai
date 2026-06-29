@@ -20,6 +20,7 @@ import { registerNavigateRoutes } from './src/server/routes/navigate';
 import { registerWebhookRoutes } from './src/server/routes/webhooks';
 import { registerChangelogRoutes } from './src/server/routes/changelog';
 import { registerTechDebtRoutes } from './src/server/routes/techDebt';
+import { registerVersionRoutes } from './src/server/routes/version';
 import { getSecretValue } from './src/server/lib/secrets';
 import { verifyPaymentInternal } from './src/server/lib/payments';
 import { registerPaymentRoutes } from './src/server/routes/payment';
@@ -524,6 +525,7 @@ setInterval(() => {
   registerWebhookRoutes(app);
   registerChangelogRoutes(app);
   registerTechDebtRoutes(app);
+  registerVersionRoutes(app);
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
   registerPreviewRoutes(app, chatLimiter);

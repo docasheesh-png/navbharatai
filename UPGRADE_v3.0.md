@@ -1105,16 +1105,18 @@
   `buildHistory[]` (UI + Firestore persistence — deferred from the unattended run).
 - **Files:** new `src/server/lib/BuildTimeEstimator.ts` + `.test.ts`, new `src/server/routes/buildEstimate.ts`, `server.ts`.
 
-### P-PME.5 — Lessons Learned / Retrospective Engine  ❌ MISSING  [HIGH]
-- `KnowledgeEvolution.ts` (AgentV3) stores per-session lessons in memory. Failed builds beyond the
-  current session are not systematically learned from. No "why did this build fail" retrospective.
-- [ ] Add `BuildRetrospectiveEngine.ts` — after a failed build reaches maxAttempts (RepairBudgetManager),
-  capture: failure classification, repair strategies attempted, final error, root cause, time spent.
-- [ ] Persist to `buildRetrospectives/{userId}/{projectId}[]` in Firestore.
-- [ ] On next similar build (same framework + intent), inject top-3 past failures as warnings in system prompt.
-- [ ] Connects with `KnowledgeEvolution.ts` — promote retrospective lessons to long-term knowledge.
-- **Files:** new `src/server/AppMakerLab/intelligence/BuildRetrospectiveEngine.ts`,
-  `src/server/AppMakerLab/AppMakerOrchestrator.ts`, `src/server/AgentV3/KnowledgeEvolution.ts`.
+### P-PME.5 — Lessons Learned / Retrospective Engine  🟡 engine+API DONE / persistence+wiring PENDING  [HIGH]
+- Failed builds weren't systematically learned from. Now there is a real retrospective engine.
+- [x] Added `src/server/lib/BuildRetrospectiveEngine.ts` — pure, dependency-free: `classifyFailure` (error text →
+  category: dependency/syntax/type/timeout/network/runtime/test/build/unknown + a root-cause hint),
+  `buildRetrospective` (failed-build record → structured retrospective: category, root cause, strategies tried,
+  final error, time, a reusable warning), and `relevantWarnings` (rank past failures for a new build by
+  framework + overlapping intent words). Honest: unrecognised errors → `unknown` (no confident wrong label). 7 tests.
+- [x] Added `POST /api/retrospective` (failed build → retrospective) and `POST /api/retrospective/warnings`
+  (history + query → top-N relevant warnings).
+- [ ] **Still pending:** persist to `buildRetrospectives/...` (Firestore), capture on maxAttempts in the build
+  flow, and promote lessons into AgentV3 `KnowledgeEvolution` (Firestore + AgentV3/build-path — deferred).
+- **Files:** new `src/server/lib/BuildRetrospectiveEngine.ts` + `.test.ts`, new `src/server/routes/retrospective.ts`, `server.ts`.
 
 ### P-PME.6 — Scope Change Control (mid-build requirement change)  ❌ MISSING  [MED]
 - If a user sends a new prompt while a build is in progress (changing scope mid-flight), the system

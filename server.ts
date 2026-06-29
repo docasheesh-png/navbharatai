@@ -55,6 +55,7 @@ import { registerBuildEstimateRoutes } from './src/server/routes/buildEstimate';
 import { registerDocsRoutes } from './src/server/routes/docs';
 import { registerOpenApiRoutes } from './src/server/routes/openapi';
 import { registerRetrospectiveRoutes } from './src/server/routes/retrospective';
+import { registerTestGenRoutes } from './src/server/routes/testgen';
 import { errorTracker, installGlobalErrorHandlers } from './src/server/observability/ErrorTracker';
 import { registerHealthRoutes, markServerReady } from './src/server/routes/health';
 import { registerWarmRoute } from './src/server/routes/warm';
@@ -517,6 +518,8 @@ setInterval(() => {
   registerOpenApiRoutes(app);
   // P-PME.5 — build retrospective engine (stateless failed-build → classification + warnings).
   registerRetrospectiveRoutes(app);
+  // P-CGE.4 — test scaffold generator (stateless function/route/mock defs → Vitest skeletons).
+  registerTestGenRoutes(app);
   registerSecretsRoutes(app);
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).

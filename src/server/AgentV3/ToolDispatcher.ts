@@ -37,6 +37,7 @@ import { generateGitignore } from './GitignoreGenerator';
 import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
+import { generateObservability, type ObservabilityTarget } from '../AppMakerLab/generator/ObservabilityGenerator';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
@@ -1209,6 +1210,31 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — Vitest skeleton for ${functions.length} function(s). Fill in the TODO assertions to verify real behaviour.`;
+      }
+
+      case 'generate_observability': {
+        const rawTarget = optStr(input, 'target');
+        const target: ObservabilityTarget = rawTarget === 'frontend' || rawTarget === 'backend' ? rawTarget : 'both';
+        const { files, summary } = generateObservability({ target });
+        const written: string[] = [];
+        const wiring: string[] = [];
+        for (const file of files) {
+          let kind: 'create' | 'modify' = 'create';
+          try {
+            await this.actuator.readFile(this.workspaceId, file.path);
+            kind = 'modify';
+          } catch {
+            kind = 'create';
+          }
+          await this.actuator.writeFile(this.workspaceId, file.path, file.content);
+          this.state?.recordFileChange({ path: file.path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(file.path, file.content);
+          written.push(`${kind === 'create' ? 'Created' : 'Updated'} ${file.path}`);
+          wiring.push(`• ${file.path}: ${file.wiring}`);
+        }
+        if (written.length === 0) return 'generate_observability: nothing generated.';
+        this.scheduleCheckpoint(`observability (${target})`);
+        return `${summary}\n${written.join('\n')}\nWire each in with edit_file:\n${wiring.join('\n')}`;
       }
 
       case 'check_conventions': {

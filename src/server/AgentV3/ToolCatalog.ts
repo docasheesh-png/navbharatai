@@ -349,6 +349,26 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_observability',
+      description:
+        'Add real, dependency-free observability to the app you built and write the files to the ' +
+        'workspace: a client-side error handler (window error + unhandledrejection → structured logs), ' +
+        'an Express request-logger middleware (method/path/status/duration), and a GET /health endpoint. ' +
+        'Use "target" to pick frontend, backend, or both. After writing, wire each file in with edit_file ' +
+        '(the tool result lists the exact one-line import/mount for each). Use this once the app has a ' +
+        'backend and/or a frontend entry so the deployed app is not a black box.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          target: {
+            type: 'string',
+            enum: ['frontend', 'backend', 'both'],
+            description: 'Which side to instrument. Defaults to "both".',
+          },
+        },
+      },
+    },
+    {
       name: 'check_conventions',
       description:
         'Check naming + import-ordering conventions and get suggested fixes (analysis only — writes ' +
@@ -496,6 +516,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_openapi',
   'generate_api_docs',
   'generate_tests',
+  'generate_observability',
   'check_conventions',
   'generate_release_notes',
   'web_search',

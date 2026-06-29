@@ -140,6 +140,31 @@ describe('ToolDispatcher', () => {
     expect((await d.dispatch(call('generate_tests', { path: 'a.test.ts', module_path: './a', functions: [] }), 'qa')).content).toContain('empty or missing');
   });
 
+  it('generate_observability writes dependency-free instrumentation files for both sides', async () => {
+    const res = await d.dispatch(call('generate_observability', { target: 'both' }), 'backend');
+    expect(res.is_error).toBe(false);
+    // Frontend error handler.
+    const obs = act.files.get('src/observability.ts')!;
+    expect(obs).toContain("addEventListener('error'");
+    expect(obs).toContain("addEventListener('unhandledrejection'");
+    // Backend request logger + health endpoint.
+    const logger = act.files.get('src/server/requestLogger.ts')!;
+    expect(logger).toContain('export function requestLogger');
+    expect(logger).not.toContain('morgan'); // dependency-free — no forced install
+    const health = act.files.get('src/server/health.ts')!;
+    expect(health).toContain("healthRouter.get('/health'");
+    // The result tells the agent how to wire each file in.
+    expect(res.content).toContain('Wire each in with edit_file');
+  });
+
+  it('generate_observability respects target=frontend (no backend files)', async () => {
+    const res = await d.dispatch(call('generate_observability', { target: 'frontend' }), 'frontend');
+    expect(res.is_error).toBe(false);
+    expect(act.files.has('src/observability.ts')).toBe(true);
+    expect(act.files.has('src/server/requestLogger.ts')).toBe(false);
+    expect(act.files.has('src/server/health.ts')).toBe(false);
+  });
+
   it('check_conventions reports violations with suggestions (analysis only, no write)', async () => {
     const res = await d.dispatch(
       call('check_conventions', {

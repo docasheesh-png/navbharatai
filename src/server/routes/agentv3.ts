@@ -1397,6 +1397,9 @@ export function registerAgentV3Routes(app: Express): void {
     runningBuilds.set(buildKey, rb);
     req.on('close', () => { rb.subscribers.delete(primary); });
     const emit = (e: unknown): void => broadcastBuild(rb, e);
+    // Exposed to the finally so the LAST background checkpoint is flushed on every exit path
+    // (success, error, abort). Held outside the try because `dispatcher` is block-scoped to it.
+    let dispatcherForFlush: { flushCheckpoints: () => Promise<void> } | undefined;
 
     const events = new AgentEventStream();
     events.subscribe((e) => emit(e), false);
@@ -1716,6 +1719,7 @@ export function registerAgentV3Routes(app: Express): void {
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
         (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
+      dispatcherForFlush = dispatcher; // let the finally flush the final checkpoint
 
       // Surgical edit mode (gold standard): when the user is editing an existing
       // app rather than building fresh, inject the CURRENT file tree and the
@@ -2405,6 +2409,14 @@ export function registerAgentV3Routes(app: Express): void {
       } catch { /* diagnostics are best-effort */ }
       emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {
+      // Flush the LAST background checkpoint so the finished app is captured in History/restore.
+      // Bounded (6s) + best-effort: checkpoints are off the hot path during the build, so this is
+      // the ONLY place git is awaited, and the cap guarantees a slow/stuck git can never re-stall a
+      // build the way the old per-write checkpoints did. Files are durably saved regardless, so even
+      // if this is skipped the user never loses code — it only keeps History complete.
+      if (dispatcherForFlush) {
+        await raceTimeout(dispatcherForFlush.flushCheckpoints(), 6_000, 'flushCheckpoints').catch(() => {});
+      }
       // Normal completion reached the finally synchronously → cancel the wall-clock deadline so it
       // can't fire after a clean finish (no double terminal event), and stop the heartbeat timer.
       if (deadlineTimer) clearTimeout(deadlineTimer);

@@ -219,6 +219,23 @@ describe('ToolDispatcher', () => {
     expect(res.content).toContain('npm i firebase');
   });
 
+  it('generate_migration writes a prisma schema + sql ddl for the given entities', async () => {
+    const res = await d.dispatch(
+      call('generate_migration', {
+        entities: [{ name: 'User', fields: [{ name: 'id' }, { name: 'email' }, { name: 'age' }] }],
+      }),
+      'backend',
+    );
+    expect(res.is_error).toBe(false);
+    expect(act.files.get('prisma/schema.prisma')).toContain('model User {');
+    expect(act.files.get('migrations/001_init.sql')).toContain('CREATE TABLE "users"');
+  });
+
+  it('generate_migration reports an honest error on an empty entities array', async () => {
+    const res = await d.dispatch(call('generate_migration', { entities: [] }), 'backend');
+    expect(res.content).toContain('empty or missing');
+  });
+
   it('check_conventions reports violations with suggestions (analysis only, no write)', async () => {
     const res = await d.dispatch(
       call('check_conventions', {

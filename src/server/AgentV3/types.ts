@@ -30,6 +30,7 @@ export type ToolName =
   | 'generate_bundle_optimization'
   | 'generate_seed_data'
   | 'generate_auth'
+  | 'generate_migration'
   | 'check_conventions'
   | 'generate_release_notes'
   | 'task'

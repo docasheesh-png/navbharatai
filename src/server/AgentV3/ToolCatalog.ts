@@ -439,6 +439,44 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_migration',
+      description:
+        'Generate database migration artifacts from the app\'s entities and write them to the workspace: ' +
+        'a Prisma schema (prisma/schema.prisma) and/or a SQL CREATE TABLE migration (migrations/001_init.sql). ' +
+        'Pass the entities you built with their fields; column types are inferred from each field\'s name/type ' +
+        '(id→PK, email→unique, *_at→timestamp, price→float, count→int, etc.). Use after defining the data model.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          entities: {
+            type: 'array',
+            description: 'The entities to generate a schema for.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Entity/model name.' },
+                fields: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      name: { type: 'string', description: 'Field name.' },
+                      type: { type: 'string', description: 'Optional type hint: string|int|float|boolean|date.' },
+                    },
+                    required: ['name'],
+                  },
+                },
+              },
+              required: ['name', 'fields'],
+            },
+          },
+          dialect: { type: 'string', enum: ['prisma', 'sql', 'both'], description: 'Output dialect (default both).' },
+          provider: { type: 'string', enum: ['postgresql', 'mysql', 'sqlite'], description: 'SQL provider (default postgresql).' },
+        },
+        required: ['entities'],
+      },
+    },
+    {
       name: 'check_conventions',
       description:
         'Check naming + import-ordering conventions and get suggested fixes (analysis only — writes ' +
@@ -590,6 +628,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_bundle_optimization',
   'generate_seed_data',
   'generate_auth',
+  'generate_migration',
   'check_conventions',
   'generate_release_notes',
   'web_search',

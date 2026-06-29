@@ -41,6 +41,7 @@ import { generateObservability, type ObservabilityTarget } from '../AppMakerLab/
 import { generateBundleOptimization } from '../AppMakerLab/generator/BundleOptimizationGenerator';
 import { generateSeedData, type EntitySpec } from '../AppMakerLab/generator/MockDataGenerator';
 import { generateAuthCode, type AuthType } from '../AppMakerLab/generator/AuthCodeGenerator';
+import { generateMigration, type MigrationEntity, type MigrationDialect, type SqlProvider } from '../AppMakerLab/generator/MigrationGenerator';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
@@ -1335,6 +1336,49 @@ export class ToolDispatcher {
         this.scheduleCheckpoint(`auth (${type})`);
         const depNote = dependencies.length ? `\nInstall: npm i ${dependencies.join(' ')}` : '';
         return `${summary}\n${written.join('\n')}${depNote}\nWire in with edit_file:\n${wiring.join('\n')}`;
+      }
+
+      case 'generate_migration': {
+        const rawEntities = (input as Record<string, unknown>)?.entities;
+        if (!Array.isArray(rawEntities) || rawEntities.length === 0) {
+          return 'generate_migration: entities array is empty or missing. Pass [{ name, fields: [{ name, type? }] }].';
+        }
+        const entities: MigrationEntity[] = rawEntities.map((e: unknown) => {
+          if (typeof e !== 'object' || e === null) throw new Error('Each entity must be an object with name + fields.');
+          const obj = e as Record<string, unknown>;
+          const rawFields = Array.isArray(obj.fields) ? obj.fields : [];
+          const fields = rawFields
+            .map((f: unknown) => {
+              if (typeof f !== 'object' || f === null) return null;
+              const fo = f as Record<string, unknown>;
+              const name = typeof fo.name === 'string' ? fo.name : '';
+              return name ? { name, type: typeof fo.type === 'string' ? fo.type : undefined } : null;
+            })
+            .filter((f): f is { name: string; type: string | undefined } => f !== null);
+          return { name: reqStr(obj, 'name'), fields };
+        });
+        const rawDialect = optStr(input, 'dialect');
+        const dialect: MigrationDialect = rawDialect === 'prisma' || rawDialect === 'sql' ? rawDialect : 'both';
+        const rawProvider = optStr(input, 'provider');
+        const provider: SqlProvider = rawProvider === 'mysql' || rawProvider === 'sqlite' ? rawProvider : 'postgresql';
+        const { files, summary } = generateMigration(entities, { dialect, provider });
+        if (files.length === 0) return 'generate_migration: nothing generated.';
+        const written: string[] = [];
+        for (const file of files) {
+          let kind: 'create' | 'modify' = 'create';
+          try {
+            await this.actuator.readFile(this.workspaceId, file.path);
+            kind = 'modify';
+          } catch {
+            kind = 'create';
+          }
+          await this.actuator.writeFile(this.workspaceId, file.path, file.content);
+          this.state?.recordFileChange({ path: file.path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(file.path, file.content);
+          written.push(`${kind === 'create' ? 'Created' : 'Updated'} ${file.path}`);
+        }
+        this.scheduleCheckpoint(`migration (${provider})`);
+        return `${summary}\n${written.join('\n')}`;
       }
 
       case 'check_conventions': {

@@ -1625,16 +1625,25 @@
 - **Files:** `src/server/lib/OpenApiGenerator.ts`, `src/server/AgentV3/{types,ToolCatalog,AgentRegistry,ToolDispatcher,systemPrompt}.ts`,
   `src/server/AgentV3/ToolDispatcher.test.ts`, `src/server/routes/openapi.ts`.
 
-### P-CGE.6 — Database Migration Generator  🟡 PARTIAL → full  [MED]
-- `DatabaseGenerationEngine.ts` generates TypeScript entity interfaces. No SQL DDL, no Prisma
-  migration files, no seed data. When blueprint specifies a database, only type stubs are created.
-- [ ] Add `MigrationGenerator.ts` — when blueprint specifies Prisma + entities, emit `prisma/schema.prisma`
-  + `prisma/migrations/` files from entity definitions.
-- [ ] Add `SeedDataGenerator.ts` — generate realistic fake seed rows (using `@faker-js/faker` patterns)
-  for each entity.
+### P-CGE.6 — Database Migration Generator  ✅ DONE (2026-06-29) · 🔌 WIRED  [MED]
+- Only TypeScript entity interfaces were generated — no SQL DDL, no Prisma schema.
+- [x] **`MigrationGenerator.ts`** (pure, unit-tested) — `generateMigration(entities, { dialect, provider })`
+  plus `generatePrismaSchema`, `generateSqlDdl`, `fieldKind`. Emits `prisma/schema.prisma` and/or a SQL
+  `CREATE TABLE` migration (`migrations/001_init.sql`) for postgresql/mysql/sqlite. Column types are
+  inferred from each field's name/type (id→PK `@default(uuid())`, email→unique, `*_at`→timestamp
+  `@default(now())`, price→float, count→int…); an `id` PK is added when none is declared.
+- [x] **Wired as the `generate_migration` AgentV3 tool** (types.ts + ToolCatalog + `CATALOG_TOOL_NAMES`
+  + AgentRegistry `BUILD_TOOLS` + ToolDispatcher case + systemPrompt nudge + ToolDispatcher tests): the
+  agent passes its entities and the tool writes the schema/DDL files (records/indexes/checkpoints).
+- **Honest scope:** seed data is handled by the separate `generate_seed_data` tool (P-CGE.13, dependency-
+  free — no `@faker-js/faker`). Prisma *migration history* files (`prisma/migrations/<ts>/`) are left to
+  `prisma migrate` against the generated schema (that's its job); we emit the authoritative schema + a
+  plain SQL DDL.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3680 passing (9 new) ✅ · `test:coverage` exit 0 ·
+  `build` ✅ · `boot:check` PASS. AppKnowledgeBase updated (AUTO DB MIGRATION).
 - **Files:** new `src/server/AppMakerLab/generator/MigrationGenerator.ts`,
-  new `src/server/AppMakerLab/generator/SeedDataGenerator.ts`,
-  `src/server/AppMakerLab/generator/DatabaseGenerationEngine.ts`.
+  `tests/migrationGenerator.test.ts`; wired in `types.ts`, `ToolCatalog.ts`, `AgentRegistry.ts`,
+  `ToolDispatcher.ts`, `systemPrompt.ts`, `ToolDispatcher.test.ts`, `AppKnowledgeBase.ts`.
 
 ### P-CGE.7 — Lint Fix Generator (auto-fix pass)  🟡 PARTIAL → full  [MED]
 - `LintEvaluator.ts` runs ESLint and reports errors but never fixes them. Lint failures then go

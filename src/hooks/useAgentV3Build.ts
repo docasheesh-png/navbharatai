@@ -56,7 +56,7 @@ export interface UseAgentV3Build {
    * own restored messages so the panel can re-display them too. Returns null if nothing was loaded.
    * No-op while a build is running. Best-effort: any failure resolves null and leaves state untouched.
    */
-  loadConversation: (opts?: { userId?: string; email?: string }) => Promise<UserChatMsg[] | null>;
+  loadConversation: (opts?: { userId?: string; email?: string }) => Promise<{ messages: UserChatMsg[]; workspaceId?: string } | null>;
 }
 
 export function useAgentV3Build(): UseAgentV3Build {
@@ -151,7 +151,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, []);
 
-  const loadConversation = useCallback(async (opts?: { userId?: string; email?: string }): Promise<UserChatMsg[] | null> => {
+  const loadConversation = useCallback(async (opts?: { userId?: string; email?: string }): Promise<{ messages: UserChatMsg[]; workspaceId?: string } | null> => {
     if (running) return null;
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     try {
@@ -172,8 +172,10 @@ export function useAgentV3Build(): UseAgentV3Build {
       for (const e of conversationToEvents(conv)) next = agentV3Reducer(next, e);
       setState(next);
       // Return the user's OWN messages so the panel can restore them too (the reducer/narration
-      // path only rebuilds the AGENT side — without this the user's bubbles vanish on reload).
-      return conversationToUserMessages(conv);
+      // path only rebuilds the AGENT side — without this the user's bubbles vanish on reload), AND
+      // the restored workspaceId so the panel can adopt the SAME session id → a follow-up continues
+      // this exact project/memory instead of opening a fresh one.
+      return { messages: conversationToUserMessages(conv), workspaceId: conv.workspaceId };
     } catch {
       return null; // best-effort — never disrupt the panel on a load failure
     }

@@ -8,6 +8,7 @@ import {
   FileCode, Copy,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
+import { normalizeUid } from '../../lib/agentv3Workspace';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
 import { PreviewSurface } from './PreviewSurface';
 import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
@@ -189,11 +190,23 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
     if (loadedConvoRef.current || running || !userId || state.narration.length > 0 || userMsgs.length > 0) return;
     loadedConvoRef.current = true;
     void (async () => {
-      const restoredUserMsgs = await loadConversation({ userId, email });
+      const restored = await loadConversation({ userId, email });
+      if (!restored) return;
+      // RESUME THE SAME SESSION: adopt the sessionId of the restored (most-recent) conversation so a
+      // follow-up message continues THAT exact workspace/memory — not a fresh one. This is what makes
+      // "open v3.0 → reopen where I left off" reliable, independent of localStorage/auth timing.
+      // sessionId is the tail of the workspaceId: `agentv3-{uid}-{sessionId}`. Only "New" starts fresh.
+      if (restored.workspaceId) {
+        const prefix = `agentv3-${normalizeUid(userId)}-`;
+        if (restored.workspaceId.startsWith(prefix)) {
+          const sid = restored.workspaceId.slice(prefix.length);
+          if (sid) { sessionIdRef.current = sid; persistSessionId(sid); }
+        }
+      }
       // Restore the user's OWN messages too — the narration path only rebuilds the agent side, so
       // without this the user's bubbles vanish on reload (only AI replies would remain).
-      if (restoredUserMsgs && restoredUserMsgs.length > 0) {
-        setUserMsgs((cur) => (cur.length > 0 ? cur : restoredUserMsgs.map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts }))));
+      if (restored.messages.length > 0) {
+        setUserMsgs((cur) => (cur.length > 0 ? cur : restored.messages.map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts }))));
       }
     })();
   }, [userId, email, running, state.narration.length, userMsgs.length, loadConversation]);

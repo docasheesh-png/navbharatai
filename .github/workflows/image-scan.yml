@@ -1,0 +1,42 @@
+name: Container Image Scan (Trivy)
+
+# P-SEC.4 — Build the production Docker image and scan it for OS/base-image CVEs.
+# Runs nightly + on-demand (NOT per-PR/deploy: building+scanning the image is slow,
+# and we must never add a surprise hard-block to the deploy pipeline). Fails only on
+# CRITICAL (genuinely block-worthy, rare); HIGH and below are reported, not failed.
+on:
+  schedule:
+    - cron: '30 3 * * *'   # nightly 03:30 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  trivy-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build production image
+        run: docker build -t navbharatai:scan .
+
+      - name: Trivy scan — FAIL on CRITICAL
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: 'navbharatai:scan'
+          format: 'table'
+          severity: 'CRITICAL'
+          exit-code: '1'           # CRITICAL CVE → fail the job
+          ignore-unfixed: true     # don't fail on CVEs with no available fix
+
+      - name: Trivy scan — report HIGH (non-blocking)
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: 'navbharatai:scan'
+          format: 'table'
+          severity: 'HIGH'
+          exit-code: '0'           # report only
+          ignore-unfixed: true

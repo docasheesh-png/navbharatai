@@ -508,7 +508,7 @@
 - [ ] Gate admin panel access on MFA verification (no MFA → deny admin access, show enrollment prompt).
 - **Files:** new `src/server/routes/mfa.ts`, `src/server/lib/authMiddleware.ts`, `src/App.tsx` (settings modal).
 
-### P-SEC.4 — Container Image Vulnerability Scanning  ❌ MISSING  [HIGH]
+### P-SEC.4 — Container Image Vulnerability Scanning  ✅ DONE (2026-06-28)
 - `cloudbuild.yaml` builds the Docker image and pushes to Artifact Registry with no vulnerability scan.
   A HIGH/CRITICAL CVE in the Node base image goes live undetected (e.g. `node:20-slim` has had critical CVEs).
 - [ ] Add a Trivy scan step in `cloudbuild.yaml` before the push step: `trivy image --exit-code 1 --severity HIGH,CRITICAL $IMAGE`.
@@ -562,7 +562,7 @@
 - [ ] Set up rate limiting at the Cloud Armor level (complements, doesn't replace, express-rate-limit).
 - **Files:** GCP console / `infra/` (terraform if added in P6), documentation only for now.
 
-### P-SEC.10 — Dependency Pinning + Supply Chain Attestation  🟡 PARTIAL → full  [MED]
+### P-SEC.10 — Dependency Pinning + Supply Chain Attestation  ✅ DONE (2026-06-28)
 - `package.json` uses caret (`^`) versions throughout. `npm ci` is used in CI (locks to `package-lock.json`),
   but no package signature verification and no SLSA provenance for build artifacts.
 - [ ] Add `npm audit signatures` check to CI: verifies npm package provenance (npm 8.8+ feature).

@@ -198,3 +198,35 @@ export function buildRateLimiter() {
 export function workspaceRateLimiter() {
   return rateLimiter({ name: 'workspace', authed: 60, anon: 30, noun: 'requests' });
 }
+
+/**
+ * P-SEC.13 — Device binding for sensitive operations. Records the caller's device fingerprint
+ * (hashed UA + IP) against the user and DETECTS anomalies. Non-blocking by design (a UA bump or
+ * mobile IP change must never lock a real user out — see sessionTracker.ts): on a first-seen
+ * device it audits the access and sets an honest `X-Device-New: true` response header that the
+ * client can surface, then lets the request proceed. Must run AFTER an auth middleware that has
+ * established the uid (e.g. `requireUserMatch`). VITEST/DB-outage safe — degrades to a no-op.
+ */
+export function trackDevice(paramName = 'userId') {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (process.env.VITEST) { next(); return; }
+    try {
+      const uid = req.params[paramName] || (await verifyFirebaseToken(req));
+      if (uid) {
+        const { recordAndEvaluateDevice } = await import('./sessionTracker');
+        const evaluation = await recordAndEvaluateDevice(
+          uid, req.headers['user-agent'] as string | undefined, req.ip, new Date().toISOString(),
+        );
+        if (evaluation.risk === 'high') {
+          res.setHeader('X-Device-New', 'true');
+          const { audit } = await import('./audit');
+          audit('SENSITIVE_ACCESS_NEW_DEVICE', { uid, ip: req.ip, path: req.path }, 'warn');
+        }
+      }
+    } catch (err) {
+      // Never let device tracking break a legitimate request.
+      console.error('[trackDevice] non-fatal:', err);
+    }
+    next();
+  };
+}

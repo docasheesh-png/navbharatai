@@ -2,7 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { doc, updateDoc, collection, addDoc, getDocs, query, where } from 'firebase/firestore';
 import { getDb } from '../lib/db';
 import { encrypt } from '../lib/secrets';
-import { requireUserMatch } from '../lib/authMiddleware';
+import { requireUserMatch, trackDevice } from '../lib/authMiddleware';
 
 /**
  * User-secret CRUD routes extracted from the server.ts monolith (Phase 1).
@@ -14,7 +14,7 @@ import { requireUserMatch } from '../lib/authMiddleware';
  * - DELETE /api/secrets/:userId/:secretId  — soft-delete a secret
  */
 export function registerSecretsRoutes(app: Express): void {
-  app.get('/api/secrets/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
+  app.get('/api/secrets/:userId', requireUserMatch('userId'), trackDevice('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     console.log('[DEBUG] GET /api/secrets/:userId called for:', req.params.userId);
     try {

@@ -26,6 +26,7 @@ import {
   architectSystemPrompt,
   planSystemPrompt,
   editModePrefix,
+  dateContextBlock,
   LANGUAGE_RULE,
   awaitApproval,
   resolveApproval,
@@ -1958,6 +1959,13 @@ export function registerAgentV3Routes(app: Express): void {
       // id for telemetry traceability. Best-effort — never affects the build.
       let architectPromptVersion = '';
       try { architectPromptVersion = registerPrompt('architect', architectSystem); } catch { /* best-effort */ }
+      // P-PE.8 — inject the current date so the AI uses "today" (not a stale training-cutoff) when
+      // reasoning about "latest" frameworks/versions. Injected AFTER registerPrompt so the registered
+      // BASE prompt version stays stable. Additive + best-effort — never blocks the build.
+      try {
+        const dateBlock = dateContextBlock(new Date().toISOString());
+        if (dateBlock) architectSystem = `${dateBlock}\n\n---\n\n${architectSystem}`;
+      } catch { /* date context is best-effort */ }
       // P-AI.5 — Personalization: for a RETURNING user, inject their learned stack preferences
       // (inferred from past successful builds) as advisory defaults so the Architect leans toward
       // how this user likes to build when they don't specify a stack. Best-effort and additive —

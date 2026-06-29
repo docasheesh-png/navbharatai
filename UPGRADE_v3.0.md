@@ -2194,10 +2194,18 @@
 - [ ] Show the full composed prompt, token estimate, provider chosen, and response latency.
 - **Files:** new `src/components/PromptDebugPanel.tsx`, `src/config/env.ts`.
 
-### P-PE.8 — Time/Date Context Injection  ❌ MISSING  [LOW]
-- AI has no awareness of current date/time — can give stale advice about "latest" frameworks.
-- [ ] Prepend `[Current date: ${new Date().toISOString()}]` to system prompt in `architectSystemPrompt()`.
-- **Files:** `src/server/AgentV3/systemPrompt.ts`.
+### P-PE.8 — Time/Date Context Injection  ✅ DONE (2026-06-29) · 🔌 WIRED  [LOW]
+- The AI had no awareness of the current date — it could give stale "latest framework/version" advice
+  or reason from a training-cutoff date.
+- [x] **`dateContextBlock(nowIso)`** (pure, unit-tested) in `systemPrompt.ts` — formats a human + ISO
+  "Current date" block and instructs the AI to treat it as "today" (and not invent future version
+  numbers). Pure (caller supplies the timestamp) so the base prompt stays deterministic/testable.
+- [x] **Injected per-turn in `routes/agentv3.ts`** with `new Date().toISOString()`, AFTER `registerPrompt`
+  so the registered BASE prompt version stays stable — additive + best-effort (never blocks the build).
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3655 passing (+3) ✅ · `test:coverage` exit 0 ·
+  `build` ✅ · `boot:check` PASS.
+- **Files:** `src/server/AgentV3/systemPrompt.ts`, `src/server/AgentV3/index.ts` (re-export),
+  `src/server/routes/agentv3.ts`, `src/server/AgentV3/systemPrompt.test.ts`.
 
 ---
 

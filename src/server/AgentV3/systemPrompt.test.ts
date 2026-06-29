@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { editModePrefix, architectSystemPrompt, planSystemPrompt, LANGUAGE_RULE } from './systemPrompt';
+import { editModePrefix, architectSystemPrompt, planSystemPrompt, dateContextBlock, LANGUAGE_RULE } from './systemPrompt';
 
 describe('LANGUAGE_RULE (mirror the user, never default to Hindi)', () => {
   it('is blunt about mirroring the user and not defaulting to Hindi', () => {
@@ -72,6 +72,23 @@ describe('editModePrefix', () => {
     const architect = architectSystemPrompt();
     expect(edit.length).toBeGreaterThan(0);
     expect(edit).not.toEqual(architect);
+  });
+});
+
+describe('dateContextBlock (P-PE.8)', () => {
+  it('formats a human + ISO date and tells the AI to use it as today', () => {
+    const block = dateContextBlock('2026-06-29T12:00:00.000Z');
+    expect(block).toContain('2026-06-29T12:00:00.000Z');
+    expect(block).toContain('June 29, 2026');
+    expect(block.toLowerCase()).toContain('today');
+  });
+  it('returns "" for a blank timestamp (no change)', () => {
+    expect(dateContextBlock('')).toBe('');
+    expect(dateContextBlock('   ')).toBe('');
+  });
+  it('falls back to the raw string for an unparseable timestamp', () => {
+    const block = dateContextBlock('not-a-date');
+    expect(block).toContain('not-a-date');
   });
 });
 

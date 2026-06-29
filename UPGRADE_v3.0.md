@@ -1135,14 +1135,23 @@
 - **Files:** `src/server/AI/NavigationEngine.ts` (new), `src/server/routes/navigate.ts` (new),
       `tests/navigationEngine.test.ts` (new), `server.ts`.
 
-### P-DEV.2 — Cross-Session Workspace Persistence (Firestore)  🟡 PARTIAL → full  [HIGH]
-- `WorkspaceContext.tsx` stores files, open tabs, and chat history in localStorage only.
-  On browser close or cross-device access, the workspace is gone.
-- `WorkspaceManager.ts` has `saveWorkspace()` / `loadWorkspace()` methods but they are not wired to the context on every mutation.
-- [ ] Subscribe to workspace mutations in `WorkspaceContext.tsx` (debounced 2s) → call `WorkspaceManager.saveWorkspace()` → Firestore `workspaces/{userId}/{workspaceId}/state`.
-- [ ] On app load: fetch latest workspace from Firestore first, fall back to localStorage.
-- [ ] Show a "Saving…" / "Saved" indicator in StatusBar.tsx.
-- **Files:** `src/contexts/WorkspaceContext.tsx`, `src/server/AppMakerLab/WorkspaceManager.ts`, `src/components/ide/StatusBar.tsx`.
+### P-DEV.2 — Cross-Session Workspace Persistence (Firestore)  ✅ DONE (substance pre-existing — STALE AUDIT; verified 2026-06-29)  [HIGH]
+- **Redundant-work finding (safeguard #6):** the audit said state is "localStorage only" — that is STALE. The
+  cross-session, cross-device cloud persistence already exists and works; flagging it here so no future session
+  rebuilds it (the PR#1/#4 redundancy the constitution guards against). Verified in code:
+- [x] **Debounced cloud save** — `App.tsx` pushes workspace state (sessions + last generated app) to Firestore
+      via `POST /api/sync/:userId` on every change, debounced 2.5s.
+- [x] **Load on startup + merge** — `GET /api/sync/:userId` on mount, merged with localStorage by newest-wins;
+      localStorage stays the instant/offline fallback.
+- [x] **Lossless, conflict-safe storage** — `routes/sync.ts` + `WorkspaceStore` chunk the payload (no 60KB/800KB
+      truncation) and `SyncMerge` does a server-side per-session last-write-wins merge, so a stale device can't
+      drop another device's newer work.
+- [ ] **"Saving…/Saved" indicator deferred (honest):** `StatusBar.tsx` has the `isSaving` prop but the component
+      is NOT mounted anywhere in the current app shell; mounting a global status bar is a separate layout decision
+      and adding it blindly risks shell breakage (safeguard #3). The persistence itself — the high-value
+      substance — is fully working today.
+- **Files (existing, verified):** `src/App.tsx` (sync effects), `src/server/routes/sync.ts`,
+      `src/server/project/{WorkspaceStore,SyncMerge}.ts`.
 
 ### P-DEV.3 — Real Debugger Panel (Breakpoints + Call Stack + Variable Watch)  ❌ MISSING  [HIGH]
 - `AIDebugger.tsx` does AI analysis of error text — it is NOT a runtime debugger. No breakpoints, no call stack, no variable inspection.

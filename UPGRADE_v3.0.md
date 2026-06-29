@@ -1045,13 +1045,25 @@
 - **Files:** new `src/server/PreviewRunner/WatchdogService.ts`, `src/server/AppMakerLab/kernel/RuntimeKernel.ts`,
   `src/server/PreviewRunner/SandboxManager.ts`.
 
-### P-BRE.13 — Deterministic / Reproducible Builds  ❌ MISSING  [LOW — audit trail]
-- The same source code may produce slightly different output across builds (non-deterministic timestamps in bundles, non-locked transitive deps). Makes audit trails and build caching less reliable.
-- [ ] Enforce `package-lock.json` / `pnpm-lock.yaml` in `cloudbuild.yaml` (`npm ci` instead of `npm install`).
-- [ ] Pin all direct + transitive deps in `package.json` (no `^` or `~` ranges on production deps).
-- [ ] Strip build timestamps from esbuild output (use `--define:process.env.BUILD_TIME=undefined` or a fixed value from `$COMMIT_SHA`).
-- [ ] Add a `BuildReproducibilityChecker.ts` that SHA256-compares two consecutive builds of the same commit — alert if output differs.
-- **Files:** `cloudbuild.yaml`, `package.json`, `Dockerfile`, new `src/server/AppMakerLab/BuildReproducibilityChecker.ts`.
+### P-BRE.13 — Deterministic / Reproducible Builds  ✅ DONE (2026-06-29)
+- The same source could produce slightly different output across builds (embedded timestamps), weakening
+  audit trails + caching.
+- [x] **Reproducible install** — `Dockerfile` now uses `npm ci` (lockfile-exact, fails fast if out of sync)
+      instead of `npm install`. (CI already used `npm ci`; the lockfile is proven in-sync on every PR.)
+- [x] **Deterministic build timestamp** — `vite.config.ts` `__BUILD_TIME__` now honors `SOURCE_DATE_EPOCH` (the
+      reproducible-builds standard) when set, so two builds of the SAME commit are byte-identical; it falls back
+      to `now()` for local dev, preserving the deploy-freshness indicator (each deploy is a new commit). Setting
+      `SOURCE_DATE_EPOCH` in Cloud Build is the documented one-line infra step to make prod builds reproducible.
+- [x] **`BuildReproducibilityChecker.ts`** — pure, unit-tested audit tool: SHA-256 hashes each output file and
+      diffs two build manifests (`compareManifests` / `compareBuilds`), reporting `identical` + the exact
+      differing / added / removed files. A runner can build twice from one commit and alert on drift.
+- **Declined (honest):** "pin ALL direct+transitive deps (remove every `^`/`~`)" — the committed
+      `package-lock.json` + `npm ci` ALREADY pin exact versions for every install, so bulk caret-removal across
+      ~250 deps is high-risk churn (breaks Dependabot grouping + future upgrades) for no added determinism. Not done.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3235/3235 ✅ (6 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `Dockerfile`, `vite.config.ts`, `src/server/AppMakerLab/BuildReproducibilityChecker.ts` (new),
+      `tests/buildReproducibilityChecker.test.ts` (new).
 
 ---
 

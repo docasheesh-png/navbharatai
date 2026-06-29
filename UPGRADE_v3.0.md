@@ -990,17 +990,25 @@
 - **Files:** `src/server/AppMakerLab/jobs/BuildJobManager.ts`, `server.ts` (new endpoint),
   `src/components/ide/AppAnalytics.tsx`.
 
-### P-BRE.9 — Circuit Breaker for Build Pipeline Steps  🟡 PARTIAL → full  [MED]
-- `ExecutionOrchestrator.ts` has `maxRetries` but no circuit breaker. If the AI provider call inside
-  a generation engine hangs or times out, the entire build hangs until the outer timeout fires.
-  No fast-fail, no half-open state, no fallback strategy per stage.
-  *(Note: P2 captures circuit breaker for AI provider HTTP calls generally; this item is the
-  build-pipeline-specific integration — wrapping each engine dispatch with the breaker.)*
-- [ ] Wrap each `EngineDispatcher.dispatch()` call with the existing circuit breaker pattern (from P2) or introduce `BuildStepBreaker.ts`.
-- [ ] Per-engine breaker: 3 failures → open (fast-fail for 60s) → half-open probe.
-- [ ] On breaker open: emit `STAGE_CIRCUIT_OPEN` event → `AutoRepairEngine` picks a fallback strategy.
-- **Files:** `src/server/AppMakerLab/generator/EngineDispatcher.ts`, new `src/server/AppMakerLab/BuildStepBreaker.ts`,
-  `src/server/AppMakerLab/autorepair/AutoRepairEngine.ts`.
+### P-BRE.9 — Circuit Breaker for Build Pipeline Steps  ✅ DONE (2026-06-29)
+- `EngineDispatcher.dispatch()` had no breaker: a repeatedly-failing/hanging generation engine dragged every
+  build to the full outer timeout — no fast-fail, no per-stage isolation.
+- [x] **`BuildStepBreaker.ts`** — per-engine breakers in a SEPARATE registry (so they don't pollute the
+      AI-provider breaker stats), reusing the proven, unit-tested AI-router `CircuitBreaker` (CLOSED/OPEN/
+      HALF_OPEN). `runWithBreaker(step, fn, onOpen)`: fast-fails with a typed `CircuitOpenError` while open,
+      records success/failure, and fires `onOpen` when a step trips.
+- [x] **3 failures → open (fast-fail, 60s escalating) → half-open probe** — `FAILURE_THRESHOLD = 3`; the
+      wrapper only blocks once a step reaches 3 consecutive failures (so a single transient engine error doesn't
+      lock the engine out for a minute), then escalates the cooldown from 60s and lets a half-open trial through
+      after it elapses (a success closes it; a failed probe re-opens).
+- [x] **Wired into `EngineDispatcher`** — each `engine.execute()` now runs under `runWithBreaker('engine:<type>')`.
+      An optional `onCircuitOpen` constructor callback (defaults undefined → existing callers unaffected) lets the
+      orchestrator emit the new `STAGE_CIRCUIT_OPEN` event so `AutoRepairEngine` can pick a fallback.
+- [x] **`STAGE_CIRCUIT_OPEN`** added to `eventbus/EventTypes.ts`.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3229/3229 ✅ (6 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/AppMakerLab/BuildStepBreaker.ts` (new), `tests/buildStepBreaker.test.ts` (new),
+      `src/server/AppMakerLab/generator/EngineDispatcher.ts`, `src/server/AppMakerLab/eventbus/EventTypes.ts`.
 
 ### P-BRE.10 — SBOM Generator + License Validator  ✅ DONE (2026-06-29)
 - No SBOM was generated for the apps users BUILD on the platform (P-SEC.6 covers NavBharatAI's OWN SBOM in

@@ -1713,15 +1713,25 @@
 - **Files:** `src/server/AgentV3/IntentClassifier.ts`, `src/server/AppMakerLab/intelligence/IntentExtractor.ts`,
   `src/server/AppMakerLab/BlueprintInferenceEngine.ts`.
 
-### P-AI.5 — Preference Learning / Personalization  ❌ MISSING  [HIGH]
-- The AI treats every user identically. No tracking of user's preferred tech stack, coding style, or
-  past decisions (e.g. "this user always picks React + Tailwind + Firestore").
-- [ ] Add `UserPreferenceStore.ts` — Firestore collection `userPrefs/{userId}` storing: preferred
-  framework, DB, language, component style, last 5 successful blueprint patterns.
-- [ ] Inject top preferences as context in `architectSystemPrompt()` for returning users.
-- [ ] Update preferences on every successful build (infer from blueprint, not from explicit user input).
-- **Files:** new `src/server/AgentV3/UserPreferenceStore.ts`, `src/server/AgentV3/systemPrompt.ts`,
-  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+### P-AI.5 — Preference Learning / Personalization  ✅ DONE (2026-06-29) · 🔌 WIRED
+- The AI treated every user identically. Now v3.0 learns each user's revealed stack from their past
+  successful builds and leans toward it on the next build (e.g. "this user always picks React + Tailwind + Firestore").
+- [x] **`UserPreferenceStore.ts`** (new) — Firestore `userPrefs/{userId}` storing tallies for framework,
+      database, styling, language + last 5 successful app-type patterns + `totalBuilds`. Pure, unit-tested core:
+      `detectDatabase`/`detectStyling`/`detectLanguage` (high-precision, from deps + code), `summarizePattern`
+      (prompt → app-type), `inferPreferences`, `mergePreferences` (immutable tally fold), `topPreferences` (mode),
+      `preferenceContext` (advisory prompt block, gated on ≥2 prior builds). VITEST-skip, best-effort persistence.
+- [x] **Injected into the build flow** — `routes/agentv3.ts` prepends `userPreferenceStore.contextFor(userId)` to
+      the Architect system prompt for returning users (additive; '' for new users — existing prompt-regression
+      tests untouched). So learned preferences are a real, felt default in what the AI proposes, not a headless store.
+- [x] **Learned on every successful build** — after `result.ok` with real artifacts, `recordBuild` infers the stack
+      from the files that actually shipped (framework + package.json deps + code) and the prompt, and folds it into
+      the user's record. Inferred from the blueprint, never from explicit input — per spec.
+- [x] **AppKnowledgeBase** — added a PERSONALIZATION capability bullet to the v3.0 entry so every AI can explain it.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3424/3424 ✅ (20 new) · `test:coverage` exit 0 (stmts 64.11%) ·
+      `build` ✅ · `boot:check` PASS.
+- **Files:** new `src/server/AgentV3/UserPreferenceStore.ts`, `src/server/routes/agentv3.ts`,
+  `src/server/AppContext/AppKnowledgeBase.ts`, `tests/userPreferenceStore.test.ts` (new).
 
 ### P-AI.6 — Dedicated PII Detection  ✅ DONE (2026-06-29) · 🔌 WIRED
 - `SecretRedactor` masked API keys but not general PII.

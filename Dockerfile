@@ -4,7 +4,9 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm install
+# P-BRE.13 — `npm ci` (not `npm install`) for a reproducible, lockfile-exact install:
+# installs strictly from package-lock.json and fails fast if the lock is out of sync.
+RUN npm ci
 
 COPY . .
 

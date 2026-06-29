@@ -12,7 +12,14 @@ export default defineConfig(({mode}) => {
       // Build-time stamp so a deployed version is verifiable at a glance (shown in
       // the v3.0 header). If it doesn't change after a deploy, the browser is serving
       // cached code, not a code problem.
-      '__BUILD_TIME__': JSON.stringify(new Date().toISOString()),
+      // P-BRE.13 — honor SOURCE_DATE_EPOCH (the reproducible-builds standard) when set, so two
+      // builds of the SAME commit produce byte-identical output; fall back to now() for local dev
+      // (each deploy is a new commit, so the deploy-freshness indicator still changes per deploy).
+      '__BUILD_TIME__': JSON.stringify(
+        process.env.SOURCE_DATE_EPOCH
+          ? new Date(Number(process.env.SOURCE_DATE_EPOCH) * 1000).toISOString()
+          : new Date().toISOString()
+      ),
     },
     resolve: {
       alias: {

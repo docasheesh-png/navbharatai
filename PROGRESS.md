@@ -5713,3 +5713,19 @@ Net: simple apps now get BOTH a type check (tsc) AND a style-consistency check b
 with auto-repair on either — closing the "built but renders unstyled/broken" gap.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3499/3499 PASS (+7), boot:check PASS.
+
+## 2026-06-29 — FIX (P3+P2a): in-browser preview now reports the REAL error (not a cryptic about:srcdoc stack)
+
+A todo-app report showed the build now SUCCEEDS (CSS gate + auto-repair worked — "Build verified ✓"), but the
+in-browser preview failed with only "requireModule@about:srcdoc:81:32" — no reason. Root cause of the
+USELESS message: showError used `err.stack || err`, and iOS Safari's err.stack is frames-only (no message
+line), so the actual reason ("Cannot resolve …", "Run src/App.tsx: …") never showed. Fix: surface
+err.message FIRST, append the stack for context. Also made the in-browser module loader name BOTH the
+failing import and its importer ("Cannot resolve './x' imported by src/App.tsx (looked for src/x)";
+"Missing dependency 'foo' (imported by …)") instead of a bare "Module not found". So the next preview
+failure pinpoints the exact module — turning blind preview bugs into one-look fixes.
+
+Note: this makes preview failures DIAGNOSABLE; the deeper preview render fixes (P1 live static-build to
+beat the dev-server OOM, P2 fuller in-browser hardening) are the next PRs per the admin's go-ahead.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3512/3512 PASS (+1), boot:check PASS.

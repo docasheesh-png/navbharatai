@@ -75,6 +75,17 @@ describe('buildReactPreview', () => {
     const html = buildReactPreview(VirtualFileSystem.fromRecord({ 'foo.txt': 'x' }));
     expect(html).toContain('No React entry module found');
   });
+
+  it('emits PRECISE module errors — names the unresolved import AND its importer (not a cryptic stack)', () => {
+    const html = buildReactPreview(reactVfs());
+    // A failed relative import surfaces "Cannot resolve ... imported by ..." rather than just "Module not found".
+    expect(html).toContain('Cannot resolve');
+    expect(html).toContain('imported by');
+    // A missing bare dep names the package + importer.
+    expect(html).toContain('Missing dependency');
+    // The error display surfaces the MESSAGE (iOS Safari's stack is frames-only) — message-first handling.
+    expect(html).toContain('err.message');
+  });
 });
 
 describe('renderPreview', () => {

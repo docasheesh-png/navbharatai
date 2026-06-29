@@ -232,9 +232,13 @@ ${babelTag}
     function localRequire(spec) {
       if (spec.charAt(0) !== '.' && spec.charAt(0) !== '/') {
         if (bareCache[spec]) return bareCache[spec];
-        throw new Error('Missing dependency: ' + spec);
+        throw new Error('Missing dependency "' + spec + '" (imported by ' + path + '). It is not in package.json.');
       }
-      return requireModule(resolve(path, spec));
+      var resolved = resolve(path, spec);
+      // Precise, actionable error — names BOTH the missing import and who imported it — instead of a
+      // bare "Module not found" that doesn't say where the broken import lives.
+      if (!SOURCES.hasOwnProperty(resolved)) throw new Error('Cannot resolve "' + spec + '" imported by ' + path + ' (looked for ' + resolved + ').');
+      return requireModule(resolved);
     }
     try { (new Function('require', 'module', 'exports', transformed))(localRequire, module, module.exports); }
     catch (e) { throw new Error('Run ' + path + ': ' + e.message); }
@@ -281,7 +285,13 @@ ${babelTag}
       }));
       requireModule(ENTRY);
     } catch (err) {
-      showError((err && err.stack) || err);
+      // Show the actual MESSAGE first — some browsers (notably iOS Safari) put only stack FRAMES in
+      // err.stack with no message line, which is why a real reason like "Cannot resolve './x' imported
+      // by src/App.tsx" used to surface as a cryptic "requireModule@about:srcdoc:81". The message is the
+      // useful part; the stack is appended after it for context.
+      var emsg = (err && err.message) ? err.message : '';
+      var estk = (err && err.stack) ? err.stack : '';
+      showError(emsg ? (estk && estk.indexOf(emsg) < 0 ? emsg + '\\n\\n' + estk : (estk || emsg)) : (estk || String(err)));
     }
   })();
 })();

@@ -15,12 +15,40 @@
  *
  * Pure + dependency-free (string in → string out) → unit-testable.
  */
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { normalizePath } from '../project/ProjectModel';
 
 // Compiler is self-hosted on NavBharatAI's own origin (served from public/vendor)
 // so it is never blocked by a third-party CDN; CDNs are only a fallback chain.
 const BABEL_PRIMARY = '/vendor/babel.min.js';
+
+// BULLETPROOF compiler delivery: INLINE the Babel source straight into the preview HTML. A
+// <script src=…> can fail in a sandboxed <iframe srcDoc> (root-relative paths don't resolve, an
+// absolute URL can 404 if the asset isn't deployed, and every third-party CDN is blocked by the
+// app's CSP) — which is exactly the recurring "Could not load the preview compiler" error. An
+// inline <script> is same-document (CSP allows 'unsafe-inline'), needs NO network and NO asset
+// serving, so the compiler is ALWAYS present. Read once from disk and cached.
+let _babelInlineCache: string | null | undefined;
+function babelInlineSource(): string | null {
+  if (_babelInlineCache !== undefined) return _babelInlineCache;
+  // Tests assert the <script src=…> markup (the no-network fallback), so skip inlining under vitest.
+  if (process.env.VITEST) { _babelInlineCache = null; return null; }
+  const candidates = [
+    join(process.cwd(), 'public/vendor/babel.min.js'),
+    join(process.cwd(), 'dist/vendor/babel.min.js'),
+    join(process.cwd(), 'node_modules/@babel/standalone/babel.min.js'),
+  ];
+  for (const p of candidates) {
+    try {
+      const src = readFileSync(p, 'utf8');
+      if (src && src.length > 100_000) { _babelInlineCache = src; return src; }
+    } catch { /* try the next path */ }
+  }
+  _babelInlineCache = null; // none readable — fall back to <script src=…>
+  return null;
+}
 const BABEL_FALLBACKS = [
   'https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js',
   'https://unpkg.com/@babel/standalone@7.26.4/babel.min.js',
@@ -99,6 +127,13 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
   // (root-relative paths don't resolve inside a sandboxed <iframe srcDoc>). Falls back to the
   // root-relative path when no origin is provided (e.g. unit tests, the /preview/:id static route).
   const babelPrimary = origin ? `${origin.replace(/\/$/, '')}${BABEL_PRIMARY}` : BABEL_PRIMARY;
+  // Prefer INLINING the compiler (always works); fall back to a <script src=…> only when the source
+  // can't be read from disk. The escapes guard against the (extremely unlikely) "</script>" in the
+  // minified source breaking out of the tag.
+  const inlineBabel = babelInlineSource();
+  const babelTag = inlineBabel
+    ? `<script>${inlineBabel.replace(/<\/script>/gi, '<\\/script>')}</script>`
+    : `<script src="${babelPrimary}"></script>`;
 
   // Gather every source + css module so the in-browser loader can resolve imports.
   const modules: Record<string, string> = {};
@@ -132,7 +167,7 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
 <title>Preview</title>
 ${css ? `<style>\n${css}\n</style>` : ''}
 <script type="importmap">${importmap}</script>
-<script src="${babelPrimary}"></script>
+${babelTag}
 </head>
 <body>
 <div id="root"></div>

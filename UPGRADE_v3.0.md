@@ -1380,7 +1380,10 @@
 - **Files:** `src/server/FeatureFlagManager.ts` (new), `tests/featureFlagManager.test.ts` (new),
       `src/server/routes/admin.ts`, `server.ts`.
 
-### P-PME.9 — Webhook Manager (build/deploy event notifications)  ✅ DONE (2026-06-29)
+### P-PME.9 — Webhook Manager (build/deploy event notifications)  ✅ DONE (2026-06-29) · 🔌 UI-WIRED (2026-06-29)
+- **Now reachable in the product:** Settings → **Insights & Webhooks** (`ProjectInsightsPanel`) has a Webhooks
+  section (add / list / delete / send-test) calling these endpoints — no longer a headless API. The same panel
+  also surfaces P-BRE.10 (App SBOM + license check) and P-PME.11 (Build SLO compliance).
 - Users couldn't wire NavBharatAI into their own CI/CD or get Slack/Discord alerts. (P-BRE.7 added a single
   global `BUILD_WEBHOOK_URL`; this adds managed, per-user, multi-URL, per-event subscriptions.)
 - [x] **`WebhookManager.ts`** — per-user CRUD in Firestore `webhooks/{userId}` (`listWebhooks` / `addWebhook` /

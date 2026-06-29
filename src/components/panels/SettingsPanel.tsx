@@ -339,6 +339,7 @@ export function SettingsPanel({
                       { id: 'collab', label: 'Live Collab', icon: Users2, tab: true },
                       { id: 'whitelabel', label: 'Whitelabel', icon: Palette, tab: true },
                       { id: 'analytics', label: 'Analytics', icon: TrendingUp, tab: true },
+                      { id: 'insights', label: 'Insights & Webhooks', icon: TrendingUp, tab: true },
                       { id: 'database', label: 'Database', icon: Database, tab: true },
                     ],
                   },

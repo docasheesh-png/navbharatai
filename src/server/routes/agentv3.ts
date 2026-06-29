@@ -102,7 +102,7 @@ import { renderPreview } from '../runtime/renderPreview';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY } from '../lib/prompts';
-import { classifyIntentSmart } from '../AgentV3/IntentClassifier';
+import { classifyIntentSmart, wantsFreshStart } from '../AgentV3/IntentClassifier';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
@@ -112,7 +112,7 @@ import {
   saveWorkspaceMemory,
   restoreWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
-import { saveWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { saveWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
@@ -1282,6 +1282,21 @@ export function registerAgentV3Routes(app: Express): void {
         'classifyIntentSmart',
       );
     } catch { /* LLM upgrade is best-effort — keyword result stands */ }
+    // WORKSPACE-AWARE intent (the "don't rebuild an app that already exists" fix): the keyword and
+    // LLM classifiers above look ONLY at the prompt text, so a follow-up like "add a dashboard" on a
+    // project that already has files was classified new_build → the surgical-edit path was skipped →
+    // v3.0 rebuilt from scratch and ignored the existing files. A v3.0 session is ONE project, so if
+    // this workspace ALREADY has saved files, a build-intent turn is almost always an EDIT of that
+    // project — treat it as edit_existing UNLESS the user explicitly asked to start over. Bounded and
+    // fails OPEN (a check error keeps the original intent), so it can never wrongly downgrade or hang.
+    if (intent === 'new_build' && !wantsFreshStart(prompt)) {
+      const existingFileCount = await raceTimeout(
+        countWorkspaceFiles(deriveWorkspaceId(userId, req.body?.sessionId)),
+        4_000,
+        'countWorkspaceFiles',
+      ).catch(() => 0);
+      if (existingFileCount > 0) intent = 'edit_existing';
+    }
     const isPlainChatTurn = intent === 'chat';
     // Surgical edit mode: the user is modifying an existing app (fix/change/update/
     // refactor/…), not building from scratch. When true, the build loop reads the

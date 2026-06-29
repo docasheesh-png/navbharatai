@@ -109,6 +109,35 @@ const CONTINUATION_SIGNALS: readonly string[] = [
 ];
 
 /**
+ * Explicit "throw the current project away and start fresh" phrases. These are the ONLY case in
+ * which a build-intent turn should rebuild from scratch even though the workspace already has an
+ * app (one project per session). Everything else on a non-empty workspace is an EDIT — this is
+ * what stops "add a dashboard" from wiping and rebuilding the existing project. Kept to STRONG,
+ * unambiguous signals so a normal feature request is never mistaken for a reset.
+ */
+const FRESH_START_SIGNALS: readonly string[] = [
+  'start over', 'start fresh', 'start again from scratch', 'from scratch', 'from the scratch',
+  'new project', 'brand new app', 'brand new project', 'scrap this', 'scrap it', 'scrap everything',
+  'delete everything', 'clear everything', 'reset everything', 'wipe everything', 'wipe it',
+  'rebuild from scratch', 'rebuild it from scratch', 'throw this away', 'throw it away',
+  'fresh start', 'blank slate', 'start from zero',
+  // Hindi / Hinglish
+  'naya project', 'naye sire se', 'naye sire', 'sab kuch hata', 'sab kuch delete',
+  'sab delete kar', 'fir se shuru karo', 'phir se shuru karo', 'scratch se shuru',
+  'bilkul naya banao', 'sab mita',
+];
+
+/**
+ * True only when the user EXPLICITLY asked to discard the current project and start fresh.
+ * Used to override the "non-empty workspace ⇒ treat as edit" rule so a genuine reset still
+ * rebuilds. Conservative by design — ambiguous phrasing is NOT a fresh start.
+ */
+export function wantsFreshStart(message: string): boolean {
+  if (typeof message !== 'string' || !message.trim()) return false;
+  return matchesSignal(message.toLowerCase(), FRESH_START_SIGNALS);
+}
+
+/**
  * Clear social/conversational patterns. A message matches 'chat' only if it has
  * NO build signal AND hits one of these (or is a very short, signal-free message).
  */

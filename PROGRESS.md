@@ -5487,3 +5487,16 @@ budgeted (skips if <90s left before the 12-min cap), abortable, best-effort — 
 build. Disable with AGENTV3_PREVIEW_VERIFY=off. Records PREVIEW_NOT_RENDERED in the build report.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3137/3137 PASS (+8), boot:check PASS.
+
+## 2026-06-29 — Fix: lean build plan — no auto "verify and deploy" stage that freezes a simple build
+
+User screenshot: a todo-app build reached PLAN 3/4 and froze at the LAST todo "Verify and deploy" /
+"update the preview" for 12+ min. The Architect over-plans: for a plain "build a todo app" it added a
+"Verify and deploy" step the user never asked for. Deploying an unasked app can stall on missing hosting
+credentials, and a vague "verify" step makes the agent churn on the preview — a slow/freezing last stage.
+Fix: planSystemPrompt now instructs a LEAN plan (2–4 concrete construction steps, final step = run/preview),
+explicitly NO deploy/publish step unless the user asked, and NO vague verify/test steps (the system already
+opens + verifies the live preview automatically after the build, via #597). So a normal build ends cleanly
+after the preview instead of churning on an over-planned "verify and deploy".
+
+Gate: server tsc 0, vitest 3143/3143 PASS, boot:check PASS.

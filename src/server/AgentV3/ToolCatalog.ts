@@ -291,6 +291,35 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_api_docs',
+      description:
+        'Generate a human-readable API reference (Markdown) for the backend you built and write it to ' +
+        'the workspace (default API.md). Pass the routes you actually created; produces a sorted ' +
+        'method/path/auth/description table. Use this alongside generate_openapi so the API has both a ' +
+        'machine-readable contract and readable docs (nothing invented — only the routes you pass).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          routes: {
+            type: 'array',
+            description: 'The API routes you built.',
+            items: {
+              type: 'object',
+              properties: {
+                method: { type: 'string', description: 'HTTP method, e.g. GET/POST.' },
+                path: { type: 'string', description: 'Route path, e.g. /users/:id.' },
+                description: { type: 'string', description: 'Optional description of what the route does.' },
+                auth: { type: 'boolean', description: 'Whether the route requires authentication.' },
+              },
+              required: ['method', 'path'],
+            },
+          },
+          path: { type: 'string', description: 'Optional output path (defaults to API.md).' },
+        },
+        required: ['routes'],
+      },
+    },
+    {
       name: 'web_search',
       description:
         'Search the web for up-to-date information — package versions, framework/API docs, ' +
@@ -388,6 +417,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_env_example',
   'generate_gitignore',
   'generate_openapi',
+  'generate_api_docs',
   'web_search',
   'screenshot',
   'browser_action',

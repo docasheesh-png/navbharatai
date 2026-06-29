@@ -35,6 +35,7 @@ import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
 import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
+import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
@@ -1148,6 +1149,32 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — OpenAPI 3.0.3 contract for ${routes.length} route(s).`;
+      }
+
+      case 'generate_api_docs': {
+        const rawRoutes = (input as Record<string, unknown>)?.routes;
+        if (!Array.isArray(rawRoutes) || rawRoutes.length === 0) {
+          return 'generate_api_docs: routes array is empty or missing. Pass the API routes you built: [{ method, path, description?, auth? }].';
+        }
+        const routes: RouteDoc[] = rawRoutes.map((r: unknown) => {
+          if (typeof r !== 'object' || r === null) throw new Error('Each route entry must be an object with method + path.');
+          const obj = r as Record<string, unknown>;
+          return { method: reqStr(obj, 'method'), path: reqStr(obj, 'path'), description: optStr(obj, 'description'), auth: obj.auth === true };
+        });
+        const path = optStr(input, 'path') || 'API.md';
+        const content = generateApiDocs(routes);
+        let kind: 'create' | 'modify' = 'create';
+        try {
+          await this.actuator.readFile(this.workspaceId, path);
+          kind = 'modify';
+        } catch {
+          kind = 'create';
+        }
+        await this.actuator.writeFile(this.workspaceId, path, content);
+        this.state?.recordFileChange({ path, kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+        this.scheduleCheckpoint(`${kind} ${path}`);
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — API reference for ${routes.length} route(s).`;
       }
 
       case 'update_preview': {

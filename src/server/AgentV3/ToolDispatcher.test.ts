@@ -98,6 +98,25 @@ describe('ToolDispatcher', () => {
     expect(act.files.has('openapi.json')).toBe(false);
   });
 
+  it('generate_api_docs writes a Markdown API reference from the given routes', async () => {
+    const res = await d.dispatch(
+      call('generate_api_docs', { routes: [{ method: 'post', path: '/login', description: 'Authenticate', auth: true }] }),
+      'backend',
+    );
+    expect(res.is_error).toBe(false);
+    const md = act.files.get('API.md')!;
+    expect(md).toContain('# API Reference');
+    expect(md).toContain('`/login`');
+    expect(md).toContain('POST'); // method upper-cased
+    expect(md).toContain('🔒'); // auth marker
+  });
+
+  it('generate_api_docs reports an honest error on an empty routes array', async () => {
+    const res = await d.dispatch(call('generate_api_docs', { routes: [] }), 'backend');
+    expect(res.content).toContain('empty or missing');
+    expect(act.files.has('API.md')).toBe(false);
+  });
+
   it('write_file on an existing path records a modify and nudges toward edit_file', async () => {
     act.files.set('a.ts', 'old');
     const res = await d.dispatch(call('write_file', { path: 'a.ts', content: 'new' }));

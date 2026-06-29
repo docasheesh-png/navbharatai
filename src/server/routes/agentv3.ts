@@ -94,6 +94,7 @@ import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
 import { estimateBuildTime, complexityFromPrompt } from '../lib/BuildTimeEstimator';
 import { incrementalBuildCache, hashFiles, diffHashes } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
+import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, tokenize as rerankTokenize } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
@@ -821,6 +822,23 @@ export function registerAgentV3Routes(app: Express): void {
     if (!report) report = lastDiagnostics.get(userId ?? 'anon');
     if (!report) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
     res.json({ diagnostics: report });
+  });
+
+  // P-AI.9 — explainability: the semantic decision trace from the user's LAST build for a workspace
+  // (intent detected → tier/model selected → outcome), each with a short human reason. Owner-scoped
+  // (gated by isAgentV3Enabled). Lets the admin/user see WHY the AI made each choice, not just timing.
+  app.get('/api/agentv3/decision-trace', async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      return;
+    }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    const decisions = await getDecisionTrace(workspaceId);
+    if (!decisions || decisions.length === 0) { res.status(404).json({ error: 'No decision trace yet — run a build first.' }); return; }
+    res.json({ decisions });
   });
 
   // Capture a PREVIEW failure (in-browser srcdoc / live runtime) reported by the client into the
@@ -1597,6 +1615,18 @@ export function registerAgentV3Routes(app: Express): void {
       // OTLP/Cloud Trace at the end when configured; otherwise the traceId is still surfaced for logs.
       const buildTrace = startBuildTrace('agentv3.build', { intent: String(intent), framework }, typeof req.headers?.traceparent === 'string' ? req.headers.traceparent : undefined);
       buildTrace.begin(buildStartedAt);
+      // P-AI.9 — explainability: an append-only trace of the SEMANTIC decisions this build made
+      // (intent → tier/model → outcome), each with a short human reason. Persisted per workspace
+      // and surfaced via the owner-scoped GET /api/agentv3/decision-trace endpoint. Best-effort.
+      const decisionTrace = new DecisionTrace(workspaceId);
+      try {
+        decisionTrace.record(
+          'intent',
+          String(intent),
+          projectExists ? 'workspace already has files' : 'no existing files in workspace',
+          new Date().toISOString(),
+        );
+      } catch { /* decision trace is best-effort — never affects the build */ }
       // P-PME.4 — show an up-front ETA for build/edit turns so the user sees a real estimate instead
       // of an open-ended spinner. Derived from the prompt's complexity (no blueprint yet). Best-effort
       // and additive — a failure just skips the ETA; chat turns already returned above.
@@ -2690,6 +2720,18 @@ export function registerAgentV3Routes(app: Express): void {
         const traceTag = providerDebugTag(`trace ${buildTrace.traceId}`);
         if (traceTag) events.emit({ type: 'narration', agent: 'architect', text: traceTag.trim(), ts: Date.now() });
       } catch { /* tracing is best-effort — never affects the build */ }
+      // P-AI.9 — record the final model/tier and outcome decisions, then persist the trace. Best-effort.
+      try {
+        const nowIso = new Date().toISOString();
+        decisionTrace.record('model', `${deliveredTier} (${model})`, onlyOpus ? 'Only-Opus toggle on' : `analyzer chose ${analysis?.startTier ?? 'default'} start tier`, nowIso);
+        decisionTrace.record('outcome', result.ok ? 'success' : 'incomplete', `${writtenFiles.size} file(s) written in ${Math.max(0, Date.now() - buildStartedAt)}ms`, nowIso);
+        await persistDecisionTrace(decisionTrace, nowIso);
+        // Surface the trace in chat when provider-debug is on (same gate as the trace-id tag), so the
+        // admin can SEE why each choice was made. Normal users see nothing — explainability without noise.
+        if (isProviderDebugOn()) {
+          events.emit({ type: 'narration', agent: 'architect', text: `🧭 Decision trace:\n${decisionTrace.format()}`, ts: Date.now() });
+        }
+      } catch { /* decision trace is best-effort — never affects the build */ }
       emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(diagnostics ? { diagnostics } : {}) });
     } catch (err) {
       // Capture the crash in the diagnostics report too (real-time onUpdate already persisted it).

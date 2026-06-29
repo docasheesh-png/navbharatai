@@ -112,6 +112,7 @@ import { HomeView } from './components/home/HomeView';
 import { GitHubService } from './lib/githubService';
 import { trackEvent } from './lib/analytics';
 import { saveFile, saveAllFiles, loadAllFiles, clearWorkspace, deleteFile as storageDeleteFile } from './lib/storage';
+import { getAgentV3WorkspaceId } from './lib/agentv3Workspace';
 import {
   type ApnapanProfile,
   APNAPAN_DEFAULT_PROFILE,
@@ -2443,6 +2444,37 @@ ${buildLanguageRule(preferredLanguage)}`;
     for (const p of paths) storageDeleteFile(p).catch(() => {});
   }, []);
 
+  // Push the IDE workspace files into the NavBharatAI Pro v3.0 (AgentV3) workspace so v3.0 KNOWS
+  // which files exist (e.g. after a ZIP upload). Best-effort: needs a signed-in user; the server
+  // also gates on v3.0 being enabled (returns 404 → no sandbox is spun) so this is a no-op for
+  // non-v3.0 users. The workspace id is the SAME one the v3.0 chat panel uses (shared localStorage
+  // session), so the IDE and v3.0 operate on one workspace.
+  const syncFilesToV3 = useCallback(async (filesToSync: Record<string, string>): Promise<void> => {
+    const uid = user?.uid;
+    if (!uid) return;
+    const paths = Object.keys(filesToSync || {});
+    if (paths.length === 0) return;
+    try {
+      const workspaceId = getAgentV3WorkspaceId(uid);
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      try {
+        const tok = await auth.currentUser?.getIdToken();
+        if (tok) headers.Authorization = `Bearer ${tok}`;
+      } catch { /* token optional — server falls back to claimed userId */ }
+      const res = await fetch('/api/agentv3/import-files', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ workspaceId, userId: uid, email: user?.email || '', files: filesToSync }),
+      });
+      if (res.ok) {
+        const j = await res.json().catch(() => ({} as any));
+        const n = typeof j?.imported === 'number' ? j.imported : paths.length;
+        addToast(`Synced ${n} file${n === 1 ? '' : 's'} to v3.0 ✓`, 'success');
+      }
+      // 404 (v3.0 not enabled) / other statuses: silent best-effort — IDE still has the files.
+    } catch { /* network/best-effort — never block the upload flow */ }
+  }, [user, addToast]);
+
   const handleModelSelect = (id: string) => {
     if (id === 'auto') {
       setSelectedModel(id);
@@ -3098,6 +3130,7 @@ ${buildLanguageRule(preferredLanguage)}`;
       // Final state — ensure everything is synced.
       setFiles(loadedFiles as any);
       saveAllFiles(loadedFiles).catch(() => {}); // persist to IndexedDB/Cache API
+      syncFilesToV3(loadedFiles).catch(() => {}); // mirror uploaded files into the v3.0 workspace
       setHasGeneratedCode(true);  // ← marks workspace as occupied so next prompt = edit, not rebuild
       setIsAppBuilt(true);
 

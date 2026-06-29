@@ -1,0 +1,105 @@
+{
+  "_comment": "P-SEC.11 — NavBharatAI Pro v3.0 builder sandbox seccomp profile. OCI/Docker-format. Default-allow with an explicit denylist of privilege-escalation / host-tampering syscalls. Apply at the container-runtime layer (see docs/SANDBOX_HARDENING.md): `--security-opt seccomp=infra/e2b/seccomp-profile.json`. A default-deny allowlist is stricter but high-maintenance for a general build sandbox (npm install / vite build touch a wide syscall surface); this denylist precisely blocks the dangerous classes called out in the roadmap (ptrace, mount, setuid family, kernel-module + reboot/swap/namespace tampering) without breaking legitimate builds.",
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "archMap": [
+    {
+      "architecture": "SCMP_ARCH_X86_64",
+      "subArchitectures": ["SCMP_ARCH_X86", "SCMP_ARCH_X32"]
+    },
+    {
+      "architecture": "SCMP_ARCH_AARCH64",
+      "subArchitectures": ["SCMP_ARCH_ARM"]
+    }
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "ptrace",
+        "process_vm_readv",
+        "process_vm_writev",
+        "kcmp"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Block debugger / cross-process memory inspection — stops a compromised preview server from reading or tampering with other processes."
+    },
+    {
+      "names": [
+        "mount",
+        "umount",
+        "umount2",
+        "pivot_root",
+        "chroot",
+        "move_mount",
+        "fsopen",
+        "fsconfig",
+        "fsmount",
+        "open_tree"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Block filesystem mount manipulation — prevents remounting host paths or escaping the workspace via the mount table."
+    },
+    {
+      "names": [
+        "setuid",
+        "setgid",
+        "setreuid",
+        "setregid",
+        "setresuid",
+        "setresgid",
+        "setfsuid",
+        "setfsgid"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Block UID/GID changes — a non-root build process cannot escalate to another user. (Pair with a non-root container user + --cap-drop ALL.)"
+    },
+    {
+      "names": [
+        "init_module",
+        "finit_module",
+        "delete_module"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Block kernel-module load/unload — no code path in a build sandbox legitimately touches the kernel."
+    },
+    {
+      "names": [
+        "kexec_load",
+        "kexec_file_load",
+        "reboot",
+        "swapon",
+        "swapoff",
+        "settimeofday",
+        "clock_settime",
+        "clock_adjtime",
+        "adjtimex",
+        "acct"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Block host-level tampering — kernel replacement, reboot, swap, system clock, and process accounting are never needed by a build."
+    },
+    {
+      "names": [
+        "add_key",
+        "request_key",
+        "keyctl"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Block the kernel keyring — avoids cross-container key material access."
+    },
+    {
+      "names": [
+        "bpf",
+        "perf_event_open"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Block eBPF + perf — powerful kernel-tracing primitives with a history of LPE CVEs; unused by builds."
+    }
+  ]
+}

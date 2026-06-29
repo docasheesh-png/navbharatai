@@ -91,6 +91,7 @@ import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptC
 import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
+import { estimateBuildTime, complexityFromPrompt } from '../lib/BuildTimeEstimator';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -1576,6 +1577,15 @@ export function registerAgentV3Routes(app: Express): void {
       });
       // Build start time — used for cost-ladder telemetry duration (P2 measurement).
       const buildStartedAt = Date.now();
+      // P-PME.4 — show an up-front ETA for build/edit turns so the user sees a real estimate instead
+      // of an open-ended spinner. Derived from the prompt's complexity (no blueprint yet). Best-effort
+      // and additive — a failure just skips the ETA; chat turns already returned above.
+      if (intent === 'new_build' || intent === 'edit_existing') {
+        try {
+          const est = estimateBuildTime(complexityFromPrompt(prompt));
+          events.emit({ type: 'narration', agent: 'architect', text: `⏱️ Estimated build time: ~${est.etaText} (rough — it adapts as I go).`, ts: Date.now() });
+        } catch { /* ETA is best-effort — never affects the build */ }
+      }
       const budget = maxBuildBudgetUsd();
       const maxSteps = envInt('AGENTV3_MAX_STEPS', 80);
       const subAgentMaxSteps = envInt('AGENTV3_SUBAGENT_MAX_STEPS', 40);

@@ -125,3 +125,19 @@ export function estimateBuildTime(complexity: Complexity, history: HistoricalBui
 export function predictDeadline(estimateMs: number, startMs: number): { finishMs: number; etaText: string } {
   return { finishMs: startMs + Math.max(0, estimateMs), etaText: formatEta(estimateMs) };
 }
+
+/**
+ * Rough Complexity inferred from a build prompt — used to show an ETA before the build runs (no
+ * blueprint exists yet at that point). Pure + deterministic. Counts page/screen-like nouns for
+ * modules and feature-list separators for features, each clamped to a sane range so a giant prompt
+ * can't produce an absurd estimate.
+ */
+export function complexityFromPrompt(prompt: string): Complexity {
+  const text = String(prompt || '');
+  const moduleMatches = text.match(/\b(page|pages|screen|screens|view|views|dashboard|section|sections|tab|tabs|route|routes)\b/gi);
+  // Feature signals: list separators + common feature verbs/nouns.
+  const featureMatches = text.match(/(?:,|\band\b|\bwith\b|\bplus\b|\n[-*•]|\b(auth|login|signup|search|filter|chart|payment|upload|export|profile|admin|cart|checkout|notification|comment|like|follow)\w*)/gi);
+  const moduleCount = clamp((moduleMatches?.length ?? 0) + 1, 1, 20);
+  const featureCount = clamp(featureMatches?.length ?? 0, 1, 30);
+  return { moduleCount, featureCount };
+}

@@ -53,6 +53,7 @@ import { registerReleaseNotesRoutes } from './src/server/routes/releaseNotes';
 import { registerConventionRoutes } from './src/server/routes/convention';
 import { registerBuildEstimateRoutes } from './src/server/routes/buildEstimate';
 import { registerDocsRoutes } from './src/server/routes/docs';
+import { registerOpenApiRoutes } from './src/server/routes/openapi';
 import { errorTracker, installGlobalErrorHandlers } from './src/server/observability/ErrorTracker';
 import { registerHealthRoutes, markServerReady } from './src/server/routes/health';
 import { registerWarmRoute } from './src/server/routes/warm';
@@ -511,6 +512,8 @@ setInterval(() => {
   registerBuildEstimateRoutes(app);
   // P-CGE.2 — documentation generators (stateless blueprint/routes/signatures → README/API/TSDoc).
   registerDocsRoutes(app);
+  // P-CGE.5 — OpenAPI generator (stateless route specs → OpenAPI 3.0.3 document).
+  registerOpenApiRoutes(app);
   registerSecretsRoutes(app);
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).

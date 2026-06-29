@@ -1270,17 +1270,17 @@
   `src/server/AppMakerLab/generator/EngineRegistry.ts`,
   `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
 
-### P-CGE.5 — OpenAPI / Contract-First API Generator  ❌ MISSING  [HIGH]
-- `BackendGenerationEngine.ts` generates Express route stubs but produces no API contract document.
-  No OpenAPI spec, no GraphQL schema. Contract-first generation (spec → server + client) is missing.
-- [ ] Add `OpenAPIGenerator.ts` — after backend generation, extract route definitions and emit
-  `openapi.yaml` into the generated workspace.
-- [ ] Add `GraphQLSchemaGenerator.ts` — when blueprint includes graphql feature, generate `.graphql`
-  schema file alongside resolvers.
-- [ ] Use the spec as source of truth for `APIDocumentationGenerator` (P-CGE.2).
-- **Files:** new `src/server/AppMakerLab/generator/OpenAPIGenerator.ts`,
-  new `src/server/AppMakerLab/generator/GraphQLSchemaGenerator.ts`,
-  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+### P-CGE.5 — OpenAPI / Contract-First API Generator  🟡 OpenAPI DONE / GraphQL+wiring PENDING  [HIGH]
+- Backend generation produced route stubs but no API contract. Now there is a real OpenAPI generator.
+- [x] Added `src/server/lib/OpenApiGenerator.ts` — pure, dependency-free: `expressPathToOpenApi`
+  (`/users/:id` → `/users/{id}`), `extractPathParams`, and `generateOpenApi` → a valid **OpenAPI 3.0.3**
+  document (paths grouped + sorted, operations per method, auto-derived path params, JSON request bodies from
+  declared properties, default `200` so the spec stays valid). Honest: only declared content; nothing invented.
+  8 unit tests.
+- [x] Added `POST /api/openapi/generate` (stateless): `{ routes[], info? }` → an OpenAPI 3.0.3 document.
+- [ ] **Still pending:** `GraphQLSchemaGenerator`, emitting `openapi.yaml` into the generated workspace, and
+  using the spec as the source of truth for the P-CGE.2 API docs (build-path wiring — deferred).
+- **Files:** new `src/server/lib/OpenApiGenerator.ts` + `.test.ts`, new `src/server/routes/openapi.ts`, `server.ts`.
 
 ### P-CGE.6 — Database Migration Generator  🟡 PARTIAL → full  [MED]
 - `DatabaseGenerationEngine.ts` generates TypeScript entity interfaces. No SQL DDL, no Prisma

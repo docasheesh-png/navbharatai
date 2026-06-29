@@ -1196,6 +1196,17 @@ export function registerAgentV3Routes(app: Express): void {
     const send = (obj: unknown): void => {
       if (!res.writableEnded) res.write(JSON.stringify(obj) + '\n');
     };
+    // FIRST-BYTE GUARANTEE — write one NDJSON event the instant the headers flush,
+    // BEFORE any setup (intent classify, free-chat router, sandbox actuator, build
+    // planning). Those steps can take several seconds, and a multi-second silent gap
+    // right after the headers makes a proxy / CDN / Cloud Run ingress (or a cold start)
+    // hand the browser an empty 200 — which the client reports as the misleading
+    // "No response from the v3.0 engine … the backend may be unreachable, or v3.0 is
+    // not enabled." This first byte forces the infra to commit to the stream and makes
+    // the client register a real event immediately, so a later failure surfaces its
+    // OWN honest terminal error instead of the bare "no response" message. A `ping` is
+    // the contract-safe choice: the client already ignores the 15 s keepalive pings.
+    send({ type: 'ping' });
     // SSE keepalive: send a ping every 15 s so Chrome never throttles/drops the
     // connection when the tab is backgrounded or minimised. Cleared on response end.
     const heartbeatTimer = setInterval(() => {

@@ -1976,12 +1976,17 @@
 - [x] 13 unit tests (`AnomalyDetector.test.ts`); full gate green (tsc fe+server, 3010 vitest, boot:check, live route smoke).
 - **Files:** new `src/server/lib/AnomalyDetector.ts` + `.test.ts`, `src/server/routes/observability.ts`.
 
-### P-MON.3 — LLM / AI Observability Dashboard  🟡 PARTIAL → full  [MED]
-- Token/cost are tracked, but there is no **LLM-ops view**: prompt performance, **inference-latency percentiles
-  (p50/p95/p99)** per provider/model, **model-drift** over time, **tool-usage** analytics, and **multi-agent** coordination metrics.
-- [ ] Record per-call latency percentiles + per-tool success/failure; persist a daily LLM-ops snapshot.
-- [ ] Add an admin "AI Observability" view (provider/model latency, drift, tool usage, agent coordination).
-- **Files:** `src/server/lib/metrics.ts`, `src/server/AgentV3/{AgentV3CostTelemetry,ToolDispatcher}.ts`, `src/server/routes/admin.ts`.
+### P-MON.3 — LLM / AI Observability Dashboard  🟡 latency-percentiles DONE / drift+tool-usage PENDING  [MED]
+- Token/cost are tracked; now per-provider **inference-latency percentiles** are too.
+- [x] Added `src/server/lib/Percentiles.ts` — pure `quantile`/`percentiles` (p50/p90/p95/p99 + min/max/mean) and
+  `aggregateProviderLatency`, which turns the REAL `ai.provider.*` spans the AI router records (Tracer) into
+  per-provider latency percentiles + error rate. Honest: no samples → zero counts + null percentiles, never invented.
+  11 unit tests.
+- [x] Added `GET /api/observability/llm` (admin-gated) — live per-provider p50/p90/p95/p99 latency + error rate from
+  recent trace spans (ordered by sample volume).
+- [ ] **Still pending:** per-tool success/failure analytics (lives in AgentV3 `ToolDispatcher`), model-drift over
+  time, persisted daily LLM-ops snapshot, and the multi-agent coordination view.
+- **Files:** new `src/server/lib/Percentiles.ts` + `.test.ts`, `src/server/routes/observability.ts`.
 
 ### P-MON.4 — Wire Health Monitor to REAL Metrics + Composite Scores  ✅ DONE  [MED — honesty]
 - `AppHealthMonitor.tsx` previously rendered **fully simulated/demo data** (Math.random metrics, hardcoded

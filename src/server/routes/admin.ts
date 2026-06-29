@@ -14,6 +14,7 @@ import { computeHealthScore } from '../lib/HealthScore';
 import { analyzeFinOps } from '../lib/FinOpsAdvisor';
 import { aggregateProviderLatency, type SpanLike } from '../lib/Percentiles';
 import { tracer } from '../observability/Tracer';
+import { analyzeSeries, type Point } from '../lib/AnomalyDetector';
 import { logStore } from '../lib/logStore';
 import { eventStore } from '../lib/eventStore';
 
@@ -157,6 +158,14 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       providers,
       generatedAt: Date.now(),
     });
+  });
+
+  // P-MON.2 — latency anomaly/trend watch over the REAL recent per-trace durations
+  // (z-score + EWMA anomalies, linear trend, short forecast). x-admin-token scheme for the dashboard.
+  app.get('/api/admin/anomaly/latency', verifyAdminToken, (req: Request, res: Response) => {
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+    const series: Point[] = tracer.recentTraces(limit).map((tr) => ({ t: tr.startMs, v: tr.durationMs }));
+    res.json({ source: 'trace-latency', sampleCount: series.length, ...analyzeSeries(series), generatedAt: Date.now() });
   });
 
   // P-MON.6 — FinOps recommendations derived from the REAL live metrics snapshot

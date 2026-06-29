@@ -1974,7 +1974,10 @@
   (`{ series:number[] }` or `{ points:{t,v}[] }`); `GET /api/observability/anomaly/latency` analyzes the LIVE
   per-trace latency series from the P2.1 tracer. Both admin-gated (same scheme as the other observability routes).
 - [x] 13 unit tests (`AnomalyDetector.test.ts`); full gate green (tsc fe+server, 3010 vitest, boot:check, live route smoke).
-- **Files:** new `src/server/lib/AnomalyDetector.ts` + `.test.ts`, `src/server/routes/observability.ts`.
+- [x] Surfaced in the Admin dashboard AI Engines tab — a "Latency Anomaly Watch" card (sample count, z-score+EWMA
+  anomaly count, trend direction, recent spikes) via `GET /api/admin/anomaly/latency` (x-admin-token).
+- **Files:** new `src/server/lib/AnomalyDetector.ts` + `.test.ts`, `src/server/routes/observability.ts`,
+  `src/server/routes/admin.ts`, `src/components/AdminDashboard.tsx`.
 
 ### P-MON.3 — LLM / AI Observability Dashboard  🟡 latency-percentiles DONE / drift+tool-usage PENDING  [MED]
 - Token/cost are tracked; now per-provider **inference-latency percentiles** are too.

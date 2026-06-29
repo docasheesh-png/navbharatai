@@ -30,10 +30,22 @@ export class GitManager implements Checkpointer {
   /** Initialise the repo (idempotent). Returns false when git is unavailable. */
   async ensureRepo(): Promise<boolean> {
     try {
+      // 1) Ensure a .gitignore exists BEFORE anything is staged. Each checkpoint runs
+      //    `git add -A`; without ignoring node_modules/build output, that staged THOUSANDS
+      //    of dependency files on every single file write → ~45s per commit → the build blew
+      //    past the wall-clock cap and "timed out". We append only the patterns that are
+      //    missing, so a real project .gitignore is preserved, never clobbered.
+      await this.run(ENSURE_GITIGNORE_CMD);
+      // 2) Initialise the repo + identity (idempotent).
       await this.run(
         'git rev-parse --git-dir >/dev/null 2>&1 || ' +
           '( git init -q && git config user.email "agent@navbharatai.dev" ' +
           '&& git config user.name "NavBharatAI v3.0" )',
+      );
+      // 3) Untrack heavy dirs an OLDER sandbox may have committed before this .gitignore
+      //    existed, so future checkpoints stay fast. Best-effort — a no-op on a fresh repo.
+      await this.run(
+        'git rm -r --cached --quiet node_modules dist build .next out coverage .venv 2>/dev/null || true',
       );
       this.ready = true;
       return true;
@@ -83,3 +95,19 @@ export class GitManager implements Checkpointer {
 function sanitizeMessage(message: string): string {
   return message.replace(/["`$\\]/g, '').replace(/\r?\n/g, ' ').slice(0, 200) || 'checkpoint';
 }
+
+/**
+ * Append any MISSING ignore patterns to .gitignore (creating it if absent), without clobbering an
+ * existing project .gitignore. Keeping node_modules / build output out of `git add -A` is what
+ * makes a checkpoint cost milliseconds instead of ~45s. POSIX sh: `grep -qxF` = exact full-line
+ * match, so a pattern is added at most once.
+ */
+const GITIGNORE_PATTERNS = [
+  'node_modules/', 'dist/', 'build/', '.next/', 'out/', 'coverage/',
+  '.venv/', '__pycache__/', '.cache/', '.e-checkpoints/', '.DS_Store', '*.log',
+];
+const ENSURE_GITIGNORE_CMD =
+  'touch .gitignore; ' +
+  GITIGNORE_PATTERNS.map(
+    (p) => `grep -qxF '${p}' .gitignore 2>/dev/null || echo '${p}' >> .gitignore`,
+  ).join('; ');

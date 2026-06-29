@@ -1095,22 +1095,37 @@ export class ToolDispatcher {
         if (!this.actuator.getPortUrl) {
           throw new Error('Live preview is not available in this sandbox.');
         }
-        // Verify the port is actually listening before publishing (30 attempts × 500 ms = 15 s max).
-        // This prevents a false-success preview when the dev server hasn't started yet.
+        // Verify the port is actually listening before publishing. Bounded TWO ways so this tool can
+        // NEVER hang the whole build (the real freeze we saw: a single sandbox runCommand stalled and
+        // update_preview sat in-flight for 15 min until the wall-clock cap). (1) Each port check is
+        // wrapped in withTimeout so one stalled `nc` can't block forever; (2) the whole poll has a
+        // hard wall-clock budget so it always exits regardless of how the actuator behaves.
         let portReady = false;
-        for (let attempt = 0; attempt < 30 && !portReady; attempt++) {
+        const PORT_POLL_BUDGET_MS = 15_000;
+        const pollDeadline = Date.now() + PORT_POLL_BUDGET_MS;
+        for (let attempt = 0; attempt < 30 && !portReady && Date.now() < pollDeadline; attempt++) {
           try {
-            const chk = await this.actuator.runCommand(
-              this.workspaceId,
-              `nc -z localhost ${port} 2>/dev/null && echo PORT_UP || echo PORT_DOWN`,
+            const chk = await withTimeout(
+              this.actuator.runCommand(
+                this.workspaceId,
+                `nc -z localhost ${port} 2>/dev/null && echo PORT_UP || echo PORT_DOWN`,
+              ),
+              3_000,
+              'preview-port-check',
             );
             if (chk.stdout.includes('PORT_UP')) { portReady = true; break; }
-          } catch { /* keep polling */ }
-          if (!portReady) await new Promise(r => setTimeout(r, 500));
+          } catch { /* a stalled/failed check just counts as not-ready — keep polling within budget */ }
+          if (!portReady && Date.now() < pollDeadline) await new Promise(r => setTimeout(r, 500));
         }
         // §12: v3.0-built apps are previewed under the platform's E2B custom domain
         // (mitrify.xyz) instead of the raw *.e2b.app host. Idempotent + scoped to v3.0.
-        const rawUrl = await this.actuator.getPortUrl(this.workspaceId, port);
+        // Bounded too — getPortUrl talks to the sandbox SDK and must not hang the build.
+        let rawUrl: string;
+        try {
+          rawUrl = await withTimeout(this.actuator.getPortUrl(this.workspaceId, port), 10_000, 'preview-get-url');
+        } catch {
+          return `WARNING: could not resolve the preview URL for port ${port} (the sandbox did not respond in time) — preview NOT published. Make sure the dev server is up, then call update_preview again.`;
+        }
         const url = applyPreviewDomain(rawUrl);
         if (!portReady) {
           // Audit P2: do NOT emit a preview URL the user would click into a blank/502 page — the

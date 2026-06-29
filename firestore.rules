@@ -44,9 +44,16 @@ service cloud.firestore {
     // Users
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create: if isVerified() && isValidId(userId) && isOwner(userId) && isValidUser(incoming());
+      // P-SEC.1: `role` is server-managed (admin SDK only) — clients may never set or
+      // change it, else a user could self-escalate to owner/admin. (isValidUser allows
+      // up to 10 arbitrary keys, so this explicit guard is required.)
+      allow create: if isVerified() && isValidId(userId) && isOwner(userId) && isValidUser(incoming()) &&
+                       !('role' in incoming());
       allow update: if isVerified() && isValidId(userId) && isOwner(userId) && isValidUser(incoming()) &&
-                       incoming().uid == existing().uid;
+                       incoming().uid == existing().uid &&
+                       (!('role' in incoming())
+                          ? !('role' in existing())
+                          : ('role' in existing() && incoming().role == existing().role));
     }
 
     // Posts

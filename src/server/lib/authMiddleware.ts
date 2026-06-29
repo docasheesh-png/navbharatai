@@ -114,6 +114,77 @@ export function rateLimiter(opts: RateLimitOptions) {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// P-SEC.1 — RBAC (Role-Based Access Control)
+// Roles live in Firestore `users/{uid}.role`. CRITICAL backward-compat rule: a user
+// with NO role set defaults to `owner` (full access), so this is purely additive —
+// no existing single-user account is ever locked out. Granularity only kicks in once
+// a role is explicitly assigned (e.g. team members get `editor`/`viewer`).
+// ─────────────────────────────────────────────────────────────────────────────
+export type UserRole = 'owner' | 'admin' | 'editor' | 'viewer' | 'billing_only';
+
+/** Higher rank = more privilege. `billing_only` is a side-grant (billing actions), low general rank. */
+export const ROLE_RANK: Record<UserRole, number> = { viewer: 1, billing_only: 1, editor: 2, admin: 3, owner: 4 };
+
+/** Pure, testable access decision. owner/admin are superusers (always allowed). */
+export function isRoleAllowed(role: UserRole, allowed: UserRole[]): boolean {
+  if (role === 'owner' || role === 'admin') return true;
+  return allowed.includes(role);
+}
+
+async function getAdminFirestore(): Promise<import('firebase-admin/firestore').Firestore | null> {
+  if (process.env.VITEST) return null;
+  try {
+    const admin = await import('firebase-admin');
+    if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
+    return admin.firestore();
+  } catch {
+    return null;
+  }
+}
+
+/** Read a user's role from Firestore. Defaults to `owner` (backward-compatible) when unset/unreadable. */
+export async function getUserRole(uid: string): Promise<UserRole> {
+  if (process.env.VITEST) return 'owner';
+  try {
+    const db = await getAdminFirestore();
+    if (!db) return 'owner';
+    const snap = await db.collection('users').doc(uid).get();
+    const role = snap.exists ? (snap.data()?.role as UserRole | undefined) : undefined;
+    return role && ROLE_RANK[role] ? role : 'owner';
+  } catch {
+    return 'owner';
+  }
+}
+
+/** Assign a user's role (admin/owner operation). Best-effort; throws only on hard Firestore error. */
+export async function setUserRole(uid: string, role: UserRole): Promise<void> {
+  if (process.env.VITEST) return;
+  const db = await getAdminFirestore();
+  if (!db) return;
+  await db.collection('users').doc(uid).set({ role }, { merge: true });
+}
+
+/**
+ * Express middleware: require the authenticated user to hold one of `allowed` roles
+ * (owner/admin always pass). 401 if unauthenticated, 403 if role insufficient.
+ * VITEST-skipped. Attaches the resolved role to `req.userRole`.
+ */
+export function requireRole(...allowed: UserRole[]) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (process.env.VITEST) { next(); return; }
+    const uid = await verifyFirebaseToken(req);
+    if (!uid) { res.status(401).json({ error: 'Authentication required.' }); return; }
+    const role = await getUserRole(uid);
+    if (!isRoleAllowed(role, allowed)) {
+      res.status(403).json({ error: 'Forbidden: insufficient role for this action.' });
+      return;
+    }
+    (req as Request & { userRole?: UserRole }).userRole = role;
+    next();
+  };
+}
+
 /** Hot build endpoint (`/chat`): 10 builds/hr authed, 5/hr anonymous. */
 export function buildRateLimiter() {
   return rateLimiter({ name: 'build', authed: 10, anon: 5, noun: 'builds' });

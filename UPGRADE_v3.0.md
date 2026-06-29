@@ -960,14 +960,18 @@
 - **Note:** no legacy `BuildManager` wiring done (safeguard #6/#7 — the live v3.0 path already delivers this, and it
   is the path users actually run). Doc correction of a stale audit.
 
-### P-BRE.5 — Remote Build Cache (GCS)  ❌ MISSING  [HIGH — CI speed]
-- `cloudbuild.yaml` uses Docker layer caching (`--cache-from`) but there is no application-level remote cache.
-  Every Cloud Build run re-runs `npm install` (2-3 min) and re-bundles unchanged code.
-- `IncrementalBuildCache.ts` (P-BRE.2) covers per-workspace caching; this item covers the CI build itself.
-- [ ] Add a GCS bucket `navbharatai-build-cache` with Vite's experimental persistent cache (`cacheDir` → mounted GCS FUSE or pre/post build sync steps).
-- [ ] In `cloudbuild.yaml`: add a `gsutil rsync` step before `npm install` to restore `node_modules` cache; after build, sync it back.
-- [ ] Reduce cold build time from ~5 min to < 2 min.
-- **Files:** `cloudbuild.yaml`, `Dockerfile`.
+### P-BRE.5 — Remote Build Cache (registry layer cache)  ✅ DONE (2026-06-29)  [HIGH — CI speed]
+- Every Cloud Build re-ran `npm ci` (~2-3 min) + re-bundled unchanged code; `cloudbuild.yaml` did NOT actually
+  pass `--cache-from`, so there was no cross-build cache.
+- [x] **Registry IS the remote cache (simpler, no extra GCS bucket/FUSE):** `cloudbuild.yaml` now (1) warms the
+  cache by pulling the previous `:latest` image (non-fatal `|| exit 0` — first build / registry hiccup can never
+  break the deploy), and (2) builds with `DOCKER_BUILDKIT=1` + `--cache-from …:latest` +
+  `--build-arg BUILDKIT_INLINE_CACHE=1` so the pushed image carries inline cache metadata for the next build.
+- [x] **Reuses the `npm ci` layer** — the Dockerfile already copies `package*.json` → `npm ci` BEFORE `COPY . .`,
+  so when the lockfile is unchanged the install layer is a cache hit → cold build drops from ~5 min toward ~2 min.
+- **Note:** chose the standard Docker registry layer cache over a GCS-FUSE `node_modules` rsync — same outcome,
+  fewer moving parts, uses infra that already exists (Artifact Registry), zero new failure surface on the deploy.
+- **Files:** `cloudbuild.yaml` (Dockerfile already cache-friendly from P-BRE.13).
 
 ### P-BRE.6 — Durable Background Job Queue (Build Jobs Survive Restarts)  ❌ MISSING  [MED]
 - `BuildJobManager.ts` stores jobs in Firestore but the actual build *execution* is in-memory Promise chains.

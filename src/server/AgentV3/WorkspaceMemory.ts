@@ -171,6 +171,10 @@ export class WorkspaceMemory {
     if (this.episodes.length > MAX_EPISODES) this.episodes.splice(0, this.episodes.length - MAX_EPISODES);
   }
   recordRequest(text: string): void { this.episode('request', text); }
+  /** The user's most recent request texts (oldest→newest) — conversational context for intent. */
+  recentRequests(limit = 3): string[] {
+    return this.episodes.filter((e) => e.kind === 'request').slice(-Math.max(1, limit)).map((e) => e.text);
+  }
   recordError(text: string, file?: string): void { this.episode('error', text, file); }
   recordFix(text: string, file?: string): void { this.episode('fix', text, file); }
   recordNote(text: string, file?: string): void { this.episode('note', text, file); }

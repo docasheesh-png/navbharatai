@@ -29,6 +29,21 @@ export interface LogQuery {
   limit?: number;
 }
 
+/**
+ * Return a shallow copy with all `undefined`-valued keys removed. firebase-admin's Firestore
+ * rejects `undefined` field values with a SYNCHRONOUS throw from `.set()` (it happens before
+ * the promise exists, so a trailing `.catch()` cannot swallow it). Stripping undefined keys
+ * before the write keeps optional fields (traceId, message, …) safe to omit. Pure + exported
+ * for unit testing.
+ */
+export function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) out[k as keyof T] = v as T[keyof T];
+  }
+  return out;
+}
+
 class LogStore {
   private db: admin.firestore.Firestore | null = null;
 
@@ -46,11 +61,21 @@ class LogStore {
   }
 
   append(entry: Omit<LogEntry, 'id' | 'ts'>): void {
-    const db = this.getDb();
-    if (!db) return;
-    const doc: LogEntry = { id: randomUUID(), ts: Date.now(), ...entry };
-    // Fire-and-forget — never await, never throw
-    db.collection('server_logs').doc(doc.id).set(doc).catch(() => {});
+    // The whole body is guarded: firebase-admin's `.set()` validates SYNCHRONOUSLY and throws
+    // (before returning a promise) on an `undefined` field value — so a trailing `.catch()`
+    // cannot catch it. Without this guard a single optional field left undefined (e.g. traceId
+    // on an audit entry) would throw straight through `audit()` into the request handler and
+    // turn an intended 403 into a 500. We both strip undefined values and wrap in try/catch to
+    // honour this module's documented "never throws" contract.
+    try {
+      const db = this.getDb();
+      if (!db) return;
+      const doc = stripUndefined({ id: randomUUID(), ts: Date.now(), ...entry }) as LogEntry;
+      // Fire-and-forget — never await; the reject handler catches async write failures.
+      db.collection('server_logs').doc(doc.id).set(doc).catch(() => {});
+    } catch {
+      // Persistence is best-effort; the stdout audit line is the durable record.
+    }
   }
 
   async query({ level, event, workspaceId, since, limit = 100 }: LogQuery = {}): Promise<LogEntry[]> {

@@ -203,6 +203,12 @@ try {
     setSharedDb(db); // share the handle with extracted route modules (Phase 1)
     firebaseApiKey = firebaseConfig.apiKey;
     console.log('✅ Firebase initialized successfully. Resolved fallback ApiKey:', firebaseApiKey ? 'present' : 'absent');
+    // P-PME.8 — hydrate persisted feature flags into the in-memory cache so admin toggles survive
+    // restarts. Best-effort + non-blocking: a load failure leaves the hardcoded defaults in place.
+    import('./src/server/FeatureFlagManager')
+      .then(({ loadFlagConfig }) => loadFlagConfig())
+      .then((cfg) => { if (cfg?.flags) Object.assign(serverStats.featureFlags, cfg.flags); })
+      .catch(() => { /* feature-flag hydration is best-effort */ });
   } else {
     console.warn('⚠️ firebase-applet-config.json not found. Firebase features will be disabled.');
   }

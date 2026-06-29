@@ -1358,13 +1358,21 @@
 - **Files:** `src/server/AppMakerLab/generator/ChangelogManager.ts` (new), `src/server/routes/changelog.ts` (new),
       `tests/changelogManager.test.ts` (new), `server.ts`.
 
-### P-PME.8 — Feature Flag Manager (replace hardcoded flags)  🟡 PARTIAL → full  [MED]
-- `server.ts` has `featureFlags: { doctorAI: true, navBharatPro: true, appBuilder: true }` hardcoded.
-  Turning a feature on/off requires a code deploy. No per-user or percentage-rollout flags.
-- [ ] Move feature flags to Firestore `config/featureFlags` document — editable by admin without deploy.
-- [ ] Expose `/api/admin/feature-flags` (admin-only) to toggle flags at runtime.
-- [ ] Extend with per-userId overrides: `config/featureFlags/overrides/{userId}` for beta users.
-- **Files:** `server.ts`, new `src/server/FeatureFlagManager.ts`.
+### P-PME.8 — Feature Flag Manager (replace hardcoded flags)  ✅ DONE (2026-06-29)
+- Flags lived in-memory (`serverStats.featureFlags`) — admin toggles reset on every Cloud Run restart, and
+  there was no per-user or percentage rollout.
+- [x] **Firestore persistence** (`config/featureFlags`) — `FeatureFlagManager.loadFlagConfig` / `saveFlagConfig`
+      (best-effort). The admin settings save now persists flags; the server **hydrates them on startup** into the
+      in-memory cache, so toggles survive deploys/restarts.
+- [x] **`/api/admin/feature-flags`** (admin-only) GET/POST — read/replace the full persisted config (flags +
+      rollout + overrides) at runtime without a deploy.
+- [x] **Per-user overrides + percentage rollout** — pure, unit-tested `isFlagEnabled(config, flag, userId?)`:
+      precedence is per-user override → deterministic percentage rollout (stable per-(user,flag) bucketing via
+      `stableHashPercent`) → global flag → false.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3334/3334 ✅ (8 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/FeatureFlagManager.ts` (new), `tests/featureFlagManager.test.ts` (new),
+      `src/server/routes/admin.ts`, `server.ts`.
 
 ### P-PME.9 — Webhook Manager (build/deploy event notifications)  ✅ DONE (2026-06-29)
 - Users couldn't wire NavBharatAI into their own CI/CD or get Slack/Discord alerts. (P-BRE.7 added a single

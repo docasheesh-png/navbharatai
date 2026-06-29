@@ -1902,11 +1902,21 @@
 - **Verification:** `tsc` (fe) ✅ · `build` ✅ · `vitest run` 3451/3451 ✅ · `test:coverage` exit 0 · `boot:check` PASS.
 - **Files:** new `src/components/ui/Skeleton.tsx`, `src/components/HistoryView.tsx`, `src/components/panels/FilesPanel.tsx`.
 
-### P-UX.3 — One-Click AI Fix after Error  ❌ MISSING  [HIGH]
-- Console errors are tracked (`window.error → /api/logs/error`) but the UI offers no "Fix it" button.
-- [ ] Show an inline "AI Fix" button in the preview error overlay that prepopulates the chat with the error.
-- [ ] Wire into error-aware AI flow already in `AgentV3` (Phase 7 built error context injection).
-- **Files:** `src/App.tsx` (PREVIEW_BOOTSTRAP error handler), `src/contexts/WorkspaceContext.tsx`.
+### P-UX.3 — One-Click AI Fix after Error  ✅ DONE (2026-06-29) · 🔌 UI-WIRED
+- Console errors were tracked, but the UI offered no "Fix it" button.
+- [x] **"Fix with AI" button in the preview error overlay** — when the v3.0 in-browser preview fails to build
+      (`PreviewSurface` `err` state), it now shows a "Fix with AI" button. `PreviewSurface` gained an optional
+      `onFixError(errorText)` prop (so the shared component stays reusable; the button only appears where a
+      handler is wired).
+- [x] **Prepopulates the chat, doesn't auto-fire** — `AgentV3Panel` passes a handler that fills the chat input
+      with the exact preview error + a fix instruction and collapses the workspace so the chat is in view. The
+      user reviews and presses Send — a destructive auto-fix never runs without the user's go-ahead. The agent's
+      existing edit/error-aware flow handles the actual repair.
+- [x] **AppKnowledgeBase** — added a "ONE-CLICK AI FIX" capability bullet to the v3.0 entry.
+- **Verification:** `tsc` (fe) ✅ · `build` ✅ · `vitest run` 3451/3451 ✅ · `test:coverage` exit 0 · `boot:check` PASS.
+- **Files:** `src/components/agentv3/PreviewSurface.tsx`, `src/components/agentv3/AgentV3Panel.tsx`,
+  `src/server/AppContext/AppKnowledgeBase.ts`. (Targeted the live v3.0 preview surface — the felt path — rather
+  than the legacy `App.tsx` PREVIEW_BOOTSTRAP handler the original spec named.)
 
 ### P-UX.4 — Product Tour / Guided Walkthrough  ❌ MISSING  [HIGH]
 - Onboarding modal exists (4 cards) but no interactive step-by-step tour highlighting UI elements.

@@ -6,7 +6,7 @@
 // build never writes — so the preview looked permanently "disconnected" from the v3.0 engine.
 
 import { useCallback, useEffect, useState } from 'react';
-import { RotateCcw, ExternalLink, Loader2 } from 'lucide-react';
+import { RotateCcw, ExternalLink, Loader2, Wand2 } from 'lucide-react';
 import { auth } from '../../App';
 
 async function authJsonHeaders(): Promise<Record<string, string>> {
@@ -30,7 +30,7 @@ function Empty({ children }: { children: React.ReactNode }) {
  *    running server. Works even when the sandbox is unavailable, and (via the server's saved-files
  *    fallback) even after the sandbox is gone. In-browser defaults on when there is no live URL yet.
  */
-export function PreviewSurface({ url, workspaceId, userId, email }: { url?: string; workspaceId?: string; userId?: string; email?: string }) {
+export function PreviewSurface({ url, workspaceId, userId, email, onFixError }: { url?: string; workspaceId?: string; userId?: string; email?: string; onFixError?: (errorText: string) => void }) {
   const [mode, setMode] = useState<'live' | 'inbrowser'>(url ? 'live' : 'inbrowser');
   const [html, setHtml] = useState<string>('');
   const [kind, setKind] = useState<string>('');
@@ -147,7 +147,21 @@ export function PreviewSurface({ url, workspaceId, userId, email }: { url?: stri
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm"><Loader2 className="w-4 h-4 animate-spin mr-2" /> Building preview…</div>
       ) : err ? (
-        <div className="flex-1 flex items-center justify-center p-6"><Empty>Couldn't build the in-browser preview: {err}</Empty></div>
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6">
+          <Empty>Couldn't build the in-browser preview: {err}</Empty>
+          {onFixError && (
+            // P-UX.3 — One-click AI fix: hand the exact preview error to the agent so it can diagnose
+            // and repair the build. Prepopulates the chat (the user reviews + sends) rather than
+            // firing silently, so a destructive auto-fix never runs without the user's go-ahead.
+            <button
+              onClick={() => onFixError(err)}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold"
+              title="Send this error to the AI to fix"
+            >
+              <Wand2 className="w-3.5 h-3.5" /> Fix with AI
+            </button>
+          )}
+        </div>
       ) : html ? (
         <iframe title="In-browser preview" srcDoc={html} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-forms allow-popups" />
       ) : (

@@ -1,4 +1,4 @@
-import type { AgentCard, AgentRole, AgentV3ClientState, AgentV3WireEvent, FileChange, NarrationLine } from './agentV3Types';
+import type { ActivityEntry, AgentCard, AgentRole, AgentV3ClientState, AgentV3WireEvent, FileChange, NarrationLine } from './agentV3Types';
 
 // Pure reducer: folds each NDJSON wire event into the client state that drives
 // all merged surfaces (narration, files, diffs, terminal, git/history, todos,
@@ -10,6 +10,19 @@ import type { AgentCard, AgentRole, AgentV3ClientState, AgentV3WireEvent, FileCh
 
 const MAX_NARRATION = 500;
 const MAX_TERMINAL = 1000;
+const MAX_ACTIVITY = 300;
+
+/** Append a new activity entry to the live "working…" feed (capped). */
+function pushActivity(activity: ActivityEntry[], entry: ActivityEntry): ActivityEntry[] {
+  return [...activity, entry].slice(-MAX_ACTIVITY);
+}
+
+/** Mark an in-flight tool activity (matched by callId) as completed with its ok/fail verdict. */
+function completeActivity(activity: ActivityEntry[], callId: string, ok: boolean): ActivityEntry[] {
+  let found = false;
+  const next = activity.map((a) => (a.id === callId && a.active ? ((found = true), { ...a, active: false, ok }) : a));
+  return found ? next : activity;
+}
 
 function touchAgent(
   agents: Record<string, AgentCard>,
@@ -93,6 +106,8 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'tool_call': {
       const action = describeToolCall(event.tool, event.input);
       const agents = touchAgent(state.agents, event.agent, action, true, event.ts);
+      // Live activity feed: record the tool call as in-flight (matched to its result by callId).
+      const activity = pushActivity(state.activity, { id: event.callId, ts: event.ts, kind: 'tool', text: action, agent: event.agent, active: true });
       // Route bash commands to the terminal surface (real execution log).
       if (event.tool === 'bash') {
         const cmd = typeof (event.input as Record<string, unknown>)?.command === 'string'
@@ -101,38 +116,49 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
         return {
           ...state,
           agents,
+          activity,
           pendingBash: { ...state.pendingBash, [event.callId]: cmd },
           terminal: [...state.terminal, `$ ${cmd}`].slice(-MAX_TERMINAL),
         };
       }
-      return { ...state, agents };
+      return { ...state, agents, activity };
     }
 
     case 'tool_result': {
       const existing = state.agents[event.agent];
       const action = existing ? existing.lastAction : event.summary;
       const agents = touchAgent(state.agents, event.agent, action, false, event.ts);
+      // Live activity feed: mark the matching in-flight tool entry done (✓ / ✗).
+      const activity = completeActivity(state.activity, event.callId, event.ok);
       // If this completes a bash call, append its output to the terminal.
       if (state.pendingBash[event.callId] !== undefined) {
         const { [event.callId]: _done, ...rest } = state.pendingBash;
         return {
           ...state,
           agents,
+          activity,
           pendingBash: rest,
           terminal: [...state.terminal, event.summary].slice(-MAX_TERMINAL),
         };
       }
-      return { ...state, agents };
+      return { ...state, agents, activity };
     }
 
     case 'agent_spawned':
       return {
         ...state,
         agents: touchAgent(state.agents, event.agent, `started: ${event.task}`, true, event.ts),
+        activity: pushActivity(state.activity, { id: `a-${event.ts}-${event.agent}`, ts: event.ts, kind: 'agent', text: `${event.agent} — ${event.task}`, agent: event.agent }),
       };
 
-    case 'file_changed':
-      return { ...state, files: applyFileChange(state.files, event.change) };
+    case 'file_changed': {
+      const verb = event.change.kind === 'create' ? 'created' : event.change.kind === 'delete' ? 'deleted' : 'edited';
+      return {
+        ...state,
+        files: applyFileChange(state.files, event.change),
+        activity: pushActivity(state.activity, { id: `f-${event.ts}-${event.change.path}`, ts: event.ts, kind: 'file', text: `${verb} ${event.change.path}`, agent: event.agent, ok: true }),
+      };
+    }
 
     case 'files_restored':
       // "Restore all files" replaced the whole file list with what's genuinely in the workspace now.
@@ -151,7 +177,11 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       return { ...state, checkpoints: [...state.checkpoints, event.checkpoint] };
 
     case 'preview':
-      return { ...state, previewUrl: event.url };
+      return {
+        ...state,
+        previewUrl: event.url,
+        activity: pushActivity(state.activity, { id: `p-${event.ts}`, ts: event.ts, kind: 'preview', text: 'preview published', ok: true }),
+      };
 
     case 'repo':
       return { ...state, repoUrl: event.url, repoFullName: event.fullName };

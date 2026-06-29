@@ -67,6 +67,26 @@ export interface AgentCard {
   updatedTs: number;
 }
 
+/**
+ * One line in the live "working…" activity feed (the Claude-style expandable indicator). Derived
+ * ONLY from real engine events (tool calls, file writes, agent spawns, preview) — no synthetic
+ * activity. The collapsed indicator shows the latest entry; expanding reveals the full ordered log.
+ */
+export interface ActivityEntry {
+  /** Stable key for React + to mark a tool entry done when its result arrives. */
+  id: string;
+  ts: number;
+  /** Coarse kind → the UI maps it to an icon. */
+  kind: 'tool' | 'file' | 'agent' | 'preview' | 'plan';
+  /** Human-readable action, e.g. "writing src/App.tsx" or "running: npm install". */
+  text: string;
+  agent?: AgentRole;
+  /** True while a tool call is in-flight (renders a live cursor); cleared on its tool_result. */
+  active?: boolean;
+  /** Set on completion: did the tool call succeed? (used to show ✓ / ✗). */
+  ok?: boolean;
+}
+
 export interface NarrationLine {
   agent: AgentRole;
   text: string;
@@ -83,6 +103,8 @@ export interface NarrationLine {
 export interface AgentV3ClientState {
   /** Architect/agent narration feed (chat-bubble text). */
   narration: NarrationLine[];
+  /** Live "working…" activity log (the expandable indicator) — ordered, capped, real events only. */
+  activity: ActivityEntry[];
   /** File explorer surface — current change set. */
   files: FileChange[];
   /** Todo surface (editable in P4). */
@@ -136,6 +158,7 @@ export interface BuildHealth {
 export function initialAgentV3State(): AgentV3ClientState {
   return {
     narration: [],
+    activity: [],
     files: [],
     todos: [],
     diffs: {},

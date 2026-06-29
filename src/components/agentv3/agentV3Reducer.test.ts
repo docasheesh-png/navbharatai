@@ -23,6 +23,36 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(s.agents.frontend.lastAction).toBe('writing src/App.tsx');
   });
 
+  it('builds the live activity feed: tool_call (in-flight) → tool_result (completed)', () => {
+    let s = initialAgentV3State();
+    s = agentV3Reducer(s, { type: 'tool_call', agent: 'frontend', tool: 'bash', input: { command: 'npm install' }, callId: 'c1', ts: 1 });
+    expect(s.activity).toHaveLength(1);
+    expect(s.activity[0]).toMatchObject({ id: 'c1', kind: 'tool', text: 'running: npm install', active: true });
+
+    s = agentV3Reducer(s, { type: 'tool_result', agent: 'frontend', callId: 'c1', ok: true, summary: 'ok', ts: 2 });
+    expect(s.activity[0].active).toBe(false);
+    expect(s.activity[0].ok).toBe(true);
+  });
+
+  it('a failed tool_result marks its activity entry ok:false', () => {
+    let s = initialAgentV3State();
+    s = agentV3Reducer(s, { type: 'tool_call', agent: 'frontend', tool: 'bash', input: { command: 'tsc' }, callId: 'c9', ts: 1 });
+    s = agentV3Reducer(s, { type: 'tool_result', agent: 'frontend', callId: 'c9', ok: false, summary: 'error', ts: 2 });
+    expect(s.activity[0]).toMatchObject({ active: false, ok: false });
+  });
+
+  it('records file writes, agent spawns and preview in the activity feed', () => {
+    const events: AgentV3WireEvent[] = [
+      { type: 'agent_spawned', agent: 'tester', task: 'write tests', ts: 1 },
+      { type: 'file_changed', agent: 'frontend', change: { path: 'src/App.tsx', kind: 'create' }, ts: 2 },
+      { type: 'preview', url: 'https://x.example.dev', ts: 3 },
+    ];
+    const s = reduceAll(initialAgentV3State(), events);
+    expect(s.activity.map((a) => a.kind)).toEqual(['agent', 'file', 'preview']);
+    expect(s.activity[1].text).toBe('created src/App.tsx');
+    expect(s.activity[2].text).toBe('preview published');
+  });
+
   it('updates the file explorer surface (create / modify / delete)', () => {
     const events: AgentV3WireEvent[] = [
       { type: 'file_changed', agent: 'frontend', change: { path: 'a.ts', kind: 'create' }, ts: 1 },

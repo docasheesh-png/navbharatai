@@ -259,19 +259,22 @@ export function readinessGateEnabled(): boolean {
 
 /**
  * WATCHDOG — hard wall-clock cap (seconds) on a single build, so it can NEVER hang for 20-30 minutes
- * (the agent looping when a broken preview can't be verified). Default 12 minutes; admin-tunable via
- * AGENTV3_MAX_BUILD_SECONDS. Set to 0 to disable (not recommended).
+ * (the agent looping when a broken preview can't be verified). Default 18 minutes — enough headroom
+ * for a real multi-file app whose final "start dev server + verify it renders" step legitimately
+ * takes a few extra minutes (dev-server startup ~20-40 s per attempt, plus restarts on a port
+ * conflict). Cost is bounded SEPARATELY by AGENTV3_MAX_BUILD_USD, so this only guards wall-clock, not
+ * spend. Admin-tunable via AGENTV3_MAX_BUILD_SECONDS; set to 0 to disable (not recommended).
  */
 export function maxBuildSeconds(): number {
   const raw = Number(process.env.AGENTV3_MAX_BUILD_SECONDS);
   if (raw === 0) return 0;
-  return Number.isFinite(raw) && raw > 0 ? raw : 720;
+  return Number.isFinite(raw) && raw > 0 ? raw : 1080;
 }
 
 /**
  * Resolve `p`, but REJECT with a labelled error if it has not settled within `ms`. Used to bound the
  * request-setup calls (intent classify, plain chat, vision describe, monthly-cap) that run BEFORE the
- * 12-min build deadline timer is armed — without this, a single stalled provider/Firestore call hangs
+ * build wall-clock deadline timer is armed — without this, a single stalled provider/Firestore call hangs
  * the whole HTTP request forever (the deadline never starts). Pure + exported for testing.
  */
 export function raceTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -1361,8 +1364,8 @@ export function registerAgentV3Routes(app: Express): void {
         buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_TIMEOUT', message: `Build exceeded the ${Math.round(deadlineMs / 1000)}s wall-clock cap and was stopped.`, autoResolved: false });
         buildDiagRef?.finish(false);
       } catch { /* diagnostics are best-effort */ }
-      emit({ type: 'narration', agent: 'architect', text: 'This build hit the time limit and was stopped automatically. Any files already generated are saved — please try again or send a follow-up.', ts: Date.now() });
-      emit({ type: 'result', ok: false, summary: 'Build timed out and was stopped — your files (if any) are saved.', steps: 0, billedUsd: 0, billedInr: 0 });
+      emit({ type: 'narration', agent: 'architect', text: 'This build hit the time limit and was paused automatically — every file generated so far is saved. It was likely almost done. Just type **"continue"** and I will pick up exactly where I left off and finish it.', ts: Date.now() });
+      emit({ type: 'result', ok: false, summary: 'Build paused at the time limit — your files are saved. Type "continue" to finish where it left off.', steps: 0, billedUsd: 0, billedInr: 0 });
       activeBuilds.delete(buildKey);
       if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
       endBuild(rb);

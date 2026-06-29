@@ -400,9 +400,9 @@ describe('maxBuildSeconds (watchdog wall-clock cap)', () => {
     if (prev === undefined) delete process.env.AGENTV3_MAX_BUILD_SECONDS;
     else process.env.AGENTV3_MAX_BUILD_SECONDS = prev;
   });
-  it('defaults to 720s (12 min)', () => {
+  it('defaults to 1080s (18 min)', () => {
     delete process.env.AGENTV3_MAX_BUILD_SECONDS;
-    expect(maxBuildSeconds()).toBe(720);
+    expect(maxBuildSeconds()).toBe(1080);
   });
   it('honors a positive override', () => {
     process.env.AGENTV3_MAX_BUILD_SECONDS = '300';
@@ -414,7 +414,7 @@ describe('maxBuildSeconds (watchdog wall-clock cap)', () => {
   });
   it('falls back to the default on garbage', () => {
     process.env.AGENTV3_MAX_BUILD_SECONDS = 'abc';
-    expect(maxBuildSeconds()).toBe(720);
+    expect(maxBuildSeconds()).toBe(1080);
   });
 });
 

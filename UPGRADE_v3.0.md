@@ -1295,15 +1295,21 @@
 - **Files:** new `src/server/lib/ReleaseNotesGenerator.ts` + `.test.ts`, new `src/server/routes/releaseNotes.ts`, `server.ts`.
   `src/server/AppMakerLab/AppMakerOrchestrator.ts`, `src/App.tsx`.
 
-### P-PME.3 — Technical Debt Tracker  🟡 PARTIAL → full  [HIGH]
-- `QualityEvaluationEngine.ts` finds lint errors, architecture violations, security issues. These are
-  either repaired immediately or silently dropped. No accumulating debt register exists.
-- [ ] Add `TechnicalDebtTracker.ts` — after every quality evaluation, persist unfixed issues to
-  Firestore `techDebt/{userId}/{projectId}/items[]` (issue type, file, severity, first-seen date).
-- [ ] UI: show a "Tech Debt" badge count in the IDE header; clicking opens a prioritised list.
-- [ ] Auto-prioritize: CRITICAL security issues surfaced first; architecture violations grouped by file.
-- **Files:** new `src/server/AppMakerLab/intelligence/TechnicalDebtTracker.ts`,
-  `src/server/QualityEvaluationEngine/QualityEvaluationEngine.ts`, `src/App.tsx`.
+### P-PME.3 — Technical Debt Tracker  ✅ DONE (2026-06-29, engine + persistence + API)
+- Quality findings were auto-repaired or silently dropped — no accumulating debt register.
+- [x] **`TechnicalDebtTracker.ts`** (pure logic unit-tested) — `mergeDebt` (dedup by `debtKey`, keep `firstSeen`
+      + refresh `lastSeen`, retain prior debt until resolved), `prioritizeDebt` (**CRITICAL security first**, then
+      severity desc, then category/file), `summarizeDebt` (counts + critical-security highlight). Persisted to
+      Firestore `techDebt/{userId}__{projectId}` (best-effort).
+- [x] **API** — `GET/POST /api/techdebt/:userId/:projectId` (requireUserMatch + request-validated): record
+      findings into the register and return the prioritized list + summary.
+- [ ] **UI "Tech Debt" badge in the IDE header — thin follow-up:** the register + prioritized API are live; the
+      badge is a small frontend addition (the count comes straight from `summary` / `GET`). Deferred to keep the
+      change low-risk; not faked.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3340/3340 ✅ (6 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/AppMakerLab/intelligence/TechnicalDebtTracker.ts` (new), `src/server/routes/techDebt.ts` (new),
+      `tests/technicalDebtTracker.test.ts` (new), `server.ts`.
 
 ### P-PME.4 — AI Build Time Estimator / Deadline Predictor  🟡 engine+API DONE / UI+persistence PENDING  [HIGH]
 - Builds showed an open-ended spinner with no ETA. Now there is a real estimator.

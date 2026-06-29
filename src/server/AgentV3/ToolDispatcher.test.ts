@@ -202,6 +202,23 @@ describe('ToolDispatcher', () => {
     expect(res.content).toContain('empty or missing');
   });
 
+  it('generate_auth writes a dependency-free JWT module + middleware by default', async () => {
+    const res = await d.dispatch(call('generate_auth', {}), 'backend');
+    expect(res.is_error).toBe(false);
+    const jwt = act.files.get('src/server/auth/jwt.ts')!;
+    expect(jwt).toContain('export function signToken');
+    expect(jwt).toContain('export function verifyToken');
+    expect(act.files.get('src/middleware/authMiddleware.ts')).toContain('Bearer ');
+    expect(res.content).not.toContain('npm i'); // jwt path is dependency-free
+  });
+
+  it('generate_auth type=firebase emits client helpers and notes the install', async () => {
+    const res = await d.dispatch(call('generate_auth', { type: 'firebase' }), 'backend');
+    expect(res.is_error).toBe(false);
+    expect(act.files.get('src/lib/authClient.ts')).toContain("from 'firebase/auth'");
+    expect(res.content).toContain('npm i firebase');
+  });
+
   it('check_conventions reports violations with suggestions (analysis only, no write)', async () => {
     const res = await d.dispatch(
       call('check_conventions', {

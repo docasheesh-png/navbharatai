@@ -1582,6 +1582,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['dependency', 'package.json', 'missing module', 'cannot find module', 'npm install', 'missing dependency', 'undeclared package', 'import error', 'module not found', 'package missing', 'auto install', 'dep sync'],
   },
   {
+    id: 'app-sbom',
+    name: 'App SBOM + License Check',
+    path: 'Backend capability — POST /api/workspace/sbom (returns a Software Bill of Materials for your built app)',
+    description: `Generates a CycloneDX 1.5 Software Bill of Materials (SBOM) for an app you built on NavBharatAI, from that app's package-lock.json — a full list of every open-source dependency (name, version, purl, license). It also runs a LICENSE CHECK: it flags any strong-copyleft GPL/AGPL dependency your generated app pulled in (a real compliance risk if you ship commercially), and lists weak-copyleft (LGPL/MPL/EPL) ones for awareness. Dual licenses that offer a permissive option (e.g. "MIT OR GPL-3.0") are correctly treated as permissive. Useful for enterprise compliance, security audits, and supply-chain verification of what's actually inside the apps you create. (This is for the user's GENERATED apps; NavBharatAI's own SBOM is produced separately in CI.)`,
+    howToUse: 'Backend API: POST /api/workspace/sbom with the app\'s parsed package-lock.json as { packageLock }. Returns { sbom, copyleft: { strong[], weak[] }, componentCount, hasCopyleftRisk }. Optionally pass workspaceId + buildId to persist the SBOM.',
+    relatedFeatures: ['pro_chat', 'auto-dependency-sync'],
+    keywords: ['sbom', 'bill of materials', 'cyclonedx', 'license', 'gpl', 'agpl', 'copyleft', 'compliance', 'supply chain', 'dependencies', 'oss', 'open source license', 'license check', 'audit'],
+  },
+  {
     id: 'auto-test-generation',
     name: 'Auto Test Generation (Phase 17)',
     path: 'Pro Chat → Build any app → automatic (no user action needed)',

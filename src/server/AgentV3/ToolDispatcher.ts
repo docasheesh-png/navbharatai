@@ -38,6 +38,7 @@ import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
 import { generateObservability, type ObservabilityTarget } from '../AppMakerLab/generator/ObservabilityGenerator';
+import { generateBundleOptimization } from '../AppMakerLab/generator/BundleOptimizationGenerator';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
@@ -1235,6 +1236,41 @@ export class ToolDispatcher {
         if (written.length === 0) return 'generate_observability: nothing generated.';
         this.scheduleCheckpoint(`observability (${target})`);
         return `${summary}\n${written.join('\n')}\nWire each in with edit_file:\n${wiring.join('\n')}`;
+      }
+
+      case 'generate_bundle_optimization': {
+        let hasViteConfig = false;
+        try {
+          await this.actuator.readFile(this.workspaceId, 'vite.config.ts');
+          hasViteConfig = true;
+        } catch {
+          try {
+            await this.actuator.readFile(this.workspaceId, 'vite.config.js');
+            hasViteConfig = true;
+          } catch {
+            hasViteConfig = false;
+          }
+        }
+        const { files, manualChunksSnippet, summary } = generateBundleOptimization({ hasViteConfig });
+        const written: string[] = [];
+        for (const file of files) {
+          let kind: 'create' | 'modify' = 'create';
+          try {
+            await this.actuator.readFile(this.workspaceId, file.path);
+            kind = 'modify';
+          } catch {
+            kind = 'create';
+          }
+          await this.actuator.writeFile(this.workspaceId, file.path, file.content);
+          this.state?.recordFileChange({ path: file.path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(file.path, file.content);
+          written.push(`${kind === 'create' ? 'Created' : 'Updated'} ${file.path}`);
+        }
+        this.scheduleCheckpoint('bundle optimization');
+        const mergeNote = hasViteConfig
+          ? `\nMerge this into your vite.config.ts (inside defineConfig({ ... })):\n${manualChunksSnippet}`
+          : '';
+        return `${summary}\n${written.join('\n')}${mergeNote}`;
       }
 
       case 'check_conventions': {

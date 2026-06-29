@@ -1668,15 +1668,25 @@
 - [ ] **Still pending:** emit these files into the generated workspace as a post-generation step (build-path wiring — deferred).
 - **Files:** new `src/server/lib/DeployArtifactGenerator.ts` + `.test.ts`, new `src/server/routes/deployArtifacts.ts`, `server.ts`.
 
-### P-CGE.10 — Bundle Optimization Generators  ❌ MISSING  [MED]
-- Generated Vite+React apps use no bundle optimization. No code splitting, no lazy loading, no tree
-  shaking config. Production apps can have large initial bundles.
-- [ ] Add `BundleOptimizationGenerator.ts` — post-generation pass that:
-  - Injects `React.lazy()` + `Suspense` wrapping for all page-level components.
-  - Adds `vite.config.ts` `build.rollupOptions.output.manualChunks` for vendor splitting.
-  - Adds `import.meta.env.PROD` guards to remove dev-only code.
+### P-CGE.10 — Bundle Optimization Generators  ✅ DONE (2026-06-29) · 🔌 WIRED
+- Generated Vite+React apps used no bundle optimization — no code-splitting, no vendor chunking — so
+  production apps had large initial bundles.
+- [x] **`BundleOptimizationGenerator.ts`** (pure, unit-tested) — `generateBundleOptimization({ hasViteConfig })`
+  emits a real `lazyWithRetry` helper (React.lazy route splitting + one-time reload on a stale chunk) and a
+  Rollup `manualChunks` config splitting node_modules into `react-vendor`/`vendor`. Writes a complete
+  optimized `vite.config.ts` only when none exists; otherwise returns the manualChunks snippet to merge.
+- [x] **Wired as the `generate_bundle_optimization` AgentV3 tool** (types.ts + ToolCatalog +
+  `CATALOG_TOOL_NAMES` + AgentRegistry `BUILD_TOOLS` + ToolDispatcher case + systemPrompt nudge +
+  ToolDispatcher tests): the agent writes the helper + (conditionally) the config, never clobbering an
+  existing vite.config, and the result tells it to wrap page components with `lazyWithRetry` inside `<Suspense>`.
+- **Honest scope:** `React.lazy`+`Suspense` wrapping of the app's OWN page components and any
+  `import.meta.env.PROD` dev-code stripping are left to the agent via `edit_file` (auto-rewriting the user's
+  components would risk breaking them) — the helper + config + nudge make that a one-line wrap per route.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3635 passing (8 new) ✅ · `test:coverage` exit 0 ·
+  `build` ✅ · `boot:check` PASS. AppKnowledgeBase updated (AUTO BUNDLE OPTIMIZATION).
 - **Files:** new `src/server/AppMakerLab/generator/BundleOptimizationGenerator.ts`,
-  `src/server/AppMakerLab/generator/FrontendGenerationEngine.ts`.
+  `tests/bundleOptimizationGenerator.test.ts`; wired in `types.ts`, `ToolCatalog.ts`, `AgentRegistry.ts`,
+  `ToolDispatcher.ts`, `systemPrompt.ts`, `ToolDispatcher.test.ts`, `AppKnowledgeBase.ts`.
 
 ### P-CGE.11 — Observability Instrumentation Generator  ✅ DONE (2026-06-29) · 🔌 WIRED
 - Generated apps shipped as black boxes — no request logging, no client error capture, no health probe.

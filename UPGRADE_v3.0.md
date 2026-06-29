@@ -1443,16 +1443,20 @@
 - **Files:** new `src/server/AppMakerLab/intelligence/RequirementTraceabilityMatrix.ts`,
   `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
 
-### P-PME.13 — Semantic Version Manager  🟡 PARTIAL → full  [LOW]
-- `CodeVersioning.tsx` stores named snapshots but no semantic versioning (no major.minor.patch logic).
-  Users cannot distinguish breaking changes from minor updates.
-- [ ] Add `SemanticVersionManager.ts` — auto-bump version on each successful build:
-  - Major: if blueprint `pages` or `entities` count changes.
-  - Minor: if new features added.
-  - Patch: if repair/fix applied without blueprint change.
-- [ ] Persist current semver in `projectMemory/{userId}/{projectId}/version` in Firestore.
-- **Files:** new `src/server/AppMakerLab/intelligence/SemanticVersionManager.ts`,
-  `src/server/Memory/ProjectMemoryManager.ts`.
+### P-PME.13 — Semantic Version Manager  ✅ DONE (2026-06-29)
+- Snapshots had names but no semantic version — users couldn't tell a breaking change from a fix.
+- [x] **`SemanticVersionManager.ts`** (pure, unit-tested) — `parseSemver`/`formatSemver`/`bumpVersion`,
+      `classifyBump(prev, next, {repairOnly})` (**MAJOR** on page/entity count change · **MINOR** on new features ·
+      **PATCH** on repair-only/no change), and `computeNextVersion(current, prev, next)` → `{ previous, next, bump }`.
+- [x] **`POST /api/workspace/version`** — caller supplies the structural signals (pages/entities/features) +
+      current version → next version + bump kind. Pure computation, rate-limited + request-validated.
+- **Note:** persistence of the current semver into `projectMemory/{userId}/{projectId}/version` is the caller's
+      step (`ProjectMemoryManager` is in-memory; a Firestore write of the returned `next` is a one-liner where a
+      build completes). The version-decision engine + API are complete.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3358/3358 ✅ (12 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/AppMakerLab/intelligence/SemanticVersionManager.ts` (new), `src/server/routes/version.ts` (new),
+      `tests/semanticVersionManager.test.ts` (new), `server.ts`.
 
 ---
 

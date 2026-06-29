@@ -1887,10 +1887,20 @@
 - **Files:** new `src/lib/consent.ts`, new `src/components/ConsentBanner.tsx`, `src/main.tsx`, `src/lib/analytics.ts`,
   `src/server/AppContext/AppKnowledgeBase.ts`, `tests/consent.test.ts` (new).
 
-### P-UX.2 — Skeleton Screens (per-component)  🟡 PARTIAL → full  [HIGH]
-- Global Suspense spinner exists, but individual list/card components have no shimmer placeholders.
-- [ ] Add skeleton variants for: chat history list, template cards, file tree, billing view.
-- **Files:** new `src/components/ui/Skeleton.tsx`, applied in 4-6 component views.
+### P-UX.2 — Skeleton Screens (per-component)  ✅ DONE (2026-06-29) · 🔌 UI-WIRED
+- Global Suspense spinner existed, but individual list/card components had no shimmer placeholders.
+- [x] **Reusable primitives** — new `src/components/ui/Skeleton.tsx`: `Skeleton`, `SkeletonText`,
+      `SkeletonCard`, `SkeletonList`, `SkeletonGrid`, `SkeletonTree`. Pure presentational, Tailwind-only,
+      `aria-hidden`, zero deps — adoptable by any view.
+- [x] **Applied to the genuinely-async loading states** (where a real fetch was showing a bare spinner):
+      • Chat history list (`HistoryView.tsx`) — initial Firestore load now shows a `SkeletonList` instead of a
+        centered spinner. • Build history tab (`FilesPanel.tsx`) — `loadingHistory` now shows a `SkeletonList`.
+- [x] **Honest scope note** — template cards (static constants, no async load) and the file tree / billing
+      balance (rendered from props with fallback values, no async loading state) were intentionally NOT given
+      skeletons: a shimmer over already-present data would be fake (real-features rule). The primitive is in
+      place for those views the moment they gain a real async load.
+- **Verification:** `tsc` (fe) ✅ · `build` ✅ · `vitest run` 3451/3451 ✅ · `test:coverage` exit 0 · `boot:check` PASS.
+- **Files:** new `src/components/ui/Skeleton.tsx`, `src/components/HistoryView.tsx`, `src/components/panels/FilesPanel.tsx`.
 
 ### P-UX.3 — One-Click AI Fix after Error  ❌ MISSING  [HIGH]
 - Console errors are tracked (`window.error → /api/logs/error`) but the UI offers no "Fix it" button.

@@ -10,7 +10,7 @@ import {
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
 import { PreviewSurface } from './PreviewSurface';
-import type { AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
+import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
 import { db, sanitizeFirestoreData, auth } from '../../App';
 
 /** Best-effort Firebase ID-token header so the server can verify workspace ownership (IDOR guard).
@@ -769,7 +769,9 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
               </div>
             )}
             {convo.map((m, i) => <Bubble key={i} msg={m} />)}
-            {running && <WorkingIndicator />}
+            {(running || state.activity.length > 0) && (
+              <WorkingIndicator activity={state.activity} todos={state.todos} running={running} />
+            )}
             {(error || state.error) && (
               <div className="flex items-start gap-2 px-3 py-2 bg-red-950/60 text-red-300 text-xs rounded">
                 <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{error || state.error}</span>
@@ -1196,22 +1198,112 @@ function WavingTiranga({ size = 16 }: { size?: number }) {
   );
 }
 
+/** Pick a small icon for an activity entry from its kind / action verb. */
+function activityIcon(e: ActivityEntry): string {
+  if (e.kind === 'file') return '📄';
+  if (e.kind === 'agent') return '👥';
+  if (e.kind === 'preview') return '🌐';
+  if (e.kind === 'plan') return '🗒️';
+  // tool — derive from the human verb so reading/writing/running each read distinctly.
+  if (/^writing/.test(e.text)) return '✍️';
+  if (/^editing/.test(e.text)) return '✏️';
+  if (/^reading/.test(e.text)) return '📖';
+  if (/^running/.test(e.text)) return '⌨️';
+  if (/^searching|^listing/.test(e.text)) return '🔍';
+  if (/^recalling/.test(e.text)) return '🧠';
+  if (/^evaluating/.test(e.text)) return '🔬';
+  return '⚙️';
+}
+
+function fmtClock(ts: number): string {
+  try {
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+function fmtElapsed(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
+}
+
 /**
- * Live "working…" indicator with an elapsed-time counter. The ticking seconds prove
- * the build is alive even during a long step that emits no narration, so it never
- * looks frozen. Mounts fresh on each run (rendered only while running).
+ * Live, Claude-style "working…" indicator. Collapsed it shows the CURRENT action (the latest real
+ * engine activity) + elapsed time + a chevron; expanded it reveals the full ordered activity log
+ * (every tool call, file write, command, agent spawn, preview) plus todo progress — so the user can
+ * see exactly what the build is doing instead of a frozen-looking "working… 12s". All entries are
+ * REAL engine events (state.activity); no synthetic activity. Renders while running, and stays as a
+ * collapsed "view activity" expander after the build finishes so the work is reviewable.
  */
-function WorkingIndicator() {
-  const [secs, setSecs] = useState(0);
+function WorkingIndicator({ activity, todos, running }: { activity: ActivityEntry[]; todos: TodoItem[]; running: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const mountTsRef = useRef(Date.now());
+  const logRef = useRef<HTMLDivElement | null>(null);
+
+  // Tick the elapsed clock only while running (a finished build's time is frozen).
   useEffect(() => {
-    const t = setInterval(() => setSecs((s) => s + 1), 1000);
+    if (!running) return;
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(t);
-  }, []);
-  const label = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
+  }, [running]);
+
+  // Auto-scroll the expanded log to the newest entry (like a terminal/chat).
+  useEffect(() => {
+    if (expanded && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [expanded, activity.length]);
+
+  const startTs = activity.length ? activity[0].ts : mountTsRef.current;
+  const endTs = running ? nowTick : (activity.length ? activity[activity.length - 1].ts : startTs);
+  const elapsed = fmtElapsed(endTs - startTs);
+
+  // Current action: the newest still-in-flight tool, else the newest entry.
+  const current = [...activity].reverse().find((a) => a.active) ?? activity[activity.length - 1];
+  const headText = running
+    ? (current ? current.text : 'working…')
+    : `Done · ${activity.length} step${activity.length === 1 ? '' : 's'}`;
+
+  const doneTodos = todos.filter((t) => t.status === 'done').length;
+
   return (
-    <div className="flex items-center gap-2 text-xs text-zinc-500">
-      <WavingTiranga size={16} />
-      <span>working… {label}</span>
+    <div className="text-xs text-zinc-500 w-full max-w-[90%]">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex items-center gap-2 w-full text-left hover:text-zinc-300 transition-colors"
+        aria-expanded={expanded}
+        title={expanded ? 'Hide activity' : 'Show what the build is doing'}
+      >
+        {running ? <WavingTiranga size={16} /> : <span className="text-emerald-400">✓</span>}
+        <span className="truncate flex-1">{running && current ? activityIcon(current) + ' ' : ''}{headText}</span>
+        {running && current?.active && <span className="inline-block w-1 h-3 bg-current animate-pulse shrink-0" />}
+        <span className="shrink-0 tabular-nums text-zinc-600">{elapsed}</span>
+        {activity.length > 0 && (expanded ? <ChevronDown className="w-3.5 h-3.5 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0" />)}
+      </button>
+
+      {expanded && activity.length > 0 && (
+        <div className="mt-1.5 ml-1 border-l border-zinc-800 pl-2.5">
+          <div ref={logRef} className="max-h-52 overflow-auto space-y-1 pr-1">
+            {activity.map((a) => (
+              <div key={a.id} className="flex items-start gap-2 leading-relaxed">
+                <span className="text-zinc-600 tabular-nums shrink-0">{fmtClock(a.ts)}</span>
+                <span className="shrink-0">{activityIcon(a)}</span>
+                <span className={`flex-1 break-words ${a.active ? 'text-zinc-300' : a.ok === false ? 'text-red-400' : 'text-zinc-500'}`}>
+                  {a.text}
+                  {a.active && <span className="inline-block w-1 h-3 ml-1 bg-current animate-pulse align-middle" />}
+                  {!a.active && a.ok === false && ' ✗'}
+                </span>
+              </div>
+            ))}
+          </div>
+          {todos.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-zinc-800 text-zinc-600">
+              Tasks: {doneTodos}/{todos.length} done
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

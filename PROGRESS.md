@@ -5593,3 +5593,22 @@ scraper (hundreds/sec) is still caught. Bot-UA detection + static limiters uncha
 map also clears on the Cloud Run redeploy, so the deploy itself releases any currently-blocked users.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3399/3399 PASS (+3 isGuardedPath), boot:check PASS.
+
+## 2026-06-29 — FEATURE: Claude-style live "working…" activity indicator (expandable)
+
+The old WorkingIndicator showed only "🇮🇳 working… 12s" — a timer with no insight, so a long step
+looked frozen and the user couldn't tell what the build was doing. Replaced it with a Claude-style
+expandable indicator driven entirely by REAL engine events already in client state (no new backend):
+  • Collapsed: the CURRENT live action (latest in-flight tool, e.g. "✍️ writing src/App.tsx",
+    "⌨️ running: npm install") + a live cursor + elapsed timer + a chevron.
+  • Expanded (click): a scrollable, auto-scrolling step-by-step activity log — every tool call, file
+    write, command, search, agent spawn and the preview publish — each with a timestamp and ✓/✗, plus
+    a "Tasks N/M done" line from the todos. Click again to collapse.
+  • After the build finishes the same line persists as "✓ Done · N steps" so the work stays reviewable
+    (expand to see exactly what happened); a failed step shows in red.
+Implementation: new ActivityEntry type + activity[] on AgentV3ClientState (capped 300), populated in
+the reducer from tool_call (in-flight, matched to its tool_result by callId → ✓/✗), file_changed,
+agent_spawned and preview events. Resets per turn via initialAgentV3State(). Frontend-only, additive.
+AppKnowledgeBase agentv3_builder entry updated with the LIVE ACTIVITY capability + keywords.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3402/3402 PASS (+3 activity-feed tests), boot:check PASS.

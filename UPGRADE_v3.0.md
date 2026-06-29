@@ -1258,18 +1258,17 @@
   (build-path wiring — deferred to avoid touching the live AppMakerLab/AgentV3 path unattended).
 - **Files:** new `src/server/lib/ConventionEngine.ts` + `.test.ts`, new `src/server/routes/convention.ts`, `server.ts`.
 
-### P-CGE.4 — Test Generation Suite  ❌ MISSING  [HIGH]
-- No test code is generated for any generated app. `QualityEvaluationEngine` evaluates tests but nothing
-  creates them. `test_generator_audit.ts` is an audit file only.
-  *(Note: P-AI.7 captures the AI agent role; this item is the concrete generation engine.)*
-- [ ] Add `TestGenerationEngine.ts` (specialised `IGenerationEngine` subtype) covering:
-  - **Unit tests**: Vitest `describe/it/expect` blocks for generated services/hooks.
-  - **Integration tests**: API route tests using `supertest` + express app.
-  - **Snapshot tests**: React component snapshot with `@testing-library/react`.
-  - **Mock Generator**: auto-generate `__mocks__/` for injected dependencies.
-- [ ] Register in `EngineRegistry` as `EngineType.TEST`; trigger after successful build.
-- **Files:** new `src/server/AppMakerLab/generator/TestGenerationEngine.ts`,
-  `src/server/AppMakerLab/generator/EngineRegistry.ts`,
+### P-CGE.4 — Test Generation Suite  🟡 engine+API DONE / snapshot+wiring PENDING  [HIGH]
+- No test code was generated for built apps. Now there is a real test-scaffold generator.
+- [x] Added `src/server/lib/TestSkeletonGenerator.ts` — pure, dependency-free: `generateUnitTest` (Vitest
+  `describe/it/expect` per function, awaits async, identifier-sanitised against injection), `generateIntegrationTest`
+  (supertest cases per route), and `generateMock` (vi.fn mock objects), + `generateTests`. Honest: these are
+  runnable SKELETONS — each `it` has a smoke assertion + an explicit `// TODO: assert real behaviour`; the generator
+  never emits a fake passing assertion that pretends to verify logic. 8 unit tests.
+- [x] Added `POST /api/testgen` (stateless): `{ unit?, integration?, mock? }` → `{ unit?, integration?, mock? }` scaffolds.
+- [ ] **Still pending:** React component snapshot tests (`@testing-library/react`), `EngineRegistry` `EngineType.TEST`
+  registration, and triggering after a successful build (build-path wiring — deferred).
+- **Files:** new `src/server/lib/TestSkeletonGenerator.ts` + `.test.ts`, new `src/server/routes/testgen.ts`, `server.ts`.
   `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
 
 ### P-CGE.5 — OpenAPI / Contract-First API Generator  🟡 OpenAPI DONE / GraphQL+wiring PENDING  [HIGH]

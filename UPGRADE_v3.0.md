@@ -1762,14 +1762,20 @@
 - [ ] Expose via `/api/admin/trace/:jobId` (admin only) for debugging.
 - **Files:** new `src/server/AgentV3/DecisionTraceManager.ts`, `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
 
-### P-AI.10 — Adversarial Input / Abuse Detection  🟡 PARTIAL → full  [MED]
-- `CommandGovernance.ts` blocks shell commands. `UntrustedContent.ts` fences prompt injection.
-  Rate limiter throttles requests. No dedicated abuse pattern detection (bulk generation abuse,
-  adversarial prompts to extract training data, prompt-stuffing to bypass governance).
-- [ ] Add `AbuseDetector.ts` — track: requests/minute per userId, unusual prompt patterns (very long
-  prompts, high repetition, requests for "ignore above" variants), generation cost spikes.
-- [ ] On detection: rate-limit tier drop + Firestore `abuseLedger/{userId}` entry + audit log.
-- **Files:** new `src/server/AgentV3/AbuseDetector.ts`, `server.ts` (inject pre-AI call).
+### P-AI.10 — Adversarial Input / Abuse Detection  ✅ DONE (2026-06-29) · 🔌 WIRED
+- Added a dedicated PROMPT-pattern abuse classifier on top of the existing defenses (CommandGovernance,
+  UntrustedContent fencing, rate limiter).
+- [x] **`AbuseDetector.ts`** (pure `assessPrompt`, unit-tested) — flags jailbreak/override phrasing
+      ("ignore previous instructions", "developer mode", DAN, "no restrictions"), system-prompt **extraction**
+      ("print your system prompt", "repeat the words above"), **prompt-stuffing** (one line repeated ≥10× and
+      dominating), and **excessive length** → 0–100 score + `isAbusive` (distinct-kind weighting, no double-count).
+- [x] **Wired into the agent input path** (`routes/agentv3.ts`) — every build prompt is assessed; an abusive one
+      emits an `ABUSE_DETECTED` audit (severity warn) + best-effort `abuseLedger/{userId}` Firestore entry
+      (`recordAbuse`). **Non-blocking by design** — a long/edgy prompt isn't hard-blocked (that would break real
+      users); the actual enforcement remains UntrustedContent fencing + CommandGovernance downstream.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3384/3384 ✅ (8 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/AgentV3/AbuseDetector.ts` (new), `src/server/routes/agentv3.ts`, `tests/abuseDetector.test.ts` (new).
 
 ### P-AI.11 — Dedicated Log / Stack Trace Intelligence  ❌ MISSING  [LOW]
 - Errors are classified by `FailureClassifier.ts` (pattern matching). No dedicated log parser that

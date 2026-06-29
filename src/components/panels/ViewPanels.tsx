@@ -1,5 +1,6 @@
 import React, { lazy } from 'react';
 import { PreviewPanel } from '../ide/PreviewPanel';
+import { PreviewSurface } from '../agentv3/PreviewSurface';
 import { FilesPanel } from './FilesPanel';
 import { ZipSizeModal } from '../ide/ZipSizeModal';
 import type { ZipSizeModalVariant } from '../ide/ZipSizeModal';
@@ -109,6 +110,9 @@ export interface ViewPanelsProps {
   setShowAuth: (v: boolean) => void;
   zipSizeModal: { variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null;
   setZipSizeModal: (v: { variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null) => void;
+  /** The v3.0 build's live preview URL + workspace, lifted from AgentV3Panel so the main "Preview"
+   *  menu shows the SAME working v3.0 preview instead of the retired v2.0 generatedCode. */
+  v3Preview?: { previewUrl?: string; workspaceId?: string };
 }
 
 export function ViewPanels({
@@ -123,7 +127,7 @@ export function ViewPanels({
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
   downloadAppZip, setActiveFile, wallet, setShowVishwakarmaUnlockModal, setShowAuth,
-  zipSizeModal, setZipSizeModal,
+  zipSizeModal, setZipSizeModal, v3Preview,
 }: ViewPanelsProps) {
   return (
     <>
@@ -184,20 +188,31 @@ export function ViewPanels({
 
       {activeView === 'preview' && (
         <div className="flex-1 h-full overflow-hidden">
-          <PreviewPanel
-            files={files}
-            onRun={() => updatePreview(files)}
-            generatedCode={generatedCode}
-            previewHistory={previewHistory}
-            onRestoreHistory={(html: string) => setGeneratedCode(html)}
-            onHtmlChange={(html: string) => setGeneratedCode(html)}
-            onGoPro={() => toggleTab('nbi_pro_chat')}
-            onEditWithAI={(hint: string) => {
-              setMode('build');
-              if (hint) setProInput(hint);
-              toggleTab('nbi_pro_chat');
-            }}
-          />
+          {v3Preview?.workspaceId ? (
+            // A v3.0 build is active → show the SAME working v3.0 preview (live URL or in-browser
+            // build of the saved files), not the retired v2.0 generatedCode the v3 engine never writes.
+            <PreviewSurface
+              url={v3Preview.previewUrl}
+              workspaceId={v3Preview.workspaceId}
+              userId={user?.uid}
+              email={user?.email ?? undefined}
+            />
+          ) : (
+            <PreviewPanel
+              files={files}
+              onRun={() => updatePreview(files)}
+              generatedCode={generatedCode}
+              previewHistory={previewHistory}
+              onRestoreHistory={(html: string) => setGeneratedCode(html)}
+              onHtmlChange={(html: string) => setGeneratedCode(html)}
+              onGoPro={() => toggleTab('nbi_pro_chat')}
+              onEditWithAI={(hint: string) => {
+                setMode('build');
+                if (hint) setProInput(hint);
+                toggleTab('nbi_pro_chat');
+              }}
+            />
+          )}
         </div>
       )}
 

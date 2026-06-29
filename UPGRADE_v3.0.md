@@ -1531,18 +1531,23 @@
   (build-path wiring — deferred to avoid touching the live AppMakerLab/AgentV3 path unattended).
 - **Files:** new `src/server/lib/ConventionEngine.ts` + `.test.ts`, new `src/server/routes/convention.ts`, `server.ts`.
 
-### P-CGE.4 — Test Generation Suite  🟡 engine+API DONE / snapshot+wiring PENDING  [HIGH]
-- No test code was generated for built apps. Now there is a real test-scaffold generator.
+### P-CGE.4 — Test Generation Suite  ✅ DONE (2026-06-29) · 🔌 WIRED  [snapshot tests deferred]
+- No test code was generated for built apps. Now there is a real test-scaffold generator, wired into the
+  live v3.0 build as an agent tool.
 - [x] Added `src/server/lib/TestSkeletonGenerator.ts` — pure, dependency-free: `generateUnitTest` (Vitest
   `describe/it/expect` per function, awaits async, identifier-sanitised against injection), `generateIntegrationTest`
   (supertest cases per route), and `generateMock` (vi.fn mock objects), + `generateTests`. Honest: these are
   runnable SKELETONS — each `it` has a smoke assertion + an explicit `// TODO: assert real behaviour`; the generator
   never emits a fake passing assertion that pretends to verify logic. 8 unit tests.
 - [x] Added `POST /api/testgen` (stateless): `{ unit?, integration?, mock? }` → `{ unit?, integration?, mock? }` scaffolds.
-- [ ] **Still pending:** React component snapshot tests (`@testing-library/react`), `EngineRegistry` `EngineType.TEST`
-  registration, and triggering after a successful build (build-path wiring — deferred).
-- **Files:** new `src/server/lib/TestSkeletonGenerator.ts` + `.test.ts`, new `src/server/routes/testgen.ts`, `server.ts`.
-  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+- [x] **BUILD-PATH WIRING (live v3.0)** — new `generate_tests` AgentV3 tool (ToolName + ToolCatalog + BUILD_TOOLS
+  + ToolDispatcher handler): the agent passes a module + its exported functions; the tool writes a runnable Vitest
+  unit-test skeleton (smoke assertion + explicit `// TODO: assert real behaviour` per function — never a faked pass)
+  into the workspace. systemPrompt nudges the agent to use it to seed tests when evaluate flags coverage gaps.
+  2 dispatcher tests added (honest TODO present; required-args validation).
+- [ ] **Still deferred:** React component snapshot tests (`@testing-library/react`) + auto-trigger after build.
+- **Files:** `src/server/lib/TestSkeletonGenerator.ts`, `src/server/AgentV3/{types,ToolCatalog,AgentRegistry,ToolDispatcher,systemPrompt}.ts`,
+  `src/server/AgentV3/ToolDispatcher.test.ts`, `src/server/routes/testgen.ts`.
 
 ### P-CGE.5 — OpenAPI / Contract-First API Generator  ✅ DONE (2026-06-29) · 🔌 WIRED  [GraphQL deferred]
 - Backend generation produced route stubs but no API contract. Now there is a real OpenAPI generator,

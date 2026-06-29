@@ -36,6 +36,7 @@ import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
 import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
+import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
@@ -1175,6 +1176,37 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — API reference for ${routes.length} route(s).`;
+      }
+
+      case 'generate_tests': {
+        const path = optStr(input, 'path');
+        const modulePath = optStr(input, 'module_path');
+        if (!path || !modulePath) {
+          return 'generate_tests: both "path" (output test file) and "module_path" (import specifier) are required.';
+        }
+        const rawFns = (input as Record<string, unknown>)?.functions;
+        if (!Array.isArray(rawFns) || rawFns.length === 0) {
+          return 'generate_tests: functions array is empty or missing. Pass the exported functions to scaffold: [{ name, params?, async? }].';
+        }
+        const functions: FunctionDef[] = rawFns.map((f: unknown) => {
+          if (typeof f !== 'object' || f === null) throw new Error('Each function entry must be an object with a name.');
+          const obj = f as Record<string, unknown>;
+          const params = Array.isArray(obj.params) ? obj.params.filter((p): p is string => typeof p === 'string') : undefined;
+          return { name: reqStr(obj, 'name'), params, async: obj.async === true };
+        });
+        const content = generateUnitTest({ modulePath, functions });
+        let kind: 'create' | 'modify' = 'create';
+        try {
+          await this.actuator.readFile(this.workspaceId, path);
+          kind = 'modify';
+        } catch {
+          kind = 'create';
+        }
+        await this.actuator.writeFile(this.workspaceId, path, content);
+        this.state?.recordFileChange({ path, kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+        this.scheduleCheckpoint(`${kind} ${path}`);
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — Vitest skeleton for ${functions.length} function(s). Fill in the TODO assertions to verify real behaviour.`;
       }
 
       case 'update_preview': {

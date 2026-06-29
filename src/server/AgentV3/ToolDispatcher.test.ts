@@ -117,6 +117,29 @@ describe('ToolDispatcher', () => {
     expect(act.files.has('API.md')).toBe(false);
   });
 
+  it('generate_tests writes a Vitest skeleton with an honest TODO (no faked assertion)', async () => {
+    const res = await d.dispatch(
+      call('generate_tests', {
+        path: 'src/services/auth.test.ts',
+        module_path: './auth',
+        functions: [{ name: 'login', params: ['email', 'password'], async: true }],
+      }),
+      'qa',
+    );
+    expect(res.is_error).toBe(false);
+    const t = act.files.get('src/services/auth.test.ts')!;
+    expect(t).toContain("import { describe, it, expect } from 'vitest';");
+    expect(t).toContain("from './auth'");
+    expect(t).toContain('login');
+    expect(t).toContain('await login'); // async awaited
+    expect(t).toContain('TODO: assert real behaviour'); // honest skeleton, not a fake pass
+  });
+
+  it('generate_tests requires path, module_path and functions', async () => {
+    expect((await d.dispatch(call('generate_tests', { module_path: './a', functions: [{ name: 'x' }] }), 'qa')).content).toContain('required');
+    expect((await d.dispatch(call('generate_tests', { path: 'a.test.ts', module_path: './a', functions: [] }), 'qa')).content).toContain('empty or missing');
+  });
+
   it('write_file on an existing path records a modify and nudges toward edit_file', async () => {
     act.files.set('a.ts', 'old');
     const res = await d.dispatch(call('write_file', { path: 'a.ts', content: 'new' }));

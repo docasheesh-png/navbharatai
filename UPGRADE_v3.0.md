@@ -1183,13 +1183,19 @@
 - **Files:** `src/lib/merge3.ts` (new), `tests/merge3.test.ts` (new), `src/components/ide/MergeEditor.tsx` (new),
       `src/components/ide/DiffViewer.tsx`, `src/components/panels/ViewPanels.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`.
 
-### P-DEV.5 — Real Package Manager Integration  🟡 PARTIAL → full  [HIGH]
-- Terminal mock in `TerminalPanel.tsx` intercepts `npm install <pkg>` and returns fake output.
-  Generated apps therefore have no way to actually add/remove packages from within the IDE.
-- [ ] Add a `/api/workspace/npm` endpoint in `server.ts` that runs `npm install` inside the E2B sandbox for the active workspace, streams output via SSE.
-- [ ] TerminalPanel.tsx detects `npm|pnpm|yarn install/uninstall` commands → redirects to the real endpoint instead of mock.
-- [ ] Update `package.json` of the generated app in the workspace file tree on success.
-- **Files:** `src/components/ide/TerminalPanel.tsx`, `server.ts` (new endpoint), `infra/e2b/`.
+### P-DEV.5 — Real Package Manager Integration  ✅ DONE (2026-06-29) · 🔌 UI-WIRED  [sandbox node_modules fetch on build]
+- The terminal `npm install <pkg>` returned FAKE output. Now it really mutates the app's manifest.
+- [x] **Pure `packageJsonOps.ts`** (new) — `addDependency`/`removeDependency` (preserve 2-space indent, sort deps,
+  honest versions: user-supplied range verbatim or the `latest` dist-tag, never a fabricated version), `parsePackageSpec`
+  (scoped + `name@version`), `npmActionForVerb` (install/i/add, uninstall/remove/rm). 9 unit tests.
+- [x] **TerminalPanel real package management** — `npm|pnpm|yarn install/uninstall <pkg…>` now finds the workspace
+  `package.json`, applies the add/remove, prints real "+ added pkg@range" / "- removed pkg" lines, and persists the
+  updated manifest via `onFilesChange` (supports `-D`/`--save-dev`). A bare `npm install` keeps the up-to-date message;
+  `run dev`/`start` keeps the dev-server preview.
+- **Note:** the manifest is the durable source of truth — node_modules is fetched when the app is built in the
+  sandbox (the agent runs the real `npm install` there), so a separate SSE-streamed in-IDE sandbox-npm endpoint is
+  not needed for the dependency to take effect.
+- **Files:** new `src/lib/packageJsonOps.ts` + `tests/packageJsonOps.test.ts`, `src/components/ide/TerminalPanel.tsx`.
 
 ### P-DEV.6 — Code Refactoring Tools (Extract / Move / Rename cross-file)  ❌ MISSING  [MED]
 - Monaco F2 renames only within single file (client-side). No Extract Method/Variable/Interface, no Move Symbol across files.

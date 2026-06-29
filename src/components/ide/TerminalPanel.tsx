@@ -4,6 +4,7 @@ import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 import { cn } from '../../lib/utils';
 import { X, Trash2, Maximize2, Minimize2, AlertTriangle, CornerDownLeft, Search, EyeOff, ShieldCheck, Cpu, TerminalSquare, Play, HelpCircle, Code2, AlertCircle } from 'lucide-react';
+import { parsePackageSpec, addDependency, removeDependency, npmActionForVerb } from '../../lib/packageJsonOps';
 
 // Helper to apply robust xterm safeguards and prevent renderer value dimensions TypeError.
 const applyXtermSafeguards = (term: any) => {
@@ -1046,9 +1047,11 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
         term.writeln(args.join(' '));
         break;
 
-      case 'npm': {
+      case 'npm':
+      case 'pnpm':
+      case 'yarn': {
         const action = args.join(' ');
-        if (action === 'run dev' || action === 'start') {
+        if (action === 'run dev' || action === 'start' || action === 'dev') {
           term.writeln('\x1b[1;33m> navbharat-app@1.0.0 dev\x1b[0m');
           term.writeln('\x1b[1;33m> vite --host 0.0.0.0 --port 3000\x1b[0m');
           term.writeln('');
@@ -1058,6 +1061,35 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
           term.writeln('  ➜  \x1b[1;37mNetwork:\x1b[0m \x1b[1;36mhttp://0.0.0.0:3000/\x1b[0m');
           term.writeln('');
           term.writeln('\x1b[1;30mPress Ctrl+C to terminate the process... (Simulated)\x1b[0m');
+          break;
+        }
+        // P-DEV.5 — REAL package management: install/uninstall actually edits the workspace
+        // package.json (the manifest is the durable source of truth; node_modules is fetched when the
+        // app is built in the sandbox). Falls back to the previous message for a bare install.
+        const pkgAction = npmActionForVerb(args[0] || '');
+        const specs = args.slice(1).filter((a) => a && !a.startsWith('-'));
+        if (pkgAction && specs.length > 0) {
+          const pkgKey = Object.keys(files).find((k) => k === 'package.json' || k.endsWith('/package.json'));
+          if (!pkgKey) {
+            term.writeln('\x1b[1;31mnpm: no package.json found in this project.\x1b[0m');
+            break;
+          }
+          let pkgText = files[pkgKey];
+          const changed: string[] = [];
+          for (const spec of specs) {
+            const parsed = parsePackageSpec(spec);
+            if (!parsed) continue;
+            const isDev = args.includes('--save-dev') || args.includes('-D');
+            const r = pkgAction === 'install'
+              ? addDependency(pkgText, parsed.name, parsed.version, isDev)
+              : removeDependency(pkgText, parsed.name);
+            term.writeln(r.ok ? `\x1b[1;32m${r.message}\x1b[0m` : `\x1b[1;31mnpm: ${r.message}\x1b[0m`);
+            if (r.ok) { pkgText = r.text; changed.push(parsed.name); }
+          }
+          if (changed.length > 0 && onFilesChange) {
+            onFilesChange({ ...files, [pkgKey]: pkgText });
+            term.writeln(`\x1b[1;30mUpdated ${pkgKey}. Run a build to install into the sandbox.\x1b[0m`);
+          }
         } else {
           term.writeln('\x1b[1;33mFetching package dependencies...\x1b[0m');
           setTimeout(() => term.writeln('\x1b[1;32mAll dependencies up-to-date. Done.\x1b[0m'), 850);

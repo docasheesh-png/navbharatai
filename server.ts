@@ -52,6 +52,7 @@ import { registerObservabilityRoutes } from './src/server/routes/observability';
 import { registerReleaseNotesRoutes } from './src/server/routes/releaseNotes';
 import { registerConventionRoutes } from './src/server/routes/convention';
 import { registerBuildEstimateRoutes } from './src/server/routes/buildEstimate';
+import { registerDocsRoutes } from './src/server/routes/docs';
 import { errorTracker, installGlobalErrorHandlers } from './src/server/observability/ErrorTracker';
 import { registerHealthRoutes, markServerReady } from './src/server/routes/health';
 import { registerWarmRoute } from './src/server/routes/warm';
@@ -508,6 +509,8 @@ setInterval(() => {
   registerConventionRoutes(app);
   // P-PME.4 — build-time estimate / deadline prediction (stateless complexity+history → ETA).
   registerBuildEstimateRoutes(app);
+  // P-CGE.2 — documentation generators (stateless blueprint/routes/signatures → README/API/TSDoc).
+  registerDocsRoutes(app);
   registerSecretsRoutes(app);
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).

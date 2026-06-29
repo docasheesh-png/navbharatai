@@ -1231,15 +1231,17 @@
   `src/server/AppMakerLab/autorepair/RepairExecutor.ts`,
   new `src/server/AppMakerLab/generator/ASTPatching.ts`.
 
-### P-CGE.2 — Documentation Generators  ❌ MISSING  [HIGH]
-- Generated code has no documentation. No README, no JSDoc/TSDoc inline comments, no API docs.
-  When navBharatAI generates a full app, the user gets code but no explanation of what was built.
-- [ ] Add `DocumentationGenerationEngine.ts` as a post-generation step in `AppMakerOrchestrator.ts`.
-- [ ] **README Generator**: auto-generate `README.md` from blueprint (app name, stack, features, setup).
-- [ ] **Inline Documentation Generator**: inject TSDoc comment blocks above every generated function/class.
-- [ ] **API Documentation Generator**: auto-generate endpoint list from generated Express routes.
-- **Files:** new `src/server/AppMakerLab/generator/DocumentationGenerationEngine.ts`,
-  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+### P-CGE.2 — Documentation Generators  🟡 engine+API DONE / orchestrator wiring PENDING  [HIGH]
+- Generated apps had no docs. Now there is a real generator for README, API reference and TSDoc.
+- [x] Added `src/server/lib/DocGenerator.ts` — pure, dependency-free: `generateReadme` (from
+  name/description/features/tech-stack/setup), `generateApiDocs` (a sorted route table from `{method,path,
+  description?,auth?}`), `generateTsDoc` (a TSDoc block from a parsed function signature with @param/@returns),
+  and `generateDocs` (whatever the input supports). Honest: empty blueprint → minimal README (no fabricated
+  features); no routes → "_No routes documented._". 7 unit tests.
+- [x] Added `POST /api/docs/generate` (stateless): `{ blueprint?, routes?, signatures? }` → `{ readme?, apiDocs?, tsdoc? }`.
+- [ ] **Still pending:** run it as a post-generation step in the generator (build-path wiring) and the AST-based
+  inline-comment injection over real generated source (deferred — live build path + needs a real parser).
+- **Files:** new `src/server/lib/DocGenerator.ts` + `.test.ts`, new `src/server/routes/docs.ts`, `server.ts`.
 
 ### P-CGE.3 — Convention & Naming Engine  🟡 engine+API DONE / build-pass wiring PENDING  [HIGH]
 - Generated code had no enforced conventions. Now there is a real engine that checks + suggests fixes.

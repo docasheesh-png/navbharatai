@@ -16,6 +16,7 @@ import { registerWalletRoutes } from './src/server/routes/wallet';
 import { registerSecretsRoutes } from './src/server/routes/secrets';
 import { registerSbomRoutes } from './src/server/routes/sbom';
 import { registerBuildAnalyticsRoutes } from './src/server/routes/buildAnalytics';
+import { registerNavigateRoutes } from './src/server/routes/navigate';
 import { getSecretValue } from './src/server/lib/secrets';
 import { verifyPaymentInternal } from './src/server/lib/payments';
 import { registerPaymentRoutes } from './src/server/routes/payment';
@@ -510,6 +511,7 @@ setInterval(() => {
   registerSecretsRoutes(app);
   registerSbomRoutes(app);
   registerBuildAnalyticsRoutes(app);
+  registerNavigateRoutes(app);
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
   registerPreviewRoutes(app, chatLimiter);

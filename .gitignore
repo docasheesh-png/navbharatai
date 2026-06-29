@@ -17,3 +17,7 @@ test_environment_debug.json
 
 .boot-check.cjs
 sbom.cdx.json
+
+# Self-hosted Monaco editor assets — copied from node_modules at build time
+# (scripts/copyMonaco.mjs), never committed (16 MB, regenerated on every build).
+public/monaco/

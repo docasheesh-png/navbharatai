@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
+    "predev": "node scripts/copyMonaco.mjs",
+    "copy:monaco": "node scripts/copyMonaco.mjs",
+    "prebuild": "node scripts/copyMonaco.mjs",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist",

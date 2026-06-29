@@ -4,6 +4,7 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import { MessageSquare, Clock, ShieldCheck, LogIn, MoreVertical, Trash2, Search, X, Layers, Code2, Zap, Cpu, Stethoscope } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { Skeleton, SkeletonList } from './ui/Skeleton';
 
 type FilterMode = 'all' | 'chat' | 'apps' | 'free' | 'pro' | 'sda';
 
@@ -89,8 +90,9 @@ export const HistoryView = ({
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-[#0d1117]">
-        <div className="w-12 h-12 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+      <div className="flex-1 flex flex-col bg-[#0d1117] h-full overflow-hidden p-6">
+        <div className="h-8 w-48 mb-5"><Skeleton className="h-full w-full" rounded="rounded-lg" /></div>
+        <SkeletonList count={6} />
       </div>
     );
   }

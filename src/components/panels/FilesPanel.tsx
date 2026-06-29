@@ -12,6 +12,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { FolderOpen, Upload, Download, FileCode, ChevronRight, History, GitCommit, RotateCcw, Loader2, Plus, Trash2, Pencil, Check, X, Copy } from 'lucide-react';
 import { listBuildHistory, fetchBuildVersion } from '../../services/buildService';
 import type { VersionMeta } from '../../services/buildService';
+import { SkeletonList } from '../ui/Skeleton';
 
 export interface FileConflict {
   file: File;
@@ -340,10 +341,7 @@ export function FilesPanel({
       {tab === 'history' && (
         <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
           {loadingHistory ? (
-            <div className="flex items-center justify-center gap-2 py-12 text-[#484f58]">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="text-[10px]">Loading history…</span>
-            </div>
+            <SkeletonList count={5} />
           ) : versions.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
               <History className="w-12 h-12 text-white/10" />

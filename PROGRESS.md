@@ -5813,3 +5813,16 @@ skipped when <120s deadline headroom remains and hard-capped at 90s (raceTimeout
 reason a finished app times out. Net: a built app shows success, never a misleading "paused".
 
 Gate: frontend tsc 0, server tsc 0, vitest 3555/3555 PASS, boot:check PASS.
+
+## 2026-06-29 — FIX (in-browser preview, root cause): iframe was missing allow-same-origin
+
+THE reason the in-browser preview died with `Missing dependency "react"`: its <iframe srcDoc> sandbox was
+`allow-scripts allow-forms allow-popups` — MISSING `allow-same-origin`. Without it the srcDoc document has
+an OPAQUE origin, and a dynamic ES-module `import()` (exactly how the preview loads React from the CDN) is
+blocked by the browser → React never loads → "Missing dependency react". (Babel worked because it's a
+classic inlined <script>, not a module import.) Not CSP (firebase.json sets none; #676 didn't help) — the
+sandbox origin. Tell-tale: the LIVE-server iframe right above already had allow-same-origin and worked.
+Fix: add allow-same-origin to the in-browser iframe (one attribute) so module imports run. Safe — the
+preview renders the user's OWN generated code.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3571/3571 PASS, boot:check PASS.

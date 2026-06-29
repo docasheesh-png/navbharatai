@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, dominantProvider } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -215,6 +215,24 @@ describe('cheapFloorAllowedForTier — cheap floor leads only simple/medium (com
     process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS = '1';
     expect(cheapFloorAllowedForTier('sonnet')).toBe(true);
     expect(cheapFloorAllowedForTier('opus')).toBe(true);
+  });
+});
+
+describe('dominantProvider — PR4 deliveredVia (which model drove most build turns)', () => {
+  it('returns the provider with the most turns (the dominant builder)', () => {
+    const turns = new Map<string, number>([['GLM', 18], ['CLAUDE', 2]]);
+    expect(dominantProvider(turns)).toBe('GLM'); // cheap floor carried the build
+  });
+  it('returns CLAUDE when escalation took over most turns', () => {
+    const turns = new Map<string, number>([['GLM', 1], ['CLAUDE', 9]]);
+    expect(dominantProvider(turns)).toBe('CLAUDE'); // fell back to Claude — the tripwire signal
+  });
+  it('keeps the first-seen provider on a tie (the leading provider)', () => {
+    const turns = new Map<string, number>([['GLM', 5], ['CLAUDE', 5]]);
+    expect(dominantProvider(turns)).toBe('GLM');
+  });
+  it('returns undefined for an empty map (non-agentic lanes record nothing)', () => {
+    expect(dominantProvider(new Map())).toBeUndefined();
   });
 });
 

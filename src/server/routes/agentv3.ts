@@ -2009,11 +2009,25 @@ export function registerAgentV3Routes(app: Express): void {
           .filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
         // Shared side-effects for both fast lanes (Simple Builder + OneShot).
         const fastGenerate = async (system: string, user: string): Promise<string> => {
-          const t = await new ClaudeClient(undefined, { maxRetries: 2 }).runTurn({
-            // D — Sonnet (not Haiku) for the fast lane: per-file isolated generation needs cross-file
-            // contract consistency; Haiku disagreed across calls → code didn't compile. Env-overridable.
-            model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
-          });
+          // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
+          // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
+          // blind spot — a truncated (max_tokens) per-file generation is exactly what produces broken
+          // code. Now every manifest / per-file / repair call is recorded (success AND failure).
+          const fbModel = fastBuildModel();
+          const promptPreview = `${system}\n---\n${user}`;
+          const startedAt = Date.now();
+          let t;
+          try {
+            t = await new ClaudeClient(undefined, { maxRetries: 2 }).runTurn({
+              // D — Sonnet (not Haiku) for the fast lane: per-file isolated generation needs cross-file
+              // contract consistency; Haiku disagreed across calls → code didn't compile. Env-overridable.
+              model: fbModel, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
+            });
+          } catch (err) {
+            try { buildDiag.recordLlmCall({ model: fbModel, provider: 'anthropic', promptPreview, promptChars: promptPreview.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) }); } catch { /* diagnostics best-effort */ }
+            throw err;
+          }
+          try { buildDiag.recordLlmCall({ model: fbModel, provider: 'anthropic', promptPreview, promptChars: promptPreview.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true }); } catch { /* diagnostics best-effort */ }
           osUsage.inputTokens += t.usage.inputTokens;
           osUsage.outputTokens += t.usage.outputTokens;
           osUsage.cacheCreationInputTokens += t.usage.cacheCreationInputTokens ?? 0;
@@ -2039,6 +2053,22 @@ export function registerAgentV3Routes(app: Express): void {
             const r = await actuator.runCommand(workspaceId, '[ -d node_modules ] || npm install >/dev/null 2>&1; npx --no-install tsc --noEmit 2>&1 | tail -200 || true');
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
             const hasErrors = /error TS\d+/.test(out);
+            if (hasErrors) {
+              // #1 — capture the OFFENDING files into the diagnosis bundle so the exact mismatch is
+              // visible in the report (no inference). Parse the file paths tsc names (e.g.
+              // "src/Calculator.tsx(17,9): error TS2339" or "src/Calculator.tsx:17:9"), de-dupe, and
+              // record each one's content from the captured writes. Best-effort — never blocks.
+              try {
+                const paths = new Set<string>();
+                const re = /([\w./-]+\.[a-z0-9]{1,5})[(:]\d+/gi;
+                let m: RegExpExecArray | null;
+                while ((m = re.exec(out)) && paths.size < 12) paths.add(m[1].replace(/^\.\//, ''));
+                for (const p of paths) {
+                  const content = writtenFiles.get(p) ?? writtenFiles.get(`./${p}`);
+                  if (content) buildDiag.recordFile({ path: p, content, note: 'referenced by a compile error' });
+                }
+              } catch { /* offending-file capture is best-effort */ }
+            }
             return { ok: !hasErrors, errors: hasErrors ? out.slice(0, 6000) : '' };
           } catch {
             return { ok: true, errors: '' }; // could not verify → don't block (best-effort)

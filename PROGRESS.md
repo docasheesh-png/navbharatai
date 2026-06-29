@@ -5654,3 +5654,21 @@ Same calculator report exposed two more issues beyond A:
   (token×markup), real-cost margin still positive (billed Opus-equiv ≥ Sonnet cost).
 
 Gate: frontend tsc 0, server tsc 0, vitest 3467/3467 PASS (+1), boot:check PASS.
+
+## 2026-06-29 — FEATURE: Diagnosis bundle v2 — fast-lane LLM I/O (#2) + offending files on compile-fail (#1)
+
+Two gaps the admin and I found while diagnosing the calculator report, both closing back-and-forth:
+• #2 FAST-LANE LLM I/O — the #4 LLM-I/O capture was wired only into AgentRunner, but simple apps build
+  via SimpleBuilder/OneShot which call the model directly (fastGenerate), so their calls were a blind
+  spot (the calculator report's llmCalls was empty). fastGenerate now records EVERY fast-lane call
+  (manifest / per-file / repair) into buildDiag.recordLlmCall — success AND failure — so a truncated
+  (max_tokens) or failed per-file generation is visible.
+• #1 OFFENDING FILES ON COMPILE-FAIL — when the fast-lane verify (tsc) fails, fastVerify now parses the
+  file paths tsc names, de-dupes, and records each offending file's content (from the captured writes)
+  into a new BuildDiagnostics `generatedFiles` channel (capped 20 files × 6000 chars, de-duped by path).
+  The exact mismatch (e.g. hook vs consumer) is now VISIBLE in the report — no inference needed.
+
+BuildDiagnostics gained GeneratedFileRecord + recordFile() + the generatedFiles report channel + text
+render ("Offending files"). +4 tests.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3469/3469 PASS (+2), boot:check PASS.

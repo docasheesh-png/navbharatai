@@ -1,6 +1,6 @@
 import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
-import type { ClaudeToolDef, TurnRunner, TurnUsage, ToolUse } from './ClaudeClient';
+import type { ClaudeToolDef, TurnRunner, TurnUsage, ToolUse, TurnResult } from './ClaudeClient';
 import type { ToolDispatcher } from './ToolDispatcher';
 import type { AgentRole } from './types';
 import type { ConversationStore, ConversationStatus } from './ConversationStore';
@@ -91,6 +91,26 @@ export interface AgentRunnerOptions {
    * limits while still parallelising the review/test phase. Mutating tools always run serially.
    */
   toolConcurrency?: number;
+  /**
+   * AI Diagnosis Bundle #4 — called after EVERY model turn with that turn's I/O shape (model,
+   * prompt/response sizes + a head preview, finish reason, tokens, latency, ok/error). The
+   * composition root forwards it to BuildDiagnostics.recordLlmCall so a truncated (max_tokens)
+   * or failed model turn is captured. Best-effort; a throw here never breaks the build.
+   */
+  onLlmCall?: (call: {
+    model: string;
+    promptPreview: string;
+    promptChars: number;
+    responsePreview: string;
+    responseChars: number;
+    finishReason: string | null;
+    toolCalls: number;
+    inputTokens: number;
+    outputTokens: number;
+    latencyMs: number;
+    ok: boolean;
+    error?: string;
+  }) => void;
 }
 
 // ── Parallel tool execution (capped) ───────────────────────────────────────────
@@ -271,19 +291,48 @@ export class AgentRunner {
         // narration line so the client can finalize (not duplicate) the line.
         const turnId = `t${steps}-${Date.now()}`;
 
-        const turn = await client.runTurn({
-          model,
-          system,
-          messages,
-          tools,
-          maxTokens: maxTokensPerTurn,
-          thinking,
-          effort,
-          onText: (delta) =>
-            events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'text', delta, ts: Date.now() }),
-          onThinking: (delta) =>
-            events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'thinking', delta, ts: Date.now() }),
-        });
+        // #4 — what we're about to ask: a head preview of the prompt (system + the latest turn).
+        const lastMsg = messages[messages.length - 1] as { content?: unknown } | undefined;
+        const lastMsgText = typeof lastMsg?.content === 'string' ? lastMsg.content : JSON.stringify(lastMsg?.content ?? '');
+        const promptPreview = `${system ?? ''}\n---\n${lastMsgText}`;
+        const llmStartedAt = Date.now();
+        let turn: TurnResult;
+        try {
+          turn = await client.runTurn({
+            model,
+            system,
+            messages,
+            tools,
+            maxTokens: maxTokensPerTurn,
+            thinking,
+            effort,
+            onText: (delta) =>
+              events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'text', delta, ts: Date.now() }),
+            onThinking: (delta) =>
+              events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'thinking', delta, ts: Date.now() }),
+          });
+        } catch (err) {
+          // #4 — capture the FAILED model turn before it propagates (provider error, timeout, …).
+          try {
+            this.opts.onLlmCall?.({
+              model, promptPreview, promptChars: promptPreview.length,
+              responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0,
+              inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - llmStartedAt,
+              ok: false, error: err instanceof Error ? err.message : String(err),
+            });
+          } catch { /* diagnostics capture is best-effort */ }
+          throw err;
+        }
+        // #4 — capture the successful model turn (finish reason 'max_tokens' = truncated output).
+        try {
+          this.opts.onLlmCall?.({
+            model, promptPreview, promptChars: promptPreview.length,
+            responsePreview: turn.text, responseChars: turn.text.length,
+            finishReason: turn.stopReason, toolCalls: turn.toolUses.length,
+            inputTokens: turn.usage.inputTokens, outputTokens: turn.usage.outputTokens,
+            latencyMs: Date.now() - llmStartedAt, ok: true,
+          });
+        } catch { /* diagnostics capture is best-effort */ }
 
         usage.inputTokens += turn.usage.inputTokens;
         usage.outputTokens += turn.usage.outputTokens;

@@ -1996,12 +1996,24 @@
       `boot:check` PASS.
 - **Files:** new `src/server/AgentV3/PromptCache.ts`, `src/server/routes/agentv3.ts`, `tests/promptCache.test.ts` (new).
 
-### P-PE.2 — Prompt Versioning / Registry  ❌ MISSING  [HIGH]
-- System prompts are hardcoded in `AgentV3/systemPrompt.ts`. No version history, no rollback.
-- [ ] Create a `PromptRegistry` (simple YAML/JSON store or Firestore collection) with version IDs.
-- [ ] `systemPrompt.ts` reads from registry; CI can diff versions.
-- [ ] Log which prompt version was active in `AgentV3CostTelemetry.ts` records.
-- **Files:** `src/server/AgentV3/systemPrompt.ts`, new `src/server/AgentV3/PromptRegistry.ts`.
+### P-PE.2 — Prompt Versioning / Registry  ✅ DONE (2026-06-29) · 🔌 WIRED
+- System prompts were hardcoded with no version identity — you couldn't tell which prompt produced a
+  build, nor detect that a prompt changed.
+- [x] **`PromptRegistry.ts`** (new) — every prompt gets a stable version id `<id>@<semver>.<fingerprint>`:
+      a human-curated `PROMPT_VERSIONS` semver (bumped on intent changes) + an FNV content fingerprint that
+      flips on ANY text edit (so CI/telemetry detect drift). `registerPrompt`/`getRegisteredPrompt`/
+      `listRegisteredPrompts` keep an in-memory snapshot for inspection/diff. Pure core, unit-tested.
+- [x] **Active version logged in telemetry** — `CostTelemetryEntry.promptVersion` + `DailyCostTelemetryDoc.
+      lastPromptVersion` (additive); `routes/agentv3.ts` registers the BASE architect prompt (pre per-turn
+      injection) on every build and records its version id into the cost-telemetry row — so each day's
+      telemetry shows which prompt version was active. Traceable, rollback-ready.
+- **Scope note:** `systemPrompt.ts` stays the source text (registry fingerprints it at the call site rather
+  than inverting ownership), and a content change flips the fingerprint — that IS the "CI can diff versions"
+  mechanism (mirrors the P-TQA.4 prompt-regression approach). No new YAML/Firestore store needed.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3489/3489 ✅ (+16) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** new `src/server/AgentV3/PromptRegistry.ts`, `src/server/AgentV3/AgentV3CostTelemetry.ts`,
+  `src/server/routes/agentv3.ts`, `tests/promptRegistry.test.ts` (new).
 
 ### P-PE.3 — Jailbreak Detection  ✅ DONE (2026-06-29) · 🔌 WIRED
 - `CommandGovernance` blocks dangerous shell, `UntrustedContent` fences injection, and P-AI.10's

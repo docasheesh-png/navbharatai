@@ -73,6 +73,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [costSummary, setCostSummary] = useState<CostLadderSummary | null>(null);
   const [costLoading, setCostLoading] = useState(false);
 
+  // P-MON.6 — FinOps recommendations (real, from /api/admin/finops).
+  const [finops, setFinops] = useState<any>(null);
+  const [finopsLoading, setFinopsLoading] = useState(false);
+
   const headers = { 'x-admin-token': adminToken, 'Content-Type': 'application/json' };
 
   const toast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3000); };
@@ -123,10 +127,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     }
   }, [adminToken]);
 
+  const fetchFinOps = useCallback(async () => {
+    setFinopsLoading(true);
+    try {
+      const r = await fetch('/api/admin/finops', { headers });
+      const d = await r.json();
+      setFinops(d && typeof d === 'object' ? d : null);
+    } catch (e) {
+      console.error(e);
+      setFinops(null);
+    } finally {
+      setFinopsLoading(false);
+    }
+  }, [adminToken]);
+
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
   useEffect(() => { if (activeTab === 'users') fetchUsers(); }, [activeTab, fetchUsers]);
   useEffect(() => { if (activeTab === 'settings') fetchPromos(); }, [activeTab, fetchPromos]);
-  useEffect(() => { if (activeTab === 'revenue') fetchCostTelemetry(); }, [activeTab, fetchCostTelemetry]);
+  useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
 
   const adminPost = async (url: string, body: any) => {
     const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
@@ -610,6 +628,66 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       Cheap-tier success rate is the P8 cutover signal — high share + high success means the ladder is safe to default-on.
                     </p>
                   </>
+                )}
+              </div>
+
+              {/* ── P-MON.6 FinOps recommendations (real, derived from live metrics) ── */}
+              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-emerald-400" />
+                    <h3 className="text-sm font-black text-white uppercase tracking-tight">FinOps Recommendations</h3>
+                  </div>
+                  <button
+                    onClick={fetchFinOps}
+                    disabled={finopsLoading}
+                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-40"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${finopsLoading ? 'animate-spin' : ''}`} /> Refresh
+                  </button>
+                </div>
+
+                {!finops || !Array.isArray(finops.recommendations) ? (
+                  <p className="text-[10px] text-[#8b949e] uppercase font-bold py-4">
+                    {finopsLoading ? 'Analyzing spend…' : 'No metrics available yet.'}
+                  </p>
+                ) : finops.recommendations.length === 0 ? (
+                  <div className="flex items-center gap-2 py-4 text-[10px] font-bold uppercase text-emerald-400">
+                    <CheckCircle2 className="w-4 h-4" />
+                    No cost issues detected from current metrics
+                    {finops.summary?.builds === 0 && <span className="text-[#8b949e]"> (no builds recorded yet)</span>}
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {finops.recommendations.map((rec: any) => {
+                      // Static class strings — Tailwind JIT cannot see dynamically-built class names.
+                      const box = rec.severity === 'critical'
+                        ? 'border-red-500/20 bg-red-500/5'
+                        : rec.severity === 'warning'
+                          ? 'border-amber-500/20 bg-amber-500/5'
+                          : 'border-sky-500/20 bg-sky-500/5';
+                      const dot = rec.severity === 'critical' ? 'bg-red-500' : rec.severity === 'warning' ? 'bg-amber-500' : 'bg-sky-500';
+                      return (
+                        <div key={rec.id} className={`border ${box} rounded-xl p-4`}>
+                          <div className="flex items-start gap-2.5">
+                            <span className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${dot}`} />
+                            <div className="flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-black text-white">{rec.title}</span>
+                                {typeof rec.observedWasteUsd === 'number' && (
+                                  <span className="text-[10px] font-mono font-black text-red-400 whitespace-nowrap">~${rec.observedWasteUsd.toFixed(4)} wasted</span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-[#8b949e] mt-1 leading-relaxed">{rec.detail}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest pt-1">
+                      Derived from real recorded metrics — no hardcoded prices, no projections. Waste figures are already-observed spend.
+                    </p>
+                  </div>
                 )}
               </div>
             </div>

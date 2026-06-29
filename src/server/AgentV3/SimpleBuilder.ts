@@ -84,8 +84,27 @@ export function fileSystemPrompt(framework: string): string {
     '- Output ONLY that one file block — no prose, no explanation, no markdown fences.',
     '- Write the COMPLETE, real file — no TODOs, no placeholders, no "..." stubs.',
     '- Match the imports/exports the rest of the app expects (you are given the full file list).',
+    ...EXPORT_IMPORT_CONVENTION,
   ].join('\n');
 }
+
+/**
+ * A FIXED export/import convention, injected into every per-file generation + repair prompt. Because
+ * each file is generated in its OWN call, the model can't see another file's actual code — so without
+ * a shared rule it guesses the export style and produces mismatches like `import useNotes from …`
+ * against a NAMED `export function useNotes` (TS2613/TS2614), which the build then has to repair every
+ * time. A single deterministic convention makes producers and consumers agree by construction.
+ */
+const EXPORT_IMPORT_CONVENTION: string[] = [
+  'EXPORT/IMPORT CONVENTION — follow EXACTLY so every import matches the matching export across files:',
+  '  • A React COMPONENT file (App, Button, NoteCard, Sidebar, pages, …) → `export default` the component,',
+  '    and import it as DEFAULT: `import NoteCard from "./NoteCard"`.',
+  '  • Hooks, utilities, types/interfaces, contexts, constants, stores → NAMED exports',
+  '    (`export function useNotes`, `export const`, `export interface Note`), and import them NAMED:',
+  '    `import { useNotes } from "../hooks/useNotes"`, `import { Note } from "../types/note"`.',
+  '  • NEVER default-import something that is exported named, and NEVER named-import a default export.',
+  '  • CSS Modules: `import styles from "./X.module.css"` (default). Plain CSS: `import "./X.css"`.',
+];
 
 export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: SimpleFileSpec[]): string {
   const fileList = manifest.map((f) => `  - ${f.path}${f.purpose ? ` — ${f.purpose}` : ''}`).join('\n');
@@ -117,6 +136,7 @@ export function repairSystemPrompt(framework: string): string {
     '  — e.g. a hook that does NOT return a value its consumer destructures. Make the producer and the',
     '  consumer AGREE (add the missing return fields, or stop using ones that do not exist).',
     '- Real, complete code — no TODOs, no placeholders. Keep changes minimal and consistent across files.',
+    ...EXPORT_IMPORT_CONVENTION,
   ].join('\n');
 }
 

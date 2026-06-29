@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt } from './SimpleBuilder';
+import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt } from './SimpleBuilder';
 import type { OneShotFile } from './OneShotBuilder';
 
 describe('parseFileManifest', () => {
@@ -41,6 +41,14 @@ describe('prompts', () => {
     const p = fileUserPrompt('a todo app', manifest[0], manifest);
     expect(p).toContain('src/Btn.tsx');
     expect(p).toContain('write THIS file in full');
+  });
+  it('both the file and repair prompts carry the export/import convention (prevents default-vs-named mismatch)', () => {
+    for (const p of [fileSystemPrompt('vite-react'), repairSystemPrompt('vite-react')]) {
+      expect(p).toContain('EXPORT/IMPORT CONVENTION');
+      expect(p).toContain('export default'); // components
+      expect(p).toContain('NAMED exports'); // hooks/utils/types
+      expect(p).toContain('NEVER default-import something that is exported named');
+    }
   });
 });
 

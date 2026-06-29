@@ -74,6 +74,8 @@ import { BuildDiagnostics, type BuildDiagnosticsReport } from '../AgentV3/BuildD
 import { runOneShot, classifyForOneShot, oneShotEnabled } from '../AgentV3/OneShotBuilder';
 import { buildProjectContext, buildRunningSummary, formatPlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
+import { withTimeout } from '../AgentV3/asyncUtils';
+import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { billedAmountUsd } from '../AgentV3/pricing';
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
@@ -1338,6 +1340,10 @@ export function registerAgentV3Routes(app: Express): void {
     const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
     // Held outside the try so a build CRASH (caught below) is still captured in the diagnostics report.
     let buildDiagRef: BuildDiagnostics | undefined;
+    // The latest live preview URL the build published — used by the post-build PREVIEW SELF-CHECK to
+    // actually open the running app in a browser and verify it rendered.
+    let lastPreviewUrl = '';
+    events.subscribe((e) => { if ((e as { type?: string }).type === 'preview') { const u = (e as { url?: unknown }).url; if (typeof u === 'string' && u) lastPreviewUrl = u; } }, false);
 
     // HARD WALL-CLOCK DEADLINE — guarantees the build can NEVER spin at "working…" forever.
     // If the build body hangs on an UN-abortable await (a stalled model HTTP call, a sandbox
@@ -2000,6 +2006,58 @@ export function registerAgentV3Routes(app: Express): void {
           if (retry.ok || writtenFiles.size > 0) { result = retry; deliveredTier = 'sonnet'; }
         } catch (e) {
           console.log(`[AGENTV3] empty-build Claude retry failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
+      // PREVIEW SELF-CHECK + HEAL (default-on when a browser sandbox is available): v3.0 used to
+      // claim "preview published" after only a port check (port-up ≠ the app rendered). Here it
+      // actually OPENS the running app in a real browser, READS the rendered DOM + console, and
+      // judges honestly whether it works — then makes ONE bounded repair pass if it didn't, and
+      // re-verifies. This is what makes v3.0 AWARE of its own preview and able to fix what it sees.
+      // Best-effort, time-budgeted, abortable — it can never break or hang the build. Disable with
+      // AGENTV3_PREVIEW_VERIFY=off.
+      if (
+        process.env.AGENTV3_PREVIEW_VERIFY !== 'off' && result.ok && lastPreviewUrl && actuator.browseUrl
+        && !abort.signal.aborted
+        // Only if there's comfortable time left before the wall-clock cap (verify + a heal pass).
+        && (maxBuildSeconds() === 0 || Date.now() - buildStartedAt < maxBuildSeconds() * 1000 - 90_000)
+      ) {
+        const healMax = autoFixEnabled() ? Math.max(1, autoFixMaxAttempts()) : 1; // ≥1 fix attempt
+        for (let attempt = 0; attempt <= healMax && !abort.signal.aborted; attempt++) {
+          let html = '';
+          try {
+            html = (await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl')).html;
+          } catch { break; /* couldn't open the preview (no browser / timeout) — skip silently */ }
+          const verdict = analyzePreviewHtml(html);
+          let consoleErrs: string[] = [];
+          try {
+            if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
+          } catch { /* console capture is best-effort */ }
+          if (verdict.rendered && consoleErrs.length === 0) {
+            events.emit({ type: 'narration', agent: 'architect', text: '✅ Preview verified — I opened the running app in a browser and it renders correctly.', ts: Date.now() });
+            break;
+          }
+          const problems = [...verdict.problems, ...consoleErrs.map((e) => `console: ${e}`)];
+          buildDiag.record({ phase: 'preview', severity: 'warning', code: 'PREVIEW_NOT_RENDERED', message: problems.slice(0, 4).join(' | ').slice(0, 500), autoResolved: false });
+          // Out of repair budget OR the wall-clock cap is near → stop and report honestly.
+          if (attempt >= healMax || abort.signal.aborted || (maxBuildSeconds() > 0 && Date.now() - buildStartedAt > maxBuildSeconds() * 1000 - 60_000)) {
+            events.emit({ type: 'narration', agent: 'architect', text: `⚠️ I checked the live preview and it did not fully render: ${problems.slice(0, 3).join('; ')}. Your files are saved — send a follow-up and I'll fix it.`, ts: Date.now() });
+            break;
+          }
+          events.emit({ type: 'narration', agent: 'architect', text: `🔍 I opened the preview and it didn't render correctly (${problems[0]}). Fixing it now…`, ts: Date.now() });
+          try {
+            const healRunner = new AgentRunner({
+              ...baseRunnerOpts,
+              client: buildTurnRunner({ claudeFirst: true }),
+              model: resolveModel(onlyOpus),
+              persistence: { store: getConversationStore(), conversationId: randomUUID(), userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+            });
+            const healed = await healRunner.run(buildPreviewRepairPrompt(verdict.problems, consoleErrs));
+            if (healed.ok) result = healed;
+          } catch (e) {
+            console.log(`[AGENTV3] preview heal attempt ${attempt + 1} failed: ${e instanceof Error ? e.message : String(e)}`);
+            break;
+          }
         }
       }
 

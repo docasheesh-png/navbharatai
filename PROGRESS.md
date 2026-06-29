@@ -5468,3 +5468,22 @@ rehydration on restore — showing the app before the next message — is a deep
 bundled here to avoid touching the panel's multi-source chat/file state under "never break".)
 
 Gate: frontend tsc 0, server tsc 0, vitest 3115/3115 PASS, boot:check PASS.
+
+## 2026-06-29 — Feature: v3.0 preview SELF-AWARENESS — it now opens its own app, sees if it rendered, and fixes it
+
+User: "v3.0 apne preview system se aware nahi hai — use pata hi nahi chalta ki preview real me chala ya
+nahi. Isko intelligent banao jisse v3.0 dekh bhi sake aur error fix bhi kare." Root: the build claimed
+"preview published" after only a port check (nc -z); nothing ever VISITED the preview, so a blank page,
+a React crash-before-render, a Vite error overlay, or a dev-server 404 went unnoticed. The console-error
+autofix existed but was opt-in AND had no data (no browser ever navigated to the app, so getConsoleErrors
+was empty). Feature: new pure PreviewVerify (analyzePreviewHtml + buildPreviewRepairPrompt, 8 tests) judges
+from the RENDERED DOM whether the app actually rendered (empty mount root → crash before render, Vite
+overlay, "Cannot GET" 404, uncaught runtime error, blank page). Wired a default-on PREVIEW SELF-CHECK +
+HEAL into routes/agentv3.ts: after a successful build with a preview URL it OPENS the running app via the
+sandbox browser (actuator.browseUrl → rendered DOM, which ALSO populates console errors), analyses it,
+emits an HONEST verdict ("✅ Preview verified — opened it in a browser and it renders" vs "⚠️ it did not
+render: …"), and on failure runs ONE bounded repair pass (buildPreviewRepairPrompt) + re-verifies. Time-
+budgeted (skips if <90s left before the 12-min cap), abortable, best-effort — never breaks/hangs the
+build. Disable with AGENTV3_PREVIEW_VERIFY=off. Records PREVIEW_NOT_RENDERED in the build report.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3137/3137 PASS (+8), boot:check PASS.

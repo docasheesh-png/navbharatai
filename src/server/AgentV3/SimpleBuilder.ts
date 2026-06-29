@@ -100,6 +100,46 @@ export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: S
   ].join('\n');
 }
 
+/** System prompt for the auto-repair pass — fixes real compiler errors in files just generated. */
+export function repairSystemPrompt(framework: string): string {
+  return [
+    `You are an elite ${framework} engineer FIXING compiler/build errors in an app you just wrote.`,
+    '',
+    'You are given the EXACT compiler errors and the current file contents. Output the CORRECTED files.',
+    'OUTPUT FORMAT — emit each fixed file, each wrapped EXACTLY like this and nothing else:',
+    '<<<FILE relative/path.ext>>>',
+    '...the full corrected file content...',
+    '<<<ENDFILE>>>',
+    '',
+    'RULES:',
+    '- Output ONLY the files you actually change — each as a COMPLETE file block (no diffs, no prose).',
+    '- Fix the ROOT cause. The most common bug is a contract mismatch between files generated separately',
+    '  — e.g. a hook that does NOT return a value its consumer destructures. Make the producer and the',
+    '  consumer AGREE (add the missing return fields, or stop using ones that do not exist).',
+    '- Real, complete code — no TODOs, no placeholders. Keep changes minimal and consistent across files.',
+  ].join('\n');
+}
+
+export function repairUserPrompt(prompt: string, errors: string, files: OneShotFile[]): string {
+  const dump = files.map((f) => `<<<FILE ${f.path}>>>\n${f.content}\n<<<ENDFILE>>>`).join('\n\n');
+  return [
+    `App being built:\n${prompt}`,
+    '',
+    `The build FAILED with these compiler errors:\n${errors.slice(0, 6000)}`,
+    '',
+    `Current files:\n${dump.slice(0, 60_000)}`,
+    '',
+    'Output ONLY the corrected <<<FILE …>>> blocks for the files you need to change.',
+  ].join('\n');
+}
+
+/** Result of the real compile/build check run in the sandbox. */
+export interface VerifyResult {
+  ok: boolean;
+  /** Compiler error text (empty when ok) — fed verbatim to the repair pass. */
+  errors: string;
+}
+
 export interface SimpleBuildDeps {
   prompt: string;
   framework: string;
@@ -110,6 +150,20 @@ export interface SimpleBuildDeps {
   writeFiles: (files: OneShotFile[]) => Promise<void>;
   /** Start the dev server + publish the preview. Best-effort. */
   startPreview?: () => Promise<void>;
+  /**
+   * A — Verify the generated app actually COMPILES (real tsc/build in the sandbox). When wired, the
+   * build claims success ONLY if this passes ("Preview is EARNED"). A throw / infra failure is
+   * treated as "could not verify" (non-blocking) so a flaky sandbox never causes a false fallback.
+   */
+  verify?: () => Promise<VerifyResult>;
+  /**
+   * A — Given the compiler errors + the current files, return CORRECTED files to write. Called only
+   * when verify fails, up to `maxRepairs` times. A single isolated per-file generation often produces
+   * a contract mismatch (hook vs consumer); this is what closes that gap automatically.
+   */
+  repair?: (errors: string, files: OneShotFile[]) => Promise<OneShotFile[]>;
+  /** Max auto-repair attempts before handing off to the full builder (default 2). */
+  maxRepairs?: number;
   log?: (msg: string) => void;
   /** Minimum files a real build must produce (default 2 — a real app is more than one file). */
   minFiles?: number;
@@ -166,8 +220,38 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     return { ok: false, filesWritten: 0, summary: 'Simple build could not produce the app — switching to the full builder.', reason };
   }
 
-  // FILES WRITTEN → success is locked in; the preview is a best-effort bonus.
   deps.log?.(`Built your app — ${files.length} file(s), each generated individually.`);
+
+  // A — VERIFY GATE + bounded AUTO-REPAIR. "Preview is EARNED": only claim success when the app
+  // actually compiles. If verify is not wired (e.g. no sandbox), the prior sticky-success behavior
+  // is kept unchanged. On a verify infra error we DON'T block (best-effort). If it still doesn't
+  // compile after repairs, return ok:false so the caller falls through to the full agentic builder
+  // (its own repair loop + readiness gate finish it) — never worse than today, never a fake success.
+  if (deps.verify) {
+    const maxRepairs = deps.maxRepairs ?? 2;
+    const byPath = new Map(files.map((f) => [f.path, f] as const));
+    let verdict = await deps.verify().catch(() => ({ ok: true, errors: '' }));
+    let attempt = 0;
+    while (!verdict.ok && attempt < maxRepairs && deps.repair) {
+      attempt++;
+      deps.log?.(`Found build errors — fixing them (attempt ${attempt}/${maxRepairs})…`);
+      let fixed: OneShotFile[] = [];
+      try { fixed = await deps.repair(verdict.errors, [...byPath.values()]); } catch { fixed = []; }
+      fixed = fixed.filter((f) => f && f.path && f.content);
+      if (!fixed.length) break;
+      for (const f of fixed) byPath.set(f.path, f);
+      try { await deps.writeFiles(fixed); } catch { break; }
+      verdict = await deps.verify().catch(() => ({ ok: true, errors: '' }));
+    }
+    if (!verdict.ok) {
+      deps.log?.('The app still has build errors — handing to the full builder to finish it.');
+      return { ok: false, filesWritten: files.length, summary: 'Built the files but the app did not compile cleanly — switching to the full builder to finish it.', reason: 'verify_failed' };
+    }
+    files = [...byPath.values()];
+    deps.log?.('Build verified — the app compiles. ✓');
+  }
+
+  // VERIFIED (or verify not wired) → success; the preview is a best-effort bonus.
   if (deps.startPreview) {
     try { await withTimeout(deps.startPreview(), deps.previewTimeoutMs ?? 90_000, 'simple-preview'); }
     catch { deps.log?.('Preview is still starting — your files are ready.'); }

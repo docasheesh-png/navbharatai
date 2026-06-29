@@ -21,6 +21,7 @@
     "gcloud:deploy": "gcloud run deploy navbharat-cloud-run --image=gcr.io/gcp-navbharat-core/navbharat-cloud-run:latest --platform=managed --region=asia-southeast1 --port=8080 --set-env-vars=NODE_ENV=production --allow-unauthenticated",
     "boot:check": "bash scripts/boot-check.sh",
     "test:bundle": "node scripts/bundleBudget.mjs",
+    "test:load": "node scripts/loadTest.mjs",
     "audit:gate": "node scripts/auditGate.mjs",
     "license:gate": "node scripts/licenseGate.mjs",
     "sbom": "node scripts/genSbom.mjs"

@@ -1871,11 +1871,21 @@
   AI Suggestions sidebar (Copilot-style), Skeleton loader (Suspense), 18+ language + RTL support,
   Keyboard shortcuts (Ctrl+Z/Y), Mobile-first responsive layout, LiveCollaboration (Firestore-backed).
 
-### P-UX.1 — Privacy Consent / GDPR Banner  ❌ MISSING  [HIGH]
-- No cookie consent or data-processing notice exists for EU/India PDPB compliance.
-- [ ] Add a "We use analytics + AI" consent banner (localStorage flag to suppress on accept).
-- [ ] Respect consent before firing `trackEvent()` or `PerformanceObserver`.
-- **Files:** `src/main.tsx`, `src/lib/analytics.ts`, new `src/components/ConsentBanner.tsx`.
+### P-UX.1 — Privacy Consent / GDPR Banner  ✅ DONE (2026-06-29) · 🔌 UI-WIRED
+- No cookie/analytics consent or data-processing notice existed for EU GDPR / India DPDP compliance.
+- [x] **Consent banner** — new `src/components/ConsentBanner.tsx`, mounted in `main.tsx` next to `<App/>`
+      (App.tsx untouched). Self-contained inline styles (theme-agnostic, like the RootFallback). Shown once
+      on first visit with Accept analytics / Decline; choice persisted in `localStorage` (`navbharat_consent`).
+- [x] **Consent respected before non-essential telemetry** — new `src/lib/consent.ts` (pure decision helpers
+      `consentAllowsAnalytics` / `shouldShowBanner`, unit-tested, + storage wrappers + a `CONSENT_EVENT`).
+      `analytics.ts` `trackEvent()` returns early without consent; `main.tsx` Core Web Vitals (`PerformanceObserver`)
+      only initialize on grant — and start mid-session when the user accepts (`buffered:true` keeps early metrics).
+      Operational crash/error logging stays on (essential, anonymized).
+- [x] **AppKnowledgeBase** — new `privacy_consent` entry so every AI can answer "manage my privacy/analytics".
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3450/3450 ✅ (+3) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** new `src/lib/consent.ts`, new `src/components/ConsentBanner.tsx`, `src/main.tsx`, `src/lib/analytics.ts`,
+  `src/server/AppContext/AppKnowledgeBase.ts`, `tests/consent.test.ts` (new).
 
 ### P-UX.2 — Skeleton Screens (per-component)  🟡 PARTIAL → full  [HIGH]
 - Global Suspense spinner exists, but individual list/card components have no shimmer placeholders.

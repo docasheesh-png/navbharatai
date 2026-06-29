@@ -93,10 +93,19 @@ const CONTINUATION_SIGNALS: readonly string[] = [
   'continue', 'go on', 'keep going', 'keep building', 'carry on', 'resume',
   'proceed', 'go ahead', 'finish it', 'finish the', 'complete it', 'complete the',
   'do the rest', 'rest of it', 'next step', 'carry it on',
+  // Retry / redo after a timeout or failure — the "retry" button sends one of these, and they
+  // must resume the SAME project (with memory), not fall to the amnesiac chat path that replies
+  // "what would you like me to try again?".
+  'retry', 'try again', 'try it again', 'do it again', 'do over', 'redo', 'redo it',
+  'rebuild', 'build it again', 'another go', 'give it another go', 'one more time',
+  'once more', 'once again', 'again please',
   // Hindi / Hinglish
   'aage badho', 'aage badhao', 'aage karo', 'aage chalo', 'jaari rakho',
   'continue karo', 'continue kardo', 'poora karo', 'pura karo', 'puura karo',
   'baaki karo', 'baki karo', 'finish karo', 'khatam karo', 'complete karo',
+  // Hinglish retry / redo
+  'dobara', 'dubara', 'phir se', 'fir se', 'dobara karo', 'dubara karo',
+  'phir se karo', 'fir se karo', 'retry karo', 'wapas karo', 'wapas try',
 ];
 
 /**

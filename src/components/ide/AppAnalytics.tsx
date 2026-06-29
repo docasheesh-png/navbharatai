@@ -318,6 +318,26 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
   const [refreshKey, setRefreshKey] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // P-BRE.8 — real build-pipeline health from the server (GET /api/analytics/builds).
+  interface BuildPerf {
+    totalJobs: number; terminalJobs: number; successRate: number; failureRate: number;
+    avgDurationMs: number; p95DurationMs: number;
+    topFailureTypes: Array<{ type: string; count: number }>;
+  }
+  const [buildPerf, setBuildPerf] = useState<BuildPerf | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/analytics/builds?limit=100');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setBuildPerf(data);
+      } catch { /* non-fatal — card simply doesn't render */ }
+    })();
+    return () => { cancelled = true; };
+  }, [refreshKey]);
+
   // ── Read localStorage ──
   const readLocalData = useCallback(() => {
     // Sessions from dedicated key
@@ -577,6 +597,48 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
         </div>
         <BarChartSVG data={activityData} days={chartDays} />
       </div>
+
+      {/* ── Build Performance (P-BRE.8 — real server pipeline health) ── */}
+      {buildPerf && buildPerf.totalJobs > 0 && (
+        <div className="rounded-xl border p-4" style={{ background: '#161b22', borderColor: '#30363d' }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Activity size={16} className="text-emerald-400" />
+            <h2 className="font-semibold text-white text-sm">Build Performance</h2>
+            <span className="text-xs text-gray-500 ml-auto">Last {buildPerf.terminalJobs} completed builds</span>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div>
+              <div className="text-2xl font-bold text-emerald-400">{Math.round(buildPerf.successRate * 100)}%</div>
+              <div className="text-xs text-gray-500 mt-0.5">Success rate</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-red-400">{Math.round(buildPerf.failureRate * 100)}%</div>
+              <div className="text-xs text-gray-500 mt-0.5">Failure rate</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-indigo-400">{(buildPerf.avgDurationMs / 1000).toFixed(1)}s</div>
+              <div className="text-xs text-gray-500 mt-0.5">Avg duration</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-amber-400">{(buildPerf.p95DurationMs / 1000).toFixed(1)}s</div>
+              <div className="text-xs text-gray-500 mt-0.5">p95 duration</div>
+            </div>
+          </div>
+          {buildPerf.topFailureTypes.length > 0 && (
+            <div className="mt-4">
+              <div className="text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wide">Top failure types</div>
+              <div className="space-y-1.5">
+                {buildPerf.topFailureTypes.map((f, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3 text-xs">
+                    <span className="text-gray-300 font-mono truncate" title={f.type}>{f.type}</span>
+                    <span className="text-red-400 font-bold shrink-0">{f.count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Two-column Row ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

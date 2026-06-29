@@ -10,4 +10,10 @@ export interface JobStore {
      * build. Returns null when no job carries that key.
      */
     findJobByIdempotencyKey(key: string): Promise<BuildJob | null>;
+
+    /**
+     * P-BRE.8 — return the most recently created jobs (newest first), up to `limit`, for
+     * build-analytics aggregation. Best-effort: returns [] when the store is empty/unavailable.
+     */
+    listRecentJobs(limit: number): Promise<BuildJob[]>;
 }

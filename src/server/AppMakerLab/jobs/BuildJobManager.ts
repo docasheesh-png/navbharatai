@@ -91,4 +91,9 @@ export class BuildJobManager {
         const existing = await this.store.findJobByIdempotencyKey(idempotencyKey);
         return existing && !isTerminalFailure(existing) ? existing : null;
     }
+
+    /** P-BRE.8 — the most recent jobs (newest first) for build-analytics aggregation. */
+    static async listRecent(limit = 100): Promise<BuildJob[]> {
+        return await this.store.listRecentJobs(limit);
+    }
 }

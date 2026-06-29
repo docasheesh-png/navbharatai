@@ -23,6 +23,7 @@ export type ToolName =
   | 'generate_readme'
   | 'generate_env_example'
   | 'generate_gitignore'
+  | 'generate_openapi'
   | 'task'
   | 'second_opinion'
   | 'consensus'

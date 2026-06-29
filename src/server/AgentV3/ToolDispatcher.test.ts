@@ -79,6 +79,25 @@ describe('ToolDispatcher', () => {
     expect(res.content).not.toContain('edit_file');
   });
 
+  it('generate_openapi writes an OpenAPI 3.0.3 contract from the given routes', async () => {
+    const res = await d.dispatch(
+      call('generate_openapi', { routes: [{ method: 'GET', path: '/users/:id', summary: 'Get a user' }], title: 'My API' }),
+      'backend',
+    );
+    expect(res.is_error).toBe(false);
+    expect(res.content.toLowerCase()).toContain('openapi');
+    const doc = JSON.parse(act.files.get('openapi.json')!);
+    expect(doc.openapi).toBe('3.0.3');
+    expect(doc.info.title).toBe('My API');
+    expect(doc.paths['/users/{id}'].get).toBeTruthy(); // Express :id → OpenAPI {id}
+  });
+
+  it('generate_openapi reports an honest error on an empty routes array', async () => {
+    const res = await d.dispatch(call('generate_openapi', { routes: [] }), 'backend');
+    expect(res.content).toContain('empty or missing');
+    expect(act.files.has('openapi.json')).toBe(false);
+  });
+
   it('write_file on an existing path records a modify and nudges toward edit_file', async () => {
     act.files.set('a.ts', 'old');
     const res = await d.dispatch(call('write_file', { path: 'a.ts', content: 'new' }));

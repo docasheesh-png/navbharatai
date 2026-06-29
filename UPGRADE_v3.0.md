@@ -1540,17 +1540,23 @@
 - **Files:** new `src/server/lib/TestSkeletonGenerator.ts` + `.test.ts`, new `src/server/routes/testgen.ts`, `server.ts`.
   `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
 
-### P-CGE.5 — OpenAPI / Contract-First API Generator  🟡 OpenAPI DONE / GraphQL+wiring PENDING  [HIGH]
-- Backend generation produced route stubs but no API contract. Now there is a real OpenAPI generator.
+### P-CGE.5 — OpenAPI / Contract-First API Generator  ✅ DONE (2026-06-29) · 🔌 WIRED  [GraphQL deferred]
+- Backend generation produced route stubs but no API contract. Now there is a real OpenAPI generator,
+  wired into the live v3.0 build as an agent tool.
 - [x] Added `src/server/lib/OpenApiGenerator.ts` — pure, dependency-free: `expressPathToOpenApi`
   (`/users/:id` → `/users/{id}`), `extractPathParams`, and `generateOpenApi` → a valid **OpenAPI 3.0.3**
   document (paths grouped + sorted, operations per method, auto-derived path params, JSON request bodies from
   declared properties, default `200` so the spec stays valid). Honest: only declared content; nothing invented.
   8 unit tests.
 - [x] Added `POST /api/openapi/generate` (stateless): `{ routes[], info? }` → an OpenAPI 3.0.3 document.
-- [ ] **Still pending:** `GraphQLSchemaGenerator`, emitting `openapi.yaml` into the generated workspace, and
-  using the spec as the source of truth for the P-CGE.2 API docs (build-path wiring — deferred).
-- **Files:** new `src/server/lib/OpenApiGenerator.ts` + `.test.ts`, new `src/server/routes/openapi.ts`, `server.ts`.
+- [x] **BUILD-PATH WIRING (live v3.0)** — new `generate_openapi` AgentV3 tool (ToolCatalog + ToolName + BUILD_TOOLS
+  + ToolDispatcher handler, mirroring `generate_readme`). The architect/backend agent calls it with the routes it
+  built; it writes a real `openapi.json` into the workspace (records the file change, indexes it, checkpoints).
+  systemPrompt nudges the agent to call it for any app with an HTTP API. So a generated API now ships with a real
+  contract — felt in the produced app, not a headless endpoint. 2 dispatcher tests added.
+- [ ] **Still deferred:** `GraphQLSchemaGenerator`, and using the spec as the source of truth for P-CGE.2 API docs.
+- **Files:** `src/server/lib/OpenApiGenerator.ts`, `src/server/AgentV3/{types,ToolCatalog,AgentRegistry,ToolDispatcher,systemPrompt}.ts`,
+  `src/server/AgentV3/ToolDispatcher.test.ts`, `src/server/routes/openapi.ts`.
 
 ### P-CGE.6 — Database Migration Generator  🟡 PARTIAL → full  [MED]
 - `DatabaseGenerationEngine.ts` generates TypeScript entity interfaces. No SQL DDL, no Prisma

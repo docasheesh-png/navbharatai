@@ -5857,5 +5857,16 @@ verify gate tripped every time and burned repair attempts. Two improvements:
   truncated to a 400-char timeline line, so the report couldn't list all the small problems it flagged.
   Added BuildDiagnostics.recordReview() + a `review` field (capped 12k) + text render; the route now
   records the complete review. The downloadable report now lists every problem the reviewer found.
+## 2026-06-29 — FIX: prevent the recurring default-vs-named import mismatch AT GENERATION
+
+The other recurring error (TS2613/TS2614: e.g. App imports `useNotes` as default but it's a named export)
+came from per-file generation: each file is generated in its OWN call, so the model can't see another
+file's actual code and guesses the export style → producer/consumer disagree → the build repairs it EVERY
+time. Fix: inject a FIXED export/import convention into every per-file generation AND repair prompt
+(EXPORT_IMPORT_CONVENTION) — React components use `export default` (default-imported); hooks/utils/types/
+contexts/stores use NAMED exports (named-imported); never cross them; CSS-Modules default-imported. With
+one deterministic rule applied to every isolated call, producers and consumers agree by construction, so
+the mismatch is prevented at the source (verify+repair stays as the backstop). Pairs with the CSS-Modules
+scaffold types (#688) which prevents the other recurring error (*.module.css TS2307).
 
 Gate: frontend tsc 0, server tsc 0, vitest 3586/3586 PASS, boot:check PASS.

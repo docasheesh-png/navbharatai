@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -156,6 +156,43 @@ describe('planGrokEnabled — planning runs on Grok when a key is set', () => {
   it('opt-out with AGENTV3_PLAN_GROK=0 / off even when a key is set', () => {
     expect(planGrokEnabled('xai-abc', '0')).toBe(false);
     expect(planGrokEnabled('xai-abc', 'off')).toBe(false);
+  });
+});
+
+describe('cheapBuildFloorRunners — optional GLM/Kimi cheap floor, DEFAULT OFF (instant rollback)', () => {
+  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL'];
+  let saved: Record<string, string | undefined>;
+  beforeEach(() => { saved = {}; for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k]; } });
+  afterEach(() => { for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
+
+  it('returns [] by default (flag unset) — chain stays byte-for-byte today\'s Claude path', () => {
+    expect(cheapBuildFloorRunners()).toEqual([]);
+  });
+  it('returns [] when explicitly off', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'off';
+    expect(cheapBuildFloorRunners()).toEqual([]);
+  });
+  it('returns [] when the flag names a provider but its KEY is absent (second off-switch)', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'glm'; // no GLM_API_KEY
+    expect(cheapBuildFloorRunners()).toEqual([]);
+    process.env.AGENTV3_CHEAP_FLOOR = 'kimi'; // no KIMI_API_KEY
+    expect(cheapBuildFloorRunners()).toEqual([]);
+  });
+  it('wires GLM as a single leading runner when flag=glm AND key present', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'glm';
+    process.env.GLM_API_KEY = 'glm-test-key';
+    const runners = cheapBuildFloorRunners();
+    expect(runners.map((r) => r.name)).toEqual(['GLM']);
+  });
+  it('wires KIMI when flag=kimi AND key present', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'kimi';
+    process.env.KIMI_API_KEY = 'kimi-test-key';
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['KIMI']);
+  });
+  it('an unknown floor value is treated as off', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'deepseek';
+    process.env.GLM_API_KEY = 'x';
+    expect(cheapBuildFloorRunners()).toEqual([]);
   });
 });
 

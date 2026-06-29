@@ -463,6 +463,39 @@ export function oneShotDevPort(framework: string): number {
   return 5173; // vite-react / vue / svelte and the default
 }
 
+/**
+ * NavBharatAI Pro v3.0 — optional CHEAP BUILD FLOOR (admin cost-down lever, DEFAULT OFF).
+ *
+ * Returns OpenAI-compatible build runners (GLM / Kimi) that LEAD the build chain ONLY when
+ * `AGENTV3_CHEAP_FLOOR` names a provider AND that provider's key is present. Otherwise it
+ * returns `[]`, so the build chain stays **byte-for-byte today's Claude path** — the instant,
+ * no-redeploy rollback. These runners are tried FIRST; `buildTurnRunner` keeps Claude (+ the
+ * forced-Haiku backstop) permanently after them, so a cheap-model failure NEVER breaks a build.
+ *
+ * Mirrors `grokPlanRunner`: `OpenAiToolRunner` forces its own `opts.model`, so the cost-ladder /
+ * `selectBuildModel` / `models.ts` are never touched — routing decides ORDER, the runner decides
+ * MODEL. A missing key OR a misconfigured provider is skipped (Claude still backstops). Pure-ish
+ * + flag-gated; exported for unit testing. Base URLs/models are env-overridable.
+ */
+export function cheapBuildFloorRunners(): NamedRunner[] {
+  const floor = (process.env.AGENTV3_CHEAP_FLOOR || 'off').trim().toLowerCase();
+  if (floor === 'off' || floor === '') return [];
+  const runners: NamedRunner[] = [];
+  const add = (name: string, apiKey: string | undefined, baseURL: string, model: string): void => {
+    if (!apiKey) return; // no key → a second, independent off-switch
+    try {
+      const client = new OpenAI({ apiKey, baseURL, timeout: 60_000, maxRetries: 0 });
+      runners.push({ name, runner: new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }) });
+    } catch { /* misconfigured provider — skip; Claude still backstops */ }
+  };
+  if (floor === 'glm') {
+    add('GLM', process.env.GLM_API_KEY, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', process.env.GLM_MODEL || 'glm-4.6');
+  } else if (floor === 'kimi') {
+    add('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', process.env.KIMI_MODEL || 'kimi-k2-0905-preview');
+  }
+  return runners;
+}
+
 function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; onProviderError?: (name: string, err: unknown) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
@@ -490,7 +523,11 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; o
   // loading". 2 retries falls through to Gemini/Vertex in a few seconds instead.
   // AGENTV3_BUILD_CLAUDE_RETRIES overrides.
   const buildRetry = { maxRetries: Math.max(0, parseInt(process.env.AGENTV3_BUILD_CLAUDE_RETRIES || '', 10) || 2) };
-  if (cheap.length === 0) return makeResilientTurnRunner(new ClaudeClient(undefined, buildRetry)); // Claude-only env
+  // Optional cheap floor (GLM/Kimi) that LEADS the build chain — [] unless AGENTV3_CHEAP_FLOOR
+  // names a provider with its key present. Computed before the Claude-only early-return so the
+  // floor still applies in a Claude-only env (no Vertex/Gemini configured).
+  const floorRunners = cheapBuildFloorRunners();
+  if (cheap.length === 0 && floorRunners.length === 0) return makeResilientTurnRunner(new ClaudeClient(undefined, buildRetry)); // Claude-only env
   const claude: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient(undefined, buildRetry) };
   // P7 failover hardening: a final Claude-HAIKU backstop that FORCES the Haiku model
   // regardless of the turn's requested model. It only ever runs after every prior provider
@@ -509,7 +546,10 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; o
   // fake files on Gemini. AGENTV3_BUILD_ALLOW_GEMINI=1 re-adds Vertex/Gemini as a last resort.
   const fallback = process.env.AGENTV3_BUILD_ALLOW_GEMINI === '1' ? cheap : [];
   const claudeFirst = resolveClaudeFirst(opts?.claudeFirst, process.env.AGENTV3_BUILD_CLAUDE_FIRST);
-  const chain = claudeFirst ? [claude, ...fallback, ...withBackstop] : [...fallback, claude, ...withBackstop];
+  const baseChain = claudeFirst ? [claude, ...fallback, ...withBackstop] : [...fallback, claude, ...withBackstop];
+  // Cheap floor LEADS when active; [] → `[...[], ...baseChain]` is byte-for-byte today's chain.
+  // Claude + Haiku backstop remain inside baseChain, so failures always fall back safely.
+  const chain = [...floorRunners, ...baseChain];
   return makeMultiProviderTurnRunner(chain, {
     onProviderUsed: (used, from) => { if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`); },
     onProviderError: (name, err) => {

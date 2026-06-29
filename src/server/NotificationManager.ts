@@ -55,7 +55,7 @@ export function resolveWebhookUrl(explicit?: string): string | null {
  * POST a notification to a webhook with a hard timeout. Best-effort: returns true on a 2xx,
  * false on any error/non-2xx, and NEVER throws (a flaky webhook must not break a build).
  */
-export async function sendBuildWebhook(url: string, payload: BuildNotification, timeoutMs = 5000): Promise<boolean> {
+export async function sendBuildWebhook(url: string, payload: unknown, timeoutMs = 5000): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

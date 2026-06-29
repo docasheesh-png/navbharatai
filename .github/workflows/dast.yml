@@ -1,0 +1,57 @@
+name: DAST (OWASP ZAP baseline)
+
+# P-SEC.2 — Dynamic Application Security Testing.
+# Boots the real app and runs OWASP ZAP's baseline scan against it to catch
+# auth-bypass / injection / path-traversal / misconfigured-header issues that
+# static (SAST) scanning misses. Runs nightly + on-demand (NOT on every PR — a
+# full crawl is slow/flaky and would bloat PR latency; same policy as load tests).
+on:
+  schedule:
+    - cron: '0 3 * * *'   # nightly 03:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write   # ZAP action opens/updates a tracking issue for findings
+
+jobs:
+  zap-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Boot server (background)
+        run: |
+          PORT=8080 node dist/server.cjs &
+          echo "Waiting for server on :8080 ..."
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/api/health >/dev/null 2>&1; then
+              echo "Server is up."; exit 0
+            fi
+            sleep 2
+          done
+          echo "Server did not become healthy in time"; exit 1
+
+      - name: OWASP ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: 'http://localhost:8080'
+          rules_file_name: 'security/zap-baseline.conf'
+          # Default behaviour fails the job on FAIL-level alerts (HIGH risk),
+          # warns on WARN-level — exactly the P-SEC.2 gate (HIGH fails, MED warns).
+          cmd_options: '-a'
+          allow_issue_writing: true
+          fail_action: true

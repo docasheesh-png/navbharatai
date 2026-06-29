@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { BuildJobManager } from '../AppMakerLab/jobs/BuildJobManager';
 import { aggregateBuildAnalytics } from '../AppMakerLab/jobs/BuildAnalytics';
+import { summarizeSlo } from '../AppMakerLab/intelligence/BuildSLATracker';
 
 /**
  * P-BRE.8 — Build analytics endpoint.
@@ -19,6 +20,19 @@ export function registerBuildAnalyticsRoutes(app: Express): void {
     } catch (err) {
       console.error('[BUILD_ANALYTICS] failed:', err);
       res.status(500).json({ error: 'Failed to compute build analytics.' });
+    }
+  });
+
+  // P-PME.11 — build-time SLO compliance (violation rate + p95 per complexity tier). Honest zeros
+  // until builds have run; never fabricated.
+  app.get('/api/analytics/slo', async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+      const jobs = await BuildJobManager.listRecent(limit);
+      res.json({ ...summarizeSlo(jobs), window: limit, generatedAt: new Date().toISOString() });
+    } catch (err) {
+      console.error('[BUILD_SLO] failed:', err);
+      res.status(500).json({ error: 'Failed to compute SLO compliance.' });
     }
   });
 }

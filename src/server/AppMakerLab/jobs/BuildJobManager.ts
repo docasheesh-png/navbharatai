@@ -87,6 +87,18 @@ export class BuildJobManager {
                     if (!job) return;
                     const { notifyBuildResult } = await import('../../NotificationManager');
                     await notifyBuildResult(job);
+                    // P-PME.11 — record an SLO violation (best-effort) when the build ran over its target.
+                    try {
+                        const { evaluateSlo } = await import('../intelligence/BuildSLATracker');
+                        const ev = evaluateSlo(job);
+                        if (!ev.withinSlo) {
+                            const { audit } = await import('../../lib/audit');
+                            audit('BUILD_SLO_VIOLATION', {
+                                jobId: job.id, complexity: ev.complexity,
+                                durationMs: ev.durationMs, sloMs: ev.sloMs, overByMs: ev.overByMs,
+                            }, 'warn');
+                        }
+                    } catch { /* SLO tracking is best-effort */ }
                 })
                 .catch(() => { /* notifications are best-effort */ });
         }

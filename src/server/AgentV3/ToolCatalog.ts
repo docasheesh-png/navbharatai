@@ -423,6 +423,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_auth',
+      description:
+        'Generate REAL, working authentication code for the app and write it to the workspace. ' +
+        'type "jwt" (default) writes a dependency-free HS256 JWT module (sign/verify via Node crypto, ' +
+        'reads JWT_SECRET) plus an Express Bearer-token middleware — runs with no install. type ' +
+        '"firebase" writes client auth helpers (signIn/signUp/signOut/onAuthChange) over the Firebase ' +
+        'SDK (needs `firebase` installed). Use when the app needs login/protected routes — then wire ' +
+        'signToken on login and the middleware onto protected routes with edit_file.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['jwt', 'firebase'], description: 'Auth strategy. Defaults to "jwt" (dependency-free).' },
+        },
+      },
+    },
+    {
       name: 'check_conventions',
       description:
         'Check naming + import-ordering conventions and get suggested fixes (analysis only — writes ' +
@@ -573,6 +589,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_observability',
   'generate_bundle_optimization',
   'generate_seed_data',
+  'generate_auth',
   'check_conventions',
   'generate_release_notes',
   'web_search',

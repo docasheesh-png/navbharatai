@@ -40,6 +40,7 @@ import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator
 import { generateObservability, type ObservabilityTarget } from '../AppMakerLab/generator/ObservabilityGenerator';
 import { generateBundleOptimization } from '../AppMakerLab/generator/BundleOptimizationGenerator';
 import { generateSeedData, type EntitySpec } from '../AppMakerLab/generator/MockDataGenerator';
+import { generateAuthCode, type AuthType } from '../AppMakerLab/generator/AuthCodeGenerator';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
@@ -1309,6 +1310,31 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, json);
         this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — ${summary}`;
+      }
+
+      case 'generate_auth': {
+        const rawType = optStr(input, 'type');
+        const type: AuthType = rawType === 'firebase' ? 'firebase' : 'jwt';
+        const { files, dependencies, summary } = generateAuthCode({ type });
+        const written: string[] = [];
+        const wiring: string[] = [];
+        for (const file of files) {
+          let kind: 'create' | 'modify' = 'create';
+          try {
+            await this.actuator.readFile(this.workspaceId, file.path);
+            kind = 'modify';
+          } catch {
+            kind = 'create';
+          }
+          await this.actuator.writeFile(this.workspaceId, file.path, file.content);
+          this.state?.recordFileChange({ path: file.path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(file.path, file.content);
+          written.push(`${kind === 'create' ? 'Created' : 'Updated'} ${file.path}`);
+          wiring.push(`• ${file.path}: ${file.wiring}`);
+        }
+        this.scheduleCheckpoint(`auth (${type})`);
+        const depNote = dependencies.length ? `\nInstall: npm i ${dependencies.join(' ')}` : '';
+        return `${summary}\n${written.join('\n')}${depNote}\nWire in with edit_file:\n${wiring.join('\n')}`;
       }
 
       case 'check_conventions': {

@@ -29,6 +29,7 @@ export type ToolName =
   | 'generate_observability'
   | 'generate_bundle_optimization'
   | 'generate_seed_data'
+  | 'generate_auth'
   | 'check_conventions'
   | 'generate_release_notes'
   | 'task'

@@ -1647,15 +1647,26 @@
 - **Files:** new `src/server/AppMakerLab/generator/LintFixGenerator.ts`,
   `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
 
-### P-CGE.8 — Auth Code Generators (JWT + OAuth)  🟡 PARTIAL → full  [MED]
-- `FilePlanningEngine.ts` plans an `authService.ts` file if `blueprint.auth.enabled`, but the
-  generated auth code is a stub. No JWT issuance/validation, no OAuth flow, no session management.
-- [ ] Add `AuthCodeGenerator.ts` — when `blueprint.auth.type === 'jwt'`, generate:
-  - `src/server/auth/jwt.ts` — `signToken(payload)` + `verifyToken(token)` using `jsonwebtoken`.
-  - `src/middleware/authMiddleware.ts` — Bearer token validation middleware.
-- [ ] When `blueprint.auth.type === 'firebase'`, generate Firebase Auth hooks (init, signIn, signOut).
+### P-CGE.8 — Auth Code Generators (JWT + OAuth)  ✅ DONE (2026-06-29) · 🔌 WIRED  [MED]
+- Planned auth files were stubs — no real token issuance/validation, no middleware.
+- [x] **`AuthCodeGenerator.ts`** (pure, unit-tested) — `generateAuthCode({ type })`:
+  - `type 'jwt'` (default): `src/server/auth/jwt.ts` — a **dependency-free HS256** module (`signToken`/
+    `verifyToken` via Node `crypto`, `JWT_SECRET`, **timing-safe** signature check, exp enforcement) +
+    `src/middleware/authMiddleware.ts` (Express Bearer middleware → `req.user`, 401 on failure). Runs with
+    NO install, so it can never break the user's app at runtime.
+  - `type 'firebase'`: `src/lib/authClient.ts` — client helpers (signIn/signUp/signOut/onAuthChange) over
+    the Firebase SDK the user already brings (declares the `firebase` dependency).
+- [x] **Wired as the `generate_auth` AgentV3 tool** (types.ts + ToolCatalog + `CATALOG_TOOL_NAMES` +
+  AgentRegistry `BUILD_TOOLS` + ToolDispatcher case + systemPrompt nudge + ToolDispatcher tests): the agent
+  writes the files (records/indexes/checkpoints) and the result lists the wiring + any install.
+- **Honest deviation:** the spec named `jsonwebtoken`; the JWT path uses a dependency-free HS256 (Node
+  crypto) implementation so no install is forced into the user's app — swap for jsonwebtoken/RS256 if the
+  app needs asymmetric keys. OAuth flows beyond JWT/Firebase are out of scope for this pass.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3671 passing (9 new) ✅ · `test:coverage` exit 0 ·
+  `build` ✅ · `boot:check` PASS. AppKnowledgeBase updated (AUTO AUTH).
 - **Files:** new `src/server/AppMakerLab/generator/AuthCodeGenerator.ts`,
-  `src/server/AppMakerLab/intelligence/FilePlanningEngine.ts`.
+  `tests/authCodeGenerator.test.ts`; wired in `types.ts`, `ToolCatalog.ts`, `AgentRegistry.ts`,
+  `ToolDispatcher.ts`, `systemPrompt.ts`, `ToolDispatcher.test.ts`, `AppKnowledgeBase.ts`.
 
 ### P-CGE.9 — Dockerfile + CI/CD Pipeline Generators (for generated apps)  🟡 engine+API DONE / workspace-emit PENDING  [MED]
 - Generated apps had no `Dockerfile`/`docker-compose.yml`/CI. Now there is a real generator.

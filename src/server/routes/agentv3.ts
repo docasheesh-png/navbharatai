@@ -89,6 +89,7 @@ import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
 import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
 import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
+import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -1748,6 +1749,10 @@ export function registerAgentV3Routes(app: Express): void {
       // Best-effort: a listFiles failure falls back to the edit prefix without a
       // tree, and a non-edit turn uses the normal architect prompt unchanged.
       let architectSystem = architectSystemPrompt(framework);
+      // P-PE.2 — register the BASE architect prompt (pre per-turn injections) and capture its version
+      // id for telemetry traceability. Best-effort — never affects the build.
+      let architectPromptVersion = '';
+      try { architectPromptVersion = registerPrompt('architect', architectSystem); } catch { /* best-effort */ }
       // P-AI.5 — Personalization: for a RETURNING user, inject their learned stack preferences
       // (inferred from past successful builds) as advisory defaults so the Architect leans toward
       // how this user likes to build when they don't specify a stack. Best-effort and additive —
@@ -2477,6 +2482,8 @@ export function registerAgentV3Routes(app: Express): void {
           ok: result.ok,
           powerMode: onlyOpus,
           durationMs: Math.max(0, Date.now() - buildStartedAt),
+          // P-PE.2 — record which architect prompt version produced this build.
+          promptVersion: architectPromptVersion || undefined,
         })
         .catch(() => {});
 

@@ -34,6 +34,8 @@ export interface CostTelemetryEntry {
   powerMode: boolean;
   /** Wall-clock duration of the build (ms). */
   durationMs: number;
+  /** P-PE.2 — the architect prompt version id active for this build (traceability). */
+  promptVersion?: string;
 }
 
 /** Rolled-up counters for one slice (a task type or a start tier). */
@@ -57,6 +59,8 @@ export interface DailyCostTelemetryDoc {
   totalDurationMs: number;
   byTaskType: Record<string, TelemetryBreakdown>;
   byStartTier: Record<string, TelemetryBreakdown>;
+  /** P-PE.2 — the most recent architect prompt version id recorded today (traceability). */
+  lastPromptVersion?: string;
   updatedAt: number;
 }
 
@@ -128,6 +132,8 @@ export function foldCostTelemetry(
     totalDurationMs: doc.totalDurationMs + entry.durationMs,
     byTaskType,
     byStartTier,
+    // Carry the latest prompt version when present; otherwise keep the prior value.
+    lastPromptVersion: entry.promptVersion ?? doc.lastPromptVersion,
     updatedAt: now,
   };
 }

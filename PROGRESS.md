@@ -5859,3 +5859,16 @@ verify gate tripped every time and burned repair attempts. Two improvements:
   records the complete review. The downloadable report now lists every problem the reviewer found.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3586/3586 PASS, boot:check PASS.
+
+## 2026-06-29 — FIX (#3 live-server E2B): update_preview's OWN port-check was the gap → "No live preview yet"
+
+#668 fixed the dev-server LAUNCHER's port-check, but `update_preview` (ToolDispatcher) has its OWN
+port-readiness check, and it STILL used `nc -z localhost`. So when the sandbox image lacks `nc`, or
+`localhost` resolves to IPv6 ::1 while Vite binds IPv4 0.0.0.0, update_preview read the healthy dev server
+as DOWN → returned a WARNING and emitted NO `preview` event → the client never got a preview URL →
+"No live preview yet" even though the dev server was up. (Confirmed flow: preview event → reducer
+previewUrl → PreviewSurface url; all wired — the event simply never fired.) Fix: update_preview now uses
+the same tool-agnostic, IPv4-forced check (nc → curl → bash /dev/tcp on 127.0.0.1). With the port detected
+UP, getPortUrl runs and the preview event fires → the live tab shows the app.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3586/3586 PASS, boot:check PASS.

@@ -1290,12 +1290,17 @@ export class ToolDispatcher {
         const pollDeadline = Date.now() + PORT_POLL_BUDGET_MS;
         for (let attempt = 0; attempt < 30 && !portReady && Date.now() < pollDeadline; attempt++) {
           try {
+            // Tool-agnostic, IPv4-forced check (same fix as the dev-server launcher): the old
+            // `nc -z localhost` read a HEALTHY server as DOWN when the sandbox image lacks `nc`, or
+            // when `localhost` resolves to IPv6 ::1 while Vite binds IPv4 0.0.0.0 — so update_preview
+            // returned a WARNING and emitted NO preview event → the client showed "No live preview yet"
+            // even though the dev server was up. Try nc → curl → bash /dev/tcp, all against 127.0.0.1.
             const chk = await withTimeout(
               this.actuator.runCommand(
                 this.workspaceId,
-                `nc -z localhost ${port} 2>/dev/null && echo PORT_UP || echo PORT_DOWN`,
+                `if nc -z 127.0.0.1 ${port} 2>/dev/null || curl -s -o /dev/null --max-time 2 http://127.0.0.1:${port} 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null; then echo PORT_UP; else echo PORT_DOWN; fi`,
               ),
-              3_000,
+              4_000,
               'preview-port-check',
             );
             if (chk.stdout.includes('PORT_UP')) { portReady = true; break; }

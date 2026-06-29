@@ -283,6 +283,14 @@ describe('ToolDispatcher', () => {
     expect(res.content).toContain('https://sandbox-5173.example.dev');
     const ev = events.find((e) => e.type === 'preview');
     expect(ev && ev.type === 'preview' && ev.url).toBe('https://sandbox-5173.example.dev');
+    // The port-readiness check must be tool-agnostic + IPv4-forced (nc → curl → /dev/tcp on 127.0.0.1),
+    // NOT the old `nc -z localhost` — otherwise a missing nc / IPv6 localhost makes update_preview emit
+    // no preview event and the client shows "No live preview yet" despite a healthy dev server.
+    const portCheck = act.commands.find((c) => c.includes('PORT_UP'));
+    expect(portCheck).toBeTruthy();
+    expect(portCheck).toContain('127.0.0.1');
+    expect(portCheck).toContain('curl -s -o /dev/null');
+    expect(portCheck).not.toContain('nc -z localhost');
   });
 
   it('update_preview NEVER hangs the build when the sandbox stalls — it times out and warns', async () => {

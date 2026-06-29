@@ -5694,3 +5694,22 @@ to the repo, NOT the live prod DB, so the user sharing the report IS the bridge 
 AppKnowledgeBase updated. +3 DiagnosticsStore tests.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3492/3492 PASS (+3), boot:check PASS.
+
+## 2026-06-29 — FIX: CSS class-mismatch builds (the DigitalWatch bug tsc can't catch)
+
+Admin report: DigitalWatch app "didn't build" — component used className "watch-container"/"watch-screen"/
+"time-display" etc., but watch.css only defined ".watch-wrapper"/".watch-display". The reviewer caught it
+(25/100) but the build shipped anyway, AND the verify-gate (A) missed it because tsc CANNOT see a
+className-vs-CSS mismatch (class names are just strings → tsc passes, app renders unstyled).
+
+Fix: new deterministic CssConsistency check (pure, tested) cross-references the className tokens used in
+components against the .class selectors defined in the project's CSS. Wired into the fast-lane fastVerify
+AFTER the tsc check: on a real mismatch it fails verify with a descriptive error, so the SAME bounded
+auto-repair loop (A) rewrites the components/stylesheet to AGREE, then re-verifies. Conservative to avoid
+false positives on good apps: SKIPS Tailwind projects, only counts KEBAB-CASE custom classes, requires a
+.css file with selectors, and only flags at a threshold (>=3 undefined). +7 tests.
+
+Net: simple apps now get BOTH a type check (tsc) AND a style-consistency check before success is claimed,
+with auto-repair on either — closing the "built but renders unstyled/broken" gap.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3499/3499 PASS (+7), boot:check PASS.

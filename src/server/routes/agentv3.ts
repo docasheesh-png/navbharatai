@@ -123,6 +123,7 @@ import {
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { saveWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { saveDiagnostics, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
@@ -2091,7 +2092,17 @@ export function registerAgentV3Routes(app: Express): void {
                 }
               } catch { /* offending-file capture is best-effort */ }
             }
-            return { ok: !hasErrors, errors: hasErrors ? out.slice(0, 6000) : '' };
+            if (hasErrors) return { ok: false, errors: out.slice(0, 6000) };
+            // tsc is clean — but it CANNOT see a className-vs-CSS mismatch (class names are just
+            // strings), which renders the app unstyled/broken (the DigitalWatch bug). Run the
+            // deterministic CSS-consistency check and, on a real mismatch, fail verify so the SAME
+            // auto-repair pass makes the components and stylesheet agree. Conservative (Tailwind-aware,
+            // kebab-case only, thresholded) so a consistent app is never flagged.
+            try {
+              const cssErr = cssConsistencyError(Object.fromEntries(writtenFiles));
+              if (cssErr) return { ok: false, errors: cssErr };
+            } catch { /* css check is best-effort — never blocks on its own failure */ }
+            return { ok: true, errors: '' };
           } catch {
             return { ok: true, errors: '' }; // could not verify → don't block (best-effort)
           }

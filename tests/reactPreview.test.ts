@@ -76,16 +76,17 @@ describe('buildReactPreview', () => {
     expect(html).toContain('No React entry module found');
   });
 
-  it('emits PRECISE module errors — names the unresolved import AND its importer (not a cryptic stack)', () => {
+  it('emits PRECISE module errors + is RESILIENT to a missing local file (stub, not a blank crash)', () => {
     const html = buildReactPreview(reactVfs());
-    // A failed relative import surfaces "Cannot resolve ... imported by ..." rather than just "Module not found".
-    expect(html).toContain('Cannot resolve');
+    // A missing LOCAL file no longer crashes the whole preview — it is stubbed and a banner names it.
+    expect(html).toContain('missingLocal');
+    expect(html).toContain('stubbed so the preview still renders');
     expect(html).toContain('imported by');
-    // A missing bare dep names the package + importer.
+    // A missing bare dep still names the package + importer (a hard error — can't stub React).
     expect(html).toContain('Missing dependency');
     // The error display surfaces the MESSAGE (iOS Safari's stack is frames-only) — message-first handling.
     expect(html).toContain('err.message');
-    // Preview failures are postMessage'd up to the host so they can be captured into the build report.
+    // Preview failures/notes are postMessage'd up to the host so they're captured into the build report.
     expect(html).toContain('__nbaiPreviewError');
   });
 });

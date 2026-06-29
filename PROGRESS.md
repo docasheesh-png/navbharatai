@@ -5883,3 +5883,30 @@ the same tool-agnostic, IPv4-forced check (nc → curl → bash /dev/tcp on 127.
 UP, getPortUrl runs and the preview event fires → the live tab shows the app.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3586/3586 PASS, boot:check PASS.
+
+## 2026-06-29 — FIX (#3 live-server E2B): update_preview's OWN port-check was the gap → "No live preview yet"
+
+#668 fixed the dev-server LAUNCHER's port-check, but `update_preview` (ToolDispatcher) has its OWN
+port-readiness check, and it STILL used `nc -z localhost`. So when the sandbox image lacks `nc`, or
+`localhost` resolves to IPv6 ::1 while Vite binds IPv4 0.0.0.0, update_preview read the healthy dev server
+as DOWN → returned a WARNING and emitted NO `preview` event → the client never got a preview URL →
+"No live preview yet" even though the dev server was up. (Confirmed flow: preview event → reducer
+previewUrl → PreviewSurface url; all wired — the event simply never fired.) Fix: update_preview now uses
+the same tool-agnostic, IPv4-forced check (nc → curl → bash /dev/tcp on 127.0.0.1). With the port detected
+UP, getPortUrl runs and the preview event fires → the live tab shows the app.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3586/3586 PASS, boot:check PASS.
+
+## 2026-06-29 — FIX: a missing local file no longer blanks the WHOLE in-browser preview
+
+Recurring pain: NoteCard imported `../utils/formatDate`, a file the generator referenced but never
+created. Even after "Fix with AI" edits the file stayed missing, so the in-browser preview HARD-CRASHED
+every time with "Cannot resolve '../utils/formatDate'" → blank. Fix: the in-browser module loader is now
+RESILIENT — a missing LOCAL relative import is substituted with a forgiving stub (a Proxy whose every
+access is a no-op returning '') so the REST of the app renders, and a non-blocking orange banner names the
+missing file(s) ("Missing file (stubbed so the preview still renders): src/utils/formatDate (imported by
+src/components/NoteCard.tsx)") + postMessages it to the host so the Build report still captures it. Honest
+(the gap is shown, not hidden) and resilient (one dangling import ≠ blank screen). A missing bare npm dep
+(e.g. React) still hard-errors — that genuinely can't be stubbed.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3586/3586 PASS, boot:check PASS.

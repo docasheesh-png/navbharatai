@@ -141,6 +141,32 @@ export function editModePrefix(fileTree: string[] = []): string {
   ].join('\n');
 }
 
+/**
+ * P-PE.8 — current date/time context. Pure (the caller supplies the timestamp so the base prompt
+ * stays deterministic/testable). Prepend the returned block to the architect prompt per turn so the
+ * AI doesn't give stale "latest framework/version" advice or get the year wrong. Returns '' for a
+ * blank/invalid timestamp (no change).
+ */
+export function dateContextBlock(nowIso: string): string {
+  const iso = String(nowIso || '').trim();
+  if (!iso) return '';
+  let human = iso;
+  try {
+    const d = new Date(iso);
+    if (!Number.isNaN(d.getTime())) {
+      human = d.toLocaleDateString('en-US', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC',
+      });
+    }
+  } catch { /* fall back to the raw ISO string */ }
+  return [
+    `[Current date: ${human} (UTC, ${iso})]`,
+    'Use this as "today". Do not assume a training-cutoff date; when the user says "latest" or',
+    '"current", reason from this date. Do not invent specific future package version numbers you are',
+    'unsure about — prefer a stable/known version or let the install resolve the latest.',
+  ].join('\n');
+}
+
 export function architectSystemPrompt(framework?: string): string {
   const scaffoldHint = frameworkScaffoldHint(framework);
   return [

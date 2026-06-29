@@ -97,6 +97,7 @@ import { incrementalBuildCache, hashFiles, diffHashes } from '../AppMakerLab/Inc
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
 import { planAutoTests } from '../AgentV3/TestGenerationAgent';
+import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, tokenize as rerankTokenize } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
@@ -941,7 +942,9 @@ export function registerAgentV3Routes(app: Express): void {
         const last = report.previewErrors?.[report.previewErrors.length - 1];
         if (last && last.source === source && last.message === message) return report; // ignore immediate repeats
         const previewErrors = [...(report.previewErrors ?? []), rec].slice(-30);
-        const issues = [...report.issues, { ts: rec.ts, phase: 'preview' as const, severity: 'error' as const, code: 'PREVIEW_ERROR', message: `${source} preview failed: ${message}`.slice(0, 400), autoResolved: false }];
+        // P-AI.11 — enrich the recorded error with a parsed file:line:col + type hint (when
+        // extractable) so the downloadable build report shows WHERE/WHAT, not just a raw blob.
+        const issues = [...report.issues, { ts: rec.ts, phase: 'preview' as const, severity: 'error' as const, code: 'PREVIEW_ERROR', message: `${source} preview failed: ${message}${locationTag(message)}`.slice(0, 400), autoResolved: false }];
         return { ...report, previewErrors, issues, counts: { ...report.counts, total: issues.length, errors: report.counts.errors + 1, unresolved: report.counts.unresolved + 1 } };
       };
       // Update the in-memory copy (same instance) if present.

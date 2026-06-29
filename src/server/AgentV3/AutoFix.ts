@@ -7,6 +7,8 @@
 // re-verifies — and reports an honest WARNING if any remain. Pure, deterministic helpers here;
 // the impure orchestration (capture → repair runner → re-capture) lives in the build route.
 
+import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
+
 export interface RuntimeError {
   t: number;
   kind: string;
@@ -65,7 +67,9 @@ export function filterActionableErrors(errors: unknown): RuntimeError[] {
 
 /** Format the captured errors as a compact, readable list (capped) for a prompt or a message. */
 export function formatRuntimeErrors(errors: RuntimeError[], max = 20): string {
-  return errors.slice(0, max).map((e) => `- [${e.kind}] ${e.text}`).join('\n');
+  // P-AI.11 — append a parsed file:line:col + type hint (when extractable from the error text) so
+  // the repair pass can jump straight to the failing location instead of re-deriving it.
+  return errors.slice(0, max).map((e) => `- [${e.kind}] ${e.text}${locationTag(e.text)}`).join('\n');
 }
 
 /**

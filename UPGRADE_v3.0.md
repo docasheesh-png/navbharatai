@@ -1935,14 +1935,25 @@
       `boot:check` PASS.
 - **Files:** `src/server/AgentV3/AbuseDetector.ts` (new), `src/server/routes/agentv3.ts`, `tests/abuseDetector.test.ts` (new).
 
-### P-AI.11 — Dedicated Log / Stack Trace Intelligence  ❌ MISSING  [LOW]
-- Errors are classified by `FailureClassifier.ts` (pattern matching). No dedicated log parser that
-  understands structured output from Vite, TypeScript, ESLint, or runtime stack traces.
-- [ ] Add `LogIntelligenceEngine.ts` — parse stderr/stdout from build steps into structured error objects
-  (file, line, column, error type, severity).
-- [ ] Feed structured errors directly into `RootCauseAnalyzer.ts` instead of raw string matching.
+### P-AI.11 — Dedicated Log / Stack Trace Intelligence  ✅ DONE (2026-06-29) · 🔌 WIRED  [LOW]
+- Errors reached the repair pass and the build report as raw, unparsed strings (a TS diagnostic, a
+  Vite/esbuild error, a browser stack trace).
+- [x] **`LogIntelligenceEngine.ts`** (pure, unit-tested) — `parseLogErrors(text)` → structured
+  `{ file, line, column, type, message }` (TypeScript diagnostics each as their own entry; free-form
+  runtime/build output as one best-effort entry), plus `parseLocation`, `parseErrorType`, `errorHint`,
+  `firstStructuredError`, and `locationTag`. Regex-based, dependency-free, never throws.
+- [x] **Wired into two LIVE surfaces:** (1) the always-on **build diagnostics report** — the
+  `/api/agentv3/preview-error` append enriches each recorded runtime error with a parsed
+  `[at file:line:col TYPE]` tag, so the downloadable report shows WHERE/WHAT, not just a blob; (2) the
+  **AutoFix repair prompt** — `formatRuntimeErrors` appends the same parsed hint so the repair pass jumps
+  straight to the failing location.
+- **Honest scope (re-targeted from spec):** the spec named the legacy `AppMakerLab/autorepair/RootCauseAnalyzer`,
+  which is NOT on the live v3.0 build path — wiring there would be an orphan. Instead it's wired into the two
+  surfaces that v3.0 actually uses (the always-on report + the live AutoFix loop), so it is genuinely felt.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3666 passing (11 new) ✅ · `test:coverage` exit 0 ·
+  `build` ✅ · `boot:check` PASS.
 - **Files:** new `src/server/AppMakerLab/intelligence/LogIntelligenceEngine.ts`,
-  `src/server/AppMakerLab/autorepair/RootCauseAnalyzer.ts`.
+  `tests/logIntelligenceEngine.test.ts`; wired in `src/server/AgentV3/AutoFix.ts`, `src/server/routes/agentv3.ts`.
 
 ### P-AI.12 — Model Evaluation / Benchmark Engine  ❌ MISSING  [LOW]
 - No systematic comparison of output quality across providers (Claude vs Grok vs Gemini for code gen).

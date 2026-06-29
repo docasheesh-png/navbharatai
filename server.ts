@@ -50,6 +50,7 @@ import { apiVersionMiddleware } from './src/server/routes/apiVersion';
 import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
 import { registerObservabilityRoutes } from './src/server/routes/observability';
 import { registerReleaseNotesRoutes } from './src/server/routes/releaseNotes';
+import { registerConventionRoutes } from './src/server/routes/convention';
 import { errorTracker, installGlobalErrorHandlers } from './src/server/observability/ErrorTracker';
 import { registerHealthRoutes, markServerReady } from './src/server/routes/health';
 import { registerWarmRoute } from './src/server/routes/warm';
@@ -502,6 +503,8 @@ setInterval(() => {
   registerObservabilityRoutes(app);
   // P-PME.2 — release-notes generator (stateless blueprint-diff → structured notes).
   registerReleaseNotesRoutes(app);
+  // P-CGE.3 — convention & naming check (stateless file/identifier/import analysis).
+  registerConventionRoutes(app);
   registerSecretsRoutes(app);
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).

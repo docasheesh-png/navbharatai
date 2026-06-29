@@ -1239,16 +1239,18 @@
 - **Files:** new `src/server/AppMakerLab/generator/DocumentationGenerationEngine.ts`,
   `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
 
-### P-CGE.3 — Convention & Naming Engine  ❌ MISSING  [HIGH]
-- Generated code has no enforced conventions. File names, function names, variable names, and import
-  orders can be inconsistent across LLM calls (camelCase vs snake_case, `index.ts` vs `Index.tsx`).
-- [ ] Add `ConventionEngine.ts` — a post-processing pass after generation that enforces:
-  - File naming: PascalCase for components (`.tsx`), camelCase for services/hooks (`.ts`).
-  - Function naming: camelCase; constant: SCREAMING_SNAKE.
-  - Import ordering: built-ins → external → internal → relative.
-- [ ] Apply `ConventionEngine` in `PatchAggregator.ts` before writing to workspace.
-- **Files:** new `src/server/AppMakerLab/generator/ConventionEngine.ts`,
-  `src/server/AppMakerLab/generator/PatchAggregator.ts`.
+### P-CGE.3 — Convention & Naming Engine  🟡 engine+API DONE / build-pass wiring PENDING  [HIGH]
+- Generated code had no enforced conventions. Now there is a real engine that checks + suggests fixes.
+- [x] Added `src/server/lib/ConventionEngine.ts` — pure, dependency-free: `detectCase`/`toCase` (Pascal,
+  camel, snake, SCREAMING_SNAKE, kebab), `checkFileName` (PascalCase for `.tsx` components, camelCase for
+  `.ts` services/hooks; index/dotted files left alone), `checkIdentifier` (function→camel, constant→SCREAMING_SNAKE,
+  component/type→Pascal), `classifyImport`/`orderImports` (built-ins → external → internal → relative, alphabetised),
+  and `analyzeConventions` → a full report with a violation count. Honest: conforming input → zero violations. 10 tests.
+- [x] Added `POST /api/convention/check` (stateless): `{ files?, identifiers?, imports? }` → violations + suggested
+  fixes + reordered imports, with input caps. Usable by the IDE / a post-generation pass.
+- [ ] **Still pending:** apply the engine inside the generator's `PatchAggregator` before writing to the workspace
+  (build-path wiring — deferred to avoid touching the live AppMakerLab/AgentV3 path unattended).
+- **Files:** new `src/server/lib/ConventionEngine.ts` + `.test.ts`, new `src/server/routes/convention.ts`, `server.ts`.
 
 ### P-CGE.4 — Test Generation Suite  ❌ MISSING  [HIGH]
 - No test code is generated for any generated app. `QualityEvaluationEngine` evaluates tests but nothing

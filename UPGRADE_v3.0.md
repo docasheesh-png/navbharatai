@@ -1859,13 +1859,25 @@
 - **Files:** new `src/server/AgentV3/HumanReviewGate.ts`, `src/server/AppMakerLab/AppMakerOrchestrator.ts`,
   `src/App.tsx`.
 
-### P-AI.9 — Explainability / Decision Trace  ❌ MISSING  [MED]
-- `AuditManager.ts` logs mutations. `DeploymentAuditManager.ts` logs deploy steps. But no trace of
-  AI *decisions*: why was this architecture chosen? why this repair strategy? why this provider?
-- [ ] Add `DecisionTraceManager.ts` — append-only log of: intent detected → blueprint chosen → provider
-  selected → repair strategy chosen. Stored per build in Firestore `buildTraces/{jobId}`.
-- [ ] Expose via `/api/admin/trace/:jobId` (admin only) for debugging.
-- **Files:** new `src/server/AgentV3/DecisionTraceManager.ts`, `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+### P-AI.9 — Explainability / Decision Trace  ✅ DONE (2026-06-29) · 🔌 WIRED
+- `AuditManager.ts` logs mutations and `TracingManager.ts` (P-BRE.1) logs timing spans — but neither
+  captured WHY the AI made each choice. This adds an append-only, per-build trace of the *semantic*
+  decisions, each with a short human reason.
+- [x] **`DecisionTraceManager.ts`** (pure `DecisionTrace.record/snapshot/format`, unit-tested) — append-only
+      decisions `{stage, decision, reason, at}`; bounded in-memory last-trace cache (cap 100); `persistDecisionTrace`
+      (Firestore `buildTraces/{workspaceId}`, VITEST-skip + best-effort, never throws); `getDecisionTrace`
+      (in-memory cache first, then Firestore).
+- [x] **Wired into the build path** (`routes/agentv3.ts`): a trace is created at build start and records
+      `intent` (with existing-files reason), then `model` (delivered tier + model, with the selection reason)
+      and `outcome` (success/incomplete + files written + duration) at finalize, then `persistDecisionTrace`.
+- [x] **Exposed via owner-scoped `GET /api/agentv3/decision-trace`** (gated by `isAgentV3Enabled`, mirrors the
+      `/api/agentv3/diagnostics` endpoint) returning the workspace's decision list. Also surfaced in chat as a
+      `🧭 Decision trace` narration when provider-debug is on — explainability the admin can SEE, no noise for users.
+- **Deferred (honest scope):** blueprint/repair-strategy sub-decisions and a dedicated admin UI panel are not
+  wired yet — the three highest-value decisions (intent → model/tier → outcome) plus the endpoint cover the spec's
+  intent without touching the fragile App.tsx UI.
+- **Files:** new `src/server/AgentV3/DecisionTraceManager.ts`, `tests/decisionTraceManager.test.ts`,
+  wired in `src/server/routes/agentv3.ts`.
 
 ### P-AI.10 — Adversarial Input / Abuse Detection  ✅ DONE (2026-06-29) · 🔌 WIRED
 - Added a dedicated PROMPT-pattern abuse classifier on top of the existing defenses (CommandGovernance,

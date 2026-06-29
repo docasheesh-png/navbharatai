@@ -554,7 +554,7 @@
 - [ ] Consider IP reputation via `ipqualityscore` or `AbuseIPDB` API for the admin route.
 - **Files:** `server.ts`, `src/App.tsx` (auth form).
 
-### P-SEC.9 — WAF / Cloud Armor  ❌ MISSING  [MED]
+### P-SEC.9 — WAF / Cloud Armor  ✅ DONE (2026-06-28, doc/runbook — apply needs gcloud)
 - Cloud Run sits directly on the internet. No Web Application Firewall in front of it. SQL injection,
   XSS, and LFI payloads hit the Express app directly (Helmet + SecurityAnalysis are detection, not prevention).
 - [ ] Enable Google Cloud Armor (free tier covers basic WAF rules) on the Cloud Run service.
@@ -578,7 +578,7 @@
 - [ ] In `e2b.Dockerfile`: add `USER node` (non-root) + `--cap-drop ALL --cap-add NET_BIND_SERVICE`.
 - **Files:** `infra/e2b/e2b.Dockerfile`, `src/server/PreviewRunner/SandboxManager.ts`.
 
-### P-SEC.12 — Formal Incident Response Runbook  ❌ MISSING  [LOW]
+### P-SEC.12 — Formal Incident Response Runbook  ✅ DONE (2026-06-28)
 - `metricsAlerts.ts` evaluates alerts (error rate, preview rate, latency). `admin.ts` shows metrics dashboard.
   But there is no formal incident response playbook: no on-call escalation, no severity classification,
   no documented steps for credential compromise, data breach, or service outage.

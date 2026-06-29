@@ -181,7 +181,10 @@ export function PreviewSurface({ url, workspaceId, userId, email, onFixError }: 
           )}
         </div>
       ) : html ? (
-        <iframe title="In-browser preview" srcDoc={html} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-forms allow-popups" />
+        // NOTE: allow-same-origin is REQUIRED here — without it the srcDoc has an opaque origin and a
+        // dynamic ES-module import() (how the preview loads React from the CDN) is blocked, so React
+        // never loads → "Missing dependency react". The live-server iframe above already sets it.
+        <iframe title="In-browser preview" srcDoc={html} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
       ) : (
         <div className="flex-1 flex items-center justify-center p-6"><Empty>{workspaceId ? 'No preview yet — build something first.' : 'No live preview yet — it appears the moment the agent starts the app.'}</Empty></div>
       )}

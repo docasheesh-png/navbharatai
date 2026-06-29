@@ -1,0 +1,46 @@
+// P-DESIGN.5 — AI design pass endpoints (real multi-model AI, FREE router).
+//
+// POST /api/design/suggest  { code? }   → { suggestions: DesignSuggestion[] }
+// POST /api/design/palette  { brand }   → { palette: DesignPalette | null }
+//
+// Stateless, no secrets, no persistence. Uses the FREE router (Vertex/Gemini/Grok) — never Claude —
+// so design suggestions never spend build-grade credit. Honest: returns [] / null when the model
+// gives nothing usable; never fakes a result.
+
+import type { Express, Request, Response } from 'express';
+import { AIRouterManager } from '../AI/AIRouterManager';
+import { aiSuggestions, aiPalette, type RouteFn } from '../AgentV3/DesignAdvisor';
+
+const MAX_CODE = 12_000;
+const MAX_BRAND = 600;
+
+export function registerDesignRoutes(app: Express): void {
+  const routeFn: RouteFn = (prompt, system) => AIRouterManager.getRouter('free').route(prompt, system);
+
+  // Context-aware AI improvement suggestions for the current app.
+  app.post('/api/design/suggest', async (req: Request, res: Response) => {
+    try {
+      const code = typeof req.body?.code === 'string' ? req.body.code.slice(0, MAX_CODE) : '';
+      const suggestions = await aiSuggestions(code, routeFn);
+      res.json({ suggestions });
+    } catch {
+      // Honest empty result — the client falls back to its static suggestions.
+      res.json({ suggestions: [] });
+    }
+  });
+
+  // AI colour palette + type scale from a brand/description.
+  app.post('/api/design/palette', async (req: Request, res: Response) => {
+    const brand = typeof req.body?.brand === 'string' ? req.body.brand.trim().slice(0, MAX_BRAND) : '';
+    if (!brand) {
+      res.status(400).json({ error: 'provide { brand: "<description of the brand/vibe>" }' });
+      return;
+    }
+    try {
+      const palette = await aiPalette(brand, routeFn);
+      res.json({ palette });
+    } catch {
+      res.json({ palette: null });
+    }
+  });
+}

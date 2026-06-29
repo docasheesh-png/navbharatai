@@ -98,4 +98,46 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     const r = await runSimpleBuild(baseDeps({ startPreview: () => new Promise(() => {}), previewTimeoutMs: 20 }));
     expect(r.ok).toBe(true);
   });
+
+  // A — verify gate + auto-repair
+  it('verify passes → success is EARNED (ok:true)', async () => {
+    let verifies = 0;
+    const r = await runSimpleBuild(baseDeps({ verify: async () => { verifies++; return { ok: true, errors: '' }; } }));
+    expect(r.ok).toBe(true);
+    expect(verifies).toBe(1); // verified exactly once
+  });
+
+  it('verify fails then repair fixes it → re-verify passes → ok:true', async () => {
+    let verifies = 0;
+    let repairs = 0;
+    const r = await runSimpleBuild(baseDeps({
+      verify: async () => { verifies++; return verifies === 1 ? { ok: false, errors: "error TS2339: Property 'input' does not exist" } : { ok: true, errors: '' }; },
+      repair: async (_errs, files) => { repairs++; return [{ path: files[0].path, content: '// fixed' }]; },
+    }));
+    expect(r.ok).toBe(true);
+    expect(repairs).toBe(1);
+    expect(verifies).toBe(2); // verify → repair → verify
+  });
+
+  it('verify still fails after maxRepairs → ok:false (hands off to the full builder, NO fake success)', async () => {
+    let repairs = 0;
+    const r = await runSimpleBuild(baseDeps({
+      verify: async () => ({ ok: false, errors: 'error TS2339: broken' }),
+      repair: async (_e, files) => { repairs++; return [{ path: files[0].path, content: '// still broken' }]; },
+      maxRepairs: 2,
+    }));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('verify_failed');
+    expect(repairs).toBe(2); // tried exactly maxRepairs times before handing off
+  });
+
+  it('a verify infra error does NOT block success (best-effort)', async () => {
+    const r = await runSimpleBuild(baseDeps({ verify: async () => { throw new Error('sandbox gone'); } }));
+    expect(r.ok).toBe(true);
+  });
+
+  it('without a verify dep, behavior is unchanged (sticky success)', async () => {
+    const r = await runSimpleBuild(baseDeps());
+    expect(r.ok).toBe(true);
+  });
 });

@@ -71,8 +71,8 @@ import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/G
 import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
-import { runOneShot, classifyForOneShot, oneShotEnabled } from '../AgentV3/OneShotBuilder';
-import { runSimpleBuild } from '../AgentV3/SimpleBuilder';
+import { runOneShot, classifyForOneShot, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
+import { runSimpleBuild, repairSystemPrompt, repairUserPrompt } from '../AgentV3/SimpleBuilder';
 import { buildProjectContext, buildRunningSummary, formatPlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { withTimeout } from '../AgentV3/asyncUtils';
@@ -2027,6 +2027,24 @@ export function registerAgentV3Routes(app: Express): void {
           await dispatcher.dispatch({ id: 'fast-dev', name: 'bash', input: { command: 'npm run dev' } }, 'frontend');
           await dispatcher.dispatch({ id: 'fast-preview', name: 'update_preview', input: { port: oneShotDevPort(framework) } }, 'frontend');
         };
+        // A — real compile check: install deps (idempotent) then type-check. tsc surfaces the exact
+        // contract mismatch (e.g. a hook that doesn't return what a component destructures) that
+        // separate per-file generation can produce. `|| true` keeps a clean run at exit 0; a real
+        // type error is detected by the "error TSxxxx" marker. A throw → "couldn't verify" (non-blocking).
+        const fastVerify = async (): Promise<{ ok: boolean; errors: string }> => {
+          try {
+            const r = await actuator.runCommand(workspaceId, '[ -d node_modules ] || npm install >/dev/null 2>&1; npx --no-install tsc --noEmit 2>&1 | tail -200 || true');
+            const out = `${r.stdout || ''}\n${r.stderr || ''}`;
+            const hasErrors = /error TS\d+/.test(out);
+            return { ok: !hasErrors, errors: hasErrors ? out.slice(0, 6000) : '' };
+          } catch {
+            return { ok: true, errors: '' }; // could not verify → don't block (best-effort)
+          }
+        };
+        const fastRepair = async (errors: string, currentFiles: { path: string; content: string }[]): Promise<{ path: string; content: string }[]> => {
+          const text = await fastGenerate(repairSystemPrompt(framework), repairUserPrompt(prompt, errors, currentFiles));
+          return parseFileBlocks(text).map((b) => ({ path: b.path, content: b.content }));
+        };
         const fastLog = (msg: string) => events.emit({ type: 'narration', agent: 'architect', text: msg, ts: Date.now() });
         const fastResult = (summary: string, steps: number) => {
           result = { ok: true, summary, steps, usage: osUsage, billedUsd: billedAmountUsd({ inputTokens: osUsage.inputTokens, outputTokens: osUsage.outputTokens }, powerLevelReq) };
@@ -2036,7 +2054,7 @@ export function registerAgentV3Routes(app: Express): void {
         // 1) SIMPLE BUILDER (primary) — plan a file manifest, then generate EACH file in its own
         //    focused call. This beats the single-call OneShot's ~8k-token truncation that made
         //    multi-file apps produce "no files" and drop into the slow agentic loop.
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, log: fastLog });
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         if (sb.ok) {
           fastResult(sb.summary, sb.filesWritten);

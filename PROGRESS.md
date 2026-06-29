@@ -5612,3 +5612,27 @@ agent_spawned and preview events. Resets per turn via initialAgentV3State(). Fro
 AppKnowledgeBase agentv3_builder entry updated with the LIVE ACTIVITY capability + keywords.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3402/3402 PASS (+3 activity-feed tests), boot:check PASS.
+
+## 2026-06-29 — FIX (A): SimpleBuilder now EARNS success — verify-gate + auto-repair (no more "Built your app" on broken code)
+
+A real Build report (diagnosis bundle) proved the "app nahi bana" root cause: SimpleBuilder generates
+each file in its OWN isolated call, so a hook and its consumer disagreed on the interface (useCalculator
+didn't return `input`/`operation` that Calculator.tsx destructured → app won't compile). The reviewer
+caught it (15/100) — but SimpleBuilder had ALREADY returned ok:true (it reported success right after
+writing files, with NO compile check). So broken code shipped as "✅ Built your app." (Also seen: dev
+server OOM-Killed; in-browser preview "No files" — those are separate, slated next as fixes C/E.)
+
+Fix A (additive, never-worse-than-today): runSimpleBuild gains optional `verify` + `repair` deps.
+After writing files it runs a REAL compile check in the sandbox (`npx tsc --noEmit`, after an idempotent
+install) — tsc surfaces the exact contract mismatch. If it fails, it feeds the precise tsc errors + the
+current files back to a bounded auto-repair pass (default 2) that rewrites the offending files so the
+producer/consumer agree, then re-verifies. It claims ok:true ONLY when the app actually compiles; if it
+still fails after repairs, it returns ok:false so the build falls through to the full agentic builder
+(its own repair loop + readiness gate). A verify infra error is non-blocking (best-effort). With no
+verify dep wired, behavior is unchanged. This enforces "Preview is EARNED" on the fast lane.
+
+Wired in routes/agentv3.ts (fastVerify = install-guard + tsc; fastRepair = haiku call with repair prompt).
++6 SimpleBuilder tests (verify pass / repair-then-pass / fail-after-maxRepairs→ok:false / infra-error
+non-blocking / no-verify unchanged).
+
+Gate: frontend tsc 0, server tsc 0, vitest 3456/3456 PASS (+6), boot:check PASS.

@@ -59,6 +59,8 @@ export interface ViewPanelsProps {
   setGeneratedCode: (code: string) => void;
   files: FileSystem;
   setFiles: (files: any) => void;
+  /** Clear deleted paths from durable storage (IDE file-explorer multi-delete). */
+  onFilesRemoved?: (paths: string[]) => void;
   hasGeneratedCode: boolean;
   setIsAppBuilt: (v: boolean) => void;
   setHasGeneratedCode: (v: boolean) => void;
@@ -116,7 +118,7 @@ export interface ViewPanelsProps {
 }
 
 export function ViewPanels({
-  activeView, generatedCode, setGeneratedCode, files, setFiles,
+  activeView, generatedCode, setGeneratedCode, files, setFiles, onFilesRemoved,
   hasGeneratedCode, setIsAppBuilt, setHasGeneratedCode,
   user, activeAgent, mode, setMode, isAppBuilt, theme, setTheme,
   messages, input, setInput, setProInput, isLoading, activeIntent,
@@ -139,6 +141,7 @@ export function ViewPanels({
             onAgentChange={handleAgentChange}
             files={files}
             onFilesChange={(newFiles: any) => setFiles(newFiles as any)}
+            onFilesRemoved={onFilesRemoved}
             onRun={(f: any) => updatePreview(f || files)}
             generatedCode={generatedCode}
             messages={messages}

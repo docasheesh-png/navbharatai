@@ -1235,7 +1235,7 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     name: 'IDE / Code Studio',
     path: 'Sidebar → IDE  OR  Header → IDE tab',
     description: `Full in-browser development environment. Panels:
-• FILES — file explorer: browse, create, rename, delete files and folders in your project.
+• FILES — file explorer: browse, create, rename and delete files. Delete one file (trash icon) or use the Select button to multi-select / Select All and delete many at once — always with a confirmation dialog before anything is removed.
 • EDITOR — syntax-highlighted code editor for all file types (TypeScript, React, Python, HTML, CSS, etc.).
 • PREVIEW — live preview of the running app with hot-reload.
 • TERMINAL — bash shell to run any command (npm install, git, curl, etc.).

@@ -1,0 +1,4 @@
+{
+  "_comment": "P-SEC.6 — accepted STRONG-copyleft (GPL/AGPL) dependencies. The license gate (scripts/licenseGate.mjs) BLOCKS any strong-copyleft dep NOT listed here. Currently EMPTY: the tree has no un-dual-licensed GPL/AGPL deps (weak/file-level copyleft like MPL-2.0/LGPL and dual licenses like 'MIT OR GPL-3.0' are allowed automatically). Add an entry only with a deliberate legal sign-off.",
+  "allow": []
+}

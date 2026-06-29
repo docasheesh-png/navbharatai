@@ -93,8 +93,12 @@ function baseStyles(vfs: VirtualFileSystem): string {
  * Build a self-contained, in-browser-bundled React preview document.
  * Returns an HTML string; if no entry module is found, falls back to a clear notice.
  */
-export function buildReactPreview(vfs: VirtualFileSystem): string {
+export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): string {
   const entry = findEntry(vfs);
+  // Load the self-hosted compiler via an ABSOLUTE same-origin URL when the caller's origin is known
+  // (root-relative paths don't resolve inside a sandboxed <iframe srcDoc>). Falls back to the
+  // root-relative path when no origin is provided (e.g. unit tests, the /preview/:id static route).
+  const babelPrimary = origin ? `${origin.replace(/\/$/, '')}${BABEL_PRIMARY}` : BABEL_PRIMARY;
 
   // Gather every source + css module so the in-browser loader can resolve imports.
   const modules: Record<string, string> = {};
@@ -128,7 +132,7 @@ export function buildReactPreview(vfs: VirtualFileSystem): string {
 <title>Preview</title>
 ${css ? `<style>\n${css}\n</style>` : ''}
 <script type="importmap">${importmap}</script>
-<script src="${BABEL_PRIMARY}"></script>
+<script src="${babelPrimary}"></script>
 </head>
 <body>
 <div id="root"></div>

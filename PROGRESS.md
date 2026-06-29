@@ -5434,3 +5434,20 @@ previews are now driven by the v3.0 engine. 5 files: PreviewSurface.tsx (new), A
 ViewPanels, App.tsx.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3110/3110 PASS, boot:check PASS.
+
+## 2026-06-29 — Fix: in-browser preview "Could not load the preview compiler" (self-hosted Babel via absolute origin)
+
+User: even with E2B_API_KEY set, the In-browser preview showed "Could not load the preview compiler
+(network blocked?)". Root: ReactPreview.ts loaded the self-hosted compiler via a ROOT-RELATIVE path
+("/vendor/babel.min.js"). Inside a sandboxed <iframe srcDoc> a root-relative URL does not reliably
+resolve to the app origin, so the self-hosted Babel never loaded; the CDN fallbacks (jsdelivr/unpkg/
+cdnjs) are blocked → the error. (The v2.0 previewUtils already used the absolute ORIGIN form — that's
+why it worked there.) Fix: thread the caller's origin into renderPreview → buildReactPreview, which now
+emits <script src="${origin}/vendor/babel.min.js"> (absolute same-origin) when an origin is known, else
+the relative path (back-compat / unit tests / the /preview/:id static route). The /inbrowser-preview route
+derives the origin from the request body (PreviewSurface now sends window.location.origin), falling back to
+the x-forwarded-proto/host header. buildVuePreview accepts the origin param too (Vue uses CDNs separately).
+NOTE: after Babel loads, React deps still load from esm.sh — if that CDN is also blocked, the live (E2B)
+preview is the full-fidelity path.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3111/3111 PASS (+1), boot:check PASS.

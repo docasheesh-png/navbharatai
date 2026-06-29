@@ -992,7 +992,15 @@ export function registerAgentV3Routes(app: Express): void {
         return;
       }
       const vfs = VirtualFileSystem.fromRecord(files);
-      const html = renderPreview(vfs);
+      // The client's own origin (sent in the body, validated to an http/https URL) is used to load
+      // the self-hosted preview compiler via an absolute same-origin URL — a root-relative path
+      // doesn't resolve inside the sandboxed <iframe srcDoc>, which produced "Could not load the
+      // preview compiler". Falls back to a header-derived origin, then to no origin (relative).
+      const bodyOrigin = typeof req.body?.origin === 'string' && /^https?:\/\/[^\s/]+$/i.test(req.body.origin) ? req.body.origin : '';
+      const hdrHost = req.get('host');
+      const hdrOrigin = hdrHost ? `${(req.headers['x-forwarded-proto'] as string) || req.protocol || 'https'}://${hdrHost}` : '';
+      const previewOrigin = bodyOrigin || hdrOrigin || undefined;
+      const html = renderPreview(vfs, previewOrigin);
       // Detect the renderer used so the client can label the mode honestly.
       const kind = isReactProject(vfs) ? 'react' : isVueProject(vfs) ? 'vue' : 'static';
       res.json({ html, kind, count: Object.keys(files).length });

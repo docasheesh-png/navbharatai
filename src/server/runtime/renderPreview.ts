@@ -13,10 +13,12 @@ import { buildStaticPreview } from './StaticPreview';
 import { buildReactPreview, isReactProject } from './ReactPreview';
 import { buildVuePreview, isVueProject } from './VuePreview';
 
-export function renderPreview(vfs: VirtualFileSystem): string {
-  // React detection wins over Vue when both signals exist (a React app may have a
-  // vue dep listed); a genuine Vue SFC app has no react and routes to Vue.
-  if (isReactProject(vfs)) return buildReactPreview(vfs);
-  if (isVueProject(vfs)) return buildVuePreview(vfs);
+export function renderPreview(vfs: VirtualFileSystem, origin?: string): string {
+  // `origin` (the caller's site origin, e.g. https://navbharatai.com) is used to load the
+  // self-hosted compiler via an ABSOLUTE URL. Inside a sandboxed <iframe srcDoc> a root-relative
+  // path like "/vendor/babel.min.js" does not reliably resolve to the app origin, so the compiler
+  // failed to load ("Could not load the preview compiler"). An absolute same-origin URL fixes it.
+  if (isReactProject(vfs)) return buildReactPreview(vfs, origin);
+  if (isVueProject(vfs)) return buildVuePreview(vfs, origin);
   return buildStaticPreview(vfs);
 }

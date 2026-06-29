@@ -10,6 +10,7 @@ import { registerTelemetryRoutes } from './src/server/routes/telemetry';
 import { registerTeamRoutes } from './src/server/routes/team';
 import { audit } from './src/server/lib/audit';
 import { adaptiveGuard } from './src/server/lib/adaptiveRateLimit';
+import { securityHeadersConfig } from './src/server/lib/securityHeaders';
 import { setDb as setSharedDb } from './src/server/lib/db';
 import { registerWalletRoutes } from './src/server/routes/wallet';
 import { registerSecretsRoutes } from './src/server/routes/secrets';
@@ -243,36 +244,10 @@ setInterval(() => {
   installGlobalErrorHandlers();
 
   const app = express();
-  app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        // Firebase Auth (Google popup/redirect) loads gapi from apis.google.com, and phone-OTP
-        // reCAPTCHA loads from www.google.com / www.gstatic.com. Without these in script-src the
-        // browser blocks the gapi script and Google sign-in fails with a bare auth/internal-error.
-        scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://apis.google.com", "https://www.gstatic.com", "https://www.google.com"],
-        styleSrc:   ["'self'", "'unsafe-inline'"],
-        imgSrc:     ["'self'", "data:", "blob:", "https:"],
-        connectSrc: ["'self'", "https:", "wss:"],
-        fontSrc:    ["'self'", "data:", "https:"],
-        // Firebase Auth (redirect/popup + state sync) and phone-OTP reCAPTCHA load an
-        // iframe, and v3.0 embeds the live app PREVIEW (an https sandbox/deploy URL);
-        // a blanket 'none' silently breaks all of them. Allow our own origin plus any
-        // https frame (preview can be any sandbox host) — clickjacking of US is still
-        // governed by frame-ancestors, not this.
-        frameSrc:   ["'self'", "https:"],
-        objectSrc:  ["'none'"],
-      },
-    },
-    crossOriginEmbedderPolicy: false,
-    // CRITICAL for social sign-in: helmet's default COOP is 'same-origin', which severs
-    // window.opener for the OAuth popup — the Google/GitHub popup completes but its
-    // postMessage result can't reach the app ("message channel closed"), so the user
-    // returns logged-out with no error. 'same-origin-allow-popups' keeps the opener link
-    // so signInWithPopup actually delivers the credential. This is the fix that was
-    // missing across every prior Google-login attempt.
-    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
-  }));
+  // P-TQA.10 — HTTP security headers. The exact policy (CSP directives, COOP, etc.) lives in
+  // src/server/lib/securityHeaders.ts so it can be unit-tested; see that file for why each
+  // directive is shaped the way it is (Firebase Auth popups, live-preview iframes, OAuth opener).
+  app.use(helmet(securityHeadersConfig));
   app.use(traceMiddleware);
 
   // ── Rate Limiters (4.3) ──────────────────────────────────────────────────

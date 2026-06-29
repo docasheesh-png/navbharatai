@@ -5500,3 +5500,18 @@ opens + verifies the live preview automatically after the build, via #597). So a
 after the preview instead of churning on an over-planned "verify and deploy".
 
 Gate: server tsc 0, vitest 3143/3143 PASS, boot:check PASS.
+
+## 2026-06-29 — Fix (bulletproof): inline the Babel compiler into the in-browser preview
+
+User: "Could not load the preview compiler (network blocked?)" STILL appeared in the In-browser preview
+even after #528 (self-host) and #587 (absolute-origin URL). A <script src=…> can fail in a sandboxed
+<iframe srcDoc> for several reasons at once — a root-relative path doesn't resolve, an absolute URL 404s
+if the asset isn't in the deployed dist, and every third-party CDN fallback is blocked by the app's CSP
+(scriptSrc 'self'). Bulletproof fix (ReactPreview.ts): INLINE the Babel source directly into the preview
+HTML as <script>…</script>. An inline script is same-document (CSP allows 'unsafe-inline'), needs NO
+network and NO asset serving, so the compiler is ALWAYS present. babelInlineSource() reads babel.min.js
+once (cached) from public/vendor → dist/vendor → node_modules/@babel/standalone; if none is readable it
+falls back to the prior <script src=…> (no regression). Skipped under VITEST so the existing tests still
+assert the <script src> markup. ("</script>" in the minified source is escaped so it can't break the tag.)
+
+Gate: frontend tsc 0, server tsc 0, vitest 3223/3223 PASS, boot:check PASS.

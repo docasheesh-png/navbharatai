@@ -10,6 +10,10 @@ import type { HelmetOptions } from 'helmet';
  * The directives encode hard-won fixes — DO NOT tighten blindly:
  *  - `scriptSrc` / `frameSrc` allow Google + https so Firebase Auth (popup/redirect + reCAPTCHA)
  *    and the embedded live app PREVIEW keep working.
+ *  - `scriptSrc` ALSO allows the preview CDNs (esm.sh for React + npm deps, jsdelivr/cdnjs for the
+ *    Babel-standalone fallback): the in-browser preview's <iframe srcDoc> inherits THIS page's CSP,
+ *    and a module `import('https://esm.sh/react…')` is governed by script-src — without these hosts
+ *    React fails to load and the preview dies with `Missing dependency "react"`.
  *  - `crossOriginOpenerPolicy: 'same-origin-allow-popups'` keeps `window.opener` alive so
  *    `signInWithPopup` can deliver the OAuth credential back to the app.
  */
@@ -17,7 +21,7 @@ export const securityHeadersConfig: HelmetOptions = {
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://apis.google.com", "https://www.gstatic.com", "https://www.google.com"],
+      scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://apis.google.com", "https://www.gstatic.com", "https://www.google.com", "https://esm.sh", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
       styleSrc:   ["'self'", "'unsafe-inline'"],
       imgSrc:     ["'self'", "data:", "blob:", "https:"],
       connectSrc: ["'self'", "https:", "wss:"],

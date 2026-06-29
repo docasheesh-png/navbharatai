@@ -8,7 +8,7 @@
  * Reachable from Settings → "Insights & Webhooks". Real data only — honest empty/zero states, no fakes.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { Activity, ShieldCheck, Webhook as WebhookIcon, Plus, Trash2, RefreshCcw, Send } from 'lucide-react';
+import { Activity, ShieldCheck, Webhook as WebhookIcon, Plus, Trash2, RefreshCcw, Send, Brain } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
 
@@ -104,7 +104,20 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
     } catch (e: any) { setWhMsg(`Error: ${e?.message || e}`); }
   };
 
+  // ── Code Confidence (hallucination check) ──
+  const [conf, setConf] = useState<any>(null);
+  const [confBusy, setConfBusy] = useState(false);
+  const runConf = async () => {
+    setConfBusy(true); setConf(null);
+    try {
+      const r = await fetch('/api/workspace/hallucination-check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files }) });
+      if (r.ok) setConf(await r.json());
+    } catch { /* ignore */ }
+    finally { setConfBusy(false); }
+  };
+
   const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+  const confColor = (c: number) => (c >= 85 ? 'text-emerald-400' : c >= 70 ? 'text-amber-400' : 'text-red-400');
 
   return (
     <div className="flex-1 h-full overflow-auto bg-[#0d1117] p-6 space-y-5">
@@ -124,6 +137,31 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
                 <span className="text-[#8b949e]">{t.builds} builds · {Math.round((t.violationRate || 0) * 100)}% over · p95 {fmtSec(t.p95Ms)}</span>
               </div>
             ))}
+          </div>
+        )}
+      </Card>
+
+      {/* Code Confidence (P-AI.1 hallucination check) */}
+      <Card icon={<Brain className="w-4 h-4 text-fuchsia-400" />} title="Code Confidence (AI hallucination check)"
+        action={<button onClick={runConf} disabled={confBusy} className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest bg-fuchsia-600 hover:bg-fuchsia-700 disabled:opacity-50 text-white rounded-lg">{confBusy ? 'Checking…' : 'Check Code'}</button>}>
+        {!conf ? (
+          <p className="text-[11px] text-[#8b949e]">Scan the generated code for hallucination signals — undeclared (hallucinated) dependencies, imports to files that don't exist, and placeholder/"not implemented" stubs — and get a confidence score.</p>
+        ) : (
+          <div className="space-y-2 text-[11px]">
+            <div className="flex items-baseline gap-2">
+              <span className={`text-2xl font-black ${confColor(conf.confidence)}`}>{conf.confidence}%</span>
+              <span className="text-[#8b949e]">confidence {conf.isLowConfidence ? '· ⚠ low — review before shipping' : '· looks solid'}</span>
+            </div>
+            <div className="text-[#8b949e]">
+              Hallucinated deps: <span className="text-white font-bold">{conf.counts['hallucinated-dependency']}</span> ·
+              Unresolved imports: <span className="text-white font-bold">{conf.counts['unresolved-local-import']}</span> ·
+              Stubs: <span className="text-white font-bold">{conf.counts['placeholder-stub']}</span>
+            </div>
+            {conf.signals.length > 0 && (
+              <div className="space-y-1 max-h-40 overflow-auto">{conf.signals.slice(0, 30).map((s: any, i: number) => (
+                <div key={i} className="bg-black/30 rounded px-3 py-1 font-mono text-[10px] text-amber-300">{s.kind}: <span className="text-white">{s.detail}</span> <span className="text-[#8b949e]">({s.file})</span></div>
+              ))}</div>
+            )}
           </div>
         )}
       </Card>

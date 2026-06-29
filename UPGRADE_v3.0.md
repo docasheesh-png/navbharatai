@@ -1502,17 +1502,21 @@
   `src/server/AppMakerLab/autorepair/RepairExecutor.ts`,
   new `src/server/AppMakerLab/generator/ASTPatching.ts`.
 
-### P-CGE.2 — Documentation Generators  🟡 engine+API DONE / orchestrator wiring PENDING  [HIGH]
-- Generated apps had no docs. Now there is a real generator for README, API reference and TSDoc.
+### P-CGE.2 — Documentation Generators  ✅ DONE (2026-06-29) · 🔌 WIRED  [AST inline-comments deferred]
+- Generated apps had no docs. Now there is a real generator, wired into the live v3.0 build as an agent tool.
 - [x] Added `src/server/lib/DocGenerator.ts` — pure, dependency-free: `generateReadme` (from
   name/description/features/tech-stack/setup), `generateApiDocs` (a sorted route table from `{method,path,
   description?,auth?}`), `generateTsDoc` (a TSDoc block from a parsed function signature with @param/@returns),
   and `generateDocs` (whatever the input supports). Honest: empty blueprint → minimal README (no fabricated
   features); no routes → "_No routes documented._". 7 unit tests.
 - [x] Added `POST /api/docs/generate` (stateless): `{ blueprint?, routes?, signatures? }` → `{ readme?, apiDocs?, tsdoc? }`.
-- [ ] **Still pending:** run it as a post-generation step in the generator (build-path wiring) and the AST-based
-  inline-comment injection over real generated source (deferred — live build path + needs a real parser).
-- **Files:** new `src/server/lib/DocGenerator.ts` + `.test.ts`, new `src/server/routes/docs.ts`, `server.ts`.
+- [x] **BUILD-PATH WIRING (live v3.0)** — new `generate_api_docs` AgentV3 tool (ToolName + ToolCatalog + BUILD_TOOLS
+  + ToolDispatcher handler): the agent passes the routes it built; the tool writes a readable `API.md` reference
+  (sorted method/path/auth/description table) into the workspace. systemPrompt nudges the agent to call it alongside
+  generate_openapi. (README is already covered by the existing `generate_readme` tool.) 2 dispatcher tests added.
+- [ ] **Still deferred:** AST-based inline-comment (TSDoc) injection over real generated source (needs a real parser).
+- **Files:** `src/server/lib/DocGenerator.ts`, `src/server/AgentV3/{types,ToolCatalog,AgentRegistry,ToolDispatcher,systemPrompt}.ts`,
+  `src/server/AgentV3/ToolDispatcher.test.ts`, `src/server/routes/docs.ts`.
 
 ### P-CGE.3 — Convention & Naming Engine  🟡 engine+API DONE / build-pass wiring PENDING  [HIGH]
 - Generated code had no enforced conventions. Now there is a real engine that checks + suggests fixes.

@@ -383,6 +383,46 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_seed_data',
+      description:
+        'Generate realistic, deterministic SEED DATA for the app\'s entities and write it to ' +
+        'fixtures/seed.json — so the app can be exercised with sample rows instead of an empty database. ' +
+        'Pass the entities you built with their fields; values are derived from each field\'s name/type ' +
+        '(name→names, email→emails, price→numbers, created_at→ISO dates, status→enum, etc.), seeded by row ' +
+        'index so the data is varied but reproducible. Use after defining the data model.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          entities: {
+            type: 'array',
+            description: 'The entities to seed.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Entity/table name (becomes a key in seed.json).' },
+                fields: {
+                  type: 'array',
+                  description: 'The entity fields.',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      name: { type: 'string', description: 'Field name (drives the generated value).' },
+                      type: { type: 'string', description: 'Optional type hint: string|number|integer|float|boolean|date|email.' },
+                    },
+                    required: ['name'],
+                  },
+                },
+              },
+              required: ['name', 'fields'],
+            },
+          },
+          count: { type: 'number', description: 'Rows per entity (default 10, max 1000).' },
+          path: { type: 'string', description: 'Output path (default fixtures/seed.json).' },
+        },
+        required: ['entities'],
+      },
+    },
+    {
       name: 'check_conventions',
       description:
         'Check naming + import-ordering conventions and get suggested fixes (analysis only — writes ' +
@@ -532,6 +572,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_tests',
   'generate_observability',
   'generate_bundle_optimization',
+  'generate_seed_data',
   'check_conventions',
   'generate_release_notes',
   'web_search',

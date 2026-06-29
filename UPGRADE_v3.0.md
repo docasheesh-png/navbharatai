@@ -1719,13 +1719,23 @@
   new `src/server/AppMakerLab/generator/ReactNativeGenerationEngine.ts`,
   `src/server/AppMakerLab/generator/EngineRegistry.ts`.
 
-### P-CGE.13 — Seed / Mock / Fixture Data Generators  ❌ MISSING  [LOW]
-- No realistic test data is generated. Developers cannot test generated apps without manually
-  creating data.
-- [ ] Add `MockDataGenerator.ts` — when `blueprint.entities` present, use `@faker-js/faker`
-  patterns to generate 10 seed rows per entity as `fixtures/seed.json`.
-- [ ] Wire into `AppMakerOrchestrator.ts` post-database-generation step.
-- **Files:** new `src/server/AppMakerLab/generator/MockDataGenerator.ts`.
+### P-CGE.13 — Seed / Mock / Fixture Data Generators  ✅ DONE (2026-06-29) · 🔌 WIRED
+- No realistic test data was generated — developers couldn't exercise a generated app without
+  hand-creating rows.
+- [x] **`MockDataGenerator.ts`** (pure, unit-tested) — `generateSeedData(entities, count)` plus
+  `mockValue`/`mockRows`. Values are derived from each field's name/type (name→names, email→emails,
+  price→numbers, created_at→ISO dates, status→enum, id→hex, bool flags, etc.), seeded by row index so
+  the data is varied but **deterministic** (reproducible across runs — good for snapshot tests).
+- [x] **Wired as the `generate_seed_data` AgentV3 tool** (types.ts + ToolCatalog + `CATALOG_TOOL_NAMES`
+  + AgentRegistry `BUILD_TOOLS` + ToolDispatcher case + systemPrompt nudge + ToolDispatcher tests): the
+  agent passes its entities + fields and the tool writes `fixtures/seed.json` (records/indexes/checkpoints).
+- **Dependency-free deviation (honest):** the spec named `@faker-js/faker`; we generate realistic values
+  from name/type heuristics instead, so no new dependency is forced into NavBharatAI or the user's app.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3652 passing (10 new) ✅ · `test:coverage` exit 0 ·
+  `build` ✅ · `boot:check` PASS. AppKnowledgeBase updated (AUTO SEED DATA).
+- **Files:** new `src/server/AppMakerLab/generator/MockDataGenerator.ts`,
+  `tests/mockDataGenerator.test.ts`; wired in `types.ts`, `ToolCatalog.ts`, `AgentRegistry.ts`,
+  `ToolDispatcher.ts`, `systemPrompt.ts`, `ToolDispatcher.test.ts`, `AppKnowledgeBase.ts`.
 
 ---
 

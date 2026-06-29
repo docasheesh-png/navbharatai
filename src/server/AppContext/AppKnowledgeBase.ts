@@ -186,6 +186,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     keywords: ['github', 'github storage', 'my github', 'save to github', 'git', 'repo', 'repository', 'commit', 'pull request', 'pr', 'ci', 'merge', 'own code', 'no lock-in', 'github me save', 'github par', 'apni github', 'git native', 'version control'],
     aiSurface: 'nbi_chat',
   },
+  {
+    id: 'privacy_consent',
+    name: 'Privacy & analytics consent',
+    path: 'Consent banner (bottom of the screen) on your first visit — Accept analytics / Decline',
+    description: 'A privacy consent banner (GDPR + India DPDP) shown on your first visit. NavBharatAI uses privacy-friendly product analytics and Core Web Vitals performance measurement to improve the app — these are OPTIONAL and never run until you tap "Accept analytics". If you "Decline" (or ignore it), no non-essential analytics or performance tracking fires. Essential features and anonymous crash/error reporting (needed to keep the app stable) work either way. Your choice is remembered on this device; to change it later, clear the site data/cookies for NavBharatAI in your browser and the banner returns.',
+    howToUse: 'On your first visit, a banner appears at the bottom. Tap "Accept analytics" to allow optional analytics/performance measurement, or "Decline" to keep them off. To change your choice later, clear NavBharatAI\'s site data in your browser settings — the banner will show again on the next visit.',
+    relatedFeatures: ['settings_root'],
+    keywords: ['privacy', 'consent', 'cookie', 'cookies', 'gdpr', 'dpdp', 'analytics', 'tracking', 'data', 'opt out', 'opt in', 'decline', 'accept', 'privacy policy', 'do not track', 'data privacy', 'meri privacy', 'data collection'],
+    aiSurface: 'nbi_chat',
+  },
   // ─── ENGINEER AI ─────────────────────────────────────────────────────────
   {
     id: 'connect_domain',

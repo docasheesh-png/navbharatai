@@ -5,6 +5,8 @@ import './index.css';
 import { BuildProvider } from './components/ide/BuildContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { offlineQueue, installOfflineQueueFlush } from './lib/offlineQueue';
+import { ConsentBanner } from './components/ConsentBanner';
+import { hasAnalyticsConsent, CONSENT_EVENT } from './lib/consent';
 
 // Top-level crash fallback — guarantees the app NEVER shows a full white page.
 // Any uncaught render error anywhere in the tree lands here with a recovery option.
@@ -102,8 +104,16 @@ if (import.meta.env.PROD) {
   });
 }
 
-// 12.3 — Core Web Vitals measurement via PerformanceObserver
-if (import.meta.env.PROD && typeof PerformanceObserver !== 'undefined') {
+// 12.3 — Core Web Vitals measurement via PerformanceObserver.
+// P-UX.1 — GDPR/DPDP: this is non-essential telemetry, so it only starts once the user has granted
+// analytics consent. `buffered: true` means metrics emitted before init (e.g. LCP) are still
+// captured when the user accepts mid-session. Guarded so it inits at most once.
+let webVitalsStarted = false;
+function initWebVitals() {
+  if (webVitalsStarted) return;
+  if (!(import.meta.env.PROD && typeof PerformanceObserver !== 'undefined')) return;
+  if (!hasAnalyticsConsent()) return;
+  webVitalsStarted = true;
   try {
     // LCP
     new PerformanceObserver((list) => {
@@ -149,11 +159,17 @@ if (import.meta.env.PROD && typeof PerformanceObserver !== 'undefined') {
   } catch {}
 }
 
+// Start web-vitals now if consent was granted in a previous session, and also when the user accepts
+// via the banner this session (the consent module dispatches CONSENT_EVENT on change).
+initWebVitals();
+window.addEventListener(CONSENT_EVENT, () => initWebVitals());
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary fallback={RootFallback}>
       <BuildProvider>
         <App />
+        <ConsentBanner />
       </BuildProvider>
     </ErrorBoundary>
   </StrictMode>,

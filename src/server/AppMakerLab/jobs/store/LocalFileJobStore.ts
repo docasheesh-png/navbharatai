@@ -55,4 +55,23 @@ export class LocalFileJobStore implements JobStore {
             return null;
         }
     }
+
+    // P-BRE.8 — read every stored job, newest-first, capped at `limit`. Dev/CI store, linear scan ok.
+    async listRecentJobs(limit: number): Promise<BuildJob[]> {
+        try {
+            const files = await readdir(this.storageDir).catch(() => [] as string[]);
+            const jobs: BuildJob[] = [];
+            for (const file of files) {
+                if (!file.endsWith('.json')) continue;
+                try {
+                    const data = await readFile(join(this.storageDir, file), 'utf-8');
+                    jobs.push(JSON.parse(data) as BuildJob);
+                } catch { /* skip unreadable/corrupt entries */ }
+            }
+            jobs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            return jobs.slice(0, Math.max(0, limit));
+        } catch {
+            return [];
+        }
+    }
 }

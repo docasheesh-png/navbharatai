@@ -982,13 +982,25 @@
 - [ ] Add webhook option (per-project URL) — fire a POST with `{jobId, status, previewUrl}` on completion.
 - **Files:** new `src/server/NotificationManager.ts`, `server.ts`, `src/server/AppMakerLab/jobs/BuildJobManager.ts`.
 
-### P-BRE.8 — Build Analytics Dashboard  🟡 PARTIAL → full  [MED]
-- `BuildJobManager.ts` tracks per-job status + timestamps. `AppAnalytics.tsx` shows AI model usage.
-  But there is no dashboard showing build pipeline health: avg build duration, failure rate, most common failure type, slowest stage.
-- [ ] Add build metrics aggregation endpoint `/api/analytics/builds` — query Firestore job store for last 100 jobs, compute: avg duration, p95 duration, success rate, top 5 failure error types.
-- [ ] Render as a "Build Performance" card in `AppAnalytics.tsx` with a 7-day trend line.
-- **Files:** `src/server/AppMakerLab/jobs/BuildJobManager.ts`, `server.ts` (new endpoint),
-  `src/components/ide/AppAnalytics.tsx`.
+### P-BRE.8 — Build Analytics Dashboard  ✅ DONE (2026-06-29)
+- There was no view of build-pipeline health (duration, failure rate, common failure type).
+- [x] **Aggregation endpoint `GET /api/analytics/builds`** (`routes/buildAnalytics.ts`) — pulls the last N jobs
+      (default 100) from the job store and computes success/failure rate, avg + p95 duration, status breakdown,
+      and the top-5 failure signatures. Honest zeros until builds have run (never fabricated).
+- [x] **Store support** — added `listRecentJobs(limit)` to the `JobStore` interface + BOTH implementations
+      (`LocalFileJobStore` linear scan, `FirestoreJobStore` indexed `orderBy(createdAt desc).limit`), and
+      `BuildJobManager.listRecent()`.
+- [x] **Pure aggregator** (`BuildAnalytics.ts`, unit-tested) — `aggregateBuildAnalytics()` + `percentile()` +
+      `failureSignature()` (normalizes a failed job's last log line into a stable signature: collapses ids,
+      strips line:col, length-caps).
+- [x] **"Build Performance" card** in `AppAnalytics.tsx` — renders success rate, failure rate, avg + p95 duration,
+      and the top failure types from the real endpoint; only shows once builds exist.
+- [x] **AppKnowledgeBase** — new `build-performance-analytics` entry (same PR).
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3242/3242 ✅ (7 new) · `test:coverage` exit 0 · `build` ✅ ·
+      `boot:check` PASS.
+- **Files:** `src/server/AppMakerLab/jobs/BuildAnalytics.ts` (new), `src/server/routes/buildAnalytics.ts` (new),
+      `tests/buildAnalytics.test.ts` (new), `src/server/AppMakerLab/jobs/store/{JobStore,LocalFileJobStore,FirestoreJobStore}.ts`,
+      `src/server/AppMakerLab/jobs/BuildJobManager.ts`, `server.ts`, `src/components/ide/AppAnalytics.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`.
 
 ### P-BRE.9 — Circuit Breaker for Build Pipeline Steps  ✅ DONE (2026-06-29)
 - `EngineDispatcher.dispatch()` had no breaker: a repeatedly-failing/hanging generation engine dragged every

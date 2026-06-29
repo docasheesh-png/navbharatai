@@ -15,6 +15,7 @@ import { setDb as setSharedDb } from './src/server/lib/db';
 import { registerWalletRoutes } from './src/server/routes/wallet';
 import { registerSecretsRoutes } from './src/server/routes/secrets';
 import { registerSbomRoutes } from './src/server/routes/sbom';
+import { registerBuildAnalyticsRoutes } from './src/server/routes/buildAnalytics';
 import { getSecretValue } from './src/server/lib/secrets';
 import { verifyPaymentInternal } from './src/server/lib/payments';
 import { registerPaymentRoutes } from './src/server/routes/payment';
@@ -508,6 +509,7 @@ setInterval(() => {
   registerDeployArtifactsRoutes(app);
   registerSecretsRoutes(app);
   registerSbomRoutes(app);
+  registerBuildAnalyticsRoutes(app);
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
   registerPreviewRoutes(app, chatLimiter);

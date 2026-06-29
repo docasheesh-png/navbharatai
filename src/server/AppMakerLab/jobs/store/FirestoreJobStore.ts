@@ -51,4 +51,18 @@ export class FirestoreJobStore implements JobStore {
             .get();
         return snap.empty ? null : (snap.docs[0].data() as BuildJob);
     }
+
+    // P-BRE.8 — most recent jobs (newest first) via an indexed query, for analytics aggregation.
+    async listRecentJobs(limit: number): Promise<BuildJob[]> {
+        try {
+            const snap = await this.db.collection(this.collection)
+                .orderBy('createdAt', 'desc')
+                .limit(Math.max(1, limit))
+                .get();
+            return snap.docs.map(d => d.data() as BuildJob);
+        } catch (err) {
+            console.error('[FirestoreJobStore] listRecentJobs failed:', err);
+            return [];
+        }
+    }
 }

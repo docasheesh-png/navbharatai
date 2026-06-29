@@ -88,6 +88,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [latencyAnomaly, setLatencyAnomaly] = useState<any>(null);
   const [anomalyLoading, setAnomalyLoading] = useState(false);
 
+  // P-SEC.3 — admin TOTP MFA enrolment state.
+  const [mfaStatus, setMfaStatus] = useState<{ enabled: boolean; envManaged: boolean } | null>(null);
+  const [mfaEnroll, setMfaEnroll] = useState<{ secret: string; otpauthUri: string } | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaBusy, setMfaBusy] = useState(false);
+
   const headers = { 'x-admin-token': adminToken, 'Content-Type': 'application/json' };
 
   const toast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3000); };
@@ -197,6 +203,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   }, [adminToken]);
 
   useEffect(() => { if (activeTab === 'engines') { fetchLlmLatency(); fetchLatencyAnomaly(); } }, [activeTab, fetchLlmLatency, fetchLatencyAnomaly]);
+
+  // ── P-SEC.3 — admin MFA enrolment handlers ──
+  const fetchMfaStatus = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/mfa/status', { headers });
+      const d = await r.json();
+      setMfaStatus(d && typeof d === 'object' ? d : null);
+    } catch (e) { console.error(e); setMfaStatus(null); }
+  }, [adminToken]);
+
+  useEffect(() => { if (activeTab === 'security') fetchMfaStatus(); }, [activeTab, fetchMfaStatus]);
+
+  const startMfaEnroll = async () => {
+    setMfaBusy(true);
+    try {
+      const r = await fetch('/api/admin/mfa/enroll', { method: 'POST', headers });
+      const d = await r.json();
+      if (r.ok && d.secret) { setMfaEnroll(d); setMfaCode(''); }
+      else toast(d.error || 'Failed to start enrolment.');
+    } catch (e: any) { toast(`Error: ${e?.message || e}`); }
+    finally { setMfaBusy(false); }
+  };
+
+  const confirmMfaEnroll = async () => {
+    setMfaBusy(true);
+    try {
+      const r = await fetch('/api/admin/mfa/verify', { method: 'POST', headers, body: JSON.stringify({ code: mfaCode }) });
+      const d = await r.json();
+      if (r.ok && d.ok) { toast('MFA enabled ✓'); setMfaEnroll(null); setMfaCode(''); fetchMfaStatus(); }
+      else toast(d.error || 'Invalid code.');
+    } catch (e: any) { toast(`Error: ${e?.message || e}`); }
+    finally { setMfaBusy(false); }
+  };
+
+  const disableMfa = async () => {
+    setMfaBusy(true);
+    try {
+      const r = await fetch('/api/admin/mfa/disable', { method: 'POST', headers, body: JSON.stringify({ code: mfaCode }) });
+      const d = await r.json();
+      if (r.ok && d.ok) { toast('MFA disabled.'); setMfaCode(''); fetchMfaStatus(); }
+      else toast(d.error || 'Could not disable MFA.');
+    } catch (e: any) { toast(`Error: ${e?.message || e}`); }
+    finally { setMfaBusy(false); }
+  };
 
   const adminPost = async (url: string, body: any) => {
     const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
@@ -876,6 +926,66 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── SECURITY TAB ── */}
           {activeTab === 'security' && (
             <div className="space-y-6">
+              {/* ── P-SEC.3 — Two-Factor Authentication (TOTP) ── */}
+              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-emerald-400" />
+                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Two-Factor Authentication</h3>
+                  </div>
+                  <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${mfaStatus?.enabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-[#8b949e]'}`}>
+                    {mfaStatus?.enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#8b949e] font-medium">
+                  Require a time-based code from an authenticator app (Google Authenticator, Authy, 1Password) at admin login — protection against password leaks and SIM-swap attacks on SMS OTP.
+                </p>
+
+                {mfaStatus?.envManaged ? (
+                  <p className="text-[10px] text-amber-400 font-bold uppercase tracking-widest">
+                    Managed by ADMIN_TOTP_SECRET on the server — enrolment is read-only here.
+                  </p>
+                ) : !mfaStatus?.enabled && !mfaEnroll ? (
+                  <button onClick={startMfaEnroll} disabled={mfaBusy}
+                    className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all active:scale-95">
+                    {mfaBusy ? 'Working…' : 'Enable 2FA'}
+                  </button>
+                ) : !mfaStatus?.enabled && mfaEnroll ? (
+                  <div className="space-y-3">
+                    <div className="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-2">
+                      <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">1. Add this key to your authenticator app</p>
+                      <code className="block text-emerald-400 font-mono text-sm break-all select-all">{mfaEnroll.secret}</code>
+                      <p className="text-[9px] text-[#8b949e] break-all">Or paste this URI: <span className="font-mono">{mfaEnroll.otpauthUri}</span></p>
+                    </div>
+                    <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">2. Enter the 6-digit code to confirm</p>
+                    <div className="flex gap-2">
+                      <input value={mfaCode} inputMode="numeric" maxLength={6}
+                        onChange={e => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="000000"
+                        className="flex-1 bg-black/40 border border-white/10 rounded-2xl px-5 py-3 text-white font-bold tracking-[0.3em] text-center outline-none focus:border-emerald-500" />
+                      <button onClick={confirmMfaEnroll} disabled={mfaBusy || mfaCode.length !== 6}
+                        className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all active:scale-95">
+                        Confirm
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Enter a current code to disable 2FA</p>
+                    <div className="flex gap-2">
+                      <input value={mfaCode} inputMode="numeric" maxLength={6}
+                        onChange={e => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="000000"
+                        className="flex-1 bg-black/40 border border-white/10 rounded-2xl px-5 py-3 text-white font-bold tracking-[0.3em] text-center outline-none focus:border-red-500" />
+                      <button onClick={disableMfa} disabled={mfaBusy || mfaCode.length !== 6}
+                        className="px-5 py-3 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all active:scale-95">
+                        Disable
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {statCard('Failed Logins', analytics?.failedRequests || 0, 'Admin login failures', 'bg-red-500', Shield)}
                 {statCard('Website Hits', (analytics?.websiteHitsTotal || 0).toLocaleString(), 'All time requests', 'bg-sky-500', Globe)}

@@ -20,6 +20,11 @@ export interface AdminLoginPanelProps {
   onSubmit: (e: React.FormEvent) => void;
   onLogout: () => void;
   adminToken: string;
+  /** P-SEC.3 — TOTP second factor. */
+  adminTotp: string;
+  onTotpChange: (v: string) => void;
+  /** True once the server has indicated MFA is required for this account. */
+  mfaRequired: boolean;
 }
 
 export function AdminLoginPanel({
@@ -32,6 +37,9 @@ export function AdminLoginPanel({
   onSubmit,
   onLogout,
   adminToken,
+  adminTotp,
+  onTotpChange,
+  mfaRequired,
 }: AdminLoginPanelProps) {
   return (
     <div className="flex-1 bg-[#0d1117] flex flex-col items-center justify-center p-6">
@@ -70,6 +78,22 @@ export function AdminLoginPanel({
                 placeholder="••••••••••••"
               />
             </div>
+            {mfaRequired && (
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest ml-1">Authenticator Code</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  value={adminTotp}
+                  onChange={e => onTotpChange(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-bold tracking-[0.4em] text-center outline-none focus:border-indigo-500"
+                  placeholder="000000"
+                />
+                <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest ml-1">6-digit code from your authenticator app</p>
+              </div>
+            )}
             {adminError && (
               <p className="text-[10px] text-red-500 font-bold uppercase tracking-widest text-center">{adminError}</p>
             )}

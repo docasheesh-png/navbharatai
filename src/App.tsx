@@ -4379,6 +4379,9 @@ ${buildLanguageRule(preferredLanguage)}`;
   // A v3.0 session restored from History → handed to AgentV3Panel via this prop;
   // the nonce makes each "open chat" re-adopt even if the panel is already mounted.
   const [v3Resume, setV3Resume] = useState<{ sessionId: string; messages: Array<{ role: 'user' | 'agent'; text: string; ts: number }>; nonce: number } | null>(null);
+  // The v3.0 build's live preview URL + workspace, lifted from AgentV3Panel so the MAIN slide-out
+  // "Preview" menu renders the SAME working v3.0 preview (was wired to the retired v2.0 generatedCode).
+  const [v3Preview, setV3Preview] = useState<{ previewUrl?: string; workspaceId?: string }>({});
 
   const resumeSession = (session: ChatSession) => {
     // v3.0 (engine_builder) sessions resume INSIDE v3.0 — adopt the saved sessionId
@@ -5396,6 +5399,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               resume={v3Resume}
               onFilesSync={(synced) => setFiles((prev) => ({ ...prev, ...synced }))}
               onOpenInIDE={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
+              onPreviewState={setV3Preview}
             />
           )}
 
@@ -6050,6 +6054,7 @@ ${buildLanguageRule(preferredLanguage)}`;
           )}
 
           <ViewPanels
+            v3Preview={v3Preview}
             activeView={activeView}
             generatedCode={generatedCode}
             setGeneratedCode={setGeneratedCode}

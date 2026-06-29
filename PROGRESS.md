@@ -5417,3 +5417,20 @@ build as chit-chat). NOTE: the build still timed out at 12 min for a todo app �
 issue (deferred at user's request).
 
 Gate: frontend tsc 0, server tsc 0, vitest 3089/3089 PASS (+4), boot:check PASS.
+
+## 2026-06-29 — Fix: connect BOTH previews to the v3.0 engine (main "Preview" menu was wired to retired v2.0)
+
+User: both previews don't open — the one inside the v3.0 panel AND the main slide-out "Preview" menu —
+"preview v3.0 engine se connect hi nahi hai". Investigation (Explore agent): the v3.0 panel's own preview
+(AgentV3Panel → PreviewSurface) reads state.previewUrl from the build stream and works; but the MAIN menu
+"Preview" (ViewPanels, activeView==='preview') rendered the RETIRED v2.0 PreviewPanel from `generatedCode`
+— a string the v3.0 engine NEVER writes — so it always showed the old empty placeholder. Fix: (1) extracted
+the working PreviewSurface (Live server + In-browser, incl. the #577 saved-files fallback) into a shared
+component src/components/agentv3/PreviewSurface.tsx; (2) lifted the v3.0 preview state (previewUrl +
+workspaceId) up from AgentV3Panel via a new onPreviewState callback → ProV3Surface → App.tsx (v3Preview
+state), mirroring the existing onFilesSync lift; (3) the main "Preview" menu now renders the SAME
+PreviewSurface when a v3.0 workspace is active (else the legacy PreviewPanel for non-v3 flows). Both
+previews are now driven by the v3.0 engine. 5 files: PreviewSurface.tsx (new), AgentV3Panel, ProV3Surface,
+ViewPanels, App.tsx.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3110/3110 PASS, boot:check PASS.

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
+import { PreviewSurface } from './PreviewSurface';
 import type { AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
 import { db, sanitizeFirestoreData, auth } from '../../App';
 
@@ -48,7 +49,7 @@ const V3_EXT_COLOR: Record<string, string> = {
   svg: 'text-pink-400', png: 'text-pink-400', jpg: 'text-pink-400',
 };
 
-export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; onFilesSync?: (files: Record<string, string>) => void; onOpenInIDE?: (path: string) => void }) {
+export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, onPreviewState }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; onFilesSync?: (files: Record<string, string>) => void; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string }) => void }) {
   const { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
@@ -570,6 +571,13 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE }
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.workspaceId]);
+
+  // Lift the v3.0 preview state (live URL + workspace) up to the app shell so the MAIN slide-out
+  // "Preview" menu can render the SAME working v3.0 preview — not the retired v2.0 generatedCode.
+  useEffect(() => {
+    onPreviewState?.({ previewUrl: state.previewUrl, workspaceId: state.workspaceId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.previewUrl, state.workspaceId]);
 
   // Load the file contents when the Files tab is opened (and not already loaded), so each file
   // row can show its line count — without the user having to click into a file first.
@@ -1361,157 +1369,6 @@ function TodoList({ todos, hideHeader }: { todos: TodoItem[]; hideHeader?: boole
   );
 }
 
-/**
- * Dual preview (Phase 5). Two real preview paths:
- *  • "Live server" — the running app in the E2B sandbox (state.previewUrl), full-fidelity (a real
- *    dev server, supports any framework/backend). Shown whenever a preview URL exists.
- *  • "In-browser" — a self-contained HTML build of the workspace files rendered in an <iframe
- *    srcdoc>, with NO running server. Works even when the sandbox preview is unavailable (the
- *    "Blocked request" / sandbox-down case) and for plain static or simple React/Vue apps.
- * The user can switch between them; in-browser defaults on when there is no live URL yet.
- */
-function PreviewSurface({ url, workspaceId, userId, email }: { url?: string; workspaceId?: string; userId?: string; email?: string }) {
-  const [mode, setMode] = useState<'live' | 'inbrowser'>(url ? 'live' : 'inbrowser');
-  const [html, setHtml] = useState<string>('');
-  const [kind, setKind] = useState<string>('');
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string>('');
-  // Honest "why is there no Live server URL?" status, fetched once. This is what makes
-  // the Live server tab explain itself instead of silently vanishing: when the cloud
-  // sandbox isn't configured on this deployment, we say so plainly rather than hiding.
-  const [sandbox, setSandbox] = useState<{ livePreviewAvailable: boolean; actuator: string; previewDomainWarning: string | null } | null>(null);
-  // Bumping this remounts the live <iframe>, forcing a fresh load. Remounting via a
-  // changing key is the only cross-origin-safe way to reload a sandbox URL —
-  // iframe.contentWindow.location.reload() throws a SecurityError on a different origin.
-  // The live-preview reload button uses it so the user can reconnect once the E2B
-  // sandbox finishes its cold start (the "Preview is still starting…" case).
-  const [liveReloadKey, setLiveReloadKey] = useState(0);
-
-  // Follow the live URL: when one arrives and the user hasn't deliberately chosen in-browser,
-  // prefer the higher-fidelity live server.
-  useEffect(() => { if (url) setMode('live'); }, [url]);
-
-  // Fetch the sandbox/preview capability so the Live server tab can give a real reason
-  // when no preview URL exists (E2B not configured, or a custom preview domain needing DNS).
-  // Exposed as a callable so the reload button can re-check after a cold start.
-  const refreshSandbox = useCallback(async () => {
-    try {
-      const res = await fetch('/api/agentv3/preview-status');
-      if (!res.ok) return;
-      const data = await res.json().catch(() => null);
-      if (data && typeof data.livePreviewAvailable === 'boolean') {
-        setSandbox({ livePreviewAvailable: data.livePreviewAvailable, actuator: String(data.actuator || ''), previewDomainWarning: data.previewDomainWarning ?? null });
-      }
-    } catch { /* non-fatal — the tab just falls back to a generic message */ }
-  }, []);
-  useEffect(() => { void refreshSandbox(); }, [refreshSandbox]);
-
-  const loadInBrowser = async () => {
-    if (!workspaceId) { setErr('Build something first — there are no files to preview yet.'); return; }
-    setLoading(true);
-    setErr('');
-    try {
-      const res = await fetch('/api/agentv3/inbrowser-preview', {
-        method: 'POST',
-        headers: await authJsonHeaders(),
-        body: JSON.stringify({ workspaceId, userId, email }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);
-      setHtml(typeof data.html === 'string' ? data.html : '');
-      setKind(typeof data.kind === 'string' ? data.kind : '');
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-      setHtml('');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Auto-build the in-browser preview the first time that mode is shown.
-  useEffect(() => {
-    if (mode === 'inbrowser' && !html && !loading && !err && workspaceId) { void loadInBrowser(); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, workspaceId]);
-
-  // The "Live server" tab is ALWAYS shown — even with no URL — so it never silently
-  // vanishes. When there's no URL it explains why (see the live-no-URL branch below).
-  const switcher = (
-    <div className="flex items-center gap-1">
-      <button onClick={() => setMode('live')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app in the cloud sandbox (full fidelity)">Live server</button>
-      <button onClick={() => setMode('inbrowser')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'inbrowser' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="A self-contained preview rendered in your browser — no server needed">In-browser</button>
-    </div>
-  );
-
-  if (mode === 'live' && url) {
-    return (
-      <div className="h-full flex flex-col">
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
-          {switcher}
-          <span className="truncate flex-1">{url}</span>
-          <button onClick={() => setLiveReloadKey((k) => k + 1)} className="flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
-          <a href={url} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
-        </div>
-        <iframe key={liveReloadKey} title="Live preview" src={url} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
-      </div>
-    );
-  }
-
-  // Live server tab selected but no URL yet — explain honestly instead of a blank/missing tab.
-  if (mode === 'live') {
-    const sandboxOff = sandbox && sandbox.livePreviewAvailable === false;
-    return (
-      <div className="h-full flex flex-col">
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
-          {switcher}
-          <span className="flex-1 truncate">Live server</span>
-          <button onClick={() => void refreshSandbox()} className="flex items-center gap-1 hover:text-zinc-200" title="Re-check for the live preview (after the sandbox finishes starting)"><RotateCcw className="w-3.5 h-3.5" /></button>
-        </div>
-        <div className="flex-1 flex items-center justify-center p-6 text-center">
-          <div className="max-w-md text-sm text-zinc-400 space-y-2">
-            {sandboxOff ? (
-              <>
-                <p className="text-zinc-200 font-medium">Live server preview isn't available on this deployment.</p>
-                <p>The full-fidelity live preview runs your app inside a cloud sandbox (E2B), which isn't configured here. Your app still builds and runs — use the <button onClick={() => setMode('inbrowser')} className="underline hover:text-zinc-200">In-browser preview</button> to see it.</p>
-                <p className="text-zinc-500 text-xs">Admin: set <code className="text-zinc-400">E2B_API_KEY</code> in the server environment to enable the live cloud preview.</p>
-              </>
-            ) : (
-              <>
-                <p className="text-zinc-200 font-medium">No live preview yet.</p>
-                <p>The live server appears the moment the agent starts your app. While you wait, the <button onClick={() => setMode('inbrowser')} className="underline hover:text-zinc-200">In-browser preview</button> renders the current files instantly.</p>
-                {sandbox?.previewDomainWarning && (
-                  <p className="text-amber-400/80 text-xs">{sandbox.previewDomainWarning}</p>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // In-browser mode.
-  return (
-    <div className="h-full flex flex-col">
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
-        {switcher}
-        <span className="flex-1 truncate">{kind ? `In-browser preview (${kind})` : 'In-browser preview'}</span>
-        <button onClick={loadInBrowser} disabled={loading || !workspaceId} className="flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Rebuild the in-browser preview from the current files">
-          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-        </button>
-      </div>
-      {loading ? (
-        <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm"><Loader2 className="w-4 h-4 animate-spin mr-2" /> Building preview…</div>
-      ) : err ? (
-        <div className="flex-1 flex items-center justify-center p-6"><Empty>Couldn't build the in-browser preview: {err}</Empty></div>
-      ) : html ? (
-        <iframe title="In-browser preview" srcDoc={html} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-forms allow-popups" />
-      ) : (
-        <div className="flex-1 flex items-center justify-center p-6"><Empty>{workspaceId ? 'No preview yet — build something first.' : 'No live preview yet — it appears the moment the agent starts the app.'}</Empty></div>
-      )}
-    </div>
-  );
-}
 
 function AgentChip({ card, running }: { card: AgentCard; running: boolean }) {
   // While the build is running, every team member shows a spinning ring (work in

@@ -1270,16 +1270,20 @@
   ImpactAnalyzer.ts (dependency risk score), CostEstimator.tsx, AISuggestions.tsx.
 - **Requirements**: RequirementIntelligenceEngine + RequirementsAgent + RequirementModels, ProjectMemoryManager.
 
-### P-PME.1 — Cross-Session Project Memory / Context Preservation  🟡 PARTIAL → full  [HIGH]
-- `ProjectMemoryManager.ts` stores project metadata (structure, features, build history) in-process as JSON.
-  All context is lost when Cloud Run instance restarts (min-instances=0 → every session is fresh).
-- [ ] Persist `ProjectMemoryManager` state to Firestore: `projectMemory/{userId}/{projectId}` on every
-  build completion. Load on first AI request in a new session.
-- [ ] Add `CrossSessionContextLoader.ts` — on session start, inject last-known project state (tech stack,
-  entity names, last blueprint, last 3 errors) into the first AI system prompt.
-- [ ] Expose "Resume Project" in the UI — show last saved state with a "Continue where you left off" CTA.
-- **Files:** `src/server/Memory/ProjectMemoryManager.ts`, new `src/server/Memory/CrossSessionContextLoader.ts`,
-  `server.ts`, `src/App.tsx`.
+### P-PME.1 — Cross-Session Project Memory / Context Preservation  ✅ DONE (verified 2026-06-29 — STALE AUDIT)  [HIGH]
+- The spec named the legacy `ProjectMemoryManager.ts`, but the LIVE v3.0 engine already implements cross-session
+  memory comprehensively via `WorkspaceMemory` ↔ `FirestoreWorkspaceMemoryStore`. Verified in `routes/agentv3.ts`:
+- [x] **Persist on completion + load on first request** — `saveWorkspaceMemory(workspaceId, …snapshot())` on every
+  build end; `restoreWorkspaceMemory(workspaceId, …)` runs for EVERY build (not just edits — explicit "MEMORY FIX 3
+  (cross-instance)" comment), so episodes + project graph survive a Cloud Run restart / a different instance.
+- [x] **Inject last-known state into the first prompt** — `buildProjectContext` prepends the real file list + project
+  map (tech stack / entities) + recent requests + last PLAN_STATE; prior conversation is recapped via
+  `buildRunningSummary`; last errors/fixes are injected via `recall` + `formatRecalledLessons`. So a returning/"continue"
+  turn resumes with full context instead of amnesia.
+- [x] **"Resume" in the UI** — build continuity (auto re-attach on refresh) + History "Restore all files" already
+  provide "continue where you left off" (see `agentv3_build_continuity` / `agentv3_restore_files` in AppKnowledgeBase).
+- **Note:** no redundant `CrossSessionContextLoader` was built (safeguard #6/#7 — the substance already ships on the
+  live path). This entry is a doc correction of a stale audit; the legacy `ProjectMemoryManager` (v2) is not on the v3.0 path.
 
 ### P-PME.2 — Release Notes Generator  ✅ DONE (2026-06-29) · 🔌 WIRED  [Firestore-history UI deferred]
 - When a user deploys their app, nothing documented what changed. Now there is a real generator.

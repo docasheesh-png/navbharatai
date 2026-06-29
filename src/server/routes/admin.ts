@@ -12,6 +12,8 @@ import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore } from '../lib/HealthScore';
 import { analyzeFinOps } from '../lib/FinOpsAdvisor';
+import { aggregateProviderLatency, type SpanLike } from '../lib/Percentiles';
+import { tracer } from '../observability/Tracer';
 import { logStore } from '../lib/logStore';
 import { eventStore } from '../lib/eventStore';
 
@@ -134,6 +136,25 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         avgLatencyMs: 'AIRouter provider circuit stats (request-weighted)',
         uptimeSeconds: 'process.uptime()',
       },
+      generatedAt: Date.now(),
+    });
+  });
+
+  // P-MON.3 — admin "AI Observability" view: per-provider inference-latency percentiles
+  // (p50/p90/p95/p99) + error rate, from the REAL `ai.provider.*` trace spans. Mirrors the
+  // /api/observability/llm data on the x-admin-token scheme the dashboard uses.
+  app.get('/api/admin/llm-latency', verifyAdminToken, (req: Request, res: Response) => {
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+    const traces = tracer.recentTraces(limit);
+    const spans: SpanLike[] = [];
+    for (const tr of traces) {
+      for (const s of tr.spans) spans.push({ name: s.name, durationMs: s.durationMs, status: s.status, attributes: s.attributes });
+    }
+    const providers = aggregateProviderLatency(spans);
+    res.json({
+      tracesScanned: traces.length,
+      providerSampleCount: providers.reduce((a, p) => a + p.latency.count, 0),
+      providers,
       generatedAt: Date.now(),
     });
   });

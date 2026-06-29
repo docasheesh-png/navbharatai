@@ -84,6 +84,7 @@ import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { redactPII } from '../AgentV3/SecretRedactor';
 import { audit } from '../lib/audit';
+import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -1703,6 +1704,14 @@ export function registerAgentV3Routes(app: Express): void {
       // Best-effort: a listFiles failure falls back to the edit prefix without a
       // tree, and a non-edit turn uses the normal architect prompt unchanged.
       let architectSystem = architectSystemPrompt(framework);
+      // P-AI.5 — Personalization: for a RETURNING user, inject their learned stack preferences
+      // (inferred from past successful builds) as advisory defaults so the Architect leans toward
+      // how this user likes to build when they don't specify a stack. Best-effort and additive —
+      // returns '' (no change) for a new user or on any error; never blocks or alters the build.
+      try {
+        const prefContext = await userPreferenceStore.contextFor(userId);
+        if (prefContext) architectSystem = `${prefContext}\n\n---\n\n${architectSystem}`;
+      } catch { /* preference context is best-effort — a failure leaves the prompt unchanged */ }
       if (isEditMode) {
         let fileTree: string[] = [];
         try {
@@ -2233,6 +2242,16 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: reviewText, ts: Date.now() });
           }
         } catch { /* reviewer is best-effort — never affects the build result */ }
+      }
+
+      // P-AI.5 — Personalization: learn this user's revealed stack from the SUCCESSFUL build.
+      // Inferred from the files that actually shipped (framework + deps + code) and the prompt —
+      // never from explicit input. Feeds the next build's injected preference context above.
+      // Best-effort and gated on real artifacts — never blocks or affects the build outcome.
+      if (result.ok && userId && writtenFiles.size > 0) {
+        userPreferenceStore
+          .recordBuild(userId, { framework, files: Object.fromEntries(writtenFiles), prompt }, new Date().toISOString())
+          .catch(() => {});
       }
 
       // Level 9: Persist workspace memory to Firestore so the NEXT session (or build)

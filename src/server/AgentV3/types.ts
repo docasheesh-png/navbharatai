@@ -25,6 +25,7 @@ export type ToolName =
   | 'generate_gitignore'
   | 'generate_openapi'
   | 'generate_api_docs'
+  | 'generate_tests'
   | 'task'
   | 'second_opinion'
   | 'consensus'

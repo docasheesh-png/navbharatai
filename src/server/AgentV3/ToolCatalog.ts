@@ -320,6 +320,35 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_tests',
+      description:
+        'Generate a runnable Vitest unit-test SKELETON for a module you built and write it to the ' +
+        'workspace. Each function gets a describe/it with a smoke assertion + an explicit ' +
+        '"// TODO: assert real behaviour" — it never fakes a passing assertion that pretends to verify ' +
+        'logic. Use this to seed real tests for services/hooks/utils after building them.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Output test file path, e.g. src/services/auth.test.ts.' },
+          module_path: { type: 'string', description: 'Import specifier the test imports from, e.g. ./auth.' },
+          functions: {
+            type: 'array',
+            description: 'The exported functions to scaffold tests for.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Function name (must be a real export).' },
+                params: { type: 'array', items: { type: 'string' }, description: 'Parameter names (to scaffold the call).' },
+                async: { type: 'boolean', description: 'Whether the function is async (the test will await it).' },
+              },
+              required: ['name'],
+            },
+          },
+        },
+        required: ['path', 'module_path', 'functions'],
+      },
+    },
+    {
       name: 'web_search',
       description:
         'Search the web for up-to-date information — package versions, framework/API docs, ' +
@@ -418,6 +447,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_gitignore',
   'generate_openapi',
   'generate_api_docs',
+  'generate_tests',
   'web_search',
   'screenshot',
   'browser_action',

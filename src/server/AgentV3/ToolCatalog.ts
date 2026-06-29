@@ -369,6 +369,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_bundle_optimization',
+      description:
+        'Add real, dependency-free bundle optimization to a Vite+React app: writes a `lazyWithRetry` ' +
+        'helper (React.lazy route code-splitting with a one-time reload on a stale chunk) and a Rollup ' +
+        '`manualChunks` config that splits node_modules into react-vendor/vendor chunks. If the app has ' +
+        'no vite.config it writes a complete optimized one; otherwise the tool result returns the ' +
+        'manualChunks snippet for you to merge with edit_file. After writing, wrap page-level components ' +
+        'with lazyWithRetry inside <Suspense>. Use this for production-ready apps to shrink the initial bundle.',
+      input_schema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    {
       name: 'check_conventions',
       description:
         'Check naming + import-ordering conventions and get suggested fixes (analysis only — writes ' +
@@ -517,6 +531,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_api_docs',
   'generate_tests',
   'generate_observability',
+  'generate_bundle_optimization',
   'check_conventions',
   'generate_release_notes',
   'web_search',

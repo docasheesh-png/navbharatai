@@ -165,6 +165,24 @@ describe('ToolDispatcher', () => {
     expect(act.files.has('src/server/health.ts')).toBe(false);
   });
 
+  it('generate_bundle_optimization writes lazyWithRetry + a vite.config when none exists', async () => {
+    const res = await d.dispatch(call('generate_bundle_optimization', {}), 'frontend');
+    expect(res.is_error).toBe(false);
+    const helper = act.files.get('src/lib/lazyWithRetry.tsx')!;
+    expect(helper).toContain('export function lazyWithRetry');
+    const vite = act.files.get('vite.config.ts')!;
+    expect(vite).toContain('manualChunks');
+  });
+
+  it('generate_bundle_optimization returns a merge snippet when vite.config already exists', async () => {
+    act.files.set('vite.config.ts', 'export default {}');
+    const res = await d.dispatch(call('generate_bundle_optimization', {}), 'frontend');
+    expect(res.is_error).toBe(false);
+    expect(act.files.get('vite.config.ts')).toBe('export default {}'); // not clobbered
+    expect(res.content).toContain('Merge this into your vite.config.ts');
+    expect(act.files.has('src/lib/lazyWithRetry.tsx')).toBe(true);
+  });
+
   it('check_conventions reports violations with suggestions (analysis only, no write)', async () => {
     const res = await d.dispatch(
       call('check_conventions', {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort } from './devServerHost';
 
 describe('ensureHostBinding (v3.0 actuator)', () => {
   it('appends --host to a vite package-manager dev script', () => {
@@ -37,9 +37,19 @@ describe('ensureHostBinding (v3.0 actuator)', () => {
 });
 
 describe('buildPreKillPortCommand', () => {
-  it('targets exactly the given port with fuser', () => {
-    expect(buildPreKillPortCommand(5173)).toContain('fuser -k 5173/tcp');
+  it('targets exactly the given port across every mechanism', () => {
+    const cmd = buildPreKillPortCommand(5173);
+    expect(cmd).toContain('fuser -k 5173/tcp');
+    expect(cmd).toContain('lsof -ti tcp:5173');
+    expect(cmd).toContain('sport = :5173');
     expect(buildPreKillPortCommand(3000)).toContain('fuser -k 3000/tcp');
+  });
+
+  it('tries multiple tools so a missing fuser/lsof still frees the port', () => {
+    const cmd = buildPreKillPortCommand(5173);
+    // fuser (psmisc) may be absent in the E2B image — lsof and ss are the fallbacks.
+    expect(cmd).toContain('lsof');
+    expect(cmd).toContain('ss -lptnH');
   });
 
   it('never fails the step (trailing `true`, all errors swallowed)', () => {
@@ -48,10 +58,47 @@ describe('buildPreKillPortCommand', () => {
     expect(cmd).toContain('2>/dev/null');
   });
 
-  it('does not pkill unrelated node processes (scopes to the port)', () => {
-    // Must not be a blanket `pkill node` — that would kill the agent's own tooling.
-    expect(buildPreKillPortCommand(5173)).toContain('pkill -f "node.*:5173"');
-    expect(buildPreKillPortCommand(5173)).not.toMatch(/pkill\s+-f\s+"node"\s/);
+  it('does NOT use the old Vite-blind `node.*:{port}` pattern (it never matched a real vite process)', () => {
+    expect(buildPreKillPortCommand(5173)).not.toContain('node.*:5173');
+  });
+});
+
+describe('pinDevServerPort', () => {
+  it('pins a vite command to a fixed port with --strictPort (no silent 5173→5174 drift)', () => {
+    expect(pinDevServerPort('vite --host 0.0.0.0', 5173)).toBe('vite --host 0.0.0.0 --port 5173 --strictPort');
+    expect(pinDevServerPort('npm run dev -- --host 0.0.0.0', 5173)).toBe('npm run dev -- --host 0.0.0.0 --port 5173 --strictPort');
+  });
+
+  it('pins a next command with -p', () => {
+    expect(pinDevServerPort('next dev -H 0.0.0.0', 3000)).toBe('next dev -H 0.0.0.0 -p 3000');
+  });
+
+  it('respects an already-pinned port', () => {
+    expect(pinDevServerPort('vite --port 4000', 5173)).toBe('vite --port 4000');
+    expect(pinDevServerPort('next dev -p 3001', 3000)).toBe('next dev -p 3001');
+  });
+
+  it('leaves a non-vite/next command untouched (rely on runtime detection)', () => {
+    expect(pinDevServerPort('python -m http.server 8000', 8000)).toBe('python -m http.server 8000');
+    expect(pinDevServerPort('', 5173)).toBe('');
+  });
+});
+
+describe('detectDevPort', () => {
+  it('reads the real port from a vite banner', () => {
+    expect(detectDevPort('  ➜  Local:   http://localhost:5174/', 5173)).toBe(5174);
+    expect(detectDevPort('VITE ready\n  ➜  Local:   http://localhost:5173/', 5173)).toBe(5173);
+  });
+
+  it('reads the real port from a next / generic banner', () => {
+    expect(detectDevPort('- Local:        http://localhost:3001', 3000)).toBe(3001);
+    expect(detectDevPort('The server is running on port 5174.', 5173)).toBe(5174);
+    expect(detectDevPort('listening on 0.0.0.0:4321', 8000)).toBe(4321);
+  });
+
+  it('falls back when no port is present in the output', () => {
+    expect(detectDevPort('starting…', 5173)).toBe(5173);
+    expect(detectDevPort('', 3000)).toBe(3000);
   });
 });
 

@@ -39,12 +39,76 @@ export function ensureHostBinding(command: string): string {
  * so no self-heal ever fires. Killing the port first guarantees the new server
  * binds the port we actually preview.
  *
- * `fuser -k {port}/tcp` is precise (targets exactly whatever holds that port).
- * Everything is `|| true`-guarded so a missing tool or an already-free port never
- * makes the step fail. PURE string builder so it is unit-testable without E2B.
+ * RELIABILITY: a single tool is not enough — the E2B base image may ship without
+ * `fuser` (psmisc), and the old `pkill -f "node.*:{port}"` pattern never matched a
+ * real Vite process (its argv is `node .../vite`, with no ":5173" in it), so the
+ * port was left occupied and Vite drifted to 5174 anyway. We therefore try every
+ * common mechanism in turn — `fuser`, `lsof`, and `ss` (almost always present via
+ * iproute2) — so whichever exists frees the port. Everything is error-guarded and
+ * ends in `true`, so a missing tool or an already-free port never fails the step.
+ * PURE string builder so it is unit-testable without E2B.
  */
 export function buildPreKillPortCommand(port: number): string {
-  return `fuser -k ${port}/tcp 2>/dev/null; pkill -f "node.*:${port}" 2>/dev/null; true`;
+  return [
+    `fuser -k ${port}/tcp 2>/dev/null`,
+    // lsof: kill whatever PID owns the TCP port.
+    `kill -9 $(lsof -ti tcp:${port} 2>/dev/null) 2>/dev/null`,
+    // ss (iproute2): parse `users:(("node",pid=1234,...))` → kill that pid.
+    `kill -9 $(ss -lptnH "sport = :${port}" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2) 2>/dev/null`,
+    `true`,
+  ].join('; ');
+}
+
+/**
+ * Pin a dev server to a FIXED port so it can never silently auto-increment
+ * (5173 → 5174). Vite's default is `strictPort:false`: if the port is busy it
+ * quietly moves to the next one, but the preview URL and health check still assume
+ * the original port — so the preview connects to a dead port and the build loops
+ * until the wall-clock cap ("build timed out"). Adding `--strictPort` makes Vite
+ * bind exactly this port or fail LOUDLY (which the agent can see and recover from),
+ * instead of drifting invisibly. Next.js `-p` is already strict.
+ *
+ * No-op when the command already pins a port (`--port` / `-p`), and only touches
+ * Vite/Next commands — anything else is left for runtime port DETECTION. PURE +
+ * unit-testable.
+ */
+export function pinDevServerPort(command: string, port: number): string {
+  if (!command) return command;
+  if (/--port[=\s]|[\s]-p[\s]/.test(command)) return command; // already pinned — respect it
+  if (/\bnext\b/.test(command)) return `${command} -p ${port}`;
+  // Bare `vite`, OR a package-manager dev/serve script (npm/pnpm/yarn/bun run dev|serve),
+  // which the v3.0 scaffold uses for Vite — the same pm-script ⇒ vite assumption
+  // ensureHostBinding already makes when it appends `--host`.
+  if (/\bvite\b/.test(command) || /\b(?:npm|pnpm|yarn|bun)\b.*\b(?:run\s+)?(?:dev|serve)\b/.test(command)) {
+    return `${command} --port ${port} --strictPort`;
+  }
+  return command;
+}
+
+/**
+ * Detect the port a dev server ACTUALLY bound, from its stdout, instead of trusting
+ * the assumed default. Vite prints `➜  Local:   http://localhost:5174/`, Next prints
+ * `- Local:  http://localhost:3000`, others print `listening on :3000` or
+ * `running on port 5174`. This is the source of truth the preview must use: if the
+ * server drifted, we preview the REAL port, not the assumed one. Returns `fallback`
+ * when nothing matches. PURE + unit-testable.
+ */
+export function detectDevPort(output: string, fallback: number): number {
+  if (!output) return fallback;
+  const patterns = [
+    /(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]):(\d{2,5})/i,   // Local: http://localhost:5174/
+    /running on port (\d{2,5})/i,
+    /listening on\b[^\n]*?:(\d{2,5})/i,
+    /port[:\s]+(\d{2,5})\b/i,
+  ];
+  for (const re of patterns) {
+    const m = output.match(re);
+    if (m) {
+      const p = parseInt(m[1], 10);
+      if (p >= 1 && p <= 65535) return p;
+    }
+  }
+  return fallback;
 }
 
 /**

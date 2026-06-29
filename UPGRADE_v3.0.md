@@ -1984,9 +1984,12 @@
   11 unit tests.
 - [x] Added `GET /api/observability/llm` (admin-gated) — live per-provider p50/p90/p95/p99 latency + error rate from
   recent trace spans (ordered by sample volume).
+- [x] Added the **admin "AI Observability" view**: `GET /api/admin/llm-latency` (x-admin-token) + an "Inference Latency
+  (p50/p95/p99)" table in the Admin dashboard's AI Engines tab — surfacing the tail latency the existing average hides.
 - [ ] **Still pending:** per-tool success/failure analytics (lives in AgentV3 `ToolDispatcher`), model-drift over
   time, persisted daily LLM-ops snapshot, and the multi-agent coordination view.
-- **Files:** new `src/server/lib/Percentiles.ts` + `.test.ts`, `src/server/routes/observability.ts`.
+- **Files:** new `src/server/lib/Percentiles.ts` + `.test.ts`, `src/server/routes/observability.ts`,
+  `src/server/routes/admin.ts`, `src/components/AdminDashboard.tsx`.
 
 ### P-MON.4 — Wire Health Monitor to REAL Metrics + Composite Scores  ✅ DONE  [MED — honesty]
 - `AppHealthMonitor.tsx` previously rendered **fully simulated/demo data** (Math.random metrics, hardcoded

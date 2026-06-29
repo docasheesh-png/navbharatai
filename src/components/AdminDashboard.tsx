@@ -77,6 +77,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [finops, setFinops] = useState<any>(null);
   const [finopsLoading, setFinopsLoading] = useState(false);
 
+  // P-MON.3 — per-provider LLM latency percentiles (real, from /api/admin/llm-latency).
+  const [llmLatency, setLlmLatency] = useState<any>(null);
+  const [llmLoading, setLlmLoading] = useState(false);
+
   const headers = { 'x-admin-token': adminToken, 'Content-Type': 'application/json' };
 
   const toast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3000); };
@@ -141,10 +145,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     }
   }, [adminToken]);
 
+  const fetchLlmLatency = useCallback(async () => {
+    setLlmLoading(true);
+    try {
+      const r = await fetch('/api/admin/llm-latency', { headers });
+      const d = await r.json();
+      setLlmLatency(d && typeof d === 'object' ? d : null);
+    } catch (e) {
+      console.error(e);
+      setLlmLatency(null);
+    } finally {
+      setLlmLoading(false);
+    }
+  }, [adminToken]);
+
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
   useEffect(() => { if (activeTab === 'users') fetchUsers(); }, [activeTab, fetchUsers]);
   useEffect(() => { if (activeTab === 'settings') fetchPromos(); }, [activeTab, fetchPromos]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
+  useEffect(() => { if (activeTab === 'engines') fetchLlmLatency(); }, [activeTab, fetchLlmLatency]);
 
   const adminPost = async (url: string, body: any) => {
     const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
@@ -528,6 +547,58 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     Save Provider Settings
                   </button>
                 </div>
+              </div>
+
+              {/* ── P-MON.3 Inference-latency percentiles (real, from trace spans) ── */}
+              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-sky-400" />
+                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Inference Latency (p50 / p95 / p99)</h3>
+                  </div>
+                  <button
+                    onClick={fetchLlmLatency}
+                    disabled={llmLoading}
+                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-40"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${llmLoading ? 'animate-spin' : ''}`} /> Refresh
+                  </button>
+                </div>
+                {!llmLatency || !Array.isArray(llmLatency.providers) || llmLatency.providers.length === 0 ? (
+                  <p className="text-[10px] text-[#8b949e] uppercase font-bold py-4">
+                    {llmLoading ? 'Loading latency…' : 'No provider latency samples yet — appears after AI requests run.'}
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead><tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
+                        <th className="py-2.5 px-3 text-left">Provider</th>
+                        <th className="py-2.5 px-3 text-left">Samples</th>
+                        <th className="py-2.5 px-3 text-left">p50</th>
+                        <th className="py-2.5 px-3 text-left">p95</th>
+                        <th className="py-2.5 px-3 text-left">p99</th>
+                        <th className="py-2.5 px-3 text-left">Max</th>
+                        <th className="py-2.5 px-3 text-left">Errors</th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-white/5">
+                        {llmLatency.providers.map((p: any) => (
+                          <tr key={p.provider} className="hover:bg-white/5">
+                            <td className="py-2.5 px-3 text-white font-black uppercase font-mono">{p.provider}</td>
+                            <td className="py-2.5 px-3 text-[#8b949e] font-mono">{p.latency?.count ?? 0}</td>
+                            <td className="py-2.5 px-3 text-emerald-400 font-mono">{p.latency?.p50 ?? '—'}ms</td>
+                            <td className="py-2.5 px-3 text-amber-400 font-mono">{p.latency?.p95 ?? '—'}ms</td>
+                            <td className="py-2.5 px-3 text-orange-400 font-mono">{p.latency?.p99 ?? '—'}ms</td>
+                            <td className="py-2.5 px-3 text-[#8b949e] font-mono">{p.latency?.max ?? '—'}ms</td>
+                            <td className={`py-2.5 px-3 font-mono font-black ${p.errorRatePct > 0 ? 'text-red-400' : 'text-emerald-400'}`}>{p.errorRatePct}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest pt-1">
+                      Percentiles from real `ai.provider.*` trace spans — tail latency (p95/p99) that the average hides.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}

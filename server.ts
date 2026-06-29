@@ -56,6 +56,7 @@ import { registerDocsRoutes } from './src/server/routes/docs';
 import { registerOpenApiRoutes } from './src/server/routes/openapi';
 import { registerRetrospectiveRoutes } from './src/server/routes/retrospective';
 import { registerTestGenRoutes } from './src/server/routes/testgen';
+import { registerDeployArtifactsRoutes } from './src/server/routes/deployArtifacts';
 import { errorTracker, installGlobalErrorHandlers } from './src/server/observability/ErrorTracker';
 import { registerHealthRoutes, markServerReady } from './src/server/routes/health';
 import { registerWarmRoute } from './src/server/routes/warm';
@@ -520,6 +521,8 @@ setInterval(() => {
   registerRetrospectiveRoutes(app);
   // P-CGE.4 — test scaffold generator (stateless function/route/mock defs → Vitest skeletons).
   registerTestGenRoutes(app);
+  // P-CGE.9 — deploy artifact generator (stateless → Dockerfile / compose / CI workflow).
+  registerDeployArtifactsRoutes(app);
   registerSecretsRoutes(app);
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).

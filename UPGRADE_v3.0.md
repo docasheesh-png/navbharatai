@@ -1315,16 +1315,16 @@
 - **Files:** new `src/server/AppMakerLab/generator/AuthCodeGenerator.ts`,
   `src/server/AppMakerLab/intelligence/FilePlanningEngine.ts`.
 
-### P-CGE.9 — Dockerfile + CI/CD Pipeline Generators (for generated apps)  ❌ MISSING  [MED]
-- Generated apps have no `Dockerfile`, no `.github/workflows/`, no `docker-compose.yml`.
-  Users cannot containerise or set up CI/CD for their generated app.
-- [ ] Add `DockerfileGenerator.ts` — emit a production `Dockerfile` (node:20-alpine, multi-stage
-  build, non-root user) into the generated workspace.
-- [ ] Add `CICDPipelineGenerator.ts` — emit a GitHub Actions `ci.yml` (install, lint, test, build)
-  for the generated app.
-- **Files:** new `src/server/AppMakerLab/generator/DockerfileGenerator.ts`,
-  new `src/server/AppMakerLab/generator/CICDPipelineGenerator.ts`,
-  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+### P-CGE.9 — Dockerfile + CI/CD Pipeline Generators (for generated apps)  🟡 engine+API DONE / workspace-emit PENDING  [MED]
+- Generated apps had no `Dockerfile`/`docker-compose.yml`/CI. Now there is a real generator.
+- [x] Added `src/server/lib/DeployArtifactGenerator.ts` — pure, dependency-free: `generateDockerfile`
+  (alpine, **multi-stage**, **non-root `USER node`**, configurable node/port/build/start; single-stage option),
+  `generateDockerCompose` (service + port mapping + env + restart policy), and `generateCiWorkflow` (GitHub
+  Actions: checkout + setup-node + install → lint → test → build, only the declared steps — no placeholder steps).
+  6 unit tests.
+- [x] Added `POST /api/deploy-artifacts` (stateless): `{ docker?, compose?, ci? }` → `{ dockerfile?, dockerCompose?, ciWorkflow? }`.
+- [ ] **Still pending:** emit these files into the generated workspace as a post-generation step (build-path wiring — deferred).
+- **Files:** new `src/server/lib/DeployArtifactGenerator.ts` + `.test.ts`, new `src/server/routes/deployArtifacts.ts`, `server.ts`.
 
 ### P-CGE.10 — Bundle Optimization Generators  ❌ MISSING  [MED]
 - Generated Vite+React apps use no bundle optimization. No code splitting, no lazy loading, no tree

@@ -5795,3 +5795,21 @@ Also confirmed from the same report: the LIVE-server port-check fix (#668) WORKS
 quality jumped to 82/100 (Sonnet + verify/CSS gates + auto-repair).
 
 Gate: frontend tsc 0, server tsc 0, vitest 3539/3539 PASS, boot:check PASS.
+
+## 2026-06-29 — FIX: "Build paused at the time limit" shown on a FINISHED app
+
+User hit "Build paused at the time limit — type continue" even when the app was actually built. Root
+cause: after a build SUCCEEDS (generation + verify/CSS gates + auto-repair + heal + autofix), a lot of
+ADVISORY post-build work still runs synchronously before the success result is emitted — the post-build
+multi-agent quality REVIEW (a sub-agent doing read→evaluate→second_opinion, historically MINUTES), plus
+reflection/memory/file-save/git-push. On a heavier build that advisory tail reached the 1080s wall-clock
+deadline, and the deadline timer always emitted "paused — type continue" — overwriting the success the
+user earned, even though the app was built AND already durably saved.
+
+Fix (two parts): (1) SUCCESS-AWARE DEADLINE — the deadline timer now checks a buildResultRef set the moment
+the core build settles (before advisory work); if the build already succeeded, it finalizes as SUCCESS
+(files are saved) instead of "paused — type continue". (2) BOUNDED REVIEWER — the advisory reviewer is
+skipped when <120s deadline headroom remains and hard-capped at 90s (raceTimeout), so it can never be the
+reason a finished app times out. Net: a built app shows success, never a misleading "paused".
+
+Gate: frontend tsc 0, server tsc 0, vitest 3555/3555 PASS, boot:check PASS.

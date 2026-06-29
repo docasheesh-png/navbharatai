@@ -203,16 +203,37 @@ describe('BuildDiagnostics — AI Diagnosis Bundle (raw logs, LLM I/O, full erro
     expect(r.errors![0].message).toContain('ROOT_CAUSE_FRAME');
   });
 
+  it('#1 captures offending files on a compile failure (de-dupes by path, latest wins)', () => {
+    const d = fresh();
+    d.recordFile({ path: 'src/Calculator.tsx', content: 'const { input } = useCalculator();', note: 'referenced by a compile error' });
+    d.recordFile({ path: 'src/useCalculator.ts', content: 'export function useCalculator(){ return { display } }' });
+    d.recordFile({ path: 'src/Calculator.tsx', content: 'const { display } = useCalculator(); // fixed' }); // same path → replace
+    const r = d.report();
+    expect(r.generatedFiles).toHaveLength(2);
+    expect(r.generatedFiles!.find((f) => f.path === 'src/Calculator.tsx')!.content).toContain('fixed');
+    expect(r.generatedFiles!.find((f) => f.path === 'src/useCalculator.ts')!.note).toBeUndefined();
+  });
+
+  it('#1 caps very large file content', () => {
+    const d = fresh();
+    d.recordFile({ path: 'big.ts', content: 'x'.repeat(20_000) });
+    expect(d.report().generatedFiles![0].content.length).toBeLessThan(6500);
+    expect(d.report().generatedFiles![0].content).toContain('truncated');
+  });
+
   it('renders commands, LLM calls and full errors in the text report', () => {
     const d = fresh();
     d.recordCommand({ command: 'npm install', exitCode: 1, stdout: '', stderr: 'ERESOLVE' });
     d.recordLlmCall({ model: 'claude-opus-4', finishReason: 'max_tokens', toolCalls: 0, inputTokens: 1, outputTokens: 8000, latencyMs: 5000, ok: true, responsePreview: 'partial code' });
     d.recordFullError({ message: 'TypeError: x is not a function', stack: 'at App (src/App.tsx:10)', phase: 'build' });
+    d.recordFile({ path: 'src/Calculator.tsx', content: 'const { input } = useCalculator();', note: 'referenced by a compile error' });
     const text = renderDiagnosticsText(d.report());
     expect(text).toContain('Sandbox commands');
     expect(text).toContain('ERESOLVE');
     expect(text).toContain('LLM calls');
     expect(text).toContain('Full errors');
     expect(text).toContain('src/App.tsx:10');
+    expect(text).toContain('Offending files');
+    expect(text).toContain('useCalculator');
   });
 });

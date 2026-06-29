@@ -87,6 +87,20 @@ export interface CapturedError {
   stack?: string;
 }
 
+/**
+ * AI Diagnosis Bundle — generated-file capture (#1 of the follow-up). When the app fails to compile,
+ * the OFFENDING files' content is captured so the exact mismatch (e.g. a hook's return shape vs what
+ * its consumer destructures) is VISIBLE in the report — no inference needed.
+ */
+export interface GeneratedFileRecord {
+  ts: number;
+  path: string;
+  /** File content, capped — enough to see the bug, bounded for storage. */
+  content: string;
+  /** Why it was captured, e.g. "referenced by compile error". */
+  note?: string;
+}
+
 export interface BuildDiagnosticsReport {
   schema: 'navbharatai.v3.build-diagnostics/1';
   sessionId?: string;
@@ -110,6 +124,8 @@ export interface BuildDiagnosticsReport {
   commands?: SandboxCommandRecord[];
   llmCalls?: LlmCallRecord[];
   errors?: CapturedError[];
+  /** Offending generated files captured on a compile failure — so the exact bug is visible. */
+  generatedFiles?: GeneratedFileRecord[];
 }
 
 export interface BuildDiagnosticsMeta {
@@ -131,6 +147,8 @@ const MAX_ISSUES = 2000;
 const MAX_COMMANDS = 300;
 const MAX_LLM_CALLS = 300;
 const MAX_ERRORS = 200;
+const MAX_GEN_FILES = 20;
+const GEN_FILE_CAP = 6000;
 /** Per-stream output cap — large enough to hold a real npm/tsc/vite failure, bounded for storage. */
 const CMD_OUTPUT_CAP = 4000;
 const LLM_PREVIEW_CAP = 2000;
@@ -165,6 +183,7 @@ export class BuildDiagnostics {
   private readonly commands: SandboxCommandRecord[] = [];
   private readonly llmCalls: LlmCallRecord[] = [];
   private readonly errors: CapturedError[] = [];
+  private readonly generatedFiles: GeneratedFileRecord[] = [];
 
   constructor(meta: BuildDiagnosticsMeta = {}) {
     this.meta = meta;
@@ -285,6 +304,21 @@ export class BuildDiagnostics {
       message: capTail(err.message, ERROR_MESSAGE_CAP),
       stack: err.stack ? capTail(err.stack, STACK_CAP) : undefined,
     });
+    this.notify();
+  }
+
+  /**
+   * Capture an OFFENDING generated file's content on a compile failure (#1). De-dupes by path
+   * (latest wins) and caps content + count so the report stays bounded. This is what lets a
+   * reader SEE the exact mismatch (e.g. a hook vs its consumer) instead of inferring it.
+   */
+  recordFile(file: { path: string; content: string; note?: string }): void {
+    if (!file.path) return;
+    const existing = this.generatedFiles.findIndex((f) => f.path === file.path);
+    const rec: GeneratedFileRecord = { ts: this.now(), path: file.path, content: capHead(file.content, GEN_FILE_CAP), note: file.note };
+    if (existing >= 0) { this.generatedFiles[existing] = rec; this.notify(); return; }
+    if (this.generatedFiles.length >= MAX_GEN_FILES) return;
+    this.generatedFiles.push(rec);
     this.notify();
   }
 
@@ -431,6 +465,7 @@ export class BuildDiagnostics {
       commands: this.commands.length ? [...this.commands] : undefined,
       llmCalls: this.llmCalls.length ? [...this.llmCalls] : undefined,
       errors: this.errors.length ? [...this.errors] : undefined,
+      generatedFiles: this.generatedFiles.length ? [...this.generatedFiles] : undefined,
     };
   }
 }
@@ -487,6 +522,14 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
       lines.push(`${n + 1}. ${c.provider ?? '?'}/${c.model ?? '?'} finish=${c.finishReason ?? '?'}${tok}${lat} ${c.ok ? 'ok' : 'FAILED'}`);
       if (c.error) lines.push(`   error: ${c.error}`);
       if (c.responsePreview) lines.push(`   response[${c.responseChars ?? c.responsePreview.length}c]: ${c.responsePreview}`);
+    });
+  }
+  if (r.generatedFiles?.length) {
+    lines.push('');
+    lines.push(`Offending files (${r.generatedFiles.length}):`);
+    r.generatedFiles.forEach((f, n) => {
+      lines.push(`${n + 1}. ${f.path}${f.note ? ` — ${f.note}` : ''}`);
+      lines.push(f.content.split('\n').map((l) => `     ${l}`).join('\n'));
     });
   }
   return lines.join('\n') + '\n';

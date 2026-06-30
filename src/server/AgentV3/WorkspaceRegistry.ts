@@ -1,4 +1,5 @@
-import type { GitManager } from './GitManager';
+import type { GitManager, CommandRunner } from './GitManager';
+import { wrapBoundedCommand, capOutput, isRunnableCommand, EXEC_TIMEOUT_SEC, type ExecResult } from './execCommand';
 
 /**
  * WorkspaceRegistry — keeps active v3.0 build sessions addressable after the
@@ -13,6 +14,8 @@ import type { GitManager } from './GitManager';
 export interface WorkspaceSession {
   workspaceId: string;
   git: GitManager;
+  /** The sandbox command runner (the actuator) — powers the real Code Studio terminal. */
+  runner?: CommandRunner;
   userId?: string;
   createdAt: number;
 }
@@ -27,9 +30,9 @@ function prune(): void {
   }
 }
 
-export function registerSession(workspaceId: string, git: GitManager, userId?: string): void {
+export function registerSession(workspaceId: string, git: GitManager, userId?: string, runner?: CommandRunner): void {
   prune();
-  sessions.set(workspaceId, { workspaceId, git, userId, createdAt: Date.now() });
+  sessions.set(workspaceId, { workspaceId, git, runner, userId, createdAt: Date.now() });
 }
 
 export function getSession(workspaceId: string): WorkspaceSession | undefined {
@@ -64,6 +67,38 @@ export async function gitStatusForSession(
   if (!session) return null;
   if (userId && session.userId && session.userId !== userId) return null;
   return session.git.status();
+}
+
+/**
+ * Run a single command in a warm session's sandbox for the REAL Code Studio terminal. Bounded: the
+ * command runs under a hard `timeout` and its output is capped. Returns { available:false } when the
+ * session is unknown / not owned / has no sandbox runner — so the UI shows an honest "sandbox not
+ * active" state instead of faking output. Never throws.
+ */
+export async function execInSession(
+  workspaceId: string,
+  command: string,
+  userId?: string,
+): Promise<ExecResult> {
+  const offline: ExecResult = { available: false, exitCode: -1, stdout: '', stderr: '' };
+  const session = sessions.get(workspaceId);
+  if (!session || !session.runner) return offline;
+  if (userId && session.userId && session.userId !== userId) return offline;
+  if (!isRunnableCommand(command)) return { available: true, exitCode: 0, stdout: '', stderr: '' };
+  try {
+    const r = await session.runner.runCommand(workspaceId, wrapBoundedCommand(command, EXEC_TIMEOUT_SEC));
+    return {
+      available: true,
+      exitCode: typeof r.exitCode === 'number' ? r.exitCode : -1,
+      stdout: capOutput(r.stdout),
+      stderr: capOutput(r.stderr),
+      // `timeout` exits 124 when it kills the command.
+      timedOut: r.exitCode === 124,
+    };
+  } catch {
+    // The sandbox has no shell (e.g. LocalActuator in dev/CI) → honest "not available".
+    return offline;
+  }
 }
 
 export function sessionCount(): number {

@@ -1284,10 +1284,11 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
 • EDITOR — syntax-highlighted code editor for all file types (TypeScript, React, Python, HTML, CSS, etc.).
 • PREVIEW — live preview of the running app with hot-reload.
 • PROBLEMS — real compile-error panel: when the live preview bundle fails, it lists the actual errors esbuild reported (file · line · message); click a problem to jump to that line in the editor. An empty list means the app genuinely compiled. Open it from the amber problem-count badge (bottom-right) or the "view problems" command.
+• TERMINAL — a REAL terminal: each command runs in YOUR v3.0 sandbox and shows the actual stdout/stderr (e.g. ls, cat package.json, npm run build, node -v). Each command is bounded by a 30-second timeout with capped output (no runaway processes), and ↑/↓ recall your command history. It needs a warm sandbox — start or continue a build in NavBharatAI Pro v3.0 to activate it; until then it honestly says the sandbox isn't active (it never fakes output). Type "clear" to clear the screen.
 • GIT — version control panel: commit, push, pull, view diffs.
 • LOGS — build and runtime output for debugging.
 • SETTINGS — workspace and IDE configuration.`,
-    howToUse: 'Open IDE from the sidebar. Use the panel tabs (Files, Editor, Preview, Problems, Git, Logs) to develop your project. When the preview fails to compile, open Problems (amber badge, bottom-right) to see the real errors and click one to jump to the line.',
+    howToUse: 'Open IDE from the sidebar. Use the panel tabs (Files, Editor, Preview, Problems, Terminal, Git, Logs) to develop your project. The Terminal runs real commands in your v3.0 sandbox (start a build first to activate it). When the preview fails to compile, open Problems (amber badge, bottom-right) to see the real errors and click one to jump to the line.',
     relatedFeatures: ['settings_git', 'settings_terminal', 'settings_logs', 'pro_chat'],
     keywords: [
       'ide', 'code studio', 'editor', 'code', 'files', 'preview', 'terminal', 'shell',

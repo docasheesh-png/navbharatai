@@ -4,6 +4,7 @@ import {
   RefreshCcw, Loader2, ChevronDown, ChevronRight, Trash2, X
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { recordRun, isFlaky, loadHistory, serializeHistory, type TestRunHistory, FLAKY_STORAGE_KEY } from '../../lib/flakyTests';
 
 interface TestPanelProps {
   generatedCode?: string;
@@ -121,6 +122,10 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
   const [newName, setNewName] = useState('');
   const [newCode, setNewCode] = useState('');
   const [iframeSrc, setIframeSrc] = useState<string | null>(null);
+  // P-TQA.8 — per-test run history (localStorage) so we can flag flaky tests (pass/fail across runs).
+  const [flakyHistory, setFlakyHistory] = useState<TestRunHistory>(() => {
+    try { return loadHistory(localStorage.getItem(FLAKY_STORAGE_KEY)); } catch { return {}; }
+  });
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const passCount = tests.filter(t => t.status === 'pass').length;
@@ -130,6 +135,14 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
     if (e.data?.type === 'TEST_RESULT') {
       const { id, status, output, duration } = e.data.payload;
       setTests(prev => prev.map(t => t.id === id ? { ...t, status, output, duration } : t));
+      // P-TQA.8 — record this run's outcome so a test that alternates pass/fail gets flagged as flaky.
+      if (id && (status === 'pass' || status === 'fail')) {
+        setFlakyHistory(prev => {
+          const next = recordRun(prev, id, status === 'pass');
+          try { localStorage.setItem(FLAKY_STORAGE_KEY, serializeHistory(next)); } catch { /* ignore */ }
+          return next;
+        });
+      }
     }
     if (e.data?.type === 'TESTS_DONE') {
       setRunning(false);
@@ -324,6 +337,11 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
                   )}>
                     {test.name}
                   </span>
+                  {isFlaky(flakyHistory, test.id) && (
+                    <span title="Flaky — this test has both passed and failed across recent runs" className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-500/15 text-yellow-300 border border-yellow-500/30">
+                      🟡 flaky
+                    </span>
+                  )}
                   {test.duration !== undefined && (
                     <span className="text-xs text-gray-600 font-mono shrink-0">{test.duration}ms</span>
                   )}

@@ -2473,7 +2473,7 @@ ${buildLanguageRule(preferredLanguage)}`;
   // also gates on v3.0 being enabled (returns 404 → no sandbox is spun) so this is a no-op for
   // non-v3.0 users. The workspace id is the SAME one the v3.0 chat panel uses (shared localStorage
   // session), so the IDE and v3.0 operate on one workspace.
-  const syncFilesToV3 = useCallback(async (filesToSync: Record<string, string>, opts?: { silent?: boolean }): Promise<void> => {
+  const syncFilesToV3 = useCallback(async (filesToSync: Record<string, string>, opts?: { silent?: boolean; source?: 'ide-edit' | 'import' }): Promise<void> => {
     const uid = user?.uid;
     if (!uid) return;
     const paths = Object.keys(filesToSync || {});
@@ -2488,7 +2488,7 @@ ${buildLanguageRule(preferredLanguage)}`;
       const res = await fetch('/api/agentv3/import-files', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ workspaceId, userId: uid, email: user?.email || '', files: filesToSync }),
+        body: JSON.stringify({ workspaceId, userId: uid, email: user?.email || '', files: filesToSync, ...(opts?.source ? { source: opts.source } : {}) }),
       });
       if (res.ok) {
         const j = await res.json().catch(() => ({} as any));
@@ -2504,7 +2504,7 @@ ${buildLanguageRule(preferredLanguage)}`;
   // changes (i.e. on sign-in). The IDE edit seam calls onLocalChange; the v3.0→IDE path calls noteRemote.
   const workspaceSyncerRef = useRef<WorkspaceSyncer | null>(null);
   useEffect(() => {
-    workspaceSyncerRef.current = makeWorkspaceSyncer({ sync: (changed) => syncFilesToV3(changed, { silent: true }) });
+    workspaceSyncerRef.current = makeWorkspaceSyncer({ sync: (changed) => syncFilesToV3(changed, { silent: true, source: 'ide-edit' }) });
     return () => workspaceSyncerRef.current?.dispose();
   }, [syncFilesToV3]);
 

@@ -135,6 +135,7 @@ import {
   loadWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveDiagnostics, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
@@ -1306,6 +1307,13 @@ export function registerAgentV3Routes(app: Express): void {
       // destroying the edit. mergeWorkspaceFiles UNIONS paths so a partial set never drops other files.
       // Awaited so a subsequent build reads the fresh truth. Best-effort — never blocks the import.
       try { await mergeWorkspaceFiles(workspaceId, files as Record<string, string>); } catch { /* durable persist is best-effort */ }
+      // Phase S2 — when this import is a MANUAL IDE EDIT (source: 'ide-edit', sent by the editor's
+      // debounced syncer), record the paths so the NEXT v3.0 build acknowledges them ("I noticed you
+      // edited N files…") and builds on top of them. Bulk repo imports / uploads do NOT set this flag,
+      // so they don't spam the next turn with "you edited 500 files". Best-effort — never blocks.
+      if (req.body?.source === 'ide-edit') {
+        try { await recordManualEdits(workspaceId, written.length ? written : Object.keys(files as Record<string, string>), Date.now()); } catch { /* edit tracking is best-effort */ }
+      }
       res.json({ imported: written.length, skipped: skipped.length });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to import the files.' });
@@ -2073,6 +2081,18 @@ export function registerAgentV3Routes(app: Express): void {
         const dateBlock = dateContextBlock(new Date().toISOString());
         if (dateBlock) architectSystem = `${dateBlock}\n\n---\n\n${architectSystem}`;
       } catch { /* date context is best-effort */ }
+      // Phase S2 — IDE↔v3.0 awareness (Google-AI-Studio style): if the user MANUALLY edited files in
+      // Code Studio since the last build, consume that pending set, tell the agent about it (so it reads
+      // and builds ON TOP of those edits, never reverting them), and acknowledge it to the user in chat.
+      // Consuming clears the set so the same edits aren't re-announced next turn. Additive + best-effort.
+      try {
+        const manual = await consumeManualEdits(workspaceId);
+        if (manual.count > 0) {
+          const note = manualEditContext(manual.paths);
+          if (note) architectSystem = `${note}\n\n---\n\n${architectSystem}`;
+          events.emit({ type: 'narration', agent: 'architect', text: manualEditNarration(manual.count), ts: Date.now() });
+        }
+      } catch { /* manual-edit awareness is best-effort — never blocks the build */ }
       // P-AI.5 — Personalization: for a RETURNING user, inject their learned stack preferences
       // (inferred from past successful builds) as advisory defaults so the Architect leans toward
       // how this user likes to build when they don't specify a stack. Best-effort and additive —

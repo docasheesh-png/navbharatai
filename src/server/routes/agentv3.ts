@@ -95,7 +95,7 @@ import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptC
 import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
-import { estimateBuildTime, complexityFromPrompt } from '../lib/BuildTimeEstimator';
+import { estimateBuildTime, complexityFromPrompt, formatEta } from '../lib/BuildTimeEstimator';
 import { incrementalBuildCache, hashFiles, diffHashes } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
@@ -1807,12 +1807,33 @@ export function registerAgentV3Routes(app: Express): void {
     // "paused". Set the moment a build lane produces a successful result (before advisory post-work).
     let buildResultRef: { ok: boolean; summary: string; steps?: number; billedUsd?: number } | null = null;
 
+    // P-PME.4 — LIVE, ADAPTIVE ETA state. The up-front estimate (set below at build start) is a
+    // realistic total; the heartbeat below recomputes the REMAINING time every 2 min and emits it,
+    // so "I'll update it as I go" is literally true (not a one-shot claim). 0 until the build starts.
+    let etaTotalMs = 0;
+    let etaStartMs = 0;
+    let etaTick = 0;
+
     // MINUTE-BY-MINUTE TIMELINE — record a "still working" heartbeat every 60 s so the build report
     // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
     // blank gap during a long/slow step. Best-effort; cleared in `finally`.
     const diagHeartbeatTimer: ReturnType<typeof setInterval> = setInterval(() => {
       if (rb.ended) return;
       try { buildDiagRef?.heartbeat(); } catch { /* diagnostics are best-effort */ }
+      // Live ETA: every 2nd tick (~2 min) show elapsed + a REVISED remaining time, adapting as the
+      // build runs. Honest when it overruns the estimate (no fake "almost done"). Best-effort.
+      etaTick += 1;
+      if (etaTotalMs > 0 && etaStartMs > 0 && etaTick % 2 === 0) {
+        try {
+          const elapsedMs = Date.now() - etaStartMs;
+          const remainingMs = etaTotalMs - elapsedMs;
+          const inTxt = formatEta(elapsedMs).replace('~', '');
+          const text = remainingMs > 45_000
+            ? `⏱️ Still building… ${inTxt} in · ~${formatEta(remainingMs).replace('~', '')} to go`
+            : `⏱️ Still building… ${inTxt} in · wrapping up (a little longer than estimated)`;
+          events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() });
+        } catch { /* ETA is best-effort — never affects the build */ }
+      }
     }, 60_000);
 
     try {
@@ -1875,6 +1896,7 @@ export function registerAgentV3Routes(app: Express): void {
       });
       // Build start time — used for cost-ladder telemetry duration (P2 measurement).
       const buildStartedAt = Date.now();
+      etaStartMs = buildStartedAt; // anchor the live ETA heartbeat to the real build start
       // P-BRE.1 — open a distributed trace for this build (root span). Continues an inbound W3C
       // traceparent if the client sent one, so the build links into the caller's trace. Exported to
       // OTLP/Cloud Trace at the end when configured; otherwise the traceId is still surfaced for logs.
@@ -1898,7 +1920,8 @@ export function registerAgentV3Routes(app: Express): void {
       if (intent === 'new_build' || intent === 'edit_existing') {
         try {
           const est = estimateBuildTime(complexityFromPrompt(prompt));
-          events.emit({ type: 'narration', agent: 'architect', text: `⏱️ Estimated build time: ~${est.etaText} (rough — it adapts as I go).`, ts: Date.now() });
+          etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
+          events.emit({ type: 'narration', agent: 'architect', text: `⏱️ Estimated build time: ${est.etaText} — I'll keep you posted as I go.`, ts: Date.now() });
         } catch { /* ETA is best-effort — never affects the build */ }
       }
       const budget = maxBuildBudgetUsd();

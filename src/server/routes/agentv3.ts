@@ -138,7 +138,7 @@ import {
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
-import { saveCheckpoint, loadCheckpoints } from '../AgentV3/CheckpointStore';
+import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { saveDiagnostics, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
@@ -1201,7 +1201,12 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     const status = await gitStatusForSession(workspaceId, userId ?? undefined);
-    res.json(status ? { available: true, ...status } : { available: false, clean: false, changed: 0, head: '' });
+    if (status) { res.json({ available: true, live: true, ...status }); return; }
+    // Cold session (sandbox recycled): surface the last DURABLE checkpoint as a dormant-but-valid
+    // working tree so the panel shows continuity ("Last saved … on <sha>") instead of the scary
+    // "not active in this session" dead-end. Falls through to honest "not available" if no history.
+    const dormant = dormantGitStatusFromCheckpoints(await loadCheckpoints(workspaceId).catch(() => []));
+    res.json(dormant ?? { available: false, live: false, clean: false, changed: 0, head: '' });
   });
 
   // REAL Code Studio terminal: run ONE bounded command in the user's own warm v3.0 sandbox. Each

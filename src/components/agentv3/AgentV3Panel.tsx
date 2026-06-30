@@ -240,22 +240,30 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
   // chat history so a refresh/reconnect doesn't lose it (option (a): chat + git-restore). Runs
   // ONCE, and only when nothing is running and the panel is still empty, so it never clobbers a
   // live build or a thread already opened from History. Best-effort.
-  const loadedConvoRef = useRef(false);
+  // Keyed to the sessionId that has ALREADY been auto-restored. (Was a never-reset boolean, which let
+  // an in-flight most-recent-conversation restore re-adopt the OLD chat AFTER "+ New chat" cleared the
+  // thread — the verified S1 race.) Keying it to the session means: each session auto-restores at most
+  // once, AND a deliberate session switch mid-load discards the stale result so New chat stays blank.
+  const autoRestoredSessionRef = useRef<string>('');
   useEffect(() => {
-    if (loadedConvoRef.current || running || !userId || state.narration.length > 0 || userMsgs.length > 0) return;
-    loadedConvoRef.current = true;
+    if (running || !userId || state.narration.length > 0 || userMsgs.length > 0) return;
+    if (autoRestoredSessionRef.current === sessionIdRef.current) return; // this session already handled
+    const sidAtStart = sessionIdRef.current;
+    autoRestoredSessionRef.current = sidAtStart;
     void (async () => {
       const restored = await loadConversation({ userId, email });
       if (!restored) return;
+      // CANCELLATION TOKEN: if the user started a New chat / opened another session while we were
+      // loading, the live sessionId no longer matches — discard so the deliberate choice wins.
+      if (sessionIdRef.current !== sidAtStart) return;
       // RESUME THE SAME SESSION: adopt the sessionId of the restored (most-recent) conversation so a
-      // follow-up message continues THAT exact workspace/memory — not a fresh one. This is what makes
-      // "open v3.0 → reopen where I left off" reliable, independent of localStorage/auth timing.
-      // sessionId is the tail of the workspaceId: `agentv3-{uid}-{sessionId}`. Only "New" starts fresh.
+      // follow-up message continues THAT exact workspace/memory. sessionId is the tail of the
+      // workspaceId: `agentv3-{uid}-{sessionId}`. Only "New" starts fresh.
       if (restored.workspaceId) {
         const prefix = `agentv3-${normalizeUid(userId)}-`;
         if (restored.workspaceId.startsWith(prefix)) {
           const sid = restored.workspaceId.slice(prefix.length);
-          if (sid) { sessionIdRef.current = sid; persistSessionId(sid); }
+          if (sid) { sessionIdRef.current = sid; persistSessionId(sid); autoRestoredSessionRef.current = sid; }
         }
       }
       // Restore the user's OWN messages too — the narration path only rebuilds the agent side, so
@@ -266,6 +274,10 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
     })();
   }, [userId, email, running, state.narration.length, userMsgs.length, loadConversation]);
 
+  // S4 — re-armed per workspace; the rehydrate EFFECT itself lives below loadWorkspaceFiles (declared
+  // later) to avoid a temporal-dead-zone on workspaceFiles. New chat / open / resume reset it to ''.
+  const rehydratedWsRef = useRef<string>('');
+
   // Resume a saved v3.0 conversation opened from History ("open chat"). Adopt its
   // sessionId so the backend continues with the SAME workspace/memory (best-effort,
   // if still warm) and restore its saved thread into the chat. Fires on each new
@@ -274,6 +286,8 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
     if (!resume) return;
     sessionIdRef.current = resume.sessionId;
     persistSessionId(resume.sessionId); // keep the reopened project sticky across reloads too
+    autoRestoredSessionRef.current = resume.sessionId; // explicit resume → mark handled (auto-restore must not override)
+    rehydratedWsRef.current = '';                       // re-arm file rehydrate for the resumed workspace
     reset();
     setUserMsgs(resume.messages.filter((m) => m.role === 'user'));
     setAgentHistory(resume.messages.filter((m) => m.role !== 'user'));
@@ -476,6 +490,8 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
     if (running) return;
     sessionIdRef.current = newSessionId();
     persistSessionId(sessionIdRef.current); // the new project is now the sticky one across reloads
+    autoRestoredSessionRef.current = sessionIdRef.current; // mark handled → auto-restore won't load the old chat over this blank one
+    rehydratedWsRef.current = '';            // re-arm file rehydrate for the new (empty) workspace
     setWorkspaceFiles(null);
     setSelectedFile(null);
     setUserMsgs([]);
@@ -519,6 +535,8 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
         if (sid) { sessionIdRef.current = sid; persistSessionId(sid); }
       }
     }
+    autoRestoredSessionRef.current = sessionIdRef.current; // explicit open → mark handled so auto-restore can't swap in the most-recent chat
+    rehydratedWsRef.current = '';                          // re-arm file rehydrate for the opened workspace
     setUserMsgs(restored.messages.map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts })));
   };
   const newChatFromHistory = () => { setHistoryOpen(false); startNewSession(); };
@@ -749,8 +767,11 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
   // Heavy generated dirs are never shown/synced — the user cares about source.
   const FILE_EXCLUDE = /^(node_modules\/|\.git\/|dist\/|build\/|\.next\/|__pycache__\/)/;
 
-  const loadWorkspaceFiles = async (): Promise<Record<string, string> | null> => {
-    const wsId = state.workspaceId;
+  const loadWorkspaceFiles = async (wsIdArg?: string): Promise<Record<string, string> | null> => {
+    // On a COLD reopen there is no live build yet, so state.workspaceId is empty — derive the durable
+    // workspaceId from the session so files still rehydrate from storage (the server falls back to the
+    // saved file store when the sandbox is cold). An explicit arg wins (the rehydrate effect passes it).
+    const wsId = wsIdArg || state.workspaceId || (userId && sessionIdRef.current ? `agentv3-${normalizeUid(userId)}-${sessionIdRef.current}` : '');
     if (!wsId) return null;
     try {
       const res = await fetch('/api/agentv3/workspace-files', {
@@ -818,6 +839,21 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done]);
+
+  // S4 — REHYDRATE FILES + PREVIEW from durable storage on (re)open. The other file-load effects all
+  // require state.files.length > 0, which is ALWAYS 0 after a reopen (the restored thread carries no
+  // file events) — so files/preview looked "gone". This pulls the durable file contents for the shown
+  // workspace the moment it is opened (and NOT mid-build), so the Files viewer is populated and the
+  // in-browser preview (which renders from the same durable files server-side) comes back. Runs once
+  // per workspace (rehydratedWsRef), re-armed on session switch; never during a live build.
+  useEffect(() => {
+    if (running || !userId || !sessionIdRef.current) return;
+    const wsId = state.workspaceId || `agentv3-${normalizeUid(userId)}-${sessionIdRef.current}`;
+    if (rehydratedWsRef.current === wsId || workspaceFiles !== null) return;
+    rehydratedWsRef.current = wsId;
+    void loadWorkspaceFiles(wsId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, state.workspaceId, running, workspaceFiles]);
 
   // Plan (todo list) collapse toggle (Task 3) — keeps the chat area readable.
   const [planCollapsed, setPlanCollapsed] = useState(false);
@@ -1344,7 +1380,9 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
                     <div className="mb-2 flex items-center gap-2 text-[11px] px-2 py-1 rounded bg-zinc-800/60 border border-white/5">
                       <GitBranch className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
                       {!gitStatus.available ? (
-                        <span className="text-zinc-500">Git status: not active in this session — continue a build to make the working tree live.</span>
+                        <span className="text-zinc-500">Workspace is dormant — send a message to bring it back online.</span>
+                      ) : gitStatus.live === false ? (
+                        <span className="text-zinc-400">Last saved: working tree clean{gitStatus.head ? ` · on ${gitStatus.head}` : ''}{gitStatus.lastCommit ? ` · ${gitStatus.lastCommit.slice(0, 48)}` : ''}</span>
                       ) : gitStatus.clean ? (
                         <span className="text-emerald-400">Working tree clean{gitStatus.head ? ` · on ${gitStatus.head}` : ''}</span>
                       ) : (

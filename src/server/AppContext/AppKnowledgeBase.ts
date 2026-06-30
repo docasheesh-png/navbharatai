@@ -1283,15 +1283,16 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
 • FILES — file explorer: browse, create, rename and delete files. Delete one file (trash icon) or use the Select button to multi-select / Select All and delete many at once — always with a confirmation dialog before anything is removed.
 • EDITOR — syntax-highlighted code editor for all file types (TypeScript, React, Python, HTML, CSS, etc.).
 • PREVIEW — live preview of the running app with hot-reload.
-• TERMINAL — bash shell to run any command (npm install, git, curl, etc.).
+• PROBLEMS — real compile-error panel: when the live preview bundle fails, it lists the actual errors esbuild reported (file · line · message); click a problem to jump to that line in the editor. An empty list means the app genuinely compiled. Open it from the amber problem-count badge (bottom-right) or the "view problems" command.
 • GIT — version control panel: commit, push, pull, view diffs.
 • LOGS — build and runtime output for debugging.
 • SETTINGS — workspace and IDE configuration.`,
-    howToUse: 'Open IDE from the sidebar. Use the panel tabs (Files, Editor, Preview, Terminal, Git, Logs) to develop your project.',
+    howToUse: 'Open IDE from the sidebar. Use the panel tabs (Files, Editor, Preview, Problems, Git, Logs) to develop your project. When the preview fails to compile, open Problems (amber badge, bottom-right) to see the real errors and click one to jump to the line.',
     relatedFeatures: ['settings_git', 'settings_terminal', 'settings_logs', 'pro_chat'],
     keywords: [
       'ide', 'code studio', 'editor', 'code', 'files', 'preview', 'terminal', 'shell',
       'file explorer', 'code editor', 'git panel', 'build output', 'live preview',
+      'problems', 'problems panel', 'errors', 'compile errors', 'error list', 'galti', 'error kahan hai',
     ],
   },
   {

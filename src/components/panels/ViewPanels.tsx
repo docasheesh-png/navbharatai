@@ -7,6 +7,7 @@ import type { ZipSizeModalVariant } from '../ide/ZipSizeModal';
 import type { ViewType, FileSystem, ChatSession, Message } from '../../types';
 import type { AgentMode } from '../../types';
 import type { ThemeMode } from '../../lib/theme';
+import type { PreviewProblem } from '../../lib/previewProblems';
 import type { User as FirebaseUser } from 'firebase/auth';
 
 // ── Lazy-loaded view components ─────────────────────────────────────────────
@@ -116,6 +117,8 @@ export interface ViewPanelsProps {
   /** The v3.0 build's live preview URL + workspace, lifted from AgentV3Panel so the main "Preview"
    *  menu shows the SAME working v3.0 preview instead of the retired v2.0 generatedCode. */
   v3Preview?: { previewUrl?: string; workspaceId?: string };
+  /** Real compile-error problems from the live preview bundle, surfaced in Code Studio's Problems panel. */
+  problems?: PreviewProblem[];
 }
 
 export function ViewPanels({
@@ -130,7 +133,7 @@ export function ViewPanels({
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
   downloadAppZip, setActiveFile, wallet, setShowVishwakarmaUnlockModal, setShowAuth,
-  zipSizeModal, setZipSizeModal, v3Preview,
+  zipSizeModal, setZipSizeModal, v3Preview, problems = [],
 }: ViewPanelsProps) {
   return (
     <>
@@ -151,6 +154,7 @@ export function ViewPanels({
             onChatSend={() => handleSendForTab(activeAgent.startsWith('vishwakarma') ? 'asc_chat' as ViewType : 'nbi_pro_chat' as ViewType)}
             isChatLoading={isLoading}
             activeIntent={activeIntent}
+            problems={problems}
             githubToken={githubToken}
             githubUser={githubUser}
             githubRepoContext={githubRepoContext}

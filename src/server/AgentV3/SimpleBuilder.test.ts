@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt, contractBlock, contractSystemPrompt, repairUserPrompt } from './SimpleBuilder';
+import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt, contractBlock, contractSystemPrompt, repairUserPrompt, generationTier, dependencyContext } from './SimpleBuilder';
 import type { OneShotFile } from './OneShotBuilder';
 
 describe('parseFileManifest', () => {
@@ -251,5 +251,101 @@ describe('runSimpleBuild — shared contract wiring', () => {
     expect(p).toContain('ENUM');
     expect(p).toContain('FROZEN');
     expect(p).toContain('props interface');
+  });
+});
+
+describe('generationTier (LENS B — leaves before consumers)', () => {
+  it('classifies foundation (types/utils/hooks/contexts/stores/css) as tier 0', () => {
+    expect(generationTier('src/types/media.ts')).toBe(0);
+    expect(generationTier('src/utils/extractEmbedUrl.ts')).toBe(0);
+    expect(generationTier('src/hooks/useMediaUrl.ts')).toBe(0);
+    expect(generationTier('src/useTimer.ts')).toBe(0);
+    expect(generationTier('src/context/AuthContext.tsx')).toBe(0);
+    expect(generationTier('src/store/cart.ts')).toBe(0);
+    expect(generationTier('src/styles/App.css')).toBe(0);
+    expect(generationTier('src/constants.ts')).toBe(0);
+  });
+  it('classifies the shell/entry/pages as tier 2 (generated last)', () => {
+    expect(generationTier('src/main.tsx')).toBe(2);
+    expect(generationTier('src/App.tsx')).toBe(2);
+    expect(generationTier('src/pages/Home.tsx')).toBe(2);
+    expect(generationTier('src/components/PlayerPage.tsx')).toBe(2); // *Page composes components → last
+    expect(generationTier('index.html')).toBe(1); // not a TS entry; just a normal file
+  });
+  it('classifies ordinary components as tier 1', () => {
+    expect(generationTier('src/components/MediaPlayer.tsx')).toBe(1);
+    expect(generationTier('src/components/UrlInput.tsx')).toBe(1);
+  });
+});
+
+describe('dependencyContext (LENS B — real producer source block)', () => {
+  it('frames the real source and caps each file', () => {
+    const out = dependencyContext([{ path: 'src/types/media.ts', content: 'export enum MediaType { YouTube }' }]);
+    expect(out).toContain('ALREADY-WRITTEN FILES YOU CAN IMPORT');
+    expect(out).toContain('<<<FILE src/types/media.ts>>>');
+    expect(out).toContain('export enum MediaType { YouTube }');
+  });
+  it('returns "" for no producers and caps long content', () => {
+    expect(dependencyContext([])).toBe('');
+    const big = 'x'.repeat(9000);
+    const out = dependencyContext([{ path: 'a.ts', content: big }], 100);
+    expect(out.includes('x'.repeat(100))).toBe(true);
+    expect(out.includes('x'.repeat(101))).toBe(false);
+  });
+});
+
+describe('runSimpleBuild — LENS B staged generation', () => {
+  const PLAN = 'src/types/media.ts :: types\nsrc/components/MediaPlayer.tsx :: player\nsrc/App.tsx :: root';
+  const stagedDeps = (over = {}) => {
+    const calls: string[] = []; // file-generation order (paths)
+    const prompts: Record<string, string> = {};
+    return {
+      calls, prompts,
+      deps: {
+        prompt: 'media player', framework: 'vite-react', scaffoldPaths: ['src/App.tsx'],
+        shareContract: false, // isolate LENS B from LENS A in this test
+        generate: async (_s: string, user: string) => {
+          if (user.includes('Plan the COMPLETE file list') || user.includes('Plan the file list') || user.includes('complete file list:')) {
+            if (!user.includes('write THIS file')) return PLAN;
+          }
+          const m = user.match(/write THIS file in full:\s*\n\s*([^\n]+)/);
+          if (m) {
+            const path = m[1].trim();
+            calls.push(path);
+            prompts[path] = user;
+            return `<<<FILE ${path}>>>\n// ${path}\nexport default function X(){return null}\n<<<ENDFILE>>>`;
+          }
+          return PLAN; // manifest fallback
+        },
+        writeFiles: async () => {},
+        ...over,
+      },
+    };
+  };
+
+  it('generates foundation BEFORE the component BEFORE the shell, and feeds real source forward', async () => {
+    const h = stagedDeps();
+    const r = await runSimpleBuild(h.deps);
+    expect(r.ok).toBe(true);
+    const iTypes = h.calls.indexOf('src/types/media.ts');
+    const iComp = h.calls.indexOf('src/components/MediaPlayer.tsx');
+    const iApp = h.calls.indexOf('src/App.tsx');
+    expect(iTypes).toBeGreaterThanOrEqual(0);
+    expect(iTypes).toBeLessThan(iComp);   // foundation first
+    expect(iComp).toBeLessThan(iApp);     // component before the shell
+    // The component's prompt carried the REAL generated source of the foundation file.
+    expect(h.prompts['src/components/MediaPlayer.tsx']).toContain('ALREADY-WRITTEN FILES YOU CAN IMPORT');
+    expect(h.prompts['src/components/MediaPlayer.tsx']).toContain('<<<FILE src/types/media.ts>>>');
+    // The shell saw both the foundation AND the component.
+    expect(h.prompts['src/App.tsx']).toContain('src/components/MediaPlayer.tsx');
+  });
+
+  it('depOrder:false falls back to one batch with NO dependency block (byte-identical path)', async () => {
+    const h = stagedDeps({ depOrder: false });
+    const r = await runSimpleBuild(h.deps);
+    expect(r.ok).toBe(true);
+    for (const p of Object.values(h.prompts)) {
+      expect(p).not.toContain('ALREADY-WRITTEN FILES YOU CAN IMPORT');
+    }
   });
 });

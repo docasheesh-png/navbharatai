@@ -2609,7 +2609,7 @@ export function registerAgentV3Routes(app: Express): void {
         // 1) SIMPLE BUILDER (primary) — plan a file manifest, then generate EACH file in its own
         //    focused call. This beats the single-call OneShot's ~8k-token truncation that made
         //    multi-file apps produce "no files" and drop into the slow agentic loop.
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog });
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off' });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         if (sb.ok) {
           fastResult(sb.summary, sb.filesWritten);

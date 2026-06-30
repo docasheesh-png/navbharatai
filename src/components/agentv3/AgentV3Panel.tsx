@@ -5,8 +5,9 @@ import {
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
   SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github, Circle,
   ChevronLeft, ChevronRight, ChevronDown,
-  FileCode, Copy, Maximize2, Minimize2, ThumbsUp, ThumbsDown,
+  FileCode, Copy, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, MessageSquare,
 } from 'lucide-react';
+import type { ConversationMeta } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
@@ -53,7 +54,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 };
 
 export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, onPreviewState, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; onFilesSync?: (files: Record<string, string>) => void; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string }) => void; filesPanel?: FilesPanelProps }) {
-  const { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, listConversations } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
   // 5× = Opus minimum power; 10× = Opus medium; 20× = Opus max / ultracode.
@@ -421,6 +422,53 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
     reset();
   };
 
+  // History menu: list this account's saved v3.0 chats and open any of them. Because conversations
+  // are stored per-USER in Firestore (not per device), the same list — and continuing the SAME
+  // project/memory — works from any device the user signs in on (Claude-style continuity).
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyItems, setHistoryItems] = useState<ConversationMeta[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const toggleHistory = async () => {
+    const next = !historyOpen;
+    setHistoryOpen(next);
+    if (next) {
+      setHistoryLoading(true);
+      try { setHistoryItems(await listConversations({ userId, email })); }
+      finally { setHistoryLoading(false); }
+    }
+  };
+  // Open a specific saved conversation: load its thread + plan, and adopt its sessionId so a
+  // follow-up continues THAT exact workspace/memory (same as the auto-restore of the most recent).
+  const openConversation = async (id: string) => {
+    if (running) return;
+    setHistoryOpen(false);
+    setWorkspaceFiles(null);
+    setSelectedFile(null);
+    setAgentHistory([]);
+    setCheckpointHistory([]);
+    setFiles([]);
+    const restored = await loadConversation({ userId, email, id });
+    if (!restored) return;
+    if (restored.workspaceId) {
+      const prefix = `agentv3-${normalizeUid(userId)}-`;
+      if (restored.workspaceId.startsWith(prefix)) {
+        const sid = restored.workspaceId.slice(prefix.length);
+        if (sid) { sessionIdRef.current = sid; persistSessionId(sid); }
+      }
+    }
+    setUserMsgs(restored.messages.map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts })));
+  };
+  const newChatFromHistory = () => { setHistoryOpen(false); startNewSession(); };
+  const relTime = (ts?: number): string => {
+    if (!ts || typeof ts !== 'number') return '';
+    const m = Math.floor((Date.now() - ts) / 60000);
+    if (m < 1) return 'now';
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h`;
+    return `${Math.floor(h / 24)}d`;
+  };
+
   // Header tab pill: tapping a surface opens the workspace on it; tapping the
   // already-active pill collapses the workspace back to full-width chat.
   const openTab = (t: SurfaceTab) => {
@@ -722,6 +770,52 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
       {/* Header: title + New, and the workspace tab pills (open/collapse the workspace) */}
       <div className="shrink-0 border-b border-zinc-800">
         <div className="flex items-center gap-2 px-4 pt-3 pb-2">
+          {/* History menu (3-line): this account's saved chats + New chat. Per-user (Firestore), so the
+              same list and the same project/memory continue from any device the user signs in on. */}
+          <div className="relative">
+            <button
+              onClick={toggleHistory}
+              title="Chat history"
+              aria-label="Chat history"
+              className="flex items-center justify-center w-7 h-7 -ml-1 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            {historyOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setHistoryOpen(false)} />
+                <div className="absolute left-0 top-9 z-50 w-72 max-h-[70vh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl py-1.5">
+                  <button
+                    onClick={newChatFromHistory}
+                    disabled={running}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+                  >
+                    <Plus className="w-4 h-4 text-indigo-400" /> New chat
+                  </button>
+                  <div className="my-1 border-t border-zinc-800" />
+                  {historyLoading ? (
+                    <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
+                  ) : historyItems.length === 0 ? (
+                    <div className="px-3 py-3 text-xs text-zinc-500">No saved chats yet.</div>
+                  ) : (
+                    historyItems.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => openConversation(c.id)}
+                        disabled={running}
+                        title={c.title || 'Untitled chat'}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                        <span className="truncate flex-1">{c.title || 'Untitled chat'}</span>
+                        {c.updatedAt ? <span className="text-[10px] text-zinc-600 shrink-0">{relTime(c.updatedAt)}</span> : null}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
           <Bot className="w-5 h-5 text-indigo-400" />
           <span className="font-semibold">NavBharatAI Pro v3.0</span>
           <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>

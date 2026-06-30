@@ -6152,3 +6152,25 @@ Gate: server tsc 0, vitest 3764/3764 PASS, boot:check PASS.
 
 HONEST LIMITATION: I can't reproduce the exact cold-sandbox file-keying in CI; the fix is a pure,
 unit-tested resilience improvement to entry detection. Final confirmation needs a real reopened session.
+
+## 2026-06-30 — FEATURE: v3.0 chats menu (☰) — real history list, open any chat, "+ New chat", cross-device
+
+Admin asked for a 3-line menu in the v3.0 header that opens a real chat-history list, lets you continue the
+same project/memory from any device (Claude-style), plus a "+ New chat".
+
+The continuity infra already existed — conversations are stored PER USER in Firestore (GET
+/api/agentv3/conversations lists by userId), and loading a conversation adopts its sessionId so a follow-up
+continues the SAME workspace/memory; #719 restores plan/preview on resume. What was missing was the UI to
+list ALL chats and open a SPECIFIC one (the client only auto-loaded the most recent).
+
+Added:
+- useAgentV3Build: `listConversations()` (metadata list) + `loadConversation({ id })` to open a SPECIFIC
+  saved chat (was most-recent only).
+- AgentV3Panel: a ☰ (Menu) button at the top-left of the v3.0 header opens a dropdown with "+ New chat" and
+  the account's saved chats (newest first, title + relative time). Tapping a chat loads its thread + plan and
+  adopts its sessionId → continues that exact project/memory. Because the list is per-account, it works from
+  any signed-in device (open on phone, continue on laptop).
+- AppKnowledgeBase: HISTORY entry + keywords updated for the chats menu / cross-device continuity.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3771/3771 PASS, boot:check PASS. UI + thin client/hook wiring;
+reuses the existing per-user conversation store + durable restore (no new server endpoints).

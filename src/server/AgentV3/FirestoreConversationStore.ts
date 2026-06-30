@@ -132,14 +132,31 @@ export class FirestoreConversationStore implements ConversationStore {
   }
 
   async listByUser(userId: string, limit = 50): Promise<ConversationRecord[]> {
-    const q = await this.db
-      .collection(COLLECTION)
-      .where('userId', '==', userId)
-      .orderBy('updatedAt', 'desc')
-      .limit(Math.max(0, limit))
-      .get();
+    const cap = Math.max(0, limit);
     // List view: transcript omitted (empty messages) — call get(id) for the full build.
-    return q.docs.map((d) => this.toRecord(d.id, d.data() as ConversationMeta, []));
+    try {
+      const q = await this.db
+        .collection(COLLECTION)
+        .where('userId', '==', userId)
+        .orderBy('updatedAt', 'desc')
+        .limit(cap)
+        .get();
+      return q.docs.map((d) => this.toRecord(d.id, d.data() as ConversationMeta, []));
+    } catch {
+      // FALLBACK — the (userId ASC, updatedAt DESC) composite index may not be deployed yet. Without
+      // it the ordered query THROWS ("query requires an index"), the route returns 500, and the
+      // history menu silently shows "No saved chats yet" even though chats exist. Query by userId
+      // alone (a single-field index always exists), then sort + cap in memory so OLD CHATS still
+      // appear. Once the index is live (firestore.indexes.json) the fast ordered path above is used.
+      const q = await this.db
+        .collection(COLLECTION)
+        .where('userId', '==', userId)
+        .limit(Math.max(cap, 200))
+        .get();
+      const recs = q.docs.map((d) => this.toRecord(d.id, d.data() as ConversationMeta, []));
+      recs.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+      return cap > 0 ? recs.slice(0, cap) : recs;
+    }
   }
 
   async remove(id: string): Promise<void> {

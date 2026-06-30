@@ -6278,3 +6278,25 @@ Gate: server tsc 0, vitest 3857/3857 PASS, boot:check PASS.
 HONEST LIMITATION: CI can't prove the live model now emits matching identifiers end-to-end; the tiering,
 ordering, and real-source injection are pure + unit-tested (generate spy), but real convergence on the
 media-player prompt needs a real fast-lane build + a BuildDiagnostics bundle.
+
+## 2026-06-30 — FIX (root cause, Slice 3/3 — LENS C): deterministic ContractMap drift backstop into repair
+
+Completes the build-drift fix (Slice 1 shared contract + Slice 2 dependency-ordered generation). LENS C is
+the safety net for any residue that still slips through to verify: a NEW pure module ContractMap.ts detects
+the two highest-signal drift classes deterministically and feeds a COMPACT report into the repair pass so
+the precise mismatches survive the repair prompt's ~6k error-slice truncation.
+
+- ContractMap.ts (pure): extractContract(files) → per-module exported symbols + enum members; contractDriftReport(files)
+  → one compact line per mismatch for (1) a named import the target does NOT export (e.g. extractVimeoEmbedUrl
+  from a util that only exports extractEmbedUrl) and (2) an Enum.Member the enum does not declare (e.g.
+  MediaType.YouTube vs {YOUTUBE}). Conservative: resolves only in-app relative imports, skips export-* targets,
+  external imports, default imports, CSS; returns null on no drift. Advisory only — tsc stays the hard gate.
+- Wired into SimpleBuilder's repair loop: the drift report is PREPENDED to the tsc errors before each repair
+  call, so the model sees the full, precise mismatch set in a form that fits the slice.
+
+Tests: +8 ContractMap (the exact report symptoms + null on agreement + conservative skips + index resolution).
+Gate: server tsc 0, vitest 3865/3865 PASS, boot:check PASS.
+
+NET (A+B+C): drift is prevented at generation (shared contract + real producer source) AND, if any residue
+reaches verify, named precisely + compactly into repair so it converges. HONEST: end-to-end convergence on a
+live model still needs a real fast-lane build to confirm; all three layers' logic is pure + unit-tested.

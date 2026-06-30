@@ -15,6 +15,7 @@
 
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
+import { contractDriftReport } from './ContractMap';
 
 export interface SimpleFileSpec {
   path: string;
@@ -423,8 +424,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     while (!verdict.ok && attempt < maxRepairs && deps.repair) {
       attempt++;
       deps.log?.(`Found build errors — fixing them (attempt ${attempt}/${maxRepairs})…`);
+      // LENS C — prepend a COMPACT deterministic cross-file drift report so the precise mismatches
+      // (missing exports, bad enum members) survive the repair prompt's error-slice truncation and the
+      // repair model sees the full set. Best-effort, advisory; tsc verdict stays the hard gate.
+      let repairErrors = verdict.errors;
+      try {
+        const drift = contractDriftReport(Object.fromEntries([...byPath].map(([p, f]) => [p, f.content])));
+        if (drift) repairErrors = `${drift}\n\n${verdict.errors}`;
+      } catch { /* drift report is best-effort — never blocks repair */ }
       let fixed: OneShotFile[] = [];
-      try { fixed = await deps.repair(verdict.errors, [...byPath.values()], contract); } catch { fixed = []; }
+      try { fixed = await deps.repair(repairErrors, [...byPath.values()], contract); } catch { fixed = []; }
       fixed = fixed.filter((f) => f && f.path && f.content);
       if (!fixed.length) break;
       for (const f of fixed) byPath.set(f.path, f);

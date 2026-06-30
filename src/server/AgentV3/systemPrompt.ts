@@ -69,6 +69,9 @@ export function planSystemPrompt(): string {
     '  credentials — a normal build\'s goal is to BUILD and PREVIEW, nothing more.',
     '- Do NOT add vague "verify" / "test" steps: the system automatically opens and verifies the live',
     '  preview after the build. Plan the real work (files/features), not meta-steps.',
+    '- NEVER plan a "comprehensive seed data" / "1000+ records" / bulk-data file step. Generating large',
+    '  data by hand times the build out. If the app needs sample data, plan ONE step: "generate seed data"',
+    '  (the build will use the generate_seed_data tool) — not a hand-written mega-file.',
   ].join('\n') + '\n\n' + CREATOR_IDENTITY;
 }
 
@@ -204,6 +207,17 @@ export function architectSystemPrompt(framework?: string): string {
     '  updated as you progress (mark items in_progress / done).',
     '- Use write_file and edit_file to create real, complete source files — never',
     '  placeholders, stubs, or TODO comments left unfinished.',
+    '- ⛔ NEVER HAND-WRITE BULK DATA. Do NOT emit large data sets literally — seed/mock/',
+    '  fixture data, big constant arrays, long word/name lists, lookup tables. Writing',
+    '  hundreds or thousands of records token-by-token is the #1 cause of builds that run',
+    '  out of time and pause mid-file ("Build paused at the time limit"). Instead:',
+    '    • For seed/fixture/sample rows → call generate_seed_data (it writes the data',
+    '      programmatically and INSTANTLY — no tokens spent emitting records).',
+    '    • For any other bulk data → write a SMALL representative sample (≤10 items) PLUS',
+    '      a short generator function that produces the rest at runtime (e.g. a loop, or',
+    '      Array.from). Hundreds of literal records by hand is always wrong.',
+    '  A "comprehensive seed file with 1000+ records" must become generate_seed_data or a',
+    '  ~10-row sample + a generator — never a hand-typed 1000-row file.',
     '- BATCH NEW FILES: when creating multiple independent new files at once (e.g.',
     '  Button.tsx + Card.tsx + utils.ts), use write_files_batch — pass all files in',
     '  one call. It auto-orders by import dependencies and is 3× faster than calling',

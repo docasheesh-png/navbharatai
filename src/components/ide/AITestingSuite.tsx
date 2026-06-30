@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { TestTube, Play, Check, X, AlertCircle, CheckCircle2, Code, RefreshCw, Download, Copy, Zap, FileCode, ChevronRight } from 'lucide-react';
+import { sampleInputValue } from '../../server/QualityEvaluationEngine/TestDataManager';
 
 type TestStatus = 'pending' | 'pass' | 'fail' | 'skip';
 
@@ -80,7 +81,7 @@ function generateTestsFromCode(code: string): TestCase[] {
       id: String(id++), category: 'unit', status: 'pending',
       name: 'Input field onChange handler',
       description: 'State updates correctly when user input changes',
-      code: `import { render, fireEvent } from '@testing-library/react';\n\ntest('input onChange updates state', () => {\n  const { getByPlaceholderText } = render(<Component />);\n  const input = getByPlaceholderText('Enter text...');\n  fireEvent.change(input, { target: { value: 'test value' } });\n  expect(input.value).toBe('test value');\n});`,
+      code: ((v: string) => `import { render, fireEvent } from '@testing-library/react';\n\ntest('input onChange updates state', () => {\n  const { getByPlaceholderText } = render(<Component />);\n  const input = getByPlaceholderText('Enter text...');\n  fireEvent.change(input, { target: { value: '${v}' } });\n  expect(input.value).toBe('${v}');\n});`)(sampleInputValue('input-onchange')),
     });
   }
 

@@ -56,7 +56,19 @@ export interface UseAgentV3Build {
    * own restored messages so the panel can re-display them too. Returns null if nothing was loaded.
    * No-op while a build is running. Best-effort: any failure resolves null and leaves state untouched.
    */
-  loadConversation: (opts?: { userId?: string; email?: string }) => Promise<{ messages: UserChatMsg[]; workspaceId?: string } | null>;
+  loadConversation: (opts?: { userId?: string; email?: string; id?: string }) => Promise<{ messages: UserChatMsg[]; workspaceId?: string } | null>;
+  /** List the user's saved v3.0 conversations (metadata only) for the history menu. */
+  listConversations: (opts?: { userId?: string; email?: string }) => Promise<ConversationMeta[]>;
+}
+
+/** Lightweight conversation metadata for the history list (matches GET /api/agentv3/conversations). */
+export interface ConversationMeta {
+  id: string;
+  title?: string;
+  status?: string;
+  workspaceId?: string;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 export function useAgentV3Build(): UseAgentV3Build {
@@ -151,19 +163,24 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, []);
 
-  const loadConversation = useCallback(async (opts?: { userId?: string; email?: string }): Promise<{ messages: UserChatMsg[]; workspaceId?: string } | null> => {
+  const loadConversation = useCallback(async (opts?: { userId?: string; email?: string; id?: string }): Promise<{ messages: UserChatMsg[]; workspaceId?: string } | null> => {
     if (running) return null;
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     try {
       const params = new URLSearchParams();
       if (userIdRef.current) params.set('userId', userIdRef.current);
       if (emailRef.current) params.set('email', emailRef.current);
-      const listRes = await fetch(`/api/agentv3/conversations?${params.toString()}`);
-      if (!listRes.ok) return null;
-      const listJson = await listRes.json().catch(() => ({}));
-      const recent = Array.isArray(listJson?.conversations) ? listJson.conversations[0] : undefined;
-      if (!recent?.id) return null;
-      const oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(String(recent.id))}?${params.toString()}`);
+      // Load a SPECIFIC conversation when an id is given (history menu); otherwise the most recent.
+      let convoId = opts?.id;
+      if (!convoId) {
+        const listRes = await fetch(`/api/agentv3/conversations?${params.toString()}`);
+        if (!listRes.ok) return null;
+        const listJson = await listRes.json().catch(() => ({}));
+        const recent = Array.isArray(listJson?.conversations) ? listJson.conversations[0] : undefined;
+        convoId = recent?.id ? String(recent.id) : undefined;
+      }
+      if (!convoId) return null;
+      const oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(convoId)}?${params.toString()}`);
       if (!oneRes.ok) return null;
       const oneJson = await oneRes.json().catch(() => ({}));
       const conv = oneJson?.conversation as PersistedConversation | undefined;
@@ -187,6 +204,23 @@ export function useAgentV3Build(): UseAgentV3Build {
       return null; // best-effort — never disrupt the panel on a load failure
     }
   }, [running]);
+
+  const listConversations = useCallback(async (opts?: { userId?: string; email?: string }): Promise<ConversationMeta[]> => {
+    const uid = opts?.userId ?? userIdRef.current;
+    const em = opts?.email ?? emailRef.current;
+    if (!uid) return [];
+    try {
+      const params = new URLSearchParams();
+      params.set('userId', uid);
+      if (em) params.set('email', em);
+      const res = await fetch(`/api/agentv3/conversations?${params.toString()}`);
+      if (!res.ok) return [];
+      const json = await res.json().catch(() => ({}));
+      return Array.isArray(json?.conversations) ? (json.conversations as ConversationMeta[]) : [];
+    } catch {
+      return []; // best-effort — the history menu just shows nothing on failure
+    }
+  }, []);
 
   const resume = useCallback(async (opts?: { userId?: string; email?: string }) => {
     if (resumeInFlightRef.current) return; // don't stack concurrent reconnects
@@ -451,5 +485,5 @@ export function useAgentV3Build(): UseAgentV3Build {
     return () => clearInterval(id);
   }, [running, resume]);
 
-  return { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation };
+  return { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation, listConversations };
 }

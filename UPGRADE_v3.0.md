@@ -2103,11 +2103,31 @@
   `src/server/AppContext/AppKnowledgeBase.ts`. (Targeted the live v3.0 preview surface — the felt path — rather
   than the legacy `App.tsx` PREVIEW_BOOTSTRAP handler the original spec named.)
 
-### P-UX.4 — Product Tour / Guided Walkthrough  ❌ MISSING  [HIGH]
-- Onboarding modal exists (4 cards) but no interactive step-by-step tour highlighting UI elements.
-- [ ] Add a lightweight driver.js (or Shepherd.js) product tour triggered from the onboarding modal CTA.
-- [ ] Cover: sidebar → chat → preview → deploy → billing (5 steps).
-- **Files:** new `src/components/ProductTour.tsx`, `src/App.tsx`.
+### P-UX.4 — Product Tour / Guided Walkthrough  ✅ DONE (2026-06-30) · 🔌 WIRED  [HIGH]
+- A real interactive 5-step guided tour: sidebar → chat → preview → deploy → wallet/billing.
+- [x] **`ProductTour.tsx`** (new, **dependency-free** — NO driver.js/Shepherd.js, per the policy;
+  static-render + step-config unit-tested). Spotlights each target by its `data-tour` attribute
+  (box-shadow cut-out + tooltip), with Next/Back/Skip, Esc-to-close, arrow keys, and a `1/5` counter.
+- [x] **Unbreakable around the fragile app:** each step declares the view that owns its target; the tour
+  navigates there via the app's own guarded `toggleTab`, then POLLS (bounded ~2s) for the element and
+  **gracefully skips** any target that never appears (logged-out, collapsed, mobile, disabled) — it never
+  throws or spotlights an empty box. Re-aligns on resize/scroll.
+- [x] **Self-contained trigger:** renders its own subtle "Tour" launcher (bottom-left, desktop), so the
+  integration is just the component + one mount line + five tiny `data-tour` attributes. **User-initiated
+  only — never auto-launches** (zero surprise / never over a modal). `z-[99998]` (below the `z-[999999]`
+  critical/checkout modals). Completion stored in `localStorage` (`navbharat_product_tour_v1`).
+- [x] **`data-tour` anchors added** (additive attributes only — no behaviour/layout change): SidebarNav
+  `<aside>`, AgentV3Panel chat wrapper + Preview TabPill (via a new `dataTour` passthrough) + Deploy button,
+  BillingPanel credit card. Mounted once in `App.tsx` after `<AppModals/>`.
+- [x] **AppKnowledgeBase** — added a PRODUCT TOUR capability bullet.
+- **Honest scope:** desktop-first (the launcher + spotlight target the desktop layout; the original spec's
+  "onboarding modal CTA" no longer exists — the modal was removed — so the self-contained launcher is the
+  trigger). No auto-launch by design.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3748 passing (4 new) ✅ · `test:coverage` exit 0 ·
+  `build` ✅ · `boot:check` PASS. Built from a 3-agent read-only recon of the exact integration points.
+- **Files:** new `src/components/ProductTour.tsx` + `.test.tsx`; `src/App.tsx` (import + mount),
+  `src/components/panels/SidebarNav.tsx`, `src/components/agentv3/AgentV3Panel.tsx`,
+  `src/components/panels/BillingPanel.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`.
 
 ### P-UX.5 — Breadcrumb Navigation  ❌ MISSING  [MED]
 - No breadcrumbs in deep views (Database Studio → collection → document; Code Studio → file → symbol).

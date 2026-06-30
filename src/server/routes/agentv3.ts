@@ -136,6 +136,7 @@ import {
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
+import { saveCheckpoint, loadCheckpoints } from '../AgentV3/CheckpointStore';
 import { saveDiagnostics, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
@@ -1153,6 +1154,29 @@ export function registerAgentV3Routes(app: Express): void {
     res.json({ ok });
   });
 
+  // Phase G1 — git as the third organ: return a workspace's DURABLE checkpoint history (newest first).
+  // v3.0 builds make real git commits; this surfaces the persisted timeline so the IDE shows the full
+  // history even across sessions / devices / sandbox recycles (not just the current session's RAM).
+  // Ownership-checked; empty list when the workspace has no checkpoints yet.
+  app.get('/api/agentv3/checkpoints', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    res.json({ checkpoints: await loadCheckpoints(workspaceId) });
+  });
+
   // R5 §5.1 — return a workspace's latest LIVE deployment URL (durable, survives reconnect).
   // Lets the UI restore the "Live site" link after a refresh/new session instead of losing it
   // with the build stream. Ownership-checked; null url when the app has never been deployed.
@@ -1697,6 +1721,13 @@ export function registerAgentV3Routes(app: Express): void {
 
     const actuator = buildActuator();
     const workspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
+    // Phase G1 — git as the third organ: durably persist every real git checkpoint as it is emitted,
+    // so the commit timeline survives sandbox recycling and is visible across sessions/devices (not just
+    // this session's RAM). Best-effort — a persist failure never affects the build or the stream.
+    events.subscribe((e) => {
+      const evt = e as { type?: string; checkpoint?: unknown };
+      if (evt?.type === 'checkpoint' && evt.checkpoint) saveCheckpoint(workspaceId, evt.checkpoint).catch(() => {});
+    }, false);
     const framework = typeof req.body?.framework === 'string' && req.body.framework ? req.body.framework : 'vite-react';
     const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
     // Held outside the try so a build CRASH (caught below) is still captured in the diagnostics report.

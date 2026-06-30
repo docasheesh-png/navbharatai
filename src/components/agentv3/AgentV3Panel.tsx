@@ -5,9 +5,10 @@ import {
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
   SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github, Circle,
   ChevronLeft, ChevronRight, ChevronDown,
-  FileCode, Copy, Maximize2, Minimize2,
+  FileCode, Copy, Maximize2, Minimize2, ThumbsUp, ThumbsDown,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
+import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
 import { PreviewSurface } from './PreviewSurface';
@@ -909,6 +910,8 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
               </div>
             )}
             {state.done && state.buildHealth && <BuildHealthCard health={state.buildHealth} />}
+            {/* P-UX.6 — lightweight CSAT: thumbs feedback on a finished build (once per workspace). */}
+            {state.done && state.ok && state.workspaceId && <BuildFeedback workspaceId={state.workspaceId} />}
           </div>
 
           {/* Bottom: live AI-team chips + input (Claude-Code style — at the bottom) */}
@@ -1514,6 +1517,37 @@ function todoStatusIcon(status: TodoStatus) {
  * gate (real `evaluate` scan): a 0–100 score, READY / NOT READY, and the exact blockers/warnings.
  * Honest by construction — the same gate that decides whether a build is reported as a success.
  */
+/**
+ * P-UX.6 — CSAT feedback on a finished build. Fires trackEvent('feedback', …) and remembers (per
+ * workspace, in localStorage) so the user is asked at most once per build. Dependency-free.
+ */
+function BuildFeedback({ workspaceId }: { workspaceId: string }) {
+  const key = `nbai:feedback:${workspaceId}`;
+  const [rated, setRated] = useState<null | 'up' | 'down'>(() => {
+    try { const v = localStorage.getItem(key); return v === 'up' || v === 'down' ? v : null; } catch { return null; }
+  });
+  const rate = (score: 'up' | 'down') => {
+    if (rated) return;
+    setRated(score);
+    try { localStorage.setItem(key, score); } catch { /* ignore */ }
+    try { trackEvent('feedback', { score: score === 'up' ? 1 : -1, surface: 'agentv3_build', workspaceId }); } catch { /* best-effort */ }
+  };
+  if (rated) {
+    return <div className="mt-1 text-[11px] text-zinc-500">Thanks for the feedback{rated === 'down' ? ' — we’ll keep improving.' : '!'}</div>;
+  }
+  return (
+    <div className="mt-1 flex items-center gap-2 text-[11px] text-zinc-500">
+      <span>Was this build helpful?</span>
+      <button onClick={() => rate('up')} aria-label="Helpful" className="p-1 rounded hover:bg-white/5 hover:text-emerald-400 transition-colors">
+        <ThumbsUp className="w-3.5 h-3.5" />
+      </button>
+      <button onClick={() => rate('down')} aria-label="Not helpful" className="p-1 rounded hover:bg-white/5 hover:text-rose-400 transition-colors">
+        <ThumbsDown className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+}
+
 function BuildHealthCard({ health }: { health: BuildHealth }) {
   const ready = health.ready;
   return (

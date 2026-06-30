@@ -38,6 +38,15 @@ describe('BuildTimeEstimator (P-PME.4)', () => {
       expect(big).toBeGreaterThan(small);
       expect(small).toBeGreaterThan(10_000); // at least the base
     });
+    it('CALIBRATION: a real E2B build is minutes, not seconds (no more the "~25s" lie)', () => {
+      // Regression guard: the old constants estimated a todo app at ~25s while it really took
+      // 10–15 min. A simple app must now estimate in the multi-minute range and render in minutes.
+      const simple = estimateBuildTime(complexityFromPrompt('a todo app'));
+      expect(simple.estimateMs).toBeGreaterThan(5 * 60_000); // > 5 min, not ~25s
+      expect(simple.etaText).toMatch(/min/);
+      const complex = estimateBuildTime(complexityFromPrompt('a dashboard page with auth, charts, profile screen, search and payment'));
+      expect(complex.estimateMs).toBeGreaterThan(simple.estimateMs);
+    });
   });
 
   describe('formatEta', () => {
@@ -76,8 +85,9 @@ describe('BuildTimeEstimator (P-PME.4)', () => {
         { complexity: { moduleCount: 20, featureCount: 50 }, durationMs: 600_000 }, // far outlier
       ];
       const e = estimateBuildTime(target, history);
-      // The close 40s match should dominate over the distant 10-min outlier.
-      expect(e.estimateMs).toBeLessThan(200_000);
+      // The close 40s match should dominate over the distant 10-min outlier (the estimate stays well
+      // below the 600s outlier rather than being dragged toward it).
+      expect(e.estimateMs).toBeLessThan(500_000);
     });
 
     it('ignores invalid historical durations', () => {

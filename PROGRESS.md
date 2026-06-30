@@ -5970,3 +5970,25 @@ foreground/`&&` safety; buildDepsStaleCheckCommand). These complement the same-P
 in-browser-Tailwind fixes.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3699/3699 PASS, boot:check PASS.
+
+## 2026-06-30 — POLISH: preview-ready Vite scaffold config + agent guardrail against self-backgrounding
+
+Follow-up hardening on the AgentV3 preview path (after the "Killed"/Tailwind fixes in #710):
+
+1. **Vite scaffold now ships preview-reachable server config.** The bare
+   `defineConfig({ plugins: [react()] })` forced the agent to edit vite.config mid-build (the live
+   report showed it adding `allowedHosts` by hand) and left three recurring preview failures open.
+   All Vite scaffolds (react, react-ts, vue, svelte, pocketbase, convex) now bake in
+   `server: { host: true, port: 5173, strictPort: true, allowedHosts: true }, preview: { allowedHosts: true }`:
+   host:true → reachable cloud preview (not localhost-only), strictPort → no silent 5173→5174 drift,
+   allowedHosts → no "Blocked request … is not allowed". The agent no longer wastes steps on config.
+2. **Agent prompt guardrail against self-backgrounding.** systemPrompt now tells the agent the sandbox
+   already backgrounds + keeps the dev server alive, so run `npm run dev` as a PLAIN FOREGROUND command —
+   no trailing `&`, no `nohup`, no `&> log &` (that orphans the server → "Killed" → restart loop), and if
+   it ever sees "Killed", read the logs for the real error (e.g. missing dep → npm install) instead of
+   relaunching with `&`. Belt-and-suspenders with the stripDevServerBackgrounding() fix from #710.
+
+Tests: +scaffold case (host/strictPort/allowedHosts across the 4 Vite frameworks), +systemPrompt case
+(forbids self-backgrounding, names "Killed").
+
+Gate: frontend tsc 0, server tsc 0, vitest 3701/3701 PASS, boot:check PASS.

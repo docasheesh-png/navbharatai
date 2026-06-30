@@ -55,6 +55,19 @@ describe('scaffold', () => {
     expect(vfs.readText('package.json')).toBeTruthy();
   });
 
+  it('bakes preview-reachable server config into the Vite scaffold (host/strictPort/allowedHosts)', () => {
+    for (const fw of ['vite-react', 'vite-react-ts', 'vite-vue', 'vite-svelte'] as const) {
+      const vfs = VirtualFileSystem.fromRecord({});
+      scaffold(vfs, fw);
+      const cfg = vfs.readText('vite.config.js') || vfs.readText('vite.config.ts') || '';
+      // host:true → reachable cloud preview; strictPort → no 5173→5174 drift; allowedHosts →
+      // no "Blocked request … is not allowed". Baked in so the agent never edits the config mid-build.
+      expect(cfg).toContain('host: true');
+      expect(cfg).toContain('strictPort: true');
+      expect(cfg).toContain('allowedHosts: true');
+    }
+  });
+
   it('bundles the Tailwind toolchain so a Tailwind-using app builds + is styled (vite-react + vite-react-ts)', () => {
     for (const fw of ['vite-react', 'vite-react-ts'] as const) {
       const vfs = VirtualFileSystem.fromRecord({});

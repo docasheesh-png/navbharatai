@@ -2546,8 +2546,8 @@ export function registerAgentV3Routes(app: Express): void {
             return { ok: true, errors: '' }; // could not verify → don't block (best-effort)
           }
         };
-        const fastRepair = async (errors: string, currentFiles: { path: string; content: string }[]): Promise<{ path: string; content: string }[]> => {
-          const text = await fastGenerate(repairSystemPrompt(framework), repairUserPrompt(prompt, errors, currentFiles));
+        const fastRepair = async (errors: string, currentFiles: { path: string; content: string }[], contract?: string): Promise<{ path: string; content: string }[]> => {
+          const text = await fastGenerate(repairSystemPrompt(framework), repairUserPrompt(prompt, errors, currentFiles, contract));
           return parseFileBlocks(text).map((b) => ({ path: b.path, content: b.content }));
         };
         const fastLog = (msg: string) => events.emit({ type: 'narration', agent: 'architect', text: msg, ts: Date.now() });

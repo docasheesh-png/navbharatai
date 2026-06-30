@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildProjectContext, extractConversationSummary, buildRunningSummary, formatPlanState } from './ProjectContext';
+import { buildProjectContext, extractConversationSummary, buildRunningSummary, formatPlanState, parsePlanState } from './ProjectContext';
 
 describe('extractConversationSummary — recap prior turns so the model remembers', () => {
   it('summarizes user + assistant turns, notes tool calls, skips tool results', () => {
@@ -144,5 +144,37 @@ describe('formatPlanState — durable, compact plan status for carry-over', () =
     const todos = Array.from({ length: 40 }, (_, i) => ({ title: `t${i}`, status: 'pending' }));
     const s = formatPlanState(todos);
     expect(s.split('\n')).toHaveLength(20);
+  });
+});
+
+describe('parsePlanState — restore a resumed session\'s plan from durable storage', () => {
+  it('round-trips formatPlanState (titles + statuses survive)', () => {
+    const todos = [
+      { title: 'Create app structure', status: 'done' },
+      { title: 'Build dashboard', status: 'in_progress' },
+      { title: 'Build patients page', status: 'blocked' },
+      { title: 'Build OPD queue', status: 'pending' },
+    ];
+    const parsed = parsePlanState(formatPlanState(todos));
+    expect(parsed.map((t) => t.title)).toEqual(todos.map((t) => t.title));
+    expect(parsed.map((t) => t.status)).toEqual(['done', 'in_progress', 'blocked', 'pending']);
+    expect(parsed.every((t) => typeof t.id === 'string' && t.id.length > 0)).toBe(true);
+  });
+
+  it('tolerates the stored "PLAN_STATE\\n" note prefix', () => {
+    const block = `PLAN_STATE\n${formatPlanState([{ title: 'Do X', status: 'done' }])}`;
+    const parsed = parsePlanState(block);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({ title: 'Do X', status: 'done' });
+  });
+
+  it('returns [] for empty / null / non-plan text', () => {
+    expect(parsePlanState('')).toEqual([]);
+    expect(parsePlanState(null)).toEqual([]);
+    expect(parsePlanState('just some prose with no [brackets]')).toEqual([]);
+  });
+
+  it('coerces an unknown status to pending', () => {
+    expect(parsePlanState('  ○ Something [weird]')[0].status).toBe('pending');
   });
 });

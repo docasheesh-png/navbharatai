@@ -75,7 +75,7 @@ import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/Op
 import { BuildDiagnostics, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { runOneShot, classifyForOneShot, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt } from '../AgentV3/SimpleBuilder';
-import { buildProjectContext, buildRunningSummary, formatPlanState } from '../AgentV3/ProjectContext';
+import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { withTimeout } from '../AgentV3/asyncUtils';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
@@ -131,6 +131,7 @@ import { reviewBuild, formatReview, hasReviewableSource } from '../AgentV3/Revie
 import {
   saveWorkspaceMemory,
   restoreWorkspaceMemory,
+  loadWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { saveWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { saveDiagnostics, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
@@ -875,7 +876,25 @@ export function registerAgentV3Routes(app: Express): void {
         res.status(403).json({ error: 'This build belongs to another account.' });
         return;
       }
-      res.json({ conversation: rec });
+      // Resilient resume: also return the durably-saved plan/todos so a session reopened on a COLD
+      // server instance (in-memory plan gone after a ~15-min idle recycle) repopulates its plan
+      // panel from Firestore instead of resetting to 0/N. Best-effort — a failure here must never
+      // fail the resume; the client simply shows no restored plan.
+      let workspaceState: { todos: ReturnType<typeof parsePlanState> } | undefined;
+      try {
+        const wsId = rec && typeof (rec as { workspaceId?: unknown }).workspaceId === 'string'
+          ? (rec as { workspaceId: string }).workspaceId
+          : null;
+        if (wsId) {
+          const snap = await loadWorkspaceMemory(wsId).catch(() => null);
+          const planNote = snap?.episodes?.slice().reverse().find(
+            (e) => e.kind === 'note' && typeof e.text === 'string' && e.text.startsWith('PLAN_STATE'),
+          );
+          const todos = planNote ? parsePlanState(planNote.text) : [];
+          if (todos.length > 0) workspaceState = { todos };
+        }
+      } catch { /* plan restore is best-effort — never blocks resume */ }
+      res.json({ conversation: rec, workspaceState });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }

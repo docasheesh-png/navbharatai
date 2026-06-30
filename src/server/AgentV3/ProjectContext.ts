@@ -6,6 +6,8 @@
 // the recent user requests — that is prepended to the build prompt so the agent KNOWS it is
 // continuing an existing project and resumes instead of asking. Pure + dependency-free (testable).
 
+import type { TodoItem, TodoStatus } from './types';
+
 export interface ProjectContextInput {
   /** Current workspace file paths (the durable, cross-instance signal of what exists). */
   files: string[];
@@ -159,4 +161,32 @@ export function formatPlanState(todos: Array<{ title?: unknown; status?: unknown
     const mark = PLAN_MARK[status] ?? '○';
     return `  ${mark} ${String(t.title).trim().slice(0, 120)} [${status}]`;
   }).join('\n');
+}
+
+const VALID_STATUS = new Set<TodoStatus>(['done', 'in_progress', 'blocked', 'pending']);
+
+/**
+ * Inverse of formatPlanState: parse a persisted PLAN_STATE block back into structured todos so a
+ * RESUMED session (after a server cold-start, when the in-memory plan is gone) can repopulate the
+ * plan/todos panel from durable storage instead of resetting it to 0/N. Tolerates the stored
+ * "PLAN_STATE\n" note prefix and ignores any line that isn't a "<mark> <title> [status]" entry.
+ * Pure + exported for testing.
+ */
+export function parsePlanState(text: string | null | undefined): TodoItem[] {
+  if (!text || typeof text !== 'string') return [];
+  const body = text.replace(/^PLAN_STATE\s*\n?/, '');
+  const out: TodoItem[] = [];
+  for (const raw of body.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    // "<mark> <title> [<status>]" — REQUIRE a known status mark (✓/⋯/✗/○) so arbitrary prose that
+    // merely happens to end in "[word]" is never mis-parsed as a todo.
+    const m = line.match(/^(?:✓|⋯|✗|○)\s+(.*?)\s*\[([a-z_]+)\]$/);
+    if (!m) continue;
+    const title = m[1].trim();
+    if (!title) continue;
+    const status = (VALID_STATUS.has(m[2] as TodoStatus) ? m[2] : 'pending') as TodoStatus;
+    out.push({ id: `restored-${out.length}`, title, status });
+  }
+  return out;
 }

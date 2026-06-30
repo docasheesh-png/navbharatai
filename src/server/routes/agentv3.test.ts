@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, dominantProvider } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, dominantProvider, parseModelLadder } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -178,21 +178,51 @@ describe('cheapBuildFloorRunners — optional GLM/Kimi cheap floor, DEFAULT OFF 
     process.env.AGENTV3_CHEAP_FLOOR = 'kimi'; // no KIMI_API_KEY
     expect(cheapBuildFloorRunners()).toEqual([]);
   });
-  it('wires GLM as a single leading runner when flag=glm AND key present', () => {
+  it('wires GLM as a 2-rung ladder by default (newest → 1-step-back) when flag=glm AND key present', () => {
     process.env.AGENTV3_CHEAP_FLOOR = 'glm';
     process.env.GLM_API_KEY = 'glm-test-key';
     const runners = cheapBuildFloorRunners();
-    expect(runners.map((r) => r.name)).toEqual(['GLM']);
+    // default ladder = ['glm-4.7','glm-4.6'] → two runners, both named GLM (clean deliveredVia split)
+    expect(runners.map((r) => r.name)).toEqual(['GLM', 'GLM']);
   });
-  it('wires KIMI when flag=kimi AND key present', () => {
+  it('wires KIMI as a 2-rung ladder by default when flag=kimi AND key present', () => {
     process.env.AGENTV3_CHEAP_FLOOR = 'kimi';
     process.env.KIMI_API_KEY = 'kimi-test-key';
-    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['KIMI']);
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['KIMI', 'KIMI']);
+  });
+  it('a single GLM_MODEL override → one rung (backward-compatible with the run-sheet)', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'glm';
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.GLM_MODEL = 'glm-4.7';
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['GLM']);
+  });
+  it('a comma-separated GLM_MODEL → one rung per id (the model fallback ladder)', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'glm';
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.GLM_MODEL = 'glm-5.2, glm-4.7 , glm-4.6';
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['GLM', 'GLM', 'GLM']);
   });
   it('an unknown floor value is treated as off', () => {
     process.env.AGENTV3_CHEAP_FLOOR = 'deepseek';
     process.env.GLM_API_KEY = 'x';
     expect(cheapBuildFloorRunners()).toEqual([]);
+  });
+});
+
+describe('parseModelLadder — comma-separated newest→older model ladder', () => {
+  it('splits a comma list and trims whitespace', () => {
+    expect(parseModelLadder('glm-4.7, glm-4.6', ['x'])).toEqual(['glm-4.7', 'glm-4.6']);
+  });
+  it('a single id → a one-element ladder (old behaviour preserved)', () => {
+    expect(parseModelLadder('glm-4.7', ['x'])).toEqual(['glm-4.7']);
+  });
+  it('empty / undefined / whitespace-only → the provided default ladder', () => {
+    expect(parseModelLadder(undefined, ['a', 'b'])).toEqual(['a', 'b']);
+    expect(parseModelLadder('', ['a', 'b'])).toEqual(['a', 'b']);
+    expect(parseModelLadder('  ,  ', ['a', 'b'])).toEqual(['a', 'b']);
+  });
+  it('drops blank entries between commas', () => {
+    expect(parseModelLadder('glm-4.7,,glm-4.6,', ['x'])).toEqual(['glm-4.7', 'glm-4.6']);
   });
 });
 

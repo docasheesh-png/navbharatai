@@ -468,6 +468,19 @@ export function oneShotDevPort(framework: string): number {
 }
 
 /**
+ * Parse a cheap-floor model env into an ordered model LADDER (newest → 1-step-back). Accepts a
+ * comma-separated list (`glm-4.7,glm-4.6`) so a retired/unresponsive latest model falls through to
+ * the previous one before Claude — admin-requested resilience after `kimi-k2-0905-preview` was
+ * discontinued (a single pinned id 404s on a valid key). A single id stays valid (list of 1, the
+ * old behaviour). Blank/whitespace entries are dropped; an empty env → the provided default ladder.
+ * Pure + exported for testing.
+ */
+export function parseModelLadder(env: string | undefined, fallback: string[]): string[] {
+  const list = (env || '').split(',').map(s => s.trim()).filter(Boolean);
+  return list.length ? list : fallback;
+}
+
+/**
  * NavBharatAI Pro v3.0 — optional CHEAP BUILD FLOOR (admin cost-down lever, DEFAULT OFF).
  *
  * Returns OpenAI-compatible build runners (GLM / Kimi) that LEAD the build chain ONLY when
@@ -476,26 +489,37 @@ export function oneShotDevPort(framework: string): number {
  * no-redeploy rollback. These runners are tried FIRST; `buildTurnRunner` keeps Claude (+ the
  * forced-Haiku backstop) permanently after them, so a cheap-model failure NEVER breaks a build.
  *
+ * MODEL LADDER (admin-requested): each provider emits ONE runner per model id in its ladder, newest
+ * → 1-step-back, so a retired/unresponsive latest model (e.g. a 404 on a discontinued id, an outage,
+ * a rate-limit) falls through to the previous cheap model — then Claude. The existing
+ * `MultiProviderTurnRunner` already does error-based per-turn fallback, so this is just "more runners
+ * prepended" — no new orchestration. (This covers "no response / unavailable"; it does NOT cover a
+ * model that replies but builds badly — that stays the objective gate + Claude escalation's job.)
+ * The ladder stays CHEAP coding models, NOT the flagship — escalation owns "go stronger".
+ *
  * Mirrors `grokPlanRunner`: `OpenAiToolRunner` forces its own `opts.model`, so the cost-ladder /
  * `selectBuildModel` / `models.ts` are never touched — routing decides ORDER, the runner decides
- * MODEL. A missing key OR a misconfigured provider is skipped (Claude still backstops). Pure-ish
- * + flag-gated; exported for unit testing. Base URLs/models are env-overridable.
+ * MODEL. A missing key OR a misconfigured provider is skipped (Claude still backstops). The runner
+ * name stays the provider (`GLM`/`KIMI`) so the PR4 `deliveredVia` cheap-vs-Claude split stays clean.
+ * Pure-ish + flag-gated; exported for unit testing. Base URLs/models are env-overridable.
  */
 export function cheapBuildFloorRunners(): NamedRunner[] {
   const floor = (process.env.AGENTV3_CHEAP_FLOOR || 'off').trim().toLowerCase();
   if (floor === 'off' || floor === '') return [];
   const runners: NamedRunner[] = [];
-  const add = (name: string, apiKey: string | undefined, baseURL: string, model: string): void => {
+  const add = (name: string, apiKey: string | undefined, baseURL: string, models: string[]): void => {
     if (!apiKey) return; // no key → a second, independent off-switch
-    try {
-      const client = new OpenAI({ apiKey, baseURL, timeout: 60_000, maxRetries: 0 });
-      runners.push({ name, runner: new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }) });
-    } catch { /* misconfigured provider — skip; Claude still backstops */ }
+    for (const model of models) {
+      try {
+        const client = new OpenAI({ apiKey, baseURL, timeout: 60_000, maxRetries: 0 });
+        runners.push({ name, runner: new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }) });
+      } catch { /* misconfigured model rung — skip; the next rung / Claude still backstops */ }
+    }
   };
   if (floor === 'glm') {
-    add('GLM', process.env.GLM_API_KEY, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', process.env.GLM_MODEL || 'glm-4.6');
+    add('GLM', process.env.GLM_API_KEY, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', parseModelLadder(process.env.GLM_MODEL, ['glm-4.7', 'glm-4.6']));
   } else if (floor === 'kimi') {
-    add('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', process.env.KIMI_MODEL || 'kimi-k2-0905-preview');
+    add('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', parseModelLadder(process.env.KIMI_MODEL, ['kimi-k2.6', 'kimi-k2.5']));
   }
   return runners;
 }

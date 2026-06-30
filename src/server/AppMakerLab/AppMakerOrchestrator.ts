@@ -16,6 +16,7 @@ import { BuildManager } from './BuildManager';
 import { BlueprintBuilder } from './intelligence/BlueprintBuilder';
 import { ScaffoldGenerator } from './generator/ScaffoldGenerator';
 import { AutoRepairEngine } from './repair/AutoRepairEngine';
+import { LintFixGenerator } from './generator/LintFixGenerator';
 import { LLMGenerationEngine } from './generator/LLMGenerationEngine';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -94,9 +95,18 @@ export class AppMakerOrchestrator {
             let buildResult = await buildManager.build(workspaceId);
 
             if (!buildResult.success) {
+                // P-CGE.7 — cheap deterministic lint auto-fix BEFORE the expensive LLM repair. Resolves
+                // the bulk of auto-fixable lint errors (unused imports, semicolons, quotes) with zero LLM
+                // cost; if that alone makes the build pass, the LLM repair is skipped entirely.
+                try {
+                    const fix = await new LintFixGenerator().fix(workspaceId);
+                    if (fix.ran) buildResult = await buildManager.build(workspaceId);
+                } catch { /* best-effort — fall through to the LLM repair */ }
+            }
+            if (!buildResult.success) {
                 await BuildJobManager.updateStatus(jobId, JobStatus.REPAIRING, 90, "Auto-repairing...");
                 const { mutationEngine } = MutationEngineFactory.create(checkpointManager, namespace);
-                const generationEngine = new LLMGenerationEngine(); 
+                const generationEngine = new LLMGenerationEngine();
                 const repairEngine = new AutoRepairEngine(workspaceManager, mutationEngine, generationEngine);
                 const repairResult = await repairEngine.repair(workspaceId, buildResult);
                 if (repairResult.repaired) {

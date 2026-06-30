@@ -12,6 +12,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { TEMPLATE_PROJECTS } from './SyncedTemplates';
+import { deployCapability, sanitizeZipName, unavailableDeployMessage } from '../../lib/deployCapability';
 
 interface GitPanelProps {
   token: string | null;
@@ -230,85 +231,58 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     }
   }, [selectedSyncPlatform, activeTab, token, firebaseToken]);
 
+  // Honest import: a real GitHub repo is genuinely pulled (server proxy); a template entry loads a real
+  // starter template into the workspace. We label each accurately and never fake a "cloud sync" from a
+  // platform we don't actually talk to. (Firebase/Vercel project listing returns not_available, so those
+  // entries are starter templates.)
   const handleSyncProject = async (product: any) => {
     setIsSyncRunning(true);
     setSuccessfullySyncedProject(null);
     setSyncLogs([]);
-    
+
     const timestamp = () => new Date().toLocaleTimeString();
-    
-    const addLogLine = (msg: string) => {
-      setSyncLogs(prev => [...prev, `[${timestamp()}] ${msg}`]);
-    };
+    const addLogLine = (msg: string) => setSyncLogs(prev => [...prev, `[${timestamp()}] ${msg}`]);
 
-    addLogLine(`Initiating Cloud Sync for: ${product.displayName || product.name} across platform [${selectedSyncPlatform.toUpperCase()}]`);
-    setSyncProgressStage("Connecting platform...");
-    
-    await new Promise(r => setTimeout(r, 600));
-    addLogLine(`Connecting to platform gateway: api.${selectedSyncPlatform}.com`);
-    addLogLine(`Resolving credentials and session tokens...`);
-    setSyncProgressStage("Verifying auth...");
+    let targetFiles: Record<string, string> | null = null;
+    const isRealGithubRepo = selectedSyncPlatform === 'github' && !product.isTemplate && !!token;
 
-    await new Promise(r => setTimeout(r, 800));
-    addLogLine(`Authentication verification: SUCCESS.`);
-    addLogLine(`Fetching remote tree structure maps...`);
-    setSyncProgressStage("Fetching repos...");
-
-    await new Promise(r => setTimeout(r, 900));
-    addLogLine(`Resolved repository files: 12 elements.`);
-    addLogLine(`Running secure dependency scanner on package.json...`);
-    setSyncProgressStage("Downloading files...");
-
-    await new Promise(r => setTimeout(r, 700));
-    addLogLine(`Unpacking node modules workspace allocations...`);
-    setSyncProgressStage("Creating workspace...");
-
-    let targetFiles: Record<string, string> = {};
-    
-    if (selectedSyncPlatform === 'github' && !product.isTemplate && token) {
+    if (isRealGithubRepo) {
+      addLogLine(`Pulling "${product.displayName || product.name}" from GitHub…`);
+      setSyncProgressStage('Pulling from GitHub…');
       try {
-        addLogLine(`Contacting backend cloudsync proxy for GitHub download...`);
         const response = await fetch('/api/cloudsync/github', {
           method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `token ${token}`
-          },
-          body: JSON.stringify({
-            owner: product.owner || user?.login || 'username',
-            repo: product.name,
-            branch: 'main'
-          })
+          headers: { 'Content-Type': 'application/json', 'Authorization': `token ${token}` },
+          body: JSON.stringify({ owner: product.owner || user?.login || 'username', repo: product.name, branch: 'main' }),
         });
         const result = await response.json();
-        if (result.files && Object.keys(result.files).length > 0) {
+        if (response.ok && result.files && Object.keys(result.files).length > 0) {
           targetFiles = result.files;
-          addLogLine(`Successfully pulled ${Object.keys(result.files).length} files from public/private GitHub repository!`);
+          addLogLine(`✅ Pulled ${Object.keys(result.files).length} file(s) from ${product.displayName || product.name}.`);
         } else {
-          addLogLine(`No text files found in main branch. Falling back to template preset...`);
-          targetFiles = TEMPLATE_PROJECTS['my-ecommerce-app'].files;
+          addLogLine(`⚠️ Couldn't read files from that repository${result?.error ? `: ${result.error}` : ''}.`);
         }
       } catch (err: any) {
-        addLogLine(`GitHub pull failed: ${err.message}. Falling back to default baseline...`);
-        targetFiles = TEMPLATE_PROJECTS['my-ecommerce-app'].files;
+        addLogLine(`❌ GitHub pull failed: ${err?.message || String(err)}.`);
       }
     } else {
+      // A starter template — a real, local set of files we load into the workspace.
       const templateKey = product.id && TEMPLATE_PROJECTS[product.id] ? product.id : 'my-ecommerce-app';
       targetFiles = TEMPLATE_PROJECTS[templateKey].files;
-      addLogLine(`Sovereign template parsed successfully.`);
+      addLogLine(`Loading the "${product.displayName || product.name}" starter template…`);
+      setSyncProgressStage('Loading template…');
     }
 
-    await new Promise(r => setTimeout(r, 600));
-    
-    if (onFilesChange) {
-      onFilesChange(targetFiles);
+    if (targetFiles && Object.keys(targetFiles).length > 0) {
+      if (onFilesChange) onFilesChange(targetFiles);
+      addLogLine(isRealGithubRepo ? `✅ Imported into Code Studio.` : `✅ Template loaded into Code Studio.`);
+      setSyncProgressStage('Done');
+      setSuccessfullySyncedProject(product);
+    } else {
+      addLogLine(`Nothing was imported.`);
+      setSyncProgressStage('Failed');
     }
-    
-    addLogLine(`Allocations complete! Integrated inside active workspace environment.`);
-    addLogLine(`Cloud Sync successful! Code Studio buffers populated.`);
-    setSyncProgressStage("Sync successful...");
     setIsSyncRunning(false);
-    setSuccessfullySyncedProject(product);
   };
 
   // DevOps States
@@ -423,25 +397,20 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
   // Deployment Logs state
   const [deployLogs, setDeployLogs] = useState<string[]>([]);
-  const [deployStatus, setDeployStatus] = useState<'idle' | 'validating' | 'building' | 'deployed' | 'error'>('idle');
+  const [deployStatus, setDeployStatus] = useState<'idle' | 'validating' | 'building' | 'deployed' | 'error' | 'unavailable'>('idle');
   const [activeStep, setActiveStep] = useState<number>(0);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [currentBuildTime, setCurrentBuildTime] = useState<number>(0);
   const [deployedUrl, setDeployedUrl] = useState<string>('');
+  // History holds ONLY real deploy events (a real GitHub push). No fabricated/seed entries —
+  // an empty history is the honest state for a workspace that has never been pushed.
   const [gitHistory, setGitHistory] = useState<Array<{ id: string; date: string; platform: string; commit: string; status: string; url: string }>>(() => {
     try {
       const saved = localStorage.getItem('v_deploy_history');
       if (saved) return JSON.parse(saved);
     } catch {}
-    return [
-      { id: 'dep-44a1', date: '5/23/2026, 04:30 AM', platform: 'github', commit: 'Initial build skeleton', status: 'success', url: 'https://github.com/navbharat/workspace-app' },
-      { id: 'dep-09b2', date: '5/23/2026, 05:12 AM', platform: 'vercel', commit: 'Configured active routes', status: 'success', url: 'https://navbharat-app-prod.vercel.app' }
-    ];
+    return [];
   });
-
-  // DevOps Error Sandbox simulation states
-  const [simulateFailure, setSimulateFailure] = useState<boolean>(false);
-  const [simulateFailureType, setSimulateFailureType] = useState<string>('auth_expired');
 
   interface ErrorDetails {
     provider: string;
@@ -544,66 +513,12 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     return () => clearTimeout(timer);
   }, [showErrorModal, isAutoRetryActive, retryCountdown]);
 
-  // Detect Framework Context
-  const detectFramework = () => {
-    const hasVite = files['package.json']?.includes('vite') || true;
-    const hasExpress = files['package.json']?.includes('express') || files['server.ts'] !== undefined || true;
-    const hasReact = files['package.json']?.includes('react') || true;
-    
-    if (hasVite && hasReact && hasExpress) {
-      return 'Vite + React (with Express API Backend Server)';
-    } else if (hasVite && hasReact) {
-      return 'React + Vite SPA';
-    } else if (hasExpress) {
-      return 'Node.js Express backend service';
-    }
-    return 'Static HTML Site';
-  };
-
   // helper to trigger error modal and set up retry countdown
   const triggerErrorDisplay = (details: ErrorDetails) => {
     setErrorDetails(details);
     setShowErrorModal(true);
     setIsAutoRetryActive(true);
     setRetryCountdown(10); // Start 10s auto-retry countdown
-  };
-
-  const getPreDeploymentErrors = (): string[] => {
-    const errors: string[] = [];
-    const filesCount = Object.keys(files || {}).length;
-    if (filesCount === 0) {
-      errors.push('No source files found in the active workspace context.');
-    }
-    if (!files || !files['package.json']) {
-      errors.push('CRITICAL: package.json missing in workspace root directory.');
-    } else {
-      try {
-        const pkg = JSON.parse(files['package.json']);
-        if (!pkg.dependencies && !pkg.devDependencies) {
-          errors.push('WARNING: package.json does not feature any dependencies.');
-        }
-      } catch (e) {
-        errors.push('SYNTAX ERROR: package.json file has invalid format/JSON configuration.');
-      }
-    }
-    const pltConfig = configs[selectedPlatform];
-    if (pltConfig) {
-      if (selectedPlatform === 'firebase' && !pltConfig.projectId) {
-        errors.push('Firebase project ID configuration parameter is not specified.');
-      } else if (selectedPlatform === 'gcloud' && !pltConfig.projectId) {
-         errors.push('Google Cloud Console target Project ID is not defined.');
-      } else if (selectedPlatform === 'render' && !pltConfig.webhookUrl) {
-         errors.push('Unable to deploy: Render Build Hook URL is missing.');
-      }
-    }
-    return errors;
-  };
-
-  // Perform Validation check
-  const handlePreDeploymentValidation = (): boolean => {
-    const errors = getPreDeploymentErrors();
-    setValidationErrors(errors);
-    return errors.length === 0;
   };
 
   // Run real authentic GitHub deployment operations via our secure backend.
@@ -735,314 +650,72 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     timeoutRefs.current.push(tidPush);
   };
 
-  // Run DevOps push / deploy simulation or real operation
+  // Real-or-honest deploy. NEVER fabricates success for a target we cannot actually deploy to.
+  //  • GitHub  → a real commit/push (executeRealGitHubPush → /api/github/push-enhanced).
+  //  • Static  → a real ZIP of the workspace files, downloaded in the browser (JSZip).
+  //  • Anything else → an honest "not available yet + the real path" message (no fake URL/success).
+  const exportStaticZip = async () => {
+    clearAllPipelineTimeouts();
+    setValidationErrors([]);
+    setDeployedUrl('');
+    setActiveStep(2);
+    setDeployStatus('building');
+    const addLog = (line) => setDeployLogs(prev => [...prev, '[' + new Date().toLocaleTimeString() + '] ' + line]);
+    setDeployLogs(['[' + new Date().toLocaleTimeString() + '] 📦 Packaging your workspace into a ZIP…']);
+    const entries = Object.entries(files || {});
+    if (entries.length === 0) {
+      setDeployStatus('error');
+      addLog('❌ No files in the workspace to export.');
+      return;
+    }
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      for (const [path, content] of entries) zip.file(path, typeof content === 'string' ? content : String(content ?? ''));
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const fileName = sanitizeZipName(configs.static?.zipName);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      addLog('✅ Exported ' + entries.length + ' file(s) → ' + fileName + '. Check your browser downloads.');
+      setActiveStep(3);
+      setDeployStatus('deployed');
+    } catch (err) {
+      setDeployStatus('error');
+      addLog('❌ ZIP export failed: ' + (err?.message || String(err)));
+    }
+  };
+
+  const showDeployUnavailable = () => {
+    clearAllPipelineTimeouts();
+    setValidationErrors([]);
+    setDeployedUrl('');
+    setActiveStep(1);
+    setDeployStatus('unavailable');
+    const name = DEPLOY_PLATFORMS.find(p => p.id === selectedPlatform)?.name || selectedPlatform.toUpperCase();
+    const now = () => new Date().toLocaleTimeString();
+    setDeployLogs(unavailableDeployMessage(name).map(line => '[' + now() + '] ' + line));
+  };
+
+  // Run the real deploy action for the selected target, or honestly report it isn't available.
   const triggerPushAndDeploy = () => {
     clearAllPipelineTimeouts();
-    if (selectedPlatform === 'github') {
-      executeRealGitHubPush();
-      return;
-    }
-
-    setDeployStatus('validating');
-    setDeployLogs([]);
-    setActiveStep(1);
-    
-    // Write dynamic stream logs
-    const addLogLine = (line: string, delay: number) => {
-      const tid = setTimeout(() => {
-        setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${line}`]);
-      }, delay);
-      timeoutRefs.current.push(tid);
-    };
-
-    if (simulateFailure) {
-      addLogLine('🚀 Booting navBharatAI DevOps Enterprise Pipeline [Error Simulator Option enabled]...', 100);
-      addLogLine('🔍 Initiating Pre-Deployment Validation Rules...', 600);
-      
-      const tidVal = setTimeout(() => {
-        setDeployStatus('building');
-        setActiveStep(2);
-        addLogLine('✅ Pre-deployment check complete. Workspace healthy.', 100);
-        addLogLine(`📁 Framework Autodetected: ${detectFramework()}`, 500);
-        addLogLine('📦 Restoring pipeline build cache... (yarn/npm cached layers hit)', 1000);
-        addLogLine('⚙️ Installing module dependencies...', 1500);
-      }, 1200);
-      timeoutRefs.current.push(tidVal);
-
-      // Now map out the selected error category to fail at 3000ms!
-      const errorMaps: Record<string, { type: string; msg: string; suggestions: string; logs: string[] }> = {
-        auth_expired: {
-          type: 'Authentication Failed',
-          msg: `Firebase CLI Authentication token expired or GCP OAuth credentials invalidated (HTTP 401 Unauthorized).`,
-          suggestions: 'Please reconnect your Firebase account or refresh OAuth access tokens in Settings.',
-          logs: [
-            '🔥 Generating standard configurations inside firebase.json context...',
-            '❌ [ERROR] Firebase authorization failure: Token expired. Code 401.',
-            '⚠️ [WARN] Stopping deployment pipeline abruptly. Re-authentication required.'
-          ]
-        },
-        invalid_repo: {
-          type: 'Invalid Repository',
-          msg: `Repository access denied or path "${configs.github.repoName}" is invalid.`,
-          suggestions: 'Verify repository permissions, check if the naming is correct, and confirm your personal access token has "repo" scope.',
-          logs: [
-            '🟢 Connecting and authorizing with GitHub server API...',
-            '❌ [ERROR] GitHub remote heads synchronization failed: Repository Not Found (HTTP 404).',
-            '⚠️ [WARN] Push rejected by server because of missing or invalid repository reference.'
-          ]
-        },
-        build_failed: {
-          type: 'Build Failed',
-          msg: `TypeScript compilation error: 'vite' or build module cannot be resolved. Process exited with code 1.`,
-          suggestions: 'Check package.json and build command scripts. Ensure all dependencies are fully installed.',
-          logs: [
-            '🔧 Building production static site in sandbox environment...',
-            '  -> Running cmd: [npm run build] with production profile',
-            '❌ [ERROR] Failed to run build command: "sh: vite: command not found" or syntax error in vite.config.ts',
-            '⚠️ [WARN] Build phase crashed with status code 1. Halted packaging.'
-          ]
-        },
-        missing_package_json: {
-          type: 'Missing package.json',
-          msg: `Workspace verification failed: package.json is missing in the root workspace directory.`,
-          suggestions: 'Ensure your project root directory containing files has a valid package.json configuration.',
-          logs: [
-            '🔍 Running integrity checks inside project workspace root...',
-            '❌ [ERROR] Validation failure: package.json could not be found.',
-            '⚠️ [WARN] Deployments require package.json to manage manifest entries.'
-          ]
-        },
-        permission_denied: {
-          type: 'Permission Denied',
-          msg: `IAM authorization policy error: current credentials lack permission "run.services.update" on Google Cloud Run.`,
-          suggestions: 'Ensure your GCP credentials contain administrative developer roles or correct IAM service roles.',
-          logs: [
-            '🛡️ GCLOUD DEPLOYMENT SECURITY PASS ACTIVE...',
-            '❌ [ERROR] Google Cloud platform returned HTTP 403 Forbidden.',
-            '  -> Principal: developer-service@gcp-navbharat.iam.gserviceaccount.com lacks roles/run.admin.'
-          ]
-        },
-        project_not_found: {
-          type: 'Firebase Project Not Found',
-          msg: `Specified Firebase project ID "${configs.firebase.projectId || 'demo-project-id'}" was not found or is inaccessible.`,
-          suggestions: 'Please double check that the Target Firebase Project ID exists inside your Firebase / Google Cloud Console.',
-          logs: [
-            '🔥 Verifying targeted Google Cloud Projects...',
-            '❌ [ERROR] Firebase Console project query failed (HTTP 404).',
-            '⚠️ [WARN] The requested project ID was not affiliated with this deployment credential.'
-          ]
-        },
-        oauth_expired: {
-          type: 'OAuth Expired',
-          msg: `The provider OAuth consent flow has expired or has been revoked by the authorization server.`,
-          suggestions: 'Re-authenticate your OAuth account or clear cookies and session storage to start fresh.',
-          logs: [
-            '🔄 Checking third-party OAuth state token...',
-            '❌ [ERROR] OAuth state token invalidated or expired.',
-            '⚠️ [WARN] Account handshake severed. Immediate re-connection requested.'
-          ]
-        },
-        token_invalid: {
-          type: 'Token Invalid',
-          msg: `The security token string has an invalid length, invalid check-digit, or has been manually revoked.`,
-          suggestions: 'Please reconnect your account or generate a new secret deploy token and update it below.',
-          logs: [
-            '🔑 Inspecting API security signature parameters...',
-            '❌ [ERROR] Security signature error: Invalid cryptographic token format.',
-            '⚠️ [WARN] Target cloud platform rejected credentials signature validation.'
-          ]
-        },
-        dns_verification_failed: {
-          type: 'DNS Verification Failed',
-          msg: `Failed to verify ownership of domain. CNAME or dynamic TXT security records not found.`,
-          suggestions: 'Verify DNS zones with your domain registrar. Ensure TXT security tokens are appended to routing rules.',
-          logs: [
-            '🌐 Commencing global DNS resolution verification...',
-            '❌ [ERROR] DNS lookup failed for target domains. Security record mismatch.',
-            '⚠️ [WARN] Custom domain association rejected by CDN proxy.'
-          ]
-        },
-        timeout: {
-          type: 'Deployment Timeout',
-          msg: `The remote Cloud Serverless engine exceeded the timeout limit of 60 seconds (status: DEADLINE_EXCEEDED).`,
-          suggestions: 'Optimize your bundle size, prune build cache layers, and avoid heavy node_modules imports if possible.',
-          logs: [
-            '⚡ Spawning container micro-instance layer...',
-            '⏳ Waiting for health status indicators on live portal port 3000...',
-            '❌ [ERROR] Connection timed out after 60000ms. Container failed to report ready status.',
-            '⚠️ [WARN] Pipeline killed automatically. Check container start logs for runtime exceptions.'
-          ]
-        },
-        git_rejected: {
-          type: 'Git Push Rejected',
-          msg: `Rejecting non-fast-forward updates to master/main head branch because the remote contains work that you do.`,
-          suggestions: 'Your local workspace branch is behind the remote head. Perform standard merge reconciliation first.',
-          logs: [
-            '🐋 Packaging worktree differences and updating remote branches...',
-            '❌ [ERROR] Remote Git Push Rejected: refs/heads/main (pre-receive hook declined).',
-            '⚠️ [WARN] Local commits conflicts with remote head. Run pull and merge resolve.'
-          ]
-        },
-        memory_limit: {
-          type: 'Build Memory Limit Exceeded',
-          msg: `The bundler compiler ran out of heap memory space during production source map asset extraction (OOM error).`,
-          suggestions: 'Add environment variable NODE_OPTIONS="--max-old-space-size=4096" or split bloated vendor chunks.',
-          logs: [
-            '🔧 Minifying build modules and generating static sourcemaps...',
-            '❌ [ERROR] FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory',
-            '⚠️ [WARN] Node build runtime exited unexpectedly.'
-          ]
-        }
-      };
-
-      const selectedErr = errorMaps[simulateFailureType] || errorMaps.auth_expired;
-
-      const tidErr = setTimeout(() => {
-        // Output the specific failure logs
-        selectedErr.logs.forEach((logLine, idx) => {
-          addLogLine(logLine, idx * 300);
-        });
-
-        // Trigger real status error after logs print
-        const triggerFinalErrTid = setTimeout(() => {
-          setDeployStatus('error');
-          triggerErrorDisplay({
-            provider: DEPLOY_PLATFORMS.find(p => p.id === selectedPlatform)?.name || selectedPlatform.toUpperCase(),
-            errorType: selectedErr.type,
-            rawDetails: selectedErr.msg,
-            fixSuggestions: selectedErr.suggestions
-          });
-        }, selectedErr.logs.length * 300 + 400);
-        timeoutRefs.current.push(triggerFinalErrTid);
-
-      }, 3000);
-      timeoutRefs.current.push(tidErr);
-      return;
-    }
-
-    addLogLine('🚀 Booting navBharatAI DevOps Enterprise Pipeline...', 100);
-    addLogLine('🔍 Initiating Pre-Deployment Validation Rules...', 600);
-
-    const tidValStep = setTimeout(() => {
-      const activeErrors = getPreDeploymentErrors();
-      setValidationErrors(activeErrors);
-      
-      if (activeErrors.length > 0) {
-        setDeployStatus('error');
-        addLogLine('❌ VALIDATION PIPELINE FAILED with errors. Deployment halted.', 200);
-        
-        const firstErr = activeErrors[0];
-        let errType = 'Build Failed';
-        let fixSugg = 'Correct all marked pre-deployment issues shown in the console.';
-        if (firstErr.includes('package.json')) {
-          errType = 'Missing package.json';
-          fixSugg = 'Ensure a package.json is in the workspace root directory.';
-        } else if (firstErr.includes('Firebase') || firstErr.includes('project ID')) {
-          errType = 'Firebase Project Not Found';
-          fixSugg = 'Define the Target Firebase Project ID inside your DevOps panel config.';
-        } else if (firstErr.includes('Render') || firstErr.includes('webhook')) {
-          errType = 'Token Invalid';
-          fixSugg = 'Please copy and insert a valid Render build webhook URL.';
-        }
-
-        triggerErrorDisplay({
-          provider: DEPLOY_PLATFORMS.find(p => p.id === selectedPlatform)?.name || selectedPlatform.toUpperCase(),
-          errorType: errType,
-          rawDetails: firstErr,
-          fixSuggestions: fixSugg
-        });
+    switch (deployCapability(selectedPlatform)) {
+      case 'github-push':
+        executeRealGitHubPush();
         return;
-      }
-
-      setDeployStatus('building');
-      setActiveStep(2);
-      addLogLine('✅ Pre-deployment check complete. Workspace healthy.', 100);
-      addLogLine(`📁 Framework Autodetected: ${detectFramework()}`, 500);
-      addLogLine('📦 Restoring pipeline build cache... (yarn/npm cached layers hit)', 1000);
-      addLogLine('⚙️ Installing module dependencies...', 1500);
-      
-      // List out virtual project packages
-      addLogLine('  -> Found React v19.0.1, Express v4.21.2, TailwindCSS v4.1.14', 1900);
-      addLogLine('  -> Successfully resolved all package integrity constraints.', 2200);
-      
-      addLogLine('🔧 Building production static site in sandbox environment...', 2700);
-      addLogLine('  -> Running cmd: [npm run build] with production profile', 3100);
-      addLogLine('  -> compiling typescript modules with target: esnext...', 3700);
-      addLogLine('  -> generated static chunk bundle: dist/index.html (2.4 KB)', 4200);
-      addLogLine('  -> generated assets: dist/assets/index-cc893f.js (340.2 KB)', 4500);
-      addLogLine('  -> generated custom stylesheets: dist/assets/index-aa911c.css (42.1 KB)', 4800);
-      
-      if (files['server.ts']) {
-        addLogLine('⚡ Compiling full-stack backend server node using esbuild...', 5200);
-        addLogLine('  -> bundled custom node entrypoint server: dist/server.cjs (with Type Stripping)', 5600);
-      }
-
-      addLogLine(`📦 packaging deploy targets for platform: [${selectedPlatform.toUpperCase()}]`, 6100);
-      
-      // Customize base action text per platform logs
-      if (selectedPlatform === 'gcloud') {
-        addLogLine('🛡️ GCLOUD DEPLOYMENT SECURITY PASS ACTIVE...', 6200);
-        addLogLine('🔍 Checking file exclusion lists: [/.gcloudignore] and [/.dockerignore] verified!', 6500);
-        addLogLine('📦 Pruning source context aggressively. Excluded [node_modules/, .git/, dist/, temp/] from archive.', 6800);
-        addLogLine('⚡ Bypassing legacy raw source zip upload method to avoid the 90-second timeout restriction.', 7100);
-        addLogLine('🐳 Building multi-stage OCI Container Image locally on Google Cloud Build agent...', 7400);
-        addLogLine('  -> docker build -t gcr.io/gcp-navbharat-core/navbharat-cloud-run:latest .', 7600);
-        addLogLine('🌐 Pushing compiled artifact layers to Google Artifact Registry...', 8000);
-        addLogLine('🚀 Deploying compiled image container cleanly to managed Cloud Run instance...', 8300);
-        addLogLine('🟢 Target revision launched! Health telemetry checks active on port 3000.', 8600);
-      } else if (selectedPlatform === 'firebase') {
-        addLogLine('🔥 Generating standard configurations inside firebase.json context...', 6600);
-        addLogLine('🔥 Deploying public files directly onto Google CDN Edge Network...', 7200);
-      } else {
-        addLogLine(`💾 Transmitting secure compiled build bundle via HTTPS SSL...`, 6600);
-        addLogLine('✨ Deploying edge routing rules globally...', 7350);
-      }
-
-      addLogLine('🛰️ Warm up health telemetry checked on live runtime port 3000...', 8800);
-      
-      // Deploy outcome success parameters
-      setTimeout(() => {
-        setDeployStatus('deployed');
-        setActiveStep(3);
-        const dynamicHash = 'sha-' + Math.random().toString(16).substring(2, 8);
-        const domainMap: Record<string, string> = {
-          github: `https://github.com/navbharat/${configs.github.repoName}/tree/main`,
-          firebase: `https://${configs.firebase.projectId}.web.app`,
-          vercel: `https://navbharat-app-${dynamicHash}.vercel.app`,
-          netlify: `https://navbharat-${dynamicHash}.netlify.app`,
-          cloudflare: `https://navbharat-pages-${dynamicHash}.pages.dev`,
-          gcloud: `https://navbharat-cloud-run-${dynamicHash}-as.a.run.app`,
-          docker: `https://hub.docker.com/r/navbharat-devs/image-${dynamicHash}`,
-          render: `https://render-navbharat-site-${dynamicHash}.onrender.com`,
-          railway: `https://production-railway-node-${dynamicHash}.up.railway.app`,
-          aws: `https://master.${dynamicHash}.amplifyapp.com`,
-          supabase: `https://navbharat-edge-${dynamicHash}.supabase.co`,
-          surge: `https://${configs.surge.domain}`,
-          digitalocean: `https://navbharat-platform-${dynamicHash}.onedo.co`,
-          heroku: `https://navbharat-heroku-app-${dynamicHash}.herokuapp.com`,
-          static: `https://navbharat-build-export.zip`,
-          remote: configs.remote.url
-        };
-        const activeUrl = domainMap[selectedPlatform];
-        setDeployedUrl(activeUrl);
-        addLogLine(`🎉 DEPLOYMENT SUCCESSFUL! Live Domain Activated: ${activeUrl}`, 100);
-
-        // Append to local storage history list
-        const commitUsed = selectedPlatform === 'github' ? configs.github.commitMsg : `AI deployment build info (${dynamicHash})`;
-        const newHistoryItem = {
-          id: dynamicHash,
-          date: new Date().toLocaleString(),
-          platform: selectedPlatform,
-          commit: commitUsed,
-          status: 'success',
-          url: activeUrl
-        };
-        const updatedHistory = [newHistoryItem, ...gitHistory];
-        setGitHistory(updatedHistory);
-        localStorage.setItem('v_deploy_history', JSON.stringify(updatedHistory));
-      }, 9300);
-
-    }, 1200);
+      case 'static-zip':
+        void exportStaticZip();
+        return;
+      default:
+        showDeployUnavailable();
+        return;
+    }
   };
 
   const changesCount = Object.keys(files).length;
@@ -1103,9 +776,9 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 <Sparkles className="w-3.5 h-3.5 animate-pulse" />
                 Cloud Deployment Hub
               </div>
-              <h4 className="text-sm font-black uppercase tracking-tight text-white leading-none">Automated Serverless DevOps</h4>
+              <h4 className="text-sm font-black uppercase tracking-tight text-white leading-none">Push to GitHub &amp; Export</h4>
               <p className="text-[10px] text-[#8b949e] font-medium leading-relaxed">
-                Connect your workspace structures and trigger fast, globally dispersed edge deployments without handling manual terminal scripts.
+                Live now: real commits/pushes to GitHub and a real ZIP export of your files. Other platforms connect to your GitHub repo for auto-deploy — we never fake a deployment.
               </p>
             </div>
 
@@ -1753,48 +1426,6 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               </div>
             </div>
 
-            {/* navBharat DevOps Error Sandbox Simulator */}
-            <div className="p-3 bg-red-950/10 border border-red-500/10 rounded-2xl space-y-2 shrink-0 animate-in fade-in slide-in-from-bottom-2 duration-200">
-              <div className="flex items-center justify-between">
-                <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-red-400 block flex items-center gap-1.5 selection:bg-red-500/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
-                  DevOps Failure Sandbox
-                </span>
-                <label className="relative inline-flex items-center cursor-pointer select-none">
-                  <input 
-                    type="checkbox" 
-                    checked={simulateFailure}
-                    onChange={(e) => setSimulateFailure(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-8 h-4 bg-white/5 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[3px] after:left-[3px] after:bg-gray-500 after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-red-500 peer-checked:after:bg-white"></div>
-                </label>
-              </div>
-              
-              {simulateFailure && (
-                <div className="space-y-1.5 pt-1 animate-in slide-in-from-top-2 duration-150">
-                  <div className="text-[8px] font-bold text-[#8b949e]">SELECT SIMULATED FAIL SCENARIO</div>
-                  <select 
-                    value={simulateFailureType}
-                    onChange={(e) => setSimulateFailureType(e.target.value)}
-                    className="w-full bg-[#0d1117] border border-white/10 rounded-lg p-2 text-[10px] font-black text-red-300/90 outline-none cursor-pointer focus:border-red-500/40"
-                  >
-                    <option value="auth_expired">❌ Connection Handshake expired (HTTP 401)</option>
-                    <option value="invalid_repo">❌ Invalid / Private Repository Permission</option>
-                    <option value="build_failed">❌ Compiler Crash / Syntax Resolve (Vite Error)</option>
-                    <option value="missing_package_json">❌ package.json Verification Failure</option>
-                    <option value="permission_denied">❌ GCP IAM Policies Denied (HTTP 403)</option>
-                    <option value="project_not_found">❌ Target Console Project ID Missing (HTTP 404)</option>
-                    <option value="oauth_expired">❌ Session OAuth Token Expired</option>
-                    <option value="token_invalid">❌ Cryptographic Bearer format invalid</option>
-                    <option value="dns_verification_failed">❌ DNS CNAME Owner unresolved</option>
-                    <option value="timeout">❌ container start Timeout (60s limit)</option>
-                    <option value="git_rejected">❌ Remote heads write conflict (pre-receive reject)</option>
-                    <option value="memory_limit">❌ V8 Memory Heap limit Out of bounds</option>
-                  </select>
-                </div>
-              )}
-            </div>
 
             {/* Validation warning block if any */}
             {validationErrors.length > 0 && (
@@ -1890,6 +1521,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     {deployStatus === 'building' && <span className="text-amber-500 animate-pulse font-bold">Building...</span>}
                     {deployStatus === 'deployed' && <span className="text-emerald-400 font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Ready</span>}
                     {deployStatus === 'error' && <span className="text-red-400 font-bold">Error</span>}
+                    {deployStatus === 'unavailable' && <span className="text-amber-400 font-bold flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Not available yet</span>}
                   </div>
                 </div>
 
@@ -1930,11 +1562,11 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               >
                 <div className="flex items-center gap-2 text-emerald-400 text-[10px] font-black uppercase tracking-wider">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  Deployment Live & Synced
+                  Pushed to GitHub
                 </div>
-                
+
                 <div className="space-y-1 bg-black/40 border border-[#2b2b2b] rounded-xl p-3">
-                  <span className="text-[8.5px] font-extrabold text-[#8b949e] uppercase tracking-wider">Endpoint URL</span>
+                  <span className="text-[8.5px] font-extrabold text-[#8b949e] uppercase tracking-wider">Repository URL</span>
                   <div className="flex items-center justify-between text-xs font-bold gap-3">
                     <a 
                       href={deployedUrl} 
@@ -1948,7 +1580,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     <button 
                       onClick={() => {
                         navigator.clipboard.writeText(deployedUrl);
-                        alert('Copied deployment URL to clipboard!');
+                        alert('Copied repository URL to clipboard!');
                       }}
                       className="p-1 text-[#8b949e] hover:text-white hover:bg-white/5 rounded transition-all cursor-pointer"
                       title="Copy URL"
@@ -1960,12 +1592,12 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
                 <div className="grid grid-cols-2 gap-2 text-[9px]">
                   <div className="p-2.5 rounded-xl bg-black/20 border border-white/5 flex flex-col">
-                    <span className="text-[#8b949e] font-bold">Platform</span>
-                    <span className="text-white font-black uppercase mt-0.5">{selectedPlatformObj.name.split(' ')[0]}</span>
+                    <span className="text-[#8b949e] font-bold">Branch</span>
+                    <span className="text-white font-black uppercase mt-0.5 truncate">{configs.github.branch || 'main'}</span>
                   </div>
                   <div className="p-2.5 rounded-xl bg-black/20 border border-white/5 flex flex-col">
-                    <span className="text-[#8b949e] font-bold">Build Mode</span>
-                    <span className="text-white font-black uppercase mt-0.5">Production</span>
+                    <span className="text-[#8b949e] font-bold">Files pushed</span>
+                    <span className="text-white font-black uppercase mt-0.5">{Object.keys(files || {}).length}</span>
                   </div>
                 </div>
 
@@ -1985,22 +1617,11 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 <div className="flex items-center gap-2 justify-end pt-1">
                   <button
                     onClick={() => {
-                      if(confirm('Are you sure you want to perform zero-downtime rollback to the previous build instance?')) {
-                        setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Rollback request approved. Pointing routing weights to previous branch build... Done!`]);
-                        alert('Successfully rolled back to the previous deployment version!');
-                      }
-                    }}
-                    className="px-3 py-1.5 rounded-lg border border-red-500/20 hover:border-red-500/40 text-[9px] font-black uppercase tracking-widest text-[#ff8080] hover:text-white transition-all cursor-pointer bg-red-950/10"
-                  >
-                    Rollback Version
-                  </button>
-                  <button
-                    onClick={() => {
                       window.open(deployedUrl, '_blank');
                     }}
                     className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer"
                   >
-                    Launch Site
+                    Open on GitHub
                   </button>
                 </div>
               </motion.div>

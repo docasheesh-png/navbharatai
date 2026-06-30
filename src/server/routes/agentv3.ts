@@ -87,6 +87,7 @@ import { buildDocumentContext } from '../lib/attachmentText';
 import { redactPII } from '../AgentV3/SecretRedactor';
 import { audit } from '../lib/audit';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
+import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
 import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
 import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
@@ -2020,6 +2021,13 @@ export function registerAgentV3Routes(app: Express): void {
         const prefContext = await userPreferenceStore.contextFor(userId);
         if (prefContext) architectSystem = `${prefContext}\n\n---\n\n${architectSystem}`;
       } catch { /* preference context is best-effort — a failure leaves the prompt unchanged */ }
+      // Cross-Project Lesson Brain: inject the user's highest-confidence lessons learned across ALL
+      // their PAST projects (proven fixes + reflections), so wisdom from project A helps project B.
+      // Additive + best-effort — '' (no change) for a new user or on any error; never blocks a build.
+      try {
+        const brainContext = await userLessonBrainStore.contextFor(userId);
+        if (brainContext) architectSystem = `${brainContext}\n\n---\n\n${architectSystem}`;
+      } catch { /* brain context is best-effort — a failure leaves the prompt unchanged */ }
       // P-AI.4 — NLU: recognize the concrete services the user named in THIS prompt (Razorpay,
       // Supabase, Clerk, …) and inject them as explicit requirements so the agent wires those exact
       // choices instead of substituting its own defaults. Additive + best-effort — '' when nothing
@@ -2704,6 +2712,16 @@ export function registerAgentV3Routes(app: Express): void {
         userPreferenceStore
           .recordBuild(userId, { framework, files: Object.fromEntries(writtenFiles), prompt }, new Date().toISOString())
           .catch(() => {});
+      }
+
+      // Cross-Project Lesson Brain: promote THIS build's transferable lessons (proven fixes + the
+      // reflection note recorded above) into the user's per-user brain so they carry to future
+      // projects. Best-effort and gated on a successful build — never blocks or affects the outcome.
+      if (result.ok && userId) {
+        try {
+          const episodes = getWorkspaceMemory(workspaceId).snapshot().episodes;
+          userLessonBrainStore.recordBuildLessons(userId, episodes, new Date().toISOString()).catch(() => {});
+        } catch { /* brain promotion is best-effort */ }
       }
 
       // Level 9: Persist workspace memory to Firestore so the NEXT session (or build)

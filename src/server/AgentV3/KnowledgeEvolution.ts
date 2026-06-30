@@ -60,8 +60,8 @@ const STOPWORDS = new Set(['the', 'a', 'an', 'to', 'of', 'and', 'or', 'is', 'are
 const NEAR_DUP_JACCARD = 0.85;
 const CONFLICT_JACCARD = 0.85;
 
-/** Lowercase, strip `[tag]` prefixes, collapse whitespace. */
-function normalize(text: string): string {
+/** Lowercase, strip `[tag]` prefixes, collapse whitespace. Exported for reuse (UserLessonBrain). */
+export function normalizeLessonText(text: string): string {
   return text.replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
@@ -91,7 +91,7 @@ function hasNegation(norm: string): boolean {
 }
 
 /** True when two lessons are near-identical statements (so one is redundant). */
-function isNearDuplicate(aNorm: string, bNorm: string): boolean {
+export function isNearDuplicate(aNorm: string, bNorm: string): boolean {
   if (aNorm === bNorm) return true;
   // One fully contains the other (e.g. a truncated recall snippet of the same lesson).
   if (aNorm.length >= 20 && bNorm.length >= 20 && (aNorm.includes(bNorm) || bNorm.includes(aNorm))) return true;
@@ -99,7 +99,7 @@ function isNearDuplicate(aNorm: string, bNorm: string): boolean {
 }
 
 /** True when two lessons make the same claim with OPPOSITE polarity (a contradiction). */
-function isConflict(aNorm: string, bNorm: string): boolean {
+export function isConflict(aNorm: string, bNorm: string): boolean {
   if (hasNegation(aNorm) === hasNegation(bNorm)) return false; // same polarity → not a conflict
   return jaccard(claimTokens(aNorm), claimTokens(bNorm)) >= CONFLICT_JACCARD;
 }
@@ -112,18 +112,31 @@ function preferred(a: Lesson, b: Lesson): boolean {
   return a.score > b.score;
 }
 
+/** A deduped lesson plus how many times it was independently confirmed (reinforced). */
+export interface KeptLesson {
+  lesson: Lesson;
+  norm: string;
+  reinforced: number;
+}
+
+/** The confidence score of a kept lesson (outcome weight + reinforcement). Exported for reuse. */
+export function lessonConfidence(lesson: Lesson, reinforced: number): number {
+  return confidence(lesson.kind, reinforced);
+}
+
 /**
- * Evolve a set of recalled lessons into a de-duplicated, conflict-resolved,
- * recency-ranked list of lesson texts. Input order is preserved among items of
- * equal rank (stable), so existing relevance ordering is respected. PURE.
+ * De-duplicate + conflict-resolve a set of lessons into the KEPT set, tracking how many times each
+ * survivor was reinforced (near-duplicates collapse and bump the count; a contradiction lets the
+ * newer advice win and resets the count). Order of first appearance is preserved (stable). PURE.
+ * This is the shared engine behind both evolveLessons (per-build recall) and the cross-project brain.
  */
-export function evolveLessons(input: Lesson[]): string[] {
+export function mergeLessons(input: Lesson[]): KeptLesson[] {
   const items = input
     .filter((l) => l && typeof l.text === 'string' && l.text.trim())
-    .map((l) => ({ lesson: l, norm: normalize(l.text) }))
+    .map((l) => ({ lesson: l, norm: normalizeLessonText(l.text) }))
     .filter((x) => x.norm);
 
-  const kept: { lesson: Lesson; norm: string; reinforced: number }[] = [];
+  const kept: KeptLesson[] = [];
   for (const it of items) {
     let merged = false;
     for (let k = 0; k < kept.length; k++) {
@@ -147,11 +160,17 @@ export function evolveLessons(input: Lesson[]): string[] {
     }
     if (!merged) kept.push({ lesson: it.lesson, norm: it.norm, reinforced: 1 });
   }
+  return kept;
+}
 
-  // Rank by CONFIDENCE (outcome weight + reinforcement) first — so a proven, repeatedly-confirmed
-  // fix outranks a one-off error — then by relevance, then recency, then original order. Confidence
-  // is 0 for lessons with no `kind`, so callers that don't supply outcomes keep the prior ordering.
-  return kept
+/**
+ * Evolve a set of recalled lessons into a de-duplicated, conflict-resolved, confidence- then
+ * recency-ranked list of lesson texts. A proven, repeatedly-confirmed fix outranks a one-off error;
+ * confidence is 0 for lessons with no `kind`, so callers that don't supply outcomes keep the prior
+ * relevance/recency ordering. Input order is preserved among items of equal rank (stable). PURE.
+ */
+export function evolveLessons(input: Lesson[]): string[] {
+  return mergeLessons(input)
     .map((x, idx) => ({ x, idx, conf: confidence(x.lesson.kind, x.reinforced) }))
     .sort((p, q) =>
       (q.conf - p.conf) ||

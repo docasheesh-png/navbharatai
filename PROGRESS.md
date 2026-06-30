@@ -6042,3 +6042,31 @@ Tests: +Bm25.test.ts (IDF/TF-saturation/length-norm/empty), +WorkspaceMemory rar
 +KnowledgeEvolution fix>note>error & reinforcement & kind-less-neutral, +RecalledLessons fix-before-error.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3717/3717 PASS, boot:check PASS.
+
+## 2026-06-30 — MEMORY: Cross-Project User "Brain" (lessons carry across all your projects)
+
+The memory loop was per-WORKSPACE: a lesson learned in project A never helped project B.
+UserPreferenceStore already carries stack PREFERENCES across a user's projects; this adds the
+equivalent for LESSONS — a per-user "brain" of the highest-signal, transferable lessons.
+
+- NEW `UserLessonBrain.ts` (pure core + Firestore `user_brain_v3/{userId}`, mirrors UserPreferenceStore:
+  VITEST-skip, best-effort, never throws). Pure core: `extractPromotableLessons` (promote ONLY proven
+  `fix`es + reflection `note`s — never raw error symptoms, PLAN_STATE, or requests), `mergeLessonsIntoBrain`
+  (fold a build's lessons in: near-duplicates REINFORCE and carry the count forward across builds, a proven
+  fix upgrades a note of the same claim, contradictions let newer advice win, set capped to the highest-
+  confidence 60), `formatBrainLessons` (inject the top lessons, gated until ≥2 prior builds).
+- DRY: refactored KnowledgeEvolution to expose a shared `mergeLessons` engine + `lessonConfidence` and the
+  `normalizeLessonText`/`isNearDuplicate`/`isConflict` primitives, so the brain and per-workspace recall use
+  ONE definition of "same lesson"/"contradiction"/"trustworthiness". `evolveLessons` is now a thin wrapper —
+  behaviour-identical (all prior tests green).
+- Wired into routes/agentv3.ts: inject the brain block into the Architect system prompt right after the
+  preference block (best-effort), and promote this build's transferable lessons after a successful build
+  (best-effort, gated on result.ok). Both additive — a failure leaves the prompt/build unchanged.
+- AppKnowledgeBase: updated the agentv3_builder memory bullet (BM25 relevance + outcome-weighted + cross-
+  project brain) and keywords, per the mandatory sync rule.
+
+Tests: +UserLessonBrain.test.ts (11 cases: extract filters, reinforce-across-builds, fix-upgrades-note,
+conflict-newer-wins, cap, null-tolerance, gating, fix-above-note, block cap) + WorkspaceMemory invariants
+(exact match beats token match; recall determinism).
+
+Gate: frontend tsc 0, server tsc 0, vitest 3730/3730 PASS, boot:check PASS.

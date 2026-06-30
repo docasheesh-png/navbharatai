@@ -1679,16 +1679,17 @@
   `tests/migrationGenerator.test.ts`; wired in `types.ts`, `ToolCatalog.ts`, `AgentRegistry.ts`,
   `ToolDispatcher.ts`, `systemPrompt.ts`, `ToolDispatcher.test.ts`, `AppKnowledgeBase.ts`.
 
-### P-CGE.7 — Lint Fix Generator (auto-fix pass)  🟡 PARTIAL → full  [MED]
+### P-CGE.7 — Lint Fix Generator (auto-fix pass)  ✅ DONE (2026-06-30) · 🔌 WIRED  [MED]
 - `LintEvaluator.ts` runs ESLint and reports errors but never fixes them. Lint failures then go
   to `AutoRepairEngine.ts` which makes another LLM call — expensive and slow.
-- [ ] After lint evaluation, run `eslint --fix` on the generated workspace before triggering the
-  full repair pipeline. This resolves 80%+ of lint errors (unused imports, semicolons, quotes)
-  without an LLM call.
-- [ ] Add `LintFixGenerator.ts` as a lightweight repair step between `QualityEvaluationEngine`
-  and `AutoRepairEngine` in the orchestrator pipeline.
+- [x] **`LintFixGenerator.ts`** — runs `--fix` (the project's OWN lint script when present:
+  `npm run lint -- --fix`; else `npx --no-install eslint . --fix`), bounded by a 60s timeout,
+  best-effort (eslint's non-zero "residual errors" exit still counts as applied, and never throws).
+- [x] Wired into `AppMakerOrchestrator`: on a failed build it runs the cheap lint auto-fix and REBUILDS
+  FIRST; only if the build still fails does the expensive LLM `AutoRepairEngine` run — so trivial lint
+  nits never cost an LLM round-trip. Pure `chooseLintFixCommand()` + no-throw tested (`lintFixGenerator.test.ts`).
 - **Files:** new `src/server/AppMakerLab/generator/LintFixGenerator.ts`,
-  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+  `src/server/AppMakerLab/AppMakerOrchestrator.ts`, new `tests/lintFixGenerator.test.ts`.
 
 ### P-CGE.8 — Auth Code Generators (JWT + OAuth)  ✅ DONE (2026-06-29) · 🔌 WIRED  [MED]
 - Planned auth files were stubs — no real token issuance/validation, no middleware.

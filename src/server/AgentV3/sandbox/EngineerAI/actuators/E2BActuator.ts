@@ -3,7 +3,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand } from './devServerHost';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
@@ -483,7 +483,15 @@ export class E2BActuator implements IEngineerActuator {
       // Node/npm project: install if needed (with peer-dep fallback), then build.
       let installLog = '';
       const hasModules = await sandbox.files.exists(`${WORKSPACE_ROOT}/node_modules`).catch(() => false);
-      if (!hasModules) {
+      // Re-install when node_modules is MISSING, or STALE (package.json edited after the last
+      // install — e.g. the scaffold/agent added `tailwindcss`). The old "skip if node_modules
+      // exists" gate left newly-declared deps uninstalled, so `npm run dev` crashed with
+      // "Cannot find module 'tailwindcss'" and the preview never came up.
+      const depsStale = hasModules && await sandbox.commands
+        .run(buildDepsStaleCheckCommand(), { cwd: WORKSPACE_ROOT, timeoutMs: 10_000 })
+        .then((r) => r.stdout.includes('STALE'))
+        .catch(() => false);
+      if (!hasModules || depsStale) {
         const installResult = await this._npmInstall(sandbox);
         installLog = installResult.log;
         if (!installResult.success) {
@@ -539,7 +547,24 @@ export class E2BActuator implements IEngineerActuator {
       // Pin the port so the server binds EXACTLY `port` (or fails loudly) instead of
       // silently drifting to 5174 when 5173 is busy — the drift is what made the
       // preview connect to a dead port and the build loop until the time-limit cap.
-      const devCommand = pinDevServerPort(ensureHostBinding(command), port);
+      // Strip the agent's own `… &` / `nohup … &` FIRST: E2B already backgrounds this
+      // command, and a self-backgrounded vite is orphaned + reaped (prints "Killed" right
+      // after "ready") — the root cause of the preview-restart loop and BUILD_TIMEOUT.
+      const devCommand = pinDevServerPort(ensureHostBinding(stripDevServerBackgrounding(command)), port);
+
+      // Ensure dependencies are installed BEFORE starting the dev server. If the
+      // scaffold/agent declared a new dep (e.g. tailwindcss) but node_modules is stale,
+      // `npm run dev` crashes on boot ("Cannot find module 'tailwindcss'") and the preview
+      // never comes up. Best-effort + only when actually stale, so a warm tree starts instantly.
+      const depsStale = await sandbox.commands
+        .run(buildDepsStaleCheckCommand(), { cwd: WORKSPACE_ROOT, timeoutMs: 10_000 })
+        .then((r) => r.stdout.includes('STALE'))
+        .catch(() => false);
+      if (depsStale) {
+        stdout += '\n[health-check] installing dependencies (package.json changed)…';
+        const dep = await this._npmInstall(sandbox).catch(() => ({ success: false, log: '' }));
+        stdout += dep.success ? ' done.' : ' (install reported errors — starting anyway).';
+      }
 
       // Pre-kill any stale dev server still holding this port from a previous
       // attempt (now reliable — tries fuser/lsof/ss, not a Vite-blind pkill).

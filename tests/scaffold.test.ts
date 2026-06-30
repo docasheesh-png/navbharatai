@@ -54,6 +54,24 @@ describe('scaffold', () => {
     scaffold(vfs, 'vite-react');
     expect(vfs.readText('package.json')).toBeTruthy();
   });
+
+  it('bundles the Tailwind toolchain so a Tailwind-using app builds + is styled (vite-react + vite-react-ts)', () => {
+    for (const fw of ['vite-react', 'vite-react-ts'] as const) {
+      const vfs = VirtualFileSystem.fromRecord({});
+      scaffold(vfs, fw);
+      // Dev deps must declare tailwindcss/postcss/autoprefixer — else `npm run dev` crashes with
+      // "Cannot find module 'tailwindcss'" the moment the generated app references Tailwind.
+      const pkg = JSON.parse(vfs.readText('package.json') || '{}');
+      const dev = pkg.devDependencies || {};
+      expect(dev.tailwindcss).toBeTruthy();
+      expect(dev.postcss).toBeTruthy();
+      expect(dev.autoprefixer).toBeTruthy();
+      // Config + directives present so PostCSS actually generates the utilities.
+      expect(vfs.readText('postcss.config.js')).toContain('tailwindcss');
+      expect(vfs.readText('tailwind.config.js')).toContain('content');
+      expect(vfs.readText('src/index.css')).toContain('@tailwind base');
+    }
+  });
 });
 
 describe('scaffoldSummary', () => {

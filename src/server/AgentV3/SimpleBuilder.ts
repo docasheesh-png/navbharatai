@@ -104,6 +104,15 @@ const EXPORT_IMPORT_CONVENTION: string[] = [
   '    `import { useNotes } from "../hooks/useNotes"`, `import { Note } from "../types/note"`.',
   '  • NEVER default-import something that is exported named, and NEVER named-import a default export.',
   '  • CSS Modules: `import styles from "./X.module.css"` (default). Plain CSS: `import "./X.css"`.',
+  'PROP & TYPE CONTRACTS (these recur — get them right the FIRST time):',
+  '  • When a parent renders a child, the props it passes MUST EXACTLY match the child component\'s',
+  '    declared props (same NAMES and TYPES). Decide each component\'s props once and use the same on',
+  '    both sides — e.g. if TaskCounter is `{ remaining, total }`, the parent passes `remaining`+`total`,',
+  '    NOT `count`.',
+  '  • In .ts/.tsx files, IMPORT the React types you reference — `import type { Dispatch, SetStateAction',
+  '    } from "react"` — do NOT write the bare `React.` namespace (e.g. `React.Dispatch`) without an',
+  '    `import React from "react"`. Hooks files are usually .ts (no JSX) so React is NOT auto-in-scope.',
+  '  • `key` is React\'s special prop for list items only — NEVER add it to a component\'s props interface.',
 ];
 
 export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: SimpleFileSpec[]): string {

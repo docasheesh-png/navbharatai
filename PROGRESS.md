@@ -5910,3 +5910,63 @@ src/components/NoteCard.tsx)") + postMessages it to the host so the Build report
 (e.g. React) still hard-errors — that genuinely can't be stubbed.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3586/3586 PASS, boot:check PASS.
+
+## 2026-06-30 — FIX: all 4 build-report errors (Tailwind toolchain + skip-install + in-browser Tailwind CDN + prop/type prompt contracts)
+
+A "todo app" build report surfaced 4 problems; fixed at the deterministic root cause "best tarikhe se":
+
+1. (biggest) `npm run dev` crashed `Cannot find module 'tailwindcss'` (PostCSS) → live preview never came
+   up + in-browser unstyled. Root cause: apps use Tailwind but the scaffold didn't ship it, AND the fast-lane
+   install (`[ -d node_modules ] && echo "deps present" || npm install`) SKIPPED install when node_modules
+   existed but package.json had since added tailwindcss. Fix: (a) Scaffold.ts now bundles the Tailwind
+   toolchain into BOTH vite-react and vite-react-ts scaffolds — devDeps (tailwindcss/postcss/autoprefixer),
+   postcss.config.js, tailwind.config.js, and `@tailwind base/components/utilities` in src/index.css.
+   (b) agentv3.ts install commands (fastPreview + fastVerify) now re-install when package.json is NEWER than
+   node_modules (`[ ! -d node_modules ] || [ package.json -nt node_modules ]`) so a newly-added dep is never
+   skipped. (c) ReactPreview.ts: a Tailwind-using app loads the Tailwind Play CDN and routes @tailwind/@apply
+   CSS (incl. Vite's JS-imported index.css via the runtime injectCss → #__nbai-tw block) into a
+   `<style type="text/tailwindcss">` so the no-build in-browser preview is STYLED. (d) CSP scriptSrc allows
+   cdn.tailwindcss.com so the preview iframe can load it.
+2. TaskCounter prop mismatch (parent passed remaining/total, child declared count), 3. useLocalStorage.ts
+   used `React.Dispatch` in a .ts file without importing React ("Cannot find namespace 'React'"), 4. `key`
+   placed in a props interface. All three are prevented at generation: SimpleBuilder's EXPORT_IMPORT_CONVENTION
+   now carries PROP & TYPE CONTRACTS (parent props must EXACTLY match the child's declared props; in .ts/.tsx
+   import React types via `import type { Dispatch, SetStateAction } from "react"`, never bare `React.` without
+   importing React; `key` is React's list special prop, never in a props interface) — injected into both the
+   generation and repair prompts, with verify(tsc)+auto-repair as the backstop.
+
+Tests: +Tailwind-CDN preview test (reactPreview), +Tailwind-toolchain scaffold test (both scaffolds),
++cdn.tailwindcss.com CSP guard (headers).
+
+Gate: frontend tsc 0, server tsc 0, vitest 3693/3693 PASS, boot:check PASS.
+
+## 2026-06-30 — FIX (permanent): AgentV3 dev server "Killed" loop + E2B stale-deps skip-install
+
+A live build report ("add a real-time clock") showed the dev server starting fine
+(`VITE ready … Local: http://localhost:5173/`) then printing **`Killed`** seconds later,
+the health-check restarting it, and the loop burning the full 1080s budget → `BUILD_TIMEOUT`.
+Two root causes, both in the AgentV3 E2B sandbox path, both fixed deterministically:
+
+1. **Dev server self-backgrounding → orphaned → reaped.** The actuator already starts long-running
+   commands with E2B `background:true` (which keeps the process alive across calls). But the agent
+   wrote its OWN backgrounding — `npm run dev … &> /tmp/vite.log &`, `nohup npm run dev … &`,
+   `npx vite … 2>&1 &` — so the shell launched vite in the background and EXITED immediately; E2B saw
+   its command finish and reaped the command's process group, killing the orphaned vite ("Killed").
+   EVERY launch in the report ended in a trailing `&`. Fix: new pure `stripDevServerBackgrounding()`
+   in devServerHost.ts removes a trailing single `&` (never `&&`) and a leading `nohup` (+ the file
+   redirect that precedes the `&`), so vite runs in the FOREGROUND of E2B's background command and
+   E2B tracks its lifetime → it stays up. Applied in E2BActuator.runCommand before host/port pinning.
+2. **E2B install gate skipped on stale node_modules.** `build()` only ran `npm install` when
+   node_modules was MISSING — so when the scaffold/agent added a dep (tailwindcss) to package.json but
+   node_modules already existed from a prior build, the dep was never installed and `npm run dev`
+   crashed with "Cannot find module 'tailwindcss'". Fix: new pure `buildDepsStaleCheckCommand()`
+   (`[ ! -d node_modules ] || [ package.json -nt node_modules ]`) gates the install in build() AND
+   before the dev server launches, so a newly-declared dep is always installed before boot. (npm ci's
+   own "errors when lock and package.json are out of sync" behaviour makes the fallback to `npm install`
+   reconcile the new dep.)
+
+Tests: +6 devServerHost cases (stripDevServerBackgrounding across the exact failing commands +
+foreground/`&&` safety; buildDepsStaleCheckCommand). These complement the same-PR scaffold/skip-install/
+in-browser-Tailwind fixes.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3699/3699 PASS, boot:check PASS.

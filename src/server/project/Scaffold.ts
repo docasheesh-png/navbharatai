@@ -77,12 +77,21 @@ const VITE_REACT_FILES: Record<string, string> = {
       dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' },
       devDependencies: {
         '@vitejs/plugin-react': '^4.3.1',
+        autoprefixer: '^10.4.20',
+        postcss: '^8.4.47',
+        tailwindcss: '^3.4.14',
         vite: '^5.4.0',
       },
     },
     null,
     2,
   ) + '\n',
+  // Tailwind bundled into the scaffold (deps + config + @tailwind) — see the vite-react-ts note.
+  'postcss.config.js':
+    `export default {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n};\n`,
+  'tailwind.config.js':
+    `/** @type {import('tailwindcss').Config} */\n` +
+    `export default {\n  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],\n  theme: { extend: {} },\n  plugins: [],\n};\n`,
   'vite.config.js':
     `import { defineConfig } from 'vite';\n` +
     `import react from '@vitejs/plugin-react';\n\n` +
@@ -104,6 +113,7 @@ const VITE_REACT_FILES: Record<string, string> = {
     `  return <h1>Hello from App</h1>;\n` +
     `}\n`,
   'src/index.css':
+    `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n` +
     `:root { font-family: system-ui, sans-serif; }\n` +
     `body { margin: 0; }\n`,
   // The generator often writes .tsx + CSS-Module imports even in this JS scaffold, and the verify
@@ -129,6 +139,9 @@ const VITE_REACT_TS_FILES: Record<string, string> = {
         '@types/react': '^18.3.3',
         '@types/react-dom': '^18.3.0',
         '@vitejs/plugin-react': '^4.3.1',
+        autoprefixer: '^10.4.20',
+        postcss: '^8.4.47',
+        tailwindcss: '^3.4.14',
         typescript: '^5.5.3',
         vite: '^5.4.0',
       },
@@ -136,6 +149,14 @@ const VITE_REACT_TS_FILES: Record<string, string> = {
     null,
     2,
   ) + '\n',
+  // Tailwind is bundled INTO the scaffold (deps + config + @tailwind directives) because nearly every
+  // generated React app uses Tailwind classes. Without it pre-installed, `npm run dev` crashed with
+  // "Cannot find module 'tailwindcss'" (PostCSS) and the preview was unstyled. Present-but-unused is harmless.
+  'postcss.config.js':
+    `export default {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n};\n`,
+  'tailwind.config.js':
+    `/** @type {import('tailwindcss').Config} */\n` +
+    `export default {\n  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],\n  theme: { extend: {} },\n  plugins: [],\n};\n`,
   'vite.config.ts':
     `import { defineConfig } from 'vite';\n` +
     `import react from '@vitejs/plugin-react';\n\n` +
@@ -170,6 +191,7 @@ const VITE_REACT_TS_FILES: Record<string, string> = {
     `  return <h1>Hello from App</h1>;\n` +
     `}\n`,
   'src/index.css':
+    `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n` +
     `:root { font-family: system-ui, sans-serif; }\n` +
     `body { margin: 0; }\n`,
   // Ambient types so `import styles from './X.module.css'` (CSS Modules) and asset imports type-check

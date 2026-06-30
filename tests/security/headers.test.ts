@@ -48,6 +48,9 @@ describe('P-TQA.10 — production security headers', () => {
     expect(csp).toContain('https://esm.sh');
     expect(csp).toContain('https://cdn.jsdelivr.net');
     expect(csp).toContain('https://cdnjs.cloudflare.com');
+    // Tailwind apps load the Play CDN (cdn.tailwindcss.com) inside the preview iframe so the no-build
+    // preview is STYLED — without this in script-src the preview renders unstyled. Guard it stays.
+    expect(csp).toContain('https://cdn.tailwindcss.com');
   });
 
   it('sets X-Content-Type-Options: nosniff (blocks MIME sniffing)', async () => {

@@ -29,6 +29,56 @@ export function ensureHostBinding(command: string): string {
 }
 
 /**
+ * Strip shell-level self-backgrounding from a dev-server command so it runs in the
+ * FOREGROUND of E2B's `background:true` runner.
+ *
+ * THE BUG this fixes (the #1 "preview never comes up / build times out" cause):
+ * the actuator already starts long-running commands with E2B `background:true`,
+ * which keeps the process alive across calls ONLY as long as the command E2B
+ * launched is itself the running process. When the agent writes its own
+ * `npm run dev … &` (trailing `&`) or `nohup npm run dev … &`, the shell launches
+ * vite in the background and then EXITS immediately — so E2B sees its command
+ * finish and reaps the command's process group, killing the orphaned vite. The
+ * server prints `ready in 200ms … Local: http://localhost:5173/` and then `Killed`
+ * a second later, the health-check restarts it, and the loop burns the whole
+ * wall-clock budget until BUILD_TIMEOUT. Removing the agent's own backgrounding
+ * makes vite the foreground process E2B tracks, so it stays up.
+ *
+ * Only touches a command that ENDS in a single `&` (real backgrounding) — `a && b`
+ * and normal foreground commands are left byte-for-byte unchanged. PURE +
+ * unit-testable.
+ */
+export function stripDevServerBackgrounding(command: string): string {
+  if (!command) return command;
+  let c = command.trim();
+  // `nohup` is pointless under E2B's background runner and only muddies process tracking.
+  c = c.replace(/^nohup\s+/i, '');
+  // Act ONLY when there is a real trailing backgrounding `&` (not `&&`).
+  if (!/(^|[^&])&\s*$/.test(c)) return c;
+  c = c.replace(/\s*&\s*$/, '');           // drop the trailing &
+  // Drop the file redirect that typically precedes it (e.g. `&> /tmp/vite.log`,
+  // `> x.log 2>&1`) so vite's own output flows back to the actuator's stream and the
+  // bound port can be detected — strip repeatedly since there can be several tokens.
+  let prev: string;
+  do {
+    prev = c;
+    c = c.replace(/\s*(?:&>>?|>>?|2>&1|1>&2|2>>?)\s*(?:[^\s&|;<>]+)?\s*$/, '').trim();
+  } while (c !== prev);
+  return c;
+}
+
+/**
+ * Shell test that prints `STALE` when dependencies need (re)installing — node_modules is
+ * missing, or package.json has been edited since the last install (a newly-declared dep like
+ * `tailwindcss` is not yet on disk). Used to gate `npm install` before a build AND before a dev
+ * server starts, so the server never crashes with "Cannot find module 'tailwindcss'". Ends in
+ * `true` so a clean tree exits 0. PURE string builder — unit-testable without E2B.
+ */
+export function buildDepsStaleCheckCommand(): string {
+  return '[ ! -d node_modules ] || [ package.json -nt node_modules ] && echo STALE || true';
+}
+
+/**
  * Free a TCP port BEFORE (re)starting a dev server.
  *
  * Why this matters: when a previous build attempt left a dev server alive on the

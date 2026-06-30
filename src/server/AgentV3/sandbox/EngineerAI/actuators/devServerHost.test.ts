@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand } from './devServerHost';
 
 describe('ensureHostBinding (v3.0 actuator)', () => {
   it('appends --host to a vite package-manager dev script', () => {
@@ -99,6 +99,44 @@ describe('detectDevPort', () => {
   it('falls back when no port is present in the output', () => {
     expect(detectDevPort('starting…', 5173)).toBe(5173);
     expect(detectDevPort('', 3000)).toBe(3000);
+  });
+});
+
+describe('stripDevServerBackgrounding', () => {
+  it('strips a trailing `&` so vite is not orphaned + reaped by E2B (the "Killed" loop)', () => {
+    // Every launch in the failing build report ended in `&` and printed "Killed" after "ready".
+    expect(stripDevServerBackgrounding('npm run dev -- --host 0.0.0.0 --port 5173 &> /tmp/vite.log &'))
+      .toBe('npm run dev -- --host 0.0.0.0 --port 5173');
+    expect(stripDevServerBackgrounding('npx vite --host 0.0.0.0 --port 5173 > /tmp/vite2.log 2>&1 &'))
+      .toBe('npx vite --host 0.0.0.0 --port 5173');
+    expect(stripDevServerBackgrounding('node node_modules/vite/bin/vite.js --host 0.0.0.0 --port 5173 > /tmp/vdev.log 2>&1 &'))
+      .toBe('node node_modules/vite/bin/vite.js --host 0.0.0.0 --port 5173');
+  });
+
+  it('drops a leading `nohup` (pointless under E2B background, muddies process tracking)', () => {
+    expect(stripDevServerBackgrounding('nohup npm run dev > /tmp/vite_out.log 2>&1 &'))
+      .toBe('npm run dev');
+    expect(stripDevServerBackgrounding('nohup npm run dev')).toBe('npm run dev');
+  });
+
+  it('leaves a normal foreground command byte-for-byte unchanged', () => {
+    expect(stripDevServerBackgrounding('npm run dev')).toBe('npm run dev');
+    expect(stripDevServerBackgrounding('npm run dev -- --host 0.0.0.0')).toBe('npm run dev -- --host 0.0.0.0');
+    expect(stripDevServerBackgrounding('')).toBe('');
+  });
+
+  it('does NOT mistake `&&` for backgrounding', () => {
+    expect(stripDevServerBackgrounding('npm ci && npm run dev')).toBe('npm ci && npm run dev');
+  });
+});
+
+describe('buildDepsStaleCheckCommand', () => {
+  it('prints STALE when node_modules is missing or package.json is newer (declared-but-not-installed deps)', () => {
+    const cmd = buildDepsStaleCheckCommand();
+    expect(cmd).toContain('[ ! -d node_modules ]');
+    expect(cmd).toContain('[ package.json -nt node_modules ]');
+    expect(cmd).toContain('echo STALE');
+    expect(cmd.trim().endsWith('true')).toBe(true); // clean tree exits 0, never fails the step
   });
 });
 

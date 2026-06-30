@@ -8,6 +8,7 @@ import type { ViewType, FileSystem, ChatSession, Message } from '../../types';
 import type { AgentMode } from '../../types';
 import type { ThemeMode } from '../../lib/theme';
 import type { PreviewProblem } from '../../lib/previewProblems';
+import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import type { User as FirebaseUser } from 'firebase/auth';
 
 // ── Lazy-loaded view components ─────────────────────────────────────────────
@@ -155,6 +156,9 @@ export function ViewPanels({
             isChatLoading={isLoading}
             activeIntent={activeIntent}
             problems={problems}
+            v3WorkspaceId={user?.uid ? getAgentV3WorkspaceId(user.uid) : undefined}
+            v3UserId={user?.uid}
+            v3Email={user?.email || undefined}
             githubToken={githubToken}
             githubUser={githubUser}
             githubRepoContext={githubRepoContext}

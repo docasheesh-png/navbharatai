@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Editor } from './Editor';
 import { FileExplorer } from './FileExplorer';
 import { ActivityBar } from './ActivityBar';
-import { TerminalPanel } from './TerminalPanel';
 import { DebugPanel } from './DebugPanel';
+import { RealTerminal } from './RealTerminal';
 import { ProblemsPanel } from './ProblemsPanel';
 import type { PreviewProblem } from '../../lib/previewProblems';
 import { loadBreakpoints, serializeBreakpoints, toggleBreakpoint as toggleBpInMap, BREAKPOINTS_STORAGE_KEY, type BreakpointMap } from '../../lib/breakpoints';
@@ -45,6 +45,10 @@ interface CodeStudioProps {
   activeIntent?: string;
   /** Real compile-error problems from the live esbuild preview bundle (empty = compiled clean). */
   problems?: PreviewProblem[];
+  /** v3.0 identity for the REAL terminal (runs commands in this user's warm sandbox). */
+  v3WorkspaceId?: string;
+  v3UserId?: string;
+  v3Email?: string;
   pendingGHEdit?: any;
   onConfirmPush?: () => void;
   isGHPushing?: boolean;
@@ -95,6 +99,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   isChatLoading,
   activeIntent = 'social',
   problems = [],
+  v3WorkspaceId,
+  v3UserId,
+  v3Email,
   pendingGHEdit,
   onConfirmPush,
   isGHPushing,
@@ -1126,15 +1133,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                      exit={{ height: 0 }}
                      className="absolute left-0 right-0 bottom-0 z-50 bg-[#0d1117] border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
                   >
-                      <TerminalPanel
+                      <RealTerminal
                         onClose={() => {
                           setIsPanelOpen(false);
                           setIsPanelMaximized(false);
                         }}
-                        files={files}
-                        onFilesChange={onFilesChange}
-                        activeFile={activeFile}
-                        onActiveFileChange={setActiveFile}
+                        workspaceId={v3WorkspaceId}
+                        userId={v3UserId}
+                        email={v3Email}
                         isMaximized={isPanelMaximized}
                         onToggleMaximize={() => setIsPanelMaximized(prev => !prev)}
                       />

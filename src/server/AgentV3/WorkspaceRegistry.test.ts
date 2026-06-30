@@ -1,10 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { registerSession, getSession, restoreSession, gitStatusForSession, sessionCount, _clearSessions } from './WorkspaceRegistry';
+import { registerSession, getSession, restoreSession, gitStatusForSession, execInSession, sessionCount, _clearSessions } from './WorkspaceRegistry';
 import { GitManager, type CommandRunner } from './GitManager';
 
 class FakeShell implements CommandRunner {
+  lastCommand = '';
   async runCommand(_w: string, command: string) {
+    this.lastCommand = command;
     if (command.includes('rev-parse HEAD')) return { exitCode: 0, stdout: 'abc1234\n', stderr: '' };
+    if (command.includes('bash -lc')) return { exitCode: 0, stdout: 'hello from sandbox\n', stderr: '' };
     return { exitCode: 0, stdout: '', stderr: '' };
   }
 }
@@ -50,5 +53,26 @@ describe('WorkspaceRegistry', () => {
     expect(st?.clean).toBe(true);
     expect(await gitStatusForSession('nope', 'owner')).toBeNull();
     expect(await gitStatusForSession('ws-1', 'attacker')).toBeNull();
+  });
+
+  it('execInSession runs a bounded command for the owner and returns real output', async () => {
+    const shell = new FakeShell();
+    const git = new GitManager(shell, 'ws');
+    await git.ensureRepo();
+    registerSession('ws-1', git, 'owner', shell);
+    const r = await execInSession('ws-1', 'echo hi', 'owner');
+    expect(r.available).toBe(true);
+    expect(r.stdout).toContain('hello from sandbox');
+    expect(shell.lastCommand).toContain('timeout 30 bash -lc');
+  });
+
+  it('execInSession is unavailable for unknown / wrong-owner / no-runner sessions', async () => {
+    registerSession('ws-1', await makeGit(), 'owner'); // no runner passed
+    expect((await execInSession('ws-1', 'ls', 'owner')).available).toBe(false);
+    expect((await execInSession('nope', 'ls', 'owner')).available).toBe(false);
+    const shell = new FakeShell();
+    const g = new GitManager(shell, 'ws'); await g.ensureRepo();
+    registerSession('ws-2', g, 'owner', shell);
+    expect((await execInSession('ws-2', 'ls', 'attacker')).available).toBe(false);
   });
 });

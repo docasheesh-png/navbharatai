@@ -44,6 +44,7 @@ import {
   registerSession,
   restoreSession,
   gitStatusForSession,
+  execInSession,
   agentLifecycle,
   getWorkspaceMemory,
   warmIndexFiles,
@@ -1202,6 +1203,30 @@ export function registerAgentV3Routes(app: Express): void {
     res.json(status ? { available: true, ...status } : { available: false, clean: false, changed: 0, head: '' });
   });
 
+  // REAL Code Studio terminal: run ONE bounded command in the user's own warm v3.0 sandbox. Each
+  // command runs under a hard timeout with capped output (see execInSession) — no persistent shell,
+  // no runaway processes. available:false when the sandbox isn't warm (honest, never faked output).
+  // Ownership-checked + rate-limited.
+  app.post('/api/agentv3/exec', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const command = typeof req.body?.command === 'string' ? req.body.command : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    res.json(await execInSession(workspaceId, command, userId ?? undefined));
+  });
+
   // R5 §5.1 — return a workspace's latest LIVE deployment URL (durable, survives reconnect).
   // Lets the UI restore the "Live site" link after a refresh/new session instead of losing it
   // with the build stream. Ownership-checked; null url when the app has never been deployed.
@@ -2033,7 +2058,9 @@ export function registerAgentV3Routes(app: Express): void {
         // sandboxes without a shell).
         git = new GitManager(actuator, workspaceId);
         await git.ensureRepo();
-        registerSession(workspaceId, git, userId ?? undefined);
+        // Pass the actuator as the session's command runner so the REAL Code Studio terminal can exec
+        // bounded commands in this same warm sandbox.
+        registerSession(workspaceId, git, userId ?? undefined, actuator);
         events.emit({ type: 'workspace', workspaceId, ts: Date.now() });
       } catch (setupErr) {
         const m = setupErr instanceof Error ? setupErr.message : String(setupErr);

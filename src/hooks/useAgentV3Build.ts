@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { agentV3Reducer } from '../components/agentv3/agentV3Reducer';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
-import type { AgentV3ClientState, AgentV3WireEvent } from '../components/agentv3/agentV3Types';
+import type { AgentV3ClientState, AgentV3WireEvent, GitCheckpoint } from '../components/agentv3/agentV3Types';
 import { conversationToEvents, conversationToUserMessages, type PersistedConversation } from '../components/agentv3/agentV3History';
 import { auth } from '../App';
 
@@ -37,6 +37,8 @@ export interface UseAgentV3Build {
   respond: (requestId: string, approved: boolean) => Promise<void>;
   /** Restore the workspace to a checkpoint commit (History → restore). */
   restore: (sha: string) => Promise<boolean>;
+  /** Phase G1 — load the durable git checkpoint history for a workspace (newest first, cross-session). */
+  getCheckpoints: (opts: { workspaceId: string; userId?: string; email?: string }) => Promise<GitCheckpoint[]>;
   /** "Restore all files" — genuinely bring the whole project back into the workspace (writes the
    *  durably-saved files back) and reflect the real file list. Returns count + whether it restored. */
   restoreAllFiles: () => Promise<{ ok: boolean; count: number; restored: boolean }>;
@@ -352,6 +354,28 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, []);
 
+  // Phase G1 — load the DURABLE git checkpoint history for a workspace (newest first), so the IDE's
+  // History shows the full timeline across sessions/devices, not just this session's RAM. Best-effort:
+  // returns [] on any error. Accepts the workspaceId explicitly because this can run before a build
+  // (no state.workspaceId yet) — the panel passes agentv3-{uid}-{sessionId}.
+  const getCheckpoints = useCallback(async (opts: { workspaceId: string; userId?: string; email?: string }): Promise<GitCheckpoint[]> => {
+    if (!opts?.workspaceId) return [];
+    try {
+      const params = new URLSearchParams();
+      params.set('workspaceId', opts.workspaceId);
+      const uid = opts.userId ?? userIdRef.current;
+      const em = opts.email ?? emailRef.current;
+      if (uid) params.set('userId', uid);
+      if (em) params.set('email', em);
+      const res = await fetch(`/api/agentv3/checkpoints?${params.toString()}`, { headers: await authJsonHeaders() });
+      if (!res.ok) return [];
+      const j = await res.json().catch(() => ({}));
+      return Array.isArray(j?.checkpoints) ? (j.checkpoints as GitCheckpoint[]) : [];
+    } catch {
+      return [];
+    }
+  }, []);
+
   const start = useCallback(
     async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string }) => {
       if (running) return;
@@ -527,5 +551,5 @@ export function useAgentV3Build(): UseAgentV3Build {
     return () => clearInterval(id);
   }, [running, resume]);
 
-  return { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation, listConversations, subscribeLive };
+  return { state, running, error, start, respond, restore, getCheckpoints, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation, listConversations, subscribeLive };
 }

@@ -54,7 +54,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 };
 
 export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string }) => void; filesPanel?: FilesPanelProps }) {
-  const { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, listConversations, subscribeLive } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, getCheckpoints, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, listConversations, subscribeLive } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
   // 5× = Opus minimum power; 10× = Opus medium; 20× = Opus max / ultracode.
@@ -112,6 +112,17 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
   // is reset by start() on every message, so the History tab would forget prior
   // checkpoints across an iterative session. Snapshotted in send() before start().
   const [checkpointHistory, setCheckpointHistory] = useState<GitCheckpoint[]>([]);
+  // Phase G1 — honest restore feedback: a restore can fail if the SHA isn't in the CURRENT sandbox
+  // (e.g. it recycled since that checkpoint, or we're in a fresh session). We tell the user the truth
+  // instead of a silent no-op or a fake "restored".
+  const [restoreNote, setRestoreNote] = useState<string>('');
+  const handleRestoreCheckpoint = async (sha: string) => {
+    setRestoreNote('Restoring…');
+    const ok = await restore(sha);
+    setRestoreNote(ok
+      ? '✅ Restored your workspace to that checkpoint.'
+      : "⚠️ That checkpoint isn't active in this session yet (the sandbox may have recycled). Continue a build to make its history live again.");
+  };
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // A stable session id keeps the SAME sandbox + memory + workspace across messages,
   // so the build is iterative (each message continues the same project). "New session"
@@ -268,6 +279,34 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
     setFiles([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resume?.nonce]);
+
+  // Phase G1 — git as the third organ: load the DURABLE checkpoint timeline for this workspace and seed
+  // it into checkpointHistory, so the History tab shows the full commit history even across sessions,
+  // devices and sandbox recycles (not just this session's RAM). Runs on sign-in, on resume, and when a
+  // build settles (to pick up just-persisted commits). Merged + deduped by sha; best-effort.
+  useEffect(() => {
+    if (!userId || !sessionIdRef.current) return;
+    let cancelled = false;
+    const workspaceId = state.workspaceId || `agentv3-${normalizeUid(userId)}-${sessionIdRef.current}`;
+    (async () => {
+      const durable = await getCheckpoints({ workspaceId, userId, email });
+      if (cancelled || durable.length === 0) return;
+      setCheckpointHistory((prev) => {
+        const seen = new Set<string>();
+        const merged: GitCheckpoint[] = [];
+        // Oldest-first to match how checkpointHistory is built across turns (durable comes newest-first).
+        for (const c of [...durable].reverse().concat(prev)) {
+          const key = c.sha || c.id;
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          merged.push(c);
+        }
+        return merged;
+      });
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, resume?.nonce, state.workspaceId, state.done]);
 
   // Persist the v3.0 conversation into NavBharatAI's MAIN History (the sidebar
   // "History" option), using the SAME chat_sessions shape as Free/Pro/SDA chats.
@@ -1294,6 +1333,9 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
                       {restoreMsg && <span className="text-[11px] text-zinc-400">{restoreMsg}</span>}
                     </div>
                   )}
+                  {restoreNote && (
+                    <div className="mb-2 text-[11px] text-zinc-400 bg-zinc-800/60 border border-white/5 rounded px-2 py-1">{restoreNote}</div>
+                  )}
                   {allCheckpoints.length === 0 ? <Empty>No checkpoints yet.</Empty> : (
                     <ul className="space-y-1">
                       {allCheckpoints.map((c) => (
@@ -1302,7 +1344,7 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
                           <span className="text-zinc-500 shrink-0">{c.sha.slice(0, 7) || '—'}</span>
                           <span className="flex-1 truncate">{c.message}</span>
                           {c.sha && (
-                            <button onClick={() => restore(c.sha)} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 shrink-0" title="Restore to this checkpoint">
+                            <button onClick={() => handleRestoreCheckpoint(c.sha)} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 shrink-0" title="Restore to this checkpoint">
                               <RotateCcw className="w-3 h-3" /> Restore
                             </button>
                           )}

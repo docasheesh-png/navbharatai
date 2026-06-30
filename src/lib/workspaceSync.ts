@@ -36,6 +36,14 @@ export interface WorkspaceSyncer {
   onLocalChange(prev: FileMap, next: FileMap): void;
   /** Record files that just arrived FROM v3.0 so they are not echoed back out. */
   noteRemote(files: FileMap): void;
+  /** Are there local edits not yet pushed to v3.0 (pending or in-flight)? Used by the dirty guard. */
+  hasPending(): boolean;
+  /**
+   * Force any pending edits to sync NOW (bypass the debounce) and resolve once the durable store has
+   * them. Called BEFORE a v3.0 build starts so the build never runs on a stale file set while the user
+   * has un-flushed edits — the Phase S3 conflict guard. Safe to call when nothing is pending (no-op).
+   */
+  flush(): Promise<void>;
   /** Cancel any pending sync (e.g. on unmount). */
   dispose(): void;
 }
@@ -50,28 +58,34 @@ export function makeWorkspaceSyncer(opts: { sync: (changed: FileMap) => Promise<
   let pending: FileMap = {};
   const remote: FileMap = {};
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let inFlight = false;
+  let inFlight: Promise<void> | null = null;
 
   const schedule = () => {
     if (timer) clearTimeout(timer);
-    timer = setTimeout(flush, debounceMs);
+    timer = setTimeout(() => { void runOnce(); }, debounceMs);
   };
 
-  const flush = async () => {
-    timer = null;
-    if (inFlight) { schedule(); return; } // a sync is running — retry after the debounce window
+  // Sync the current pending batch exactly once. If a sync is already running, chain after it so the
+  // freshest pending set is flushed when it returns. Returns a promise that resolves when this round
+  // (and any it chained) has drained — so flush() can await a real completion.
+  const runOnce = (): Promise<void> => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (inFlight) return inFlight.then(() => runOnce()); // serialize — never two syncs at once
     const batch = stripEcho(pending, remote);
     pending = {};
-    if (Object.keys(batch).length === 0) return;
-    inFlight = true;
-    try {
-      await opts.sync(batch);
-    } catch {
-      /* best-effort — never surface a sync error to the editor */
-    } finally {
-      inFlight = false;
-      if (Object.keys(pending).length > 0) schedule();
-    }
+    if (Object.keys(batch).length === 0) return Promise.resolve();
+    const p = (async () => {
+      try {
+        await opts.sync(batch);
+      } catch {
+        /* best-effort — never surface a sync error to the editor */
+      } finally {
+        inFlight = null;
+        if (Object.keys(pending).length > 0) schedule();
+      }
+    })();
+    inFlight = p;
+    return p;
   };
 
   return {
@@ -85,6 +99,14 @@ export function makeWorkspaceSyncer(opts: { sync: (changed: FileMap) => Promise<
     noteRemote(files) {
       if (!files) return;
       for (const [p, c] of Object.entries(files)) if (typeof c === 'string') remote[p] = c;
+    },
+    hasPending() {
+      return Object.keys(pending).length > 0 || inFlight !== null;
+    },
+    async flush() {
+      // Drain the pending set NOW (bypass the debounce) and wait for any in-flight sync to finish too,
+      // so on return the durable store has every local edit. Loop until truly drained.
+      do { await runOnce(); } while (Object.keys(pending).length > 0 || inFlight !== null);
     },
     dispose() {
       if (timer) clearTimeout(timer);

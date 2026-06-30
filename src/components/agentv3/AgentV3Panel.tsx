@@ -53,7 +53,7 @@ const V3_EXT_COLOR: Record<string, string> = {
   svg: 'text-pink-400', png: 'text-pink-400', jpg: 'text-pink-400',
 };
 
-export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, onPreviewState, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; onFilesSync?: (files: Record<string, string>) => void; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string }) => void; filesPanel?: FilesPanelProps }) {
+export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string }) => void; filesPanel?: FilesPanelProps }) {
   const { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, listConversations, subscribeLive } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
@@ -391,6 +391,10 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
     setFiles([]);
     const pendingImportUrl = importUrl.trim();
     setImportUrl(''); // consume import URL on first send
+    // Phase S3 conflict guard: flush any pending IDE edits to v3.0's durable store BEFORE the build
+    // starts, so the build reads the user's latest hand edits — never a stale file set. Best-effort:
+    // a flush failure must never block the build (the syncer swallows its own errors).
+    try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
     start(msgText, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, importUrl: pendingImportUrl || undefined });
   };
 

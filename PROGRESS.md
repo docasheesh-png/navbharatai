@@ -6228,3 +6228,26 @@ Gate: frontend tsc 0, server tsc 0, vitest 3785/3785 PASS.
 HONEST LIMITATION: the actual cross-device/cross-instance live behaviour can't be reproduced in CI; the
 ring/seq/delta core is unit-tested and the wiring is additive (it never touches the local build stream).
 Final confirmation needs 2 real signed-in devices.
+
+## 2026-06-30 — FIX (root cause, Slice 1/2): v3.0 build drift — SHARED CONTRACT before per-file generation
+
+Admin: v3.0 loops "Found build errors — fixing them (1/2, 2/2)" and STILL doesn't fix them. A multi-agent
+workflow CONFIRMED the root cause: SimpleBuilder generates each file in its OWN isolated parallel LLM call
+whose prompt contains ONLY the file LIST (path + one-line purpose) of siblings — never the real exported
+symbols / enum members / prop interfaces / util signatures. So independently-generated files DISAGREE
+(MediaType.YouTube vs enum {YOUTUBE}; child prop {url} vs parent {embedUrl}; import {extractVimeoEmbedUrl}
+from a util that only exports extractEmbedUrl; undefined PlayerState; enum-vs-string compares), and the
+bounded 2-attempt repair can't reconcile that many simultaneous mismatches.
+
+Slice 1 (LENS A — the primary lever): generate ONE shared CONTRACT up front (the exact enums with frozen
+member casing, shared types/interfaces, util signatures, and each component's prop interface) via one cheap
+call BEFORE the per-file fan-out, then inject that frozen contract into EVERY per-file generation prompt AND
+the repair prompt (contractSystemPrompt/contractUserPrompt/contractBlock; shareContract default-on; fileUserPrompt
++ repairUserPrompt thread it; route's fastRepair forwards it). Files can no longer invent divergent
+names/shapes — they're handed the single source of truth, so producer + consumer agree by construction.
+
+Slice 2 (next): LENS B (dependency-ordered generation feeding each consumer its producers' REAL generated
+source — catches the case where a file deviates from the planned contract) + LENS C (a pure ContractMap
+deterministic drift backstop fed into repair so any residual mismatch is named precisely, incl. CSS-class drift).
+
+Gate: frontend tsc 0, server tsc 0, vitest 3809/3809 PASS (incl. new contract tests), boot:check PASS.

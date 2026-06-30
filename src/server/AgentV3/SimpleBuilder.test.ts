@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt } from './SimpleBuilder';
+import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt, contractBlock, contractSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import type { OneShotFile } from './OneShotBuilder';
 
 describe('parseFileManifest', () => {
@@ -84,6 +84,7 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
   it('a single file\'s failed call does not kill the build (others still ship)', async () => {
     let calls = 0;
     const r = await runSimpleBuild(baseDeps({
+      shareContract: false, // isolate per-file resilience from the contract call
       generate: async (_s, user) => {
         if (user.includes('Plan the file list')) return 'a.tsx :: a\nb.tsx :: b\nc.tsx :: c';
         calls++;
@@ -147,5 +148,108 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
   it('without a verify dep, behavior is unchanged (sticky success)', async () => {
     const r = await runSimpleBuild(baseDeps());
     expect(r.ok).toBe(true);
+  });
+});
+
+// LENS A — SHARED CONTRACTS FIRST: a single contract is designed up front and injected into every
+// per-file (and repair) prompt so independently-generated files agree on names/shapes by construction.
+describe('contractBlock (pure)', () => {
+  it('is empty for empty/whitespace contract (no behavior change when no contract)', () => {
+    expect(contractBlock(undefined)).toBe('');
+    expect(contractBlock('   \n  ')).toBe('');
+  });
+  it('renders the FROZEN contract as a fenced block when present', () => {
+    const b = contractBlock('enum MediaType { YouTube, Vimeo }');
+    expect(b).toContain('SHARED CONTRACT');
+    expect(b).toContain('enum MediaType { YouTube, Vimeo }');
+    expect(b).toContain('```ts');
+  });
+  it('flows the contract into the per-file and repair prompts', () => {
+    const m = [{ path: 'src/Player.tsx', purpose: 'player' }];
+    const contract = 'interface PlayerProps { url: string; mediaType: MediaType }';
+    expect(fileUserPrompt('app', m[0], m, contract)).toContain('PlayerProps');
+    expect(repairUserPrompt('app', 'error TS2322', [{ path: 'src/Player.tsx', content: 'x' }], contract)).toContain('PlayerProps');
+  });
+  it('per-file prompt with NO contract is unchanged (no SHARED CONTRACT header leaks in)', () => {
+    const m = [{ path: 'src/App.tsx', purpose: 'root' }];
+    expect(fileUserPrompt('app', m[0], m)).not.toContain('SHARED CONTRACT');
+  });
+});
+
+describe('runSimpleBuild — shared contract wiring', () => {
+  const deps = (over: Partial<Parameters<typeof runSimpleBuild>[0]> = {}) => ({
+    prompt: 'an online media player', framework: 'vite-react', scaffoldPaths: ['src/App.tsx'],
+    generate: async (_s: string, user: string) => {
+      if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/Player.tsx :: player\nsrc/types.ts :: types';
+      if (user.includes('Design the shared contract')) return 'enum MediaType { YouTube, Vimeo }';
+      const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+      return `<<<FILE ${path}>>>\n// ${path}\nexport default function X(){return null}\n<<<ENDFILE>>>`;
+    },
+    writeFiles: async () => {},
+    ...over,
+  });
+
+  it('designs a contract once and injects it into EVERY per-file generation prompt', async () => {
+    const perFilePrompts: string[] = [];
+    let contractCalls = 0;
+    const r = await runSimpleBuild(deps({
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/Player.tsx :: player\nsrc/types.ts :: types';
+        if (user.includes('Design the shared contract')) { contractCalls++; return 'enum MediaType { YouTube, Vimeo }'; }
+        perFilePrompts.push(user);
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        return `<<<FILE ${path}>>>\nok\n<<<ENDFILE>>>`;
+      },
+    }));
+    expect(r.ok).toBe(true);
+    expect(contractCalls).toBe(1); // exactly ONE contract call, up front
+    expect(perFilePrompts).toHaveLength(3);
+    for (const p of perFilePrompts) expect(p).toContain('enum MediaType { YouTube, Vimeo }');
+  });
+
+  it('a failed contract call NEVER fails the build (best-effort, falls back to contract-free)', async () => {
+    const r = await runSimpleBuild(deps({
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/Player.tsx :: player';
+        if (user.includes('Design the shared contract')) throw new Error('contract call down');
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        return `<<<FILE ${path}>>>\nok\n<<<ENDFILE>>>`;
+      },
+    }));
+    expect(r.ok).toBe(true);
+    expect(r.filesWritten).toBe(2);
+  });
+
+  it('shareContract:false skips the contract call entirely (prior behavior preserved)', async () => {
+    let contractCalls = 0;
+    const r = await runSimpleBuild(deps({
+      shareContract: false,
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/Player.tsx :: player';
+        if (user.includes('Design the shared contract')) { contractCalls++; return 'x'; }
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        return `<<<FILE ${path}>>>\nok\n<<<ENDFILE>>>`;
+      },
+    }));
+    expect(r.ok).toBe(true);
+    expect(contractCalls).toBe(0);
+  });
+
+  it('threads the contract into the repair call so it can reconcile drift against the source of truth', async () => {
+    let repairContract: string | undefined;
+    let verifies = 0;
+    const r = await runSimpleBuild(deps({
+      verify: async () => { verifies++; return verifies === 1 ? { ok: false, errors: 'error TS2339' } : { ok: true, errors: '' }; },
+      repair: async (_errs, files, contract) => { repairContract = contract; return [{ path: files[0].path, content: '// fixed' }]; },
+    }));
+    expect(r.ok).toBe(true);
+    expect(repairContract).toContain('enum MediaType { YouTube, Vimeo }');
+  });
+
+  it('contract system prompt freezes enum member casing + per-component props (the drift the report hit)', () => {
+    const p = contractSystemPrompt('vite-react');
+    expect(p).toContain('ENUM');
+    expect(p).toContain('FROZEN');
+    expect(p).toContain('props interface');
   });
 });

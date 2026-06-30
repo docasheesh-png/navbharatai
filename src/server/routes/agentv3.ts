@@ -139,6 +139,7 @@ import {
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints } from '../AgentV3/CheckpointStore';
+import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { saveDiagnostics, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
@@ -3053,6 +3054,19 @@ export function registerAgentV3Routes(app: Express): void {
           deliveredVia: dominantProvider(providerTurns),
         })
         .catch(() => {});
+
+      // P-PE.6 — Prompt audit trail: one durable record per build capturing the EXACT prompt context
+      // (version, intent, model, task type, outcome + the system-prompt head) for prompt-engineering
+      // traceability. Best-effort — never blocks the build.
+      savePromptAudit(userId, buildPromptAudit({
+        ts: Date.now(),
+        promptVersion: architectPromptVersion,
+        intentLabel: String(intent),
+        model,
+        taskType: analysis?.taskType ?? 'unknown',
+        ok: result.ok,
+        systemPrompt: architectSystem,
+      })).catch(() => {});
 
       // TEMP DEBUG: tag the build reply with the provider/model (Claude primary; the
       // resilient runner already self-labels in the text if it fell back to a free provider).

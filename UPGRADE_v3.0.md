@@ -2307,11 +2307,14 @@
 - [ ] Log variant + quality signal (user thumbs/NPS from P-UX.6) to Firestore for offline eval.
 - **Files:** `src/lib/featureFlags.ts`, `src/server/AgentV3/systemPrompt.ts`, `src/lib/analytics.ts`.
 
-### P-PE.6 — Prompt Audit Trail  🟡 PARTIAL → full  [MED]
+### P-PE.6 — Prompt Audit Trail  ✅ DONE (2026-06-30) · 🔌 WIRED  [MED]
 - `AgentV3CostTelemetry.ts` logs cost/tokens but not the exact prompt text or version that produced a response.
-- [ ] Append `promptVersion`, `intentLabel`, and first 200 chars of system prompt to each telemetry record.
-- [ ] Firestore collection: `promptAudits/{userId}/{timestamp}`.
-- **Files:** `src/server/AgentV3/AgentV3CostTelemetry.ts`, `src/server/AgentV3/systemPrompt.ts`.
+- [x] **`PromptAuditStore.ts`** — one durable record per build: `promptVersion`, `intentLabel`, `model`,
+  `taskType`, `ok`, and the first 200 chars of the composed system prompt. Pure `buildPromptAudit()`
+  (normalises + clamps) + best-effort `savePromptAudit` / `loadPromptAudits` (VITEST-skip, never throws).
+- [x] Firestore collection: `promptAudits/{userId}` → `entries/{ts}` (newest-first load).
+- [x] Wired in the build flow right after the cost-telemetry record. Tests: `promptAuditStore.test.ts` (3).
+- **Files:** new `src/server/AgentV3/PromptAuditStore.ts`, `src/server/routes/agentv3.ts`.
 
 ### P-PE.7 — Prompt Debugger / Trace View  ❌ MISSING  [LOW — dev tool]
 - No admin view showing: intent → context assembled → system prompt → model selected → tokens used.

@@ -47,6 +47,53 @@ export function parseFileManifest(text: string): SimpleFileSpec[] {
   return out.slice(0, 40); // a simple app never needs more — keeps the build bounded
 }
 
+/**
+ * LENS B — generation TIER for a file, so we build leaves before the files that consume them and can
+ * feed each consumer the REAL generated source of its foundations (not a guess, and not only the
+ * predicted contract — this also catches a producer that DEVIATED from the planned contract):
+ *   0 = foundation: types, interfaces, models, constants, config, utils, lib, helpers, hooks,
+ *       contexts, stores, services/api, and stylesheets (everyone imports these; low cross-deps).
+ *   2 = shell: the entry (main/index), App, pages/routes/router, and *Page/*Screen/*View files
+ *       (they compose the components below, so they generate LAST with the real component source).
+ *   1 = everything else (leaf/mid components).
+ * PURE + unit-testable. With only one effective tier present, the staged build collapses to today's
+ * single parallel batch.
+ */
+export function generationTier(path: string): number {
+  const p = path.toLowerCase();
+  // Shell / entry / pages — generated last (they import the components + foundation).
+  if (/(^|\/)(main|index)\.[jt]sx?$/.test(p) && !/(^|\/)components?\//.test(p)) return 2;
+  if (/(^|\/)app\.[jt]sx?$/.test(p)) return 2;
+  if (/(^|\/)(pages?|routes?|router)(\/|\.)/.test(p)) return 2;
+  if (/(page|screen|view)\.[jt]sx?$/.test(p)) return 2;
+  // Foundation — generated first.
+  if (/\.css$/.test(p)) return 0;
+  if (/\.d\.ts$/.test(p)) return 0;
+  if (/(^|\/)(types?|interfaces?|models?|constants?|config|utils?|lib|helpers?|hooks?|contexts?|stores?|services?|api)(\/|\.)/.test(p)) return 0;
+  if (/(^|\/)use[a-z0-9]/.test(p)) return 0; // useXxx hook files anywhere
+  // Components and everything else.
+  return 1;
+}
+
+/**
+ * LENS B — render already-generated producer files as a prompt block so a consumer uses their EXACT
+ * exported names / enum members / prop interfaces (capped per file to bound the prompt). PURE.
+ */
+export function dependencyContext(producers: OneShotFile[], perFileCap = 4000): string {
+  const real = (producers || []).filter((f) => f && f.path && typeof f.content === 'string');
+  if (real.length === 0) return '';
+  const dump = real
+    .map((f) => `<<<FILE ${f.path}>>>\n${f.content.slice(0, Math.max(0, perFileCap))}\n<<<ENDFILE>>>`)
+    .join('\n\n');
+  return [
+    '',
+    'ALREADY-WRITTEN FILES YOU CAN IMPORT — this is their REAL source. Use these EXACT exported names,',
+    'enum members, types, function signatures, and component prop interfaces; import ONLY what is',
+    'actually exported here. Do NOT invent or re-case names:',
+    dump,
+  ].join('\n');
+}
+
 /** System prompt for the manifest (planning) call. */
 export function manifestSystemPrompt(framework: string): string {
   return [
@@ -179,13 +226,14 @@ export function contractBlock(contract: string | undefined): string {
   ].join('\n');
 }
 
-export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: SimpleFileSpec[], contract?: string): string {
+export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: SimpleFileSpec[], contract?: string, deps?: string): string {
   const fileList = manifest.map((f) => `  - ${f.path}${f.purpose ? ` — ${f.purpose}` : ''}`).join('\n');
   return [
     `App being built:\n${prompt}`,
     '',
     `The app's complete file list (so your imports line up):\n${fileList}`,
     contractBlock(contract),
+    deps || '',
     '',
     `Now write THIS file in full:\n  ${file.path}${file.purpose ? `\n  Purpose: ${file.purpose}` : ''}`,
     '',
@@ -270,6 +318,13 @@ export interface SimpleBuildDeps {
    * loop could not reliably reconcile. Set false to restore the prior contract-free behavior.
    */
   shareContract?: boolean;
+  /**
+   * LENS B — generate files in dependency TIERS (foundation → components → shell) instead of one
+   * all-parallel batch, feeding each tier the REAL generated source of the earlier tiers so consumers
+   * use the actual exported names (catching even a producer that deviated from the predicted contract).
+   * Default ON; set false (or env AGENTV3_DEP_ORDER=off) for a byte-identical fallback to the single batch.
+   */
+  depOrder?: boolean;
   log?: (msg: string) => void;
   /** Minimum files a real build must produce (default 2 — a real app is more than one file). */
   minFiles?: number;
@@ -316,19 +371,34 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         } catch { contract = ''; }
       }
       deps.log?.(`Building ${manifest.length} file(s) — one focused pass each…`);
-      // Generate each file in its OWN call, in parallel (bounded). Each returns one FILE block.
-      const generated = await mapWithConcurrency(manifest, concurrency, async (spec) => {
+      // Generate ONE file (its own call, returns one FILE block). `produced` is the real source of
+      // earlier-tier files, injected so this file uses their EXACT exported names.
+      const genOne = async (spec: SimpleFileSpec, produced: OneShotFile[]): Promise<OneShotFile | null> => {
         try {
-          const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract));
+          const depBlock = produced.length ? dependencyContext(produced) : '';
+          const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock));
           const blocks = parseFileBlocks(text);
-          // Prefer the block matching the requested path; else the first block; else nothing.
           const match = blocks.find((b) => b.path === spec.path) ?? blocks[0];
           return match ? { path: spec.path, content: match.content } : null;
         } catch {
           return null; // a single file's call failing must not kill the whole build
         }
-      });
-      const written = generated.filter((f): f is OneShotFile => !!f && !!f.content);
+      };
+
+      // LENS B — STAGED, dependency-ordered generation (default ON). Build foundation (tier 0) first,
+      // then components (1), then the shell/entry (2); each tier runs in parallel internally and is
+      // fed the REAL source of all earlier tiers. When depOrder is off, or only one tier is present,
+      // this is exactly today's single parallel batch.
+      const depOrder = deps.depOrder !== false;
+      const tiers = depOrder ? [0, 1, 2] : [0];
+      const written: OneShotFile[] = [];
+      for (const tier of tiers) {
+        const specs = depOrder ? manifest.filter((s) => generationTier(s.path) === tier) : manifest;
+        if (specs.length === 0) continue;
+        const producedSoFar = [...written]; // real source of all earlier tiers (snapshot for this tier)
+        const gen = await mapWithConcurrency(specs, concurrency, (spec) => genOne(spec, producedSoFar));
+        for (const f of gen) if (f && f.content) written.push(f);
+      }
       if (written.length < minFiles) throw new Error('too_few_files_generated');
       await deps.writeFiles(written);
       return written;

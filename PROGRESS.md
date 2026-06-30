@@ -6251,3 +6251,30 @@ source — catches the case where a file deviates from the planned contract) + L
 deterministic drift backstop fed into repair so any residual mismatch is named precisely, incl. CSS-class drift).
 
 Gate: frontend tsc 0, server tsc 0, vitest 3809/3809 PASS (incl. new contract tests), boot:check PASS.
+
+## 2026-06-30 — FIX (root cause, Slice 2/2): v3.0 build drift — DEPENDENCY-ORDERED generation (LENS B)
+
+Builds on Slice 1 (shared contract). Slice 1 injects the PREDICTED contract; Slice 2 feeds each file the
+REAL generated source of its foundations, so a file uses the actual exported names even if a producer
+deviated from the predicted contract.
+
+LENS B: SimpleBuilder now generates in dependency TIERS instead of one all-parallel batch —
+0 foundation (types/interfaces/models/constants/config/utils/lib/helpers/hooks/contexts/stores/services/css)
+→ 1 components → 2 shell (entry main/index, App, pages/routes, *Page/*Screen/*View). Each tier runs in
+parallel internally and is fed dependencyContext() — the REAL source of all earlier tiers — so a component
+sees the real types/enums/util-signatures, and the shell (incl. *Page composers) sees the real component
+prop interfaces. New pure helpers generationTier() + dependencyContext(); fileUserPrompt() gains an optional
+deps block. Gated behind depOrder (default ON; env AGENTV3_DEP_ORDER=off for a byte-identical single-batch
+fallback; collapses to today's batch when only one tier is present).
+
+Tests (+7, 32 total in SimpleBuilder.test.ts): generationTier classification; dependencyContext framing+cap;
+a staged-order test asserting foundation-before-component-before-shell AND the component's prompt carried the
+foundation's real source (via a generate spy); and depOrder:false → no dep block (byte-identical fallback).
+
+Remaining hardening (optional, only if a real build still struggles): LENS C — a pure ContractMap drift
+report fed into repair + CSS-class drift reaching repair on a never-green build.
+
+Gate: server tsc 0, vitest 3857/3857 PASS, boot:check PASS.
+HONEST LIMITATION: CI can't prove the live model now emits matching identifiers end-to-end; the tiering,
+ordering, and real-source injection are pure + unit-tested (generate spy), but real convergence on the
+media-player prompt needs a real fast-lane build + a BuildDiagnostics bundle.

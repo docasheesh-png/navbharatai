@@ -54,7 +54,9 @@ export function formatRecalledLessons(hits: RecallHit[]): string {
     if (!GUIDANCE_KINDS.has(kind)) continue;
     const text = typeof hit.ref === 'string' ? hit.ref.trim() : '';
     if (!text) continue;
-    candidates.push({ text, score: typeof hit.score === 'number' ? hit.score : 0, ts: hit.ts });
+    // Pass the episode kind so Knowledge Evolution can weight a proven `fix` above a one-off
+    // `error` and rank repeatedly-confirmed lessons higher (outcome-weighted confidence).
+    candidates.push({ text, score: typeof hit.score === 'number' ? hit.score : 0, ts: hit.ts, kind });
   }
 
   // Evolve (dedupe + resolve conflicts + age/rank), then trim to the budget.

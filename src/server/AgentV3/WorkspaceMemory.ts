@@ -18,6 +18,7 @@
 // the v3.0 engine. A durable backend can swap the Map without changing callers.
 
 import { scanSecurity, type SecurityFinding } from './SecurityAnalysis';
+import { bm25, type Bm25Doc } from './Bm25';
 
 // Words too generic to carry recall signal — dropped from the query token set so a
 // multi-word query like "build the timer app" ranks on "timer"/"app", not on "the".
@@ -222,31 +223,42 @@ export class WorkspaceMemory {
    * Search symbols, files and episodes for a free-text query, best matches first.
    *
    * Relevance combines (a) whole-phrase match — exact > prefix > substring, which keeps the
-   * old behaviour ("UserCard" → the UserCard symbol first) — with (b) per-token overlap so a
-   * MULTI-WORD query like "countdown timer logic" still finds an episode "fixed the countdown
-   * timer" that shares no single contiguous substring with the full query. Episodes additionally
-   * get a small RECENCY boost (newer ranks above stale at equal relevance) computed relative to
-   * the episodes in memory — fully deterministic, no wall-clock dependency. A hit with zero
-   * phrase- and token-relevance is never returned (recency alone can't surface an unrelated note).
+   * old behaviour ("UserCard" → the UserCard symbol first) — with (b) BM25 token relevance over
+   * the whole memory corpus, so a MULTI-WORD query like "countdown timer logic" finds an episode
+   * "fixed the countdown timer", and a RARE discriminating token outranks a common one (a search
+   * engine's ranking, not a flat per-token tally). Episodes additionally get a small RECENCY boost
+   * (newer ranks above stale at equal relevance), deterministic and independent of wall-clock. A
+   * hit with zero phrase- and token-relevance is never returned (recency alone can't surface an
+   * unrelated note).
    */
   recall(query: string, limit = 10): RecallHit[] {
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    // Meaningful query tokens (≥3 chars, de-duped, stopwords removed, capped for long prompts).
-    const tokens = [...new Set(q.split(/[^a-z0-9]+/i).filter((t) => t.length >= 3 && !RECALL_STOPWORDS.has(t)))].slice(0, 30);
 
-    const relevance = (text: string): number => {
+    // (a) Whole-phrase bonus — keeps the exact/prefix/substring guarantees recall always had.
+    const phraseBonus = (text: string): number => {
       const t = text.toLowerCase();
-      let s = 0;
-      if (t === q) s += 10;
-      else if (t.startsWith(q)) s += 6;
-      else if (t.includes(q)) s += 4;
-      for (const tok of tokens) {
-        if (new RegExp(`\\b${tok}\\b`).test(t)) s += 2;      // whole-word token hit
-        else if (t.includes(tok)) s += 1;                    // in-word substring hit
-      }
-      return s;
+      if (t === q) return 10;
+      if (t.startsWith(q)) return 6;
+      if (t.includes(q)) return 4;
+      return 0;
     };
+
+    // (b) BM25 token relevance over the FULL corpus (symbols + files + episodes). Building the
+    // corpus once lets IDF weigh a rare token (e.g. "stripe") above a common one (e.g. "page").
+    type Item = { hit: RecallHit; text: string };
+    const items: Item[] = [];
+    for (const { name, kind, file } of this.graph().symbols) {
+      items.push({ hit: { type: 'symbol', ref: name, file, detail: kind, score: 0 }, text: name });
+    }
+    for (const file of this.fileFacts.keys()) {
+      items.push({ hit: { type: 'file', ref: file, file, score: 0 }, text: file });
+    }
+    for (const e of this.episodes) {
+      items.push({ hit: { type: 'episode', ref: e.text.slice(0, 120), file: e.file, detail: e.kind, score: 0, ts: e.ts }, text: e.text });
+    }
+    const docs: Bm25Doc[] = items.map((it, i) => ({ id: String(i), text: it.text }));
+    const tokenScores = bm25(q, docs, { stopwords: RECALL_STOPWORDS });
 
     // Deterministic recency weight in [0, 0.9): newest episode ≈ 0.9, oldest ≈ 0. Computed from
     // the spread of episode timestamps in memory so it never depends on Date.now() (test-stable),
@@ -258,17 +270,13 @@ export class WorkspaceMemory {
     const recency = (ts: number): number => (span > 0 ? ((ts - minTs) / span) * 0.9 : 0);
 
     const hits: RecallHit[] = [];
-    for (const { name, kind, file } of this.graph().symbols) {
-      const s = relevance(name);
-      if (s > 0) hits.push({ type: 'symbol', ref: name, file, detail: kind, score: s });
-    }
-    for (const file of this.fileFacts.keys()) {
-      const s = relevance(file);
-      if (s > 0) hits.push({ type: 'file', ref: file, file, score: s });
-    }
-    for (const e of this.episodes) {
-      const s = relevance(e.text);
-      if (s > 0) hits.push({ type: 'episode', ref: e.text.slice(0, 120), file: e.file, detail: e.kind, score: s + recency(e.ts), ts: e.ts });
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const base = phraseBonus(it.text) + (tokenScores.get(String(i)) ?? 0);
+      if (base <= 0) continue; // no phrase- or token-relevance → never surfaced (recency can't rescue it)
+      const isEpisode = it.hit.type === 'episode';
+      it.hit.score = isEpisode && typeof it.hit.ts === 'number' ? base + recency(it.hit.ts) : base;
+      hits.push(it.hit);
     }
     return hits.sort((a, b) => b.score - a.score).slice(0, limit);
   }

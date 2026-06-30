@@ -75,6 +75,18 @@ describe('WorkspaceMemory', () => {
     expect(hits.some((h) => h.type === 'episode' && h.ref.includes('countdown timer'))).toBe(true);
   });
 
+  it('recall ranks a RARE discriminating token above a common one (BM25 IDF)', () => {
+    const mem = new WorkspaceMemory();
+    // "page" is common across the corpus; "stripe" is rare and discriminating.
+    mem.recordNote('built the home page layout');
+    mem.recordNote('built the about page layout');
+    mem.recordNote('built the contact page layout');
+    mem.recordFix('wired the stripe page checkout', 'src/Checkout.tsx');
+    const hits = mem.recall('stripe page').filter((h) => h.type === 'episode');
+    // The episode carrying the rare token "stripe" must rank first, not a generic "page" note.
+    expect(hits[0].ref).toContain('stripe');
+  });
+
   it('recall ranks a more RECENT matching episode above an older one at equal relevance', () => {
     const mem = new WorkspaceMemory();
     mem.recordNote('timer feature first pass');

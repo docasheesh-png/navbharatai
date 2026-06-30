@@ -81,6 +81,19 @@ describe('formatRecalledLessons', () => {
     expect(out).not.toContain('lesson number 6');
   });
 
+  it('ranks a proven `fix` lesson above a one-off `error` (outcome-weighted)', () => {
+    const hits: RecallHit[] = [
+      epHit('error', 'TypeError: cannot read property map of undefined'),
+      epHit('fix', 'guarded the array before mapping and it worked'),
+    ];
+    const out = formatRecalledLessons(hits);
+    const fixAt = out.indexOf('guarded the array');
+    const errAt = out.indexOf('TypeError');
+    expect(fixAt).toBeGreaterThanOrEqual(0);
+    expect(errAt).toBeGreaterThanOrEqual(0);
+    expect(fixAt).toBeLessThan(errAt); // the fix that worked comes first
+  });
+
   it('stays within the length cap with long inputs', () => {
     const long = 'x'.repeat(500);
     const hits: RecallHit[] = Array.from({ length: 6 }, (_, i) =>

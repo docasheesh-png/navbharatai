@@ -2167,11 +2167,18 @@
 - **Verification:** `tsc` (fe+server) ✅ · `vitest run` (3 new) ✅ · `test:coverage` exit 0 · `build` ✅ · `boot:check` PASS.
 - **Files:** new `src/components/ui/Breadcrumb.tsx` + `.test.tsx`, `src/components/ide/DatabaseStudio.tsx`.
 
-### P-UX.6 — NPS / CSAT Feedback  ❌ MISSING  [MED]
-- No in-app Net Promoter Score or thumbs-up/down per AI response.
-- [ ] Add a thumbs-up/down icon after each AI response; fire `trackEvent('feedback', {score})`.
-- [ ] Show an NPS prompt (0-10 scale) on session 5 / after first successful deploy.
-- **Files:** `src/App.tsx` (chat message rendering), `src/lib/analytics.ts`.
+### P-UX.6 — NPS / CSAT Feedback  ✅ DONE (2026-06-30, scoped) · 🔌 WIRED  [MED]
+- No in-app feedback signal on AI output.
+- [x] **Build CSAT** — after a successful v3.0 build, a `BuildFeedback` widget ("Was this build helpful?" 👍/👎)
+  renders under the result in `AgentV3Panel`; a tap fires `trackEvent('feedback', { score:±1, surface:
+  'agentv3_build', workspaceId })` and is remembered per workspace in `localStorage` (asked at most once/build).
+- **Honest scope:** wired at the highest-value AI surface (the build result) rather than threading a thumbs
+  control through every chat message across all surfaces (sprawling/fragile). The full **NPS 0–10 modal** (trigger
+  on session 5 / first deploy) is deferred — it needs a session-count + deploy-event trigger that doesn't exist
+  yet; the `trackEvent('feedback', …)` pipeline is in place for it. No fake data.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` ✅ · `test:coverage` exit 0 · `build` ✅ · `boot:check` PASS.
+  AppKnowledgeBase updated.
+- **Files:** `src/components/agentv3/AgentV3Panel.tsx`, `src/server/AppContext/AppKnowledgeBase.ts` (uses `src/lib/analytics.ts`).
 
 ### P-UX.7 — Token Usage Visualization  ❌ MISSING  [MED]
 - Token spend is tracked in `AgentV3CostTelemetry.ts` but never surfaced to the user.

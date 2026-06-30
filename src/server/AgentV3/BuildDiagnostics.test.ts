@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BuildDiagnostics, renderDiagnosticsText } from './BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, formatProviderDelivery } from './BuildDiagnostics';
 import type { AgentEvent } from './types';
 
 let clock = 1000;
@@ -267,5 +267,32 @@ describe('BuildDiagnostics — AI Diagnosis Bundle (raw logs, LLM I/O, full erro
     expect(text).toContain('useCalculator');
     expect(text).toContain('Preview errors');
     expect(text).toContain('x is not defined');
+  });
+});
+
+describe('provider delivery — "kaun sa reply kis provider se aaya" in the build report', () => {
+  it('formatProviderDelivery orders dominant-first with singular/plural turns', () => {
+    expect(formatProviderDelivery({ GLM: 18, CLAUDE: 2 })).toBe('GLM (18 turns), CLAUDE (2 turns)');
+    expect(formatProviderDelivery({ CLAUDE: 1 })).toBe('CLAUDE (1 turn)');
+    expect(formatProviderDelivery({ GLM: 1, CLAUDE: 9 })).toBe('CLAUDE (9 turns), GLM (1 turn)');
+  });
+  it('formatProviderDelivery returns null when nothing was recorded', () => {
+    expect(formatProviderDelivery(undefined)).toBeNull();
+    expect(formatProviderDelivery({})).toBeNull();
+    expect(formatProviderDelivery({ GLM: 0 })).toBeNull();
+  });
+  it('recordProviderTurn accumulates per provider and surfaces in the report + text', () => {
+    const d = new BuildDiagnostics({ now: () => clock });
+    d.recordProviderTurn('GLM');
+    d.recordProviderTurn('GLM');
+    d.recordProviderTurn('CLAUDE');
+    const r = d.report();
+    expect(r.providerDelivery).toEqual({ GLM: 2, CLAUDE: 1 });
+    expect(renderDiagnosticsText(r)).toContain('Built by : GLM (2 turns), CLAUDE (1 turn)');
+  });
+  it('omits the "Built by" line when no provider turns were recorded', () => {
+    const d = new BuildDiagnostics({ now: () => clock });
+    expect(d.report().providerDelivery).toBeUndefined();
+    expect(renderDiagnosticsText(d.report())).not.toContain('Built by');
   });
 });

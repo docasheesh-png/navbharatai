@@ -142,6 +142,9 @@ export interface BuildDiagnosticsReport {
   generatedFiles?: GeneratedFileRecord[];
   /** Preview failures (in-browser / live runtime) captured after the build — a build can pass yet not render. */
   previewErrors?: PreviewErrorRecord[];
+  /** Which provider delivered each build turn → turn count (e.g. { GLM: 18, CLAUDE: 2 }). Shows whether
+   *  the cheap floor (GLM/KIMI) actually built it or it fell back to Claude. Absent if nothing recorded. */
+  providerDelivery?: Record<string, number>;
   /** The post-build quality reviewer's FULL findings (every small problem it listed) — not the
    *  400-char timeline snippet. This is what makes the report's "all problems" list complete. */
   review?: string;
@@ -206,6 +209,9 @@ export class BuildDiagnostics {
   private readonly errors: CapturedError[] = [];
   private readonly generatedFiles: GeneratedFileRecord[] = [];
   private readonly previewErrors: PreviewErrorRecord[] = [];
+  /** Which provider actually DELIVERED each build turn (GLM/KIMI/CLAUDE/…) → turn count. Lets the
+   *  downloadable report answer "kaun sa reply kis provider se aaya" — the cheap-floor-vs-Claude split. */
+  private readonly providerDelivery = new Map<string, number>();
   private reviewText?: string;
 
   constructor(meta: BuildDiagnosticsMeta = {}) {
@@ -485,6 +491,17 @@ export class BuildDiagnostics {
     this.notify();
   }
 
+  /**
+   * Record that one build turn was DELIVERED by a given provider (the name the multi-provider runner
+   * reports via its onProviderUsed callback, e.g. 'GLM' | 'KIMI' | 'CLAUDE' | 'CLAUDE_HAIKU'). Counts
+   * per provider so the report shows the delivery split. Best-effort — a blank name is ignored.
+   */
+  recordProviderTurn(name: string): void {
+    if (!name) return;
+    this.providerDelivery.set(name, (this.providerDelivery.get(name) ?? 0) + 1);
+    this.notify();
+  }
+
   report(): BuildDiagnosticsReport {
     const errors = this.issues.filter((i) => i.severity === 'error').length;
     const warnings = this.issues.filter((i) => i.severity === 'warning').length;
@@ -513,9 +530,25 @@ export class BuildDiagnostics {
       errors: this.errors.length ? [...this.errors] : undefined,
       generatedFiles: this.generatedFiles.length ? [...this.generatedFiles] : undefined,
       previewErrors: this.previewErrors.length ? [...this.previewErrors] : undefined,
+      providerDelivery: this.providerDelivery.size ? Object.fromEntries(this.providerDelivery) : undefined,
       review: this.reviewText,
     };
   }
+}
+
+/**
+ * Format the provider-delivery split for the report, dominant provider first (e.g.
+ * "GLM (18 turns), CLAUDE (2 turns)"). Returns null when nothing was recorded (e.g. the
+ * non-agentic SimpleBuild/OneShot lanes). Pure + exported for testing.
+ */
+export function formatProviderDelivery(delivery?: Record<string, number>): string | null {
+  if (!delivery) return null;
+  const entries = Object.entries(delivery).filter(([, n]) => n > 0);
+  if (entries.length === 0) return null;
+  return entries
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => `${name} (${n} turn${n === 1 ? '' : 's'})`)
+    .join(', ');
 }
 
 /** Render a report as a human/Claude-readable plain-text document (for the .txt download). */
@@ -526,6 +559,9 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   lines.push(`Prompt   : ${r.prompt ?? '(n/a)'}`);
   lines.push(`Framework: ${r.framework ?? '(n/a)'}`);
   lines.push(`Model    : ${r.model ?? '(n/a)'}`);
+  // Which provider(s) actually drove the build turns — the real "kaun sa reply kis provider se aaya".
+  const deliveredBy = formatProviderDelivery(r.providerDelivery);
+  if (deliveredBy) lines.push(`Built by : ${deliveredBy}`);
   lines.push(`Outcome  : ${r.ok === undefined ? '(n/a)' : r.ok ? 'SUCCESS' : 'FAILED'}`);
   if (typeof r.startedAt === 'number' && typeof r.endedAt === 'number') {
     lines.push(`Duration : ${Math.max(0, Math.round((r.endedAt - r.startedAt) / 1000))}s`);

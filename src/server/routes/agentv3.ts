@@ -1790,7 +1790,12 @@ export function registerAgentV3Routes(app: Express): void {
       // build (first attempt + any escalation), so `deliveredVia` records the dominant builder
       // (GLM/KIMI/CLAUDE). This is the cheap-floor-vs-Claude rollback tripwire. Best-effort.
       const providerTurns = new Map<string, number>();
-      const captureProvider = (used: string): void => { providerTurns.set(used, (providerTurns.get(used) ?? 0) + 1); };
+      const captureProvider = (used: string): void => {
+        providerTurns.set(used, (providerTurns.get(used) ?? 0) + 1);
+        // Also surface the delivering provider in the downloadable build report ("Built by: GLM …"),
+        // so the admin can see which provider actually answered each turn. Best-effort.
+        try { buildDiag.recordProviderTurn(used); } catch { /* diagnostics are best-effort */ }
+      };
       const client = buildTurnRunner({
         ...(analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : {}),
         // First attempt only opts the cheap floor in — and only for simple/medium apps (complex →

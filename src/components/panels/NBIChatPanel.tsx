@@ -6,7 +6,9 @@ import type { Message, ChatSession, AgentMode } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
 
 const AISuggestions = lazy(() =>
-  import('../ide/AISuggestions').then(m => ({ default: m.AISuggestions }))
+  import('../ide/AISuggestions')
+    .then(m => ({ default: m.AISuggestions }))
+    .catch(() => ({ default: (() => null) as React.ComponentType<any> }))
 );
 
 export interface NBIChatPanelProps {

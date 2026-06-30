@@ -1552,6 +1552,10 @@ export default function App() {
   const pendingViewAfterLoginRef = useRef<ViewType | null>(null);
   // G10 — stores the last build prompt so retry requests ("try again") can restore context.
   const lastBuildPromptRef = useRef<string>('');
+  // Debounce timers for Firestore chat_sessions writes — prevents exhausting the free-tier
+  // daily write quota when messages update on every AI turn.
+  const fsNBIDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const fsProDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   // NOTE: horizontal swipe is intentionally reserved app-wide for the sidebar
   // (open/close) — handled by the document-level touch handler above. A previous
@@ -1613,53 +1617,21 @@ export default function App() {
 
       safeLS('navbharat_sessions', JSON.stringify(next));
 
-      // Sync with Firestore collection: chat_sessions under authenticated user contexts
-      if (user) {
-        const sessionRef = doc(db, 'chat_sessions', currentSessionId);
-        setDoc(sessionRef, sanitizeFirestoreData({
-          id: currentSessionId || 'unknown',
+      // Firestore chat_sessions sync moved to a debounced useEffect below to avoid
+      // exhausting the free-tier daily write quota on every message update.
+
+      // Log agent transitions if changed since previous state (rare write — kept inline)
+      if (user && existingSession && existingSession.currentAgent !== updatedSession.currentAgent) {
+        const transitionId = `transition_${currentSessionId}_${Date.now()}`;
+        const transitionRef = doc(db, 'chat_agent_history', transitionId);
+        setDoc(transitionRef, sanitizeFirestoreData({
+          id: transitionId,
           uci: sessionUci || '',
           userId: user?.uid || 'anonymous',
-          tab: activeView,
-          original_agent: updatedSession.originalAgent || null,
+          previous_agent: existingSession.currentAgent || null,
           current_agent: updatedSession.currentAgent || null,
-          title: updatedSession.title || 'Untitled',
-          memory_summary: updatedSession.memorySummary || '',
-          edit_log: updatedSession.editLog || [],
-          restoredMessages: (updatedSession.restoredMessages || []).map(m => ({
-            id: m.id || Date.now().toString(),
-            text: m.text || '',
-            sender: m.sender || 'ai',
-            timestamp: m.timestamp || new Date().toISOString()
-          })),
-          messages: (updatedSession.messages || []).map(m => ({
-            id: m.id || Date.now().toString(),
-            text: m.text || '',
-            sender: m.sender || 'ai',
-            timestamp: m.timestamp || new Date().toISOString()
-          })),
-          files: Object.entries(updatedSession.files || {}).reduce((acc: Record<string, string>, [key, val]) => {
-            acc[key] = val || '';
-            return acc;
-          }, {}),
-          lastUpdated: updatedSession.lastUpdated || new Date().toISOString(),
-          isPinned: !!updatedSession.isPinned,
-          mode: updatedSession.mode || 'chat'
-        })).catch(err => console.error('Firestore chat_sessions sync error:', err));
-
-        // Log agent transitions if changed since previous state
-        if (existingSession && existingSession.currentAgent !== updatedSession.currentAgent) {
-          const transitionId = `transition_${currentSessionId}_${Date.now()}`;
-          const transitionRef = doc(db, 'chat_agent_history', transitionId);
-          setDoc(transitionRef, sanitizeFirestoreData({
-            id: transitionId,
-            uci: sessionUci || '',
-            userId: user?.uid || 'anonymous',
-            previous_agent: existingSession.currentAgent || null,
-            current_agent: updatedSession.currentAgent || null,
-            timestamp: new Date().toISOString()
-          })).catch(err => console.error('Firestore transition sync error:', err));
-        }
+          timestamp: new Date().toISOString()
+        })).catch(() => {});
       }
 
       return next;
@@ -1715,43 +1687,97 @@ export default function App() {
 
       safeLS('navbharat_sessions', JSON.stringify(next));
 
-      if (user) {
-        const sessionRef = doc(db, 'chat_sessions', currentProSessionId);
-        setDoc(sessionRef, sanitizeFirestoreData({
-          id: currentProSessionId || 'unknown',
-          uci: sessionUci || '',
-          userId: user?.uid || 'anonymous',
-          tab: 'nbi_pro_chat',
-          original_agent: updatedSession.originalAgent || null,
-          current_agent: updatedSession.currentAgent || null,
-          title: updatedSession.title || 'Untitled',
-          memory_summary: updatedSession.memorySummary || '',
-          edit_log: updatedSession.editLog || [],
-          restoredMessages: (updatedSession.restoredMessages || []).map(m => ({
-            id: m.id || Date.now().toString(),
-            text: m.text || '',
-            sender: m.sender || 'ai',
-            timestamp: m.timestamp || new Date().toISOString()
-          })),
-          messages: (updatedSession.messages || []).map(m => ({
-            id: m.id || Date.now().toString(),
-            text: m.text || '',
-            sender: m.sender || 'ai',
-            timestamp: m.timestamp || new Date().toISOString()
-          })),
-          files: Object.entries(updatedSession.files || {}).reduce((acc: Record<string, string>, [key, val]) => {
-            acc[key] = val || '';
-            return acc;
-          }, {}),
-          lastUpdated: updatedSession.lastUpdated || new Date().toISOString(),
-          isPinned: !!updatedSession.isPinned,
-          mode: 'build'
-        })).catch(err => console.error('Firestore chat_sessions (pro) sync error:', err));
-      }
+      // Firestore chat_sessions sync moved to a debounced useEffect below.
 
       return next;
     });
   }, [proMessages, currentProSessionId, files, user]);
+
+  // Debounced Firestore sync for NBI Chat sessions.
+  // Fires at most once per 2 s of quiet after messages change, so a 20-turn conversation
+  // produces 1–2 writes instead of 20 — keeps the free-tier daily write quota healthy.
+  useEffect(() => {
+    if (!user) return;
+    const session = sessions.find(s => s.id === currentSessionId);
+    if (!session || !session.messages?.length) return;
+    clearTimeout(fsNBIDebounceRef.current);
+    fsNBIDebounceRef.current = setTimeout(() => {
+      const sessionRef = doc(db, 'chat_sessions', session.id);
+      setDoc(sessionRef, sanitizeFirestoreData({
+        id: session.id || 'unknown',
+        uci: session.uci || '',
+        userId: user.uid,
+        tab: activeView,
+        original_agent: session.originalAgent || null,
+        current_agent: session.currentAgent || null,
+        title: session.title || 'Untitled',
+        memory_summary: session.memorySummary || '',
+        edit_log: session.editLog || [],
+        restoredMessages: (session.restoredMessages || []).map(m => ({
+          id: m.id || '',
+          text: m.text || '',
+          sender: m.sender || 'ai',
+          timestamp: m.timestamp || new Date().toISOString()
+        })),
+        messages: (session.messages || []).map(m => ({
+          id: m.id || '',
+          text: m.text || '',
+          sender: m.sender || 'ai',
+          timestamp: m.timestamp || new Date().toISOString()
+        })),
+        files: Object.entries(session.files || {}).reduce((acc: Record<string, string>, [k, v]) => { acc[k] = v || ''; return acc; }, {}),
+        lastUpdated: session.lastUpdated || new Date().toISOString(),
+        isPinned: !!session.isPinned,
+        mode: session.mode || 'chat'
+      })).catch(err => {
+        if ((err as any)?.code !== 'resource-exhausted') {
+          console.error('Firestore chat_sessions sync error:', err);
+        }
+      });
+    }, 2000);
+  }, [sessions, currentSessionId, user, activeView]);
+
+  // Debounced Firestore sync for Pro Builder sessions.
+  useEffect(() => {
+    if (!user) return;
+    const session = sessions.find(s => s.id === currentProSessionId);
+    if (!session || !session.messages?.length) return;
+    clearTimeout(fsProDebounceRef.current);
+    fsProDebounceRef.current = setTimeout(() => {
+      const sessionRef = doc(db, 'chat_sessions', session.id);
+      setDoc(sessionRef, sanitizeFirestoreData({
+        id: session.id || 'unknown',
+        uci: session.uci || '',
+        userId: user.uid,
+        tab: 'nbi_pro_chat',
+        original_agent: session.originalAgent || null,
+        current_agent: session.currentAgent || null,
+        title: session.title || 'Untitled',
+        memory_summary: session.memorySummary || '',
+        edit_log: session.editLog || [],
+        restoredMessages: (session.restoredMessages || []).map(m => ({
+          id: m.id || '',
+          text: m.text || '',
+          sender: m.sender || 'ai',
+          timestamp: m.timestamp || new Date().toISOString()
+        })),
+        messages: (session.messages || []).map(m => ({
+          id: m.id || '',
+          text: m.text || '',
+          sender: m.sender || 'ai',
+          timestamp: m.timestamp || new Date().toISOString()
+        })),
+        files: Object.entries(session.files || {}).reduce((acc: Record<string, string>, [k, v]) => { acc[k] = v || ''; return acc; }, {}),
+        lastUpdated: session.lastUpdated || new Date().toISOString(),
+        isPinned: !!session.isPinned,
+        mode: 'build'
+      })).catch(err => {
+        if ((err as any)?.code !== 'resource-exhausted') {
+          console.error('Firestore chat_sessions (pro) sync error:', err);
+        }
+      });
+    }, 2000);
+  }, [sessions, currentProSessionId, user]);
 
   useEffect(() => {
     if (scrollRef.current) {
